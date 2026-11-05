@@ -1,0 +1,18 @@
+[default]
+check-file = true
+check-filename = true
+locale = "en-us"
+
+[files]
+extend-exclude = [
+  ".vite",
+  "build",
+  "bun.lock",
+  "coverage",
+  "dist",
+  "node_modules",
+]
+
+# The product name, AppyTappy.
+[default.extend-words]
+appy = "appy"

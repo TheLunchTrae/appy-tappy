@@ -1,0 +1,182 @@
+[settings]
+# rust-toolchain.toml pins the compiler and its components for mise, rustup,
+# and editors alike.
+idiomatic_version_file_enable_tools = ["rust"]
+
+[tools]
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+"github:bnjbvr/cargo-machete" = "0.9.2"
+"github:nextest-rs/nextest" = { version = "0.9.149", version_prefix = "cargo-nextest-" }
+# cargo-mutants publishes no arm64 macOS binary, and the mutation lanes need
+# Linux anyway.
+"github:sourcefrog/cargo-mutants" = { version = "27.1.0", os = ["linux", "windows"] }
+
+[tasks."rust:lock"]
+description = "Refresh Cargo.lock after dependency changes without upgrading unrelated packages"
+run = "cargo update --workspace"
+
+[tasks."rust:fmt"]
+description = "Format Rust code"
+run = "cargo fmt --all"
+
+[tasks."rust:fmt:check"]
+description = "Check Rust formatting"
+run = "cargo fmt --all -- --check"
+
+# Cargo tasks share one build-directory lock, so the gate orders them from the
+# cheapest check to the full test run instead of letting them contend for it.
+# rust:policy and rust:mutants run beside them, and cargo-mutants builds in its
+# own copy of the tree. rust:policy's `cargo test` builds also take the shared
+# lock; the rest of its time goes to the lock self-test's shutdown timeouts and
+# to Clippy on the lint-wall probe, which uses a separate target directory.
+# tests/lint_wall.rs replays only rust:lint's run value: keep it one plain
+# command line that passes Cargo only the arguments the test lists, set no key
+# but description and run, and define rust:lint in no other mise file.
+[tasks."rust:lint"]
+description = "Run Clippy for all Rust workspace targets/features"
+run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -F clippy::allow_attributes -F clippy::allow_attributes_without_reason"
+
+[tasks."rust:policy"]
+description = "Self-test the mutation verifiers and prove the configured lint wall fires"
+run = """
+set -eu
+
+sh scripts/verify-mutants.sh --self-test
+sh scripts/mutants-lock.sh --self-test
+cargo test --locked --all-features --test lint_wall -- --ignored
+
+echo "The mutation verifiers and configured lint wall passed."
+"""
+
+[tasks."rust:doc"]
+description = "Build Rust documentation with warnings denied"
+wait_for = ["rust:lint"]
+run = "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --all-features --no-deps --locked"
+
+# Nextest runs every test binary at once; doctests still need libtest.
+[tasks."rust:test"]
+description = "Run Rust tests and doctests for all workspace targets/features"
+wait_for = ["rust:doc"]
+run = """
+set -eu
+cargo nextest run --workspace --all-targets --all-features --locked
+cargo test --workspace --doc --all-features --locked
+"""
+
+[tasks."rust:package"]
+description = "Validate Rust package contents"
+wait_for = ["rust:test"]
+run = "cargo package --workspace --allow-dirty --locked"
+
+[tasks."rust:mutants"]
+description = "Run mutation testing; a surviving mutant is a review finding"
+run = """
+set -eu
+
+. scripts/mutants-lock.sh
+acquire_mutants_task_lock full
+trap mutants_task_release_lock EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# cargo-mutants leaves an existing report untouched when it selects no mutants.
+rm -rf mutants.out
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --cargo-arg=--locked
+run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
+"""
+
+[tasks."rust:mutants:diff"]
+description = "Mutation-test changed code; default base prefers origin/main"
+run = """
+set -eu
+
+diff_file="$(mktemp)"
+trap 'rm -f "$diff_file"' EXIT
+
+if [ -n "${MUTANTS_BASE_REF:-}" ]; then
+  base_ref="$MUTANTS_BASE_REF"
+  if ! base_commit="$(git rev-parse --verify --quiet "$base_ref^{commit}")"; then
+    echo "Cannot resolve explicit MUTANTS_BASE_REF '$base_ref'." >&2
+    exit 1
+  fi
+elif base_commit="$(git rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}')"; then
+  base_ref="origin/main"
+elif base_commit="$(git rev-parse --verify --quiet 'refs/heads/main^{commit}')"; then
+  base_ref="main"
+else
+  echo "Cannot resolve default base refs/remotes/origin/main or refs/heads/main." >&2
+  exit 1
+fi
+
+if ! merge_base="$(git merge-base HEAD "$base_commit")"; then
+  echo "Cannot compute a merge base with $base_ref. Fetch full history with git fetch --unshallow or git fetch origin main." >&2
+  exit 1
+fi
+if ! untracked_files="$(git ls-files --others --exclude-standard)"; then
+  echo "Cannot inspect untracked files before mutation diff testing." >&2
+  exit 1
+fi
+if [ -n "$untracked_files" ]; then
+  echo "Mutation diff testing cannot include these untracked files:" >&2
+  printf '%s\n' "$untracked_files" >&2
+  echo "Stage them, or run git add -N <path> for each file so the diff becomes reviewable." >&2
+  exit 1
+fi
+
+git diff --relative "$merge_base" -- > "$diff_file"
+
+if [ ! -s "$diff_file" ]; then
+  echo "No changes relative to $base_ref; nothing to mutate."
+  exit 0
+fi
+
+. scripts/mutants-lock.sh
+acquire_mutants_task_lock diff
+trap 'mutants_task_release_lock; rm -f "$diff_file"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# cargo-mutants leaves an existing report untouched when it selects no mutants.
+rm -rf mutants.out
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --cargo-arg=--locked --in-diff "$diff_file"
+if [ ! -d mutants.out ]; then
+  echo "The diff selects no mutants; nothing to verify."
+  exit 0
+fi
+run_mutants_task_child sh scripts/verify-mutants.sh diff mutants.out
+"""
+
+[tasks."rust:machete"]
+description = "Detect unused [dependencies] entries with Cargo metadata"
+run = """
+set -eu
+
+cargo metadata --all-features --locked --format-version=1 >/dev/null
+CARGO_NET_OFFLINE=true cargo machete --with-metadata --skip-target-dir
+"""
+
+[tasks."rust:deny"]
+description = "Run cargo-deny dependency policy checks"
+run = "cargo deny --workspace --all-features --locked check"
+
+[tasks."rust:standards"]
+description = "Run the Rust standards workflow with autofixes"
+depends = ["rust:fmt"]
+
+# The gate mutates the code each change touches. rust:mutants, the full sweep,
+# fails when the tree has no code to mutate, so it runs on demand.
+[tasks."rust:standards:check"]
+description = "Run the Rust standards CI gate"
+depends = [
+  "rust:fmt:check",
+  "rust:lint",
+  "rust:policy",
+  "rust:doc",
+  "rust:test",
+  "rust:package",
+  "rust:mutants:diff",
+  "rust:machete",
+  "rust:deny",
+]

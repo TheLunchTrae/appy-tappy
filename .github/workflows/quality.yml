@@ -1,0 +1,76 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The mandatory gate. The mutation lane resolves its diff base from history,
+  # so the checkout is not shallow.
+  quality:
+    name: quality
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned tools
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          version: '2026.10.19'
+          install: true
+          cache: true
+      - name: Run the mandatory gate
+        run: mise run standards:check
+
+  # AppyTappy ships for Windows only. This job proves the Rust workspace
+  # formats, lints, and documents on the target platform. The root package's
+  # standards policy tests compare POSIX paths, so they run in `quality`.
+  windows:
+    name: windows
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      # Inline tasks are POSIX sh. mise reads this setting only from the
+      # environment or global config, so CI sets it here; AGENTS.md gives the
+      # same setting for Windows workstations.
+      MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
+      # Tasks would otherwise install every tool, not only install_args.
+      MISE_TASK_RUN_AUTO_INSTALL: 'false'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned tools
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          version: '2026.10.19'
+          install: true
+          install_args: rust github:nextest-rs/nextest
+          cache: true
+      - name: Check formatting
+        run: mise run rust:fmt:check
+      - name: Lint
+        run: mise run rust:lint
+      - name: Build documentation
+        run: mise run rust:doc

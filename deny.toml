@@ -1,0 +1,48 @@
+# Agents add dependencies autonomously, so the supply-chain gate is strict:
+# vulnerabilities and unmaintained advisories deny (the pinned default), and
+# yanked crates are promoted to deny. Duplicate versions surface as warnings,
+# not failures; the handoff report carries them forward (AGENTS.md
+# dependencies and review).
+[advisories]
+unmaintained = "all"
+yanked = "deny"
+
+# Pre-emptively widened to the common permissive licenses agents drag in —
+# a deliberate posture choice, not a need of the current tree, so entries the
+# tree does not use yet are expected. Every entry can be combined into the
+# GPL-3.0-only release; add none that cannot.
+[licenses]
+include-dev = true
+unused-allowed-license = "allow"
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+# Pins cargo-deny's current default license-confidence bar against drift.
+confidence-threshold = 0.8
+
+# Workspace crates are unpublished and carry the project's GPL-3.0-only
+# license, which the dependency allow list above deliberately omits.
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+unknown-git = "deny"
+unknown-registry = "deny"

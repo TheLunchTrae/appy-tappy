@@ -1,0 +1,17 @@
+# The enforcement surface. The leading catch-all is deliberate: lint escapes
+# and mutation classifications can live anywhere, so every change needs the
+# owner's review. The named paths below repeat it for the files that hold the
+# gate itself. Cargo.toml is unanchored on purpose: member crate manifests
+# carry the `[lints] workspace = true` opt-in, so adding one is a wall edit.
+# tests/allow_policy.rs and tests/lint_wall.rs read the Rust task fragment
+# from .config/mise/conf.d/; move their path with it.
+* @TheLunchTrae
+/.cargo/ @TheLunchTrae
+/.config/mise/ @TheLunchTrae
+/.github/ @TheLunchTrae
+/AGENTS.md @TheLunchTrae
+Cargo.toml @TheLunchTrae
+/clippy.toml @TheLunchTrae
+/deny.toml @TheLunchTrae
+/rust-toolchain.toml @TheLunchTrae
+/rustfmt.toml @TheLunchTrae

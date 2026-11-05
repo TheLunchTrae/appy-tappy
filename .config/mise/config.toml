@@ -1,0 +1,44 @@
+# Lockfile format 3, which `mise lock` writes for a new lockfile, needs at
+# least this mise.
+min_version = "2026.9.16"
+
+[settings]
+lockfile = true
+# CI runs Linux and Windows; contributors use Windows and macOS.
+lockfile_platforms = ["linux-x64", "macos-arm64", "windows-x64"]
+
+[tools]
+gitleaks = "8.30.1"
+
+[tasks.secrets]
+description = "Scan the working tree for secrets"
+run = "gitleaks dir . --redact --no-banner"
+
+# The repository has two profiles, Rust and Markdown, so the aggregate tasks
+# name them directly instead of detecting them from marker files.
+[tasks.fmt]
+description = "Format Rust and Markdown"
+depends = ["rust:fmt", "md:fmt"]
+
+[tasks."fmt:check"]
+description = "Check Rust and Markdown formatting"
+depends = ["rust:fmt:check", "md:fmt:check"]
+
+[tasks.lint]
+description = "Lint Rust and Markdown"
+depends = ["rust:lint", "md:lint"]
+
+[tasks.test]
+description = "Run the Rust tests"
+depends = ["rust:test"]
+
+[tasks.standards]
+description = "Run the standards workflows and their autofixes"
+depends = ["rust:standards", "md:standards"]
+
+# Secrets and hygiene check the tree before the profile gates write their
+# build and probe output.
+[tasks."standards:check"]
+description = "Run the standards CI gate"
+depends = ["secrets", "hygiene"]
+run = [{ task = "rust:standards:check" }, { task = "md:standards:check" }]
