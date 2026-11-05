@@ -14,6 +14,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "appytappy-actions"
+version = "0.1.0"
+
+[[package]]
+name = "appytappy-config"
+version = "0.1.0"
+
+[[package]]
+name = "appytappy-engine"
+version = "0.1.0"
+
+[[package]]
+name = "appytappy-runtime"
+version = "0.1.0"
+
+[[package]]
+name = "appytappy-sources"
+version = "0.1.0"
+
+[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

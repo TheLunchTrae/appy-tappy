@@ -1,0 +1,12 @@
+[package]
+name = "appytappy-sources"
+description = "Windows source primitives that read game state for the runtime and the setup app."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
