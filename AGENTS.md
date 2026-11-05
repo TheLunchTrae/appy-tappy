@@ -26,7 +26,7 @@ and no task covers it.
 AppyTappy ships for Windows only. CI runs two jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check` on
 Linux and is the required gate, and `windows` runs `rust:fmt:check`,
-`rust:lint`, and `rust:doc` on Windows.
+`rust:lint`, `rust:doc`, and `rust:test:members` on Windows.
 
 - Inline mise tasks are POSIX `sh`. On a Windows workstation, run mise from
   Git Bash and set this in the global mise config
@@ -40,7 +40,8 @@ Linux and is the required gate, and `windows` runs `rust:fmt:check`,
 - `rust:policy` and the mutation tasks need `setsid`, which Windows and macOS
   lack, so `standards:check` runs on Linux: in CI or WSL. The root package's
   policy tests compare POSIX paths, so `rust:test` runs on Linux or macOS. On
-  Windows, run `rust:fmt`, `rust:lint`, `rust:doc`, and the `md:` tasks.
+  Windows, run `rust:fmt`, `rust:lint`, `rust:doc`, `rust:test:members`, and
+  the `md:` tasks.
 - `mise lock` records every platform in `lockfile_platforms`; commit
   `.config/mise/mise.lock` after a tool change.
 
@@ -164,11 +165,11 @@ source changes; add `rust:doc` for public API changes.
 `rust:standards` formats code. Refresh `Cargo.lock` through `rust:lock` after
 dependency changes and commit it.
 
-`rust:mutants:diff` mutates changed code and is part of
-`rust:standards:check`; its base defaults to `origin/main`, then local `main`,
-and can be set with `MUTANTS_BASE_REF`. Include new files in the Git diff
-before running it. `rust:mutants` runs the full sweep on demand. Before
-handoff, run `mise run rust:standards:check`; report skipped checks and their
+`rust:mutants` runs the full sweep and is part of `rust:standards:check`.
+`rust:mutants:diff` mutates only changed code for a faster inner loop; its
+base defaults to `origin/main`, then local `main`, and can be set with
+`MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
+Before handoff, run `mise run rust:standards:check`; report skipped checks and their
 reasons.
 
 ### Ownership and state
@@ -274,10 +275,13 @@ elsewhere. Only a test of an operator implementation itself takes a reasoned
 expectation, on the item Clippy reports. Doc examples use `?`, not
 `unwrap()`, because Clippy does not lint doctests.
 
-`unsafe_code = "forbid"` has no local escape. Work requiring unsafe needs
-explicit human authorization to change the profile to `deny`; in that change,
-also set `undocumented_unsafe_blocks = "deny"` in `[workspace.lints.clippy]`.
-Each unsafe block then carries a reasoned expectation and a `SAFETY` comment.
+The owner authorized `unsafe_code = "deny"` for the Windows adapters, and
+`undocumented_unsafe_blocks = "deny"` is set in `[workspace.lints.clippy]`.
+Each unsafe block carries a reasoned expectation and a `SAFETY` comment.
+Unsafe code may appear only in the `win.rs` modules of `sources`, `actions`,
+and `platform`. A crate root without such a module keeps
+`#![forbid(unsafe_code)]`. Widening that scope needs explicit human
+authorization.
 
 Every workspace package, including the root package, declares
 `[lints] workspace = true`. Release profiles belong in the root manifest;
@@ -302,10 +306,9 @@ dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-The gate requires executed mutation evidence for changed code; a change that
-selects no mutants passes. Once a workspace member crate holds product
-code, restore `rust:mutants`, the full sweep, as a dependency of
-`rust:standards:check`. Read [mutation operation](docs/rust.md#mutation-testing)
+The gate requires executed mutation evidence for the whole workspace.
+`.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
+approval, because the Linux gate compiles them out. Read [mutation operation](docs/rust.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.
 Confirm no run is active before clearing a stale lock.
 

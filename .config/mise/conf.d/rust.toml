@@ -63,10 +63,26 @@ cargo nextest run --workspace --all-targets --all-features --locked
 cargo test --workspace --doc --all-features --locked
 """
 
+# The root package's policy tests compare POSIX paths, so this variant leaves
+# them out. The windows CI job runs it, because the Windows adapters' tests run
+# only on Windows.
+[tasks."rust:test:members"]
+description = "Run the member crates' tests and doctests, without the root policy tests"
+wait_for = ["rust:doc"]
+run = """
+set -eu
+cargo nextest run --workspace --exclude appy-tappy-workspace --all-targets --all-features --locked
+cargo test --workspace --exclude appy-tappy-workspace --doc --all-features --locked
+"""
+
+# Every package is unpublished (`publish = false`), and Cargo then resolves a
+# member's path dependencies on other members from crates.io, where they do not
+# exist. So the task builds each package's file list and normalized manifest
+# without the crates.io verification build.
 [tasks."rust:package"]
 description = "Validate Rust package contents"
 wait_for = ["rust:test"]
-run = "cargo package --workspace --allow-dirty --locked"
+run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 
 [tasks."rust:mutants"]
 description = "Run mutation testing; a surviving mutant is a review finding"
@@ -165,8 +181,9 @@ run = "cargo deny --workspace --all-features --locked check"
 description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
-# The gate mutates the code each change touches. rust:mutants, the full sweep,
-# fails when the tree has no code to mutate, so it runs on demand.
+# Member crates hold product code, so the gate runs the full mutation sweep.
+# rust:mutants:diff is the faster inner loop; the two lanes share one lock, so
+# the gate runs only one of them.
 [tasks."rust:standards:check"]
 description = "Run the Rust standards CI gate"
 depends = [
@@ -176,7 +193,7 @@ depends = [
   "rust:doc",
   "rust:test",
   "rust:package",
-  "rust:mutants:diff",
+  "rust:mutants",
   "rust:machete",
   "rust:deny",
 ]

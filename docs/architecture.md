@@ -61,6 +61,7 @@ The repository is one Cargo workspace. `apps/` holds the two programs and
 ```text
 Cargo.toml       workspace root; hosts the standards policy tests
 apps/
+  mcp/           appytappy-mcp: the local MCP investigation server
   runtime/       appytappy-runtime: the always-on binary
   setup/         the Tauri setup app (#16); its Rust side is in src-tauri/
 crates/
@@ -78,6 +79,7 @@ crates/
 | `appytappy-sources`  | Windows  | `config`, `windows`                                  | setup, runtime |
 | `appytappy-actions`  | Windows  | `config`, `windows`                                  | runtime        |
 | `appytappy-platform` | Windows  | `windows`                                            | runtime        |
+| `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`           | —              |
 | `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform` | —              |
 | setup app            | Windows  | `config`, `engine`, `sources`, `tauri`, `tokio`      | —              |
 
@@ -101,16 +103,16 @@ lints, tests, and mutation-tests them in full. `sources`, `actions`,
 `#[cfg(windows)]` and their Windows-only dependencies under
 `[target.'cfg(windows)'.dependencies]`, so those crates still build on Linux,
 where they are nearly empty. The `windows` CI job lints and documents them on
-Windows. Their Windows code can run only there, so the first change that gives
-these crates tests adds a test step to that job.
+Windows. Their Windows code can run only there, so that job also runs the
+member crates' tests.
 
 Logic that can be wrong belongs in `config` or `engine`. A Windows adapter
 turns one API call into one typed value or error and holds no decisions of its
 own. Mutation testing cannot check adapter code: the Linux gate compiles it
 out, and cargo-mutants reports its mutants as missed. So each crate keeps its
 Windows code in `win.rs` modules (not `windows.rs`, whose name would clash with
-the `windows` crate), and the first adapter change asks the
-owner to exclude those files in `.cargo/mutants.toml`.
+the `windows` crate), and `.cargo/mutants.toml` excludes those files with the
+owner's approval.
 [`AGENTS.md`](../AGENTS.md#tests-and-mutation) requires that approval for any
 configuration exclusion.
 
@@ -303,19 +305,21 @@ profile.
 
 ## Unsafe code
 
-The standards forbid `unsafe` code. Win32 and COM calls through the `windows`
+The standards deny `unsafe` code. Win32 and COM calls through the `windows`
 crate are `unsafe`, because Rust cannot check what Windows does with the
 pointers it receives. That covers reading another process's memory, Core
 Audio, window hooks, the tray icon, directory watching, and the Direct3D
 interop that screen capture needs. WinRT calls, such as media sessions and the
 screen capture API itself, are safe Rust methods.
 
-The first change that adds an `unsafe` Windows call asks the owner to change
-the policy as
-[`AGENTS.md`](../AGENTS.md#exceptions-and-workspace-policy) describes, scoped
-so that `unsafe` appears only in `sources`, `actions`, and `platform`.
-`config`, `engine`, the runtime, and the setup app keep
-`#![forbid(unsafe_code)]` at their crate roots.
+The owner approved changing the workspace lint from `forbid` to `deny` with
+the first `unsafe` Windows call, in `sources`, as
+[`AGENTS.md`](../AGENTS.md#exceptions-and-workspace-policy) describes.
+`unsafe` may appear only in the `win.rs` modules of `sources`, `actions`, and
+`platform`, and each block carries a reasoned expectation and a `SAFETY`
+comment. Every crate root without such a module, including `config`,
+`engine`, the runtime, the MCP server, and the setup app, keeps
+`#![forbid(unsafe_code)]`.
 
 ## Crate glossary
 

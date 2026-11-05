@@ -28,7 +28,7 @@ toml = "=1.1.8"
 # `[lints] workspace = true`; tests/allow_policy.rs rejects missing opt-ins.
 # Profiles are only honored in this root manifest.
 [workspace]
-members = ["apps/runtime", "crates/*"]
+members = ["apps/mcp", "apps/runtime", "crates/*"]
 
 # Member packages inherit these with `field.workspace = true`.
 [workspace.package]
@@ -55,7 +55,11 @@ missing_debug_implementations = "deny"
 missing_docs = "deny"
 unexpected_cfgs = "deny"
 unreachable_pub = "deny"
-unsafe_code = "forbid"
+# `unsafe` is denied, not forbidden, so the Windows adapters in
+# `appytappy-sources` can call Win32 APIs (docs/architecture.md#unsafe-code).
+# Each unsafe block carries a reasoned `#[expect(unsafe_code)]` and a SAFETY
+# comment; every other crate root keeps `#![forbid(unsafe_code)]`.
+unsafe_code = "deny"
 
 [workspace.lints.rustdoc]
 all = { level = "deny", priority = -1 }
@@ -109,6 +113,9 @@ print_stdout = "deny"
 # pointer.
 clone_on_ref_ptr = "deny"
 rc_buffer = "deny"
+
+# Every unsafe block states why it is sound.
+undocumented_unsafe_blocks = "deny"
 
 # Dependency hygiene.
 wildcard_dependencies = "deny"
