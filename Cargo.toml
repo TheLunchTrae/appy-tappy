@@ -1,12 +1,12 @@
 [package]
 name = "appy-tappy-workspace"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.99.1"
 description = "Workspace root of AppyTappy; hosts the repository's standards policy tests."
-license = "GPL-3.0-only"
-repository = "https://github.com/TheLunchTrae/appy-tappy"
-publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
 
 [dependencies]
 
@@ -28,6 +28,16 @@ toml = "=1.1.8"
 # `[lints] workspace = true`; tests/allow_policy.rs rejects missing opt-ins.
 # Profiles are only honored in this root manifest.
 [workspace]
+members = ["apps/runtime", "crates/*"]
+
+# Member packages inherit these with `field.workspace = true`.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+license = "GPL-3.0-only"
+repository = "https://github.com/TheLunchTrae/appy-tappy"
+publish = false
 
 # Agent-optimized posture: the lint groups below are denied, and the only
 # sanctioned escape is a per-site `#[expect(lint, reason = "...")]`;

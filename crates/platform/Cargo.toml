@@ -1,0 +1,12 @@
+[package]
+name = "appytappy-platform"
+description = "The runtime's Windows host services: message loop, tray icon, single-instance guard, and file watching."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
