@@ -118,8 +118,9 @@ configuration exclusion.
 
 The runtime is one process for all games. It uses no async runtime and no
 webview, and it keeps its dependencies few. It is built as a Windows GUI
-program (`#![windows_subsystem = "windows"]`), so no console window opens; it
-has no console output, so it logs only to `%LOCALAPPDATA%\AppyTappy\logs\`. Footprint targets belong to
+program (`#![windows_subsystem = "windows"]`), so no console window opens. It
+has no console output, so it logs only to `%LOCALAPPDATA%\AppyTappy\logs\`.
+Footprint targets belong to
 [#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
 
 It follows the standards' ownership rule: one thread owns all state, and other
@@ -134,9 +135,10 @@ Each thread below is a plain `std::thread`, and each channel is a
 - **Lifecycle.** Reports `GameStarted` and `GameExited` from the process and
   window events source. It matches a new window's process to a game by the
   executable name in a process snapshot (`CreateToolhelp32Snapshot`), which
-  does not open the process, so it is safe for every anti-cheat class. While
-  no configured game runs, nothing polls.
-  Detection and autostart belong to
+  does not open the process, so it is safe for every anti-cheat class. It
+  learns that a game exited the same way, from window-destroy events and a
+  fresh snapshot, never by waiting on a process handle. While no configured
+  game runs, nothing polls. Detection and autostart belong to
   [#13](https://github.com/TheLunchTrae/appy-tappy/issues/13).
 - **Source workers.** One per attached game. Each runs the bindings the
   compiled config chose for that game's version and sends `Sample` events.
@@ -211,8 +213,9 @@ changing.
 - **What is resolved at compile time.** Each signal resolves to the concrete
   binding for each known game version, and every rule and action is
   validated. The runtime only picks the binding for the version it detects.
-  It detects the version from the game's executable file on disk, such as its
-  file version, which is allowed for every anti-cheat class.
+  It detects the version from the game's executable file on disk, at the
+  install path the compiled config records, such as its file version. Reading
+  that file is allowed for every anti-cheat class.
 - **Writing.** The setup app writes the compiled config to a uniquely named
   temporary file in `compiled\`, flushes it to disk with `sync_all`, and
   renames it over the old file. A rename within one folder replaces the file
