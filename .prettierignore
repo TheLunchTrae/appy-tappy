@@ -1,0 +1,11 @@
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.vite/
+build/
+coverage/
+dist/
+node_modules/
+out/
+sbom/

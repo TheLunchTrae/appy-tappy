@@ -1,0 +1,23 @@
+{
+  "name": "appy-tappy-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "scripts": {
+    "audit": "bun audit --audit-level=low",
+    "format": "oxfmt --write \"**/*.md\"",
+    "format:check": "oxfmt --check \"**/*.md\"",
+    "lint": "markdownlint-cli2",
+    "lint:fix": "markdownlint-cli2 --fix",
+    "standards": "bun run format && bun run lint:fix",
+    "standards:check": "bun run lint && bun run format:check"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "^0.24.0",
+    "oxfmt": "0.74.0"
+  },
+  "overrides": {
+    "katex": "^0.19.1"
+  }
+}

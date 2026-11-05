@@ -1,0 +1,73 @@
+[tools]
+bun = "1.4.4"
+lychee = "0.24.2"
+typos = "1.51.1"
+
+[tasks."md:install"]
+description = "Install Bun-managed Markdown dependencies"
+depends = ["md:lock:check"]
+run = "bun install --frozen-lockfile"
+
+[tasks."md:lock"]
+description = "Refresh the Bun lockfile for Markdown tooling"
+run = "bun install"
+
+[tasks."md:lock:check"]
+description = "Ensure the Markdown Bun lockfile is present"
+run = """
+if [ ! -f bun.lock ]; then
+  echo "bun.lock is required for Markdown CI. Run mise run md:lock and commit the generated lockfile." >&2
+  exit 1
+fi
+"""
+
+[tasks."md:fmt"]
+description = "Format Markdown"
+depends = ["md:install"]
+run = "bun run format"
+
+[tasks."md:fmt:check"]
+description = "Check Markdown formatting"
+depends = ["md:install"]
+run = "bun run format:check"
+
+[tasks."md:lint"]
+description = "Lint Markdown structure"
+depends = ["md:install"]
+run = "bun run lint"
+
+[tasks."md:lint:fix"]
+description = "Fix Markdown lint issues"
+depends = ["md:install"]
+run = "bun run lint:fix"
+
+[tasks."md:links"]
+description = "Check local Markdown links without network access"
+run = "lychee --config lychee.toml --root-dir \"$PWD\" --offline --extensions md ."
+
+[tasks."md:links:deep"]
+description = "Check local and external Markdown links"
+run = "lychee --config lychee.toml --root-dir \"$PWD\" --cache --extensions md ."
+
+[tasks."md:typos"]
+description = "Check project files and filenames for typos"
+run = "typos --config typos.toml ."
+
+[tasks."md:audit"]
+description = "Audit Markdown tooling dependencies"
+depends = ["md:install"]
+run = "bun run audit"
+
+[tasks."md:standards"]
+description = "Run the Markdown standards workflow with autofixes"
+depends = ["md:install"]
+run = "bun run standards"
+
+[tasks."md:standards:check"]
+description = "Run the Markdown standards CI gate"
+depends = ["md:install", "md:links", "md:typos"]
+run = "bun run standards:check"
+
+[tasks."md:standards:check:deep"]
+description = "Run the Markdown CI gate plus external link and dependency checks"
+depends = ["md:standards:check", "md:links:deep", "md:audit"]

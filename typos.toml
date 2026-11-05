@@ -1,0 +1,24 @@
+[default]
+check-file = true
+check-filename = true
+locale = "en-us"
+
+[files]
+extend-exclude = [
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".turbo",
+  ".vite",
+  "build",
+  "bun.lock",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "sbom",
+]
+
+# The product name, AppyTappy.
+[default.extend-words]
+appy = "appy"
