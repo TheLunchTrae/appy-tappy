@@ -79,7 +79,7 @@ const PANIC_LINTS: [&str; 10] = [
 /// panic sites, so a module-wide expectation of one stays allowed. Every lint
 /// denied by name sits in this list, `PANIC_LINTS`, or `ALLOW_ATTRIBUTE_LINTS`,
 /// so denying a new one forces that classification.
-const NON_PANIC_LINTS: [&str; 10] = [
+const NON_PANIC_LINTS: [&str; 11] = [
     "clippy::clone_on_ref_ptr",
     "clippy::dbg_macro",
     "clippy::let_underscore_must_use",
@@ -88,6 +88,7 @@ const NON_PANIC_LINTS: [&str; 10] = [
     "clippy::print_stderr",
     "clippy::print_stdout",
     "clippy::rc_buffer",
+    "clippy::undocumented_unsafe_blocks",
     "clippy::unused_result_ok",
     "clippy::wildcard_dependencies",
 ];

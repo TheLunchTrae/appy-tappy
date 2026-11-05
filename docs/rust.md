@@ -22,7 +22,8 @@ own copy of the tree.
 
 ## Lint wall
 
-The workspace pins Rust, uses edition 2024, forbids `unsafe` code, requires
+The workspace pins Rust, uses edition 2024, denies `unsafe` code outside the
+Windows adapters (see [architecture](architecture.md#unsafe-code)), requires
 documented public API with `Debug` implementations, denies rustdoc warnings,
 checks doctests, and runs Clippy on every target and feature with warnings
 promoted to errors. The wall lives in `[workspace.lints]`, and every package
@@ -96,13 +97,13 @@ or build dependencies.
 
 ## Mutation testing
 
-`rust:mutants:diff` runs in the gate. It mutates code changed since the merge
+`rust:mutants`, the full sweep, runs in the gate. `rust:mutants:diff` is the
+faster inner loop. It mutates code changed since the merge
 base with `MUTANTS_BASE_REF`, which defaults to `origin/main`, then local
-`main`. CI checks out full history for it. Untracked files fail the lane;
+`main`, so it needs full Git history. Untracked files fail the lane;
 stage them with `git add -N`. A diff that selects no mutants passes.
 
-`rust:mutants` runs the full sweep and requires at least one mutant to run, so
-it waits until a workspace member crate holds product code. Both lanes clear and rewrite
+`rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in
 which every mutant is unviable fails. A surviving mutant is a review finding.
 

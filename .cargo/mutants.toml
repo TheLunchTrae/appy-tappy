@@ -1,0 +1,4 @@
+# The Windows adapters compile only on Windows, so the Linux mutation lanes
+# cannot test them; the owner approved this exclusion
+# (docs/architecture.md#portable-core-thin-windows-adapters).
+exclude_globs = ["crates/*/src/win.rs", "crates/*/src/win/**"]
