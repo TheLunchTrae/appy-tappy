@@ -41,9 +41,9 @@ the lint stops firing. `#[allow]` is rejected everywhere.
 
 `clippy.toml` bans `Mutex`, `RwLock`, `Rc`, atomics, and similar types. That
 encodes one architecture: a single owner for application state, pure
-`(state, event)` transitions, and messages to the owner. It fits the runtime
-and the setup app. A library, runtime component, or driver that needs shared
-state changes `disallowed-types`, the ownership rules in `AGENTS.md`, and the
+`(state, event)` transitions, and messages to the owner. A library or driver
+that needs shared state, or a framework that expects it, such as Tauri's
+managed state, changes `disallowed-types`, the ownership rules in `AGENTS.md`, and the
 state cases in `policy-fixtures/lint-wall.rs.in` together, with the owner's
 approval. A single site inside an application uses a reasoned `#[expect]`.
 
@@ -69,7 +69,7 @@ The scan cannot see macro output. A macro that builds an `allow` from split or
 generated tokens is a prohibited bypass that review must catch. Non-literal
 `include!` and custom `#[path]` modules fail, because the scan cannot prove
 their inputs. Every input must stay inside the project root. The scan compares
-POSIX paths, so it runs on Linux.
+POSIX paths, so it runs on Linux or macOS, not Windows.
 
 ## Lint-wall proof
 
@@ -77,11 +77,12 @@ POSIX paths, so it runs on Linux.
 `rust:lint` command over `policy-fixtures/lint-wall.rs.in` in a scratch package
 that takes the workspace's lints, edition, and `rust-version`. Each
 `//~ ERROR <code>` comment marks a diagnostic that line must report; a missing
-or unexpected diagnostic fails the task. The proof also fails when anything
-could lower lint levels without the probe noticing: extra keys or arguments on
-`rust:lint`, `-A`, `--cap-lints`, or `@file` flags, `RUSTFLAGS`-style variables,
-Cargo config `rustflags`, a forced `CLIPPY_ARGS`, or a `CLIPPY_CONF_DIR` outside
-the project. Change the probe and the test's list of codes together with the
+or unexpected diagnostic fails the task. The proof also fails on these routes
+that could lower lint levels without the probe noticing: extra keys or
+arguments on `rust:lint`; `-A`, `--allow`, `--force-warn`, `--cap-lints`,
+unstable `-Z`, or `@file` flags in the Clippy arguments, `RUSTFLAGS`-style
+variables, or Cargo config `rustflags`; a forced `CLIPPY_ARGS`; or a
+`CLIPPY_CONF_DIR` outside the project. Change the probe and the test's list of codes together with the
 wall.
 
 ## Dependencies
@@ -101,7 +102,7 @@ base with `MUTANTS_BASE_REF`, which defaults to `origin/main`, then local
 stage them with `git add -N`. A diff that selects no mutants passes.
 
 `rust:mutants` runs the full sweep and requires at least one mutant to run, so
-it waits until `config` or `engine` holds code. Both lanes clear and rewrite
+it waits until a workspace member crate holds product code. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in
 which every mutant is unviable fails. A surviving mutant is a review finding.
 

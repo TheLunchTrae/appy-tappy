@@ -38,10 +38,9 @@ Linux and is the required gate, and `windows` runs `rust:fmt:check`,
   ```
 
 - `rust:policy` and the mutation tasks need `setsid`, which Windows and macOS
-  lack, and
-  the root package's policy tests compare POSIX paths, so `standards:check`
-  and `rust:test` run on Linux: in CI or WSL. On Windows, run `rust:fmt`,
-  `rust:lint`, `rust:doc`, and the `md:` tasks.
+  lack, so `standards:check` runs on Linux: in CI or WSL. The root package's
+  policy tests compare POSIX paths, so `rust:test` runs on Linux or macOS. On
+  Windows, run `rust:fmt`, `rust:lint`, `rust:doc`, and the `md:` tasks.
 - `mise lock` records every platform in `lockfile_platforms`; commit
   `.config/mise/mise.lock` after a tool change.
 
@@ -284,7 +283,8 @@ Every workspace package, including the root package, declares
 `[lints] workspace = true`. Release profiles belong in the root manifest;
 keep overflow checks enabled. `tests/allow_policy.rs` checks first-party
 source inputs, and `rust:policy` checks configured policy probes. Read their
-[scope and limitations](docs/rust.md#source-policy-scan) before adding macros, custom target paths, includes, or symlinks.
+[scope and limitations](docs/rust.md#source-policy-scan) before adding macros,
+custom target paths, includes, or symlinks.
 Checker-specific production behavior and synthesized suppression attributes
 are prohibited even when static analysis cannot detect them.
 
@@ -303,12 +303,11 @@ coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
 The gate requires executed mutation evidence for changed code; a change that
-selects no mutants passes. Once `config` or `engine` holds product code,
-restore `rust:mutants`, the full sweep, as a dependency of
-`rust:standards:check`. Read
-[mutation operation](docs/rust.md#mutation-testing) before changing report
-paths, mutation selection, or transaction handling. Confirm no run is active before clearing
-a stale lock.
+selects no mutants passes. Once a workspace member crate holds product
+code, restore `rust:mutants`, the full sweep, as a dependency of
+`rust:standards:check`. Read [mutation operation](docs/rust.md#mutation-testing)
+before changing report paths, mutation selection, or transaction handling.
+Confirm no run is active before clearing a stale lock.
 
 ### Dependencies and review
 
