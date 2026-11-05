@@ -153,7 +153,7 @@ version-numbered names.
 ## Rust
 
 `Cargo.toml`, `clippy.toml`, and `deny.toml` own executable policy;
-`.config/mise/conf.d/20-rust.toml` owns commands. Read
+`.config/mise/conf.d/rust.toml` owns commands. Read
 [`docs/rust.md`](docs/rust.md) for setup, scanner limits, and mutation
 operation before changing enforcement.
 

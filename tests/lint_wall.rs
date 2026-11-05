@@ -16,7 +16,7 @@ use toml::{Table, Value};
 const PROBE_INPUT: &str = "policy-fixtures/lint-wall.rs.in";
 const PROBE_SOURCE: &str = "src/lib.rs";
 const ERROR_MARKER: &str = "//~ ERROR ";
-const TASK_FRAGMENT: &str = ".config/mise/conf.d/20-rust.toml";
+const TASK_FRAGMENT: &str = ".config/mise/conf.d/rust.toml";
 const PROOF_COMMAND: &str = "cargo test --locked --all-features --test lint_wall -- --ignored";
 /// The `rust:lint` keys a replay of its `run` value reproduces. Any other key,
 /// including one a later mise release adds, can change or skip what the gate

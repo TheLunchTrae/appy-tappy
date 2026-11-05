@@ -2,7 +2,7 @@
 
 This page explains how the Rust checks work and where they stop.
 [`AGENTS.md`](../AGENTS.md) holds the rules; `Cargo.toml`, `clippy.toml`,
-`deny.toml`, and `.config/mise/conf.d/20-rust.toml` hold the enforcement.
+`deny.toml`, and `.config/mise/conf.d/rust.toml` hold the enforcement.
 
 ## Toolchain
 

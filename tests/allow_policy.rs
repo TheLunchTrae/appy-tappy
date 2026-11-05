@@ -2966,7 +2966,7 @@ fn project_sources_contain_no_policy_violations() {
 #[test]
 fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     let root = project_root();
-    let task_path = root.join(".config/mise/conf.d/20-rust.toml");
+    let task_path = root.join(".config/mise/conf.d/rust.toml");
     let tasks =
         fs::read_to_string(&task_path).expect("the copied Rust task fragment should be readable");
     let Some(full) = task_definition(&tasks, "rust:mutants") else {
