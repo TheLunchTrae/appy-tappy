@@ -4,6 +4,8 @@
 //! user's answer before memory access, opening a process under a permit, and
 //! screen pixels.
 
+#![forbid(unsafe_code)]
+
 use std::convert::Infallible;
 use std::io;
 
@@ -158,6 +160,11 @@ impl ProcessMemory for NoProcess {
 
     #[mutants::skip]
     fn pointer_width(&self) -> crate::memory::PointerWidth {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn image_name(&self) -> io::Result<String> {
         match self.0 {}
     }
 }

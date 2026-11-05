@@ -34,12 +34,15 @@ const SCREEN_POINTS_LIMIT: usize = 64;
 /// What a tool returns: a JSON result, or an error message for the agent.
 pub(crate) type Outcome<T = Value> = Result<T, String>;
 
-/// The state the tools share: the processes the user allowed, and the one
+/// The state the tools share: the programs the user refused, and the one
 /// attached process with its scan.
 #[derive(Debug)]
 pub(crate) struct Session<S: System> {
     system: S,
-    allowed: Vec<(ProcessId, String)>,
+    /// Executables the user refused this session, lowercased. The server
+    /// refuses them again without asking, so an agent cannot wear the user
+    /// down with repeated prompts.
+    refused: Vec<String>,
     attached: Option<Attached<S::Process>>,
 }
 
@@ -55,7 +58,7 @@ impl<S: System> Session<S> {
     pub(crate) fn new(system: S) -> Self {
         Self {
             system,
-            allowed: Vec::new(),
+            refused: Vec::new(),
             attached: None,
         }
     }
@@ -143,8 +146,8 @@ impl<S: System> Session<S> {
         let permit = ProcessAccessPermit::issue(id, class).map_err(|blocked| {
             if blocked.class() == AntiCheatClass::Unknown {
                 format!(
-                    "the user did not allow reading {}'s memory. Do not ask to attach again \
-                     unless the user says so; investigate with window_list and screen_sample instead",
+                    "the user did not allow reading {}'s memory, and AppyTappy refuses it for \
+                     the rest of this session; investigate with window_list and screen_sample instead",
                     entry.executable
                 )
             } else {
@@ -156,6 +159,18 @@ impl<S: System> Session<S> {
             .system
             .open(&permit)
             .map_err(os_error("open the process"))?;
+        // The process could have exited while the user decided, and its ID gone
+        // to another program. The open handle pins the ID, so check that it still
+        // runs the program the user allowed.
+        let image = process
+            .image_name()
+            .map_err(os_error("read the process's program name"))?;
+        if !image.eq_ignore_ascii_case(&entry.executable) || known_anti_cheat(&image).is_some() {
+            return Err(format!(
+                "process {id} now runs {image}, not the {} the user allowed; it was closed",
+                entry.executable
+            ));
+        }
         let modules = process.modules().map_err(os_error("list modules"))?;
         let scannable = process
             .regions()
@@ -183,7 +198,9 @@ impl<S: System> Session<S> {
     }
 
     /// The anti-cheat class to apply to `entry`: a known anti-cheat's own
-    /// class, `none` once the user allowed it, and `unknown` otherwise.
+    /// class, `none` when the user allows it now, and `unknown` otherwise.
+    /// Each attach asks again, so an approval never carries over to a later
+    /// process that reuses the ID.
     fn classify(
         &mut self,
         entry: &ProcessEntry,
@@ -192,9 +209,9 @@ impl<S: System> Session<S> {
         if let Some(known) = known_anti_cheat(&entry.executable) {
             return Ok(known.class);
         }
-        let key = (entry.id, entry.executable.clone());
-        if self.allowed.contains(&key) {
-            return Ok(AntiCheatClass::None);
+        let executable = entry.executable.to_lowercase();
+        if self.refused.contains(&executable) {
+            return Ok(AntiCheatClass::Unknown);
         }
         let mut running: Vec<&str> = processes
             .iter()
@@ -208,11 +225,11 @@ impl<S: System> Session<S> {
             .ask_memory_access(entry, &running)
             .map_err(os_error("ask the user"))?
         {
-            AccessAnswer::Allowed => {
-                self.allowed.push(key);
-                Ok(AntiCheatClass::None)
+            AccessAnswer::Allowed => Ok(AntiCheatClass::None),
+            AccessAnswer::Refused => {
+                self.refused.push(executable);
+                Ok(AntiCheatClass::Unknown)
             },
-            AccessAnswer::Refused => Ok(AntiCheatClass::Unknown),
         }
     }
 
@@ -762,6 +779,7 @@ mod tests {
 
     struct FakeProcess {
         bytes: Vec<u8>,
+        image: String,
     }
 
     impl FakeProcess {
@@ -803,10 +821,16 @@ mod tests {
         fn pointer_width(&self) -> PointerWidth {
             PointerWidth::Bits64
         }
+
+        fn image_name(&self) -> io::Result<String> {
+            Ok(self.image.clone())
+        }
     }
 
     struct FakeSystem {
         processes: Vec<ProcessEntry>,
+        /// The program an opened process turns out to run.
+        image: String,
         answer: AccessAnswer,
         asked: mpsc::Sender<(ProcessId, Vec<String>)>,
     }
@@ -857,6 +881,7 @@ mod tests {
             assert_eq!(permit.process(), ProcessId::new(10));
             Ok(FakeProcess {
                 bytes: vec![0; 0x1000],
+                image: self.image.clone(),
             })
         }
 
@@ -893,6 +918,7 @@ mod tests {
                 entry(30, "vgc.exe"),
                 entry(40, "browser.exe"),
             ],
+            image: "GAME.EXE".to_owned(),
             answer,
             asked,
         };
@@ -944,9 +970,24 @@ mod tests {
 
         call(&mut session, "process_attach", json!({ "pid": 10 })).unwrap();
         assert!(
-            questions.try_recv().is_err(),
-            "an allowed process is not asked about again"
+            questions.try_recv().is_ok(),
+            "each attach asks again, so an approval never outlives its process"
         );
+    }
+
+    #[test]
+    fn attach_closes_a_process_whose_id_now_runs_another_program() {
+        let (mut session, _questions) = session(AccessAnswer::Allowed);
+        for image in ["other.exe", "Game.exe.bak", "BEService.exe"] {
+            image.clone_into(&mut session.system.image);
+            assert_eq!(
+                call(&mut session, "process_attach", json!({ "pid": 10 })),
+                Err(format!(
+                    "process 10 now runs {image}, not the Game.exe the user allowed; it was closed"
+                ))
+            );
+            assert!(session.attached.is_none());
+        }
     }
 
     #[test]
@@ -954,6 +995,11 @@ mod tests {
         let (mut session, questions) = session(AccessAnswer::Refused);
         let refused = call(&mut session, "process_attach", json!({ "pid": 10 })).unwrap_err();
         assert!(refused.starts_with("the user did not allow reading Game.exe's memory"));
+        assert_eq!(
+            call(&mut session, "process_attach", json!({ "pid": 10 })),
+            Err(refused),
+            "a refused program is refused again without asking"
+        );
         assert_eq!(
             call(
                 &mut session,

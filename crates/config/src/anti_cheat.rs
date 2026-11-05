@@ -59,7 +59,10 @@ impl fmt::Display for ProcessId {
 ///
 /// [`ProcessAccessPermit::issue`] is the only constructor, and it refuses every
 /// class but [`AntiCheatClass::None`]. Code that opens a process takes a permit
-/// for that process, so a path that skips the policy does not compile.
+/// for that process, so opening one always names a class at a visible call
+/// site. The type does not prove where the class came from: the caller that
+/// classifies the process, such as the MCP server's attach after the user's
+/// answer, is what the policy rests on.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ProcessAccessPermit {
     process: ProcessId,

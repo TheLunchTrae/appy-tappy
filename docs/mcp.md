@@ -31,17 +31,23 @@ config tools that come next slot in as `definition_*`, `rule_*`,
 
 ## Anti-cheat safety
 
-The server enforces the block itself, so an agent cannot talk its way past it.
+The server enforces the block itself, so no wording from the agent gets past
+it.
 
 - `process_attach` refuses the process of a known anti-cheat product.
-- Every other process is unknown until the user allows it. The server shows a
-  Windows dialog that the agent cannot answer, and it names any anti-cheat
-  that is running. The default button is **No**.
-- If the user chooses **No**, the agent is told not to ask again and to use
-  windows and screen pixels instead.
+- Every other process stays closed until the user allows it. Each attach
+  shows a Windows dialog that AppyTappy's tools cannot answer, and it names
+  any anti-cheat that is running. The default button is **No**.
+- If the user chooses **No**, the server refuses that program for the rest of
+  the session without asking again.
+- After opening, the server checks that the process still runs the program
+  the user allowed, in case it exited and its ID was reused.
 - The server opens a process with read and query rights only.
 
-Only allow a game that has no anti-cheat. Geometry Dash has none.
+Only allow a game that has no anti-cheat. Geometry Dash has none. An agent
+that can run shell commands on the same desktop could click the dialog
+itself, so don't auto-approve the agent's shell commands while it
+investigates.
 
 ## Build
 
@@ -59,7 +65,7 @@ The server is `target\release\appytappy-mcp.exe`.
 Add the server once for your user, with the full path to the program:
 
 ```sh
-claude mcp add --scope user appytappy -- C:\path\to\appy-tappy\target\release\appytappy-mcp.exe
+claude mcp add --scope user appytappy -- C:/path/to/appy-tappy/target/release/appytappy-mcp.exe
 ```
 
 Check it with `claude mcp list`, or run `/mcp` inside Claude Code. Claude
@@ -87,8 +93,9 @@ percent be read from memory through a pointer chain that survives a restart?
 4. Play, pause, and die when Claude asks. Each change lets it narrow the scan.
    The percent may be stored as a float, an integer, or worked out from the
    player's position, so Claude may need a few rounds.
-5. Once Claude has a chain, quit and restart the game when it asks, then let it
-   check the chain again.
+5. Once Claude has a chain, quit and restart the game when it asks. The
+   restarted game is a new process, so choose **Yes** in the dialog again,
+   then let Claude check the chain.
 
 The result to bring back to #4 is the pointer chain (module, base offset, and
 offsets), its value type, and whether it survived the restart.

@@ -11,7 +11,10 @@ use std::mem::size_of;
 use std::ptr;
 
 use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_BAD_LENGTH, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, HANDLE, HWND,
+    LPARAM, RECT,
+};
 use windows::Win32::Graphics::Gdi::{CLR_INVALID, GetDC, GetPixel, ReleaseDC};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -23,7 +26,8 @@ use windows::Win32::System::Memory::{
     PAGE_EXECUTE_WRITECOPY, PAGE_GUARD, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQueryEx,
 };
 use windows::Win32::System::Threading::{
-    IsWow64Process, OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    IsWow64Process, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    QueryFullProcessImageNameW,
 };
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
@@ -33,7 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     IsWindowVisible, MB_DEFBUTTON2, MB_ICONWARNING, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
     MessageBoxW,
 };
-use windows::core::{BOOL, HSTRING};
+use windows::core::{BOOL, HSTRING, PWSTR};
 
 use crate::memory::{Module, PointerWidth, ProcessMemory, Region};
 use crate::system::{AccessAnswer, Bounds, ProcessEntry, Rgb, System, WindowEntry};
@@ -93,14 +97,36 @@ fn struct_size<T>() -> io::Result<u32> {
     u32::try_from(size_of::<T>()).map_err(io::Error::other)
 }
 
+/// Takes a Toolhelp snapshot. A module snapshot fails with
+/// `ERROR_BAD_LENGTH` while the process is loading a module, so that error is
+/// retried a few times.
 fn snapshot(
     flags: windows::Win32::System::Diagnostics::ToolHelp::CREATE_TOOLHELP_SNAPSHOT_FLAGS,
     process: u32,
 ) -> io::Result<OwnedHandle> {
-    #[expect(unsafe_code, reason = "a Win32 call")]
-    // SAFETY: the call takes flags and a process ID and returns a new handle.
-    let handle = unsafe { CreateToolhelp32Snapshot(flags, process) }?;
-    Ok(OwnedHandle(handle))
+    let mut attempts = 0_u8;
+    loop {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes flags and a process ID and returns a new handle.
+        let taken = unsafe { CreateToolhelp32Snapshot(flags, process) };
+        match taken {
+            Ok(handle) => return Ok(OwnedHandle(handle)),
+            Err(error) if error.code() == ERROR_BAD_LENGTH.to_hresult() && attempts < 4 => {
+                attempts = attempts.saturating_add(1);
+            },
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+/// Ends a Toolhelp walk: running out of entries is the normal end, and any
+/// other failure is an error.
+fn walk_end(result: windows::core::Result<()>) -> io::Result<bool> {
+    match result {
+        Ok(()) => Ok(true),
+        Err(error) if error.code() == ERROR_NO_MORE_FILES.to_hresult() => Ok(false),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// An opened process, with read rights only.
@@ -130,7 +156,12 @@ impl ProcessMemory for WindowsProcess {
                 )
             };
             if written == 0 {
-                break;
+                // Querying past the last region fails with ERROR_INVALID_PARAMETER.
+                let error = windows::core::Error::from_thread();
+                if error.code() == ERROR_INVALID_PARAMETER.to_hresult() {
+                    break;
+                }
+                return Err(error.into());
             }
             let base = info.BaseAddress.addr();
             let protect = info.Protect.0;
@@ -186,8 +217,8 @@ impl ProcessMemory for WindowsProcess {
         let mut modules = Vec::new();
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `entry` is a MODULEENTRY32W whose dwSize is set, as the call requires.
-        let mut found = unsafe { Module32FirstW(snapshot.0, &raw mut entry) };
-        while found.is_ok() {
+        let mut found = walk_end(unsafe { Module32FirstW(snapshot.0, &raw mut entry) })?;
+        while found {
             modules.push(Module {
                 name: utf16_to_string(&entry.szModule),
                 base: entry.modBaseAddr.addr() as u64,
@@ -196,13 +227,32 @@ impl ProcessMemory for WindowsProcess {
             #[expect(unsafe_code, reason = "a Win32 call")]
             // SAFETY: as for Module32FirstW.
             let next = unsafe { Module32NextW(snapshot.0, &raw mut entry) };
-            found = next;
+            found = walk_end(next)?;
         }
         Ok(modules)
     }
 
     fn pointer_width(&self) -> PointerWidth {
         self.width
+    }
+
+    fn image_name(&self) -> io::Result<String> {
+        let mut path = vec![0_u16; 32_768];
+        let mut length = u32::try_from(path.len()).map_err(io::Error::other)?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `path` is writable for `length` UTF-16 units, and the call writes
+        // at most that many and stores the count it wrote in `length`.
+        unsafe {
+            QueryFullProcessImageNameW(
+                self.handle.0,
+                PROCESS_NAME_WIN32,
+                PWSTR(path.as_mut_ptr()),
+                &raw mut length,
+            )
+        }?;
+        let written = usize::try_from(length).map_err(io::Error::other)?;
+        let path = String::from_utf16_lossy(path.get(..written).unwrap_or_default());
+        Ok(path.rsplit('\\').next().unwrap_or_default().to_owned())
     }
 }
 
@@ -274,8 +324,8 @@ impl System for WindowsSystem {
         let mut processes = Vec::new();
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `entry` is a PROCESSENTRY32W whose dwSize is set, as the call requires.
-        let mut found = unsafe { Process32FirstW(snapshot.0, &raw mut entry) };
-        while found.is_ok() {
+        let mut found = walk_end(unsafe { Process32FirstW(snapshot.0, &raw mut entry) })?;
+        while found {
             processes.push(ProcessEntry {
                 id: ProcessId::new(entry.th32ProcessID),
                 parent: ProcessId::new(entry.th32ParentProcessID),
@@ -285,7 +335,7 @@ impl System for WindowsSystem {
             #[expect(unsafe_code, reason = "a Win32 call")]
             // SAFETY: as for Process32FirstW.
             let next = unsafe { Process32NextW(snapshot.0, &raw mut entry) };
-            found = next;
+            found = walk_end(next)?;
         }
         Ok(processes)
     }
@@ -433,6 +483,18 @@ mod tests {
         let pointer_address = ptr::from_ref(pointer.as_ref()).addr() as u64;
         let steps = follow_pointer_chain(&process, pointer_address, &[0]).unwrap();
         assert_eq!(steps[0].address, address);
+    }
+
+    #[test]
+    fn names_the_opened_process_s_image() {
+        let system = WindowsSystem::new();
+        let own = std::env::current_exe().unwrap();
+        let expected = own.file_name().unwrap().to_string_lossy();
+        let named = own_process(&system).image_name().unwrap();
+        assert!(
+            named.eq_ignore_ascii_case(&expected),
+            "{named} != {expected}"
+        );
     }
 
     #[test]

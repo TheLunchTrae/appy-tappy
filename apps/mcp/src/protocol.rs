@@ -11,8 +11,10 @@ use serde_json::{Map, Value, json};
 
 use crate::tools::{self, Session};
 
-/// The protocol revisions this server speaks, newest first.
-const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+/// The protocol revisions this server speaks, newest first. 2025-03-26 is
+/// left out because it requires JSON-RPC batches, which this server does not
+/// take.
+const PROTOCOL_VERSIONS: [&str; 3] = ["2025-11-25", "2025-06-18", "2024-11-05"];
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -38,22 +40,27 @@ chain with memory_follow_pointer after the user restarts the game.";
 ///
 /// Returns the first read or write error.
 pub(crate) fn serve<S: System>(
-    input: impl BufRead,
+    mut input: impl BufRead,
     mut output: impl Write,
     session: &mut Session<S>,
 ) -> io::Result<()> {
-    for line in input.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if input.read_until(b'\n', &mut line)? == 0 {
+            return Ok(());
         }
-        if let Some(response) = handle(session, &line) {
+        let response = match std::str::from_utf8(&line) {
+            Ok(text) if text.trim().is_empty() => None,
+            Ok(text) => handle(session, text),
+            Err(error) => Some(failure(&Value::Null, PARSE_ERROR, &error.to_string())),
+        };
+        if let Some(response) = response {
             serde_json::to_writer(&mut output, &response)?;
             output.write_all(b"\n")?;
             output.flush()?;
         }
     }
-    Ok(())
 }
 
 /// Handles one message and returns the response, if it needs one.
@@ -81,6 +88,13 @@ fn handle<S: System>(session: &mut Session<S>, line: &str) -> Option<Value> {
         ));
     };
     let id = id?;
+    if id.is_null() {
+        return Some(failure(
+            id,
+            INVALID_REQUEST,
+            "a request id must not be null",
+        ));
+    }
     let params = message.get("params").unwrap_or(&Value::Null);
     Some(match dispatch(session, method, params) {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
@@ -183,6 +197,24 @@ mod tests {
     }
 
     #[test]
+    fn reports_a_line_that_is_not_utf8_and_keeps_serving() {
+        let mut session = Session::new(Unsupported);
+        let mut output = Vec::new();
+        let input: &[u8] = b"\xff\xfe\n{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}";
+        serve(input, &mut output, &mut session).unwrap();
+        let responses: Vec<Value> = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(responses[0]["error"]["code"], -32700);
+        assert_eq!(
+            responses[1],
+            json!({ "jsonrpc": "2.0", "id": 7, "result": {} })
+        );
+    }
+
+    #[test]
     fn answers_requests_and_stays_silent_for_notifications_and_responses() {
         let responses = exchange(concat!(
             r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
@@ -211,6 +243,8 @@ mod tests {
             "\n",
             r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{}}"#,
             "\n",
+            r#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#,
+            "\n",
         ));
         let codes: Vec<(Value, Value)> = responses
             .iter()
@@ -225,6 +259,7 @@ mod tests {
                 (json!(4), json!(-32601)),
                 (json!(5), json!(-32602)),
                 (json!(6), json!(-32602)),
+                (Value::Null, json!(-32600)),
             ]
         );
     }

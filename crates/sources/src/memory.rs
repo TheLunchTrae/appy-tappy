@@ -6,10 +6,13 @@
 //! unknown, and each next scan keeps the addresses whose value passes a new
 //! test against its current and previous value.
 
+#![forbid(unsafe_code)]
+
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 use std::io;
+use std::ops::Range;
 
 /// One committed, readable region of a process's address space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +56,9 @@ impl PointerWidth {
 
 /// Read access to one opened process.
 pub trait ProcessMemory {
-    /// The committed, readable regions, in address order.
+    /// The committed, writable regions a scan reads, in address order:
+    /// the process's heap, stacks, and modules' data, where game state
+    /// lives.
     ///
     /// # Errors
     ///
@@ -76,6 +81,14 @@ pub trait ProcessMemory {
 
     /// The process's pointer size.
     fn pointer_width(&self) -> PointerWidth;
+
+    /// The file name of the program the process runs, such as
+    /// `GeometryDash.exe`, read from the opened process itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn image_name(&self) -> io::Result<String>;
 }
 
 /// How a scan or a read interprets memory. Every type is little-endian.
@@ -158,6 +171,11 @@ impl ValueType {
                 reason = "rounding to the nearest f32 is the conversion an f32 scan target needs"
             )]
             (Self::F32, Number::Float(value)) => Number::Float(f64::from(value as f32)),
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "rounding to the nearest f32 is the conversion an f32 scan target needs"
+            )]
+            (Self::F32, Number::Int(value)) => Number::Float(f64::from(value as f32)),
             _ => number,
         }
     }
@@ -360,13 +378,9 @@ impl Scan {
                 }
             },
             State::Candidates(candidates) => {
-                let mut current = vec![0; value_type.size()];
-                for candidate in candidates {
-                    if memory.read(candidate.address, &mut current).is_ok()
-                        && scan.passes(value_type, &candidate.previous, &current)
-                    {
-                        kept.push(Candidate::new(candidate.address, &current));
-                    }
+                for window in read_windows(candidates, value_type.size()) {
+                    let window = candidates.get(window).unwrap_or_default();
+                    reread_window(memory, window, value_type, scan, &mut kept);
                 }
             },
         }
@@ -388,7 +402,8 @@ impl Scan {
             State::Snapshot(pieces) => pieces
                 .iter()
                 .map(|piece| {
-                    u64::try_from(piece.values(self.value_type).count()).unwrap_or(u64::MAX)
+                    let values = piece.bytes.len().checked_div(self.value_type.size());
+                    values.map_or(0, |values| u64::try_from(values).unwrap_or(u64::MAX))
                 })
                 .fold(0, u64::saturating_add),
             State::Candidates(candidates) => u64::try_from(candidates.len()).unwrap_or(u64::MAX),
@@ -496,6 +511,73 @@ fn compare_piece(
         keep(kept, Candidate::new(address, current))?;
     }
     Ok(())
+}
+
+/// Splits sorted candidates into runs that one read of at most [`PIECE`]
+/// bytes covers, so a next scan reads memory in a few large reads rather than
+/// one read per candidate.
+fn read_windows(candidates: &[Candidate], size: usize) -> Vec<Range<usize>> {
+    let size = u64::try_from(size).unwrap_or(u64::MAX);
+    let mut windows = Vec::new();
+    let mut start = 0;
+    let mut base = None;
+    for (index, candidate) in candidates.iter().enumerate() {
+        let span = base.and_then(|base| candidate.address.checked_add(size)?.checked_sub(base));
+        if span.is_none_or(|span| span > PIECE) {
+            if index > start {
+                windows.push(start..index);
+            }
+            start = index;
+            base = Some(candidate.address);
+        }
+    }
+    if start < candidates.len() {
+        windows.push(start..candidates.len());
+    }
+    windows
+}
+
+/// Rereads one window of candidates and keeps those that pass `scan`. When
+/// the window does not read as a whole, as when it spans an unreadable page,
+/// each candidate is read alone.
+fn reread_window(
+    memory: &impl ProcessMemory,
+    window: &[Candidate],
+    value_type: ValueType,
+    scan: NextScan,
+    kept: &mut Vec<Candidate>,
+) {
+    let (Some(first), Some(last)) = (window.first(), window.last()) else {
+        return;
+    };
+    let size = value_type.size();
+    let length = last
+        .address
+        .checked_sub(first.address)
+        .and_then(|span| usize::try_from(span).ok())
+        .and_then(|span| span.checked_add(size));
+    let mut bytes = vec![0; length.unwrap_or(0)];
+    let whole = length.is_some() && memory.read(first.address, &mut bytes).is_ok();
+    let mut alone = vec![0; size];
+    for candidate in window {
+        let current = if whole {
+            candidate
+                .address
+                .checked_sub(first.address)
+                .and_then(|offset| usize::try_from(offset).ok())
+                .and_then(|offset| bytes.get(offset..offset.checked_add(size)?))
+        } else {
+            memory
+                .read(candidate.address, &mut alone)
+                .is_ok()
+                .then_some(alone.as_slice())
+        };
+        if let Some(current) = current
+            && scan.passes(value_type, &candidate.previous, current)
+        {
+            kept.push(Candidate::new(candidate.address, current));
+        }
+    }
 }
 
 fn keep(candidates: &mut Vec<Candidate>, candidate: Candidate) -> Result<(), ScanError> {
@@ -754,6 +836,10 @@ mod tests {
         fn pointer_width(&self) -> PointerWidth {
             self.width
         }
+
+        fn image_name(&self) -> io::Result<String> {
+            Ok("Fake.exe".to_owned())
+        }
     }
 
     fn f32_region(base: u64, values: &[f32]) -> (u64, Vec<u8>) {
@@ -988,6 +1074,49 @@ mod tests {
             snapshot(&memory, &regions, 16),
             Err(ScanError::SnapshotTooLarge)
         ));
+    }
+
+    #[test]
+    fn groups_candidates_into_reads_of_at_most_one_piece() {
+        let at = |addresses: &[u64]| -> Vec<Candidate> {
+            addresses
+                .iter()
+                .map(|&address| Candidate::new(address, &[0; 4]))
+                .collect()
+        };
+        assert_eq!(read_windows(&[], 4), []);
+        assert_eq!(
+            read_windows(&at(&[0x1000, 0x1004, 0x10_0ffc, 0x10_1000]), 4),
+            [0..3, 3..4]
+        );
+        assert_eq!(
+            read_windows(&at(&[0x1000]), 4),
+            [Range { start: 0, end: 1 }]
+        );
+    }
+
+    #[test]
+    fn next_scan_reads_candidates_around_an_unreadable_page() {
+        let mut memory = FakeMemory::new(vec![(0x1000, vec![0; 0x30])]);
+        for address in [0x1000, 0x1010, 0x1020] {
+            memory.write(address, &5_i32.to_le_bytes());
+        }
+        let five = FirstScan::Value(ValueTest::Exact(Number::Int(5)));
+        let mut scan = Scan::first(&memory, ValueType::I32, five).unwrap();
+        memory.holes.push((0x1010, 0x1014));
+        memory.write(0x1020, &6_i32.to_le_bytes());
+        scan.next(&memory, NextScan::Unchanged).unwrap();
+        assert_eq!(addresses(&scan), [0x1000]);
+    }
+
+    #[test]
+    fn f32_targets_given_as_integers_round_to_f32() {
+        let stored = ValueType::F32.stored(Number::Int(16_777_217));
+        assert_eq!(stored, Number::Float(16_777_216.0));
+        assert_eq!(
+            ValueType::F64.stored(Number::Int(16_777_217)),
+            Number::Int(16_777_217)
+        );
     }
 
     #[test]
