@@ -42,9 +42,11 @@ on, so it must stay small. Every design choice below follows from that split.
    one **compiled config** that holds only what the runtime needs.
 3. The runtime watches that file, validates it again, and swaps it in. It
    never reads authoring files.
-4. The runtime writes a **status file**: whether it is running, which games
-   are attached, and the last problem, such as a rejected config. The setup app
-   reads it to show the user what the runtime is doing.
+4. The runtime writes a **status file**: which games are attached and the
+   last problem, such as a rejected config. The setup app reads it to show the
+   user what the runtime is doing. A file cannot say whether its writer is
+   still alive, so the setup app checks that the runtime is running through
+   the runtime's single-instance guard instead.
 
 The two programs never talk directly: no sockets, pipes, or shared memory.
 Files carry everything between them. The setup app previews and tests rules
@@ -77,7 +79,7 @@ crates/
 | `appytappy-actions`  | Windows  | `config`, `windows`                                  | runtime        |
 | `appytappy-platform` | Windows  | `windows`                                            | runtime        |
 | `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform` | —              |
-| setup app            | Windows  | `config`, `engine`, `sources`, `tauri`               | —              |
+| setup app            | Windows  | `config`, `engine`, `sources`, `tauri`, `tokio`      | —              |
 
 Each crate's owning issue adds its code and its dependencies. Where issues #6, #8,
 and #11 say "the core crate", they mean `appytappy-config` for formats, validation,
@@ -106,7 +108,8 @@ Logic that can be wrong belongs in `config` or `engine`. A Windows adapter
 turns one API call into one typed value or error and holds no decisions of its
 own. Mutation testing cannot check adapter code: the Linux gate compiles it
 out, and cargo-mutants reports its mutants as missed. So each crate keeps its
-Windows code in `windows.rs` modules, and the first adapter change asks the
+Windows code in `win.rs` modules (not `windows.rs`, whose name would clash with
+the `windows` crate), and the first adapter change asks the
 owner to exclude those files in `.cargo/mutants.toml`.
 [`AGENTS.md`](../AGENTS.md#tests-and-mutation) requires that approval for any
 configuration exclusion.
@@ -114,7 +117,9 @@ configuration exclusion.
 ## The runtime
 
 The runtime is one process for all games. It uses no async runtime and no
-webview, and it keeps its dependencies few. Footprint targets belong to
+webview, and it keeps its dependencies few. It is built as a Windows GUI
+program (`#![windows_subsystem = "windows"]`), so no console window opens; it
+has no console output, so it logs only to `%LOCALAPPDATA%\AppyTappy\logs\`. Footprint targets belong to
 [#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
 
 It follows the standards' ownership rule: one thread owns all state, and other
@@ -127,7 +132,10 @@ Each thread below is a plain `std::thread`, and each channel is a
   applies each event as a `(state, event) -> (state, effects)` transition.
   Effects are action requests and orders to start or stop a worker.
 - **Lifecycle.** Reports `GameStarted` and `GameExited` from the process and
-  window events source. While no configured game runs, nothing polls.
+  window events source. It matches a new window's process to a game by the
+  executable name in a process snapshot (`CreateToolhelp32Snapshot`), which
+  does not open the process, so it is safe for every anti-cheat class. While
+  no configured game runs, nothing polls.
   Detection and autostart belong to
   [#13](https://github.com/TheLunchTrae/appy-tappy/issues/13).
 - **Source workers.** One per attached game. Each runs the bindings the
@@ -160,7 +168,10 @@ Some Windows callbacks, such as the hook that reports window events, carry no
 pointer back to the code that registered them. The usual way out is a static
 or a thread-local, and the standards ban both. Instead, the callback posts a
 message to its own thread with `PostThreadMessageW`. That thread's message loop
-owns the `Sender` and forwards the event over the channel.
+owns the `Sender` and forwards the event over the channel. The window events
+hook runs on its own thread, separate from the tray's message thread. A modal
+loop, such as the one an open tray menu runs, drops thread messages, so a
+thread that receives them must never show UI.
 
 ## Sources, rules, and actions
 
@@ -200,6 +211,8 @@ changing.
 - **What is resolved at compile time.** Each signal resolves to the concrete
   binding for each known game version, and every rule and action is
   validated. The runtime only picks the binding for the version it detects.
+  It detects the version from the game's executable file on disk, such as its
+  file version, which is allowed for every anti-cheat class.
 - **Writing.** The setup app writes the compiled config to a uniquely named
   temporary file in `compiled\`, flushes it to disk with `sync_all`, and
   renames it over the old file. A rename within one folder replaces the file
@@ -208,6 +221,8 @@ changing.
   retries a failed rename a few times and then tells the user that it failed.
 - **Reading.** The runtime validates everything again before use, because the
   file is outside its control.
+- **Status file.** The runtime writes it the same way, temporary file then
+  rename, so the setup app never reads it half-written.
 - **Format.** The file carries a format version. A runtime that meets a version
   it does not know keeps its current config and records the problem in the
   status file, so the setup app can tell the user to update the runtime.
@@ -230,9 +245,10 @@ The design enforces the block in four places:
    validated type that sources and actions take. The validated type has
    private fields and no `Deserialize` or `Default`, so code that skips
    validation does not compile.
-4. Every path that opens a game's process, including the guided memory scan
-   ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and version
-   detection, needs a process-access permit. Only `config` issues one, and
+4. Every path that opens a game's process needs a process-access permit,
+   including the guided memory scan
+   ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any
+   version detection that reads the running process. Only `config` issues one, and
    only for a game of class `none`. The scan runs before any binding exists,
    so this point, not the first three, is what blocks it.
 
@@ -287,8 +303,9 @@ profile.
 The standards forbid `unsafe` code. Win32 and COM calls through the `windows`
 crate are `unsafe`, because Rust cannot check what Windows does with the
 pointers it receives. That covers reading another process's memory, Core
-Audio, window hooks, the tray icon, and directory watching. WinRT calls, such
-as media sessions and screen capture, are safe Rust methods.
+Audio, window hooks, the tray icon, directory watching, and the Direct3D
+interop that screen capture needs. WinRT calls, such as media sessions and the
+screen capture API itself, are safe Rust methods.
 
 The first change that adds an `unsafe` Windows call asks the owner to change
 the policy as
@@ -331,9 +348,10 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   The runtime's tray icon, message loop, and directory watching use it
   directly, with no extra crates.
 - **[`tauri`](https://v2.tauri.app/).** The setup app framework: a Rust
-  backend with a web frontend shown in WebView2. It brings
-  [`tokio`](https://tokio.rs/), the async runtime whose `oneshot` channel the
-  setup app's commands await.
+  backend with a web frontend shown in WebView2.
+- **[`tokio`](https://tokio.rs/).** The async runtime Tauri runs on. The setup
+  app lists it directly, with only its `sync` feature, for the `oneshot`
+  channel its commands await; Tauri does not re-export that channel.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
   many random inputs to check a property, such as "a compiled config reads back
   to the same value". The standards require it at trust boundaries such as file

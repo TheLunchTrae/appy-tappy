@@ -30,6 +30,6 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
 - **Source primitive.** One kind of state reader the runtime ships: memory
   pointer chain, screen region, log file, local API, or process and window
   events.
-- **Status file.** The file the runtime writes and the setup app reads: whether
-  the runtime is running, which games are attached, and the last problem.
+- **Status file.** The file the runtime writes and the setup app reads: which
+  games are attached and the last problem.
 - **Trigger.** The condition on signals or game events that makes a rule fire.
