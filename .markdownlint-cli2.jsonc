@@ -3,17 +3,11 @@
   "globs": ["**/*.md"],
   "gitignore": true,
   "ignores": [
-    ".next/**",
-    ".nuxt/**",
-    ".svelte-kit/**",
-    ".turbo/**",
     ".vite/**",
     "build/**",
     "coverage/**",
     "dist/**",
     "node_modules/**",
-    "out/**",
-    "sbom/**"
   ],
   "noBanner": true,
   // Exceptions belong in this reviewed file, as narrow overrides with a reason.

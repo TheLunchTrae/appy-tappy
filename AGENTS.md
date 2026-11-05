@@ -2,8 +2,8 @@
 
 AppyTappy is a Windows background app that runs automations when a game reaches
 a state, such as pausing music at 90% of a Geometry Dash level. Read
-`CONTEXT.md` first if it exists. Then read the docs in `docs/` that own the
-change before changing architecture or domain language.
+`CONTEXT.md` first if it exists. Then read the pages in `docs/` that own the
+change before changing architecture, domain language, or enforcement.
 
 ## Commands
 
@@ -37,7 +37,8 @@ Linux and is the required gate, and `windows` runs `rust:fmt:check`,
   windows_default_inline_shell_args = "sh -c -o errexit"
   ```
 
-- `rust:policy` and the mutation tasks need `setsid`, which Windows lacks, and
+- `rust:policy` and the mutation tasks need `setsid`, which Windows and macOS
+  lack, and
   the root package's policy tests compare POSIX paths, so `standards:check`
   and `rust:test` run on Linux: in CI or WSL. On Windows, run `rust:fmt`,
   `rust:lint`, `rust:doc`, and the `md:` tasks.
@@ -153,9 +154,9 @@ version-numbered names.
 ## Rust
 
 `Cargo.toml`, `clippy.toml`, and `deny.toml` own executable policy;
-`.config/mise/conf.d/20-rust.toml` owns commands. Read the
-[Rust profile README](https://github.com/KrishRVH/standards/blob/main/Rust/README.md)
-for setup, scanner limits, and mutation operation before changing enforcement.
+`.config/mise/conf.d/20-rust.toml` owns commands. Read
+[`docs/rust.md`](docs/rust.md) for setup, scanner limits, and mutation
+operation before changing enforcement.
 
 ### Work and verification
 
@@ -175,8 +176,8 @@ reasons.
 
 This application profile favors one owner for state, pure `(state, event)`
 transitions, and messages to the owner. Libraries, runtimes, and concurrency
-primitives need a deliberate profile adaptation; see the
-[profile boundary](https://github.com/KrishRVH/standards/blob/main/Rust/README.md#rust-standards).
+primitives need a deliberate profile adaptation; see
+[`docs/rust.md`](docs/rust.md#ownership-boundary).
 
 - Keep program-owned counters, IDs, and dispatch state on the root model.
   Mirror external state through construction and events.
@@ -283,8 +284,7 @@ Every workspace package, including the root package, declares
 `[lints] workspace = true`. Release profiles belong in the root manifest;
 keep overflow checks enabled. `tests/allow_policy.rs` checks first-party
 source inputs, and `rust:policy` checks configured policy probes. Read their
-[scope and limitations](https://github.com/KrishRVH/standards/blob/main/Rust/README.md)
-before adding macros, custom target paths, includes, or symlinks.
+[scope and limitations](docs/rust.md#source-policy-scan) before adding macros, custom target paths, includes, or symlinks.
 Checker-specific production behavior and synthesized suppression attributes
 are prohibited even when static analysis cannot detect them.
 
@@ -302,9 +302,12 @@ dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-The full gate requires executed mutation evidence. Read [mutation operation
-and stale-lock recovery](https://github.com/KrishRVH/standards/blob/main/Rust/README.md) before changing report paths, mutation
-selection, or transaction handling. Confirm no run is active before clearing
+The gate requires executed mutation evidence for changed code; a change that
+selects no mutants passes. Once `config` or `engine` holds product code,
+restore `rust:mutants`, the full sweep, as a dependency of
+`rust:standards:check`. Read
+[mutation operation](docs/rust.md#mutation-testing) before changing report
+paths, mutation selection, or transaction handling. Confirm no run is active before clearing
 a stale lock.
 
 ### Dependencies and review
@@ -351,7 +354,8 @@ humans merge.
 - Get an independent read-only agent review of the actual diff for
   non-trivial behavior and architecture changes. The author does not approve
   their own change. Verify material findings before acting on them.
-- Report the checked revision, behavior proved, commands run and their
+- Report to whoever asked for the change, not in the PR description: the
+  checked revision, behavior proved, commands run and their
   results, skipped checks and why, remaining findings, and tree growth the
   change does not explain. Write it so the human can judge the outcome without
   reconstructing the implementation.

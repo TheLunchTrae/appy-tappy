@@ -7,7 +7,9 @@ idiomatic_version_file_enable_tools = ["rust"]
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 "github:bnjbvr/cargo-machete" = "0.9.2"
 "github:nextest-rs/nextest" = { version = "0.9.149", version_prefix = "cargo-nextest-" }
-"github:sourcefrog/cargo-mutants" = "27.1.0"
+# cargo-mutants publishes no arm64 macOS binary, and the mutation lanes need
+# Linux anyway.
+"github:sourcefrog/cargo-mutants" = { version = "27.1.0", os = ["linux", "windows"] }
 
 [tasks."rust:lock"]
 description = "Refresh Cargo.lock after dependency changes without upgrading unrelated packages"

@@ -54,6 +54,8 @@ jobs:
       # environment or global config, so CI sets it here; AGENTS.md gives the
       # same setting for Windows workstations.
       MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
+      # Tasks would otherwise install every tool, not only install_args.
+      MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

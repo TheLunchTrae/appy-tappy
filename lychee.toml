@@ -3,15 +3,9 @@ include_verbatim = false
 no_progress = true
 
 exclude_path = [
-  "(^|/)\\.next/",
-  "(^|/)\\.nuxt/",
-  "(^|/)\\.svelte-kit/",
-  "(^|/)\\.turbo/",
   "(^|/)\\.vite/",
   "(^|/)build/",
   "(^|/)coverage/",
   "(^|/)dist/",
   "(^|/)node_modules/",
-  "(^|/)out/",
-  "(^|/)sbom/",
 ]
