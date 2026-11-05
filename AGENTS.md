@@ -26,7 +26,7 @@ and no task covers it.
 AppyTappy ships for Windows only. CI runs two jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check` on
 Linux and is the required gate, and `windows` runs `rust:fmt:check`,
-`rust:lint`, `rust:doc`, and `rust:test` on Windows.
+`rust:lint`, and `rust:doc` on Windows.
 
 - Inline mise tasks are POSIX `sh`. On a Windows workstation, run mise from
   Git Bash and set this in the global mise config
@@ -37,9 +37,10 @@ Linux and is the required gate, and `windows` runs `rust:fmt:check`,
   windows_default_inline_shell_args = "sh -c -o errexit"
   ```
 
-- `rust:policy` and the mutation tasks need `setsid`, which Windows lacks, so
-  `standards:check` runs on Linux: in CI or WSL. On Windows, run the Rust
-  `fmt`, `lint`, `doc`, and `test` tasks and the `md:` tasks.
+- `rust:policy` and the mutation tasks need `setsid`, which Windows lacks, and
+  the root package's policy tests compare POSIX paths, so `standards:check`
+  and `rust:test` run on Linux: in CI or WSL. On Windows, run `rust:fmt`,
+  `rust:lint`, `rust:doc`, and the `md:` tasks.
 - `mise lock` records every platform in `lockfile_platforms`; commit
   `.config/mise/mise.lock` after a tool change.
 
