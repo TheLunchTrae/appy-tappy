@@ -195,9 +195,9 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
     /// earlier rule's release undoes it.
     ///
     /// A media action on an app picks its sessions here: pause pauses every
-    /// playing session of the app, play starts the first session unless one
-    /// is already playing, and a skip goes to the first playing session, or
-    /// else the first session. A volume action on an app sets every audio
+    /// playing session of the app, or holds them all when none plays; play
+    /// starts the first session unless one is already playing; and a skip
+    /// goes to the first playing session, or else the first session. A volume action on an app sets every audio
     /// session of its executable.
     ///
     /// # Errors
@@ -322,11 +322,16 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
             (MediaCommand::Pause | MediaCommand::Play, Some(_)) => {
                 sessions.retain(|session| session.playing);
             },
+            // Nothing plays, so a pause changes nothing, but it holds every
+            // session so that another rule's release cannot resume one.
+            (MediaCommand::Pause, None) => {},
             (MediaCommand::Next | MediaCommand::Previous, Some(first)) => {
                 sessions.drain(..first);
                 sessions.truncate(1);
             },
-            (_, None) => sessions.truncate(1),
+            (MediaCommand::Play | MediaCommand::Next | MediaCommand::Previous, None) => {
+                sessions.truncate(1);
+            },
         }
         if sessions.is_empty() {
             return Err(ActionError::NoMediaSession);
@@ -750,6 +755,27 @@ mod tests {
             .perform('a', &media(chrome(), MediaCommand::Play), Restore::Never)
             .expect("played");
         assert_eq!(actions.controls().log, ["Play 2"]);
+    }
+
+    #[test]
+    fn a_pause_that_changes_nothing_still_holds_every_session_of_the_app() {
+        let mut actions = Actions::new(Fake {
+            sessions: vec![session(1, "Chrome", false), session(2, "Chrome", true)],
+            ..Fake::default()
+        });
+        let pause = media(MediaTarget::App(app("Chrome")), MediaCommand::Pause);
+        actions
+            .perform('a', &pause, Restore::OnRelease)
+            .expect("paused");
+        actions
+            .perform('b', &pause, Restore::OnRelease)
+            .expect("already paused");
+        actions.release('a').expect("released");
+        assert!(!actions.controls().playing(2));
+        actions.release('b').expect("released");
+        assert!(actions.controls().playing(2));
+        assert!(!actions.controls().playing(1));
+        assert_eq!(actions.controls().log, ["Pause 2", "Play 2"]);
     }
 
     #[test]

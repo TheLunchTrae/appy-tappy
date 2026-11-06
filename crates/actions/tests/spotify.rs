@@ -16,7 +16,7 @@ use std::io;
 use std::thread;
 use std::time::Duration;
 
-use appytappy_actions::win::WindowsControls;
+use appytappy_actions::win::{MediaKey, WindowsControls};
 use appytappy_actions::{Actions, Controls};
 use appytappy_config::action::{
     Action, AppName, InvalidAppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
@@ -46,6 +46,17 @@ fn playing(controls: &mut WindowsControls) -> io::Result<Option<bool>> {
     Ok((!sessions.is_empty()).then(|| sessions.contains(&true)))
 }
 
+/// Spotify's media sessions.
+fn keys(controls: &mut WindowsControls) -> io::Result<Vec<MediaKey>> {
+    let spotify = spotify().map_err(io::Error::other)?;
+    Ok(controls
+        .media_sessions()?
+        .into_iter()
+        .filter(|session| spotify.matches(&session.app))
+        .map(|session| session.key)
+        .collect())
+}
+
 /// The levels of Spotify's audio sessions, sorted.
 fn levels(controls: &mut WindowsControls) -> io::Result<Vec<f32>> {
     let spotify = spotify().map_err(io::Error::other)?;
@@ -68,17 +79,34 @@ fn pauses_and_resumes_spotify() {
         Some(true),
         "start a song in Spotify first"
     );
+    // Overlapping rules rely on Windows handing out the same session object
+    // each time, which keeps their restores in order.
+    let first = keys(actions.controls()).expect("readable");
+    let second = keys(actions.controls()).expect("readable");
+    assert_eq!(first, second, "a session keeps its identity");
+
     let pause = Action::Media {
         target: MediaTarget::App(spotify().expect("valid")),
         command: MediaCommand::Pause,
     };
-    let paused = actions.perform(0_u8, &pause, Restore::OnRelease);
+    let paused = actions.perform(1_u8, &pause, Restore::OnRelease);
+    let held = actions.perform(2_u8, &pause, Restore::OnRelease);
     thread::sleep(SETTLE);
     let while_paused = playing(actions.controls());
-    actions.release(0).expect("Spotify resumes");
+    let first_release = actions.release(1);
+    thread::sleep(SETTLE);
+    let while_held = playing(actions.controls());
+    actions.release(2).expect("Spotify resumes");
     thread::sleep(SETTLE);
     paused.expect("Spotify pauses");
+    held.expect("the second pause holds Spotify");
+    first_release.expect("the first release");
     assert_eq!(while_paused.expect("readable"), Some(false));
+    assert_eq!(
+        while_held.expect("readable"),
+        Some(false),
+        "the second rule keeps Spotify paused"
+    );
     assert_eq!(playing(actions.controls()).expect("readable"), Some(true));
 }
 

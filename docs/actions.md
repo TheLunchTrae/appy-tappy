@@ -24,7 +24,8 @@ so no action opens a game's process.
 
 An app can have several sessions at once, such as one per browser tab:
 
-- **Pause** pauses every playing session of the app.
+- **Pause** pauses every playing session of the app. When none plays, it
+  changes nothing but still holds them all for restoring (see below).
 - **Play** does nothing while one of its sessions plays, and otherwise starts
   the first.
 - **Next** and **previous** go to the first playing session, or else the
@@ -35,7 +36,8 @@ Volume actions use the default playback device. Choosing another device can
 come later.
 
 A media request that gets no answer within two seconds fails, so an app
-that hangs cannot hold up the actions behind it.
+that hangs cannot hold up the actions behind it. The app may still act on
+a request after it times out; such a late change is not restored.
 
 ## Restoring
 
@@ -85,6 +87,8 @@ play a song, and run:
 cargo test -p appytappy-actions --test spotify -- --ignored --test-threads=1
 ```
 
-One test pauses Spotify and resumes it; the other lowers Spotify's volume and
-puts it back. Each puts Spotify back before checking anything, so a failed
+One test pauses Spotify with two overlapping rules and checks that it resumes
+only after both are released, which also checks that Windows keeps
+identifying Spotify's session the same way. The other lowers Spotify's volume
+and puts it back. Each puts Spotify back before checking anything, so a failed
 check leaves it as it was.
