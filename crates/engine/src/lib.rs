@@ -215,10 +215,18 @@ fn guard_holds(guard: Option<&Condition>, values: &BTreeMap<SignalName, Value>) 
 mod tests {
     use std::time::Duration;
 
+    use appytappy_config::action::{Action, MediaCommand, MediaTarget};
     use appytappy_config::rule::Comparison;
     use appytappy_config::signal::Number;
 
     use super::*;
+
+    fn pause() -> Box<[Action]> {
+        Box::new([Action::Media {
+            target: MediaTarget::Current,
+            command: MediaCommand::Pause,
+        }])
+    }
 
     fn name(raw: &str) -> SignalName {
         SignalName::new(raw).expect("valid name")
@@ -234,11 +242,23 @@ mod tests {
 
     fn becomes(rearm: Rearm, cooldown: Duration, restore: Restore) -> Rule {
         let condition = percent(Comparison::AtLeast, 90.0);
-        Rule::new(Trigger::Becomes { condition, rearm }, cooldown, restore).expect("valid")
+        Rule::new(
+            Trigger::Becomes { condition, rearm },
+            pause(),
+            cooldown,
+            restore,
+        )
+        .expect("valid")
     }
 
     fn on(event: GameEvent, guard: Option<Condition>, restore: Restore) -> Rule {
-        Rule::new(Trigger::On { event, guard }, Duration::ZERO, restore).expect("valid")
+        Rule::new(
+            Trigger::On { event, guard },
+            pause(),
+            Duration::ZERO,
+            restore,
+        )
+        .expect("valid")
     }
 
     /// A clock for one test: `clock.at(ms)` is `ms` milliseconds after start.
@@ -386,7 +406,7 @@ mod tests {
                 condition,
                 rearm: Rearm::WhenFalse,
             };
-            Rule::new(trigger, Duration::ZERO, Restore::OnRelease).expect("valid")
+            Rule::new(trigger, pause(), Duration::ZERO, Restore::OnRelease).expect("valid")
         };
         let mut session = start(
             vec![rule(Comparison::AtLeast), rule(Comparison::Below)],
@@ -445,6 +465,7 @@ mod tests {
                     signal: name(signal),
                     guard,
                 },
+                pause(),
                 Duration::ZERO,
                 Restore::Never,
             )
@@ -499,6 +520,7 @@ mod tests {
                 event: GameEvent::Focused,
                 guard: None,
             },
+            pause(),
             Duration::from_millis(10),
             Restore::Never,
         )

@@ -8,6 +8,7 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
+use crate::action::Action;
 use crate::signal::{SignalName, Value};
 
 /// How deep conditions may nest; a single comparison has depth 1.
@@ -229,20 +230,26 @@ pub enum Restore {
     OnRelease,
 }
 
-/// When to act: a trigger, a cooldown, and whether to restore.
+/// When to act and what to do: a trigger, the actions to run in order, a
+/// cooldown, and whether to restore.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rule {
     trigger: Trigger,
+    actions: Box<[Action]>,
     cooldown: Duration,
     restore: Restore,
 }
 
 impl Rule {
-    /// Builds a rule. After it fires, it cannot fire again until `cooldown`
-    /// has passed.
+    /// Builds a rule that runs `actions` in order when it fires. After it
+    /// fires, it cannot fire again until `cooldown` has passed.
     ///
     /// # Errors
     ///
+    /// - [`RuleError::NoActions`] when `actions` is empty.
+    /// - [`RuleError::NothingToRestore`] when `restore` is
+    ///   [`Restore::OnRelease`] and no action changes anything that can be put
+    ///   back, such as a rule that only skips tracks.
     /// - [`RuleError::NothingToRelease`] when `restore` is
     ///   [`Restore::OnRelease`] for a trigger that is never released: a
     ///   [`Trigger::Changes`] trigger or a [`GameEvent::Exited`] trigger.
@@ -251,8 +258,19 @@ impl Rule {
     /// - [`RuleError::CooldownDropsFocus`] for a focus trigger that restores
     ///   and has a cooldown: a focus event during the cooldown is lost, so the
     ///   rule would stay released while the focus says it should be active.
-    pub fn new(trigger: Trigger, cooldown: Duration, restore: Restore) -> Result<Self, RuleError> {
+    pub fn new(
+        trigger: Trigger,
+        actions: Box<[Action]>,
+        cooldown: Duration,
+        restore: Restore,
+    ) -> Result<Self, RuleError> {
+        if actions.is_empty() {
+            return Err(RuleError::NoActions);
+        }
         let restores = restore == Restore::OnRelease;
+        if restores && !actions.iter().any(Action::restorable) {
+            return Err(RuleError::NothingToRestore);
+        }
         match &trigger {
             Trigger::Changes { .. }
             | Trigger::On {
@@ -271,6 +289,7 @@ impl Rule {
         }
         Ok(Self {
             trigger,
+            actions,
             cooldown,
             restore,
         })
@@ -280,6 +299,12 @@ impl Rule {
     #[must_use]
     pub const fn trigger(&self) -> &Trigger {
         &self.trigger
+    }
+
+    /// The actions to run, in order, when the rule fires.
+    #[must_use]
+    pub const fn actions(&self) -> &[Action] {
+        &self.actions
     }
 
     /// How long after firing the rule cannot fire again.
@@ -305,6 +330,10 @@ pub enum RuleError {
     EmptyGroup,
     /// Conditions nested more deeply than the limit.
     TooDeep,
+    /// The rule had no actions.
+    NoActions,
+    /// The rule restores on release, but none of its actions can be undone.
+    NothingToRestore,
     /// The rule restores on release, but its trigger is never released.
     NothingToRelease,
     /// A start trigger had a guard, which can never hold.
@@ -326,6 +355,10 @@ impl fmt::Display for RuleError {
                 formatter,
                 "conditions nest more than {MAX_CONDITION_DEPTH} levels deep"
             ),
+            Self::NoActions => formatter.write_str("a rule needs an action"),
+            Self::NothingToRestore => formatter.write_str(
+                "none of this rule's actions can be undone, so it cannot restore what it changed",
+            ),
             Self::NothingToRelease => formatter.write_str(
                 "this trigger is never released, so its rule cannot restore what it changed",
             ),
@@ -345,6 +378,18 @@ mod tests {
     use crate::signal::Number;
 
     use super::*;
+    use crate::action::{MediaCommand, MediaTarget};
+
+    fn pause() -> Box<[Action]> {
+        media(MediaCommand::Pause)
+    }
+
+    fn media(command: MediaCommand) -> Box<[Action]> {
+        Box::new([Action::Media {
+            target: MediaTarget::Current,
+            command,
+        }])
+    }
 
     fn name(raw: &str) -> SignalName {
         SignalName::new(raw).expect("valid name")
@@ -471,7 +516,7 @@ mod tests {
             on(GameEvent::Focused),
             on(GameEvent::Unfocused),
         ] {
-            assert!(Rule::new(trigger, Duration::ZERO, Restore::OnRelease).is_ok());
+            assert!(Rule::new(trigger, pause(), Duration::ZERO, Restore::OnRelease).is_ok());
         }
         let guard = Some(percent(Comparison::AtLeast, 0.0));
         assert_eq!(
@@ -480,6 +525,7 @@ mod tests {
                     event: GameEvent::Started,
                     guard: guard.clone()
                 },
+                pause(),
                 Duration::ZERO,
                 Restore::Never
             ),
@@ -491,6 +537,7 @@ mod tests {
                     event: GameEvent::Exited,
                     guard
                 },
+                pause(),
                 Duration::ZERO,
                 Restore::Never
             )
@@ -499,18 +546,54 @@ mod tests {
         let second = Duration::from_secs(1);
         for event in [GameEvent::Focused, GameEvent::Unfocused] {
             assert_eq!(
-                Rule::new(on(event), second, Restore::OnRelease),
+                Rule::new(on(event), pause(), second, Restore::OnRelease),
                 Err(RuleError::CooldownDropsFocus)
             );
-            assert!(Rule::new(on(event), second, Restore::Never).is_ok());
+            assert!(Rule::new(on(event), pause(), second, Restore::Never).is_ok());
         }
-        assert!(Rule::new(on(GameEvent::Started), second, Restore::OnRelease).is_ok());
+        assert!(Rule::new(on(GameEvent::Started), pause(), second, Restore::OnRelease).is_ok());
         for trigger in [changes, on(GameEvent::Exited)] {
             assert_eq!(
-                Rule::new(trigger.clone(), Duration::ZERO, Restore::OnRelease),
+                Rule::new(trigger.clone(), pause(), Duration::ZERO, Restore::OnRelease),
                 Err(RuleError::NothingToRelease)
             );
-            assert!(Rule::new(trigger, Duration::ZERO, Restore::Never).is_ok());
+            assert!(Rule::new(trigger, pause(), Duration::ZERO, Restore::Never).is_ok());
         }
+    }
+
+    #[test]
+    fn a_rule_needs_actions_and_something_to_restore() {
+        let trigger = || Trigger::On {
+            event: GameEvent::Focused,
+            guard: None,
+        };
+        assert_eq!(
+            Rule::new(trigger(), Box::new([]), Duration::ZERO, Restore::Never),
+            Err(RuleError::NoActions)
+        );
+        for command in [MediaCommand::Next, MediaCommand::Previous] {
+            assert_eq!(
+                Rule::new(
+                    trigger(),
+                    media(command),
+                    Duration::ZERO,
+                    Restore::OnRelease
+                ),
+                Err(RuleError::NothingToRestore)
+            );
+            assert!(Rule::new(trigger(), media(command), Duration::ZERO, Restore::Never).is_ok());
+        }
+        let mut actions = media(MediaCommand::Next).into_vec();
+        actions.extend(pause());
+        let rule = Rule::new(
+            trigger(),
+            actions.clone().into(),
+            Duration::ZERO,
+            Restore::OnRelease,
+        )
+        .expect("valid");
+        assert_eq!(rule.actions(), actions.as_slice());
+        assert!(RuleError::NoActions.to_string().contains("needs an action"));
+        assert!(RuleError::NothingToRestore.to_string().contains("undone"));
     }
 }
