@@ -11,7 +11,7 @@ const MAX_NAME_LEN: usize = 64;
 ///
 /// A name starts with a lowercase ASCII letter, continues with lowercase ASCII
 /// letters, digits, and underscores, and is at most 64 bytes long.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SignalName(Box<str>);
 
 impl SignalName {
@@ -33,12 +33,6 @@ impl SignalName {
         } else {
             Err(InvalidSignalName(name.into()))
         }
-    }
-
-    /// The name as text.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
     }
 }
 
@@ -75,12 +69,6 @@ impl Number {
     pub fn new(raw: f64) -> Option<Self> {
         raw.is_finite().then_some(Self(raw))
     }
-
-    /// The number as an `f64`.
-    #[must_use]
-    pub const fn raw(self) -> f64 {
-        self.0
-    }
 }
 
 /// A value of a signal, as a source read it or a rule names it.
@@ -102,7 +90,7 @@ mod tests {
         let too_long = "a".repeat(MAX_NAME_LEN.checked_add(1).expect("small"));
         for valid in ["level_percent", "a", "lap2", "x_", longest.as_str()] {
             assert_eq!(
-                SignalName::new(valid).map(|name| name.as_str().to_owned()),
+                SignalName::new(valid).map(|name| name.to_string()),
                 Ok(valid.to_owned())
             );
         }
@@ -128,7 +116,7 @@ mod tests {
 
     #[test]
     fn numbers_are_finite() {
-        assert_eq!(Number::new(90.5).map(Number::raw), Some(90.5));
+        assert_eq!(Number::new(90.5), Some(Number(90.5)));
         for raw in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert_eq!(Number::new(raw), None);
         }

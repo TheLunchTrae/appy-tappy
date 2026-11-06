@@ -15,20 +15,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use appytappy_config::rule::{GameEvent, Rearm, Restore, Rule, Trigger};
+use appytappy_config::rule::{Condition, GameEvent, Rearm, Restore, Rule, Trigger};
 use appytappy_config::signal::{SignalName, Value};
 
 /// The position of a rule in the list a [`Session`] started with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RuleIndex(usize);
-
-impl RuleIndex {
-    /// The position as a number.
-    #[must_use]
-    pub const fn raw(self) -> usize {
-        self.0
-    }
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuleIndex(pub usize);
 
 /// What the runtime must do after an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,41 +102,39 @@ impl Session {
     }
 
     /// Records a new `value` of `signal`, read at `at`.
+    ///
+    /// Releases come before fires, so a restore never undoes a change that
+    /// another rule makes on the same value.
     pub fn sample(&mut self, signal: SignalName, value: Value, at: Instant) -> Vec<Effect> {
         let previous = self.values.insert(signal.clone(), value);
         let changed = previous.is_some_and(|previous| previous != value);
         let mut effects = Vec::new();
         for (index, (rule, state)) in self.rules.iter().zip(&mut self.states).enumerate() {
-            match rule.trigger() {
-                Trigger::Becomes { condition, rearm } => {
-                    let holds = condition.holds(&self.values);
-                    if !holds {
-                        state.release(index, &mut effects);
-                    }
-                    if !state.armed {
-                        state.armed = match rearm {
-                            Rearm::WhenFalse => !holds,
-                            Rearm::When(rearm) => rearm.holds(&self.values),
-                            Rearm::Never => false,
-                        };
-                    }
-                    if holds && state.armed && state.cooled(rule, at) {
-                        effects.push(state.fire(rule, index, at));
-                    }
-                },
+            if let Trigger::Becomes { condition, rearm } = rule.trigger()
+                && !state.armed
+                && !condition.holds(&self.values)
+            {
+                state.armed = match rearm {
+                    Rearm::WhenFalse => true,
+                    Rearm::When(rearm) => rearm.holds(&self.values),
+                    Rearm::Never => false,
+                };
+                if state.armed || matches!(rearm, Rearm::Never) {
+                    state.release(index, &mut effects);
+                }
+            }
+        }
+        for (index, (rule, state)) in self.rules.iter().zip(&mut self.states).enumerate() {
+            let fires = match rule.trigger() {
+                Trigger::Becomes { condition, .. } => state.armed && condition.holds(&self.values),
                 Trigger::Changes {
                     signal: watched,
                     guard,
-                } => {
-                    if changed
-                        && *watched == signal
-                        && guard_holds(guard.as_ref(), &self.values)
-                        && state.cooled(rule, at)
-                    {
-                        effects.push(state.fire(rule, index, at));
-                    }
-                },
-                Trigger::On { .. } => {},
+                } => changed && *watched == signal && guard_holds(guard.as_ref(), &self.values),
+                Trigger::On { .. } => false,
+            };
+            if fires && state.cooled(rule, at) {
+                effects.push(state.fire(rule, index, at));
             }
         }
         effects
@@ -176,11 +166,23 @@ impl Session {
     /// then fires the [`GameEvent::Exited`] rules.
     #[must_use]
     pub fn end(mut self, at: Instant) -> Vec<Effect> {
+        let mut effects = self.release_all();
+        self.fire_event_rules(GameEvent::Exited, at, &mut effects);
+        effects
+    }
+
+    /// Ends the session while the game keeps running, as a pause or a config
+    /// change does: releases every active rule and fires nothing.
+    #[must_use]
+    pub fn stop(mut self) -> Vec<Effect> {
+        self.release_all()
+    }
+
+    fn release_all(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
         for (index, state) in self.states.iter_mut().enumerate() {
             state.release(index, &mut effects);
         }
-        self.fire_event_rules(GameEvent::Exited, at, &mut effects);
         effects
     }
 
@@ -197,10 +199,7 @@ impl Session {
     }
 }
 
-fn guard_holds(
-    guard: Option<&appytappy_config::rule::Condition>,
-    values: &BTreeMap<SignalName, Value>,
-) -> bool {
+fn guard_holds(guard: Option<&Condition>, values: &BTreeMap<SignalName, Value>) -> bool {
     guard.is_none_or(|guard| guard.holds(values))
 }
 
@@ -208,7 +207,7 @@ fn guard_holds(
 mod tests {
     use std::time::Duration;
 
-    use appytappy_config::rule::{Comparison, Condition};
+    use appytappy_config::rule::Comparison;
     use appytappy_config::signal::Number;
 
     use super::*;
@@ -341,13 +340,58 @@ mod tests {
             vec![becomes(rearm, Duration::ZERO, Restore::OnRelease)],
             &clock,
         );
+        // Dips above the re-arm threshold neither fire the rule again nor release it.
         assert_eq!(
             feed(&mut session, &clock, 1, &[90.0, 89.0, 90.0, 50.0, 95.0]),
-            [Effect::Fire(FIRST), Effect::Release(FIRST)]
+            [Effect::Fire(FIRST)]
         );
         assert_eq!(
             feed(&mut session, &clock, 6, &[4.0, 92.0]),
+            [Effect::Release(FIRST), Effect::Fire(FIRST)]
+        );
+    }
+
+    #[test]
+    fn a_rearm_condition_that_overlaps_the_trigger_waits_for_it_to_stop_holding() {
+        let clock = Clock::new();
+        let rearm = Rearm::When(percent(Comparison::Below, 95.0));
+        let mut session = start(
+            vec![becomes(rearm, Duration::ZERO, Restore::OnRelease)],
+            &clock,
+        );
+        assert_eq!(
+            feed(&mut session, &clock, 1, &[90.0, 92.0, 93.0]),
             [Effect::Fire(FIRST)]
+        );
+        assert_eq!(
+            feed(&mut session, &clock, 4, &[80.0, 91.0]),
+            [Effect::Release(FIRST), Effect::Fire(FIRST)]
+        );
+    }
+
+    #[test]
+    fn releases_come_before_fires_across_rules() {
+        let clock = Clock::new();
+        let rule = |comparison| {
+            let condition = percent(comparison, 1.0);
+            let trigger = Trigger::Becomes {
+                condition,
+                rearm: Rearm::WhenFalse,
+            };
+            Rule::new(trigger, Duration::ZERO, Restore::OnRelease).expect("valid")
+        };
+        let mut session = start(
+            vec![rule(Comparison::AtLeast), rule(Comparison::Below)],
+            &clock,
+        );
+        assert_eq!(
+            feed(&mut session, &clock, 1, &[0.0]),
+            [Effect::Fire(SECOND)]
+        );
+        // The second rule undoes its change before the first one makes its own.
+        assert_eq!(
+            feed(&mut session, &clock, 2, &[2.0]),
+            [Effect::Release(SECOND), Effect::Fire(FIRST)]
         );
     }
 
@@ -366,6 +410,19 @@ mod tests {
         assert_eq!(
             feed(&mut session, &clock, 6, &[95.0]),
             [Effect::Fire(FIRST)]
+        );
+    }
+
+    #[test]
+    fn a_rule_that_never_rearms_is_released_when_its_condition_stops_holding() {
+        let clock = Clock::new();
+        let mut session = start(
+            vec![becomes(Rearm::Never, Duration::ZERO, Restore::OnRelease)],
+            &clock,
+        );
+        assert_eq!(
+            feed(&mut session, &clock, 1, &[95.0, 0.0, 0.0, 95.0]),
+            [Effect::Fire(FIRST), Effect::Release(FIRST)]
         );
     }
 
@@ -449,30 +506,45 @@ mod tests {
     #[test]
     fn start_and_exit_fire_their_rules_and_exit_releases_first() {
         let clock = Clock::new();
-        let guarded = Some(percent(Comparison::AtLeast, 0.0));
         let rules = vec![
             on(GameEvent::Started, None, Restore::OnRelease),
-            on(GameEvent::Started, guarded.clone(), Restore::Never),
             becomes(Rearm::WhenFalse, Duration::ZERO, Restore::OnRelease),
-            on(GameEvent::Exited, guarded, Restore::Never),
+            on(
+                GameEvent::Exited,
+                Some(percent(Comparison::AtLeast, 99.0)),
+                Restore::Never,
+            ),
             on(GameEvent::Exited, None, Restore::Never),
         ];
-        // No signal has a value at the start, so the guarded start rule does not fire.
         let (mut session, effects) = Session::start(rules.into(), clock.at(0));
         assert_eq!(effects, [Effect::Fire(FIRST)]);
-        let effects = feed(&mut session, &clock, 1, &[95.0]);
-        assert_eq!(effects, [Effect::Fire(RuleIndex(2))]);
-        assert!(matches!(effects.first(), Some(Effect::Fire(index)) if index.raw() == 2));
-        // The game exits mid-rule: both active rules are released before the exit rules run.
+        assert_eq!(
+            feed(&mut session, &clock, 1, &[95.0]),
+            [Effect::Fire(SECOND)]
+        );
+        // The game exits mid-rule: both active rules are released before the exit rules run,
+        // and the guarded exit rule sees the last value.
         assert_eq!(
             session.end(clock.at(2)),
             [
                 Effect::Release(FIRST),
-                Effect::Release(RuleIndex(2)),
+                Effect::Release(SECOND),
                 Effect::Fire(RuleIndex(3)),
-                Effect::Fire(RuleIndex(4)),
             ]
         );
+    }
+
+    #[test]
+    fn stopping_releases_active_rules_without_firing_exit_rules() {
+        let clock = Clock::new();
+        let rules = vec![
+            on(GameEvent::Started, None, Restore::OnRelease),
+            on(GameEvent::Started, None, Restore::Never),
+            on(GameEvent::Exited, None, Restore::Never),
+        ];
+        let (session, effects) = Session::start(rules.into(), clock.at(0));
+        assert_eq!(effects, [Effect::Fire(FIRST), Effect::Fire(SECOND)]);
+        assert_eq!(session.stop(), [Effect::Release(FIRST)]);
     }
 
     #[test]

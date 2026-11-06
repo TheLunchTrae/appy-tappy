@@ -171,15 +171,20 @@ pub enum GameEvent {
 }
 
 /// When a [`Trigger::Becomes`] rule may fire again after it fired.
+///
+/// A rule re-arms only while its own condition does not hold, so it never
+/// fires twice for one stretch of holding. Re-arming also releases it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Rearm {
     /// Once its condition stops holding.
     WhenFalse,
-    /// Once this other condition holds, such as a level percentage falling
-    /// back near zero. It keeps a value that wavers around the trigger's
-    /// threshold from firing the rule again.
+    /// Once its condition stops holding and this other condition holds, such
+    /// as a level percentage falling back near zero. A value that wavers
+    /// around the trigger's threshold then neither fires the rule again nor
+    /// releases it.
     When(Condition),
-    /// Not until the game starts again: once per game session.
+    /// Not until the game starts again: once per game session. The rule is
+    /// released when its condition stops holding.
     Never,
 }
 
@@ -206,9 +211,9 @@ pub enum Trigger {
     On {
         /// The event to watch.
         event: GameEvent,
-        /// A condition that must also hold, if any. At
-        /// [`GameEvent::Started`] no signal has a value yet, so a guard
-        /// there never holds.
+        /// A condition that must also hold, if any. A
+        /// [`GameEvent::Started`] trigger takes none, because no signal has
+        /// a value yet.
         guard: Option<Condition>,
     },
 }
@@ -219,8 +224,8 @@ pub enum Restore {
     /// The changes stay.
     Never,
     /// The changes are undone when the rule is released: when a
-    /// [`Trigger::Becomes`] condition stops holding, when the opposite focus
-    /// event of a focus trigger happens, or when the game exits.
+    /// [`Trigger::Becomes`] rule re-arms (see [`Rearm`]), when the opposite
+    /// focus event of a focus trigger happens, or when the session ends.
     OnRelease,
 }
 
@@ -238,17 +243,31 @@ impl Rule {
     ///
     /// # Errors
     ///
-    /// Returns [`RuleError::NothingToRelease`] when `restore` is
-    /// [`Restore::OnRelease`] for a trigger that is never released: a
-    /// [`Trigger::Changes`] trigger or a [`GameEvent::Exited`] trigger.
+    /// - [`RuleError::NothingToRelease`] when `restore` is
+    ///   [`Restore::OnRelease`] for a trigger that is never released: a
+    ///   [`Trigger::Changes`] trigger or a [`GameEvent::Exited`] trigger.
+    /// - [`RuleError::GuardNeverHolds`] for a guard on a
+    ///   [`GameEvent::Started`] trigger, because no signal has a value then.
+    /// - [`RuleError::CooldownDropsFocus`] for a focus trigger that restores
+    ///   and has a cooldown: a focus event during the cooldown is lost, so the
+    ///   rule would stay released while the focus says it should be active.
     pub fn new(trigger: Trigger, cooldown: Duration, restore: Restore) -> Result<Self, RuleError> {
-        let released = match &trigger {
-            Trigger::Becomes { .. } => true,
-            Trigger::Changes { .. } => false,
-            Trigger::On { event, .. } => *event != GameEvent::Exited,
-        };
-        if restore == Restore::OnRelease && !released {
-            return Err(RuleError::NothingToRelease);
+        let restores = restore == Restore::OnRelease;
+        match &trigger {
+            Trigger::Changes { .. }
+            | Trigger::On {
+                event: GameEvent::Exited,
+                ..
+            } if restores => return Err(RuleError::NothingToRelease),
+            Trigger::On {
+                event: GameEvent::Started,
+                guard: Some(_),
+            } => return Err(RuleError::GuardNeverHolds),
+            Trigger::On {
+                event: GameEvent::Focused | GameEvent::Unfocused,
+                ..
+            } if restores && !cooldown.is_zero() => return Err(RuleError::CooldownDropsFocus),
+            Trigger::Becomes { .. } | Trigger::Changes { .. } | Trigger::On { .. } => {},
         }
         Ok(Self {
             trigger,
@@ -288,6 +307,11 @@ pub enum RuleError {
     TooDeep,
     /// The rule restores on release, but its trigger is never released.
     NothingToRelease,
+    /// A start trigger had a guard, which can never hold.
+    GuardNeverHolds,
+    /// A focus trigger that restores had a cooldown, which would lose focus
+    /// events.
+    CooldownDropsFocus,
 }
 
 impl fmt::Display for RuleError {
@@ -304,6 +328,11 @@ impl fmt::Display for RuleError {
             ),
             Self::NothingToRelease => formatter.write_str(
                 "this trigger is never released, so its rule cannot restore what it changed",
+            ),
+            Self::GuardNeverHolds => formatter
+                .write_str("a start trigger cannot have a guard, because no signal has a value yet"),
+            Self::CooldownDropsFocus => formatter.write_str(
+                "a focus rule that restores cannot have a cooldown, because it would lose focus events",
             ),
         }
     }
@@ -444,6 +473,38 @@ mod tests {
         ] {
             assert!(Rule::new(trigger, Duration::ZERO, Restore::OnRelease).is_ok());
         }
+        let guard = Some(percent(Comparison::AtLeast, 0.0));
+        assert_eq!(
+            Rule::new(
+                Trigger::On {
+                    event: GameEvent::Started,
+                    guard: guard.clone()
+                },
+                Duration::ZERO,
+                Restore::Never
+            ),
+            Err(RuleError::GuardNeverHolds)
+        );
+        assert!(
+            Rule::new(
+                Trigger::On {
+                    event: GameEvent::Exited,
+                    guard
+                },
+                Duration::ZERO,
+                Restore::Never
+            )
+            .is_ok()
+        );
+        let second = Duration::from_secs(1);
+        for event in [GameEvent::Focused, GameEvent::Unfocused] {
+            assert_eq!(
+                Rule::new(on(event), second, Restore::OnRelease),
+                Err(RuleError::CooldownDropsFocus)
+            );
+            assert!(Rule::new(on(event), second, Restore::Never).is_ok());
+        }
+        assert!(Rule::new(on(GameEvent::Started), second, Restore::OnRelease).is_ok());
         for trigger in [changes, on(GameEvent::Exited)] {
             assert_eq!(
                 Rule::new(trigger.clone(), Duration::ZERO, Restore::OnRelease),

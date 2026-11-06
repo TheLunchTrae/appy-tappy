@@ -85,7 +85,9 @@ crates/
 
 Each crate's owning issue adds its code and its dependencies. Where issues #6, #8,
 and #11 say "the core crate", they mean `appytappy-config` for formats, validation,
-and policy, and `appytappy-engine` for rule evaluation. `apps/setup/src-tauri`
+and policy, and `appytappy-engine` for rule evaluation. `config` owns what a
+condition means, so the setup app and the runtime agree on it; `engine` owns
+the state of each game session. `apps/setup/src-tauri`
 joins the workspace `members` list with
 [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16).
 
@@ -194,7 +196,7 @@ changing.
   [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6), and version
   changes to [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7).
 - A **rule** says when to act: a trigger on signals or game events, with
-  conditions, debounce, and re-arming. The engine evaluates rules as a pure
+  conditions, a cooldown, and re-arming. The engine evaluates rules as a pure
   function with no I/O, so its tests need no game and no Windows.
   [Rules](rules.md) describes the model.
 - An **action** is a side effect from a fixed set, such as pausing media or
