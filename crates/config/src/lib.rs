@@ -5,3 +5,5 @@
 #![forbid(unsafe_code)]
 
 pub mod anti_cheat;
+pub mod rule;
+pub mod signal;

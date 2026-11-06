@@ -8,5 +8,8 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+appytappy-config = { version = "=0.1.0", path = "../config" }
+
 [lints]
 workspace = true
