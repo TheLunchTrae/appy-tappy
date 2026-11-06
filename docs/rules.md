@@ -98,7 +98,9 @@ nothing.
 At exit, the session releases every active rule first and then fires the
 exit rules, so restores run before anything the exit rules do. The runtime
 can also stop a session while the game keeps running, for a pause or a config
-change: that releases every active rule and fires nothing.
+change: that releases every active rule and fires nothing. The session that
+replaces it resumes without firing the start rules again; like any new
+session, it starts with every rule armed and no signal values.
 
 ## Examples
 

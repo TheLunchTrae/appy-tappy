@@ -90,15 +90,23 @@ impl Session {
     /// [`GameEvent::Started`] rules.
     #[must_use]
     pub fn start(rules: Arc<[Rule]>, at: Instant) -> (Self, Vec<Effect>) {
-        let mut session = Self {
+        let mut session = Self::resume(rules);
+        let mut effects = Vec::new();
+        session.fire_event_rules(GameEvent::Started, at, &mut effects);
+        (session, effects)
+    }
+
+    /// Starts a session for a game that is already running, such as after a
+    /// [`Session::stop`] for a config change. It fires nothing: the
+    /// [`GameEvent::Started`] rules already ran when the game started.
+    #[must_use]
+    pub fn resume(rules: Arc<[Rule]>) -> Self {
+        Self {
             states: vec![RuleState::new(); rules.len()],
             rules,
             values: BTreeMap::new(),
             focused: None,
-        };
-        let mut effects = Vec::new();
-        session.fire_event_rules(GameEvent::Started, at, &mut effects);
-        (session, effects)
+        }
     }
 
     /// Records a new `value` of `signal`, read at `at`.
@@ -542,9 +550,13 @@ mod tests {
             on(GameEvent::Started, None, Restore::Never),
             on(GameEvent::Exited, None, Restore::Never),
         ];
-        let (session, effects) = Session::start(rules.into(), clock.at(0));
+        let rules: Arc<[Rule]> = rules.into();
+        let (session, effects) = Session::start(Arc::clone(&rules), clock.at(0));
         assert_eq!(effects, [Effect::Fire(FIRST), Effect::Fire(SECOND)]);
         assert_eq!(session.stop(), [Effect::Release(FIRST)]);
+        // Resuming for the running game does not run the start rules again.
+        let session = Session::resume(rules);
+        assert_eq!(session.end(clock.at(1)), [Effect::Fire(RuleIndex(2))]);
     }
 
     #[test]
