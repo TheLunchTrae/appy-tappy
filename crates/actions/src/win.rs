@@ -1,38 +1,49 @@
 //! The Windows adapter: each function turns Windows API calls into a typed
 //! value or an error and makes no decisions of its own.
 //!
-//! Media sessions come from the Windows Runtime media transport controls, which Spotify
-//! and browsers publish without any app-specific API. Volumes come from Core
-//! Audio on the default playback device. Naming an audio session's app takes
-//! a process snapshot, which never opens a process, so no action opens a
-//! game's process.
+//! Media sessions come from the Windows Runtime media transport controls,
+//! which Spotify and browsers publish without any app-specific API. Volumes
+//! come from Core Audio on the default playback device. Naming an audio
+//! session's app takes a process snapshot, which never opens a process, so no
+//! action opens a game's process.
 
 use std::collections::BTreeMap;
 use std::io;
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ptr;
+use std::thread;
+use std::time::{Duration, Instant};
 
-use appytappy_config::action::{AppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget};
+use appytappy_config::action::{MediaCommand, VolumeLevel};
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
-use windows::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, ERROR_NOT_FOUND, HANDLE};
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
     ISimpleAudioVolume, MMDeviceEnumerator, eConsole, eRender,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+    CoUninitialize,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows::core::{GUID, Interface};
+use windows::core::{GUID, IUnknown, Interface, PWSTR, RuntimeType};
+use windows_future::{AsyncStatus, IAsyncOperation};
 
-use crate::{Controls, MediaSession};
+use crate::{Controls, MediaSession, Volume};
+
+/// How long a media request may take before it counts as failed, so an app
+/// that hangs cannot stall the action worker.
+const MEDIA_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How often a pending media request is checked.
+const MEDIA_POLL: Duration = Duration::from_millis(5);
 
 /// This thread's membership in the COM multithreaded apartment, which Core
 /// Audio needs. It ends on drop, on the thread that joined, because the type
@@ -62,6 +73,45 @@ impl Drop for Apartment {
     }
 }
 
+/// A media session. Two keys are equal when they hold the same session
+/// object, which COM identifies by its `IUnknown` pointer.
+#[derive(Debug, Clone)]
+pub struct MediaKey {
+    session: GlobalSystemMediaTransportControlsSession,
+    identity: IUnknown,
+}
+
+impl PartialEq for MediaKey {
+    fn eq(&self, other: &Self) -> bool {
+        ptr::eq(self.identity.as_raw(), other.identity.as_raw())
+    }
+}
+
+/// A volume control. Two keys are equal when Windows gives them the same ID:
+/// a device's endpoint ID, or an audio session's instance ID.
+#[derive(Debug, Clone)]
+pub struct VolumeKey {
+    id: String,
+    control: VolumeControl,
+}
+
+#[derive(Debug, Clone)]
+enum VolumeControl {
+    Device(IAudioEndpointVolume),
+    Session(ISimpleAudioVolume),
+}
+
+impl PartialEq for VolumeKey {
+    fn eq(&self, other: &Self) -> bool {
+        let same_kind = matches!(
+            (&self.control, &other.control),
+            (VolumeControl::Device(_), VolumeControl::Device(_))
+                | (VolumeControl::Session(_), VolumeControl::Session(_))
+        );
+        same_kind && self.id == other.id
+    }
+}
+
 /// The Windows implementation of [`Controls`].
 ///
 /// It joins the calling thread to the COM multithreaded apartment, so it is
@@ -83,7 +133,7 @@ impl WindowsControls {
     /// Returns the operating system's error.
     pub fn new() -> io::Result<Self> {
         let apartment = Apartment::join()?;
-        let media = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.join()?;
+        let media = finish(&GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?)?;
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the class ID is a static GUID, and the result is a new owned interface.
         let devices = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }?;
@@ -94,45 +144,93 @@ impl WindowsControls {
         })
     }
 
-    fn find_session(
-        &self,
-        target: &MediaTarget,
-    ) -> io::Result<Option<GlobalSystemMediaTransportControlsSession>> {
-        match target {
-            // With no current session, the call returns null, which arrives as an
-            // error carrying a success code.
-            MediaTarget::Current => match self.media.GetCurrentSession() {
-                Ok(session) => Ok(Some(session)),
-                Err(error) if error.code().is_ok() => Ok(None),
-                Err(error) => Err(error.into()),
-            },
-            MediaTarget::App(app) => self.app_session(app),
-        }
-    }
-
-    fn app_session(
-        &self,
-        app: &AppName,
-    ) -> io::Result<Option<GlobalSystemMediaTransportControlsSession>> {
-        for session in &self.media.GetSessions()? {
-            if app.matches(&session.SourceAppUserModelId()?.to_string_lossy()) {
-                return Ok(Some(session));
-            }
-        }
-        Ok(None)
-    }
-
-    fn default_device(&self) -> io::Result<IMMDevice> {
+    /// The default playback device, or `None` when there is none.
+    fn default_device(&self) -> io::Result<Option<IMMDevice>> {
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the call takes two enum values and returns a new owned interface.
-        let device = unsafe { self.devices.GetDefaultAudioEndpoint(eRender, eConsole) }?;
-        Ok(device)
+        match unsafe { self.devices.GetDefaultAudioEndpoint(eRender, eConsole) } {
+            Ok(device) => Ok(Some(device)),
+            // With no playback device, the call fails with "not found".
+            Err(error) if error.code() == ERROR_NOT_FOUND.to_hresult() => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+fn media_session(
+    session: GlobalSystemMediaTransportControlsSession,
+) -> io::Result<MediaSession<MediaKey>> {
+    let status = session.GetPlaybackInfo()?.PlaybackStatus()?;
+    Ok(MediaSession {
+        app: session.SourceAppUserModelId()?.to_string_lossy(),
+        playing: status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing,
+        key: MediaKey {
+            identity: session.cast()?,
+            session,
+        },
+    })
+}
+
+impl Controls for WindowsControls {
+    type Media = MediaKey;
+    type Volume = VolumeKey;
+
+    fn current_media(&mut self) -> io::Result<Option<MediaSession<MediaKey>>> {
+        // With no current session, the call returns null, which arrives as an
+        // error carrying a success code.
+        match self.media.GetCurrentSession() {
+            Ok(session) => media_session(session).map(Some),
+            Err(error) if error.code().is_ok() => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
-    /// The volume controls of every audio session of `app` on the default
-    /// playback device.
-    fn app_volumes(&self, app: &AppName) -> io::Result<Vec<ISimpleAudioVolume>> {
-        let device = self.default_device()?;
+    fn media_sessions(&mut self) -> io::Result<Vec<MediaSession<MediaKey>>> {
+        self.media
+            .GetSessions()?
+            .into_iter()
+            .map(media_session)
+            .collect()
+    }
+
+    fn media_command(&mut self, session: &MediaKey, command: MediaCommand) -> io::Result<bool> {
+        let session = &session.session;
+        let request = match command {
+            MediaCommand::Play => session.TryPlayAsync()?,
+            MediaCommand::Pause => session.TryPauseAsync()?,
+            MediaCommand::Next => session.TrySkipNextAsync()?,
+            MediaCommand::Previous => session.TrySkipPreviousAsync()?,
+        };
+        finish(&request)
+    }
+
+    fn system_volume(&mut self) -> io::Result<Option<Volume<VolumeKey>>> {
+        let Some(device) = self.default_device()? else {
+            return Ok(None);
+        };
+        #[expect(unsafe_code, reason = "a COM call")]
+        // SAFETY: the call takes no arguments and returns a string the caller owns.
+        let id = take_string(unsafe { device.GetId() }?)?;
+        #[expect(unsafe_code, reason = "a COM call")]
+        // SAFETY: the call activates an interface the type parameter names, with no
+        // activation parameters.
+        let control: IAudioEndpointVolume = unsafe { device.Activate(CLSCTX_ALL, None) }?;
+        #[expect(unsafe_code, reason = "a COM call")]
+        // SAFETY: the call takes no arguments.
+        let level = level(unsafe { control.GetMasterVolumeLevelScalar() }?)?;
+        Ok(Some(Volume {
+            key: VolumeKey {
+                id,
+                control: VolumeControl::Device(control),
+            },
+            level,
+        }))
+    }
+
+    fn app_volumes(&mut self) -> io::Result<Vec<(String, Volume<VolumeKey>)>> {
+        let Some(device) = self.default_device()? else {
+            return Ok(Vec::new());
+        };
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the call activates an interface the type parameter names, with no
         // activation parameters.
@@ -149,107 +247,85 @@ impl WindowsControls {
             #[expect(unsafe_code, reason = "a COM call")]
             // SAFETY: `index` is below the count the enumerator reported.
             let session = unsafe { sessions.GetSession(index) }?;
-            let control: IAudioSessionControl2 = session.cast()?;
+            let details: IAudioSessionControl2 = session.cast()?;
             #[expect(unsafe_code, reason = "a COM call")]
-            // SAFETY: the call takes no arguments. A session that spans several
-            // processes reports no single ID, which names no app.
-            let process = unsafe { control.GetProcessId() }?;
-            if executables
-                .get(&process)
-                .is_some_and(|executable| app.matches(executable))
-            {
-                volumes.push(session.cast()?);
-            }
+            // SAFETY: the call takes no arguments. For a session that spans several
+            // processes it still succeeds and names the process that created it.
+            let process = unsafe { details.GetProcessId() }?;
+            let Some(executable) = executables.get(&process) else {
+                continue;
+            };
+            #[expect(unsafe_code, reason = "a COM call")]
+            // SAFETY: the call takes no arguments and returns a string the caller owns.
+            let id = take_string(unsafe { details.GetSessionInstanceIdentifier() }?)?;
+            let control: ISimpleAudioVolume = session.cast()?;
+            #[expect(unsafe_code, reason = "a COM call")]
+            // SAFETY: the call takes no arguments.
+            let level = level(unsafe { control.GetMasterVolume() }?)?;
+            let key = VolumeKey {
+                id,
+                control: VolumeControl::Session(control),
+            };
+            volumes.push((executable.clone(), Volume { key, level }));
         }
         Ok(volumes)
     }
 
-    fn system_volume(&self) -> io::Result<IAudioEndpointVolume> {
-        let device = self.default_device()?;
-        #[expect(unsafe_code, reason = "a COM call")]
-        // SAFETY: the call activates an interface the type parameter names, with no
-        // activation parameters.
-        let volume = unsafe { device.Activate(CLSCTX_ALL, None) }?;
-        Ok(volume)
+    fn set_volume(&mut self, control: &VolumeKey, level: VolumeLevel) -> io::Result<()> {
+        match &control.control {
+            VolumeControl::Device(device) => {
+                #[expect(unsafe_code, reason = "a COM call")]
+                // SAFETY: the level is in 0 to 1, and a null event context is allowed.
+                unsafe { device.SetMasterVolumeLevelScalar(level.scalar(), ptr::null::<GUID>()) }?;
+            },
+            VolumeControl::Session(session) => {
+                #[expect(unsafe_code, reason = "a COM call")]
+                // SAFETY: the level is in 0 to 1, and a null event context is allowed.
+                unsafe { session.SetMasterVolume(level.scalar(), ptr::null::<GUID>()) }?;
+            },
+        }
+        Ok(())
     }
 }
 
-impl Controls for WindowsControls {
-    fn media_session(&mut self, target: &MediaTarget) -> io::Result<Option<MediaSession>> {
-        let Some(session) = self.find_session(target)? else {
-            return Ok(None);
-        };
-        let status = session.GetPlaybackInfo()?.PlaybackStatus()?;
-        Ok(Some(MediaSession {
-            app: session.SourceAppUserModelId()?.to_string_lossy(),
-            playing: status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing,
-        }))
-    }
-
-    fn media_command(&mut self, app: &str, command: MediaCommand) -> io::Result<bool> {
-        let mut found = None;
-        for session in &self.media.GetSessions()? {
-            if session.SourceAppUserModelId()?.to_string_lossy() == app {
-                found = Some(session);
-                break;
-            }
+/// Waits for `request`, for at most [`MEDIA_TIMEOUT`], and cancels it if it
+/// takes longer.
+fn finish<T: RuntimeType + 'static>(request: &IAsyncOperation<T>) -> io::Result<T> {
+    let deadline = Instant::now()
+        .checked_add(MEDIA_TIMEOUT)
+        .ok_or_else(|| io::Error::other("the clock cannot represent the deadline"))?;
+    while request.Status()? == AsyncStatus::Started {
+        if Instant::now() >= deadline {
+            request.Cancel()?;
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the media app did not answer",
+            ));
         }
-        let Some(session) = found else {
-            return Ok(false);
-        };
-        let request = match command {
-            MediaCommand::Play => session.TryPlayAsync()?,
-            MediaCommand::Pause => session.TryPauseAsync()?,
-            MediaCommand::Next => session.TrySkipNextAsync()?,
-            MediaCommand::Previous => session.TrySkipPreviousAsync()?,
-        };
-        Ok(request.join()?)
+        thread::sleep(MEDIA_POLL);
     }
+    Ok(request.GetResults()?)
+}
 
-    fn volume(&mut self, target: &VolumeTarget) -> io::Result<Option<VolumeLevel>> {
-        let scalar = match target {
-            VolumeTarget::System => {
-                let volume = self.system_volume()?;
-                #[expect(unsafe_code, reason = "a COM call")]
-                // SAFETY: the call takes no arguments.
-                let scalar = unsafe { volume.GetMasterVolumeLevelScalar() }?;
-                scalar
-            },
-            VolumeTarget::App(app) => {
-                let Some(volume) = self.app_volumes(app)?.into_iter().next() else {
-                    return Ok(None);
-                };
-                #[expect(unsafe_code, reason = "a COM call")]
-                // SAFETY: the call takes no arguments.
-                let scalar = unsafe { volume.GetMasterVolume() }?;
-                scalar
-            },
-        };
-        VolumeLevel::from_scalar(scalar)
-            .map(Some)
-            .ok_or_else(|| io::Error::other(format!("Windows reported volume {scalar}")))
-    }
+/// A volume level Windows reported, which it keeps from 0 to 1.
+fn level(scalar: f32) -> io::Result<VolumeLevel> {
+    VolumeLevel::from_scalar(scalar)
+        .ok_or_else(|| io::Error::other(format!("Windows reported volume {scalar}")))
+}
 
-    fn set_volume(&mut self, target: &VolumeTarget, level: VolumeLevel) -> io::Result<bool> {
-        match target {
-            VolumeTarget::System => {
-                let volume = self.system_volume()?;
-                #[expect(unsafe_code, reason = "a COM call")]
-                // SAFETY: the level is in 0 to 1, and a null event context is allowed.
-                unsafe { volume.SetMasterVolumeLevelScalar(level.scalar(), ptr::null::<GUID>()) }?;
-                Ok(true)
-            },
-            VolumeTarget::App(app) => {
-                let volumes = self.app_volumes(app)?;
-                for volume in &volumes {
-                    #[expect(unsafe_code, reason = "a COM call")]
-                    // SAFETY: the level is in 0 to 1, and a null event context is allowed.
-                    unsafe { volume.SetMasterVolume(level.scalar(), ptr::null::<GUID>()) }?;
-                }
-                Ok(!volumes.is_empty())
-            },
-        }
+/// Copies a string that COM allocated for the caller, then frees it.
+fn take_string(text: PWSTR) -> io::Result<String> {
+    #[expect(unsafe_code, reason = "reading a COM string")]
+    // SAFETY: the COM call that returned `text` succeeded, so it points to a
+    // nul-terminated UTF-16 string that stays valid until it is freed below.
+    let copied = unsafe { text.to_string() };
+    #[expect(unsafe_code, reason = "a COM call")]
+    // SAFETY: the string came from CoTaskMemAlloc, as the COM call documents, and
+    // is freed once, after the copy.
+    unsafe {
+        CoTaskMemFree(Some(text.0.cast_const().cast()));
     }
+    copied.map_err(io::Error::other)
 }
 
 /// An owned kernel handle, closed on drop.

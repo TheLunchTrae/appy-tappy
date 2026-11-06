@@ -16,30 +16,51 @@ calls that crate; the engine only says which rule fired.
   mixer.
 
 An app is named the way Windows reports it, ignoring ASCII case. For media,
-that is the session's app ID: `Spotify.exe` for the desktop app, or the
-package name for the Microsoft Store version. For volume, it is the
-executable name, such as `Spotify.exe`, and the action sets every audio
-session of that executable. Naming an audio session's executable takes a
-process snapshot, which never opens a process, so no action opens a game's
-process.
+that is the session's app ID: `Spotify.exe` for the desktop app, the
+package name for the Microsoft Store version, or the browser's name. For
+volume, it is the executable name, such as `Spotify.exe`. Naming an audio
+session's executable takes a process snapshot, which never opens a process,
+so no action opens a game's process.
 
-Volume actions use the default playback device only. Choosing another device
-can come later.
+An app can have several sessions at once, such as one per browser tab:
+
+- **Pause** pauses every playing session of the app.
+- **Play** does nothing while one of its sessions plays, and otherwise starts
+  the first.
+- **Next** and **previous** go to the first playing session, or else the
+  first session.
+- **Set volume** sets every audio session of the executable.
+
+Volume actions use the default playback device. Choosing another device can
+come later.
+
+A media request that gets no answer within two seconds fails, so an app
+that hangs cannot hold up the actions behind it.
 
 ## Restoring
 
 A rule that restores on release undoes its actions when it is released (see
-[Rules](rules.md)):
+[Rules](rules.md)). Each action records the state of each session or volume
+it touched, just before it acted:
 
-- **Pause** resumes the session it paused. If the session was already
-  paused, the action does nothing, and so does its restore.
-- **Play** pauses the session it started, under the same rule.
-- **Set volume** puts back the level it read just before the change.
+- **Pause** and **play** put back whether each session was playing. A session
+  that was already in the wanted state is left alone, and so is its restore.
+- **Set volume** puts back each audio session's own level, or the device's.
+  A restore goes to the same device or session the action changed, even if
+  the default device has changed since.
 - **Next** and **previous** cannot be undone. A rule that restores needs at
   least one action that can.
 
-Restore is per rule: all of a rule's actions that can be undone are undone
-together.
+A rule's actions are undone newest first. When several restoring rules change
+the same session or volume, the original state comes back only when the last
+of them is released; until then, releasing one leaves the others' changes in
+place. If a rule pauses Spotify at a boss and another lowers its volume
+while the game has the focus, alt-tabbing during the boss puts the volume
+back but keeps Spotify paused.
+
+A rule that does not restore makes a permanent change: no earlier rule's
+release undoes it. If an action fails partway, such as on the second of two
+audio sessions, what it changed before the failure is still restored.
 
 ## Not in v1
 
@@ -65,4 +86,5 @@ cargo test -p appytappy-actions --test spotify -- --ignored --test-threads=1
 ```
 
 One test pauses Spotify and resumes it; the other lowers Spotify's volume and
-puts it back.
+puts it back. Each puts Spotify back before checking anything, so a failed
+check leaves it as it was.

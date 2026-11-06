@@ -6,6 +6,9 @@
 //! ```sh
 //! cargo test -p appytappy-actions --test spotify -- --ignored --test-threads=1
 //! ```
+//!
+//! Each test restores Spotify before it checks anything, so a failed check
+//! leaves it as it was.
 
 #![cfg(windows)]
 
@@ -14,32 +17,54 @@ use std::thread;
 use std::time::Duration;
 
 use appytappy_actions::win::WindowsControls;
-use appytappy_actions::{Controls, Restore, perform, restore};
+use appytappy_actions::{Actions, Controls};
 use appytappy_config::action::{
     Action, AppName, InvalidAppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
 };
+use appytappy_config::rule::Restore;
 
 /// How long Spotify takes to report a new playback state.
 const SETTLE: Duration = Duration::from_secs(2);
+
+/// How far a volume read back may be from the level set, because Windows
+/// stores levels with less precision.
+const TOLERANCE: f32 = 0.01;
 
 fn spotify() -> Result<AppName, InvalidAppName> {
     AppName::new("Spotify.exe")
 }
 
-/// Whether Spotify is playing, or `None` when it has no media session.
+/// Whether a Spotify session is playing, or `None` when it has none.
 fn playing(controls: &mut WindowsControls) -> io::Result<Option<bool>> {
-    let target = MediaTarget::App(spotify().map_err(io::Error::other)?);
-    Ok(controls
-        .media_session(&target)?
-        .map(|session| session.playing))
+    let spotify = spotify().map_err(io::Error::other)?;
+    let sessions: Vec<bool> = controls
+        .media_sessions()?
+        .into_iter()
+        .filter(|session| spotify.matches(&session.app))
+        .map(|session| session.playing)
+        .collect();
+    Ok((!sessions.is_empty()).then(|| sessions.contains(&true)))
+}
+
+/// The levels of Spotify's audio sessions, sorted.
+fn levels(controls: &mut WindowsControls) -> io::Result<Vec<f32>> {
+    let spotify = spotify().map_err(io::Error::other)?;
+    let mut levels: Vec<f32> = controls
+        .app_volumes()?
+        .into_iter()
+        .filter(|(executable, _)| spotify.matches(executable))
+        .map(|(_, volume)| volume.level.scalar())
+        .collect();
+    levels.sort_by(f32::total_cmp);
+    Ok(levels)
 }
 
 #[test]
 #[ignore = "needs Spotify playing; pauses and resumes it"]
 fn pauses_and_resumes_spotify() {
-    let mut controls = WindowsControls::new().expect("the controls connect");
+    let mut actions = Actions::new(WindowsControls::new().expect("the controls connect"));
     assert_eq!(
-        playing(&mut controls).expect("readable"),
+        playing(actions.controls()).expect("readable"),
         Some(true),
         "start a song in Spotify first"
     );
@@ -47,42 +72,44 @@ fn pauses_and_resumes_spotify() {
         target: MediaTarget::App(spotify().expect("valid")),
         command: MediaCommand::Pause,
     };
-    let undo = perform(&mut controls, &pause)
-        .expect("Spotify pauses")
-        .expect("a playing session restores");
+    let paused = actions.perform(0_u8, &pause, Restore::OnRelease);
     thread::sleep(SETTLE);
-    assert_eq!(playing(&mut controls).expect("readable"), Some(false));
-    restore(&mut controls, &undo).expect("Spotify resumes");
+    let while_paused = playing(actions.controls());
+    actions.release(0).expect("Spotify resumes");
     thread::sleep(SETTLE);
-    assert_eq!(playing(&mut controls).expect("readable"), Some(true));
+    paused.expect("Spotify pauses");
+    assert_eq!(while_paused.expect("readable"), Some(false));
+    assert_eq!(playing(actions.controls()).expect("readable"), Some(true));
 }
 
 #[test]
 #[ignore = "needs Spotify playing; lowers its volume and puts it back"]
 fn lowers_and_restores_spotify_volume() {
-    let mut controls = WindowsControls::new().expect("the controls connect");
-    let target = VolumeTarget::App(spotify().expect("valid"));
-    let before = controls
-        .volume(&target)
-        .expect("the volume can be read")
-        .expect("Spotify has an audio session");
+    let mut actions = Actions::new(WindowsControls::new().expect("the controls connect"));
+    let before = levels(actions.controls()).expect("readable");
+    assert!(!before.is_empty(), "start a song in Spotify first");
     let lower = Action::SetVolume {
-        target: target.clone(),
+        target: VolumeTarget::App(spotify().expect("valid")),
         level: VolumeLevel::from_percent(20).expect("at most 100"),
     };
-    let undo = perform(&mut controls, &lower)
-        .expect("the volume changes")
-        .expect("a volume change restores");
-    assert_eq!(
-        undo,
-        Restore::Volume {
-            target: target.clone(),
-            level: before
-        }
-    );
-    let lowered = controls.volume(&target).expect("read").expect("session");
-    assert!((lowered.scalar() - 0.2).abs() < 0.01, "Spotify is at 20%");
+    let lowered = actions.perform(0_u8, &lower, Restore::OnRelease);
+    let while_lowered = levels(actions.controls());
     thread::sleep(SETTLE);
-    restore(&mut controls, &undo).expect("the volume goes back");
-    assert_eq!(controls.volume(&target).expect("read"), Some(before));
+    actions.release(0).expect("the volume goes back");
+    lowered.expect("the volume changes");
+    let while_lowered = while_lowered.expect("readable");
+    assert!(
+        while_lowered
+            .iter()
+            .all(|level| (level - 0.2).abs() < TOLERANCE),
+        "Spotify is at 20%: {while_lowered:?}"
+    );
+    let after = levels(actions.controls()).expect("readable");
+    assert_eq!(after.len(), before.len());
+    for (after, before) in after.iter().zip(&before) {
+        assert!(
+            (after - before).abs() < TOLERANCE,
+            "{after} is back to {before}"
+        );
+    }
 }

@@ -149,9 +149,10 @@ Each thread below is a plain `std::thread`, and each channel is a
   compiled config chose for that game's version and sends `Sample` events.
   Push sources, such as a log tail, send when data arrives; polled sources,
   such as a memory read, run at the interval the binding sets.
-- **Action worker.** Runs action requests in order and sends back results,
-  including any prior state a paired action needs to restore, such as the
-  volume before a change.
+- **Action worker.** Runs action requests and releases in order and sends
+  back results. It keeps the restore journal: the state each restoring rule
+  changed, such as the volume before a change, so a release can put it back
+  even when several rules changed the same thing.
 - **Config watcher.** Watches the compiled config's folder, ignores every file
   but the compiled config, and turns a burst of change events into one
   `ConfigChanged`. The owner validates the new file and swaps it in only if it
