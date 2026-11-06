@@ -131,7 +131,8 @@ Each thread below is a plain `std::thread`, and each channel is a
 `std::sync::mpsc` channel.
 
 - **Owner thread.** Holds the root model: the loaded compiled config, which
-  games are attached, current signal values, and the engine's rule state. It
+  games are attached, and one engine session per attached game, which holds
+  its signal values and rule state. It
   applies each event as a `(state, event) -> (state, effects)` transition.
   Effects are action requests and orders to start or stop a worker.
 - **Lifecycle.** Reports `GameStarted` and `GameExited` from the process and
@@ -194,8 +195,8 @@ changing.
   changes to [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7).
 - A **rule** says when to act: a trigger on signals or game events, with
   conditions, debounce, and re-arming. The engine evaluates rules as a pure
-  function with no I/O, so its tests need no game and no Windows. The model
-  belongs to [#9](https://github.com/TheLunchTrae/appy-tappy/issues/9).
+  function with no I/O, so its tests need no game and no Windows.
+  [Rules](rules.md) describes the model.
 - An **action** is a side effect from a fixed set, such as pausing media or
   setting an app's volume. The engine emits action requests; only the action
   worker performs them. The v1 set belongs to
