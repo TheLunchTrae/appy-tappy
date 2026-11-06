@@ -16,6 +16,10 @@ dependencies = [
 [[package]]
 name = "appytappy-actions"
 version = "0.1.0"
+dependencies = [
+ "appytappy-config",
+ "windows",
+]
 
 [[package]]
 name = "appytappy-config"

@@ -27,7 +27,8 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
 - **Release.** End a fired rule's effect: it re-armed, the opposite focus
   event happened, or the session ended. A rule that restores undoes its
   paired actions then.
-- **Rule.** A trigger, a cooldown, and whether its paired actions restore.
+- **Rule.** A trigger, the actions to run when it fires, a cooldown, and
+  whether those actions restore.
 - **Runtime.** The always-on background program.
 - **Sample.** One value a source read for a signal.
 - **Session.** One run of a game, from its start to its exit, or until the

@@ -4,6 +4,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod action;
 pub mod anti_cheat;
 pub mod rule;
 pub mod signal;

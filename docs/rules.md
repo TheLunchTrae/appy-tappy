@@ -1,6 +1,7 @@
 # Rules
 
-A rule says when AppyTappy acts on a game. The types live in
+A rule says when AppyTappy acts on a game and which
+[actions](actions.md) it runs. The types live in
 `appytappy-config` (`crates/config/src/rule.rs` and
 `crates/config/src/signal.rs`), and the evaluator lives in `appytappy-engine`.
 The authoring and compiled file formats that carry rules belong to
@@ -110,6 +111,7 @@ Geometry Dash: pause Spotify at 90% and resume it when the attempt ends.
 
 ```text
 trigger:  becomes level_percent at least 90
+actions:  pause Spotify.exe
 re-arm:   when false
 cooldown: none
 restore:  on release (resume Spotify when the percentage drops or the game exits)
@@ -119,6 +121,7 @@ Any game: turn Spotify down while the game has the focus.
 
 ```text
 trigger:  on focused
+actions:  set Spotify.exe volume to 20%
 cooldown: none
 restore:  on release (put the volume back when the game loses the focus or exits)
 ```
@@ -127,6 +130,7 @@ A racing game: skip to the next track on each new lap.
 
 ```text
 trigger:  changes lap, guard in_race equals yes
+actions:  next track on Spotify.exe
 cooldown: 10 seconds
 restore:  never
 ```

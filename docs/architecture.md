@@ -201,8 +201,7 @@ changing.
   [Rules](rules.md) describes the model.
 - An **action** is a side effect from a fixed set, such as pausing media or
   setting an app's volume. The engine emits action requests; only the action
-  worker performs them. The v1 set belongs to
-  [#10](https://github.com/TheLunchTrae/appy-tappy/issues/10).
+  worker performs them. [Actions](actions.md) describes the v1 set.
 
 ## Files and handoff
 
