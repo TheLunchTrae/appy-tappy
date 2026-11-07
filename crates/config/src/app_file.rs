@@ -260,6 +260,13 @@ pub struct SampleDef {
 }
 
 impl CheckDef {
+    /// Whether the check reads a number, as a number or bar fill check does,
+    /// rather than yes or no.
+    #[must_use]
+    pub const fn reads_number(&self) -> bool {
+        matches!(self, Self::Number { .. } | Self::BarFill { .. })
+    }
+
     /// The file names of the pictures this check needs.
     #[must_use]
     pub fn images(&self) -> Vec<&str> {

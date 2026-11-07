@@ -9,13 +9,14 @@
 
 use std::sync::mpsc::Sender;
 
+use appytappy_config::app_file::WindowDef;
+use appytappy_config::automation_file::AutomationDef;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 
+use crate::automations::AutomationSummary;
 use crate::check_spec::CheckSpec;
-use appytappy_config::app_file::WindowDef;
-
 use crate::owner::{AppSummary, Message, Reading, Reply, Request, SaveSpec, SavedValue};
 use crate::window_list::WindowList;
 
@@ -134,4 +135,47 @@ pub(crate) async fn delete_value(
         reply,
     })
     .await?
+}
+
+/// The saved automations, with what stops each one from running.
+#[tauri::command]
+pub(crate) async fn list_automations(app: AppHandle) -> Result<Vec<AutomationSummary>, String> {
+    ask(&app, Request::ListAutomations).await?
+}
+
+/// Saves `automation` over `existing`, or as a new one; returns its ID.
+#[tauri::command]
+pub(crate) async fn save_automation(
+    app: AppHandle,
+    existing: Option<String>,
+    automation: AutomationDef,
+) -> Result<String, String> {
+    let automation = Box::new(automation);
+    ask(&app, |reply| Request::SaveAutomation {
+        existing,
+        automation,
+        reply,
+    })
+    .await?
+}
+
+/// Turns an automation on or off.
+#[tauri::command]
+pub(crate) async fn set_automation_enabled(
+    app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    ask(&app, |reply| Request::SetAutomationEnabled {
+        id,
+        enabled,
+        reply,
+    })
+    .await?
+}
+
+/// Removes an automation.
+#[tauri::command]
+pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), String> {
+    ask(&app, |reply| Request::DeleteAutomation { id, reply }).await?
 }

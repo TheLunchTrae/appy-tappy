@@ -1,8 +1,9 @@
-//! Reading and writing the applications' authoring files.
+//! Reading and writing the authoring files.
 //!
 //! Each application has a folder under [`crate::paths::Locations::apps`]
 //! named by its ID, holding `app.json` and the pictures its values name.
-//! Every write goes to a temporary file first and then replaces the old file
+//! The automations live in one file of their own, at
+//! [`crate::paths::Locations::automations`]. Every write goes to a temporary file first and then replaces the old file
 //! in one step, so a reader never sees half a file.
 
 use std::fs;
@@ -13,6 +14,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::app_file::{AppFile, is_image_name};
+use crate::automation_file::AutomationsFile;
 
 /// The authoring file's name in an application's folder.
 pub const APP_FILE: &str = "app.json";
@@ -134,6 +136,50 @@ impl AppStore {
             }
         }
         Ok(())
+    }
+}
+
+/// The file that holds every automation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutomationStore {
+    path: PathBuf,
+}
+
+impl AutomationStore {
+    /// The store at `path`, such as [`crate::paths::Locations::automations`].
+    #[must_use]
+    pub const fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// The automations. A file that does not exist yet holds none.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from reading the file, or an invalid-data error
+    /// saying why the file is broken.
+    pub fn load(&self) -> io::Result<AutomationsFile> {
+        match fs::read_to_string(&self.path) {
+            Ok(json) => AutomationsFile::parse(&json)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string())),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(AutomationsFile::default()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Replaces the automations with `file`, creating the folder it lives
+    /// in.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file does not pass
+    /// [`AutomationsFile::check`] or a write fails.
+    pub fn save(&self, file: &AutomationsFile) -> io::Result<()> {
+        file.check().map_err(|error| invalid(error.to_string()))?;
+        if let Some(folder) = self.path.parent() {
+            fs::create_dir_all(folder)?;
+        }
+        write_atomic(&self.path, file.to_json().as_bytes())
     }
 }
 
@@ -379,6 +425,61 @@ mod tests {
             .collect();
         left.sort();
         assert_eq!(left, ["app.json", "kept.png", "notes.txt"]);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn automations_load_back_and_a_broken_file_says_why() {
+        use crate::automation_file::{
+            ActionDef, AutomationDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
+        };
+
+        let root = scratch("automations");
+        let store = AutomationStore::new(root.join("roaming").join("automations.json"));
+        assert_eq!(
+            store.load().expect("missing file"),
+            AutomationsFile::default()
+        );
+        let file = AutomationsFile {
+            format: crate::automation_file::FORMAT,
+            automations: vec![AutomationDef {
+                id: "pause_music".to_owned(),
+                name: "Pause music".to_owned(),
+                enabled: true,
+                when: WhenDef {
+                    app: "example".to_owned(),
+                    value: "icon_visible".to_owned(),
+                    is: ComparisonDef::Equals,
+                    target: TargetDef::Flag(true),
+                },
+                actions: vec![ActionDef::Media {
+                    command: MediaCommandDef::Pause,
+                    app: None,
+                }],
+                undo: true,
+                cooldown_ms: 0,
+            }],
+        };
+        store.save(&file).expect("saves, creating the folder");
+        assert_eq!(store.load().expect("loads"), file);
+
+        let mut broken = file.clone();
+        broken.automations[0].actions.clear();
+        let refused = store.save(&broken).expect_err("no actions");
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(store.load().expect("unchanged"), file);
+
+        fs::write(root.join("roaming").join("automations.json"), b"{").expect("write");
+        let error = store.load().expect_err("broken");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            error
+                .to_string()
+                .starts_with("the automations file is not valid")
+        );
+
+        let folder = AutomationStore::new(root.clone());
+        assert!(folder.load().is_err());
         fs::remove_dir_all(root).expect("clean up");
     }
 
