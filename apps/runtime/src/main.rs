@@ -178,6 +178,9 @@ impl From<TrayEvent> for Event {
 /// events here, where the root model applies them. It ends on Quit from the
 /// tray, when Windows asks it to close, or when detection ends.
 fn watch(watchlist: Watchlist, log: &mut Log) -> io::Result<()> {
+    // The host system sets the process's DPI awareness, which Windows
+    // requires before any window exists, so it comes before the tray window.
+    let system = HostSystem::default();
     let (window_sender, window_events) = mpsc::channel();
     let windows = WindowWatch::start(window_sender)?;
     let (sender, events) = mpsc::channel();
@@ -191,7 +194,6 @@ fn watch(watchlist: Watchlist, log: &mut Log) -> io::Result<()> {
         },
     };
     let lifecycle = Lifecycle::new(watchlist.clone(), Instant::now());
-    let system = HostSystem::default();
     let spawned = thread::Builder::new()
         .name("lifecycle".to_owned())
         .spawn(move || {
