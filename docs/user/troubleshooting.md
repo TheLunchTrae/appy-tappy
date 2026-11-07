@@ -9,8 +9,8 @@ names each automation that cannot run, and why.
 
 ## Windows warns about the installer
 
-AppyTappy is not signed, so Windows SmartScreen warns the first time you run
-the installer. Select **More info**, then **Run anyway**.
+AppyTappy is not signed, so Windows warns the first time you run the
+installer. [Install](install.md#install) says what to select.
 
 ## I can't find the tray icon
 
@@ -40,9 +40,9 @@ Check these in order:
 ## A number reads wrong
 
 Label more screenshots, so that every digit the number can show appears on at
-least one of them, and check the characters' color. The **Number** check
-cannot read rotated text, characters that touch, or text on a background of
-the same color.
+least one of them, and check the characters' color. Some text the **Number**
+check cannot read; [Checks](values.md#checks) says what it can't, and what to
+use instead.
 
 ## A key press does nothing
 

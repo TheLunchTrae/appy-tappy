@@ -17,6 +17,7 @@ On the Values page, select **New value**.
    AppyTappy picks that application, so the new value joins it. Otherwise
    **Save values to** is **A new application**: give it a name, and check how
    AppyTappy will [find its window](applications.md#how-appytappy-finds-the-window).
+   Then select **Capture this window**.
 2. **Take screenshots.** Select **Take screenshot**, or press the screenshot
    shortcut, `F9` at first. The shortcut works while the other application
    has the keyboard, so you can carry on in it until it shows what you want
@@ -25,33 +26,40 @@ On the Values page, select **New value**.
    with it, so the key keeps working everywhere else.
 3. **Draw the region.** On a screenshot, drag to draw a box around what to
    read. Drag inside the box to move it, or drag a corner to resize it. The
-   **X**, **Y**, **Width**, and **Height** fields set it to the exact pixel.
+   **X**, **Y**, **Width**, and **Height** fields set it to the exact pixel,
+   counted in the window's own pixels from its top-left corner.
 4. **Choose the check.** Pick how AppyTappy reads the region, from the four
    [checks](#checks) below.
 5. **Watch the reading.** Once the check is complete, the box under it shows
    what AppyTappy reads on the live window, a few times a second. If the
    check cannot work, such as a bar whose filled and empty colors are the
    same, it says why there.
-6. **Name it and save.** Select **Save value**.
+6. **Name it and save.** Type a **Value name**, such as `Progress`, and
+   select **Save value**.
 
-AppyTappy keeps the screenshots until you leave the new value.
+AppyTappy keeps the screenshots until you select **Change window** or leave
+the new value.
 
 ## Checks
 
-- **Number** reads a number, such as `87%` or `-12.5`. Click the screenshot
-  to pick the color of the characters. Then select each screenshot and type
-  what the region shows on it, such as `87%`. AppyTappy learns the shape of
-  each character from what you type, so label enough screenshots to show
-  every digit it needs to know. **Tolerance** says how far a pixel's color may
-  be from the characters' color and still count.
-- **Bar fill** reads how full a bar is, from 0 to 100. Click a filled part of
-  the bar, then an empty part. Borders and labels inside the region don't
-  count.
-- **Color** is yes when the region's average color is close to a color you
-  pick, such as a light that turns red. **Tolerance** says how close.
+- **Number** reads a number, such as `87%` or `-12.5`. Next to
+  **Characters' color**, select **Pick**, then click the characters on a
+  screenshot. Then select each screenshot and type what the region shows on
+  it, such as `87%`. AppyTappy learns the shape of each character from what
+  you type, so label enough screenshots to show every digit it needs to know.
+  **Tolerance** says how far a pixel's color may be from the characters'
+  color and still count.
+- **Bar fill** reads how full a bar is, from 0 to 100. Use **Pick** next to
+  **Filled color** and click a filled part of the bar, then next to
+  **Empty color** and click an empty part. Borders and labels inside the
+  region don't count.
+- **Color** is yes when the region's average color is close to the
+  **Color to look for**, such as a light that turns red. Use **Pick** and
+  click the color on a screenshot. **Tolerance** says how close.
 - **Picture** is yes when the region looks like it does on a screenshot you
-  choose, such as an icon that appears. **Tolerance** says how much it may
-  differ on average.
+  choose, such as an icon that appears. Select that screenshot, then
+  **Use this one** next to **Compare against**. **Tolerance** says how much
+  it may differ on average.
 
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or

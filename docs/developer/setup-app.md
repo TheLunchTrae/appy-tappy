@@ -36,33 +36,24 @@ This page covers what the user guide leaves out.
 - **Reload.** Saving or deleting a value or an automation, switching an
   automation on or off, and changing an anti-cheat class set the reload event,
   so the runtime reads the files again at once. Overlay changes do not, since
-  the runtime does not read them. [The runtime](architecture.md#the-runtime) describes how it
-  reads them.
+  the runtime does not read them. [The runtime](architecture.md#the-runtime)
+  describes how it reads them.
 
 ## Window matching
 
-An application's window is found the way OBS finds one: patterns on the
-title, the class, and the executable, where `*` matches any run of characters
-and `?` matches one, ignoring case. `Example App*` matches a title that
-gains a document name. When no open window fits all three patterns, the
-application falls back as its setting says:
-
-- **Only a window that matches all three.**
-- **Otherwise one with the same class and executable.**
-- **Otherwise any window of the executable**, the default, for the many
-  applications whose title changes as they run.
-
-The executable always has to match. The setup app uses the match to show
-which applications are running, and the runtime finds each application's
-window with the same rules. A value's region means something only while the
-window has the size it had when the region was drawn. Values can be drawn at
-more than one size, and the runtime reads the ones drawn at the window's
-current size. When the window closes or changes size, the runtime forgets the
-values it read. Each automation stays as it was until the values read next
-show whether its condition still holds, so it neither runs again nor undoes
-what it changed while the window is out of sight.
-When the window has a size no value was drawn at, the runtime reads nothing
-and logs that the window should be resized or the value drawn again.
+[How AppyTappy finds the window](../user/applications.md#how-appytappy-finds-the-window)
+gives the patterns and the fallback setting. The file stores the fallback as
+`priority`: `title`, `titleElseClass`, or `titleElseExecutable`, the default.
+The setup app uses the match to show which applications are running, and the
+runtime finds each application's window with the same rules. A value's region
+means something only while the window has the size it had when the region was
+drawn. Values can be drawn at more than one size, and the runtime reads the
+ones drawn at the window's current size. When the window closes or changes
+size, the runtime forgets the values it read. Each automation stays as it was
+until the values read next show whether its condition still holds, so it
+neither runs again nor undoes what it changed while the window is out of sight.
+When the window has a size no value was drawn at, the runtime reads nothing and
+logs that the window should be resized or the value drawn again.
 
 ## Saved files
 

@@ -13,8 +13,8 @@ on with the application's **Overlay** menu on the
   application is minimized.
 - **Picture in picture** shows the readings in a small panel that stays on
   top of every window. Move and resize it as you like; it opens where you
-  left it. While the application is minimized, the panel says so instead of
-  showing readings.
+  left it, unless too little of that spot is still on a monitor. While the
+  application is minimized, the panel says so instead of showing readings.
 
 The overlay shows only while AppyTappy Setup is open, and the panel closes
 when you turn the overlay off. It never changes the application: the readings

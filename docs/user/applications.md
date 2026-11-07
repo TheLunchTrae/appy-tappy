@@ -19,11 +19,11 @@ does:
 - **Executable**, the program's file name, such as `Example.exe`.
 
 When you pick a window, AppyTappy fills in all three from it. You can change
-them before you save the first value. Each is a pattern: `*` matches any run
-of characters and `?` matches any one character, and capital letters don't
-matter. For example, `Example App*` matches the title `Example App` and also
-`Example App - Save 3`. As you edit the patterns, AppyTappy counts the open
-windows they match.
+them before you save the first value; after that, they stay as they are. Each
+is a pattern: `*` matches any run of characters and `?` matches any one
+character, and capital letters don't matter. For example, `Example App*`
+matches the title `Example App` and also `Example App - Save 3`. As you edit
+the patterns, AppyTappy counts the open windows they match.
 
 Many programs change their title as they run, so the title often won't
 match later. **When no window matches all three** says what AppyTappy does

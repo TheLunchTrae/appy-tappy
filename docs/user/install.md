@@ -23,9 +23,11 @@ Installing does three things:
 ## Update
 
 Run the installer of the newer version. It closes AppyTappy's background part
-first, which undoes what your automations changed, such as a lowered volume,
-and starts the new one when it finishes. Your applications, values, and
-automations stay as they are.
+first, which normally undoes what your automations changed, such as a lowered
+volume. If the background part doesn't close within about 10 seconds, the
+installer ends it, and those changes stay. The new one starts when the
+installer finishes. Your applications, values, and automations stay as they
+are.
 
 ## Uninstall
 

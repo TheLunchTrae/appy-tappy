@@ -21,7 +21,12 @@ On the Automations page, select **New automation**. To change one, select
 2. **When.** Pick the value, then how it compares:
    - A value that reads a number: **is at least**, **is above**,
      **is at most**, **is below**, **is**, or **is not** a number you type.
-   - A value that reads yes or no: **is** or **is not** yes.
+   - A value that reads yes or no: **is** or **is not**, then **Yes** or
+     **No**.
+
+   An automation watches one value. Conditions that combine several values
+   are planned in
+   [#34](https://github.com/TheLunchTrae/appy-tappy/issues/34).
 
    While the value's application is open, the editor reads the value about
    twice a second and says what it reads now and whether the condition is
@@ -37,9 +42,10 @@ On the Automations page, select **New automation**. To change one, select
 5. **Save automation.** Until the automation is complete, the editor says
    what is still missing.
 
-Saving, deleting, or switching an automation takes effect at once. An
-automation that stops running because of the change undoes what it changed
-first.
+Saving, deleting, or switching an automation takes effect at once. So does
+saving or deleting a value or changing an anti-cheat setting. Each change
+starts the affected application's automations over: they undo what they
+changed first, and one whose condition still holds runs again.
 
 ## Actions
 
@@ -54,14 +60,15 @@ Media and volume actions choose what they change:
 
 - **Whatever is playing**, for media, or **The whole system**, for volume.
 - **One application**, named by its executable, such as `Player.exe`. The
-  editor suggests the executables of the open windows.
+  editor suggests the executables of the open windows. For volume, this sets
+  that application's own volume, as the Windows volume mixer does.
 
 Media actions find most programs by their executable, but a browser or a
 Microsoft Store app can report another name. For those, **Whatever is
 playing** is the simplest choice. When one application plays several things
 at once, such as several browser tabs, **Pause media** pauses all of them.
 
-Volume actions change your default playback device.
+Volume actions act on your default playback device.
 
 ## Key presses
 
@@ -106,6 +113,8 @@ Whether undo is on or not, an automation runs once each time its condition
 becomes true. It runs again only after the condition has stopped being true
 and then becomes true again. **Wait before it can run again, in seconds**
 also keeps it from running again until that many seconds after it last ran.
+If its condition becomes true during the wait and is still true when the wait
+ends, it runs then.
 
 ## Delete an automation
 
