@@ -222,6 +222,44 @@ mod tests {
     }
 
     #[test]
+    fn a_selection_is_made_on_the_named_screenshot() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        let select = |screenshot, x| {
+            move |reply| Request::Select {
+                screenshot,
+                selection: serde_json::from_value(serde_json::json!({
+                    "tolerance": 10,
+                    "steps": [{"kind": "click", "x": x, "y": 0}]
+                }))
+                .expect("the UI's spelling"),
+                reply,
+            }
+        };
+        assert_eq!(
+            harness
+                .ask(select(0, 3))
+                .map(|view| view.map(|view| serde_json::to_value(view).expect("plain data"))),
+            Ok(Some(serde_json::json!({
+                "region": {"x": 2, "y": 0, "width": 2, "height": 2},
+                "spans": [[0, 4]]
+            }))),
+            "the click picks the gray half"
+        );
+        assert_eq!(
+            harness.ask(select(0, 9)),
+            Ok(None),
+            "a click off the screenshot"
+        );
+        assert_eq!(
+            harness.ask(select(1, 0)),
+            Err("That screenshot is gone. Take a new one and try again.".to_owned())
+        );
+    }
+
+    #[test]
     fn the_check_reads_the_live_frame() {
         let mut harness = harness(false);
         let mut handler = harness.pick();

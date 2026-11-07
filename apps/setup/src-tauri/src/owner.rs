@@ -34,6 +34,7 @@ use crate::ocr;
 use crate::overlay::Overlays;
 use crate::pixels;
 use crate::recording::Recording;
+use crate::selection::{self, SelectionView};
 use crate::window_list;
 
 pub(crate) use self::host::Host;
@@ -241,6 +242,21 @@ impl<H: Host> Owner<H> {
                 self.screenshots
                     .get(index)
                     .map(|image| pixels::rgba(image, max_width)),
+            ),
+            Request::Select {
+                screenshot,
+                selection,
+                reply,
+            } => send(
+                reply,
+                self.screenshots
+                    .get(screenshot)
+                    .map(|image| {
+                        selection::select(image, &selection)
+                            .as_ref()
+                            .map(SelectionView::from)
+                    })
+                    .ok_or_else(|| check_spec::SpecError::NoScreenshot.to_string()),
             ),
             Request::SetCheck { spec, reply } => send(
                 reply,

@@ -76,7 +76,8 @@ impl Mask {
 
     /// The runs of kept pixels as ranges of pixel indexes, so a check walks
     /// them without testing each pixel.
-    pub(crate) fn spans(&self) -> Vec<Range<usize>> {
+    #[must_use]
+    pub fn spans(&self) -> Vec<Range<usize>> {
         let mut spans = Vec::new();
         let mut start = None;
         for (index, &kept) in self.kept.iter().enumerate() {
