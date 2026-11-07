@@ -44,9 +44,7 @@ on, so it must stay small. Every design choice below follows from that split.
 2. After each save it sets the named event `Local\AppyTappy.Reload`.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
-4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`. The
-   setup app checks that the runtime is running through the runtime's
-   single-instance guard.
+4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`.
 
 Apart from that one event, the two programs share only files: no sockets,
 pipes, or shared memory. A compiled config with a
@@ -144,11 +142,13 @@ Each thread below is a plain `std::thread`, and each channel is a
   [Lifecycle](#lifecycle) describes when it takes a snapshot.
 - **Readers.** One per attached application that has automations. Each finds
   the application's window with its [window match](setup-app.md#window-matching),
-  captures the one rectangle that covers every value its automations watch,
-  and reads each value from its own region of each frame. It sends a `Sample`
-  only when a value changes, and reads less often while nothing changes. When
-  the window closes it looks for one again, once a second, until the
-  application exits. Other kinds of source, such as a log tail or a memory
+  captures the smallest rectangle that covers the values drawn at the window's
+  current size, and reads each value from its own region of each frame. It
+  sends a `Sample` only when a value changes, and reads less often while
+  nothing changes. When the window closes or changes size, it sends `Unseen`,
+  and the owner undoes what the application's automations changed and starts
+  its rules over, so no rule acts on a value nobody can see. When the window
+  closes it looks for one again, once a second, until the application exits. Other kinds of source, such as a log tail or a memory
   read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
@@ -173,8 +173,10 @@ Each thread below is a plain `std::thread`, and each channel is a
 
 Shared flags are banned, so a worker learns to stop from its channel. Each
 worker owns a control `Receiver` and waits on it with `recv_timeout`, using the
-poll interval as its tick. A stop message, or the owner dropping the `Sender`,
-ends the worker. A push source must also be able to cancel its blocking read,
+poll interval as its tick. A stop message ends the worker, and the owner sends
+one to each worker it started when it stops. A worker that holds no sender of
+its own channel also ends when the owner drops the `Sender`; a reader holds one
+to restart itself when its window closes, so only a stop message ends it. A push source must also be able to cancel its blocking read,
 for example with `CancelIoEx`, so that it does not hang on a quiet file.
 
 Some Windows callbacks, such as the hook that reports window events, carry no

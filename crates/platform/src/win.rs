@@ -1119,6 +1119,20 @@ mod tests {
         assert!(!request_reload(&name).expect("ask"), "the event is gone");
     }
 
+    #[test]
+    fn a_dropped_reload_watch_ends_its_thread_without_waiting_for_it() {
+        let name = format!(r"Local\AppyTappy.Test.Dropped.{}", process::id());
+        let (sender, requests) = mpsc::channel::<ReloadRequest>();
+        let watch = ReloadWatch::start(&name, sender).expect("start");
+        drop(watch);
+        // The thread drops its sender when it ends.
+        assert_eq!(
+            requests.recv_timeout(Duration::from_secs(10)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
+        assert!(!request_reload(&name).expect("ask"), "the event is gone");
+    }
+
     fn next_event(events: &mpsc::Receiver<WindowEvent>, wanted: WindowEvent) {
         let deadline = Instant::now()
             .checked_add(Duration::from_secs(10))
