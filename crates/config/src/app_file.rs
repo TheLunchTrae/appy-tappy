@@ -148,9 +148,9 @@ impl From<AntiCheatDef> for AntiCheatClass {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ValueDef {
     /// The value's signal name, unique within the file, such as
-    /// `progress_percent`. Automations refer to the value by it.
+    /// `progress`. Automations refer to the value by it.
     pub id: String,
-    /// The value's name as the user sees it, such as `Progress percent`.
+    /// The value's name as the user sees it, such as `Progress`.
     pub name: String,
     /// Where on the window the value is read and how.
     pub screen: ScreenDef,
@@ -407,8 +407,8 @@ impl fmt::Display for AppFileError {
 
 impl Error for AppFileError {}
 
-/// A value ID made from a name the user typed, such as `progress_percent` from
-/// `Progress percent`.
+/// A value ID made from a name the user typed, such as `progress` from
+/// `Progress`.
 ///
 /// It keeps lowercase ASCII letters and digits, with an underscore for each
 /// run of anything else. A name with no letter or digit, or
@@ -453,12 +453,12 @@ mod tests {
             window: WindowDef::exact(WindowFacts {
                 title: "Example App",
                 class: "ExampleWindow",
-                executable: "ExampleApp.exe",
+                executable: "Example.exe",
             }),
             anti_cheat: AntiCheatDef::Unknown,
             values: vec![ValueDef {
-                id: "progress_percent".to_owned(),
-                name: "Progress percent".to_owned(),
+                id: "progress".to_owned(),
+                name: "Progress".to_owned(),
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 1920,
@@ -478,7 +478,7 @@ mod tests {
                         },
                         tolerance: 40,
                         samples: vec![SampleDef {
-                            image: "progress_percent-1.png".to_owned(),
+                            image: "progress-1.png".to_owned(),
                             text: "87%".to_owned(),
                         }],
                     },
@@ -515,7 +515,7 @@ mod tests {
                 tolerance: 3,
             },
             CheckDef::Reference {
-                image: "icon_showing.png".to_owned(),
+                image: "in_menu.png".to_owned(),
                 tolerance: 9,
             },
         ];
@@ -595,31 +595,22 @@ mod tests {
             ),
             (unnamed, "the application has no name"),
             (bad_id, "value \"Score\": signal name"),
-            (
-                twice,
-                "value \"progress_percent\": another value has the same ID",
-            ),
-            (no_value_name, "value \"progress_percent\": it has no name"),
+            (twice, "value \"progress\": another value has the same ID"),
+            (no_value_name, "value \"progress\": it has no name"),
             (
                 outside,
-                "value \"progress_percent\": its region is empty or reaches past",
+                "value \"progress\": its region is empty or reaches past",
             ),
-            (
-                empty_region,
-                "value \"progress_percent\": its region is empty",
-            ),
+            (empty_region, "value \"progress\": its region is empty"),
             (
                 taller,
-                "value \"progress_percent\": its region is empty or reaches past",
+                "value \"progress\": its region is empty or reaches past",
             ),
             (
                 no_samples,
-                "value \"progress_percent\": its number check has no sample",
+                "value \"progress\": its number check has no sample",
             ),
-            (
-                escape,
-                "value \"progress_percent\": picture \"../app.png\" must be",
-            ),
+            (escape, "value \"progress\": picture \"../app.png\" must be"),
         ];
         for (file, message) in cases {
             let error = AppFile::parse(&file.to_json()).expect_err(message);
@@ -634,7 +625,7 @@ mod tests {
 
     #[test]
     fn picture_names_stay_inside_the_folder() {
-        for name in ["a.png", "progress_percent-1.png", "x9.png"] {
+        for name in ["a.png", "progress-1.png", "x9.png"] {
             assert!(is_image_name(name), "{name}");
         }
         let long = format!("{}.png", "a".repeat(61));
@@ -658,8 +649,8 @@ mod tests {
     #[test]
     fn value_ids_come_from_the_names_users_type() {
         let cases = [
-            ("Progress percent", "progress_percent"),
-            ("  Icon showing? ", "icon_showing"),
+            ("Progress", "progress"),
+            ("  In menu? ", "in_menu"),
             ("HP / max HP", "hp_max_hp"),
             ("2 laps", "value_2_laps"),
             ("!!!", "value"),

@@ -106,7 +106,7 @@ pub(crate) struct SaveSpec {
     pub(crate) name: String,
     /// How to recognize a new application's window.
     pub(crate) window: WindowDef,
-    /// The value's name, such as `Progress percent`.
+    /// The value's name, such as `Progress`.
     pub(crate) value_name: String,
     /// The check, with the session's screenshots it names.
     pub(crate) check: CheckSpec,
@@ -598,7 +598,7 @@ mod tests {
             Ok(vec![ProcessEntry {
                 id: ProcessId::new(3),
                 parent: ProcessId::new(0),
-                executable: "ExampleApp.exe".to_owned(),
+                executable: "Example.exe".to_owned(),
                 threads: 1,
             }])
         }
@@ -709,7 +709,7 @@ mod tests {
         let mut harness = harness(false);
         let list = harness.ask(Request::ListWindows).expect("the host answers");
         assert_eq!(list.windows.len(), 1);
-        assert_eq!(list.windows[0].executable, "ExampleApp.exe");
+        assert_eq!(list.windows[0].executable, "Example.exe");
     }
 
     #[test]
@@ -873,7 +873,7 @@ mod tests {
             window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
                 title: "Example App",
                 class: "ExampleWindow",
-                executable: "ExampleApp.exe",
+                executable: "Example.exe",
             }),
             value_name: value_name.to_owned(),
             check: serde_json::from_str(check).expect("valid JSON"),
@@ -893,7 +893,7 @@ mod tests {
         let mut handler = harness.pick();
         let save = |spec| move |reply| Request::SaveValue { spec, reply };
         assert_eq!(
-            harness.ask(save(spec(None, "Icon showing", REFERENCE))),
+            harness.ask(save(spec(None, "In menu", REFERENCE))),
             Err("No frame has arrived from the window yet.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
@@ -903,20 +903,20 @@ mod tests {
             Err("Name the value first.".to_owned())
         );
         let saved = harness
-            .ask(save(spec(None, "Icon showing", REFERENCE)))
+            .ask(save(spec(None, "In menu", REFERENCE)))
             .expect("saves a new app");
         assert_eq!(
             saved,
             SavedValue {
-                app: "exampleapp".to_owned(),
-                value: "icon_showing".to_owned()
+                app: "example".to_owned(),
+                value: "in_menu".to_owned()
             }
         );
         harness
-            .ask(save(spec(Some("exampleapp"), "Progress bar", BAR)))
+            .ask(save(spec(Some("example"), "Progress bar", BAR)))
             .expect("adds to the app");
         assert_eq!(
-            harness.ask(save(spec(Some("exampleapp"), "Progress BAR", BAR))),
+            harness.ask(save(spec(Some("example"), "Progress BAR", BAR))),
             Err(
                 "Example App already has a value named like \"Progress BAR\". Pick another name."
                     .to_owned()
@@ -930,12 +930,12 @@ mod tests {
         let apps = harness.ask(Request::ListApps).expect("lists");
         assert_eq!(apps.len(), 1);
         let app = &apps[0];
-        assert_eq!((app.id.as_str(), &app.error), ("exampleapp", &None));
+        assert_eq!((app.id.as_str(), &app.error), ("example", &None));
         assert_eq!(app.windows, [7]);
         let file = app.file.as_ref().expect("a good file");
         assert_eq!(file.name, "Example App");
         let ids: Vec<&str> = file.values.iter().map(|value| value.id.as_str()).collect();
-        assert_eq!(ids, ["icon_showing", "progress_bar"]);
+        assert_eq!(ids, ["in_menu", "progress_bar"]);
         assert_eq!(
             file.values[0].screen.window_size,
             SizeDef {
@@ -943,17 +943,17 @@ mod tests {
                 height: 2
             }
         );
-        let folder = root.join("exampleapp");
-        assert!(folder.join("icon_showing.png").exists());
+        let folder = root.join("example");
+        assert!(folder.join("in_menu.png").exists());
 
         harness
             .ask(|reply| Request::DeleteValue {
-                app: "exampleapp".to_owned(),
-                value: "icon_showing".to_owned(),
+                app: "example".to_owned(),
+                value: "in_menu".to_owned(),
                 reply,
             })
             .expect("removes");
-        assert!(!folder.join("icon_showing.png").exists());
+        assert!(!folder.join("in_menu.png").exists());
         let apps = harness.ask(Request::ListApps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(file.values.len(), 1);
@@ -998,7 +998,7 @@ mod tests {
         let window = WindowDef::exact(appytappy_config::window_match::WindowFacts {
             title: "Example App",
             class: "ExampleWindow",
-            executable: "ExampleApp.exe",
+            executable: "Example.exe",
         });
         assert_eq!(
             harness.ask(|reply| Request::MatchWindows { window, reply }),

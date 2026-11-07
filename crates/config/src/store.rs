@@ -158,8 +158,8 @@ pub fn is_app_id(id: &str) -> bool {
 }
 
 /// An application ID made from an executable's name that no folder in
-/// `taken` uses yet, such as `exampleapp` from `ExampleApp.exe`, or
-/// `exampleapp-2` when that is taken.
+/// `taken` uses yet, such as `example` from `Example.exe`, or
+/// `example-2` when that is taken.
 #[must_use]
 pub fn new_app_id(executable: &str, taken: &[&str]) -> String {
     let stem = executable
@@ -265,12 +265,12 @@ mod tests {
             window: WindowDef::exact(WindowFacts {
                 title: "Example App",
                 class: "ExampleWindow",
-                executable: "ExampleApp.exe",
+                executable: "Example.exe",
             }),
             anti_cheat: AntiCheatDef::Unknown,
             values: vec![ValueDef {
-                id: "icon_showing".to_owned(),
-                name: "Icon showing".to_owned(),
+                id: "in_menu".to_owned(),
+                name: "In menu".to_owned(),
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 100,
@@ -297,16 +297,12 @@ mod tests {
         let store = AppStore::new(root.join("apps"));
         assert_eq!(store.load().expect("missing store"), []);
 
-        let saved = file("icon_showing.png");
+        let saved = file("in_menu.png");
         store
-            .save(
-                "zeta",
-                &saved,
-                &[("icon_showing.png".to_owned(), vec![1, 2, 3])],
-            )
+            .save("zeta", &saved, &[("in_menu.png".to_owned(), vec![1, 2, 3])])
             .expect("saves");
         store
-            .save("alpha", &saved, &[("icon_showing.png".to_owned(), vec![4])])
+            .save("alpha", &saved, &[("in_menu.png".to_owned(), vec![4])])
             .expect("saves");
         fs::create_dir_all(store.folder("broken")).expect("create");
         fs::write(store.folder("broken").join(APP_FILE), "{").expect("write");
@@ -324,7 +320,7 @@ mod tests {
                 .is_err_and(|error| error.contains("not valid"))
         );
         assert_eq!(
-            fs::read(store.folder("zeta").join("icon_showing.png")).expect("picture"),
+            fs::read(store.folder("zeta").join("in_menu.png")).expect("picture"),
             [1, 2, 3]
         );
         fs::remove_dir_all(root).expect("clean up");
@@ -334,7 +330,7 @@ mod tests {
     fn save_refuses_bad_ids_pictures_and_files() {
         let root = scratch("refuse");
         let store = AppStore::new(root.clone());
-        let good = file("icon_showing.png");
+        let good = file("in_menu.png");
         let bad_id = store.save("../up", &good, &[]).expect_err("bad id");
         assert_eq!(bad_id.kind(), io::ErrorKind::InvalidInput);
         let bad_picture = store
@@ -405,7 +401,7 @@ mod tests {
 
     #[test]
     fn app_ids_are_plain_folder_names() {
-        for id in ["exampleapp", "obs64", "my-app_2", "9lives"] {
+        for id in ["example", "obs64", "my-app_2", "9lives"] {
             assert!(is_app_id(id), "{id}");
         }
         let longest = "a".repeat(48);
@@ -428,14 +424,11 @@ mod tests {
 
     #[test]
     fn new_ids_come_from_the_executable_and_avoid_taken_ones() {
-        assert_eq!(new_app_id("ExampleApp.exe", &[]), "exampleapp");
+        assert_eq!(new_app_id("Example.exe", &[]), "example");
+        assert_eq!(new_app_id("Example.exe", &["example"]), "example-2");
         assert_eq!(
-            new_app_id("ExampleApp.exe", &["exampleapp"]),
-            "exampleapp-2"
-        );
-        assert_eq!(
-            new_app_id("ExampleApp.exe", &["exampleapp", "exampleapp-2"]),
-            "exampleapp-3"
+            new_app_id("Example.exe", &["example", "example-2"]),
+            "example-3"
         );
         assert_eq!(
             new_app_id("VALORANT-Win64-Shipping.exe", &[]),

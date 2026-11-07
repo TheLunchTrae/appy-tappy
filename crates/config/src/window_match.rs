@@ -116,7 +116,7 @@ pub struct WindowFacts<'window> {
     pub title: &'window str,
     /// The window's class name.
     pub class: &'window str,
-    /// The file name of the window's executable, such as `ExampleApp.exe`.
+    /// The file name of the window's executable, such as `Example.exe`.
     pub executable: &'window str,
 }
 
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn a_pattern_keeps_its_text_and_matches_it() {
-        for text in ["Page 3 * draft", "What? Me?", "Music Player", ""] {
+        for text in ["Page 3 * draft", "What? Me?", "Media Player", ""] {
             let pattern = Pattern::new(text);
             assert_eq!(pattern.as_str(), text);
             assert_eq!(pattern.to_string(), text);
@@ -233,7 +233,7 @@ mod tests {
     const WINDOW: WindowFacts<'static> = WindowFacts {
         title: "Example App",
         class: "ExampleWindow",
-        executable: "ExampleApp.exe",
+        executable: "Example.exe",
     };
 
     fn with(
@@ -250,8 +250,8 @@ mod tests {
 
     #[test]
     fn the_priority_sets_how_far_matching_falls_back() {
-        let renamed = with("Example App - Project 1", "ExampleWindow", "ExampleApp.exe");
-        let dialog = with("Example App", "#32770", "ExampleApp.exe");
+        let renamed = with("Example App - Project 1", "ExampleWindow", "Example.exe");
+        let dialog = with("Example App", "#32770", "Example.exe");
         let other = with("Example App", "ExampleWindow", "Other.exe");
         let mut matcher = WindowMatch::exact(WINDOW);
         assert_eq!(matcher.priority, MatchPriority::TitleElseExecutable);
@@ -275,7 +275,7 @@ mod tests {
         let mut matcher = WindowMatch::exact(WINDOW);
         matcher.title = Pattern::new("Example App*");
         matcher.priority = MatchPriority::Title;
-        let renamed = with("Example App - Project 1", "ExampleWindow", "exampleapp.EXE");
+        let renamed = with("Example App - Project 1", "ExampleWindow", "example.EXE");
         assert_eq!(matcher.fit(renamed), Some(Fit::Full));
     }
 
@@ -283,11 +283,11 @@ mod tests {
     fn ranking_puts_the_best_fits_first() {
         let matcher = WindowMatch::exact(WINDOW);
         let windows = [
-            with("Settings", "#32770", "ExampleApp.exe"),
-            with("Music Player", "Chrome_WidgetWin_0", "MusicPlayer.exe"),
-            with("Example App - Settings", "ExampleWindow", "ExampleApp.exe"),
+            with("Settings", "#32770", "Example.exe"),
+            with("Media Player", "Chrome_WidgetWin_0", "Player.exe"),
+            with("Example App - Settings", "ExampleWindow", "Example.exe"),
             WINDOW,
-            with("Another", "#32770", "ExampleApp.exe"),
+            with("Another", "#32770", "Example.exe"),
         ];
         assert_eq!(matcher.rank(windows), [3, 2, 0, 4]);
         assert_eq!(matcher.rank([]), [0_usize; 0]);

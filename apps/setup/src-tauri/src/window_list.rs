@@ -25,7 +25,7 @@ pub(crate) struct WindowChoice {
     pub(crate) title: String,
     /// The window's class name, which a window match can use.
     pub(crate) class: String,
-    /// The file name of the window's executable, such as `ExampleApp.exe`.
+    /// The file name of the window's executable, such as `Example.exe`.
     pub(crate) executable: String,
     /// The window's width on screen, in pixels.
     pub(crate) width: u32,
@@ -145,8 +145,8 @@ mod tests {
     #[test]
     fn offers_visible_titled_app_windows_sorted_by_title() {
         let processes = [
-            process(1, "ExampleApp.exe"),
-            process(2, "MusicPlayer.exe"),
+            process(1, "Example.exe"),
+            process(2, "Player.exe"),
             process(3, "explorer.exe"),
             process(9, "appytappy-setup.exe"),
         ];
@@ -157,7 +157,7 @@ mod tests {
         let mut collapsed = window(7, 2, "Collapsed");
         collapsed.bounds.right = collapsed.bounds.left;
         let windows = vec![
-            window(4, 2, "music Player"),
+            window(4, 2, "media Player"),
             window(3, 1, "Example App"),
             hidden,
             desktop,
@@ -176,15 +176,15 @@ mod tests {
                     handle: 3,
                     title: "Example App".to_owned(),
                     class: "AppWindow".to_owned(),
-                    executable: "ExampleApp.exe".to_owned(),
+                    executable: "Example.exe".to_owned(),
                     width: 800,
                     height: 600,
                 },
                 WindowChoice {
                     handle: 4,
-                    title: "music Player".to_owned(),
+                    title: "media Player".to_owned(),
                     class: "AppWindow".to_owned(),
-                    executable: "MusicPlayer.exe".to_owned(),
+                    executable: "Player.exe".to_owned(),
                     width: 800,
                     height: 600,
                 },
@@ -206,11 +206,11 @@ mod tests {
 
     #[test]
     fn matching_ranks_the_offered_windows_by_fit() {
-        let processes = [process(1, "ExampleApp.exe"), process(2, "MusicPlayer.exe")];
+        let processes = [process(1, "Example.exe"), process(2, "Player.exe")];
         let mut settings = window(5, 1, "Settings");
         settings.class = "Dialog".to_owned();
         let windows = vec![
-            window(4, 2, "Music Player"),
+            window(4, 2, "Media Player"),
             settings,
             window(3, 1, "Example App"),
         ];
@@ -218,7 +218,7 @@ mod tests {
         let exact = WindowDef::exact(WindowFacts {
             title: "Example App",
             class: "AppWindow",
-            executable: "exampleapp.exe",
+            executable: "example.exe",
         });
         assert_eq!(matching(&offered, &exact), [3, 5]);
         let nothing = WindowDef {

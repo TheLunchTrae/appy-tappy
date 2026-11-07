@@ -542,7 +542,7 @@ mod tests {
                 text: "1".to_owned(),
             }],
         };
-        let saved = to_saved(&spec, &[screenshot()], "progress_percent").expect("valid number");
+        let saved = to_saved(&spec, &[screenshot()], "progress").expect("valid number");
         assert_eq!(
             saved.region,
             RegionDef {
@@ -564,12 +564,12 @@ mod tests {
         assert_eq!(
             samples,
             &[SampleDef {
-                image: "progress_percent-1.png".to_owned(),
+                image: "progress-1.png".to_owned(),
                 text: "1".to_owned(),
             }]
         );
         assert_eq!(saved.pictures.len(), 1);
-        assert_eq!(saved.pictures[0].0, "progress_percent-1.png");
+        assert_eq!(saved.pictures[0].0, "progress-1.png");
         // A PNG keeps the colors and drops the unused fourth byte.
         let picture = Image::decode_png(&saved.pictures[0].1).expect("a PNG");
         let cropped = screenshot()
@@ -599,15 +599,15 @@ mod tests {
             screenshot: 0,
             tolerance: 7,
         };
-        let saved = to_saved(&reference, &[screenshot()], "icon_showing").expect("valid");
+        let saved = to_saved(&reference, &[screenshot()], "in_menu").expect("valid");
         assert_eq!(
             saved.check,
             CheckDef::Reference {
-                image: "icon_showing.png".to_owned(),
+                image: "in_menu.png".to_owned(),
                 tolerance: 7
             }
         );
-        assert_eq!(saved.pictures[0].0, "icon_showing.png");
+        assert_eq!(saved.pictures[0].0, "in_menu.png");
         assert_eq!((saved.region.x, saved.region.width), (2, 2));
 
         let bar = CheckSpec::BarFill {

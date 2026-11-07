@@ -67,7 +67,7 @@ same rules ([#6](https://github.com/TheLunchTrae/appy-tappy/issues/6)).
 ## Saved files
 
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
-made from its executable, such as `exampleapp`. The folder holds `app.json`
+made from its executable, such as `example`. The folder holds `app.json`
 and the pictures its values need: a number check's labeled screenshots,
 cropped to the region, and a picture check's reference.
 
@@ -78,14 +78,14 @@ cropped to the region, and a picture check's reference.
   "window": {
     "title": "Example App*",
     "class": "ExampleWindow",
-    "executable": "ExampleApp.exe",
+    "executable": "Example.exe",
     "priority": "titleElseExecutable"
   },
   "antiCheat": "unknown",
   "values": [
     {
-      "id": "progress_percent",
-      "name": "Progress percent",
+      "id": "progress",
+      "name": "Progress",
       "screen": {
         "windowSize": { "width": 1920, "height": 1080 },
         "region": { "x": 1146, "y": 14, "width": 74, "height": 38 },
@@ -93,7 +93,7 @@ cropped to the region, and a picture check's reference.
           "kind": "number",
           "ink": { "red": 255, "green": 255, "blue": 255 },
           "tolerance": 40,
-          "samples": [{ "image": "progress_percent-1.png", "text": "87%" }]
+          "samples": [{ "image": "progress-1.png", "text": "87%" }]
         }
       }
     }

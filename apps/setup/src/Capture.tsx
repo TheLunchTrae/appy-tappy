@@ -627,7 +627,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
           <input
             id="value-name"
             className="input"
-            placeholder="Progress percent"
+            placeholder="Progress"
             value={valueName}
             onChange={(event) => {
               setValueName(event.target.value);
