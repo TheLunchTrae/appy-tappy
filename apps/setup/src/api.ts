@@ -100,6 +100,8 @@ export interface SaveSpec {
   readonly window: WindowDef;
   readonly valueName: string;
   readonly check: CheckSpec;
+  /** The screenshot the region was drawn on, whose size the value keeps. */
+  readonly screenshot: number;
 }
 
 /** Where a value was saved. */
@@ -119,6 +121,11 @@ export async function listWindows(): Promise<WindowList> {
 
 export async function pickWindow(window: number): Promise<void> {
   await invoke('pick_window', { window });
+}
+
+/** Stops capturing and forgets the session's screenshots and check. */
+export async function stopCapture(): Promise<void> {
+  await invoke('stop_capture');
 }
 
 /** The newest frame at most `maxWidth` wide, or null before one arrives. */

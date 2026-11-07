@@ -25,6 +25,11 @@ pub const FORMAT: u32 = 1;
 /// The longest picture file name, in bytes.
 const MAX_IMAGE_NAME_LEN: usize = 64;
 
+/// The longest ID [`value_id`] makes, in bytes. It leaves room for a
+/// picture named after the value, such as `{id}-12.png` for a number check's
+/// twelfth sample, within [`MAX_IMAGE_NAME_LEN`].
+const MAX_VALUE_ID_LEN: usize = 48;
+
 /// One application's authoring file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -429,7 +434,7 @@ pub fn value_id(name: &str) -> String {
     if !id.starts_with(|first: char| first.is_ascii_lowercase()) {
         id.insert_str(0, if id.is_empty() { "value" } else { "value_" });
     }
-    id.truncate(64);
+    id.truncate(MAX_VALUE_ID_LEN);
     while id.ends_with('_') {
         id.pop();
     }
@@ -661,8 +666,13 @@ mod tests {
             assert_eq!(value_id(name), id, "{name:?}");
             assert!(SignalName::new(&value_id(name)).is_ok());
         }
-        let long = value_id(&"ab ".repeat(40));
-        assert!(long.len() <= 64);
+        // A cut that ends on an underscore drops it.
+        assert_eq!(value_id(&"ab ".repeat(40)).len(), MAX_VALUE_ID_LEN - 1);
+        let long = value_id(&"abc".repeat(30));
+        assert_eq!(long.len(), MAX_VALUE_ID_LEN);
         assert!(SignalName::new(&long).is_ok());
+        // The pictures named after the longest ID still fit.
+        assert!(is_image_name(&format!("{long}.png")));
+        assert!(is_image_name(&format!("{long}-999999999.png")));
     }
 }

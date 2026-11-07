@@ -1,6 +1,7 @@
 # The setup app's web UI, in apps/setup, with its own Bun lockfile. Its Rust
-# side embeds the built UI from apps/setup/dist, so ui:build runs before any
-# task that compiles the workspace.
+# side embeds the built UI from apps/setup/dist, so the gate runs ui:build
+# before the Rust tasks. Before the first ui:build, the Rust side's build
+# script puts a stand-in page there, so the Rust tasks still compile.
 
 [tasks."ui:install"]
 description = "Install the setup UI's locked dependencies"

@@ -195,7 +195,7 @@ pub fn new_app_id(executable: &str, taken: &[&str]) -> String {
 ///
 /// Returns the error from writing the temporary file, or from the last
 /// rename, after removing the temporary file.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn app_ids_are_plain_folder_names() {
-        for id in ["example", "obs64", "my-app_2", "9lives"] {
+        for id in ["example", "app64", "my-app_2", "9lives"] {
             assert!(is_app_id(id), "{id}");
         }
         let longest = "a".repeat(48);
@@ -438,11 +438,8 @@ mod tests {
             new_app_id("Example.exe", &["example", "example-2"]),
             "example-3"
         );
-        assert_eq!(
-            new_app_id("VALORANT-Win64-Shipping.exe", &[]),
-            "valorant-win64-shipping"
-        );
-        assert_eq!(new_app_id("obs64", &[]), "obs64");
+        assert_eq!(new_app_id("My-Example-App64.exe", &[]), "my-example-app64");
+        assert_eq!(new_app_id("app64", &[]), "app64");
         assert_eq!(new_app_id("--.exe", &[]), "app");
         assert_eq!(new_app_id("プレイ.exe", &[]), "app");
         let long = new_app_id(&format!("{}.exe", "a".repeat(80)), &[]);

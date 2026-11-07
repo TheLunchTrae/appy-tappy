@@ -42,7 +42,7 @@ jobs:
       - name: Install the webview build libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
       - name: Run the mandatory gate
         run: mise run standards:check
 

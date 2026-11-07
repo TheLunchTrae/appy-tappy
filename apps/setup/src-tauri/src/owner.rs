@@ -110,6 +110,8 @@ pub(crate) struct SaveSpec {
     pub(crate) value_name: String,
     /// The check, with the session's screenshots it names.
     pub(crate) check: CheckSpec,
+    /// The screenshot the region was drawn on, whose size the value keeps.
+    pub(crate) screenshot: usize,
 }
 
 /// Where a value was saved.
@@ -157,6 +159,9 @@ pub(crate) enum Request {
         /// The frame, or why the capture stopped.
         reply: Reply<Result<Option<Vec<u8>>, String>>,
     },
+    /// Stops capturing and drops the session's screenshots and check, once
+    /// the user leaves the capture screen.
+    Stop(Reply<()>),
     /// Keeps the newest frame as a screenshot and answers its index.
     Screenshot(Reply<Result<usize, String>>),
     /// A screenshot, scaled and encoded like a preview.
@@ -329,6 +334,10 @@ impl<H: Host> Owner<H> {
                     .map(|check| self.check = Some(check))
                     .map_err(|error| error.to_string()),
             ),
+            Request::Stop(reply) => {
+                self.stop();
+                send(reply, ());
+            },
             Request::Reading(reply) => send(reply, self.reading()),
             Request::MatchWindows { window, reply } => send(
                 reply,
@@ -349,7 +358,12 @@ impl<H: Host> Owner<H> {
 
     fn apps(&self) -> Result<Vec<AppSummary>, String> {
         let stored = self.store()?.load().map_err(|error| error.to_string())?;
-        let windows = self.window_list()?.windows;
+        // The saved files read fine without the running windows, so a
+        // failed window listing only leaves each one's windows empty.
+        let windows = self
+            .window_list()
+            .map(|list| list.windows)
+            .unwrap_or_default();
         Ok(stored
             .into_iter()
             .map(|app| {
@@ -378,11 +392,10 @@ impl<H: Host> Owner<H> {
             return Err("Name the value first.".to_owned());
         }
         let size = self
-            .latest
-            .as_ref()
-            .or_else(|| self.screenshots.last())
+            .screenshots
+            .get(spec.screenshot)
             .map(Image::size)
-            .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
+            .ok_or_else(|| "Take a screenshot first.".to_owned())?;
         let loaded = store.load().map_err(|error| error.to_string())?;
         let (app, mut file) = if let Some(id) = &spec.app {
             let file = loaded
@@ -451,11 +464,12 @@ impl<H: Host> Owner<H> {
         Ok(window_list::list(windows, &processes, self.own_process))
     }
 
-    fn pick(&mut self, window: u64) -> Result<(), String> {
-        // A capture that failed already said why; the new window matters now.
+    /// Stops the capture and forgets its frames, screenshots, and check.
+    fn stop(&mut self) {
+        // A capture that failed already said why; what comes next matters now.
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "the old capture's error is moot once the user picked another window"
+            reason = "the old capture's error is moot once the user moved on"
         )]
         let _ = self.close();
         self.generation = self.generation.wrapping_add(1);
@@ -463,6 +477,10 @@ impl<H: Host> Owner<H> {
         self.failure = None;
         self.screenshots.clear();
         self.check = None;
+    }
+
+    fn pick(&mut self, window: u64) -> Result<(), String> {
+        self.stop();
         let generation = self.generation;
         let messages = self.messages.clone();
         let handler: FrameHandler = Box::new(move |frame| {
@@ -563,6 +581,9 @@ mod tests {
         refuse: bool,
     }
 
+    /// The setup app's own process in the fake host.
+    const OWN_PROCESS: u32 = 99;
+
     #[derive(Debug)]
     struct FakeSession {
         window: u64,
@@ -579,11 +600,11 @@ mod tests {
         type Session = FakeSession;
 
         fn windows(&self) -> io::Result<Vec<WindowEntry>> {
-            Ok(vec![WindowEntry {
-                handle: 7,
-                process: ProcessId::new(3),
-                title: "Example App".to_owned(),
-                class: "ExampleWindow".to_owned(),
+            let own = WindowEntry {
+                handle: 8,
+                process: ProcessId::new(OWN_PROCESS),
+                title: "AppyTappy setup".to_owned(),
+                class: "SetupWindow".to_owned(),
                 visible: true,
                 bounds: Bounds {
                     left: 0,
@@ -591,16 +612,40 @@ mod tests {
                     right: 4,
                     bottom: 2,
                 },
-            }])
+            };
+            Ok(vec![
+                own,
+                WindowEntry {
+                    handle: 7,
+                    process: ProcessId::new(3),
+                    title: "Example App".to_owned(),
+                    class: "ExampleWindow".to_owned(),
+                    visible: true,
+                    bounds: Bounds {
+                        left: 0,
+                        top: 0,
+                        right: 4,
+                        bottom: 2,
+                    },
+                },
+            ])
         }
 
         fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
-            Ok(vec![ProcessEntry {
-                id: ProcessId::new(3),
-                parent: ProcessId::new(0),
-                executable: "Example.exe".to_owned(),
-                threads: 1,
-            }])
+            Ok(vec![
+                ProcessEntry {
+                    id: ProcessId::new(3),
+                    parent: ProcessId::new(0),
+                    executable: "Example.exe".to_owned(),
+                    threads: 1,
+                },
+                ProcessEntry {
+                    id: ProcessId::new(OWN_PROCESS),
+                    parent: ProcessId::new(0),
+                    executable: "appytappy-setup.exe".to_owned(),
+                    threads: 1,
+                },
+            ])
         }
 
         fn capture(&self, window: u64, handler: FrameHandler) -> io::Result<FakeSession> {
@@ -646,7 +691,7 @@ mod tests {
             refuse,
         };
         Harness {
-            owner: Owner::new(host, store, 99, sender),
+            owner: Owner::new(host, store, OWN_PROCESS, sender),
             messages,
             handlers,
             closed,
@@ -877,6 +922,7 @@ mod tests {
             }),
             value_name: value_name.to_owned(),
             check: serde_json::from_str(check).expect("valid JSON"),
+            screenshot: 0,
         })
     }
 
@@ -894,10 +940,21 @@ mod tests {
         let save = |spec| move |reply| Request::SaveValue { spec, reply };
         assert_eq!(
             harness.ask(save(spec(None, "In menu", REFERENCE))),
-            Err("No frame has arrived from the window yet.".to_owned())
+            Err("Take a screenshot first.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        // The window shrinks after the screenshot, and the value keeps the
+        // size of the screenshot its region was drawn on.
+        let shrunk = Image::new(
+            Size {
+                width: 2,
+                height: 1,
+            },
+            vec![0; 8],
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&shrunk));
         assert_eq!(
             harness.ask(save(spec(None, "  ", REFERENCE))),
             Err("Name the value first.".to_owned())
@@ -1003,6 +1060,28 @@ mod tests {
         assert_eq!(
             harness.ask(|reply| Request::MatchWindows { window, reply }),
             Ok(vec![7])
+        );
+    }
+
+    #[test]
+    fn stopping_closes_the_capture_and_forgets_the_screenshots() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(Request::Stop);
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        assert_eq!(
+            harness.ask(|reply| Request::ScreenshotPixels {
+                index: 0,
+                max_width: 100,
+                reply,
+            }),
+            None
+        );
+        assert_eq!(
+            harness.ask(Request::Screenshot),
+            Err("No frame has arrived from the window yet.".to_owned())
         );
     }
 

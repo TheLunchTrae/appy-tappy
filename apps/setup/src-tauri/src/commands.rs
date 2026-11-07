@@ -62,6 +62,12 @@ pub(crate) async fn preview(app: AppHandle, max_width: u32) -> Result<Response, 
         .map(pixels)
 }
 
+/// Stops capturing and forgets the session's screenshots and check.
+#[tauri::command]
+pub(crate) async fn stop_capture(app: AppHandle) -> Result<(), String> {
+    ask(&app, Request::Stop).await
+}
+
 /// Keeps the newest frame as a screenshot and returns its index.
 #[tauri::command]
 pub(crate) async fn take_screenshot(app: AppHandle) -> Result<usize, String> {

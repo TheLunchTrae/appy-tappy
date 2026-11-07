@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import type { AppSummary } from './api.ts';
+import { type AppSummary, stopCapture } from './api.ts';
 import { Capture } from './Capture.tsx';
 import { type Choice, Picker } from './Picker.tsx';
+import { background } from './repeat.ts';
 
 interface Props {
   readonly apps: readonly AppSummary[];
@@ -14,6 +15,14 @@ interface Props {
 export function NewValue({ apps, onCancel, onSaved }: Props) {
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
+  // Leaving the flow stops the window's capture, which would otherwise keep
+  // copying frames nobody looks at.
+  useEffect(
+    () => () => {
+      background(stopCapture());
+    },
+    [],
+  );
   if (picking || choice === null) {
     return (
       <Picker

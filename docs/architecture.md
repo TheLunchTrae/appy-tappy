@@ -87,9 +87,9 @@ Each crate's owning issue adds its code and its dependencies. Where issues #6, #
 and #11 say "the core crate", they mean `appytappy-config` for formats, validation,
 and policy, and `appytappy-engine` for rule evaluation. `config` owns what a
 condition means, so the setup app and the runtime agree on it; `engine` owns
-the state of each game session. `apps/setup/src-tauri` is a workspace member
-like the other programs; the setup app takes `engine` once it previews
-automations.
+the state of each game session. `apps/setup/src-tauri`
+is a workspace member like the other programs; the setup app takes `engine`
+once it previews automations.
 
 The design uses the [`windows`](https://github.com/microsoft/windows-rs) crate
 rather than `windows-sys`. Media sessions and Core Audio are WinRT and COM

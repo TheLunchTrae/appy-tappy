@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
+import { type ShortcutEvent, register, unregister } from '@tauri-apps/plugin-global-shortcut';
 
 import { type Reading, errorText, readValue, saveValue, screenshot, setCheck, takeScreenshot } from './api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
@@ -370,21 +370,24 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     latestTake.current = take;
   });
 
+  // Registering and unregistering run one after another, in the order the
+  // effect asked for them, so a quick unregister cannot overtake a register.
+  const shortcutQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     if (recording) {
       return undefined;
     }
     let current = true;
-    register(shortcut, (event) => {
+    const onPress = (event: ShortcutEvent): void => {
       if (event.state === 'Pressed') {
         background(latestTake.current());
       }
-    })
+    };
+    shortcutQueue.current = shortcutQueue.current
+      .then(async () => register(shortcut, onPress))
       .then(() => {
         if (current) {
           setShortcutError(null);
-        } else {
-          background(unregister(shortcut));
         }
       })
       .catch(() => {
@@ -394,9 +397,11 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       });
     return () => {
       current = false;
-      unregister(shortcut).catch(() => {
-        // A shortcut that never registered has nothing to remove.
-      });
+      shortcutQueue.current = shortcutQueue.current
+        .then(async () => unregister(shortcut))
+        .catch(() => {
+          // A shortcut that never registered has nothing to remove.
+        });
     };
   }, [shortcut, recording]);
 
@@ -445,10 +450,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     setLiveError(errorText(error));
   }, []);
 
-  const lastShot = shots.at(-1);
-  const native =
-    (selected === null ? undefined : full.get(selected)) ??
-    (lastShot === undefined ? undefined : full.get(lastShot.index));
+  // The region is measured on the screenshot shown, or on the newest one
+  // while the live view is shown.
+  const drawnOn = selected !== null && full.has(selected) ? selected : (shots.at(-1)?.index ?? null);
+  const native = drawnOn === null ? undefined : full.get(drawnOn);
   const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
   const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
@@ -471,7 +476,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   };
 
   const save = async (): Promise<void> => {
-    if (!built.ok) {
+    if (!built.ok || drawnOn === null) {
       return;
     }
     setSaving(true);
@@ -482,6 +487,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
         window: choice.matcher,
         valueName: valueName.trim(),
         check: built.spec,
+        screenshot: drawnOn,
       });
       onSaved();
     } catch (error: unknown) {
@@ -508,7 +514,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     }
   };
 
-  const canSave = valueName.trim().length > 0 && built.ok && checkState.kind === 'set' && !saving;
+  const canSave = valueName.trim().length > 0 && built.ok && drawnOn !== null && checkState.kind === 'set' && !saving;
   const position = (index: number): number => shots.findIndex((shot) => shot.index === index) + 1;
 
   return (

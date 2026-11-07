@@ -46,6 +46,7 @@ fn main() -> ExitCode {
             commands::list_windows,
             commands::pick_window,
             commands::preview,
+            commands::stop_capture,
             commands::take_screenshot,
             commands::screenshot,
             commands::set_check,

@@ -284,7 +284,7 @@ mod tests {
         let matcher = WindowMatch::exact(WINDOW);
         let windows = [
             with("Settings", "#32770", "Example.exe"),
-            with("Media Player", "Chrome_WidgetWin_0", "Player.exe"),
+            with("Media Player", "PlayerWindow", "Player.exe"),
             with("Example App - Settings", "ExampleWindow", "Example.exe"),
             WINDOW,
             with("Another", "#32770", "Example.exe"),

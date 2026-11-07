@@ -29,8 +29,8 @@ it.
    counts the open windows the match fits as it is edited.
 2. **Take screenshots.** **Take screenshot** or the screenshot shortcut, `F9`
    at first, keeps the window's newest frame. The shortcut works while the
-   other application has the keyboard, so the user can play to the moment
-   that shows the value and press it. **Change shortcut** records a new one;
+   other application has the keyboard, so the user can carry on in it until
+   it shows the value and press it then. **Change shortcut** records a new one;
    a letter, digit, or Space needs a modifier so it does not stop that key
    working everywhere else. Screenshots last until the window changes.
 3. **Draw the region.** On a screenshot, drag to draw a box, drag inside it to
