@@ -16,7 +16,7 @@ set -eu
 # runs the setup app. The hash pins the file, so a changed download fails
 # the build instead of shipping.
 url=https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.onnx
-expected=PIN_FROM_FIRST_CI_RUN
+expected=86c145c2edb96c8caed5b1ebb8f44d706408922211451c309c625157dd6061c5
 model=apps/setup/src-tauri/models/text-recognition.onnx
 mkdir -p apps/setup/src-tauri/models
 if [ ! -f "$model" ] || [ "$(sha256sum "$model" | cut -d' ' -f1)" != "$expected" ]; then
