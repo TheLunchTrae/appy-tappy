@@ -1,6 +1,6 @@
 //! The runtime's Windows host services: the window events that drive game
-//! detection, the single-instance guard, autostart at sign-in, and the local
-//! clock.
+//! detection, the tray icon and its menu, the single-instance guard,
+//! autostart at sign-in, and the local clock.
 //!
 //! Each service turns Windows API calls into a typed value or an error and
 //! makes no decisions of its own. The Windows adapter lives in `win`; other
@@ -13,6 +13,7 @@ use std::any::Any;
 use std::ffi::OsStr;
 use std::fmt;
 use std::io;
+use std::num::NonZeroU16;
 use std::sync::mpsc::Sender;
 
 #[cfg(not(windows))]
@@ -60,6 +61,98 @@ impl WindowWatch {
     ///
     /// Returns the error that ended the thread's message loop, if any.
     // Off Windows no watch exists, so no test there can reach this body; the
+    // Windows adapter's tests call it.
+    #[mutants::skip]
+    pub fn stop(self) -> io::Result<()> {
+        self.0.stop()
+    }
+}
+
+/// The tray icon's tooltip and right-click menu. The caller decides what
+/// they say; the tray only shows them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayMenu {
+    /// The text shown when the pointer rests on the icon. Windows shows at
+    /// most 127 UTF-16 units of it.
+    pub tooltip: String,
+    /// The menu's items, top to bottom.
+    pub items: Vec<MenuItem>,
+}
+
+/// One line of the tray menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuItem {
+    /// A line the user can pick. Picking it sends [`Picked`] with its `id`.
+    Action {
+        /// What a pick reports.
+        id: NonZeroU16,
+        /// The line's text.
+        label: String,
+        /// Whether the line shows a check mark.
+        checked: bool,
+    },
+    /// A line that shows text and does nothing when picked.
+    Note(String),
+    /// A grayed-out line.
+    Inactive(String),
+    /// A line that opens a nested menu.
+    Submenu {
+        /// The line's text.
+        label: String,
+        /// The nested menu's items.
+        items: Vec<MenuItem>,
+    },
+    /// A dividing line.
+    Separator,
+}
+
+/// The user picked the [`MenuItem::Action`] with this id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Picked(pub NonZeroU16);
+
+/// The tray icon, with its own thread and hidden window.
+///
+/// Right-clicking the icon opens the menu, and a pick goes to the sender
+/// given to [`Tray::start`]. When Explorer restarts, the icon comes back.
+#[derive(Debug)]
+pub struct Tray(host::Tray);
+
+impl Tray {
+    /// Starts the tray thread and returns once its window exists.
+    ///
+    /// The icon may appear later: when Explorer is not running yet, as at
+    /// sign-in, the icon is added when the taskbar starts.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error when the thread or the window
+    /// cannot start.
+    pub fn start<E>(picks: Sender<E>, menu: TrayMenu) -> io::Result<Self>
+    where
+        E: From<Picked> + Send + 'static,
+    {
+        host::Tray::start(picks, menu).map(Self)
+    }
+
+    /// Replaces the tooltip and the menu. A menu that is open keeps what it
+    /// showed; the next one shows the new items.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the tray thread has ended.
+    // Off Windows no tray exists, so no test there can reach this body; the
+    // Windows adapter's tests call it.
+    #[mutants::skip]
+    pub fn show(&self, menu: TrayMenu) -> io::Result<()> {
+        self.0.show(menu)
+    }
+
+    /// Removes the icon, ends the thread, and waits for it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error that ended the tray's message loop, if any.
+    // Off Windows no tray exists, so no test there can reach this body; the
     // Windows adapter's tests call it.
     #[mutants::skip]
     pub fn stop(self) -> io::Result<()> {
