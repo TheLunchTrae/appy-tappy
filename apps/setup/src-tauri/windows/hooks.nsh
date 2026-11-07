@@ -6,7 +6,7 @@
 ; Asks the runtime to close: its tray window gets WM_CLOSE, which the runtime
 ; treats like the end of the session, so it undoes what its automations
 ; changed and exits. The class and title are TRAY_CLASS and the window title in
-; crates/platform/src/win.rs. The request goes again each second, since one
+; crates/platform/src/win/tray.rs. The request goes again each second, since one
 ; sent while the tray menu is open is lost. A runtime that is still running
 ; after about 10 seconds, with or without its tray window, is killed, because a
 ; running runtime keeps its file locked.
@@ -68,7 +68,7 @@
 
 ; Tauri's uninstaller removes the Run value named for the product after this,
 ; once it knows the uninstall goes ahead, so the product name stays
-; AUTOSTART_VALUE from crates/platform/src/lib.rs.
+; AUTOSTART_VALUE from crates/platform/src/autostart.rs.
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro APPYTAPPY_STOP_RUNTIME
 !macroend
