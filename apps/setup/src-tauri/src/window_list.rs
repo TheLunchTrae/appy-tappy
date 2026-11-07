@@ -156,12 +156,15 @@ mod tests {
         desktop.class = "Progman".to_owned();
         let mut collapsed = window(7, 2, "Collapsed");
         collapsed.bounds.right = collapsed.bounds.left;
+        let mut flat = window(12, 2, "Flat");
+        flat.bounds.bottom = flat.bounds.top;
         let windows = vec![
             window(4, 2, "media Player"),
             window(3, 1, "Example App"),
             hidden,
             desktop,
             collapsed,
+            flat,
             window(8, 2, "   "),
             window(10, 9, "AppyTappy setup"),
             window(11, 42, "Process already gone"),

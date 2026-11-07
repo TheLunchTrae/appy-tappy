@@ -296,6 +296,11 @@ mod tests {
         let root = scratch("load");
         let store = AppStore::new(root.join("apps"));
         assert_eq!(store.load().expect("missing store"), []);
+        let not_a_folder = root.join("file");
+        fs::write(&not_a_folder, b"").expect("write");
+        AppStore::new(not_a_folder)
+            .load()
+            .expect_err("a file is not a store");
 
         let saved = file("in_menu.png");
         store
@@ -393,9 +398,12 @@ mod tests {
     #[test]
     fn a_rename_that_keeps_failing_gives_up_with_its_error() {
         let root = scratch("rename");
+        let started = std::time::Instant::now();
         let error = rename_with_retries(&root.join("absent"), &root.join("target"))
             .expect_err("nothing to rename");
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        // It waited between every attempt before giving up.
+        assert!(started.elapsed() >= RENAME_WAIT * (RENAME_ATTEMPTS - 1));
         fs::remove_dir_all(root).expect("clean up");
     }
 
