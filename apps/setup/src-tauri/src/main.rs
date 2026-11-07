@@ -17,6 +17,8 @@ use std::process::{self, ExitCode};
 use std::sync::mpsc;
 use std::thread;
 
+use appytappy_config::paths::Locations;
+use appytappy_config::store::AppStore;
 use appytappy_sources::HostSystem;
 
 use crate::commands::Bridge;
@@ -27,7 +29,10 @@ fn main() -> ExitCode {
     // before any window exists, so it comes before the app's window.
     let system = HostSystem::default();
     let (sender, messages) = mpsc::channel();
-    let owner = Owner::new(system, process::id(), sender.clone());
+    let store = Locations::from_env()
+        .map(|locations| AppStore::new(locations.apps()))
+        .map_err(|error| format!("AppyTappy cannot find where to keep your values: {error}."));
+    let owner = Owner::new(system, store, process::id(), sender.clone());
     let Ok(owner_thread) = thread::Builder::new()
         .name("owner".to_owned())
         .spawn(move || owner::run(owner, &messages))
@@ -45,6 +50,10 @@ fn main() -> ExitCode {
             commands::screenshot,
             commands::set_check,
             commands::read_value,
+            commands::match_windows,
+            commands::list_apps,
+            commands::save_value,
+            commands::delete_value,
         ])
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));

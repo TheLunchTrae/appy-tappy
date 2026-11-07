@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 
 use appytappy_config::anti_cheat::known_anti_cheat;
+use appytappy_config::app_file::WindowDef;
+use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 use serde::Serialize;
 
@@ -21,6 +23,8 @@ pub(crate) struct WindowChoice {
     pub(crate) handle: u64,
     /// The window's title.
     pub(crate) title: String,
+    /// The window's class name, which a window match can use.
+    pub(crate) class: String,
     /// The file name of the window's executable, such as `GeometryDash.exe`.
     pub(crate) executable: String,
     /// The window's width on screen, in pixels.
@@ -69,6 +73,7 @@ pub(crate) fn list(
             (width > 0 && height > 0).then(|| WindowChoice {
                 handle: window.handle,
                 title: window.title,
+                class: window.class,
                 executable: (*executable).to_owned(),
                 width,
                 height,
@@ -87,6 +92,22 @@ pub(crate) fn list(
         windows: choices,
         anti_cheat,
     }
+}
+
+/// The handles of the `windows` that `window` matches, the best fits first.
+#[must_use]
+pub(crate) fn matching(windows: &[WindowChoice], window: &WindowDef) -> Vec<u64> {
+    let matcher = window.to_match();
+    let facts = windows.iter().map(|choice| WindowFacts {
+        title: &choice.title,
+        class: &choice.class,
+        executable: &choice.executable,
+    });
+    matcher
+        .rank(facts)
+        .into_iter()
+        .filter_map(|position| windows.get(position).map(|choice| choice.handle))
+        .collect()
 }
 
 #[cfg(test)]
@@ -154,6 +175,7 @@ mod tests {
                 WindowChoice {
                     handle: 3,
                     title: "Geometry Dash".to_owned(),
+                    class: "GameWindow".to_owned(),
                     executable: "GeometryDash.exe".to_owned(),
                     width: 800,
                     height: 600,
@@ -161,6 +183,7 @@ mod tests {
                 WindowChoice {
                     handle: 4,
                     title: "spotify Premium".to_owned(),
+                    class: "GameWindow".to_owned(),
                     executable: "Spotify.exe".to_owned(),
                     width: 800,
                     height: 600,
@@ -179,5 +202,29 @@ mod tests {
         ];
         let list = list(Vec::new(), &processes, 0);
         assert_eq!(list.anti_cheat, ["BattlEye", "Riot Vanguard"]);
+    }
+
+    #[test]
+    fn matching_ranks_the_offered_windows_by_fit() {
+        let processes = [process(1, "GeometryDash.exe"), process(2, "Spotify.exe")];
+        let mut settings = window(5, 1, "Settings");
+        settings.class = "Dialog".to_owned();
+        let windows = vec![
+            window(4, 2, "Spotify Premium"),
+            settings,
+            window(3, 1, "Geometry Dash"),
+        ];
+        let offered = list(windows, &processes, 0).windows;
+        let exact = WindowDef::exact(WindowFacts {
+            title: "Geometry Dash",
+            class: "GameWindow",
+            executable: "geometrydash.exe",
+        });
+        assert_eq!(matching(&offered, &exact), [3, 5]);
+        let nothing = WindowDef {
+            executable: "Other.exe".to_owned(),
+            ..exact
+        };
+        assert_eq!(matching(&offered, &nothing), [0_u64; 0]);
     }
 }

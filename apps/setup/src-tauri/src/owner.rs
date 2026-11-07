@@ -11,10 +11,14 @@ use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
+use appytappy_config::app_file::{
+    AntiCheatDef, AppFile, FORMAT, ScreenDef, SizeDef, ValueDef, WindowDef, value_id,
+};
 use appytappy_config::signal::Value;
+use appytappy_config::store::{AppStore, new_app_id};
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler, Image};
 use appytappy_sources::system::{ProcessEntry, System, WindowEntry};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::check_spec::{self, CheckSpec, RegionCheck};
@@ -91,6 +95,47 @@ impl From<Value> for Reading {
     }
 }
 
+/// A value to save, as the UI describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SaveSpec {
+    /// The saved application to add the value to, or `None` for a new one
+    /// named `name` and recognized by `window`.
+    pub(crate) app: Option<String>,
+    /// A new application's name.
+    pub(crate) name: String,
+    /// How to recognize a new application's window.
+    pub(crate) window: WindowDef,
+    /// The value's name, such as `Level percent`.
+    pub(crate) value_name: String,
+    /// The check, with the session's screenshots it names.
+    pub(crate) check: CheckSpec,
+}
+
+/// Where a value was saved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SavedValue {
+    /// The application's ID.
+    pub(crate) app: String,
+    /// The value's ID.
+    pub(crate) value: String,
+}
+
+/// A saved application, as the Values page lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppSummary {
+    /// The application's ID.
+    pub(crate) id: String,
+    /// The file, or `None` when it is broken.
+    pub(crate) file: Option<AppFile>,
+    /// Why the file is broken.
+    pub(crate) error: Option<String>,
+    /// The handles of the running windows that match, the best fit first.
+    pub(crate) windows: Vec<u64>,
+}
+
 /// A command from the UI.
 #[derive(Debug)]
 pub(crate) enum Request {
@@ -133,6 +178,32 @@ pub(crate) enum Request {
     /// What the check reads on the newest frame: `None` until a check is
     /// set up and a frame arrived.
     Reading(Reply<Result<Option<Reading>, String>>),
+    /// The handles of the running windows a window match finds, the best
+    /// fit first.
+    MatchWindows {
+        /// How to recognize the window.
+        window: WindowDef,
+        /// The handles.
+        reply: Reply<Result<Vec<u64>, String>>,
+    },
+    /// The saved applications.
+    ListApps(Reply<Result<Vec<AppSummary>, String>>),
+    /// Saves a value.
+    SaveValue {
+        /// The value.
+        spec: Box<SaveSpec>,
+        /// Where it was saved, or what to fix.
+        reply: Reply<Result<SavedValue, String>>,
+    },
+    /// Removes a saved value and the pictures only it used.
+    DeleteValue {
+        /// The application's ID.
+        app: String,
+        /// The value's ID.
+        value: String,
+        /// Answered once it is gone.
+        reply: Reply<Result<(), String>>,
+    },
 }
 
 /// What reaches the owner thread.
@@ -163,6 +234,8 @@ pub(crate) enum Message {
 #[derive(Debug)]
 pub(crate) struct Owner<H: Host> {
     host: H,
+    /// Where the applications' files live, or why that is unknown.
+    store: Result<AppStore, String>,
     /// The setup app's own process, left out of the window list.
     own_process: u32,
     /// A sender for this thread's messages, handed to each capture.
@@ -178,9 +251,15 @@ pub(crate) struct Owner<H: Host> {
 
 impl<H: Host> Owner<H> {
     /// An owner with no window picked.
-    pub(crate) const fn new(host: H, own_process: u32, messages: Sender<Message>) -> Self {
+    pub(crate) const fn new(
+        host: H,
+        store: Result<AppStore, String>,
+        own_process: u32,
+        messages: Sender<Message>,
+    ) -> Self {
         Self {
             host,
+            store,
             own_process,
             messages,
             generation: 0,
@@ -251,7 +330,119 @@ impl<H: Host> Owner<H> {
                     .map_err(|error| error.to_string()),
             ),
             Request::Reading(reply) => send(reply, self.reading()),
+            Request::MatchWindows { window, reply } => send(
+                reply,
+                self.window_list()
+                    .map(|list| window_list::matching(&list.windows, &window)),
+            ),
+            Request::ListApps(reply) => send(reply, self.apps()),
+            Request::SaveValue { spec, reply } => send(reply, self.save(&spec)),
+            Request::DeleteValue { app, value, reply } => {
+                send(reply, self.delete(&app, &value));
+            },
         }
+    }
+
+    fn store(&self) -> Result<&AppStore, String> {
+        self.store.as_ref().map_err(Clone::clone)
+    }
+
+    fn apps(&self) -> Result<Vec<AppSummary>, String> {
+        let stored = self.store()?.load().map_err(|error| error.to_string())?;
+        let windows = self.window_list()?.windows;
+        Ok(stored
+            .into_iter()
+            .map(|app| {
+                let (file, error) = match app.file {
+                    Ok(file) => (Some(file), None),
+                    Err(error) => (None, Some(error)),
+                };
+                let matched = file
+                    .as_ref()
+                    .map(|file| window_list::matching(&windows, &file.window))
+                    .unwrap_or_default();
+                AppSummary {
+                    id: app.id,
+                    file,
+                    error,
+                    windows: matched,
+                }
+            })
+            .collect())
+    }
+
+    fn save(&self, spec: &SaveSpec) -> Result<SavedValue, String> {
+        let store = self.store()?;
+        let name = spec.value_name.trim();
+        if name.is_empty() {
+            return Err("Name the value first.".to_owned());
+        }
+        let size = self
+            .latest
+            .as_ref()
+            .or_else(|| self.screenshots.last())
+            .map(Image::size)
+            .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
+        let loaded = store.load().map_err(|error| error.to_string())?;
+        let (app, mut file) = if let Some(id) = &spec.app {
+            let file = loaded
+                .into_iter()
+                .find(|app| &app.id == id)
+                .ok_or_else(|| "That application is no longer saved.".to_owned())?
+                .file?;
+            (id.clone(), file)
+        } else {
+            let taken: Vec<&str> = loaded.iter().map(|app| app.id.as_str()).collect();
+            let file = AppFile {
+                format: FORMAT,
+                name: spec.name.trim().to_owned(),
+                window: spec.window.clone(),
+                anti_cheat: AntiCheatDef::Unknown,
+                values: Vec::new(),
+            };
+            (new_app_id(&spec.window.executable, &taken), file)
+        };
+        let id = value_id(name);
+        if file.values.iter().any(|value| value.id == id) {
+            return Err(format!(
+                "{} already has a value named like \"{name}\". Pick another name.",
+                file.name
+            ));
+        }
+        let saved = check_spec::to_saved(&spec.check, &self.screenshots, &id)
+            .map_err(|error| error.to_string())?;
+        file.values.push(ValueDef {
+            id: id.clone(),
+            name: name.to_owned(),
+            screen: ScreenDef {
+                window_size: SizeDef {
+                    width: size.width,
+                    height: size.height,
+                },
+                region: saved.region,
+                check: saved.check,
+            },
+        });
+        store
+            .save(&app, &file, &saved.pictures)
+            .map_err(|error| error.to_string())?;
+        Ok(SavedValue { app, value: id })
+    }
+
+    fn delete(&self, app: &str, value: &str) -> Result<(), String> {
+        let store = self.store()?;
+        let mut file = store
+            .load()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|stored| stored.id == app)
+            .ok_or_else(|| "That application is no longer saved.".to_owned())?
+            .file?;
+        file.values.retain(|saved| saved.id != value);
+        store
+            .save(app, &file, &[])
+            .and_then(|()| store.prune(app, &file))
+            .map_err(|error| error.to_string())
     }
 
     fn window_list(&self) -> Result<WindowList, String> {
@@ -431,7 +622,21 @@ mod tests {
         closed: Receiver<u64>,
     }
 
+    /// A fresh, empty store folder for one test.
+    fn scratch_store(name: &str) -> AppStore {
+        let folder =
+            std::env::temp_dir().join(format!("appytappy-setup-{name}-{}", std::process::id()));
+        if folder.exists() {
+            std::fs::remove_dir_all(&folder).expect("remove leftovers");
+        }
+        AppStore::new(folder)
+    }
+
     fn harness(refuse: bool) -> Harness {
+        harness_with(refuse, Err("no store in this test".to_owned()))
+    }
+
+    fn harness_with(refuse: bool, store: Result<AppStore, String>) -> Harness {
         let (sender, messages) = mpsc::channel();
         let (handler_sender, handlers) = mpsc::channel();
         let (closed_sender, closed) = mpsc::channel();
@@ -441,7 +646,7 @@ mod tests {
             refuse,
         };
         Harness {
-            owner: Owner::new(host, 99, sender),
+            owner: Owner::new(host, store, 99, sender),
             messages,
             handlers,
             closed,
@@ -659,6 +864,146 @@ mod tests {
         let flag = serde_json::to_string(&Reading::Flag(true)).expect("serializes");
         assert_eq!(number, r#"{"kind":"number","value":87.0}"#);
         assert_eq!(flag, r#"{"kind":"flag","value":true}"#);
+    }
+
+    fn spec(app: Option<&str>, value_name: &str, check: &str) -> Box<SaveSpec> {
+        Box::new(SaveSpec {
+            app: app.map(str::to_owned),
+            name: " Geometry Dash ".to_owned(),
+            window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                title: "Geometry Dash",
+                class: "GLFW30",
+                executable: "GeometryDash.exe",
+            }),
+            value_name: value_name.to_owned(),
+            check: serde_json::from_str(check).expect("valid JSON"),
+        })
+    }
+
+    const REFERENCE: &str = r#"{"kind":"reference","region":{"x":0,"y":0,"width":2,"height":2},
+        "screenshot":0,"tolerance":0}"#;
+    const BAR: &str = r#"{"kind":"barFill","region":{"x":0,"y":0,"width":4,"height":2},
+        "filled":{"red":255,"green":0,"blue":0},"empty":{"red":40,"green":40,"blue":40}}"#;
+
+    #[test]
+    fn saved_values_are_listed_with_their_running_windows_and_can_be_removed() {
+        let store = scratch_store("save");
+        let root = store.folder("");
+        let mut harness = harness_with(false, Ok(store));
+        let mut handler = harness.pick();
+        let save = |spec| move |reply| Request::SaveValue { spec, reply };
+        assert_eq!(
+            harness.ask(save(spec(None, "In a level", REFERENCE))),
+            Err("No frame has arrived from the window yet.".to_owned())
+        );
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(
+            harness.ask(save(spec(None, "  ", REFERENCE))),
+            Err("Name the value first.".to_owned())
+        );
+        let saved = harness
+            .ask(save(spec(None, "In a level", REFERENCE)))
+            .expect("saves a new app");
+        assert_eq!(
+            saved,
+            SavedValue {
+                app: "geometrydash".to_owned(),
+                value: "in_a_level".to_owned()
+            }
+        );
+        harness
+            .ask(save(spec(Some("geometrydash"), "Level bar", BAR)))
+            .expect("adds to the app");
+        assert_eq!(
+            harness.ask(save(spec(Some("geometrydash"), "Level BAR", BAR))),
+            Err(
+                "Geometry Dash already has a value named like \"Level BAR\". Pick another name."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            harness.ask(save(spec(Some("gone"), "x", BAR))),
+            Err("That application is no longer saved.".to_owned())
+        );
+
+        let apps = harness.ask(Request::ListApps).expect("lists");
+        assert_eq!(apps.len(), 1);
+        let app = &apps[0];
+        assert_eq!((app.id.as_str(), &app.error), ("geometrydash", &None));
+        assert_eq!(app.windows, [7]);
+        let file = app.file.as_ref().expect("a good file");
+        assert_eq!(file.name, "Geometry Dash");
+        let ids: Vec<&str> = file.values.iter().map(|value| value.id.as_str()).collect();
+        assert_eq!(ids, ["in_a_level", "level_bar"]);
+        assert_eq!(
+            file.values[0].screen.window_size,
+            SizeDef {
+                width: 4,
+                height: 2
+            }
+        );
+        let folder = root.join("geometrydash");
+        assert!(folder.join("in_a_level.png").exists());
+
+        harness
+            .ask(|reply| Request::DeleteValue {
+                app: "geometrydash".to_owned(),
+                value: "in_a_level".to_owned(),
+                reply,
+            })
+            .expect("removes");
+        assert!(!folder.join("in_a_level.png").exists());
+        let apps = harness.ask(Request::ListApps).expect("lists");
+        let file = apps[0].file.as_ref().expect("a good file");
+        assert_eq!(file.values.len(), 1);
+        assert_eq!(
+            harness.ask(|reply| Request::DeleteValue {
+                app: "gone".to_owned(),
+                value: "x".to_owned(),
+                reply,
+            }),
+            Err("That application is no longer saved.".to_owned())
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn without_a_store_saving_and_listing_say_why() {
+        let mut harness = harness(false);
+        assert_eq!(
+            harness.ask(Request::ListApps),
+            Err("no store in this test".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::SaveValue {
+                spec: spec(None, "x", BAR),
+                reply
+            }),
+            Err("no store in this test".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::DeleteValue {
+                app: "a".to_owned(),
+                value: "b".to_owned(),
+                reply
+            }),
+            Err("no store in this test".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_window_match_finds_the_running_window() {
+        let mut harness = harness(false);
+        let window = WindowDef::exact(appytappy_config::window_match::WindowFacts {
+            title: "Geometry Dash",
+            class: "GLFW30",
+            executable: "GeometryDash.exe",
+        });
+        assert_eq!(
+            harness.ask(|reply| Request::MatchWindows { window, reply }),
+            Ok(vec![7])
+        );
     }
 
     #[test]

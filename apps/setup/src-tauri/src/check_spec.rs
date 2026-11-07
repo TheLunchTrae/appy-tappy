@@ -8,6 +8,7 @@
 use std::error::Error;
 use std::fmt;
 
+use appytappy_config::app_file::{CheckDef, ColorDef, RegionDef, SampleDef};
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ReferenceMatch};
 use appytappy_sources::screen::digits::{DigitReader, LearnError};
 use appytappy_sources::screen::{Image, Region};
@@ -29,6 +30,16 @@ pub(crate) struct ColorSpec {
     red: u8,
     green: u8,
     blue: u8,
+}
+
+impl From<ColorSpec> for ColorDef {
+    fn from(color: ColorSpec) -> Self {
+        Self {
+            red: color.red,
+            green: color.green,
+            blue: color.blue,
+        }
+    }
 }
 
 impl From<ColorSpec> for Rgb {
@@ -88,6 +99,101 @@ pub(crate) struct RegionCheck {
     pub(crate) region: Region,
     /// The check.
     pub(crate) check: Check,
+}
+
+/// A check ready to save: the region, the check as the file spells it, and
+/// the pictures it names, each as a file name and PNG bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SavedCheck {
+    /// The region the check reads.
+    pub(crate) region: RegionDef,
+    /// The check.
+    pub(crate) check: CheckDef,
+    /// The pictures `check` names.
+    pub(crate) pictures: Vec<(String, Vec<u8>)>,
+}
+
+/// Turns `spec` into the saved form for the value `id`, cutting its pictures
+/// from the session's `screenshots` at the region. Pictures are named after
+/// the value: `id.png` for a reference, `id-1.png` onward for a number's
+/// samples.
+///
+/// # Errors
+///
+/// Returns the [`SpecError`] that [`build`] would, so only a check that
+/// works is saved, or [`SpecError::Picture`] when a picture cannot be
+/// encoded.
+pub(crate) fn to_saved(
+    spec: &CheckSpec,
+    screenshots: &[Image],
+    id: &str,
+) -> Result<SavedCheck, SpecError> {
+    let built = build(spec, screenshots)?;
+    let picture = |screenshot: usize| {
+        screenshots
+            .get(screenshot)
+            .and_then(|image| image.crop(built.region))
+            .ok_or(SpecError::NoScreenshot)?
+            .encode_png()
+            .map_err(|_encode| SpecError::Picture)
+    };
+    let mut pictures = Vec::new();
+    let check = match spec {
+        CheckSpec::Number {
+            ink,
+            tolerance,
+            labels,
+            ..
+        } => {
+            let mut samples = Vec::new();
+            for (number, label) in (1_u32..).zip(labels) {
+                let image = format!("{id}-{number}.png");
+                pictures.push((image.clone(), picture(label.screenshot)?));
+                samples.push(SampleDef {
+                    image,
+                    text: label.text.clone(),
+                });
+            }
+            CheckDef::Number {
+                ink: (*ink).into(),
+                tolerance: *tolerance,
+                samples,
+            }
+        },
+        CheckSpec::BarFill { filled, empty, .. } => CheckDef::BarFill {
+            filled: (*filled).into(),
+            empty: (*empty).into(),
+        },
+        CheckSpec::Color {
+            color, tolerance, ..
+        } => CheckDef::Color {
+            color: (*color).into(),
+            tolerance: *tolerance,
+        },
+        CheckSpec::Reference {
+            screenshot,
+            tolerance,
+            ..
+        } => {
+            let image = format!("{id}.png");
+            pictures.push((image.clone(), picture(*screenshot)?));
+            CheckDef::Reference {
+                image,
+                tolerance: *tolerance,
+            }
+        },
+    };
+    let size = built.region.size();
+    Ok(SavedCheck {
+        region: RegionDef {
+            x: built.region.x(),
+            y: built.region.y(),
+            width: size.width,
+            height: size.height,
+        },
+        check,
+        pictures,
+    })
 }
 
 /// Builds the check `spec` describes from the session's `screenshots`.
@@ -170,6 +276,8 @@ pub(crate) enum SpecError {
     SameColors,
     /// A number check has no labeled screenshot to learn from.
     NoLabels,
+    /// A picture could not be encoded as PNG.
+    Picture,
     /// A number check could not learn from a label.
     Learn {
         /// The text the user typed.
@@ -195,6 +303,7 @@ impl fmt::Display for SpecError {
             Self::NoLabels => {
                 formatter.write_str("Type what the region shows on at least one screenshot.")
             },
+            Self::Picture => formatter.write_str("A picture of the region could not be saved."),
             Self::Learn { text, source } => {
                 write!(formatter, "Could not learn from \"{text}\": {source}")
             },
@@ -414,6 +523,132 @@ mod tests {
                     blue: 6
                 },
             }
+        );
+    }
+
+    #[test]
+    fn a_saved_number_names_one_picture_per_label() {
+        let spec = CheckSpec::Number {
+            region: RegionSpec {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            },
+            ink: RED,
+            tolerance: 0,
+            labels: vec![Label {
+                screenshot: 0,
+                text: "1".to_owned(),
+            }],
+        };
+        let saved = to_saved(&spec, &[screenshot()], "level_percent").expect("valid number");
+        assert_eq!(
+            saved.region,
+            RegionDef {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2
+            }
+        );
+        let CheckDef::Number {
+            ink,
+            tolerance,
+            samples,
+        } = &saved.check
+        else {
+            panic!("a number: {:?}", saved.check);
+        };
+        assert_eq!((*ink, *tolerance), (ColorDef::from(RED), 0));
+        assert_eq!(
+            samples,
+            &[SampleDef {
+                image: "level_percent-1.png".to_owned(),
+                text: "1".to_owned(),
+            }]
+        );
+        assert_eq!(saved.pictures.len(), 1);
+        assert_eq!(saved.pictures[0].0, "level_percent-1.png");
+        // A PNG keeps the colors and drops the unused fourth byte.
+        let picture = Image::decode_png(&saved.pictures[0].1).expect("a PNG");
+        let cropped = screenshot()
+            .crop(Region::new(0, 0, 2, 2).expect("not empty"))
+            .expect("inside the screenshot");
+        assert_eq!(picture.size(), cropped.size());
+        let colors = |image: &Image| -> Vec<[u8; 3]> {
+            image
+                .pixels()
+                .iter()
+                .map(|&[blue, green, red, _]| [blue, green, red])
+                .collect()
+        };
+        assert_eq!(colors(&picture), colors(&cropped));
+    }
+
+    #[test]
+    fn saved_checks_keep_their_settings() {
+        let region = RegionSpec {
+            x: 2,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        let reference = CheckSpec::Reference {
+            region,
+            screenshot: 0,
+            tolerance: 7,
+        };
+        let saved = to_saved(&reference, &[screenshot()], "in_level").expect("valid");
+        assert_eq!(
+            saved.check,
+            CheckDef::Reference {
+                image: "in_level.png".to_owned(),
+                tolerance: 7
+            }
+        );
+        assert_eq!(saved.pictures[0].0, "in_level.png");
+        assert_eq!((saved.region.x, saved.region.width), (2, 2));
+
+        let bar = CheckSpec::BarFill {
+            region,
+            filled: RED,
+            empty: GRAY,
+        };
+        let saved = to_saved(&bar, &[], "bar").expect("valid");
+        assert_eq!(
+            saved.check,
+            CheckDef::BarFill {
+                filled: RED.into(),
+                empty: GRAY.into()
+            }
+        );
+        assert_eq!(saved.pictures, Vec::<(String, Vec<u8>)>::new());
+
+        let color = CheckSpec::Color {
+            region,
+            color: GRAY,
+            tolerance: 4,
+        };
+        assert_eq!(
+            to_saved(&color, &[], "color").expect("valid").check,
+            CheckDef::Color {
+                color: GRAY.into(),
+                tolerance: 4
+            }
+        );
+        assert_eq!(
+            to_saved(&bar, &[], "bar").map(|saved| saved.region),
+            Ok(RegionDef {
+                x: 2,
+                y: 0,
+                width: 2,
+                height: 2
+            })
+        );
+        assert_eq!(
+            SpecError::Picture.to_string(),
+            "A picture of the region could not be saved."
         );
     }
 }
