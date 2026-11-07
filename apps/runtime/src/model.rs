@@ -17,10 +17,10 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_engine::{Effect, Session};
 
-use crate::act::Job;
 use crate::lifecycle::Change;
 use crate::plan::AppPlan;
-use crate::reader::{self, SessionId};
+use crate::workers::act::Job;
+use crate::workers::reader::{self, SessionId};
 
 /// The runtime's state, as the log and the tray report it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
