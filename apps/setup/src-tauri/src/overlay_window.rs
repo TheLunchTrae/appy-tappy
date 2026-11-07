@@ -2,18 +2,22 @@
 //! own, one for each application whose overlay is on.
 //!
 //! In overlay mode the window is transparent, lets clicks through, never
-//! takes the focus and has no taskbar entry; it sits on the application's
-//! window while that window is in front, and hides otherwise. In
-//! picture-in-picture mode it is a small panel the user moves and resizes,
-//! which stays on top and remembers its place. Neither hooks, injects into
-//! or opens anything in the application's process.
+//! takes the focus and has no taskbar entry. It is only as big as its card,
+//! and a thread of its own puts it in the corner of the application's window
+//! while that window is in front, and off the screen otherwise, so it never
+//! has to be shown again, which could take the focus. In picture-in-picture
+//! mode it is a small panel the user moves and resizes, which stays on top
+//! and remembers its place. Neither hooks, injects into or opens anything
+//! in the application's process.
 
 use std::collections::BTreeSet;
+use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use appytappy_config::app_file::{OverlayModeDef, PanelDef};
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder, Window, WindowEvent,
+    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Runtime,
+    WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window, WindowEvent,
 };
 use tokio::sync::oneshot;
 
@@ -37,8 +41,41 @@ const PANEL_SIZE: (f64, f64) = (260.0, 200.0);
 /// The smallest a panel gets, in logical pixels.
 const PANEL_MIN: (f64, f64) = (160.0, 90.0);
 
+/// How much of a saved panel, in physical pixels each way, has to lie in a
+/// monitor's work area for it to open there: enough to grab its title bar.
+const PANEL_REACH: i64 = 48;
+
+/// The size an overlay window has before its card is measured, in logical
+/// pixels: room for the card to take its own size.
+const OVERLAY_START: (f64, f64) = (400.0, 400.0);
+
+/// How far the card sits from the application window's corner, in logical
+/// pixels, past the border Windows leaves around a window.
+const CARD_INSET: f64 = 16.0;
+
+/// Where an overlay window waits while it should not show: off every
+/// screen, where Windows also puts minimized windows.
+const OFF_SCREEN: PhysicalPosition<i32> = PhysicalPosition::new(-32_000, -32_000);
+
+/// How often an overlay window looks for where its application's window is:
+/// often enough to keep up with a dragged window.
+const FOLLOW_INTERVAL: Duration = Duration::from_millis(50);
+
+/// A rectangle in physical screen pixels, such as a monitor's work area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Area {
+    /// The left edge.
+    pub(crate) x: i32,
+    /// The top edge.
+    pub(crate) y: i32,
+    /// The width.
+    pub(crate) width: u32,
+    /// The height.
+    pub(crate) height: u32,
+}
+
 /// The label of `app`'s window for `mode`. Application IDs hold only
-/// lowercase letters, digits and dashes, which labels allow.
+/// lowercase letters, digits, dashes and underscores, which labels allow.
 pub(crate) fn label(app: &str, mode: OverlayModeDef) -> String {
     match mode {
         OverlayModeDef::Overlay => format!("{OVERLAY_PREFIX}{app}"),
@@ -95,21 +132,29 @@ pub(crate) fn sync<R: Runtime>(
             window.destroy()?;
         }
     }
-    let monitors: Vec<Place> = handle
+    let areas: Vec<Area> = handle
         .available_monitors()?
-        .into_iter()
-        .map(|monitor| Place {
-            x: monitor.position().x,
-            y: monitor.position().y,
-            width: monitor.size().width,
-            height: monitor.size().height,
-            front: false,
+        .iter()
+        .map(|monitor| {
+            let area = monitor.work_area();
+            Area {
+                x: area.position.x,
+                y: area.position.y,
+                width: area.size.width,
+                height: area.size.height,
+            }
         })
         .collect();
     for overlay in wanted {
         let label = label(&overlay.app, overlay.mode);
         if handle.get_webview_window(&label).is_none() {
-            open(handle, &label, overlay, &monitors)?;
+            let opened = open(handle, &label, overlay, &areas);
+            // Two syncs can race to open the same window, such as one from
+            // the main window opening and one from a changed setting; the
+            // window the other opened is the one wanted.
+            if opened.is_err() && handle.get_webview_window(&label).is_none() {
+                return opened;
+            }
         }
     }
     Ok(())
@@ -122,15 +167,16 @@ fn open<R: Runtime>(
     handle: &AppHandle<R>,
     label: &str,
     overlay: &OverlayWindow,
-    monitors: &[Place],
+    areas: &[Area],
 ) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(handle, label, WebviewUrl::App("index.html".into()))
         .always_on_top(true)
         .skip_taskbar(true)
-        .focused(false)
-        .visible(false);
+        .focused(false);
     match overlay.mode {
         OverlayModeDef::Overlay => {
+            // Shown once, off the screen, while it is created: a window shown
+            // later takes the focus. Its thread moves it from then on.
             let window = builder
                 .title(format!("{} overlay", overlay.name))
                 .transparent(true)
@@ -138,10 +184,17 @@ fn open<R: Runtime>(
                 .shadow(false)
                 .resizable(false)
                 .focusable(false)
+                .inner_size(OVERLAY_START.0, OVERLAY_START.1)
+                .visible(true)
                 .build()?;
-            // Clicks reach the application under it. It shows once its
-            // first poll finds the application's window in front.
+            window.set_position(OFF_SCREEN)?;
+            // Clicks reach the application under it.
             window.set_ignore_cursor_events(true)?;
+            let messages = handle.state::<Bridge>().0.clone();
+            let app = overlay.app.clone();
+            std::thread::Builder::new()
+                .name(format!("overlay {app}"))
+                .spawn(move || follow_while_open(&window, &app, &messages))?;
         },
         OverlayModeDef::PictureInPicture => {
             let window = builder
@@ -151,8 +204,9 @@ fn open<R: Runtime>(
                 .minimizable(false)
                 .maximizable(false)
                 .closable(false)
+                .visible(false)
                 .build()?;
-            if let Some(panel) = overlay.panel.filter(|panel| on_a_monitor(*panel, monitors)) {
+            if let Some(panel) = overlay.panel.filter(|panel| in_reach(*panel, areas)) {
                 window.set_position(PhysicalPosition::new(panel.x, panel.y))?;
                 window.set_size(PhysicalSize::new(panel.width, panel.height))?;
             }
@@ -162,46 +216,88 @@ fn open<R: Runtime>(
     Ok(())
 }
 
-/// Whether some of `panel` lies on one of `monitors`, so a panel left on a
-/// monitor that was unplugged opens where the user can see it.
-pub(crate) fn on_a_monitor(panel: PanelDef, monitors: &[Place]) -> bool {
-    let edge = |start: i32, length: u32| i64::from(start).saturating_add(i64::from(length));
-    monitors.iter().any(|monitor| {
-        i64::from(panel.x) < edge(monitor.x, monitor.width)
-            && edge(panel.x, panel.width) > i64::from(monitor.x)
-            && i64::from(panel.y) < edge(monitor.y, monitor.height)
-            && edge(panel.y, panel.height) > i64::from(monitor.y)
+/// Whether enough of `panel` lies in one of the monitors' work `areas` for
+/// the user to grab it, so a panel left on a monitor that was unplugged, or
+/// under the taskbar, opens where the user can reach it.
+pub(crate) fn in_reach(panel: PanelDef, areas: &[Area]) -> bool {
+    let overlap = |start: i32, length: u32, area_start: i32, area_length: u32| {
+        let end = i64::from(start).saturating_add(i64::from(length));
+        let area_end = i64::from(area_start).saturating_add(i64::from(area_length));
+        end.min(area_end)
+            .saturating_sub(i64::from(start).max(i64::from(area_start)))
+    };
+    areas.iter().any(|area| {
+        overlap(panel.x, panel.width, area.x, area.width) >= PANEL_REACH
+            && overlap(panel.y, panel.height, area.y, area.height) >= PANEL_REACH
     })
 }
 
-/// Puts an overlay-mode `window` on its application's window while that
-/// window is in front, and hides it otherwise. It needs a running app, so
-/// no unit test can reach it.
+/// Asks the owner where `app`'s overlay goes and puts `window` there, until
+/// the window or the owner is gone. It runs on the window's own thread, so
+/// the window keeps up with the application's even while its page is
+/// throttled.
+#[mutants::skip]
+fn follow_while_open<R: Runtime>(window: &WebviewWindow<R>, app: &str, messages: &Sender<Message>) {
+    loop {
+        if window
+            .app_handle()
+            .get_webview_window(window.label())
+            .is_none()
+        {
+            return;
+        }
+        let (reply, answer) = oneshot::channel();
+        let request = Request::OverlayPlace {
+            app: app.to_owned(),
+            reply,
+        };
+        if messages.send(Message::Request(request)).is_err() {
+            return;
+        }
+        let Ok(place) = answer.blocking_recv() else {
+            return;
+        };
+        if follow(window, place).is_err() {
+            return;
+        }
+        std::thread::sleep(FOLLOW_INTERVAL);
+    }
+}
+
+/// Puts an overlay-mode `window` in the corner of its application's window,
+/// at its card's size, or off the screen with `None`. It needs a running
+/// app, so no unit test can reach it.
 ///
 /// # Errors
 ///
-/// Returns Tauri's error when the window cannot be moved, shown or hidden.
+/// Returns Tauri's error when the window cannot be moved or resized.
 #[mutants::skip]
-pub(crate) fn follow<R: Runtime>(
-    window: &WebviewWindow<R>,
-    place: Option<Place>,
-) -> tauri::Result<()> {
-    let Some(place) = place.filter(|place| place.front) else {
-        if window.is_visible()? {
-            window.hide()?;
+fn follow<R: Runtime>(window: &WebviewWindow<R>, place: Option<Place>) -> tauri::Result<()> {
+    let Some(place) = place else {
+        if window.outer_position()? != OFF_SCREEN {
+            window.set_position(OFF_SCREEN)?;
         }
         return Ok(());
     };
-    let position = PhysicalPosition::new(place.x, place.y);
-    let size = PhysicalSize::new(place.width, place.height);
-    if window.outer_position()? != position {
-        window.set_position(position)?;
-    }
+    // The card takes the scale of the monitor it goes onto.
+    let scale = match window.monitor_from_point(f64::from(place.x), f64::from(place.y))? {
+        Some(monitor) => monitor.scale_factor(),
+        None => window.scale_factor()?,
+    };
+    let card: PhysicalSize<u32> =
+        LogicalSize::new(place.card.width.ceil(), place.card.height.ceil()).to_physical(scale);
+    let inset: PhysicalPosition<i32> =
+        LogicalPosition::new(CARD_INSET, CARD_INSET).to_physical(scale);
+    let size = PhysicalSize::new(card.width.min(place.width), card.height.min(place.height));
+    let position = PhysicalPosition::new(
+        place.x.saturating_add(inset.x),
+        place.y.saturating_add(inset.y),
+    );
     if window.inner_size()? != size {
         window.set_size(size)?;
     }
-    if !window.is_visible()? {
-        window.show()?;
+    if window.outer_position()? != position {
+        window.set_position(position)?;
     }
     Ok(())
 }
@@ -216,7 +312,7 @@ pub(crate) fn on_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     match event {
         WindowEvent::Destroyed if label == MAIN => window.app_handle().exit(0),
         WindowEvent::Destroyed => {
-            if let Some((app, _mode)) = parse_label(label) {
+            if let Some((app, mode)) = parse_label(label) {
                 let (reply, _answer) = oneshot::channel();
                 #[expect(
                     clippy::let_underscore_must_use,
@@ -224,6 +320,7 @@ pub(crate) fn on_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
                 )]
                 let _ = bridge.0.send(Message::Request(Request::CloseOverlay {
                     app: app.to_owned(),
+                    mode,
                     reply,
                 }));
             }
@@ -296,30 +393,32 @@ mod tests {
     }
 
     #[test]
-    fn a_panel_opens_where_it_was_only_while_that_place_is_on_a_monitor() {
-        let monitor = |x, y| Place {
+    fn a_panel_opens_where_it_was_only_while_the_user_can_reach_it() {
+        let area = |x, y| Area {
             x,
             y,
             width: 1920,
-            height: 1080,
-            front: false,
+            height: 1040,
         };
-        let monitors = [monitor(0, 0), monitor(-1920, 0)];
+        let areas = [area(0, 0), area(-1920, 0)];
         let panel = |x, y| PanelDef {
             x,
             y,
             width: 260,
             height: 200,
         };
-        assert!(on_a_monitor(panel(100, 100), &monitors));
-        assert!(on_a_monitor(panel(-1800, 900), &monitors));
-        // Partly on the left monitor's right edge.
-        assert!(on_a_monitor(panel(-261 + 2, 0), &monitors[1..]));
-        // Just past each edge.
-        assert!(!on_a_monitor(panel(1920, 0), &monitors));
-        assert!(!on_a_monitor(panel(-2180, 0), &monitors));
-        assert!(!on_a_monitor(panel(0, 1080), &monitors));
-        assert!(!on_a_monitor(panel(0, -200), &monitors));
-        assert!(!on_a_monitor(panel(100, 100), &[]));
+        assert!(in_reach(panel(100, 100), &areas));
+        assert!(in_reach(panel(-1800, 800), &areas));
+        // Just enough of it on the right monitor's left edge, and just too
+        // little.
+        assert!(in_reach(panel(-212, 0), &areas[..1]));
+        assert!(!in_reach(panel(-213, 0), &areas[..1]));
+        assert!(in_reach(panel(1872, 0), &areas));
+        assert!(!in_reach(panel(1873, 0), &areas));
+        // Under the taskbar, below the work area.
+        assert!(in_reach(panel(0, 992), &areas));
+        assert!(!in_reach(panel(0, 993), &areas));
+        assert!(!in_reach(panel(0, -153), &areas));
+        assert!(!in_reach(panel(100, 100), &[]));
     }
 }

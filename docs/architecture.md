@@ -456,12 +456,18 @@ is more windows of the setup app, one for each application whose overlay is
 on, so nothing is hooked or injected into the application. Each window loads
 the same UI, which renders only the readings when its label names an
 application. The owner thread keeps one capture for each overlay, of the
-smallest region that holds all of the application's values, and the capture
-thread reads the values from each frame, so only the readings cross to the
-owner. The window over the application is transparent, lets clicks through,
-and cannot take the focus; it asks the owner where the application's window
-is on each poll and follows it. The picture-in-picture panel reports where it
-was moved, and the owner saves that once the panel stops moving.
+smallest region that holds the values drawn at the window's current size, and
+the capture thread reads them from each frame, so only the readings cross to
+the owner. The window over the application is transparent, lets clicks
+through, and cannot take the focus. It is shown once, off the screen, and a
+thread of its own asks the owner over the channel where it goes about twenty
+times a second: the corner of the application's window while that window is in
+front, at the size its page measured for the card, and off the screen
+otherwise. Moving it never shows it again, which could take the focus, and a
+page that the webview throttles cannot hold it back. `sources` answers where
+one window is with a few calls about that window alone, so following it costs
+no listing of every window. The picture-in-picture panel reports where it was
+moved, and the owner saves that once the panel stops moving.
 
 ## Unsafe code
 

@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { type OverlayMode, type OverlayView, errorText, overlayState } from './api.ts';
+import { type OverlayMode, type OverlayView, errorText, overlayCard, overlayState } from './api.ts';
 import { readingText } from './automation.ts';
-import { useRepeat } from './repeat.ts';
+import { background, useRepeat } from './repeat.ts';
 
-/** How long the overlay waits between two polls: often enough to follow a dragged window. */
-const POLL_MS = 100;
+/** How long the overlay waits between two polls; its readings change at most about four times a second. */
+const POLL_MS = 150;
 
 interface Props {
   readonly app: string;
@@ -21,6 +21,23 @@ export function Overlay({ app, mode }: Props) {
   useEffect(() => {
     document.documentElement.classList.add(mode === 'overlay' ? 'overlay-page' : 'panel-page');
   }, [mode]);
+
+  // The window over the application is only as big as the card, so the setup app is told each size it takes.
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = card.current;
+    if (mode !== 'overlay' || element === null) {
+      return undefined;
+    }
+    const observer = new ResizeObserver(() => {
+      const { width, height } = element.getBoundingClientRect();
+      background(overlayCard(app, width, height));
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [app, mode]);
 
   useRepeat(
     async () => {
@@ -38,7 +55,11 @@ export function Overlay({ app, mode }: Props) {
   // A message says why there are no readings, so the values are left out under it.
   const message = error ?? view?.message ?? null;
   return (
-    <section className={mode === 'overlay' ? 'overlay-card' : 'panel-card'} aria-label={view?.name ?? 'Live values'}>
+    <section
+      ref={card}
+      className={mode === 'overlay' ? 'overlay-card' : 'panel-card'}
+      aria-label={view?.name ?? 'Live values'}
+    >
       {mode === 'overlay' && view !== null ? <h1 className="overlay-name">{view.name}</h1> : null}
       {message === null ? null : <p className="overlay-message">{message}</p>}
       {message !== null || view === null || view.values.length === 0 ? null : (

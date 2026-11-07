@@ -74,6 +74,7 @@ fn main() -> ExitCode {
             commands::sync_overlays,
             commands::set_overlay,
             commands::overlay_state,
+            commands::overlay_card,
         ])
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));

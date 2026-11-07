@@ -499,7 +499,7 @@ mod tests {
     use appytappy_sources::screen::saved::SavedCheck;
     use appytappy_sources::screen::{FrameHandler, Image};
     use appytappy_sources::system::{
-        AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry,
+        AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry, WindowPlace,
     };
 
     use super::*;
@@ -856,7 +856,7 @@ mod tests {
             answered.recv().map_err(|_gone| gone())?
         }
 
-        fn foreground_window(&self) -> io::Result<Option<u64>> {
+        fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 

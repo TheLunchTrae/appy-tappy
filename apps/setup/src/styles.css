@@ -939,17 +939,16 @@ select {
 }
 
 /* Overlay: the live readings on top of an application, in a window of their own */
+/* The window is only as big as the card, which takes its own size whatever the window's. */
 .overlay-page,
 .overlay-page body {
+  overflow: hidden;
   background: transparent;
 }
 
-.overlay-page #root {
-  padding: 16px;
-}
-
 .overlay-card {
-  display: inline-flex;
+  display: flex;
+  width: max-content;
   flex-direction: column;
   gap: 4px;
   min-width: 150px;

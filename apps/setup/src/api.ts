@@ -292,7 +292,12 @@ export async function setOverlay(application: string, enabled: boolean, mode: Ov
   await invoke('set_overlay', { application, enabled, mode });
 }
 
-/** What an application's overlay shows now; in overlay mode, its window also moves onto the application's. */
+/** What an application's overlay shows now. */
 export async function overlayState(application: string): Promise<OverlayView> {
   return invoke<OverlayView>('overlay_state', { application });
+}
+
+/** Tells the setup app the size of an overlay's card in CSS pixels, which its window over the application takes. */
+export async function overlayCard(application: string, width: number, height: number): Promise<void> {
+  await invoke('overlay_card', { application, width, height });
 }

@@ -771,7 +771,7 @@ mod tests {
     use std::sync::mpsc;
 
     use appytappy_sources::memory::{PointerWidth, Region};
-    use appytappy_sources::system::{Bounds, Rgb, WindowEntry};
+    use appytappy_sources::system::{Bounds, Rgb, WindowEntry, WindowPlace};
 
     use super::*;
 
@@ -863,7 +863,7 @@ mod tests {
             ])
         }
 
-        fn foreground_window(&self) -> io::Result<Option<u64>> {
+        fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 

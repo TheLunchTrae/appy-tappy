@@ -12,12 +12,12 @@ use std::sync::mpsc::Sender;
 use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use tauri::ipc::Response;
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 
 use crate::automations::AutomationSummary;
 use crate::check_spec::CheckSpec;
-use crate::overlay::OverlayView;
+use crate::overlay::{Card, OverlayView};
 use crate::overlay_window;
 use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
 use crate::window_list::WindowList;
@@ -261,22 +261,32 @@ pub(crate) async fn set_overlay(
     sync_overlays(app).await
 }
 
-/// What `application`'s overlay shows now. In overlay mode, the window that
-/// asks moves onto the application's window, or hides while it is not in
-/// front.
+/// What `application`'s overlay shows now.
 #[tauri::command]
 pub(crate) async fn overlay_state(
     app: AppHandle,
-    window: WebviewWindow,
     application: String,
 ) -> Result<OverlayView, String> {
-    let view = ask(&app, |reply| Request::OverlayState {
+    ask(&app, |reply| Request::OverlayState {
         app: application,
         reply,
     })
-    .await??;
-    if view.mode == OverlayModeDef::Overlay {
-        overlay_window::follow(&window, view.place).map_err(|error| error.to_string())?;
-    }
-    Ok(view)
+    .await?
+}
+
+/// Keeps the size of `application`'s overlay card in logical pixels, which
+/// its window over the application takes.
+#[tauri::command]
+pub(crate) async fn overlay_card(
+    app: AppHandle,
+    application: String,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    ask(&app, |reply| Request::OverlayCard {
+        app: application,
+        card: Card { width, height },
+        reply,
+    })
+    .await
 }

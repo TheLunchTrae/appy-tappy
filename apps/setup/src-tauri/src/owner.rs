@@ -25,13 +25,13 @@ use appytappy_sources::screen::saved;
 use appytappy_sources::screen::{
     Capture, CaptureSession, Crop, Frame, FrameHandler, Image, OutsideWindow, Size,
 };
-use appytappy_sources::system::{ProcessEntry, System, WindowEntry, best_window};
+use appytappy_sources::system::{ProcessEntry, System, WindowEntry, WindowPlace, best_window};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::automations::{self, AutomationSummary, Stores};
 use crate::check_spec::{self, CheckSpec, RegionCheck};
-use crate::overlay::{self, OverlayView, OverlayWindow, Overlays, ValueRead};
+use crate::overlay::{self, Card, FrameRead, OverlayView, OverlayWindow, Overlays, Place};
 use crate::pixels;
 use crate::window_list::{self, WindowList};
 
@@ -63,12 +63,12 @@ pub(crate) trait Host {
     /// Returns the operating system's error.
     fn processes(&self) -> io::Result<Vec<ProcessEntry>>;
 
-    /// The handle of the window in front, or `None` when there is none.
+    /// Where `window` is and whether it shows, or `None` once it closed.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error.
-    fn foreground_window(&self) -> io::Result<Option<u64>>;
+    fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
     /// Starts capturing `crop` of `window`, calling `handler` with frames at
     /// most every `interval`.
@@ -96,8 +96,8 @@ impl<T: System + Capture> Host for T {
         System::processes(self)
     }
 
-    fn foreground_window(&self) -> io::Result<Option<u64>> {
-        System::foreground_window(self)
+    fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
+        System::window_place(self, window)
     }
 
     fn capture(
@@ -394,10 +394,31 @@ pub(crate) enum Request {
         /// What it shows, or why it cannot.
         reply: Reply<Result<OverlayView, String>>,
     },
+    /// Where an application's overlay goes over its window now, or `None`
+    /// while it should not show.
+    OverlayPlace {
+        /// The application's ID.
+        app: String,
+        /// Where it goes.
+        reply: Reply<Option<Place>>,
+    },
+    /// The size an application's overlay card takes, as its page measured
+    /// it.
+    OverlayCard {
+        /// The application's ID.
+        app: String,
+        /// The card's size.
+        card: Card,
+        /// Answered once it is kept.
+        reply: Reply<()>,
+    },
     /// Stops an application's overlay once its window closed.
     CloseOverlay {
         /// The application's ID.
         app: String,
+        /// The mode of the window that closed. An overlay open in the other
+        /// mode belongs to the window that replaced it, and stays.
+        mode: OverlayModeDef,
         /// Answered once it stopped.
         reply: Reply<()>,
     },
@@ -437,8 +458,8 @@ pub(crate) enum Message {
         /// Which of its captures sent it; readings from an earlier one are
         /// dropped.
         generation: u64,
-        /// Each value's reading, or why the capture stopped.
-        read: Result<Vec<ValueRead>, String>,
+        /// What the frame read, or why the capture stopped.
+        read: Result<FrameRead, String>,
     },
     /// The user moved or resized an application's picture-in-picture
     /// panel.
@@ -560,18 +581,32 @@ impl<H: Host> Owner<H> {
     ///
     /// Returns the error the capture's thread ended with.
     pub(crate) fn close(&mut self) -> io::Result<()> {
+        self.session.take().map_or(Ok(()), CaptureSession::close)
+    }
+
+    /// Saves where each panel is, closes the overlays, and stops the
+    /// capture, as the app ends.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error the capture's thread ended with. An overlay's
+    /// capture that ended with an error already showed it.
+    pub(crate) fn shut_down(&mut self) -> io::Result<()> {
         self.save_panels(true);
-        let overlays = self.overlays.close(None);
-        self.session
-            .take()
-            .map_or(Ok(()), CaptureSession::close)
-            .and(overlays)
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "an overlay's capture error already showed in its window, which is closing"
+        )]
+        let _ = self.overlays.close(None);
+        self.close()
     }
 
     fn answer(&mut self, request: Request) {
         let saves = request.saves();
         if request.changes_values() {
-            // Each overlay reads its values again, from their saved files.
+            // Each overlay reads its values again, from their saved files,
+            // after keeping where the user just put its panel.
+            self.save_panels(true);
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a capture that ended with an error stopped already, and the next poll starts another"
@@ -669,13 +704,22 @@ impl<H: Host> Owner<H> {
                 self.save_panels(false);
                 send(reply, view);
             },
-            Request::CloseOverlay { app, reply } => {
-                self.save_panels(true);
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "the overlay's window closed, so nothing shows the capture's error"
-                )]
-                let _ = self.overlays.close(Some(&app));
+            Request::OverlayPlace { app, reply } => {
+                send(reply, self.overlays.place(&self.host, &app));
+            },
+            Request::OverlayCard { app, card, reply } => {
+                self.overlays.card(&app, card);
+                send(reply, ());
+            },
+            Request::CloseOverlay { app, mode, reply } => {
+                if self.overlays.mode(&app) == Some(mode) {
+                    self.save_panels(true);
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "the overlay's window closed, so nothing shows the capture's error"
+                    )]
+                    let _ = self.overlays.close(Some(&app));
+                }
                 send(reply, ());
             },
         }
@@ -1112,7 +1156,7 @@ pub(crate) fn run<H: Host>(mut owner: Owner<H>, messages: &Receiver<Message>) ->
             break;
         }
     }
-    owner.close()
+    owner.shut_down()
 }
 
 impl Request {
@@ -1176,7 +1220,7 @@ mod tests {
     use appytappy_config::store::{AppStore, AutomationStore};
 
     use crate::check_spec::CheckSpec;
-    use crate::overlay::{OVERLAY_INTERVAL, Place, RETRY_POLLS, SETTLE_POLLS, ValueView};
+    use crate::overlay::{OVERLAY_INTERVAL, RETRY_POLLS, SETTLE_POLLS, ValueRead, ValueView};
 
     /// A host with one window whose captures the test drives by hand: each
     /// started capture's handler goes to the test over a channel, and so
@@ -1187,6 +1231,8 @@ mod tests {
         refuse: bool,
         /// Makes listing windows fail.
         unlisted: bool,
+        /// Makes window 7 minimized.
+        minimized: bool,
     }
 
     /// A capture the fake host started.
@@ -1269,8 +1315,17 @@ mod tests {
             ])
         }
 
-        fn foreground_window(&self) -> io::Result<Option<u64>> {
-            Ok(Some(7))
+        fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
+            Ok((window == 7).then_some(WindowPlace {
+                bounds: Bounds {
+                    left: 0,
+                    top: 0,
+                    right: 4,
+                    bottom: 2,
+                },
+                shown: !self.minimized,
+                front: true,
+            }))
         }
 
         fn capture(
@@ -1332,6 +1387,7 @@ mod tests {
             closed: closed_sender,
             refuse,
             unlisted: false,
+            minimized: false,
         };
         Harness {
             owner: Owner::new(host, store, OWN_PROCESS, sender),
@@ -1879,6 +1935,13 @@ mod tests {
         }
     }
 
+    fn overlay_place(reply: Reply<Option<Place>>) -> Request {
+        Request::OverlayPlace {
+            app: "example".to_owned(),
+            reply,
+        }
+    }
+
     fn set_overlay(
         enabled: bool,
         mode: OverlayModeDef,
@@ -1891,18 +1954,24 @@ mod tests {
         }
     }
 
+    fn close_overlay(mode: OverlayModeDef) -> impl FnOnce(Reply<()>) -> Request {
+        move |reply| Request::CloseOverlay {
+            app: "example".to_owned(),
+            mode,
+            reply,
+        }
+    }
+
     /// The overlay's view of `Progress bar` reading `reading` or failing
-    /// with `problem`, over the window at `place`.
+    /// with `problem`.
     fn bar_view(
         mode: OverlayModeDef,
-        place: Option<Place>,
         reading: Option<Reading>,
         problem: Option<&str>,
     ) -> OverlayView {
         OverlayView {
             name: "Example App".to_owned(),
             mode,
-            place,
             message: None,
             values: vec![ValueView {
                 name: "Progress bar".to_owned(),
@@ -1912,32 +1981,43 @@ mod tests {
         }
     }
 
-    const IN_FRONT: Place = Place {
-        x: 0,
-        y: 0,
-        width: 4,
-        height: 2,
-        front: true,
-    };
-
     /// Polls the overlay once and returns its capture's handler, checking it
-    /// captures only the part of window 7 that holds the values.
-    fn overlay_capture(harness: &mut Harness) -> FrameHandler {
+    /// captures only `crop` of window 7.
+    fn overlay_capture_of(harness: &mut Harness, crop: Region) -> FrameHandler {
         harness.ask(overlay_state).expect("shows");
         let started = harness.handlers.try_recv().expect("capture started");
         assert_eq!(
             (started.window, started.crop, started.interval),
-            (
-                7,
-                Crop::Region(Region::new(0, 0, 4, 2).expect("not empty")),
-                OVERLAY_INTERVAL
-            )
+            (7, Crop::Region(crop), OVERLAY_INTERVAL)
         );
         started.handler
     }
 
+    /// Polls the overlay once and returns its capture's handler, checking it
+    /// captures only the part of window 7 that holds the bar.
+    fn overlay_capture(harness: &mut Harness) -> FrameHandler {
+        overlay_capture_of(harness, Region::new(0, 0, 4, 2).expect("not empty"))
+    }
+
+    /// Changes the saved `Example App` file with `change`, as if another
+    /// save did, without telling the overlays.
+    fn change_app_file(harness: &Harness, change: impl FnOnce(&mut AppFile)) {
+        let stores = harness.owner.stores().expect("stores");
+        let mut file = stores
+            .apps
+            .load()
+            .expect("loads")
+            .into_iter()
+            .find(|stored| stored.id == "example")
+            .expect("saved")
+            .file
+            .expect("readable");
+        change(&mut file);
+        stores.apps.save("example", &file, &[]).expect("saves");
+    }
+
     #[test]
-    fn an_overlay_reads_its_applications_values_over_its_window() {
+    fn an_overlay_reads_its_applications_values_and_follows_its_window() {
         let (mut harness, root) = with_saved_bar("overlay");
         assert_eq!(
             harness.ask(overlay_state),
@@ -1959,23 +2039,50 @@ mod tests {
         // The picked window's capture is the capture screen's, not the
         // overlay's.
         assert!(harness.closed.try_recv().is_err());
+        assert_eq!(harness.ask(overlay_place), None, "not open yet");
 
         let mut handler = overlay_capture(&mut harness);
         let over = OverlayModeDef::Overlay;
-        assert_eq!(
-            harness.ask(overlay_state),
-            Ok(bar_view(over, Some(IN_FRONT), None, None))
-        );
+        assert_eq!(harness.ask(overlay_state), Ok(bar_view(over, None, None)));
         harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), OVERLAY_INTERVAL);
         assert_eq!(
             harness.ask(overlay_state),
-            Ok(bar_view(
-                over,
-                Some(IN_FRONT),
-                Some(Reading::Number(50.0)),
-                None
-            ))
+            Ok(bar_view(over, Some(Reading::Number(50.0)), None))
         );
+
+        // It goes over the window once its card is measured, and not while
+        // the window is minimized.
+        assert_eq!(harness.ask(overlay_place), None, "no card yet");
+        let card = Card {
+            width: 180.0,
+            height: 40.0,
+        };
+        harness.ask(|reply| Request::OverlayCard {
+            app: "example".to_owned(),
+            card,
+            reply,
+        });
+        assert_eq!(
+            harness.ask(overlay_place),
+            Some(Place {
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 2,
+                card,
+            })
+        );
+        harness.owner.host.minimized = true;
+        assert_eq!(harness.ask(overlay_place), None);
+        let minimized = harness.ask(overlay_state).expect("shows");
+        assert_eq!(
+            minimized.message.as_deref(),
+            Some("Restore Example App to see its values.")
+        );
+        harness.owner.host.minimized = false;
+
+        // A window of a size no value was drawn at reads nothing, and the
+        // capture goes on.
         let wider = Size {
             width: 6,
             height: 2,
@@ -1984,50 +2091,66 @@ mod tests {
         let resized = |width| {
             Ok(bar_view(
                 over,
-                Some(IN_FRONT),
                 None,
                 Some(&format!("Drawn on a 4x2 window; it is {width}x2 now.")),
             ))
         };
         assert_eq!(harness.ask(overlay_state), resized(6));
+        let narrower = Size {
+            width: 3,
+            height: 2,
+        };
         harness.deliver_at(
             &mut handler,
             Err(OutsideWindow {
-                window_size: Size {
-                    width: 3,
-                    height: 2,
-                },
+                window_size: narrower,
             }
             .into()),
             OVERLAY_INTERVAL,
         );
         assert_eq!(harness.ask(overlay_state), resized(3));
+        assert!(harness.closed.try_recv().is_err(), "the capture goes on");
         let white = Image::new(WINDOW, vec![255; 32]).expect("matching length");
         harness.deliver_at(&mut handler, Ok((WINDOW, &white)), OVERLAY_INTERVAL);
         let view = harness.ask(overlay_state).expect("shows");
         let problem = view.values[0].problem.as_deref().expect("a problem");
         assert!(problem.starts_with("Cannot read: "), "{problem}");
 
-        // A capture that stops closes, and the next poll starts another.
+        // A capture that stops closes, says why, and starts again about a
+        // second later.
         harness.deliver_at(
             &mut handler,
             Err(io::Error::other("the window closed")),
             OVERLAY_INTERVAL,
         );
         assert_eq!(harness.closed.try_recv(), Ok(7));
+        for _ in 0..RETRY_POLLS {
+            let view = harness.ask(overlay_state).expect("shows");
+            assert_eq!(
+                view.message.as_deref(),
+                Some("Example App cannot be read: the window closed.")
+            );
+            assert!(harness.handlers.try_recv().is_err(), "it waits");
+        }
         let mut handler = overlay_capture(&mut harness);
         // Readings from the stopped capture are dropped.
         let message = Message::Overlay {
             app: "example".to_owned(),
             generation: 0,
-            read: Ok(vec![ValueRead::Read(Reading::Flag(true))]),
+            read: Ok(FrameRead::Values(vec![ValueRead::Read(Reading::Flag(
+                true,
+            ))])),
         };
         assert!(harness.owner.handle(message).is_continue());
-        assert_eq!(
-            harness.ask(overlay_state),
-            Ok(bar_view(over, Some(IN_FRONT), None, None))
-        );
+        assert_eq!(harness.ask(overlay_state), Ok(bar_view(over, None, None)));
         harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), OVERLAY_INTERVAL);
+
+        // Reading the saved file again keeps the card's size, which the page
+        // sends only when it changes.
+        harness.ask(set_overlay(true, over)).expect("saves");
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        drop(overlay_capture(&mut harness));
+        assert!(harness.ask(overlay_place).is_some());
 
         // Changing the overlay reads the saved file again.
         harness
@@ -2042,7 +2165,81 @@ mod tests {
     }
 
     #[test]
-    fn an_overlay_without_its_window_says_why_and_looks_again_about_once_a_second() {
+    fn an_overlay_reads_the_values_drawn_at_the_windows_size_and_says_why_others_cannot() {
+        let (mut harness, root) = with_saved_bar("overlay-sizes");
+        change_app_file(&harness, |file| {
+            let mut small = file.values[0].clone();
+            small.id = "small".to_owned();
+            small.name = "Small".to_owned();
+            small.screen.window_size = SizeDef {
+                width: 8,
+                height: 4,
+            };
+            small.screen.region.x = 4;
+            small.screen.region.y = 2;
+            let mut icon = file.values[0].clone();
+            icon.id = "icon".to_owned();
+            icon.name = "Icon".to_owned();
+            icon.screen.check = serde_json::from_value(serde_json::json!({
+                "kind": "reference",
+                "image": "missing.png",
+                "tolerance": 0
+            }))
+            .expect("the file's spelling");
+            file.values.extend([small, icon]);
+            file.overlay = Some(OverlayDef {
+                enabled: true,
+                mode: OverlayModeDef::PictureInPicture,
+                panel: None,
+            });
+        });
+        // Only the bar was drawn at 4x2, so only its region is captured.
+        let mut handler = overlay_capture(&mut harness);
+        harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), OVERLAY_INTERVAL);
+        let view = harness.ask(overlay_state).expect("shows");
+        let lines: Vec<(&str, Option<Reading>, Option<&str>)> = view
+            .values
+            .iter()
+            .map(|value| (value.name.as_str(), value.reading, value.problem.as_deref()))
+            .collect();
+        assert_eq!(
+            lines[0],
+            ("Progress bar", Some(Reading::Number(50.0)), None)
+        );
+        assert_eq!(
+            lines[1],
+            ("Small", None, Some("Drawn on a 8x4 window; it is 4x2 now."))
+        );
+        let (icon, reading, problem) = lines[2];
+        assert_eq!((icon, reading), ("Icon", None));
+        assert!(
+            problem.is_some_and(|problem| problem.starts_with("Cannot read: ")),
+            "{problem:?}"
+        );
+
+        // At 8x4 the capture starts again with the small value's region.
+        let large = Size {
+            width: 8,
+            height: 4,
+        };
+        harness.deliver_at(&mut handler, Ok((large, &frame_image())), OVERLAY_INTERVAL);
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        let mut handler =
+            overlay_capture_of(&mut harness, Region::new(4, 2, 4, 2).expect("not empty"));
+        harness.deliver_at(&mut handler, Ok((large, &frame_image())), OVERLAY_INTERVAL);
+        let view = harness.ask(overlay_state).expect("shows");
+        assert_eq!(
+            view.values[0].problem.as_deref(),
+            Some("Drawn on a 4x2 window; it is 8x4 now.")
+        );
+        assert_eq!(view.values[1].reading, Some(Reading::Number(50.0)));
+        // A panel does not go over the window.
+        assert_eq!(harness.ask(overlay_place), None);
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn an_overlay_without_its_window_or_file_says_why_and_tries_again_about_once_a_second() {
         let (mut harness, root) = with_saved_bar("overlay-retry");
         harness
             .ask(set_overlay(true, OverlayModeDef::Overlay))
@@ -2051,7 +2248,6 @@ mod tests {
         let gone = OverlayView {
             name: "Example App".to_owned(),
             mode: OverlayModeDef::Overlay,
-            place: None,
             message: Some("no windows here".to_owned()),
             values: vec![ValueView {
                 name: "Progress bar".to_owned(),
@@ -2066,6 +2262,26 @@ mod tests {
             assert!(harness.handlers.try_recv().is_err(), "it waits");
         }
         drop(overlay_capture(&mut harness));
+
+        // An overlay that cannot open reads its file again only after a
+        // while, rather than on every poll.
+        harness
+            .ask(set_overlay(false, OverlayModeDef::Overlay))
+            .expect("saves");
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        let off = Err("The overlay for Example App is off.".to_owned());
+        assert_eq!(harness.ask(overlay_state), off);
+        change_app_file(&harness, |file| {
+            file.overlay = Some(OverlayDef {
+                enabled: true,
+                mode: OverlayModeDef::Overlay,
+                panel: None,
+            });
+        });
+        for _ in 0..RETRY_POLLS {
+            assert_eq!(harness.ask(overlay_state), off);
+        }
+        drop(overlay_capture(&mut harness));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -2075,10 +2291,9 @@ mod tests {
         let panel_mode = OverlayModeDef::PictureInPicture;
         harness.ask(set_overlay(true, panel_mode)).expect("saves");
         drop(overlay_capture(&mut harness));
-        // A panel does not follow the window, so it does not look for it.
         assert_eq!(
             harness.ask(overlay_state),
-            Ok(bar_view(panel_mode, None, None, None))
+            Ok(bar_view(panel_mode, None, None))
         );
         let panel = |x| PanelDef {
             x,
@@ -2110,24 +2325,29 @@ mod tests {
         harness.ask(overlay_state).expect("shows");
         assert_eq!(saved(&mut harness), Some(panel(-800)));
 
-        // Saving the overlay again keeps the place, and closing saves at once.
+        // Saving the overlay right after a move keeps both.
+        assert!(harness.owner.handle(placed(-700)).is_continue());
         harness.ask(set_overlay(true, panel_mode)).expect("saves");
+        assert_eq!(saved(&mut harness), Some(panel(-700)));
         assert_eq!(harness.closed.try_recv(), Ok(7));
         drop(overlay_capture(&mut harness));
+
+        // The overlay window of the mode it left closing later leaves it.
+        harness.ask(close_overlay(OverlayModeDef::Overlay));
+        assert!(harness.closed.try_recv().is_err());
+        // Its own window closing saves its place at once.
         assert!(harness.owner.handle(placed(10)).is_continue());
-        harness.ask(|reply| Request::CloseOverlay {
-            app: "example".to_owned(),
-            reply,
-        });
+        harness.ask(close_overlay(panel_mode));
         assert_eq!(harness.closed.try_recv(), Ok(7));
         assert_eq!(saved(&mut harness), Some(panel(10)));
+        // So does the app ending.
         drop(overlay_capture(&mut harness));
         assert!(harness.owner.handle(placed(30)).is_continue());
-        harness.owner.close().expect("closes");
+        harness.owner.shut_down().expect("closes");
         assert_eq!(saved(&mut harness), Some(panel(30)));
         // A place for an overlay that is not open is dropped.
         assert!(harness.owner.handle(placed(50)).is_continue());
-        harness.owner.close().expect("closes");
+        harness.owner.shut_down().expect("closes");
         assert_eq!(saved(&mut harness), Some(panel(30)));
         std::fs::remove_dir_all(root).expect("clean up");
     }
@@ -2504,7 +2724,7 @@ mod tests {
         let unsupported = appytappy_sources::system::Unsupported;
         assert!(Host::windows(&unsupported).is_err());
         assert!(Host::processes(&unsupported).is_err());
-        assert!(Host::foreground_window(&unsupported).is_err());
+        assert!(Host::window_place(&unsupported, 7).is_err());
         let handler: FrameHandler = Box::new(|_frame| Duration::ZERO);
         assert!(Host::capture(&unsupported, 7, Crop::Whole, PREVIEW_INTERVAL, handler).is_err());
     }

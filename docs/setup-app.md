@@ -133,22 +133,25 @@ and logs that the window should be resized or the value drawn again.
 The Applications page's **Overlay** menu shows an application's values as
 they read now, in one of two ways:
 
-- **Over the window** puts the readings on the application's window, in its top-left
-  corner. The overlay lets clicks through to the application, never takes the
-  keyboard, and has no taskbar entry. It follows the window as it moves or
-  changes size, and hides while another window is in front or the window is
-  minimized.
+- **Over the window** puts the readings in the top-left corner of the
+  application's window, in a window only as big as the readings. It lets
+  clicks through to the application, never takes the keyboard, and has no
+  taskbar entry. It follows the window as it moves or changes size, and moves
+  off the screen while another window is in front or the window is minimized.
 - **Picture in picture** shows the readings in a small panel that stays on top
   of every window. The user moves and resizes it, and it opens where it was
-  left, unless that place is no longer on a monitor.
+  left, unless too little of that place is still on a monitor to grab it.
+  While the application is minimized, the panel says so in place of its
+  readings, which would no longer change.
 
 Either way, the readings are a window of the setup app's own: AppyTappy does
 not hook, inject into, or change the application. The overlay shows only
 while the setup app is open, and the panel closes when the overlay is turned
-off. It reads each value as the runtime would, capturing only the part of the
-window that holds the application's values, a few times a second. A value
-that cannot be read says why in place of its reading, such as a window that
-is not the size the value was drawn at.
+off. It reads values as the runtime does: it reads those drawn at the
+window's current size, capturing only the part of the window that holds them,
+a few times a second, and starts again with the others when the window
+changes to their size. A value that cannot be read says why in place of its
+reading, such as one drawn at another window size, and the others still read.
 
 An application in exclusive fullscreen draws over every other window, so
 **Over the window** cannot show on it. Borderless or windowed fullscreen
