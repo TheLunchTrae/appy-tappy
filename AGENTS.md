@@ -311,8 +311,8 @@ dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-The gate requires executed mutation evidence: for the code a pull request
-changes, and for the whole workspace after it merges.
+Mutation evidence covers the code a pull request changes and, on pushes to
+main, the whole workspace.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
 approval, because the Linux gate compiles them out. Read [mutation operation](docs/rust.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.
