@@ -6,5 +6,6 @@
 
 pub mod action;
 pub mod anti_cheat;
+pub mod paths;
 pub mod rule;
 pub mod signal;

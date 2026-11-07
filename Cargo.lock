@@ -52,10 +52,19 @@ dependencies = [
 [[package]]
 name = "appytappy-platform"
 version = "0.1.0"
+dependencies = [
+ "mutants",
+ "windows",
+]
 
 [[package]]
 name = "appytappy-runtime"
 version = "0.1.0"
+dependencies = [
+ "appytappy-config",
+ "appytappy-platform",
+ "appytappy-sources",
+]
 
 [[package]]
 name = "appytappy-sources"

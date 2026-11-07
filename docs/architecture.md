@@ -137,14 +137,11 @@ Each thread below is a plain `std::thread`, and each channel is a
   its signal values and rule state. It
   applies each event as a `(state, event) -> (state, effects)` transition.
   Effects are action requests and orders to start or stop a worker.
-- **Lifecycle.** Reports `GameStarted` and `GameExited` from the process and
-  window events source. It matches a new window's process to a game by the
-  executable name in a process snapshot (`CreateToolhelp32Snapshot`), which
-  does not open the process, so it is safe for every anti-cheat class. It
-  learns that a game exited the same way, from window-destroy events and a
-  fresh snapshot, never by waiting on a process handle. While no configured
-  game runs, nothing polls. Detection and autostart belong to
-  [#13](https://github.com/TheLunchTrae/appy-tappy/issues/13).
+- **Lifecycle.** Reports when a watched game starts and exits. It matches
+  processes to games by the executable name in a process snapshot
+  (`CreateToolhelp32Snapshot`), which does not open any process, so it is safe
+  for every anti-cheat class. It never waits on a process handle.
+  [Lifecycle](#lifecycle) describes when it takes a snapshot.
 - **Source workers.** One per attached game. Each runs the bindings the
   compiled config chose for that game's version and sends `Sample` events.
   Push sources, such as a log tail, send when data arrives; polled sources,
@@ -163,8 +160,7 @@ Each thread below is a plain `std::thread`, and each channel is a
   idle, attached, or problem and offers pause, open setup, and quit. Whether
   the tray is worth its cost belongs to
   [#18](https://github.com/TheLunchTrae/appy-tappy/issues/18); without it, the
-  status file still reports the same states. A single-instance guard stops a
-  second copy of the runtime from starting.
+  status file still reports the same states.
 
 Shared flags are banned, so a worker learns to stop from its channel. Each
 worker owns a control `Receiver` and waits on it with `recv_timeout`, using the
@@ -180,6 +176,87 @@ owns the `Sender` and forwards the event over the channel. The window events
 hook runs on its own thread, separate from the tray's message thread. A modal
 loop, such as the one an open tray menu runs, drops thread messages, so a
 thread that receives them must never show UI.
+
+### Lifecycle
+
+The runtime is in one of three states:
+
+- **Idle.** No watched game runs. The window event hook is installed, and no
+  timer runs. A new top-level window anywhere on the desktop, a tooltip or a
+  menu included, still leads to a snapshot; what that costs is measured in
+  [#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
+- **Attached.** At least one watched game runs, and each has a session that
+  follows one of its processes.
+- **Degraded.** A problem stops the runtime from watching games: process
+  snapshots fail. It overrides the other two states until a snapshot works
+  again. Source failures and rejected configs join it when the runtime loads
+  the compiled config
+  ([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)).
+
+```text
+          game starts             last game exits
+  idle ─────────────────► attached ───────────────► idle
+
+  idle or attached ── snapshot fails ──► degraded
+  degraded ── snapshot works ──► idle or attached, from what it finds
+```
+
+Detection runs on two threads. The window events thread, in
+`appytappy-platform`, holds an out-of-context `SetWinEventHook` for window
+creation and destruction across the desktop. Its callback keeps a created
+window only when it is top-level; Windows cannot say whether a destroyed
+window was, so it keeps every destroyed window. The lifecycle thread, in the
+runtime, turns those events into snapshots:
+
+- While no watched game runs, only a new top-level window makes a snapshot
+  due. While one runs, any destroyed window does too, child windows included,
+  so a busy desktop can mean a few snapshots a second while a game runs.
+- A burst of events becomes one snapshot 250 ms after its first event.
+- While a game runs or snapshots fail, a backstop snapshot runs every
+  5 seconds. It finds a game that exits without an event, such as a process
+  that never made a window, and a game that takes longer than 250 ms to exit
+  after closing its window. So an exit can take up to 5 seconds to notice.
+- The first snapshot runs at startup, so a game that already runs is found.
+
+Each snapshot ends the session of a game whose process is gone, then starts
+one for a game that runs without one. A session follows the running process
+with the lowest ID, so a second copy of a game starts no second session, and
+it takes over when the first exits. A process ID that Windows reused for
+another executable ends the session. A game relaunched within 5 seconds that
+gets its old process ID back keeps its session, because a snapshot cannot
+tell the two processes apart. A crashed game is the same as one that
+exits: its windows are destroyed and its process leaves the snapshot. Nothing
+holds a handle to a game, so detaching leaves nothing to clean up.
+
+Until the compiled config names the games to watch, each
+`--watch <executable>` argument names one by its file name, such as
+`appytappy-runtime.exe --watch GeometryDash.exe`. At least one is required,
+and a path is refused, because snapshots list bare file names.
+
+A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
+second copy that finds it logs that and exits at once, and the setup app can
+open it to learn whether the runtime runs.
+
+Autostart is the `AppyTappy` value under the user's
+`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` key,
+which starts the runtime at sign-in without elevation. A scheduled task can
+also do that, but it takes more setup for no gain here.
+`appytappy-runtime.exe --autostart on --watch GeometryDash.exe` writes the
+value as the runtime's own quoted path followed by the same `--watch`
+options, and `--autostart off` removes it. Either command exits without
+starting the runtime and logs its result. The exit code is 0 on success, 1 on
+failure, and 2 for a command line it does not understand, but the runtime is
+a windowed program, so a console does not wait for it: the code shows only to
+an installer or to `start /wait`. The installer or the setup app runs these
+commands; the runtime never turns autostart on by itself.
+
+The log is `runtime.log` in `%LOCALAPPDATA%\AppyTappy\logs\`, one
+timestamped line per start, exit, state change, and problem. A line that
+would take it past 512 KiB first moves it to `runtime.old.log`, replacing the
+older one, so the log never takes more than about 1 MiB. Only the copy that
+holds the single-instance guard rotates it; a second copy or an `--autostart`
+command only adds its line. When `%LOCALAPPDATA%` is unknown or the log
+cannot be opened, nothing is logged, and running exits with code 1.
 
 ## Sources, rules, and actions
 

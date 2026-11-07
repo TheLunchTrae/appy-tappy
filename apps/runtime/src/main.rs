@@ -1,7 +1,303 @@
 //! The always-on AppyTappy background program.
 //!
-//! See `docs/architecture.md` for the runtime's threads and events.
+//! It runs with no console window and writes only to its log in
+//! `%LOCALAPPDATA%\AppyTappy\logs\`. See `docs/architecture.md` for the
+//! runtime's threads and events and its lifecycle states.
 
 #![forbid(unsafe_code)]
+#![windows_subsystem = "windows"]
 
-fn main() {}
+mod cli;
+mod lifecycle;
+mod log;
+mod model;
+
+use std::env;
+use std::ffi::OsString;
+use std::io;
+use std::path::Path;
+use std::process::ExitCode;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Instant;
+
+use appytappy_config::paths::Locations;
+use appytappy_platform::{AUTOSTART_VALUE, InstanceGuard, LocalTime, WindowWatch};
+use appytappy_sources::HostSystem;
+use appytappy_sources::system::System;
+
+use crate::cli::{Autostart, Command};
+use crate::lifecycle::{Change, Lifecycle, Watchlist};
+use crate::log::Log;
+use crate::model::Model;
+
+/// The exit code for a command line the runtime does not understand.
+const USAGE: u8 = 2;
+
+fn main() -> ExitCode {
+    // The runtime has no console, so the log is the only place a problem
+    // can show, even for a command that exits at once. It rotates only once
+    // this copy holds the single-instance guard.
+    let mut log = Locations::from_env()
+        .map_err(io::Error::other)
+        .and_then(|locations| Log::open(&locations.logs(), u64::MAX));
+    let command = match cli::parse(env::args_os().skip(1)) {
+        Ok(command) => command,
+        Err(error) => {
+            if let Ok(log) = &mut log {
+                note(log, &format!("command line refused: {error}"));
+            }
+            return ExitCode::from(USAGE);
+        },
+    };
+    let result = match command {
+        Command::Autostart(setting) => {
+            let result = autostart(&setting);
+            if let Ok(log) = &mut log {
+                note(log, &autostart_line(&setting, &result));
+            }
+            result
+        },
+        Command::Run(executables) => log.and_then(|mut log| {
+            let games = executables
+                .into_iter()
+                .map(|executable| vec![executable])
+                .collect();
+            run(Watchlist::new(games), &mut log)
+        }),
+    };
+    if result.is_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Turns autostart at sign-in on or off.
+fn autostart(setting: &Autostart) -> io::Result<()> {
+    match setting {
+        Autostart::On(watched) => env::current_exe().and_then(|executable| {
+            appytappy_platform::enable_autostart(
+                AUTOSTART_VALUE,
+                &autostart_command(&executable, watched),
+            )
+        }),
+        Autostart::Off => appytappy_platform::disable_autostart(AUTOSTART_VALUE),
+    }
+}
+
+/// The command line Windows runs at sign-in: the program, quoted because a
+/// path with spaces would otherwise run its first word, then the games to
+/// watch. The command line refuses quotes in a game's name.
+fn autostart_command(executable: &Path, watched: &[String]) -> OsString {
+    let mut command = OsString::from("\"");
+    command.push(executable);
+    command.push("\"");
+    for game in watched {
+        command.push(format!(" --watch \"{game}\""));
+    }
+    command
+}
+
+/// The log line for an autostart change.
+fn autostart_line(setting: &Autostart, result: &io::Result<()>) -> String {
+    let change = match setting {
+        Autostart::On(_) => "autostart on",
+        Autostart::Off => "autostart off",
+    };
+    match result {
+        Ok(()) => change.to_owned(),
+        Err(error) => format!("{change} failed: {error}"),
+    }
+}
+
+/// Runs in the background unless another copy already does, in which case
+/// it notes that and exits at once.
+fn run(watchlist: Watchlist, log: &mut Log) -> io::Result<()> {
+    let guard = InstanceGuard::acquire(InstanceGuard::RUNTIME);
+    let _instance = match guard {
+        Ok(Some(instance)) => instance,
+        Ok(None) => {
+            note(
+                log,
+                "another copy of the runtime is running, so this one exits",
+            );
+            return Ok(());
+        },
+        Err(error) => {
+            note(log, &format!("the runtime could not start: {error}"));
+            return Err(error);
+        },
+    };
+    log.rotate_at(log::LIMIT);
+    note(log, "runtime started");
+    let result = watch(watchlist, log);
+    match &result {
+        Ok(()) => note(log, "runtime stopped"),
+        Err(error) => note(log, &format!("runtime stopped: {error}")),
+    }
+    result
+}
+
+/// Writes a line to the log. The runtime keeps working when the log cannot
+/// be written, because it has nowhere else to report.
+fn note(log: &mut Log, message: &str) {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a full or locked log must not stop the runtime, and there is nowhere else to report it"
+    )]
+    let _ = log.write(LocalTime::now(), message);
+}
+
+/// The owner loop: detection runs on its own threads and sends changes
+/// here, where the root model applies them. It ends when the window watch
+/// ends.
+fn watch(watchlist: Watchlist, log: &mut Log) -> io::Result<()> {
+    let (window_sender, window_events) = mpsc::channel();
+    let windows = WindowWatch::start(window_sender)?;
+    let (change_sender, changes) = mpsc::channel();
+    let lifecycle = Lifecycle::new(watchlist.clone(), Instant::now());
+    let system = HostSystem::default();
+    let detector = thread::Builder::new()
+        .name("lifecycle".to_owned())
+        .spawn(move || {
+            lifecycle::run(lifecycle, &window_events, &change_sender, || {
+                system.processes()
+            });
+        })?;
+    let mut model = Model::default();
+    for change in changes {
+        note(log, &describe(&watchlist, &change));
+        if let Some(state) = model.apply(change) {
+            note(log, &format!("state: {state}"));
+        }
+    }
+    detector.join().map_err(|payload| {
+        io::Error::other(format!(
+            "the lifecycle thread panicked: {}",
+            appytappy_platform::panic_reason(payload.as_ref())
+        ))
+    })?;
+    windows.stop()
+}
+
+fn describe(watchlist: &Watchlist, change: &Change) -> String {
+    match change {
+        Change::Started { game, process } => {
+            format!(
+                "{} started (process {process}): attached",
+                watchlist.name(*game)
+            )
+        },
+        Change::Exited { game, process } => {
+            format!(
+                "{} exited (process {process}): detached",
+                watchlist.name(*game)
+            )
+        },
+        Change::ScanFailed(problem) => format!("process snapshots fail: {problem}"),
+        Change::ScanRestored => "process snapshots work again".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::process;
+
+    use appytappy_config::anti_cheat::ProcessId;
+
+    use super::*;
+    use crate::lifecycle::GameIndex;
+
+    #[test]
+    fn a_note_is_a_line_in_the_log() {
+        let folder = env::temp_dir().join(format!("appytappy-note-{}", process::id()));
+        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        note(&mut log, "runtime started");
+        let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
+        fs::remove_dir_all(&folder).expect("clean up");
+        assert!(written.ends_with("runtime started\n"), "{written:?}");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_the_runtime_refuses_to_run() {
+        let folder = env::temp_dir().join(format!("appytappy-watch-{}", process::id()));
+        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let watched = watch(Watchlist::new(Vec::new()), &mut log);
+        fs::remove_dir_all(&folder).expect("clean up");
+        assert_eq!(
+            watched.expect_err("unsupported").kind(),
+            io::ErrorKind::Unsupported
+        );
+        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let ran = run(Watchlist::new(Vec::new()), &mut log);
+        let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
+        fs::remove_dir_all(&folder).expect("clean up");
+        assert_eq!(
+            ran.expect_err("unsupported").kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(
+            written.contains("the runtime could not start"),
+            "{written:?}"
+        );
+        let on = Autostart::On(vec!["Game.exe".to_owned()]);
+        for setting in [on, Autostart::Off] {
+            assert_eq!(
+                autostart(&setting).expect_err("unsupported").kind(),
+                io::ErrorKind::Unsupported
+            );
+        }
+    }
+
+    #[test]
+    fn autostart_runs_the_quoted_program_with_its_games() {
+        let command = autostart_command(
+            Path::new("C:/Program Files/AppyTappy/appytappy-runtime.exe"),
+            &["GeometryDash.exe".to_owned(), "Other.exe".to_owned()],
+        );
+        assert_eq!(
+            command,
+            OsString::from(
+                r#""C:/Program Files/AppyTappy/appytappy-runtime.exe" --watch "GeometryDash.exe" --watch "Other.exe""#
+            )
+        );
+    }
+
+    #[test]
+    fn autostart_changes_are_logged_with_their_result() {
+        let on = Autostart::On(Vec::new());
+        let failed = Err(io::Error::other("denied"));
+        assert_eq!(autostart_line(&on, &Ok(())), "autostart on");
+        assert_eq!(autostart_line(&Autostart::Off, &Ok(())), "autostart off");
+        assert_eq!(
+            autostart_line(&Autostart::Off, &failed),
+            "autostart off failed: denied"
+        );
+    }
+
+    #[test]
+    fn log_lines_name_the_game_and_process() {
+        let watchlist = Watchlist::new(vec![vec!["GeometryDash.exe".to_owned()]]);
+        let game = GameIndex(0);
+        let process = ProcessId::new(42);
+        let lines = [
+            Change::Started { game, process },
+            Change::Exited { game, process },
+            Change::ScanFailed("denied".to_owned()),
+            Change::ScanRestored,
+        ]
+        .map(|change| describe(&watchlist, &change));
+        assert_eq!(
+            lines,
+            [
+                "GeometryDash.exe started (process 42): attached",
+                "GeometryDash.exe exited (process 42): detached",
+                "process snapshots fail: denied",
+                "process snapshots work again",
+            ]
+        );
+    }
+}
