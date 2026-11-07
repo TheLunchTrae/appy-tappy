@@ -224,13 +224,13 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
 /// thread.
 #[cfg(windows)]
 #[mutants::skip] // Makes the real controls, checked by hand on Windows.
-pub(crate) fn controls() -> io::Result<appytappy_actions::win::WindowsControls> {
+fn controls() -> io::Result<appytappy_actions::win::WindowsControls> {
     appytappy_actions::win::WindowsControls::new()
 }
 
 /// Off Windows there are no controls, so no action can run.
 #[cfg(not(windows))]
-pub(crate) fn controls() -> io::Result<NoControls> {
+fn controls() -> io::Result<NoControls> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "actions run only on Windows",
@@ -240,7 +240,7 @@ pub(crate) fn controls() -> io::Result<NoControls> {
 /// Controls that cannot exist, for systems other than Windows.
 #[cfg(not(windows))]
 #[derive(Debug)]
-pub(crate) struct NoControls(std::convert::Infallible);
+struct NoControls(std::convert::Infallible);
 
 #[cfg(not(windows))]
 impl appytappy_actions::Controls for NoControls {
@@ -474,10 +474,18 @@ mod tests {
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::window_match::{MatchPriority, Pattern, WindowMatch};
 
+    use super::*;
     use crate::workers::reader;
     use crate::{log, model};
 
-    use super::*;
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_actions_cannot_run() {
+        assert_eq!(
+            controls().expect_err("unsupported").kind(),
+            io::ErrorKind::Unsupported
+        );
+    }
 
     #[test]
     fn events_update_the_model_and_the_log_until_quit() {

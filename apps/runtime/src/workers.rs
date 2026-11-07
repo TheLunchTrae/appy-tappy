@@ -1,5 +1,5 @@
-//! The worker threads the owner starts, one module each, and the helpers that
-//! start and join them.
+//! The action and reader threads the owner starts, one module each, and the
+//! helpers that start and join every thread the owner starts.
 
 pub(crate) mod act;
 pub(crate) mod reader;

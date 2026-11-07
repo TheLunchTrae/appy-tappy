@@ -111,7 +111,6 @@ mod tests {
     use std::process;
 
     use super::*;
-    use crate::owner::controls;
 
     #[test]
     fn off_windows_the_runtime_refuses_to_run() {
@@ -134,9 +133,5 @@ mod tests {
                 io::ErrorKind::Unsupported
             );
         }
-        assert_eq!(
-            controls().expect_err("unsupported").kind(),
-            io::ErrorKind::Unsupported
-        );
     }
 }
