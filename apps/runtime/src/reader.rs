@@ -22,7 +22,6 @@
 //! switch to full screen. While no window fits, it looks again every
 //! [`FIND_AGAIN`].
 
-use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -30,12 +29,11 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use appytappy_config::signal::{SignalName, Value};
-use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::{
     Capture, CaptureSession, Crop, Frame, OutsideWindow, Region, Size,
 };
-use appytappy_sources::system::System;
+use appytappy_sources::system::{System, best_window};
 
 use crate::plan::AppPlan;
 
@@ -234,36 +232,10 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
     }
 }
 
-/// The handle of the visible window that fits the app best, among the
-/// windows of every process whose executable fits it.
+/// The handle of the visible window that fits the app best.
 fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Option<u64>> {
-    let executables: BTreeMap<_, _> = system
-        .processes()?
-        .into_iter()
-        .filter(|process| job.plan.window.executable.matches(&process.executable))
-        .map(|process| (process.id, process.executable))
-        .collect();
-    let windows: Vec<_> = system
-        .windows()?
-        .into_iter()
-        .filter(|window| window.visible)
-        .filter_map(|window| {
-            let executable = executables.get(&window.process)?;
-            Some((window, executable))
-        })
-        .collect();
-    let ranked = job
-        .plan
-        .window
-        .rank(windows.iter().map(|(window, executable)| WindowFacts {
-            title: &window.title,
-            class: &window.class,
-            executable,
-        }));
-    Ok(ranked
-        .first()
-        .and_then(|&position| windows.get(position))
-        .map(|(window, _)| window.handle))
+    let processes = system.processes()?;
+    Ok(best_window(&job.plan.window, processes, system.windows()?))
 }
 
 /// The capture's frame handler: reads each value drawn at one window size

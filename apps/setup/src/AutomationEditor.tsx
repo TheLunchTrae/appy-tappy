@@ -3,19 +3,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AppSummary,
   type AutomationDef,
-  type Live,
   type MediaCommand,
   type WhenDef,
   errorText,
   listWindows,
   saveAutomation,
-  stopCapture,
+  stopWatching,
   watchValue,
   watchedReading,
 } from './api.ts';
 import {
   type ActionDraft,
   type Draft,
+  type LiveState,
   COMPARISONS,
   COMPARISON_NAMES,
   EMPTY_DRAFT,
@@ -24,8 +24,9 @@ import {
   buildAutomation,
   buildWhen,
   findValue,
+  liveAnnouncement,
+  liveText,
   newAction,
-  readingText,
   toDraft,
   undoText,
   valueChoices,
@@ -151,76 +152,76 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
 /** The pause between two live readings: often enough to follow a value as it changes. */
 const LIVE_PAUSE_MS = 500;
 
-/** A live reading in a sentence, such as `Progress reads 87 now, so this is true.` */
-function liveText(live: Live | string | null, name: string): string {
-  if (live === null || typeof live === 'string') {
-    return live ?? `Looking for the window ${name} is read on…`;
-  }
-  switch (live.kind) {
-    case 'waiting':
-      return `Waiting for the window to show ${name}…`;
-    case 'problem':
-      return live.message;
-    case 'read': {
-      const reads = `${name} reads ${readingText(live.reading)} now`;
-      if (live.holds === null) {
-        return `${reads}.`;
-      }
-      return live.holds ? `${reads}, so the condition is true.` : `${reads}, so the condition is not true.`;
-    }
-  }
-}
+/** How long the live reading waits before it looks for the window again, as the runtime does. */
+const RETRY_MS = 1000;
 
 /**
- * What the watched value reads on its window now, and whether `when` holds for
- * it. It watches again after the window closes, and stops capturing once it
- * goes away.
+ * What the watched value reads on its window now, and whether `when` holds
+ * for it. It watches again once the window closes, and stops its watch when
+ * it goes away.
  */
 function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly when: WhenDef | null }) {
-  const [live, setLive] = useState<Live | string | null>(null);
-  const watching = useRef(false);
+  const [live, setLive] = useState<LiveState>(null);
+  const watch = useRef<number | null>(null);
+  const retryAt = useRef(0);
   const mounted = useRef(true);
+  // A function, because the check after an await must see an unmount made meanwhile.
+  const isMounted = (): boolean => mounted.current;
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      background(stopCapture());
+      if (watch.current !== null) {
+        background(stopWatching(watch.current));
+        watch.current = null;
+      }
     };
   }, []);
   useRepeat(
     async () => {
-      try {
-        if (watching.current) {
-          try {
-            setLive(await watchedReading(when));
-            return;
-          } catch {
-            // The window closed or the capture was replaced: watch again,
-            // which says why the value cannot be read when it cannot.
-            watching.current = false;
+      if (watch.current !== null) {
+        try {
+          const read = await watchedReading(watch.current, when);
+          if (read.kind === 'lost') {
+            watch.current = null;
+            retryAt.current = Date.now() + RETRY_MS;
           }
+          setLive(read);
+          return;
+        } catch {
+          // Another capture replaced the watch: watch again now.
+          watch.current = null;
         }
-        await watchValue(choice.app, choice.value.id);
-        if (!mounted.current) {
+      }
+      if (!isMounted() || Date.now() < retryAt.current) {
+        return;
+      }
+      try {
+        const started = await watchValue(choice.app, choice.value.id);
+        if (!isMounted()) {
           // The editor closed while the capture started.
-          await stopCapture();
+          await stopWatching(started);
           return;
         }
-        watching.current = true;
-        setLive(await watchedReading(when));
+        watch.current = started;
+        setLive(await watchedReading(started, when));
       } catch (error: unknown) {
-        watching.current = false;
-        setLive(errorText(error));
+        watch.current = null;
+        retryAt.current = Date.now() + RETRY_MS;
+        setLive({ kind: 'error', message: errorText(error) });
       }
     },
     LIVE_PAUSE_MS,
     true,
   );
-  const holds = typeof live === 'object' && live?.kind === 'read' ? live.holds : null;
+  const holds = live?.kind === 'read' && live.holds === true;
   return (
-    <p className={holds === true ? 'live-reading holds' : 'live-reading'} role="status">
-      {liveText(live, choice.value.name)}
-    </p>
+    <div className={holds ? 'live-reading holds' : 'live-reading'}>
+      <p>{liveText(live, choice, when)}</p>
+      <p className="visually-hidden" role="status">
+        {liveAnnouncement(live)}
+      </p>
+    </div>
   );
 }
 

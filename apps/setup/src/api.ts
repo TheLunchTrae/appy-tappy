@@ -98,7 +98,9 @@ export type Live =
   | { readonly kind: 'waiting' }
   /** `holds` says whether the condition asked about is true, or is null when none was asked about. */
   | { readonly kind: 'read'; readonly reading: Reading; readonly holds: boolean | null }
-  | { readonly kind: 'problem'; readonly message: string };
+  | { readonly kind: 'problem'; readonly message: string }
+  /** The capture stopped, such as when the window closed. */
+  | { readonly kind: 'lost'; readonly message: string };
 
 /** A value to save, with a new application when `app` is null. */
 export interface SaveSpec {
@@ -199,14 +201,19 @@ export async function readValue(): Promise<Reading | null> {
   return invoke<Reading | null>('read_value');
 }
 
-/** Captures the window of a saved value's application to read the value on it, replacing any capture. */
-export async function watchValue(application: string, value: string): Promise<void> {
-  await invoke('watch_value', { application, value });
+/** Captures a saved value's region on its application's window, replacing any capture, and returns the watch's number. */
+export async function watchValue(application: string, value: string): Promise<number> {
+  return invoke<number>('watch_value', { application, value });
 }
 
-/** What the watched value reads now, and whether `when` holds for it. Fails when nothing is watched or the window closed. */
-export async function watchedReading(when: WhenDef | null): Promise<Live> {
-  return invoke<Live>('watched_reading', { when });
+/** What the watch's value reads now, and whether `when` holds for it. Fails once the watch was stopped or replaced. */
+export async function watchedReading(watch: number, when: WhenDef | null): Promise<Live> {
+  return invoke<Live>('watched_reading', { watch, when });
+}
+
+/** Stops the watch, unless another capture replaced it already. */
+export async function stopWatching(watch: number): Promise<void> {
+  await invoke('stop_watching', { watch });
 }
 
 /** The handles of the running windows `window` matches, the best fit first. */

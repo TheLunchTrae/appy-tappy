@@ -63,7 +63,9 @@ value, and any number of automations can watch the same one.
    window about twice a second and says what it reads now and whether the
    condition is true, so a target can be tried before it is saved. It says so
    when the application is not open, or when the window is not the size the
-   value was drawn at, since a value reads only at that size.
+   value was drawn at, since a value reads only at that size. It reads the
+   window the runtime would, captures only the value's region, and shows
+   numbers as read.
 3. **Do, in order.** Add any number of actions and move them up or down. Each
    one pauses, plays, or skips media, or sets a volume, for whatever is
    playing or the whole system, or for one application named by its

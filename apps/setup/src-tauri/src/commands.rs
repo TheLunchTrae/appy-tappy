@@ -103,14 +103,15 @@ pub(crate) async fn read_value(app: AppHandle) -> Result<Option<Reading>, String
     ask(&app, Request::Reading).await?
 }
 
-/// Captures the window of the saved value `value` of the application
-/// `application` and reads the value on it, for the automation editor.
+/// Captures the region of the saved value `value` of the application
+/// `application` on its window, for the automation editor, and returns the
+/// watch's number.
 #[tauri::command]
 pub(crate) async fn watch_value(
     app: AppHandle,
     application: String,
     value: String,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     ask(&app, |reply| Request::WatchValue {
         app: application,
         value,
@@ -119,14 +120,25 @@ pub(crate) async fn watch_value(
     .await?
 }
 
-/// What the watched value reads now, and whether `when` holds for it.
+/// What the watch's value reads now, and whether `when` holds for it.
 #[tauri::command]
-pub(crate) async fn watched_reading(app: AppHandle, when: Option<WhenDef>) -> Result<Live, String> {
+pub(crate) async fn watched_reading(
+    app: AppHandle,
+    watch: u64,
+    when: Option<WhenDef>,
+) -> Result<Live, String> {
     ask(&app, |reply| Request::WatchedReading {
+        watch,
         when: when.map(Box::new),
         reply,
     })
     .await?
+}
+
+/// Stops the watch, unless another capture replaced it already.
+#[tauri::command]
+pub(crate) async fn stop_watching(app: AppHandle, watch: u64) -> Result<(), String> {
+    ask(&app, |reply| Request::StopWatching { watch, reply }).await
 }
 
 /// The handles of the running windows `window` matches, the best fit first.
