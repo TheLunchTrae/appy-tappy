@@ -1,12 +1,24 @@
-//! [`Actions`]: runs each action through [`Controls`] and keeps the journal
-//! that lets releasing a rule put back what its restoring actions changed.
+//! Runs each action through [`Controls`] and keeps the journal that lets
+//! releasing a rule put back what its restoring actions changed.
 
 use appytappy_config::action::{
     Action, KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
 };
+use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::rule::Restore;
 
-use crate::{ActionError, Controls, HOLD, MediaSession, Stroke, Volume, Watched, strokes};
+use crate::{ActionError, Controls, HOLD, MediaSession, Stroke, Volume, strokes};
+
+/// The application whose automation runs an action: the process its session
+/// follows, and that process's executable, such as `Example.exe`. A key
+/// press presses keys only into that process's window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Watched {
+    /// The process.
+    pub process: ProcessId,
+    /// Its executable, for messages.
+    pub executable: String,
+}
 
 /// What one restoring action changed: the target, its state before, and the
 /// state the action left it in.
@@ -351,7 +363,6 @@ mod tests {
     use std::time::Duration;
 
     use appytappy_config::action::{AppName, Modifier};
-    use appytappy_config::anti_cheat::ProcessId;
 
     use super::*;
 

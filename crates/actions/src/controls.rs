@@ -1,5 +1,5 @@
-//! What actions act on: media sessions, volume controls, and the watched
-//! application in front, as [`Controls`] lists them.
+//! What actions act on: the media sessions, volume controls, and focused
+//! process that [`Controls`] lists, and the calls that act on them.
 
 use std::io;
 use std::time::Duration;
@@ -27,17 +27,6 @@ pub struct Volume<K> {
     pub key: K,
     /// Its level now.
     pub level: VolumeLevel,
-}
-
-/// The application whose automation runs an action: the process its session
-/// follows, and that process's executable, such as `Example.exe`. A key
-/// press presses keys only into that process's window.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Watched {
-    /// The process.
-    pub process: ProcessId,
-    /// Its executable, for messages.
-    pub executable: String,
 }
 
 /// The operating system controls that actions use. Each method lists what

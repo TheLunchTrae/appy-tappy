@@ -16,7 +16,7 @@ mod keys;
 #[cfg(windows)]
 pub mod win;
 
-pub use controls::{Controls, MediaSession, Volume, Watched};
+pub use controls::{Controls, MediaSession, Volume};
 pub use error::ActionError;
-pub use journal::Actions;
+pub use journal::{Actions, Watched};
 pub use keys::{HOLD, Stroke, strokes};
