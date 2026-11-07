@@ -1,7 +1,7 @@
 # Screen regions
 
-A screen region source reads a signal from part of a game's window, such as a
-progress bar or a percent counter. The setup app has the user pick the window,
+A screen region source reads a signal from part of an application's window,
+such as a progress bar, a number counter, or whether an icon is showing. The setup app has the user pick the window,
 take a screenshot, draw a box around the information, and choose a check. The
 code lives in `appytappy-sources`: `screen.rs` holds images, regions, and the
 capture trait, `screen/check.rs` and `screen/digits.rs` hold the checks, and
@@ -84,7 +84,7 @@ Each frame carries the time since the system composed it. The benchmark uses
 that to report capture-to-decision latency on a live window:
 
 ```sh
-APPYTAPPY_BENCH_WINDOW="Geometry Dash" APPYTAPPY_BENCH_REGION="0,0,200,20" mise run rust:bench
+APPYTAPPY_BENCH_WINDOW="Example App" APPYTAPPY_BENCH_REGION="0,0,200,20" mise run rust:bench
 ```
 
 The capture asks Windows to drop the yellow border that marks a captured

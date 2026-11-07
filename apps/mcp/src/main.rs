@@ -1,5 +1,5 @@
 //! `appytappy-mcp`: a local MCP server that gives an AI agent read-only tools
-//! to investigate how a game stores its state.
+//! to investigate how an app stores its state.
 //!
 //! The agent launches it and talks MCP over stdin and stdout. See
 //! `docs/mcp.md` for setup and the tool workflow.

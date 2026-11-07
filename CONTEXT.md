@@ -5,23 +5,26 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
 
 - **Action.** A side effect from the runtime's fixed set, such as pausing media
   or setting an app's volume. A paired action restores the state it changed.
-- **Anti-cheat class.** How a game protects itself: `none`, `user-mode`,
-  `kernel-level`, or `unknown`. Only `none` permits memory sources,
-  input-injection actions, and anything else that opens the game's process.
-- **App definition.** Data, never code, that says how to recognize one game,
-  detect its version, and read its signals.
+- **Anti-cheat class.** How an application protects itself from other
+  programs: `none`, `user-mode`, `kernel-level`, or `unknown`. A protected
+  application is one whose class is not `none`, such as one with anti-cheat.
+  Only `none` permits memory sources, input-injection actions, and anything
+  else that opens the application's process.
+- **App definition.** Data, never code, that says how to recognize one
+  application, detect its version, and read its signals.
+- **Application.** Any program AppyTappy watches: a game, a media player, a
+  browser, or anything else with a window. Code and short UI labels call it
+  an app.
 - **Authoring files.** The app definitions and rules the setup app reads and
   writes. The runtime never reads them.
-- **Binding.** The concrete way to read one signal for one game version: a
-  source primitive and its parameters, such as a pointer chain.
+- **Binding.** The concrete way to read one signal for one application
+  version: a source primitive and its parameters, such as a pointer chain.
 - **Check.** How a screen region binding turns a region's pixels into a value:
   a number, a bar's fill, a color match, or a match with a reference picture.
 - **Compiled config.** The one file the setup app compiles from authoring
   files and the runtime loads.
-- **Game.** Any application AppyTappy watches. Most are games, but nothing
-  requires it.
-- **Process-access permit.** The value `config` issues for a game of class
-  `none`; every path that opens a game's process requires one.
+- **Process-access permit.** The value `config` issues for an application of
+  class `none`; every path that opens an application's process requires one.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
 - **Read interval.** The minimum and maximum time between a source's reads.
@@ -36,15 +39,17 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
   whether those actions restore.
 - **Runtime.** The always-on background program.
 - **Sample.** One value a source read for a signal.
-- **Session.** One run of a game, from its start to its exit, or until the
-  runtime stops it for a pause or a config change. Rule state resets with
+- **Session.** One run of an application, from its start to its exit, or
+  until the runtime stops it for a pause or a config change. Rule state resets with
   each session.
 - **Setup app.** The program the user opens to discover signals, build rules,
   and compile the config.
-- **Signal.** A named, typed value a game exposes, such as `level_percent`.
+- **Signal.** A named, typed value an application exposes, such as `score`
+  or `icon_visible`.
 - **Source primitive.** One kind of state reader the runtime ships: memory
   pointer chain, screen region, log file, local API, or process and window
   events.
 - **Status file.** The file the runtime writes and the setup app reads: which
-  games are attached and the last problem.
-- **Trigger.** The condition on signals or game events that makes a rule fire.
+  applications are attached and the last problem.
+- **Trigger.** The condition on signals or application events that makes a
+  rule fire.

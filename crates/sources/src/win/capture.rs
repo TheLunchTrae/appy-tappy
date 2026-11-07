@@ -1,5 +1,5 @@
 //! Window capture through Windows Graphics Capture, the system API that
-//! screen recorders and Game Bar use.
+//! screen recorders and the Xbox Game Bar use.
 //!
 //! The system pushes a frame each time the window's content changes. The
 //! event handlers only wake a thread this module owns, and that thread makes

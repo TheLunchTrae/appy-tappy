@@ -816,8 +816,8 @@ mod tests {
 
         fn screenshots() -> [Image; 2] {
             [
-                include_bytes!("../tests/fixtures/attempt_37.png").as_slice(),
-                include_bytes!("../tests/fixtures/attempt_90.png").as_slice(),
+                include_bytes!("../tests/fixtures/progress_37.png").as_slice(),
+                include_bytes!("../tests/fixtures/progress_90.png").as_slice(),
             ]
             .map(|file| Image::decode_png(file).unwrap())
         }

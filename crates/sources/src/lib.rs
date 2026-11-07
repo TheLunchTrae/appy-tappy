@@ -1,4 +1,4 @@
-//! Source primitives that read game state for the runtime and the setup app,
+//! Source primitives that read app state for the runtime and the setup app,
 //! and the guided memory scan that finds what to read.
 //!
 //! The scan and the pointer-chain walker are portable and take a

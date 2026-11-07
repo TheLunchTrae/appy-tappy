@@ -61,11 +61,11 @@ fn main() -> ExitCode {
             result
         },
         Command::Run(executables) => log.and_then(|mut log| {
-            let games = executables
+            let apps = executables
                 .into_iter()
                 .map(|executable| vec![executable])
                 .collect();
-            run(Watchlist::new(games), &mut log)
+            run(Watchlist::new(apps), &mut log)
         }),
     };
     if result.is_ok() {
@@ -89,14 +89,14 @@ fn autostart(setting: &Autostart) -> io::Result<()> {
 }
 
 /// The command line Windows runs at sign-in: the program, quoted because a
-/// path with spaces would otherwise run its first word, then the games to
-/// watch. The command line refuses quotes in a game's name.
+/// path with spaces would otherwise run its first word, then the apps to
+/// watch. The command line refuses quotes in an app's name.
 fn autostart_command(executable: &Path, watched: &[String]) -> OsString {
     let mut command = OsString::from("\"");
     command.push(executable);
     command.push("\"");
-    for game in watched {
-        command.push(format!(" --watch \"{game}\""));
+    for app in watched {
+        command.push(format!(" --watch \"{app}\""));
     }
     command
 }
@@ -287,16 +287,16 @@ fn handle(
 
 fn describe(watchlist: &Watchlist, change: &Change) -> String {
     match change {
-        Change::Started { game, process } => {
+        Change::Started { app, process } => {
             format!(
                 "{} started (process {process}): attached",
-                watchlist.name(*game)
+                watchlist.name(*app)
             )
         },
-        Change::Exited { game, process } => {
+        Change::Exited { app, process } => {
             format!(
                 "{} exited (process {process}): detached",
-                watchlist.name(*game)
+                watchlist.name(*app)
             )
         },
         Change::ScanFailed(problem) => format!("process snapshots fail: {problem}"),
@@ -314,7 +314,7 @@ mod tests {
     use appytappy_config::anti_cheat::ProcessId;
 
     use super::*;
-    use crate::lifecycle::GameIndex;
+    use crate::lifecycle::AppIndex;
 
     #[test]
     fn a_note_is_a_line_in_the_log() {
@@ -349,7 +349,7 @@ mod tests {
             written.contains("the runtime could not start"),
             "{written:?}"
         );
-        let on = Autostart::On(vec!["Game.exe".to_owned()]);
+        let on = Autostart::On(vec!["Example.exe".to_owned()]);
         for setting in [on, Autostart::Off] {
             assert_eq!(
                 autostart(&setting).expect_err("unsupported").kind(),
@@ -359,15 +359,15 @@ mod tests {
     }
 
     #[test]
-    fn autostart_runs_the_quoted_program_with_its_games() {
+    fn autostart_runs_the_quoted_program_with_its_apps() {
         let command = autostart_command(
             Path::new("C:/Program Files/AppyTappy/appytappy-runtime.exe"),
-            &["GeometryDash.exe".to_owned(), "Other.exe".to_owned()],
+            &["Example.exe".to_owned(), "Other.exe".to_owned()],
         );
         assert_eq!(
             command,
             OsString::from(
-                r#""C:/Program Files/AppyTappy/appytappy-runtime.exe" --watch "GeometryDash.exe" --watch "Other.exe""#
+                r#""C:/Program Files/AppyTappy/appytappy-runtime.exe" --watch "Example.exe" --watch "Other.exe""#
             )
         );
     }
@@ -388,10 +388,10 @@ mod tests {
     fn events_update_the_model_and_the_log_until_quit() {
         let folder = env::temp_dir().join(format!("appytappy-handle-{}", process::id()));
         let mut log = Log::open(&folder, log::LIMIT).expect("open");
-        let watchlist = Watchlist::new(vec![vec!["Game.exe".to_owned()]]);
+        let watchlist = Watchlist::new(vec![vec!["Example.exe".to_owned()]]);
         let mut model = Model::default();
         let started = Event::from(Change::Started {
-            game: GameIndex(0),
+            app: AppIndex(0),
             process: ProcessId::new(7),
         });
         let disable = Event::from(TrayEvent::Picked(tray::DISABLE));
@@ -431,7 +431,7 @@ mod tests {
         assert_eq!(model.state(), model::State::Attached);
         assert_eq!(written.lines().count(), 7, "{written:?}");
         assert!(
-            written.contains("Game.exe started (process 7): attached"),
+            written.contains("Example.exe started (process 7): attached"),
             "{written:?}"
         );
         assert!(written.contains("state: attached"), "{written:?}");
@@ -449,13 +449,13 @@ mod tests {
     }
 
     #[test]
-    fn log_lines_name_the_game_and_process() {
-        let watchlist = Watchlist::new(vec![vec!["GeometryDash.exe".to_owned()]]);
-        let game = GameIndex(0);
+    fn log_lines_name_the_app_and_process() {
+        let watchlist = Watchlist::new(vec![vec!["Example.exe".to_owned()]]);
+        let app = AppIndex(0);
         let process = ProcessId::new(42);
         let lines = [
-            Change::Started { game, process },
-            Change::Exited { game, process },
+            Change::Started { app, process },
+            Change::Exited { app, process },
             Change::ScanFailed("denied".to_owned()),
             Change::ScanRestored,
         ]
@@ -463,8 +463,8 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "GeometryDash.exe started (process 42): attached",
-                "GeometryDash.exe exited (process 42): detached",
+                "Example.exe started (process 42): attached",
+                "Example.exe exited (process 42): detached",
                 "process snapshots fail: denied",
                 "process snapshots work again",
             ]

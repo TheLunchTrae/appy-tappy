@@ -1,7 +1,10 @@
 # appy-tappy
 
-AppyTappy is a Windows background app that runs automations when a game
-reaches a state, such as pausing music at 90% of a Geometry Dash level.
+AppyTappy is a Windows background app that runs automations when another
+application reaches a state you can see: a certain number appears in a region
+of its window, an icon becomes visible, a bar fills past a threshold, or a
+color changes. An automation then acts, such as pausing media or changing an
+app's volume.
 
 ## Development
 

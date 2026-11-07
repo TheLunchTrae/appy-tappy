@@ -1,7 +1,8 @@
 # Agent Guide
 
-AppyTappy is a Windows background app that runs automations when a game reaches
-a state, such as pausing music at 90% of a Geometry Dash level. Read
+AppyTappy is a Windows background app that runs automations when another
+application reaches a state, such as a certain number appearing in a region of
+its window or an icon becoming visible. Read
 `CONTEXT.md` first if it exists. Then read the pages in `docs/` that own the
 change before changing architecture, domain language, or enforcement.
 

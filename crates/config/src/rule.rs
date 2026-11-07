@@ -1,4 +1,4 @@
-//! Rules: when to act on a game's signals and events.
+//! Rules: when to act on an app's signals and events.
 //!
 //! These are validated types. The constructors check every invariant, so the
 //! engine never meets a malformed rule. `docs/rules.md` explains the model.
@@ -41,7 +41,7 @@ impl Comparison {
     }
 }
 
-/// A test of a game's current signal values.
+/// A test of an app's current signal values.
 ///
 /// A comparison on a signal that has no value yet, or whose value has a
 /// different type than the comparison's value, does not hold.
@@ -158,16 +158,16 @@ fn compares(current: Value, comparison: Comparison, expected: Value) -> bool {
     })
 }
 
-/// Something that happens to a game as a whole.
+/// Something that happens to an app as a whole.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GameEvent {
-    /// The game started; its first window appeared.
+pub enum AppEvent {
+    /// The app started; its first window appeared.
     Started,
-    /// The game exited.
+    /// The app exited.
     Exited,
-    /// A game window gained the keyboard focus.
+    /// An app window gained the keyboard focus.
     Focused,
-    /// The game's windows lost the keyboard focus.
+    /// The app's windows lost the keyboard focus.
     Unfocused,
 }
 
@@ -180,11 +180,11 @@ pub enum Rearm {
     /// Once its condition stops holding.
     WhenFalse,
     /// Once its condition stops holding and this other condition holds, such
-    /// as a level percentage falling back near zero. A value that wavers
+    /// as a progress value falling back near zero. A value that wavers
     /// around the trigger's threshold then neither fires the rule again nor
     /// releases it.
     When(Condition),
-    /// Not until the game starts again: once per game session. The rule is
+    /// Not until the app starts again: once per app session. The rule is
     /// released when its condition stops holding.
     Never,
 }
@@ -201,7 +201,7 @@ pub enum Trigger {
         rearm: Rearm,
     },
     /// Fires when a new value of `signal` differs from its last value. The
-    /// first value a game session reads is not a change.
+    /// first value an app session reads is not a change.
     Changes {
         /// The signal to watch.
         signal: SignalName,
@@ -211,9 +211,9 @@ pub enum Trigger {
     /// Fires when `event` happens.
     On {
         /// The event to watch.
-        event: GameEvent,
+        event: AppEvent,
         /// A condition that must also hold, if any. A
-        /// [`GameEvent::Started`] trigger takes none, because no signal has
+        /// [`AppEvent::Started`] trigger takes none, because no signal has
         /// a value yet.
         guard: Option<Condition>,
     },
@@ -252,9 +252,9 @@ impl Rule {
     ///   back, such as a rule that only skips tracks.
     /// - [`RuleError::NothingToRelease`] when `restore` is
     ///   [`Restore::OnRelease`] for a trigger that is never released: a
-    ///   [`Trigger::Changes`] trigger or a [`GameEvent::Exited`] trigger.
+    ///   [`Trigger::Changes`] trigger or an [`AppEvent::Exited`] trigger.
     /// - [`RuleError::GuardNeverHolds`] for a guard on a
-    ///   [`GameEvent::Started`] trigger, because no signal has a value then.
+    ///   [`AppEvent::Started`] trigger, because no signal has a value then.
     /// - [`RuleError::CooldownDropsFocus`] for a focus trigger that restores
     ///   and has a cooldown: a focus event during the cooldown is lost, so the
     ///   rule would stay released while the focus says it should be active.
@@ -274,15 +274,15 @@ impl Rule {
         match &trigger {
             Trigger::Changes { .. }
             | Trigger::On {
-                event: GameEvent::Exited,
+                event: AppEvent::Exited,
                 ..
             } if restores => return Err(RuleError::NothingToRelease),
             Trigger::On {
-                event: GameEvent::Started,
+                event: AppEvent::Started,
                 guard: Some(_),
             } => return Err(RuleError::GuardNeverHolds),
             Trigger::On {
-                event: GameEvent::Focused | GameEvent::Unfocused,
+                event: AppEvent::Focused | AppEvent::Unfocused,
                 ..
             } if restores && !cooldown.is_zero() => return Err(RuleError::CooldownDropsFocus),
             Trigger::Becomes { .. } | Trigger::Changes { .. } | Trigger::On { .. } => {},
@@ -406,8 +406,8 @@ mod tests {
             .collect()
     }
 
-    fn percent(comparison: Comparison, threshold: f64) -> Condition {
-        Condition::compare(name("percent"), comparison, number(threshold)).expect("valid")
+    fn progress(comparison: Comparison, threshold: f64) -> Condition {
+        Condition::compare(name("progress"), comparison, number(threshold)).expect("valid")
     }
 
     #[test]
@@ -422,45 +422,46 @@ mod tests {
             (Above, [false, false, true]),
         ];
         for (comparison, expected) in expectations {
-            let condition = percent(comparison, 90.0);
+            let condition = progress(comparison, 90.0);
             let held = [89.0, 90.0, 91.0]
-                .map(|current| condition.holds(&values(&[("percent", number(current))])));
+                .map(|current| condition.holds(&values(&[("progress", number(current))])));
             assert_eq!(held, expected, "{comparison:?}");
         }
     }
 
     #[test]
     fn flags_compare_by_equality() {
-        let in_level = Condition::compare(name("in_level"), Comparison::Equals, Value::Flag(true))
-            .expect("valid");
-        assert!(in_level.holds(&values(&[("in_level", Value::Flag(true))])));
-        assert!(!in_level.holds(&values(&[("in_level", Value::Flag(false))])));
+        let icon_visible =
+            Condition::compare(name("icon_visible"), Comparison::Equals, Value::Flag(true))
+                .expect("valid");
+        assert!(icon_visible.holds(&values(&[("icon_visible", Value::Flag(true))])));
+        assert!(!icon_visible.holds(&values(&[("icon_visible", Value::Flag(false))])));
         assert_eq!(
-            Condition::compare(name("in_level"), Comparison::Above, Value::Flag(false)),
-            Err(RuleError::OrderedFlag(name("in_level")))
+            Condition::compare(name("icon_visible"), Comparison::Above, Value::Flag(false)),
+            Err(RuleError::OrderedFlag(name("icon_visible")))
         );
         assert!(
-            RuleError::OrderedFlag(name("in_level"))
+            RuleError::OrderedFlag(name("icon_visible"))
                 .to_string()
-                .contains("in_level")
+                .contains("icon_visible")
         );
     }
 
     #[test]
     fn missing_and_mistyped_values_do_not_hold() {
-        let condition = percent(Comparison::NotEquals, 90.0);
+        let condition = progress(Comparison::NotEquals, 90.0);
         assert!(!condition.holds(&BTreeMap::new()));
-        assert!(!condition.holds(&values(&[("percent", Value::Flag(true))])));
+        assert!(!condition.holds(&values(&[("progress", Value::Flag(true))])));
         assert!(!condition.holds(&values(&[("other", number(1.0))])));
     }
 
     #[test]
     fn groups_combine_conditions() {
-        let low = percent(Comparison::Below, 10.0);
-        let high = percent(Comparison::Above, 90.0);
+        let low = progress(Comparison::Below, 10.0);
+        let high = progress(Comparison::Above, 90.0);
         let all = Condition::all(vec![low.clone(), high.clone()]).expect("valid");
         let any = Condition::any(vec![low, high]).expect("valid");
-        let at = |current| values(&[("percent", number(current))]);
+        let at = |current| values(&[("progress", number(current))]);
         assert_eq!(
             [5.0, 50.0, 95.0].map(|current| any.holds(&at(current))),
             [true, false, true]
@@ -470,8 +471,8 @@ mod tests {
             [false; 3]
         );
         let both = Condition::all(vec![
-            percent(Comparison::Above, 10.0),
-            percent(Comparison::Below, 90.0),
+            progress(Comparison::Above, 10.0),
+            progress(Comparison::Below, 90.0),
         ])
         .expect("valid");
         assert_eq!(
@@ -484,7 +485,7 @@ mod tests {
     fn groups_need_conditions_and_limited_depth() {
         assert_eq!(Condition::all(Vec::new()), Err(RuleError::EmptyGroup));
         assert_eq!(Condition::any(Vec::new()), Err(RuleError::EmptyGroup));
-        let mut condition = percent(Comparison::Above, 1.0);
+        let mut condition = progress(Comparison::Above, 1.0);
         for _ in 1..MAX_CONDITION_DEPTH {
             condition = Condition::any(vec![condition]).expect("within the limit");
         }
@@ -494,7 +495,7 @@ mod tests {
             Err(RuleError::TooDeep)
         );
         assert_eq!(
-            Condition::any(vec![percent(Comparison::Above, 1.0), condition]),
+            Condition::any(vec![progress(Comparison::Above, 1.0), condition]),
             Err(RuleError::TooDeep)
         );
     }
@@ -502,27 +503,27 @@ mod tests {
     #[test]
     fn only_released_triggers_restore() {
         let becomes = Trigger::Becomes {
-            condition: percent(Comparison::AtLeast, 90.0),
+            condition: progress(Comparison::AtLeast, 90.0),
             rearm: Rearm::WhenFalse,
         };
         let changes = Trigger::Changes {
-            signal: name("percent"),
+            signal: name("progress"),
             guard: None,
         };
         let on = |event| Trigger::On { event, guard: None };
         for trigger in [
             becomes,
-            on(GameEvent::Started),
-            on(GameEvent::Focused),
-            on(GameEvent::Unfocused),
+            on(AppEvent::Started),
+            on(AppEvent::Focused),
+            on(AppEvent::Unfocused),
         ] {
             assert!(Rule::new(trigger, pause(), Duration::ZERO, Restore::OnRelease).is_ok());
         }
-        let guard = Some(percent(Comparison::AtLeast, 0.0));
+        let guard = Some(progress(Comparison::AtLeast, 0.0));
         assert_eq!(
             Rule::new(
                 Trigger::On {
-                    event: GameEvent::Started,
+                    event: AppEvent::Started,
                     guard: guard.clone()
                 },
                 pause(),
@@ -534,7 +535,7 @@ mod tests {
         assert!(
             Rule::new(
                 Trigger::On {
-                    event: GameEvent::Exited,
+                    event: AppEvent::Exited,
                     guard
                 },
                 pause(),
@@ -544,15 +545,15 @@ mod tests {
             .is_ok()
         );
         let second = Duration::from_secs(1);
-        for event in [GameEvent::Focused, GameEvent::Unfocused] {
+        for event in [AppEvent::Focused, AppEvent::Unfocused] {
             assert_eq!(
                 Rule::new(on(event), pause(), second, Restore::OnRelease),
                 Err(RuleError::CooldownDropsFocus)
             );
             assert!(Rule::new(on(event), pause(), second, Restore::Never).is_ok());
         }
-        assert!(Rule::new(on(GameEvent::Started), pause(), second, Restore::OnRelease).is_ok());
-        for trigger in [changes, on(GameEvent::Exited)] {
+        assert!(Rule::new(on(AppEvent::Started), pause(), second, Restore::OnRelease).is_ok());
+        for trigger in [changes, on(AppEvent::Exited)] {
             assert_eq!(
                 Rule::new(trigger.clone(), pause(), Duration::ZERO, Restore::OnRelease),
                 Err(RuleError::NothingToRelease)
@@ -564,7 +565,7 @@ mod tests {
     #[test]
     fn a_rule_needs_actions_and_something_to_restore() {
         let trigger = || Trigger::On {
-            event: GameEvent::Focused,
+            event: AppEvent::Focused,
             guard: None,
         };
         assert_eq!(

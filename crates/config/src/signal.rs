@@ -1,4 +1,4 @@
-//! Signals: the named values a game exposes, and the values sources read for
+//! Signals: the named values an app exposes, and the values sources read for
 //! them.
 
 use std::error::Error;
@@ -7,7 +7,7 @@ use std::fmt;
 /// The longest signal name, in bytes.
 const MAX_NAME_LEN: usize = 64;
 
-/// The name of a signal, such as `level_percent`.
+/// The name of a signal, such as `progress`.
 ///
 /// A name starts with a lowercase ASCII letter, continues with lowercase ASCII
 /// letters, digits, and underscores, and is at most 64 bytes long.
@@ -74,9 +74,9 @@ impl Number {
 /// A value of a signal, as a source read it or a rule names it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
-    /// A number, such as a level percentage.
+    /// A number, such as a score or how full a bar is.
     Number(Number),
-    /// A yes-or-no value, such as whether the player is in a level.
+    /// A yes-or-no value, such as whether an icon is visible.
     Flag(bool),
 }
 
@@ -88,7 +88,7 @@ mod tests {
     fn signal_names_follow_the_naming_rules() {
         let longest = "a".repeat(MAX_NAME_LEN);
         let too_long = "a".repeat(MAX_NAME_LEN.checked_add(1).expect("small"));
-        for valid in ["level_percent", "a", "lap2", "x_", longest.as_str()] {
+        for valid in ["progress", "a", "step2", "x_", longest.as_str()] {
             assert_eq!(
                 SignalName::new(valid).map(|name| name.to_string()),
                 Ok(valid.to_owned())
@@ -97,10 +97,10 @@ mod tests {
         for invalid in [
             "",
             "Level",
-            "2lap",
-            "_lap",
-            "lap-two",
-            "lap two",
+            "2step",
+            "_step",
+            "step-two",
+            "step two",
             "läp",
             too_long.as_str(),
         ] {
