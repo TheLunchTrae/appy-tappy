@@ -410,6 +410,11 @@ impl appytappy_actions::Controls for NoControls {
     ) -> io::Result<()> {
         match self.0 {}
     }
+
+    #[mutants::skip]
+    fn press_keys(&mut self, _keys: &appytappy_config::action::KeyChord) -> io::Result<()> {
+        match self.0 {}
+    }
 }
 
 /// Starts a named thread.

@@ -14,6 +14,8 @@ calls that crate; the engine only says which rule fired.
 - **Set volume:** the default playback device's volume, or one app's volume
   on that device. It uses Core Audio, the API behind the Windows volume
   mixer.
+- **Press keys:** one key, with any of Ctrl, Alt, Shift, and Win held, such
+  as `Ctrl+Shift+M`. See [Key presses](#key-presses).
 
 An app is named the way Windows reports it, ignoring ASCII case. For media, that
 is the session's app ID: usually the executable name, such as `Player.exe`, for
@@ -39,6 +41,30 @@ A media request that gets no answer within two seconds fails, so an app
 that hangs cannot hold up the actions behind it. The app may still act on
 a request after it times out; such a late change is not restored.
 
+## Key presses
+
+A key press action is saved as text: any of `Ctrl`, `Alt`, `Shift`, and `Win`,
+in that order, then one key, joined by `+`. The key is a letter, a digit,
+`F1` to `F24`, `Space`, `Enter`, `Tab`, `Escape`, `Backspace`, `Insert`,
+`Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Up`, `Down`, `Left`, or
+`Right`. Reading it ignores case and spaces around each part, and the setup
+app saves it in the spelling above.
+
+The action holds the modifiers down in order, presses and releases the key,
+then lets the modifiers go in reverse. It uses `SendInput`, so the keys go to
+the window that has the keyboard focus, as if typed. They reach the watched
+application only while it is in front. Windows does not deliver them to a
+window running as administrator unless AppyTappy runs as administrator too.
+The modifiers are the left-hand ones, and the navigation and arrow keys are
+sent as the dedicated keys, not the number pad's.
+
+Anti-cheat can see injected input and treat it as cheating, so an automation
+with a key press action runs only for an application whose anti-cheat class
+is `none` (see [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)). A
+new application starts as `unknown`, so the user has to set it first. Saving
+an automation checks this, and so does the runtime when it reads them: if the
+class changes later, the runtime stops running that automation.
+
 ## Restoring
 
 A rule that restores on release undoes its actions when it is released (see
@@ -50,8 +76,8 @@ it touched, just before it acted:
 - **Set volume** puts back each audio session's own level, or the device's.
   A restore goes to the same device or session the action changed, even if
   the default device has changed since.
-- **Next** and **previous** cannot be undone. A rule that restores needs at
-  least one action that can.
+- **Next**, **previous**, and **press keys** cannot be undone. A rule that
+  restores needs at least one action that can.
 
 A rule's actions are undone newest first. When several restoring rules change
 the same session or volume, the original state comes back only when the last
@@ -67,10 +93,8 @@ audio sessions, what it changed before the failure is still restored.
 
 ## Not in v1
 
-- **Keypresses:** input goes to the focused window, which is the watched
-  application, so a hotkey meant for another app would reach it instead.
-  Injected input is also visible to anti-cheat (see
-  [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+- **Sending keys to a window other than the focused one:** a hotkey meant for
+  another application reaches the watched one instead while it is in front.
 - **Running a command or opening a URL:** configs may be shared, and a
   shared config should not be able to run programs.
 - **HTTP and WebSocket calls** (OBS, Streamer.bot, Home Assistant): useful,

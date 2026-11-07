@@ -13,7 +13,9 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
-use appytappy_config::action::{Action, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget};
+use appytappy_config::action::{
+    Action, Key, KeyChord, MediaCommand, MediaTarget, Modifier, VolumeLevel, VolumeTarget,
+};
 use appytappy_config::rule::Restore;
 
 #[cfg(windows)]
@@ -92,6 +94,47 @@ pub trait Controls {
     /// Returns the operating system's error, including for a control that is
     /// gone.
     fn set_volume(&mut self, control: &Self::Volume, level: VolumeLevel) -> io::Result<()>;
+
+    /// Presses `keys`: each modifier goes down, then the key goes down and
+    /// up, then the modifiers go up in reverse. The keys go to whichever
+    /// window has the keyboard focus.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error, including when it took only
+    /// some of the keys.
+    fn press_keys(&mut self, keys: &KeyChord) -> io::Result<()>;
+}
+
+/// One key that a key press moves, as [`strokes`] orders them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stroke {
+    /// A modifier goes down (`true`) or up.
+    Modifier(Modifier, bool),
+    /// The key goes down (`true`) or up.
+    Key(Key, bool),
+}
+
+/// The order in which pressing `keys` moves each key: the modifiers go down
+/// in order, the key goes down and up, and the modifiers go up in reverse,
+/// the way a person presses a shortcut.
+#[must_use]
+pub fn strokes(keys: &KeyChord) -> Vec<Stroke> {
+    let modifiers = keys.modifiers();
+    modifiers
+        .iter()
+        .map(|&modifier| Stroke::Modifier(modifier, true))
+        .chain([
+            Stroke::Key(keys.key(), true),
+            Stroke::Key(keys.key(), false),
+        ])
+        .chain(
+            modifiers
+                .iter()
+                .rev()
+                .map(|&modifier| Stroke::Modifier(modifier, false)),
+        )
+        .collect()
 }
 
 /// What one restoring action changed: the target, its state before, and the
@@ -246,6 +289,8 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                     self.record(owner, change, restores);
                 }
             },
+            // Pressed keys cannot be unpressed, so they leave no record.
+            Action::PressKeys(keys) => self.controls.press_keys(keys)?,
         }
         Ok(())
     }
@@ -485,6 +530,14 @@ mod tests {
                 .find(|volume| volume.key == *control)
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
             found.level = level;
+            Ok(())
+        }
+
+        fn press_keys(&mut self, keys: &KeyChord) -> io::Result<()> {
+            if self.broken == Some("keyboard") {
+                return Err(io::Error::other("input blocked"));
+            }
+            self.log.push(format!("keys {keys}"));
             Ok(())
         }
     }
@@ -920,6 +973,53 @@ mod tests {
         actions.controls().broken = None;
         actions.release('a').expect("nothing left");
         assert_eq!(actions.controls().level("music"), Some(percent(10)));
+    }
+
+    #[test]
+    fn modifiers_wrap_the_key_and_come_up_in_reverse() {
+        let keys = KeyChord::parse("Shift+Ctrl+M").expect("valid");
+        assert_eq!(
+            strokes(&keys),
+            [
+                Stroke::Modifier(Modifier::Ctrl, true),
+                Stroke::Modifier(Modifier::Shift, true),
+                Stroke::Key(Key::Letter('M'), true),
+                Stroke::Key(Key::Letter('M'), false),
+                Stroke::Modifier(Modifier::Shift, false),
+                Stroke::Modifier(Modifier::Ctrl, false),
+            ]
+        );
+        let alone = KeyChord::parse("F9").expect("valid");
+        assert_eq!(
+            strokes(&alone),
+            [
+                Stroke::Key(Key::Function(9), true),
+                Stroke::Key(Key::Function(9), false)
+            ]
+        );
+    }
+
+    #[test]
+    fn keys_are_pressed_and_leave_nothing_to_restore() {
+        let mut actions = player(true);
+        let keys = Action::PressKeys(KeyChord::parse("Ctrl+M").expect("valid"));
+        actions
+            .perform('a', &current(MediaCommand::Pause), Restore::OnRelease)
+            .expect("paused");
+        actions
+            .perform('a', &keys, Restore::OnRelease)
+            .expect("pressed");
+        actions.release('a').expect("released");
+        assert_eq!(
+            actions.controls().log,
+            ["Pause 1", "keys Ctrl+M", "Play 1"],
+            "the release undoes the pause and presses nothing"
+        );
+        actions.controls().broken = Some("keyboard");
+        assert!(matches!(
+            actions.perform('a', &keys, Restore::Never),
+            Err(ActionError::Os(_))
+        ));
     }
 
     #[test]

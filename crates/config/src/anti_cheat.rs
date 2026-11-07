@@ -118,6 +118,16 @@ impl fmt::Display for AccessBlocked {
 
 impl Error for AccessBlocked {}
 
+/// Whether the policy lets AppyTappy send input, such as a key press, for an
+/// app of `class`.
+///
+/// Only [`AntiCheatClass::None`] allows it, because anti-cheat can see input
+/// that a program sends and treat it as cheating.
+#[must_use]
+pub const fn allows_input(class: AntiCheatClass) -> bool {
+    matches!(class, AntiCheatClass::None)
+}
+
 /// Executable names of anti-cheat services and clients, with the product and
 /// its class.
 ///
@@ -201,6 +211,18 @@ mod tests {
             let blocked = ProcessAccessPermit::issue(process, class)
                 .expect_err("every class but none blocks access");
             assert_eq!(blocked.class(), class);
+        }
+    }
+
+    #[test]
+    fn only_class_none_allows_input() {
+        assert!(allows_input(AntiCheatClass::None));
+        for class in [
+            AntiCheatClass::UserMode,
+            AntiCheatClass::KernelLevel,
+            AntiCheatClass::Unknown,
+        ] {
+            assert!(!allows_input(class), "{class}");
         }
     }
 

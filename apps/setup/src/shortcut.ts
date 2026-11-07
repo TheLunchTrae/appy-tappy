@@ -74,3 +74,45 @@ export function accelerator(press: KeyPress): string | null {
 export function shortcutLabel(shortcut: string): string {
   return shortcut.replace('Control', 'Ctrl').replace('Super', 'Win');
 }
+
+/** The keys a key press action can press, by their `code`, as the automations file spells them. */
+const ACTION_KEYS: Readonly<Record<string, string>> = {
+  Space: 'Space',
+  Enter: 'Enter',
+  Tab: 'Tab',
+  Escape: 'Escape',
+  Backspace: 'Backspace',
+  Insert: 'Insert',
+  Delete: 'Delete',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+};
+
+/**
+ * The keys `press` presses, as a key press action spells them, such as `Ctrl+Shift+M`, or null for a
+ * modifier alone or a key that an action cannot press.
+ */
+export function actionKeys(press: KeyPress): string | null {
+  const letter = /^Key([A-Z])$/u.exec(press.code)?.[1];
+  const digit = /^Digit(\d)$/u.exec(press.code)?.[1];
+  const function_ = /^F([1-9]|1\d|2[0-4])$/u.test(press.code) ? press.code : undefined;
+  const found = letter ?? digit ?? function_ ?? ACTION_KEYS[press.code];
+  if (found === undefined) {
+    return null;
+  }
+  return [
+    press.ctrlKey ? 'Ctrl' : null,
+    press.altKey ? 'Alt' : null,
+    press.shiftKey ? 'Shift' : null,
+    press.metaKey ? 'Win' : null,
+    found,
+  ]
+    .filter((part) => part !== null)
+    .join('+');
+}

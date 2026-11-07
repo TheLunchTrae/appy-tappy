@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { accelerator, shortcutLabel } from '../src/shortcut.ts';
+import { accelerator, actionKeys, shortcutLabel } from '../src/shortcut.ts';
 
 const none = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
 
@@ -33,4 +33,31 @@ describe('accelerator', () => {
 test('shortcutLabel uses keycap names', () => {
   expect(shortcutLabel('Control+Shift+S')).toBe('Ctrl+Shift+S');
   expect(shortcutLabel('Super+F9')).toBe('Win+F9');
+});
+
+describe('actionKeys', () => {
+  test('spells modifiers in order, then the key', () => {
+    expect(actionKeys({ ...none, code: 'KeyM' })).toBe('M');
+    expect(actionKeys({ ...none, code: 'Digit5' })).toBe('5');
+    expect(actionKeys({ ...none, code: 'F24' })).toBe('F24');
+    expect(actionKeys({ ctrlKey: true, altKey: true, shiftKey: true, metaKey: true, code: 'KeyM' })).toBe(
+      'Ctrl+Alt+Shift+Win+M',
+    );
+    expect(actionKeys({ ...none, shiftKey: true, code: 'ArrowLeft' })).toBe('Shift+Left');
+  });
+
+  test('takes the keys an action can press, Tab and Escape included', () => {
+    expect(actionKeys({ ...none, code: 'Tab' })).toBe('Tab');
+    expect(actionKeys({ ...none, code: 'Escape' })).toBe('Escape');
+    expect(actionKeys({ ...none, code: 'Enter' })).toBe('Enter');
+    expect(actionKeys({ ...none, code: 'Backspace' })).toBe('Backspace');
+    expect(actionKeys({ ...none, code: 'PageDown' })).toBe('PageDown');
+  });
+
+  test('ignores modifiers alone and keys an action cannot press', () => {
+    expect(actionKeys({ ...none, ctrlKey: true, code: 'ControlLeft' })).toBeNull();
+    expect(actionKeys({ ...none, code: 'F25' })).toBeNull();
+    expect(actionKeys({ ...none, code: 'PrintScreen' })).toBeNull();
+    expect(actionKeys({ ...none, code: 'Numpad1' })).toBeNull();
+  });
 });

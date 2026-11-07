@@ -9,7 +9,7 @@
 
 use std::sync::mpsc::Sender;
 
-use appytappy_config::app_file::WindowDef;
+use appytappy_config::app_file::{AntiCheatDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager};
@@ -170,6 +170,21 @@ pub(crate) async fn delete_value(
     ask(&app, |reply| Request::DeleteValue {
         app: application,
         value,
+        reply,
+    })
+    .await?
+}
+
+/// Sets how an application protects itself from other programs.
+#[tauri::command]
+pub(crate) async fn set_anti_cheat(
+    app: AppHandle,
+    application: String,
+    class: AntiCheatDef,
+) -> Result<(), String> {
+    ask(&app, |reply| Request::SetAntiCheat {
+        app: application,
+        class,
         reply,
     })
     .await?

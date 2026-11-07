@@ -19,7 +19,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::action::{Action, AppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget};
+use crate::action::{
+    Action, AppName, KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
+};
+use crate::anti_cheat::{AntiCheatClass, allows_input};
 use crate::app_file::{AppFile, id_from_name};
 use crate::rule::{Comparison, Condition, Rearm, Restore, Rule, RuleError, Trigger};
 use crate::signal::{Number, SignalName, Value};
@@ -202,15 +205,27 @@ pub enum ActionDef {
         #[serde(default)]
         app: Option<String>,
     },
+    /// Presses keys, which go to whichever window has the keyboard focus.
+    Keys {
+        /// The keys, such as `Ctrl+Shift+M`; [`KeyChord::parse`] reads them.
+        keys: String,
+    },
 }
 
 impl ActionDef {
+    /// Whether the action sends input that anti-cheat can see; see
+    /// [`Action::injects_input`].
+    #[must_use]
+    pub const fn injects_input(&self) -> bool {
+        matches!(self, Self::Keys { .. })
+    }
+
     /// The action this describes.
     ///
     /// # Errors
     ///
     /// Returns the problem as a sentence: an executable name that is empty or
-    /// too long, or a volume over 100.
+    /// too long, a volume over 100, or keys that do not read as a key press.
     pub fn to_action(&self) -> Result<Action, String> {
         let app = |name: &Option<String>| {
             name.as_deref()
@@ -231,6 +246,9 @@ impl ActionDef {
                 target: app(name)?.map_or(VolumeTarget::System, VolumeTarget::App),
                 level: VolumeLevel::from_percent(*percent)
                     .ok_or_else(|| "a volume runs from 0 to 100 percent".to_owned())?,
+            },
+            Self::Keys { keys } => {
+                Action::PressKeys(KeyChord::parse(keys).map_err(|invalid| invalid.to_string())?)
             },
         })
     }
@@ -280,10 +298,12 @@ impl AutomationDef {
             restore,
         )
         .map_err(|error| match error {
-            RuleError::NothingToRestore => "none of these actions can be undone, because a skipped \
-                                            track cannot be unskipped; turn off undo or add another \
-                                            action"
-                .to_owned(),
+            RuleError::NothingToRestore => {
+                "none of these actions can be undone, because a skipped \
+                                            track cannot be unskipped and pressed keys cannot be \
+                                            unpressed; turn off undo or add another action"
+                    .to_owned()
+            },
             other => other.to_string(),
         })
     }
@@ -301,8 +321,11 @@ impl AutomationDef {
     }
 
     /// Checks the automation against the saved applications: its value must
-    /// exist, and its target must be the kind of value the value's check
-    /// reads.
+    /// exist, its target must be the kind of value the value's check reads,
+    /// and it may press keys only when its application's anti-cheat class is
+    /// none, as the policy in [`allows_input`] says. Both the setup app's
+    /// save and the runtime's compile step check this, so an application
+    /// whose class changes later stops running such automations.
     ///
     /// # Errors
     ///
@@ -317,6 +340,15 @@ impl AutomationDef {
         let Some(value) = app.values.iter().find(|value| value.id == self.when.value) else {
             return Err(format!("{} no longer has the value it watches", app.name));
         };
+        if self.actions.iter().any(ActionDef::injects_input)
+            && !allows_input(AntiCheatClass::from(app.anti_cheat))
+        {
+            return Err(format!(
+                "it presses keys, which anti-cheat can treat as cheating, so it can run only once \
+                 {}'s anti-cheat is set to none",
+                app.name
+            ));
+        }
         let numeric = value.screen.check.reads_number();
         match (numeric, self.when.target) {
             (true, TargetDef::Number(_)) | (false, TargetDef::Flag(_)) => Ok(()),
@@ -748,6 +780,79 @@ mod tests {
             app: None,
         }];
         assert!(problem(skip_only).contains("cannot be unskipped"));
+
+        let mut keys_only = pause_music();
+        keys_only.actions = vec![ActionDef::Keys {
+            keys: "F9".to_owned(),
+        }];
+        assert!(problem(keys_only).contains("cannot be unpressed"));
+
+        let mut bad_keys = pause_music();
+        bad_keys.undo = false;
+        bad_keys.actions = vec![ActionDef::Keys {
+            keys: "Ctrl+".to_owned(),
+        }];
+        assert!(problem(bad_keys).contains("Ctrl+Shift+M"));
+    }
+
+    #[test]
+    fn keys_are_spelled_as_text_and_read_as_a_key_press() {
+        let json = r#"{"kind":"keys","keys":"ctrl+shift+m"}"#;
+        let keys: ActionDef = serde_json::from_str(json).expect("valid");
+        assert!(keys.injects_input());
+        assert_eq!(
+            keys.to_action(),
+            Ok(Action::PressKeys(
+                KeyChord::parse("Ctrl+Shift+M").expect("valid")
+            ))
+        );
+        assert_eq!(
+            serde_json::to_string(&keys).expect("serializes"),
+            json,
+            "the file keeps the keys as written"
+        );
+        assert!(
+            !ActionDef::Volume {
+                percent: 5,
+                app: None
+            }
+            .injects_input()
+        );
+    }
+
+    #[test]
+    fn keys_are_pressed_only_for_an_application_without_anti_cheat() {
+        let mut press = pause_music();
+        press.actions.push(ActionDef::Keys {
+            keys: "F9".to_owned(),
+        });
+        let blocked = |class: AntiCheatDef| {
+            let mut app = app();
+            app.anti_cheat = class;
+            press.check_against([("example", &app)])
+        };
+        assert_eq!(blocked(AntiCheatDef::None), Ok(()));
+        for class in [
+            AntiCheatDef::Unknown,
+            AntiCheatDef::UserMode,
+            AntiCheatDef::KernelLevel,
+        ] {
+            assert_eq!(
+                blocked(class),
+                Err(
+                    "it presses keys, which anti-cheat can treat as cheating, so it can run only \
+                     once Example App's anti-cheat is set to none"
+                        .to_owned()
+                ),
+                "{class:?}"
+            );
+        }
+        let app = app();
+        assert_eq!(
+            pause_music().check_against([("example", &app)]),
+            Ok(()),
+            "other actions run whatever the class"
+        );
     }
 
     #[test]

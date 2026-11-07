@@ -398,6 +398,34 @@ mod tests {
     }
 
     #[test]
+    fn keys_are_pressed_only_into_an_application_without_anti_cheat() {
+        let mut protected = app("Protected App", vec![value("progress", bar())]);
+        protected.anti_cheat = AntiCheatDef::KernelLevel;
+        let apps = [
+            stored("free", Ok(app("Free App", vec![value("progress", bar())]))),
+            stored("protected", Ok(protected)),
+        ];
+        let press = |id: &str, app: &str| {
+            let mut automation = automation(id, app, "progress", TargetDef::Number(90.0));
+            automation.actions = vec![ActionDef::Keys {
+                keys: "Ctrl+Shift+M".to_owned(),
+            }];
+            automation.undo = false;
+            automation
+        };
+        let automations = file(vec![press("free", "free"), press("protected", "protected")]);
+        let plan = compile(&apps, &automations, no_pictures);
+        assert_eq!(
+            plan.problems,
+            [
+                "Automation protected cannot run: it presses keys, which anti-cheat can treat as \
+                 cheating, so it can run only once Protected App's anti-cheat is set to none"
+            ]
+        );
+        assert_eq!(plan.apps.keys().collect::<Vec<_>>(), ["free"]);
+    }
+
+    #[test]
     fn pictures_come_from_the_applications_folder() {
         let picture = appytappy_sources::screen::Image::new(
             appytappy_sources::screen::Size {

@@ -122,7 +122,7 @@ export function App() {
           />
         );
       case 'applications':
-        return <ApplicationsPage apps={apps} loadError={loadError} />;
+        return <ApplicationsPage apps={apps} loadError={loadError} onChanged={refresh} />;
     }
   })();
 

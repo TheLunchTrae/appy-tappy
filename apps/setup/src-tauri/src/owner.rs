@@ -324,6 +324,15 @@ pub(crate) enum Request {
         /// Answered once it is gone.
         reply: Reply<Result<(), String>>,
     },
+    /// Sets how an application protects itself from other programs.
+    SetAntiCheat {
+        /// The application's ID.
+        app: String,
+        /// Its anti-cheat class.
+        class: AntiCheatDef,
+        /// Answered once it is saved.
+        reply: Reply<Result<(), String>>,
+    },
     /// The saved automations.
     ListAutomations(Reply<Result<Vec<AutomationSummary>, String>>),
     /// Saves an automation.
@@ -534,6 +543,9 @@ impl<H: Host> Owner<H> {
             Request::DeleteValue { app, value, reply } => {
                 send(reply, self.delete(&app, &value));
             },
+            Request::SetAntiCheat { app, class, reply } => {
+                send(reply, self.set_anti_cheat(&app, class));
+            },
             Request::ListAutomations(reply) => {
                 send(reply, self.stores().and_then(automations::list));
             },
@@ -678,6 +690,24 @@ impl<H: Host> Owner<H> {
         store
             .save(app, &file, &[])
             .and_then(|()| store.prune(app, &file))
+            .map_err(|error| error.to_string())
+    }
+
+    /// Saves `class` as the anti-cheat class of the application `app`. A
+    /// class other than none stops its automations that press keys, which
+    /// the Automations page then shows as unable to run.
+    fn set_anti_cheat(&self, app: &str, class: AntiCheatDef) -> Result<(), String> {
+        let store = &self.stores()?.apps;
+        let mut file = store
+            .load()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|stored| stored.id == app)
+            .ok_or_else(|| "That application is no longer saved.".to_owned())?
+            .file?;
+        file.anti_cheat = class;
+        store
+            .save(app, &file, &[])
             .map_err(|error| error.to_string())
     }
 
@@ -904,6 +934,7 @@ impl Request {
             self,
             Self::SaveValue { .. }
                 | Self::DeleteValue { .. }
+                | Self::SetAntiCheat { .. }
                 | Self::SaveAutomation { .. }
                 | Self::SetAutomationEnabled { .. }
                 | Self::DeleteAutomation { .. }
@@ -1471,6 +1502,70 @@ mod tests {
             .expect("removes");
         assert_eq!(harness.ask(Request::ListAutomations), Ok(Vec::new()));
 
+        // Keys are pressed only for an application whose anti-cheat is none.
+        let press: AutomationDef = serde_json::from_value(serde_json::json!({
+            "id": "",
+            "name": "Press keys",
+            "enabled": true,
+            "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": true},
+            "actions": [{"kind": "keys", "keys": " shift + ctrl + m "}],
+            "undo": false,
+            "cooldownMs": 0
+        }))
+        .expect("the UI's spelling");
+        let save_press = |harness: &mut Harness| {
+            harness.ask(|reply| Request::SaveAutomation {
+                existing: None,
+                automation: Box::new(press.clone()),
+                reply,
+            })
+        };
+        assert!(
+            save_press(&mut harness)
+                .is_err_and(|error| error.contains("anti-cheat is set to none")),
+            "an application whose anti-cheat is not set cannot press keys"
+        );
+        let set = |harness: &mut Harness, class| {
+            harness.ask(|reply| Request::SetAntiCheat {
+                app: "example".to_owned(),
+                class,
+                reply,
+            })
+        };
+        set(&mut harness, AntiCheatDef::None).expect("sets");
+        let apps = harness.ask(Request::ListApps).expect("lists");
+        assert_eq!(
+            apps[0].file.as_ref().map(|file| file.anti_cheat),
+            Some(AntiCheatDef::None)
+        );
+        let id = save_press(&mut harness).expect("saves");
+        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        assert_eq!(
+            listed[0].automation.actions,
+            [ActionDef::Keys {
+                keys: "Ctrl+Shift+M".to_owned()
+            }],
+            "the file keeps one spelling"
+        );
+        assert_eq!(listed[0].problem, None);
+        set(&mut harness, AntiCheatDef::KernelLevel).expect("sets");
+        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        assert!(
+            listed[0]
+                .problem
+                .as_ref()
+                .is_some_and(|problem| problem.contains("anti-cheat is set to none")),
+            "{listed:?}"
+        );
+        harness
+            .ask(|reply| Request::DeleteAutomation { id, reply })
+            .expect("removes");
+        assert_eq!(
+            set(&mut harness, AntiCheatDef::None).map(drop),
+            Ok(()),
+            "lowering it again is allowed too"
+        );
+
         harness
             .ask(|reply| Request::DeleteValue {
                 app: "example".to_owned(),
@@ -1491,6 +1586,14 @@ mod tests {
             harness.ask(|reply| Request::DeleteValue {
                 app: "gone".to_owned(),
                 value: "x".to_owned(),
+                reply,
+            }),
+            Err("That application is no longer saved.".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::SetAntiCheat {
+                app: "gone".to_owned(),
+                class: AntiCheatDef::None,
                 reply,
             }),
             Err("That application is no longer saved.".to_owned())
@@ -1974,6 +2077,11 @@ mod tests {
             },
             Request::DeleteAutomation {
                 id: "x".to_owned(),
+                reply: oneshot::channel().0,
+            },
+            Request::SetAntiCheat {
+                app: "example".to_owned(),
+                class: AntiCheatDef::None,
                 reply: oneshot::channel().0,
             },
         ];

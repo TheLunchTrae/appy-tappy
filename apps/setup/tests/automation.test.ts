@@ -7,6 +7,7 @@ import {
   buildAutomation,
   buildWhen,
   findValue,
+  keysBlocked,
   liveAnnouncement,
   liveText,
   newAction,
@@ -119,6 +120,7 @@ describe('words', () => {
     expect(actionText({ kind: 'media', command: 'next', app: null })).toBe('Next track · whatever is playing');
     expect(actionText({ kind: 'volume', percent: 20, app: null })).toBe('Volume · system 20%');
     expect(actionText({ kind: 'volume', percent: 0, app: 'Player.exe' })).toBe('Volume · Player.exe 0%');
+    expect(actionText({ kind: 'keys', keys: 'Ctrl+Shift+M' })).toBe('Press Ctrl+Shift+M');
   });
 
   test('undo says what it puts back, and skips cannot be undone', () => {
@@ -127,6 +129,7 @@ describe('words', () => {
     expect(undoable({ kind: 'media', command: 'next', app: null })).toBe(false);
     expect(undoable({ kind: 'media', command: 'previous', app: null })).toBe(false);
     expect(undoable({ kind: 'volume', percent: 5, app: null })).toBe(true);
+    expect(undoable({ kind: 'keys', keys: 'M' })).toBe(false);
     expect(undoText(pauseMusic.actions)).toBe('Paused media plays again and each volume goes back to where it was.');
     expect(undoText([{ kind: 'media', command: 'play', app: null }])).toBe('Started media pauses again.');
     expect(
@@ -242,6 +245,61 @@ describe('buildAutomation', () => {
       [0, 'app', 'Player.exe'],
       [1, 'default', ''],
     ]);
+  });
+});
+
+describe('key presses', () => {
+  const free: readonly AppSummary[] = apps.map((app) =>
+    app.file === null ? app : { ...app, file: { ...app.file, antiCheat: 'none' } },
+  );
+  const pressKeys: AutomationDef = {
+    ...pauseMusic,
+    actions: [{ kind: 'keys', keys: 'Ctrl+Shift+M' }],
+    undo: false,
+  };
+
+  test('round-trip through the editor for an application without anti-cheat', () => {
+    const draft = toDraft(pressKeys);
+    expect(draft.actions.map((action) => [action.kind, action.keys, action.target, action.app])).toEqual([
+      ['keys', 'Ctrl+Shift+M', 'default', ''],
+    ]);
+    expect(buildAutomation(draft, valueChoices(free), 'pause_music')).toEqual({ ok: true, automation: pressKeys });
+  });
+
+  test('need keys, trimmed as typed', () => {
+    const draft = toDraft(pressKeys);
+    const typed = (keys: string): ReturnType<typeof buildAutomation> =>
+      buildAutomation(
+        { ...draft, actions: draft.actions.map((action) => ({ ...action, keys })) },
+        valueChoices(free),
+        'pause_music',
+      );
+    expect(typed('  ')).toEqual({ ok: false, next: 'Choose the keys for action 1 to press.' });
+    expect(typed(' Ctrl+M ')).toEqual({
+      ok: true,
+      automation: { ...pressKeys, actions: [{ kind: 'keys', keys: 'Ctrl+M' }] },
+    });
+  });
+
+  test("wait for the application's anti-cheat to be set to none", () => {
+    const blocked =
+      "Anti-cheat can treat pressed keys as cheating, so keys are pressed only once Example App's anti-cheat is set to None on the Applications page.";
+    expect(buildAutomation(toDraft(pressKeys), choices, 'pause_music')).toEqual({ ok: false, next: blocked });
+    expect(keysBlocked(pressKeys.actions, 'unknown', 'Example App')).toBe(blocked);
+    expect(keysBlocked(pressKeys.actions, 'userMode', 'Example App')).toBe(blocked);
+    expect(keysBlocked(pressKeys.actions, 'kernelLevel', 'Example App')).toBe(blocked);
+    expect(keysBlocked(pressKeys.actions, 'none', 'Example App')).toBeNull();
+    expect(keysBlocked(pauseMusic.actions, 'kernelLevel', 'Example App')).toBeNull();
+  });
+
+  test('cannot be undone', () => {
+    const undone = (actions: AutomationDef['actions']): ReturnType<typeof buildAutomation> =>
+      buildAutomation({ ...toDraft({ ...pressKeys, actions }), undo: true }, valueChoices(free), 'pause_music');
+    expect(undone(pressKeys.actions)).toEqual({ ok: false, next: 'Turn off undo: pressed keys cannot be unpressed.' });
+    expect(undone([{ kind: 'media', command: 'next', app: null }, ...pressKeys.actions])).toEqual({
+      ok: false,
+      next: 'Turn off undo: a skipped track cannot be unskipped, and pressed keys cannot be unpressed.',
+    });
   });
 });
 

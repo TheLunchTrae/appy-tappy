@@ -107,7 +107,9 @@ mod tests {
     use std::sync::mpsc;
 
     use appytappy_actions::{MediaSession, Volume};
-    use appytappy_config::action::{MediaCommand, MediaTarget, VolumeLevel, VolumeTarget};
+    use appytappy_config::action::{
+        KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
+    };
 
     use super::*;
 
@@ -148,6 +150,10 @@ mod tests {
         }
 
         fn set_volume(&mut self, (): &(), _level: VolumeLevel) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn press_keys(&mut self, _keys: &KeyChord) -> io::Result<()> {
             Ok(())
         }
     }

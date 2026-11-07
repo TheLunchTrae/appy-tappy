@@ -125,10 +125,14 @@ export type Comparison = 'below' | 'atMost' | 'equals' | 'notEquals' | 'atLeast'
 /** What a media action does. */
 export type MediaCommand = 'play' | 'pause' | 'next' | 'previous';
 
-/** One action. A null `app` means the media session Windows considers current, or the whole system's volume. */
+/**
+ * One action. A null `app` means the media session Windows considers current, or the whole system's volume.
+ * Keys, such as `Ctrl+Shift+M`, go to whichever window has the keyboard focus.
+ */
 export type ActionDef =
   | { readonly kind: 'media'; readonly command: MediaCommand; readonly app: string | null }
-  | { readonly kind: 'volume'; readonly percent: number; readonly app: string | null };
+  | { readonly kind: 'volume'; readonly percent: number; readonly app: string | null }
+  | { readonly kind: 'keys'; readonly keys: string };
 
 /** The condition on one saved value that makes an automation run. */
 export interface WhenDef {
@@ -231,6 +235,11 @@ export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
 
 export async function deleteValue(application: string, value: string): Promise<void> {
   await invoke('delete_value', { application, value });
+}
+
+/** Sets how the application `application` protects itself from other programs. */
+export async function setAntiCheat(application: string, antiCheat: AntiCheat): Promise<void> {
+  await invoke('set_anti_cheat', { application, class: antiCheat });
 }
 
 export async function listAutomations(): Promise<readonly AutomationSummary[]> {
