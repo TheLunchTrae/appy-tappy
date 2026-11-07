@@ -13,7 +13,7 @@
 
 use std::time::{Duration, Instant};
 
-use appytappy_sources::screen::digits::{DigitReader, Shapes};
+use appytappy_sources::screen::digits::{DigitReader, ReadError, Shapes};
 use appytappy_sources::screen::{Image, Region, Size};
 use appytappy_sources::system::Rgb;
 use serde::Serialize;
@@ -227,8 +227,23 @@ impl Recording {
             ));
             return None;
         };
+        let shapes = match self.reader.shapes(&crop) {
+            Ok(shapes) => shapes,
+            // A crop with none of the characters' color, such as under a
+            // menu, is a moment to skip, not a problem.
+            Err(ReadError::NoInk) => {
+                self.problem = None;
+                return None;
+            },
+            Err(error) => {
+                self.problem = Some(format!(
+                    "Nothing is recorded while {error}. Draw the region around the value alone, \
+                     or lower the tolerance."
+                ));
+                return None;
+            },
+        };
         self.problem = None;
-        let shapes = self.reader.shapes(&crop)?;
         if let Some(known) = self
             .readings
             .iter_mut()
@@ -552,6 +567,25 @@ mod tests {
             "a fitting frame clears it"
         );
         assert_eq!(recording.readings().len(), 1);
+    }
+
+    #[test]
+    fn a_region_of_too_many_characters_says_so_until_it_has_none() {
+        let start = Instant::now();
+        let mut recording = recording_of(60, 4, start);
+        // Thirty one-pixel strokes with a gap between each.
+        let crowded = frame(60, 4, |x, _| x % 2 == 0);
+        assert_eq!(recording.offer(&crowded, start), None);
+        assert_eq!(
+            recording.view(start).problem.as_deref(),
+            Some(
+                "Nothing is recorded while the region holds more than 24 characters. Draw the \
+                 region around the value alone, or lower the tolerance."
+            )
+        );
+        assert_eq!(recording.offer(&frame(60, 4, |_, _| false), start), None);
+        assert_eq!(recording.view(start).problem, None);
+        assert!(recording.readings().is_empty());
     }
 
     #[test]

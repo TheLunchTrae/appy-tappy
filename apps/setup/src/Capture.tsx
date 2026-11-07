@@ -373,7 +373,11 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   const [changingShortcut, setChangingShortcut] = useState(false);
   const [shortcutError, setShortcutError] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingView | null>(null);
-  const [recordError, setRecordError] = useState<string | null>(null);
+  // Each error clears only when what set it next succeeds: a start, stop or
+  // discard; reading the recording's state; or asking review's problems.
+  const [commandError, setRecordError] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [problemsError, setProblemsError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [edits, setEdits] = useState<ReadonlyMap<number, ReviewEntry>>(new Map());
   // Why the check cannot learn each flagged reading, for the review spec they were found on.
@@ -492,10 +496,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       const state = await recordingState();
       if (turn === recordingTurn.current) {
         setRecording(state);
-        setRecordError(null);
+        setPollError(null);
       }
     } catch (error: unknown) {
-      setRecordError(errorText(error));
+      setPollError(errorText(error));
     }
   }, []);
   const recordingLive =
@@ -567,14 +571,14 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
             }
           });
           setProblems({ spec: reviewKey, found });
-          setRecordError(null);
+          setProblemsError(null);
         })
         .catch((error: unknown) => {
           if (current) {
             // Saving checks the readings again, so a failed check flags none
             // rather than leaving Keep waiting for an answer that never comes.
             setProblems({ spec: reviewKey, found: new Map() });
-            setRecordError(errorText(error));
+            setProblemsError(errorText(error));
           }
         });
     }, REVIEW_DELAY_MS);
@@ -584,6 +588,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     };
   }, [reviewing, reviewKey]);
   // Flags found on another spec are stale: none show, and Keep waits for the answer.
+  const recordError = commandError ?? problemsError ?? pollError;
   const flagged = problems.spec === reviewKey ? problems.found : new Map<number, string>();
   const checked = problems.spec === reviewKey;
 
@@ -674,14 +679,17 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
 
   // Closing review removes the button that had focus, so focus moves to the
   // inspector's recording part once it shows again.
+  const focusRecordPanel = (): void => {
+    requestAnimationFrame(() => {
+      document.getElementById('record-title')?.focus();
+    });
+  };
   const closeReview = (): void => {
     if (!reviewing) {
       return;
     }
     setReviewing(false);
-    requestAnimationFrame(() => {
-      document.getElementById('record-title')?.focus();
-    });
+    focusRecordPanel();
   };
 
   // Starts a new recording, or with `more` goes on with the stopped one. The
@@ -726,7 +734,11 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       await discardRecording();
       setRecording(null);
       setRecordError(null);
-      closeReview();
+      setPollError(null);
+      setProblemsError(null);
+      setReviewing(false);
+      // Discarding removes the button that had focus, wherever it was.
+      focusRecordPanel();
       setEdits(new Map());
       setDraft((current) => ({ ...current, recorded: new Map() }));
     } catch (error: unknown) {
@@ -834,16 +846,22 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
               >
                 Discard recording
               </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={recordBlocked !== null}
-                onClick={() => {
-                  background(record(true));
-                }}
-              >
-                Record more
-              </button>
+              {settingsChanged ? (
+                <button type="button" className="btn" onClick={useSettings}>
+                  Use its settings
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={recordBlocked !== null}
+                  onClick={() => {
+                    background(record(true));
+                  }}
+                >
+                  Record more
+                </button>
+              )}
               <button
                 type="button"
                 className="btn primary"

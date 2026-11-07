@@ -187,12 +187,21 @@ impl DigitReader {
     /// The shapes of the characters in `image`, left to right, as a read
     /// samples them. Two images with equal shapes teach a reader the same
     /// glyphs and read the same, so one adds nothing the other does not.
-    /// `None` when the image has no ink or more characters than a read takes.
-    #[must_use]
-    pub fn shapes(&self, image: &Image) -> Option<Shapes> {
+    ///
+    /// # Errors
+    ///
+    /// [`ReadError::NoInk`] when the image has no ink, and
+    /// [`ReadError::TooManyCharacters`] when it has more characters than a
+    /// read takes.
+    pub fn shapes(&self, image: &Image) -> Result<Shapes, ReadError> {
         let mut spans = [Span::default(); MAX_CHARACTERS];
-        let (line, count) = self.segment(image, &mut spans).ok()?;
-        Some(Shapes(
+        let (line, count) = self
+            .segment(image, &mut spans)
+            .map_err(|failure| match failure {
+                Segmentation::NoInk => ReadError::NoInk,
+                Segmentation::TooMany => ReadError::TooManyCharacters,
+            })?;
+        Ok(Shapes(
             spans
                 .iter()
                 .take(count)
@@ -686,13 +695,16 @@ mod tests {
         assert_eq!(twelve.0.len(), 2);
         let mut noisy = TWELVE.to_vec();
         noisy.extend([".....", "....#"]);
-        assert_eq!(reader.shapes(&draw(&noisy)), Some(twelve.clone()));
+        assert_eq!(reader.shapes(&draw(&noisy)), Ok(twelve.clone()));
         let mut seventeen = TWELVE;
         seventeen[3] = "#...#";
-        assert_ne!(reader.shapes(&draw(&seventeen)), Some(twelve));
-        assert_eq!(reader.shapes(&draw(&["..."])), None);
+        assert_ne!(reader.shapes(&draw(&seventeen)), Ok(twelve));
+        assert_eq!(reader.shapes(&draw(&["..."])), Err(ReadError::NoInk));
         let crowded = "#.".repeat(MAX_CHARACTERS + 1);
-        assert_eq!(reader.shapes(&draw(&[crowded.as_str()])), None);
+        assert_eq!(
+            reader.shapes(&draw(&[crowded.as_str()])),
+            Err(ReadError::TooManyCharacters)
+        );
     }
 
     #[test]
