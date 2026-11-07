@@ -2989,8 +2989,8 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     );
     for contract in [
         "case \"${MUTANTS_LANE:-full}\" in",
-        "full) mise run rust:mutants ;;",
-        "diff) mise run rust:mutants:diff ;;",
+        "full) exec mise run rust:mutants ;;",
+        "diff) exec mise run rust:mutants:diff ;;",
         "exit 2",
     ] {
         assert!(
@@ -2999,6 +2999,17 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         );
     }
 
+    assert!(
+        full.contains("set -- \"--shard=$MUTANTS_SHARD\""),
+        "the full mutation task must pass MUTANTS_SHARD to cargo-mutants"
+    );
+    assert!(
+        full.lines().any(
+            |line| line.starts_with("run_mutants_task_child cargo mutants ")
+                && line.ends_with(" \"$@\"")
+        ),
+        "the full mutation task must hand its shard arguments to cargo-mutants"
+    );
     assert!(
         full.contains("--test-workspace=true"),
         "the full mutation task must run every workspace test"

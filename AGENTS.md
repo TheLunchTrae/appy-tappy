@@ -27,8 +27,9 @@ and no task covers it.
 AppyTappy ships for Windows only. CI runs these jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check` on
 Linux and is the required gate, `windows` runs `rust:fmt:check`,
-`rust:lint`, `rust:doc`, and `rust:test:members` on Windows, and on main,
-`mutants` runs the rest of the full mutation sweep in shards.
+`rust:lint`, `rust:doc`, and `rust:test:members` on Windows, and `mutants`
+shares the full mutation sweep with `quality` on pushes to main and manual
+runs.
 
 - Inline mise tasks are POSIX `sh`. On a Windows workstation, run mise from
   Git Bash and set this in the global mise config
@@ -171,7 +172,8 @@ dependency changes and commit it.
 code; its base defaults to `origin/main`, then local `main`, and can be set
 with `MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
 `rust:standards:check` runs the lane that `MUTANTS_LANE` names, `full` by
-default; CI sets `diff` for pull requests.
+default; [mutation testing](docs/rust.md#mutation-testing) says which lane CI
+runs.
 Before handoff, run `mise run rust:standards:check`; report skipped checks and their
 reasons.
 
@@ -309,8 +311,8 @@ dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-Every merge to main gets executed mutation evidence for the whole workspace;
-a pull request gets it for the code it changes.
+The gate requires executed mutation evidence: for the code a pull request
+changes, and for the whole workspace after it merges.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
 approval, because the Linux gate compiles them out. Read [mutation operation](docs/rust.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.

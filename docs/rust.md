@@ -103,13 +103,17 @@ then local `main`, so it needs full Git history. Untracked files fail the
 lane; stage them with `git add -N`. A diff that selects no mutants passes.
 
 `rust:standards:check` runs `rust:mutants:gate`, which picks the lane from
-`MUTANTS_LANE`: `full`, the default, or `diff`. In CI, pull requests and merge
-groups run the `diff` lane against their base, so the quality job fits its
-time limit. Pushes to main and manual runs take the full sweep in four
-shards: `MUTANTS_SHARD=k/n` passes `--shard` to cargo-mutants, the quality job
-runs shard 0, and the `mutants` job runs shards 1 to 3. A pull request that
-only removes or weakens tests selects no mutants, so run the workflow manually
-on its branch to check the whole workspace before merging it.
+`MUTANTS_LANE`: `full`, the default, or `diff`. CI runs the `diff` lane
+against the base for pull requests and merge groups, so the quality job fits
+its time limit. Pushes to main and manual runs take the full sweep, split
+into shards across the `quality` and `mutants` jobs:
+`MUTANTS_SHARD=k/n` makes `rust:mutants` run shard `k` of `n`, counted from
+zero, and `.github/workflows/quality.yml` sets the shard count.
+
+The diff lane mutates only changed source lines, so a pull request that only
+removes or weakens tests, or changes only mutation configuration, selects no
+mutants. Run the workflow manually on its branch to check the whole workspace
+before merging it.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in

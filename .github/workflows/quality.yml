@@ -16,10 +16,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The mandatory gate. Pull requests and merge groups mutation-test only the
-  # code they change, against their base, so the checkout is not shallow.
-  # Pushes to main and manual runs take the full sweep, split into four
-  # shards: this job runs shard 0 and the mutants job runs the rest.
+  # The mandatory gate. Pushes to main and manual runs take the full mutation
+  # sweep, split into shards: this job runs the first and the mutants job runs
+  # the rest. Every other event mutation-tests only the code it changes,
+  # against its base, so the checkout is not shallow.
   quality:
     name: quality
     runs-on: ubuntu-26.04
@@ -27,9 +27,9 @@ jobs:
     env:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MUTANTS_LANE: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'diff' || 'full' }}
-      MUTANTS_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      MUTANTS_LANE: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'full' || 'diff' }}
       MUTANTS_SHARD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && '0/4' || '' }}
+      MUTANTS_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,20 +51,21 @@ jobs:
       - name: Run the mandatory gate
         run: mise run standards:check
 
-  # The rest of the full mutation sweep, beside the quality job's shard 0.
+  # The rest of the full mutation sweep, beside the quality job's shard. Keep
+  # the shard count here and in the quality job's MUTANTS_SHARD the same.
   mutants:
-    name: mutants (${{ matrix.shard }}/4)
+    name: mutants
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: ['1/4', '2/4', '3/4']
     env:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MUTANTS_SHARD: ${{ matrix.shard }}/4
+      MUTANTS_SHARD: ${{ matrix.shard }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

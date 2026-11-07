@@ -91,7 +91,8 @@ wait_for = ["rust:test"]
 run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 
 # MUTANTS_SHARD=k/n runs only shard k of n (counting from 0), so CI can split
-# the sweep across runners; unset, it runs every mutant.
+# the sweep across runners; unset, it runs every mutant. Round-robin sharding
+# spreads each crate's mutants across the shards, so they take similar time.
 [tasks."rust:mutants"]
 description = "Run mutation testing; a surviving mutant is a review finding"
 run = """
@@ -99,7 +100,7 @@ set -eu
 
 set --
 if [ -n "${MUTANTS_SHARD:-}" ]; then
-  set -- "--shard=$MUTANTS_SHARD"
+  set -- "--shard=$MUTANTS_SHARD" --sharding=round-robin
 fi
 
 . scripts/mutants-lock.sh
@@ -194,17 +195,18 @@ run = "cargo deny --workspace --all-features --locked check"
 description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
-# Member crates hold product code, so the gate runs a mutation lane: the full
-# sweep by default, or only changed code with MUTANTS_LANE=diff, which CI sets
-# for pull requests. The two lanes share one lock, so the gate runs only one.
+# Member crates hold product code, so the gate runs a mutation lane; see
+# docs/rust.md#mutation-testing. The two lanes share one lock, so the gate runs
+# only one. exec hands the lane mise's process, so a signal that stops the
+# gate reaches the lane's own traps.
 [tasks."rust:mutants:gate"]
 description = "Run the mutation lane MUTANTS_LANE names: full (default) or diff"
 run = """
 set -eu
 
 case "${MUTANTS_LANE:-full}" in
-  full) mise run rust:mutants ;;
-  diff) mise run rust:mutants:diff ;;
+  full) exec mise run rust:mutants ;;
+  diff) exec mise run rust:mutants:diff ;;
   *)
     echo "MUTANTS_LANE must be full or diff, got '$MUTANTS_LANE'." >&2
     exit 2
