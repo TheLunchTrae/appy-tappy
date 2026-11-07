@@ -558,12 +558,13 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
                 note(
                     log,
                     &format!(
-                        "{name}: its window closed or changed size, so its automations start \
-                         over"
+                        "{name}: its window closed or changed size, so its values are read \
+                         again before any automation runs or is undone"
                     ),
                 );
             }
-            Step::Carry(model.forget(session))
+            model.forget(session);
+            Step::Carry(Vec::new())
         },
         Event::ActionFailed(ActionFailed(message)) => {
             note(log, &message);

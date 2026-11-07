@@ -44,7 +44,8 @@ impl Comparison {
 /// A test of an app's current signal values.
 ///
 /// A comparison on a signal that has no value yet, or whose value has a
-/// different type than the comparison's value, does not hold.
+/// different type than the comparison's value, does not hold. A signal with
+/// no value is also unknown: [`Condition::truth`] tells the two apart.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Condition(Test);
 
@@ -128,6 +129,15 @@ impl Condition {
     /// Whether the condition holds for the current `values`.
     #[must_use]
     pub fn holds(&self, values: &BTreeMap<SignalName, Value>) -> bool {
+        self.truth(values) == Some(true)
+    }
+
+    /// Whether the condition holds, does not, or cannot be told because a
+    /// signal it needs has no value (`None`). An all group is false once
+    /// one of its conditions is, and an any group is true once one of its
+    /// conditions is, whatever the unknown ones would say.
+    #[must_use]
+    pub fn truth(&self, values: &BTreeMap<SignalName, Value>) -> Option<bool> {
         match &self.0 {
             Test::Compare {
                 signal,
@@ -135,11 +145,29 @@ impl Condition {
                 value,
             } => values
                 .get(signal)
-                .is_some_and(|current| compares(*current, *comparison, *value)),
-            Test::All(conditions) => conditions.iter().all(|condition| condition.holds(values)),
-            Test::Any(conditions) => conditions.iter().any(|condition| condition.holds(values)),
+                .map(|current| compares(*current, *comparison, *value)),
+            Test::All(conditions) => decide(conditions, values, false),
+            Test::Any(conditions) => decide(conditions, values, true),
         }
     }
+}
+
+/// A group's truth: `settles` as soon as one condition has it, otherwise
+/// unknown if any condition is unknown, otherwise the opposite of `settles`.
+fn decide(
+    conditions: &[Condition],
+    values: &BTreeMap<SignalName, Value>,
+    settles: bool,
+) -> Option<bool> {
+    let mut unknown = false;
+    for condition in conditions {
+        match condition.truth(values) {
+            Some(truth) if truth == settles => return Some(settles),
+            Some(_) => {},
+            None => unknown = true,
+        }
+    }
+    (!unknown).then_some(!settles)
 }
 
 fn compares(current: Value, comparison: Comparison, expected: Value) -> bool {
@@ -453,6 +481,41 @@ mod tests {
         assert!(!condition.holds(&BTreeMap::new()));
         assert!(!condition.holds(&values(&[("progress", Value::Flag(true))])));
         assert!(!condition.holds(&values(&[("other", number(1.0))])));
+    }
+
+    #[test]
+    fn a_missing_value_is_unknown_unless_a_group_is_settled_without_it() {
+        let low = progress(Comparison::Below, 10.0);
+        let shown = Condition::compare(
+            SignalName::new("icon").expect("valid"),
+            Comparison::Equals,
+            Value::Flag(true),
+        )
+        .expect("valid");
+        let all = Condition::all(vec![low.clone(), shown.clone()]).expect("valid");
+        let any = Condition::any(vec![low.clone(), shown]).expect("valid");
+        let at = |current| values(&[("progress", number(current))]);
+        assert_eq!(low.truth(&BTreeMap::new()), None);
+        assert_eq!(
+            low.truth(&values(&[("progress", Value::Flag(true))])),
+            Some(false),
+            "a value of the other type is known not to hold"
+        );
+        assert_eq!(
+            [5.0, 50.0].map(|current| all.truth(&at(current))),
+            [None, Some(false)]
+        );
+        assert_eq!(
+            [5.0, 50.0].map(|current| any.truth(&at(current))),
+            [Some(true), None]
+        );
+        let mut both = at(50.0);
+        both.insert(SignalName::new("icon").expect("valid"), Value::Flag(false));
+        assert_eq!(
+            (all.truth(&both), any.truth(&both)),
+            (Some(false), Some(false))
+        );
+        assert!(!any.holds(&at(50.0)), "unknown does not hold");
     }
 
     #[test]

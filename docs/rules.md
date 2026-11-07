@@ -23,7 +23,13 @@ A condition tests the application's current signal values:
   counting the comparison.
 
 A comparison on a signal with no value yet, or with a value of the other
-type, does not hold. Rules have no scripting: conditions are the only logic.
+type, does not hold. A signal with no value is also unknown: an all group with
+an unknown condition and no false one is unknown, and so is an any group with
+an unknown condition and no true one. The runtime forgets an application's
+values when it can no longer see them, and a rule that fired is released only
+once its condition is known to be false, so values that are out of sight
+neither release nor fire it. Rules have no scripting: conditions are the only
+logic.
 
 ## Triggers
 
