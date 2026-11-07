@@ -101,8 +101,10 @@ which applications are running, and the runtime finds each application's
 window with the same rules. A value's region means something only while the
 window has the size it had when the region was drawn. Values can be drawn at
 more than one size, and the runtime reads the ones drawn at the window's
-current size. When the window closes or changes size, the application's
-automations undo what they changed and start over from the values read next.
+current size. When the window closes or changes size, the runtime forgets the
+values it read. Each automation stays as it was until the values read next
+show whether its condition still holds, so it neither runs again nor undoes
+what it changed while the window is out of sight.
 When the window has a size no value was drawn at, the runtime reads nothing
 and logs that the window should be resized or the value drawn again.
 

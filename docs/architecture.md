@@ -146,8 +146,9 @@ Each thread below is a plain `std::thread`, and each channel is a
   current size, and reads each value from its own region of each frame. It
   sends a `Sample` only when a value changes, and reads less often while
   nothing changes. When the window closes or changes size, it sends `Unseen`,
-  and the owner undoes what the application's automations changed and starts
-  its rules over, so no rule acts on a value nobody can see. When the window
+  and the owner forgets the application's values, so no rule acts on a value
+  nobody can see. Each rule stays as it was, run or not, until the values read
+  next decide its condition. When the window
   closes it looks for one again, once a second, until the application exits.
   Other kinds of source, such as a log tail or a memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).

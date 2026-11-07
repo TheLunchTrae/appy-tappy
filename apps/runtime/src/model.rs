@@ -9,7 +9,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::mem;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -215,16 +214,13 @@ impl Model {
         acts(id, &running.plan, effects)
     }
 
-    /// Forgets the values a session's reader can no longer see: undoes what
-    /// its automations changed and starts its rules over, as if no value had
-    /// been read yet. The reader keeps reading for the same session.
-    pub(crate) fn forget(&mut self, id: SessionId) -> Vec<Order> {
-        let Some(running) = self.running.values_mut().find(|running| running.id == id) else {
-            return Vec::new();
-        };
-        let fresh = Session::resume(Arc::clone(&running.plan.rules));
-        let effects = mem::replace(&mut running.session, fresh).stop();
-        acts(id, &running.plan, effects)
+    /// Forgets the values a session's reader can no longer see. Each rule
+    /// keeps its state, so an automation that ran stays run, and nothing
+    /// fires or is undone until the values read next decide its condition.
+    pub(crate) fn forget(&mut self, id: SessionId) {
+        if let Some(running) = self.running.values_mut().find(|running| running.id == id) {
+            running.session.forget_values();
+        }
     }
 
     /// Starts running `app`'s automations, if it is attached, automations
@@ -494,22 +490,20 @@ mod tests {
     }
 
     #[test]
-    fn values_out_of_sight_are_forgotten_and_their_automations_undone() {
+    fn values_out_of_sight_are_forgotten_but_their_automations_stay() {
         let mut model = Model::default();
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0))]));
         model.apply(started("a", 7), now);
         let fired = model.sample(SessionId(0), signal(), number(95.0), now);
         assert_eq!(kinds(&fired), ["run 0 Pause A"]);
-        assert_eq!(kinds(&model.forget(SessionId(0))), ["undo 0 Pause A"]);
-        assert_eq!(model.forget(SessionId(0)), [], "nothing left to undo");
-        assert_eq!(model.forget(SessionId(9)), [], "no such session");
+        model.forget(SessionId(0));
+        model.forget(SessionId(9));
+        assert_eq!(model.active_automations(), ["Pause A"]);
         let again = model.sample(SessionId(0), signal(), number(95.0), now);
-        assert_eq!(
-            kinds(&again),
-            ["run 0 Pause A"],
-            "the same reading fires again in the fresh rules"
-        );
+        assert_eq!(again, [], "still true: it neither undoes nor runs again");
+        let released = model.sample(SessionId(0), signal(), number(10.0), now);
+        assert_eq!(kinds(&released), ["undo 0 Pause A"]);
     }
 
     #[test]
