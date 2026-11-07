@@ -26,8 +26,9 @@ use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CLASS_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND,
-    GetLastError, HANDLE, HWND, LPARAM, LRESULT, WAIT_OBJECT_0, WPARAM,
+    CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_ALREADY_EXISTS,
+    ERROR_CLASS_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError, HANDLE, HWND, LPARAM, LRESULT,
+    WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
@@ -35,8 +36,8 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::System::Threading::{
-    CreateEventW, CreateMutexW, EVENT_MODIFY_STATE, GetCurrentThreadId, INFINITE, OpenEventW,
-    SetEvent, WaitForMultipleObjects,
+    CreateEventW, CreateMutexW, EVENT_MODIFY_STATE, GetCurrentProcess, GetCurrentThreadId,
+    INFINITE, OpenEventW, SetEvent, WaitForMultipleObjects,
 };
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Shell::{
@@ -838,6 +839,28 @@ impl Event {
         self.0.0.addr()
     }
 
+    /// A second handle to the event at `address`, which this thread owns
+    /// and closes. The handle at `address` must stay open until this returns.
+    fn duplicate(address: usize) -> io::Result<Self> {
+        let source = HANDLE(ptr::without_provenance_mut(address));
+        let mut copy = HANDLE::default();
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `source` is an open event handle of this process, as the caller
+        // promises, and `copy` is a writable HANDLE.
+        unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                source,
+                GetCurrentProcess(),
+                &raw mut copy,
+                0,
+                false,
+                DUPLICATE_SAME_ACCESS,
+            )
+        }?;
+        Ok(Self(copy))
+    }
+
     /// Signals the event.
     fn set(&self) -> io::Result<()> {
         #[expect(unsafe_code, reason = "a Win32 call")]
@@ -865,8 +888,8 @@ impl Drop for Event {
 #[derive(Debug)]
 pub(crate) struct ReloadWatch {
     thread: Option<JoinHandle<io::Result<()>>>,
-    /// Ends the thread's wait. It drops after the thread is joined, so the
-    /// thread never waits on a closed handle.
+    /// Ends the thread's wait. The thread waits on its own handle to the
+    /// same event, so this one can close without waiting for the thread.
     stop: Event,
 }
 
@@ -892,10 +915,6 @@ impl ReloadWatch {
     }
 
     pub(crate) fn stop(mut self) -> io::Result<()> {
-        self.end()
-    }
-
-    fn end(&mut self) -> io::Result<()> {
         let Some(thread) = self.thread.take() else {
             return Ok(());
         };
@@ -906,12 +925,15 @@ impl ReloadWatch {
 }
 
 impl Drop for ReloadWatch {
+    /// Tells the thread to end without waiting for it; `stop` waits.
     fn drop(&mut self) {
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "Drop has no caller to report to; `stop` reports the same result"
-        )]
-        let _ = self.end();
+        if self.thread.take().is_some() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "Drop has no caller to report to; `stop` reports the same result"
+            )]
+            let _ = self.stop.set();
+        }
     }
 }
 
@@ -924,6 +946,11 @@ fn watch_reload<E: From<ReloadRequest>>(
     events: &Sender<E>,
     ready: &SyncSender<io::Result<()>>,
 ) -> io::Result<()> {
+    // The caller keeps its handle open until this thread reports its start.
+    let stop = match Event::duplicate(stop) {
+        Ok(stop) => stop,
+        Err(error) => return ready.send(Err(error)).map_err(io::Error::other),
+    };
     // An auto-reset event: each wait that returns it clears it, so a burst
     // of requests while one is handled becomes one more request.
     #[expect(unsafe_code, reason = "a Win32 call")]
@@ -934,11 +961,11 @@ fn watch_reload<E: From<ReloadRequest>>(
         Err(error) => return ready.send(Err(error.into())).map_err(io::Error::other),
     };
     ready.send(Ok(())).map_err(io::Error::other)?;
-    let handles = [HANDLE(ptr::without_provenance_mut(stop)), reload.0];
+    let handles = [stop.0, reload.0];
     loop {
         #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: both handles stay open while this thread runs: the stop event
-        // until `ReloadWatch` joins this thread, and `reload` until it drops below.
+        // SAFETY: both handles are this thread's own and stay open until they drop
+        // when it returns.
         let woken = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
         match woken.0.checked_sub(WAIT_OBJECT_0.0) {
             Some(0) => return Ok(()),

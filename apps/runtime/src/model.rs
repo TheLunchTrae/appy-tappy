@@ -12,7 +12,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_engine::{Effect, Session};
 
@@ -48,8 +47,8 @@ impl fmt::Display for State {
 pub(crate) enum Order {
     /// Start reading an app's values.
     Read(reader::Job),
-    /// Stop the reader of a session.
-    StopReading(SessionId),
+    /// Stop the reader of a session, named by its app's name for the log.
+    StopReading(SessionId, String),
     /// Run or undo an automation's actions.
     Act(Job),
 }
@@ -57,7 +56,7 @@ pub(crate) enum Order {
 /// An attached app's process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Attached {
-    process: ProcessId,
+    /// Its executable, such as `Example.exe`.
     executable: String,
 }
 
@@ -137,17 +136,9 @@ impl Model {
     pub(crate) fn apply(&mut self, change: Change, at: Instant) -> Vec<Order> {
         match change {
             Change::Started {
-                app,
-                process,
-                executable,
+                app, executable, ..
             } => {
-                self.attached.insert(
-                    app.clone(),
-                    Attached {
-                        process,
-                        executable,
-                    },
-                );
+                self.attached.insert(app.clone(), Attached { executable });
                 self.start(&app, Start::Fresh(at))
             },
             Change::Exited { app, .. } => {
@@ -242,7 +233,6 @@ impl Model {
         let mut orders = vec![Order::Read(reader::Job {
             session: id,
             plan: Arc::clone(plan),
-            process: attached.process,
             executable: attached.executable.clone(),
         })];
         orders.extend(acts(id, plan, effects));
@@ -261,7 +251,8 @@ impl Model {
             Stop::Exited(at) => running.session.end(at),
             Stop::Paused => running.session.stop(),
         };
-        let mut orders = vec![Order::StopReading(running.id)];
+        let name = running.plan.name.clone();
+        let mut orders = vec![Order::StopReading(running.id, name)];
         orders.extend(acts(running.id, &running.plan, effects));
         orders
     }
@@ -317,6 +308,7 @@ mod tests {
     use std::time::Duration;
 
     use appytappy_config::action::{Action, MediaCommand, MediaTarget};
+    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
     use appytappy_config::signal::Number;
     use appytappy_config::window_match::{MatchPriority, Pattern, WindowMatch};
@@ -421,7 +413,7 @@ mod tests {
             .iter()
             .map(|order| match order {
                 Order::Read(job) => format!("read {} {}", job.session.0, job.plan.name),
-                Order::StopReading(id) => format!("stop {}", id.0),
+                Order::StopReading(id, name) => format!("stop {} {name}", id.0),
                 Order::Act(Job::Run {
                     owner, automation, ..
                 }) => format!("run {} {automation}", owner.0.0),
@@ -470,7 +462,6 @@ mod tests {
         let Some(Order::Read(job)) = read.first() else {
             panic!("a read order");
         };
-        assert_eq!(job.process, ProcessId::new(7));
         assert_eq!(job.executable, "Example.exe");
         assert_eq!(model.active_automations(), ["Pause A"]);
         assert_eq!(model.app_name(SessionId(0)), Some("A"));
@@ -485,7 +476,7 @@ mod tests {
         assert_eq!(other, [], "a reading of another session is dropped");
         model.sample(SessionId(0), signal(), number(95.0), now);
         let ended = model.apply(exited("a", 7), now);
-        assert_eq!(kinds(&ended), ["stop 0", "undo 0 Pause A"]);
+        assert_eq!(kinds(&ended), ["stop 0 A", "undo 0 Pause A"]);
         assert_eq!(model.active_automations(), Vec::<&str>::new());
     }
 
@@ -523,7 +514,7 @@ mod tests {
         model.sample(SessionId(0), signal(), number(95.0), now);
         assert_eq!(
             kinds(&model.set_enabled(false)),
-            ["stop 0", "undo 0 Pause A"]
+            ["stop 0 A", "undo 0 Pause A"]
         );
         assert!(!model.enabled());
         assert_eq!(model.active_automations(), Vec::<&str>::new());
@@ -548,9 +539,13 @@ mod tests {
         model.sample(SessionId(1), signal(), number(95.0), now);
         let b = plan("B", 50.0);
         let orders = model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &b)]));
-        assert_eq!(kinds(&orders), ["stop 1", "undo 1 Pause B", "read 2 B"]);
+        assert_eq!(kinds(&orders), ["stop 1 B", "undo 1 Pause B", "read 2 B"]);
         let orders = model.replan(plans(&[("b", &b)]));
-        assert_eq!(kinds(&orders), ["stop 0"], "a has no automations any more");
+        assert_eq!(
+            kinds(&orders),
+            ["stop 0 A"],
+            "a has no automations any more"
+        );
         assert_eq!(model.active_automations(), ["Pause B"]);
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
         assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
