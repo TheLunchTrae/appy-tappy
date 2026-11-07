@@ -196,19 +196,28 @@ function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly 
       if (!isMounted() || Date.now() < retryAt.current) {
         return;
       }
+      let started: number;
       try {
-        const started = await watchValue(choice.app, choice.value.id);
+        started = await watchValue(choice.app, choice.value.id);
         if (!isMounted()) {
           // The editor closed while the capture started.
           await stopWatching(started);
           return;
         }
         watch.current = started;
-        setLive(await watchedReading(started, when));
       } catch (error: unknown) {
         watch.current = null;
         retryAt.current = Date.now() + RETRY_MS;
         setLive({ kind: 'error', message: errorText(error) });
+        return;
+      }
+      try {
+        setLive(await watchedReading(started, when));
+      } catch {
+        // Another capture replaced the watch already: watch again next time.
+        if (watch.current === started) {
+          watch.current = null;
+        }
       }
     },
     LIVE_PAUSE_MS,

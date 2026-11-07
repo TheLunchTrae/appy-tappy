@@ -451,7 +451,16 @@ impl<H: Host> Owner<H> {
                 {
                     match seen {
                         Ok(seen) => watched.seen = Some(seen),
-                        Err(error) => watched.failure = Some(error),
+                        Err(error) => {
+                            watched.failure = Some(error);
+                            // The editor watches again, so nothing needs this
+                            // capture, even if it would go on.
+                            #[expect(
+                                clippy::let_underscore_must_use,
+                                reason = "the capture already failed, and the editor shows why"
+                            )]
+                            let _ = self.close();
+                        },
                     }
                 }
             },
@@ -1668,6 +1677,11 @@ mod tests {
             Ok(Live::Lost {
                 message: "Progress bar cannot be read: the window closed.".to_owned()
             })
+        );
+        assert_eq!(
+            harness.closed.try_recv(),
+            Ok(7),
+            "a failed capture is closed at once"
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }
