@@ -461,7 +461,15 @@ mod tests {
             .into_iter()
             .find(|entry| entry.id == own)
             .expect("the snapshot lists this process");
-        assert!(entry.executable.to_ascii_lowercase().ends_with(".exe"));
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy();
+        assert!(
+            entry.executable.eq_ignore_ascii_case(&name),
+            "{} is not {name}",
+            entry.executable
+        );
+        assert_ne!(entry.parent, own, "a process is not its own parent");
+        assert!(entry.threads > 0, "a running process has a thread");
     }
 
     #[test]

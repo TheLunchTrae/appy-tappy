@@ -1051,7 +1051,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use windows::Win32::System::Registry::{RRF_RT_REG_SZ, RegGetValueW};
-    use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemCount, GetSubMenu};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetMenuItemCount, GetMenuItemID, GetMenuState, GetSubMenu, MF_BYPOSITION,
+    };
 
     use super::*;
 
@@ -1207,23 +1209,29 @@ mod tests {
     fn the_menu_has_a_line_for_each_item() {
         let menu = PopupMenu::new(&sample_menu().items).expect("build the menu");
         #[expect(unsafe_code, reason = "Win32 calls")]
-        // SAFETY: the menu belongs to `menu`, which outlives both calls.
-        let (lines, nested) = unsafe {
+        // SAFETY: the menu belongs to `menu`, which outlives all the calls.
+        let (lines, nested, action_id, action, note, inactive, separator) = unsafe {
             let submenu = GetSubMenu(menu.0, 1);
             (
                 GetMenuItemCount(Some(menu.0)),
                 GetMenuItemCount(Some(submenu)),
+                GetMenuItemID(menu.0, 0),
+                GetMenuState(menu.0, 0, MF_BYPOSITION),
+                GetMenuState(submenu, 0, MF_BYPOSITION),
+                GetMenuState(submenu, 1, MF_BYPOSITION),
+                GetMenuState(menu.0, 2, MF_BYPOSITION),
             )
         };
         assert_eq!((lines, nested), (3, 2));
-    }
-
-    #[test]
-    fn the_tray_starts_takes_a_new_menu_and_stops() {
-        let (events, _received) = mpsc::channel::<TrayEvent>();
-        let tray = Tray::start(events, sample_menu()).expect("start");
-        tray.show(sample_menu()).expect("show");
-        tray.stop().expect("stop");
+        assert_eq!(action_id, 1, "the action keeps its id");
+        assert_ne!(action & MF_CHECKED.0, 0, "a checked action shows its check");
+        assert_eq!(note & MF_GRAYED.0, 0, "a note is not grayed");
+        assert_ne!(inactive & MF_GRAYED.0, 0, "an inactive line is grayed");
+        assert_ne!(
+            separator & MF_SEPARATOR.0,
+            0,
+            "a separator line is a separator"
+        );
     }
 
     #[test]

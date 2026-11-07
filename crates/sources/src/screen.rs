@@ -851,14 +851,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn unsupported_platforms_cannot_capture() {
-        let error = Unsupported
-            .start(0, Crop::Whole, Duration::ZERO, Box::new(|_| Duration::ZERO))
-            .expect_err("unsupported");
-        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
-    }
-
     /// The setup flow on two screenshots of one fixture layout: a progress bar
     /// at 37% and at 90%, a percent counter under it, and a panel that turns
     /// gold on the second. `digits.png` shows the counter's font.

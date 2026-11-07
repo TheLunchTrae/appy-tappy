@@ -695,10 +695,16 @@ mod tests {
     #[test]
     fn a_cell_is_set_when_at_least_half_its_pixels_are_ink() {
         let reader = DigitReader::new(WHITE, 0);
-        let line = Line { top: 0, bottom: 1 };
-        let span = Span { left: 0, right: 1 };
-        assert_eq!(reader.shape(&draw(&["#"]), line, span)[0] & 1, 1);
-        assert_eq!(reader.shape(&draw(&["."]), line, span)[0] & 1, 0);
+        // A line 32 pixels tall makes each grid cell 2 by 2 pixels.
+        let line = Line { top: 0, bottom: 32 };
+        let span = Span { left: 0, right: 2 };
+        let first_cell = |top: [&'static str; 2]| {
+            let mut rows = vec![".."; 32];
+            rows[..2].copy_from_slice(&top);
+            reader.shape(&draw(&rows), line, span)[0] & 1
+        };
+        assert_eq!(first_cell(["#.", "#."]), 1, "half the cell is ink");
+        assert_eq!(first_cell(["#.", ".."]), 0, "a quarter of the cell is ink");
     }
 
     #[test]
