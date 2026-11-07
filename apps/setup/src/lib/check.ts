@@ -3,6 +3,7 @@
 import type { CheckSpec, RecordedLabel } from './api.ts';
 import type { Color } from './pixels.ts';
 import type { Rect } from './region.ts';
+import { DEFAULT_COLOR_MATCH, type SelectStep } from './selection.ts';
 
 /** The kinds of check, in the order the capture screen offers them. */
 export const CHECK_KINDS = ['number', 'barFill', 'color', 'reference'] as const;
@@ -41,6 +42,12 @@ export interface Draft {
   readonly color: Color | null;
   /** The screenshot a picture check compares against. */
   readonly reference: number | null;
+  /** How the user selected the thing a picture check looks for, on its screenshot. */
+  readonly steps: readonly SelectStep[];
+  /** How far a color may be from another and still count as alike, while selecting. */
+  readonly colorMatch: number;
+  /** Whether a picture check compares only the selected pixels. */
+  readonly ignoreBackground: boolean;
 }
 
 export const EMPTY_DRAFT: Draft = {
@@ -54,6 +61,9 @@ export const EMPTY_DRAFT: Draft = {
   empty: null,
   color: null,
   reference: null,
+  steps: [],
+  colorMatch: DEFAULT_COLOR_MATCH,
+  ignoreBackground: true,
 };
 
 /** The draft's check, or what the user still has to do. */
@@ -132,7 +142,11 @@ export function buildSpec(draft: Draft): Built {
       if (draft.reference === null) {
         return missing('Choose the screenshot to compare against.');
       }
-      return { ok: true, spec: { kind: 'reference', region, screenshot: draft.reference, tolerance } };
+      const spec = { kind: 'reference', region, screenshot: draft.reference, tolerance } as const;
+      if (!draft.ignoreBackground || draft.steps.length === 0) {
+        return { ok: true, spec };
+      }
+      return { ok: true, spec: { ...spec, selection: { tolerance: draft.colorMatch, steps: draft.steps } } };
     }
   }
 }
