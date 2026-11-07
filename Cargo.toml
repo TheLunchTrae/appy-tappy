@@ -28,7 +28,7 @@ toml = "=1.1.8"
 # `[lints] workspace = true`; tests/allow_policy.rs rejects missing opt-ins.
 # Profiles are only honored in this root manifest.
 [workspace]
-members = ["apps/mcp", "apps/runtime", "crates/*"]
+members = ["apps/mcp", "apps/runtime", "apps/setup/src-tauri", "crates/*"]
 
 # Member packages inherit these with `field.workspace = true`.
 [workspace.package]

@@ -42,6 +42,10 @@ node_modules/
 /build/
 /coverage/
 /dist/
+# The setup app's built web UI, which Tauri embeds at compile time.
+/apps/setup/dist/
+# Tauri writes the setup app's permission schemas here on every build.
+/apps/setup/src-tauri/gen/
 /out/
 /sbom/
 
