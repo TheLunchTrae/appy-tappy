@@ -3,6 +3,7 @@ import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState }
 import { type ShortcutEvent, register, unregister } from '@tauri-apps/plugin-global-shortcut';
 
 import { type Reading, errorText, readValue, saveValue, screenshot, setCheck, takeScreenshot } from './api.ts';
+import { readingText } from './automation.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import { type CheckKind, type Draft, buildSpec, CHECK_KINDS, EMPTY_DRAFT, KIND_NAMES, withKind } from './check.ts';
 import type { Choice } from './Picker.tsx';
@@ -173,15 +174,6 @@ function ToleranceField({
   );
 }
 
-function formatReading(reading: Reading): string {
-  switch (reading.kind) {
-    case 'number':
-      return Number.isInteger(reading.value) ? String(reading.value) : reading.value.toFixed(1);
-    case 'flag':
-      return reading.value ? 'Yes' : 'No';
-  }
-}
-
 function ReadingBox({
   built,
   state,
@@ -207,7 +199,7 @@ function ReadingBox({
             <small>Waiting for a frame…</small>
           ) : (
             <>
-              <strong>{formatReading(reading)}</strong>
+              <strong>{readingText(reading)}</strong>
               <small>on the live window</small>
             </>
           )}

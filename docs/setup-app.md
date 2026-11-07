@@ -59,6 +59,11 @@ value, and any number of automations can watch the same one.
    is at least, above, at most, below, is, or is not a number; a value that
    reads yes or no is or is not yes. Conditions on several values come later
    ([#34](https://github.com/TheLunchTrae/appy-tappy/issues/34)).
+   While the value's application is open, the editor reads the value on its
+   window about twice a second and says what it reads now and whether the
+   condition is true, so a target can be tried before it is saved. It says so
+   when the application is not open, or when the window is not the size the
+   value was drawn at, since a value reads only at that size.
 3. **Do, in order.** Add any number of actions and move them up or down. Each
    one pauses, plays, or skips media, or sets a volume, for whatever is
    playing or the whole system, or for one application named by its

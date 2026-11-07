@@ -93,6 +93,27 @@ pub struct WhenDef {
     pub target: TargetDef,
 }
 
+impl WhenDef {
+    /// The condition, comparing `signal` with the target.
+    ///
+    /// # Errors
+    ///
+    /// Returns the problem as a sentence the setup app can show: a target
+    /// that is not a finite number, or a yes-or-no target compared by order.
+    pub fn condition(&self, signal: SignalName) -> Result<Condition, String> {
+        let target = match self.target {
+            TargetDef::Number(number) => Value::Number(
+                Number::new(number)
+                    .ok_or_else(|| "the number to compare with is not finite".to_owned())?,
+            ),
+            TargetDef::Flag(flag) => Value::Flag(flag),
+        };
+        Condition::compare(signal, self.is.into(), target).map_err(|_ordered| {
+            "a yes-or-no value can only be compared with \"is\" or \"is not\"".to_owned()
+        })
+    }
+}
+
 /// [`Comparison`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -235,17 +256,7 @@ impl AutomationDef {
         if self.cooldown_ms > MAX_COOLDOWN_MS {
             return Err("the wait before it can run again is longer than a day".to_owned());
         }
-        let target = match self.when.target {
-            TargetDef::Number(number) => Value::Number(
-                Number::new(number)
-                    .ok_or_else(|| "the number to compare with is not finite".to_owned())?,
-            ),
-            TargetDef::Flag(flag) => Value::Flag(flag),
-        };
-        let condition =
-            Condition::compare(signal, self.when.is.into(), target).map_err(|_ordered| {
-                "a yes-or-no value can only be compared with \"is\" or \"is not\"".to_owned()
-            })?;
+        let condition = self.when.condition(signal)?;
         if self.actions.is_empty() {
             return Err("add an action".to_owned());
         }

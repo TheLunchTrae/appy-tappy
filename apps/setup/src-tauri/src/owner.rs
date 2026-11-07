@@ -6,6 +6,8 @@
 //! the picked window's capture, its newest frame, the session's screenshots,
 //! and the check the user is setting up.
 
+use std::collections::BTreeMap;
+use std::fs;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
@@ -14,10 +16,11 @@ use std::time::Duration;
 use appytappy_config::app_file::{
     AntiCheatDef, AppFile, FORMAT, ScreenDef, SizeDef, ValueDef, WindowDef, value_id,
 };
-use appytappy_config::automation_file::AutomationDef;
-use appytappy_config::signal::Value;
+use appytappy_config::automation_file::{AutomationDef, WhenDef};
+use appytappy_config::signal::{SignalName, Value};
 use appytappy_config::store::new_app_id;
-use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler, Image};
+use appytappy_sources::screen::saved;
+use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler, Image, Size};
 use appytappy_sources::system::{ProcessEntry, System, WindowEntry};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -95,6 +98,43 @@ impl From<Value> for Reading {
             Value::Flag(flag) => Self::Flag(flag),
         }
     }
+}
+
+/// What a watched value reads on the newest frame, for the automation
+/// editor.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum Live {
+    /// No frame has arrived from the window yet.
+    Waiting,
+    /// The value's reading.
+    Read {
+        /// What it reads.
+        reading: Reading,
+        /// Whether the condition the editor asked about holds for it, or
+        /// `None` when it asked about none.
+        holds: Option<bool>,
+    },
+    /// The window shows but the value cannot be read on it, and why.
+    Problem {
+        /// What is wrong, for the user.
+        message: String,
+    },
+}
+
+/// The saved value the automation editor watches.
+#[derive(Debug)]
+struct Watched {
+    /// Its application's ID.
+    app: String,
+    /// Its ID.
+    value: String,
+    /// Its name, for messages.
+    name: String,
+    /// The window's size when its region was drawn.
+    window_size: Size,
+    /// The value's check.
+    check: RegionCheck,
 }
 
 /// A value to save, as the UI describes it.
@@ -185,6 +225,26 @@ pub(crate) enum Request {
     /// What the check reads on the newest frame: `None` until a check is
     /// set up and a frame arrived.
     Reading(Reply<Result<Option<Reading>, String>>),
+    /// Captures the window of a saved value's application and reads the
+    /// value on it, for the automation editor. Like [`Request::Pick`], it
+    /// drops the previous window's screenshots and check.
+    WatchValue {
+        /// The application's ID.
+        app: String,
+        /// The value's ID.
+        value: String,
+        /// Answered once the capture started, or with why it cannot.
+        reply: Reply<Result<(), String>>,
+    },
+    /// What the watched value reads on the newest frame, and whether `when`
+    /// holds for it; an error when nothing is watched or the capture
+    /// stopped, so the editor watches again.
+    WatchedReading {
+        /// The condition to test, which must watch the watched value.
+        when: Option<Box<WhenDef>>,
+        /// The reading.
+        reply: Reply<Result<Live, String>>,
+    },
     /// The handles of the running windows a window match finds, the best
     /// fit first.
     MatchWindows {
@@ -283,6 +343,8 @@ pub(crate) struct Owner<H: Host> {
     failure: Option<String>,
     screenshots: Vec<Image>,
     check: Option<RegionCheck>,
+    /// The saved value the automation editor watches.
+    watched: Option<Watched>,
 }
 
 impl<H: Host> Owner<H> {
@@ -304,6 +366,7 @@ impl<H: Host> Owner<H> {
             failure: None,
             screenshots: Vec::new(),
             check: None,
+            watched: None,
         }
     }
 
@@ -371,6 +434,10 @@ impl<H: Host> Owner<H> {
                 send(reply, ());
             },
             Request::Reading(reply) => send(reply, self.reading()),
+            Request::WatchValue { app, value, reply } => send(reply, self.watch(&app, &value)),
+            Request::WatchedReading { when, reply } => {
+                send(reply, self.watched_reading(when.as_deref()));
+            },
             Request::MatchWindows { window, reply } => send(
                 reply,
                 self.window_list()
@@ -547,6 +614,7 @@ impl<H: Host> Owner<H> {
         self.failure = None;
         self.screenshots.clear();
         self.check = None;
+        self.watched = None;
     }
 
     fn pick(&mut self, window: u64) -> Result<(), String> {
@@ -595,15 +663,93 @@ impl<H: Host> Owner<H> {
         let (Some(check), Some(latest)) = (&self.check, &self.latest) else {
             return Ok(None);
         };
-        let cropped = latest.crop(check.region).ok_or_else(|| {
-            "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
-        })?;
-        check
-            .check
-            .read(&cropped)
-            .map(|value| Some(value.into()))
-            .map_err(|error| error.to_string())
+        read(check, latest).map(|value| Some(value.into()))
     }
+
+    fn watch(&mut self, app: &str, value: &str) -> Result<(), String> {
+        let store = &self.stores()?.apps;
+        let file = store
+            .load()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|stored| stored.id == app)
+            .ok_or_else(|| "That application is no longer saved.".to_owned())?
+            .file?;
+        let saved = file
+            .values
+            .iter()
+            .find(|saved| saved.id == value)
+            .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
+        let folder = store.folder(app);
+        let check = saved::build(&saved.screen, |name| fs::read(folder.join(name)))
+            .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
+        let windows = self.window_list()?.windows;
+        let window = *window_list::matching(&windows, &file.window)
+            .first()
+            .ok_or_else(|| format!("Open {} to see what {} reads.", file.name, saved.name))?;
+        self.pick(window)?;
+        self.watched = Some(Watched {
+            app: app.to_owned(),
+            value: value.to_owned(),
+            name: saved.name.clone(),
+            window_size: check.window_size,
+            check: RegionCheck {
+                region: check.region,
+                check: check.check,
+            },
+        });
+        Ok(())
+    }
+
+    fn watched_reading(&self, when: Option<&WhenDef>) -> Result<Live, String> {
+        let watched = self
+            .watched
+            .as_ref()
+            .ok_or_else(|| "No value is watched.".to_owned())?;
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
+        let Some(latest) = &self.latest else {
+            return Ok(Live::Waiting);
+        };
+        if latest.size() != watched.window_size {
+            return Ok(Live::Problem {
+                message: format!(
+                    "{} was drawn when the window was {}, and it is {} now. \
+                     Resize the window to read it.",
+                    watched.name,
+                    watched.window_size,
+                    latest.size()
+                ),
+            });
+        }
+        let value = match read(&watched.check, latest) {
+            Ok(value) => value,
+            Err(message) => return Ok(Live::Problem { message }),
+        };
+        let holds = when
+            .filter(|when| when.app == watched.app && when.value == watched.value)
+            .and_then(|when| {
+                let signal = SignalName::new(&when.value).ok()?;
+                let condition = when.condition(signal.clone()).ok()?;
+                Some(condition.holds(&BTreeMap::from([(signal, value)])))
+            });
+        Ok(Live::Read {
+            reading: value.into(),
+            holds,
+        })
+    }
+}
+
+/// What `check` reads on `frame`.
+fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
+    let cropped = frame.crop(check.region).ok_or_else(|| {
+        "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
+    })?;
+    check
+        .check
+        .read(&cropped)
+        .map_err(|error| error.to_string())
 }
 
 /// Runs `owner` until [`Message::Shutdown`] arrives, then stops its capture.
@@ -663,7 +809,7 @@ mod tests {
     use std::time::Instant;
 
     use appytappy_config::anti_cheat::ProcessId;
-    use appytappy_config::automation_file::{ActionDef, MediaCommandDef};
+    use appytappy_config::automation_file::{ActionDef, ComparisonDef, MediaCommandDef, TargetDef};
     use appytappy_sources::screen::{Frame, Size};
     use appytappy_sources::system::Bounds;
 
@@ -1191,6 +1337,206 @@ mod tests {
             Err("That application is no longer saved.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    fn watch(app: &str, value: &str) -> impl FnOnce(Reply<Result<(), String>>) -> Request {
+        let (app, value) = (app.to_owned(), value.to_owned());
+        move |reply| Request::WatchValue { app, value, reply }
+    }
+
+    fn watched(when: Option<WhenDef>) -> impl FnOnce(Reply<Result<Live, String>>) -> Request {
+        move |reply| Request::WatchedReading {
+            when: when.map(Box::new),
+            reply,
+        }
+    }
+
+    /// The condition that `value` of `example` is at least `target`.
+    fn at_least(value: &str, target: f64) -> WhenDef {
+        WhenDef {
+            app: "example".to_owned(),
+            value: value.to_owned(),
+            is: ComparisonDef::AtLeast,
+            target: TargetDef::Number(target),
+        }
+    }
+
+    #[test]
+    fn the_editor_reads_a_saved_value_on_its_window_and_tests_the_condition() {
+        let (stores, root) = scratch_store("watch");
+        let mut harness = harness_with(false, Ok(stores));
+        assert_eq!(
+            harness.ask(watch("example", "progress_bar")),
+            Err("That application is no longer saved.".to_owned())
+        );
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        let save = |spec| move |reply| Request::SaveValue { spec, reply };
+        harness
+            .ask(save(spec(None, "Progress bar", BAR)))
+            .expect("saves");
+        assert_eq!(
+            harness.ask(watch("example", "gone")),
+            Err("Example App no longer has that value.".to_owned())
+        );
+        assert_eq!(
+            harness.ask(watched(None)),
+            Err("No value is watched.".to_owned())
+        );
+
+        harness
+            .ask(watch("example", "progress_bar"))
+            .expect("watches");
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the capture was replaced");
+        let (window, mut handler) = harness.handlers.try_recv().expect("capture started");
+        assert_eq!(window, 7);
+        assert_eq!(harness.ask(watched(None)), Ok(Live::Waiting));
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        let read = |holds| {
+            Ok(Live::Read {
+                reading: Reading::Number(50.0),
+                holds,
+            })
+        };
+        assert_eq!(harness.ask(watched(None)), read(None));
+        assert_eq!(
+            harness.ask(watched(Some(at_least("progress_bar", 50.0)))),
+            read(Some(true))
+        );
+        assert_eq!(
+            harness.ask(watched(Some(at_least("progress_bar", 51.0)))),
+            read(Some(false))
+        );
+        // A condition on another value says nothing about this one.
+        assert_eq!(
+            harness.ask(watched(Some(at_least("other", 0.0)))),
+            read(None)
+        );
+        let mut elsewhere = at_least("progress_bar", 0.0);
+        "other".clone_into(&mut elsewhere.app);
+        assert_eq!(harness.ask(watched(Some(elsewhere))), read(None));
+        // A setup check of the capture screen does not change what is read.
+        let spec: CheckSpec = serde_json::from_str(
+            r#"{"kind":"color","region":{"x":0,"y":0,"width":1,"height":1},
+                "color":{"red":255,"green":0,"blue":0},"tolerance":0}"#,
+        )
+        .expect("valid JSON");
+        harness
+            .ask(|reply| Request::SetCheck { spec, reply })
+            .expect("valid check");
+        assert_eq!(harness.ask(watched(None)), read(None));
+
+        let shrunk = Image::new(
+            Size {
+                width: 2,
+                height: 1,
+            },
+            vec![0; 8],
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&shrunk));
+        assert_eq!(
+            harness.ask(watched(None)),
+            Ok(Live::Problem {
+                message: "Progress bar was drawn when the window was 4x2, and it is 2x1 now. \
+                          Resize the window to read it."
+                    .to_owned()
+            })
+        );
+        harness.deliver(&mut handler, Err(io::Error::other("the window closed")));
+        assert_eq!(
+            harness.ask(watched(None)),
+            Err("the window closed".to_owned())
+        );
+        harness.ask(Request::Stop);
+        assert_eq!(
+            harness.ask(watched(None)),
+            Err("No value is watched.".to_owned())
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_value_that_cannot_be_watched_says_why() {
+        let (stores, root) = scratch_store("unwatched");
+        let apps = stores.apps.clone();
+        let mut harness = harness_with(false, Ok(stores));
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        let save = |spec| move |reply| Request::SaveValue { spec, reply };
+        harness
+            .ask(save(spec(None, "Icon visible", REFERENCE)))
+            .expect("saves");
+        let folder = apps.folder("example");
+        let picture = folder.join("icon_visible.png");
+        let bytes = std::fs::read(&picture).expect("saved picture");
+        std::fs::remove_file(&picture).expect("remove");
+        let missing = harness
+            .ask(watch("example", "icon_visible"))
+            .expect_err("no picture");
+        assert!(
+            missing.starts_with("Icon visible cannot be read: ") && missing.ends_with('.'),
+            "{missing}"
+        );
+        std::fs::write(&picture, bytes).expect("restore");
+
+        let mut file = apps.load().expect("loads")[0]
+            .file
+            .clone()
+            .expect("a good file");
+        file.window = WindowDef::exact(appytappy_config::window_match::WindowFacts {
+            title: "Other App",
+            class: "OtherWindow",
+            executable: "Other.exe",
+        });
+        apps.save("example", &file, &[]).expect("saves");
+        assert_eq!(
+            harness.ask(watch("example", "icon_visible")),
+            Err("Open Example App to see what Icon visible reads.".to_owned())
+        );
+        harness.owner.host.unlisted = true;
+        assert_eq!(
+            harness.ask(watch("example", "icon_visible")),
+            Err("no windows here".to_owned())
+        );
+        harness.owner.host.refuse = true;
+        harness.owner.host.unlisted = false;
+        file.window = spec(None, "x", BAR).window;
+        apps.save("example", &file, &[]).expect("saves");
+        assert_eq!(
+            harness.ask(watch("example", "icon_visible")),
+            Err("no capture here".to_owned())
+        );
+        assert_eq!(
+            harness.ask(watched(None)),
+            Err("No value is watched.".to_owned())
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn live_readings_reach_the_ui_tagged_by_kind() {
+        let read = Live::Read {
+            reading: Reading::Flag(true),
+            holds: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&read).expect("serializes"),
+            serde_json::json!({"kind": "read", "reading": {"kind": "flag", "value": true}, "holds": null})
+        );
+        assert_eq!(
+            serde_json::to_value(Live::Waiting).expect("serializes"),
+            serde_json::json!({"kind": "waiting"})
+        );
+        assert_eq!(
+            serde_json::to_value(Live::Problem {
+                message: "x".to_owned()
+            })
+            .expect("serializes"),
+            serde_json::json!({"kind": "problem", "message": "x"})
+        );
     }
 
     #[test]
