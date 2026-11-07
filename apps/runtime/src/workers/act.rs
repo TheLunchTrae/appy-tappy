@@ -14,7 +14,7 @@ use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
 use appytappy_engine::RuleIndex;
 
-use crate::reader::SessionId;
+use crate::workers::reader::SessionId;
 
 /// Names a fired automation: its session and its rule's position, so two
 /// sessions' changes are never mixed up.

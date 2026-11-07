@@ -139,7 +139,7 @@ impl Reader {
             reason = "a failed send means the thread already ended, and the join below says how"
         )]
         let _ = self.control.send(Control::Stop);
-        crate::join(self.thread)
+        super::join(self.thread)
     }
 }
 
