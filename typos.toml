@@ -16,3 +16,7 @@ extend-exclude = [
 # The product name, AppyTappy.
 [default.extend-words]
 appy = "appy"
+
+# NSIS's string copy instruction, in the installer hooks.
+[default.extend-identifiers]
+StrCpy = "StrCpy"
