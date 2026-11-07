@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::sync::mpsc::Sender;
 
-use crate::{LocalTime, TrayEvent, TrayMenu, WindowEvent};
+use crate::{LocalTime, ReloadRequest, TrayEvent, TrayMenu, WindowEvent};
 
 fn unsupported<T>() -> io::Result<T> {
     Err(io::Error::new(
@@ -22,7 +22,10 @@ fn unsupported<T>() -> io::Result<T> {
 pub(crate) struct WindowWatch(Infallible);
 
 impl WindowWatch {
-    pub(crate) fn start(_events: Sender<WindowEvent>) -> io::Result<Self> {
+    pub(crate) fn start<E>(_events: Sender<E>) -> io::Result<Self>
+    where
+        E: From<WindowEvent> + Send + 'static,
+    {
         unsupported()
     }
 
@@ -69,6 +72,30 @@ impl InstanceGuard {
     }
 }
 
+/// A reload watch, which cannot be constructed here.
+#[derive(Debug)]
+pub(crate) struct ReloadWatch(Infallible);
+
+impl ReloadWatch {
+    pub(crate) fn start<E>(_name: &str, _events: Sender<E>) -> io::Result<Self>
+    where
+        E: From<ReloadRequest> + Send + 'static,
+    {
+        unsupported()
+    }
+
+    // `ReloadWatch` holds `Infallible`, so no value exists and this body
+    // never runs.
+    #[mutants::skip]
+    pub(crate) fn stop(self) -> io::Result<()> {
+        match self.0 {}
+    }
+}
+
+pub(crate) fn request_reload(_name: &str) -> io::Result<bool> {
+    unsupported()
+}
+
 pub(crate) fn enable_autostart(_value: &str, _command: &OsStr) -> io::Result<()> {
     unsupported()
 }
@@ -85,14 +112,15 @@ pub(crate) const fn local_time() -> Option<LocalTime> {
 mod tests {
     use std::sync::mpsc;
 
-    use crate::{InstanceGuard, Tray, WindowWatch};
+    use crate::{InstanceGuard, ReloadWatch, Tray, WindowWatch};
 
     use super::*;
 
     #[test]
     fn every_service_is_unsupported() {
-        let (events, _received) = mpsc::channel();
+        let (events, _received) = mpsc::channel::<WindowEvent>();
         let (tray_events, _tray_received) = mpsc::channel::<TrayEvent>();
+        let (reloads, _reload_received) = mpsc::channel::<ReloadRequest>();
         let menu = TrayMenu {
             tooltip: "AppyTappy".to_owned(),
             items: Vec::new(),
@@ -101,11 +129,13 @@ mod tests {
             WindowWatch::start(events).map(drop),
             Tray::start(tray_events, menu).map(drop),
             InstanceGuard::acquire(InstanceGuard::RUNTIME).map(drop),
+            ReloadWatch::start(crate::RELOAD, reloads).map(drop),
+            crate::request_reload(crate::RELOAD).map(drop),
             crate::enable_autostart("test", OsStr::new("runtime.exe")),
             crate::disable_autostart("test"),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 5]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 7]);
         assert_eq!(LocalTime::now(), None);
     }
 }

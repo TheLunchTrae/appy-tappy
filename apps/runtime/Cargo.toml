@@ -9,9 +9,16 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Runs each automation's actions and undoes them after.
+appytappy-actions = { version = "=0.1.0", path = "../../crates/actions" }
 appytappy-config = { version = "=0.1.0", path = "../../crates/config" }
+# Decides when each automation fires from the values the runtime reads.
+appytappy-engine = { version = "=0.1.0", path = "../../crates/engine" }
 appytappy-platform = { version = "=0.1.0", path = "../../crates/platform" }
 appytappy-sources = { version = "=0.1.0", path = "../../crates/sources" }
+# Provides `#[mutants::skip]` for functions no test can reach; it expands to
+# nothing.
+mutants = "0.0.4"
 
 [lints]
 workspace = true

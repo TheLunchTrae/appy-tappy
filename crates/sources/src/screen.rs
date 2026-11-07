@@ -10,6 +10,7 @@
 
 pub mod check;
 pub mod digits;
+pub mod saved;
 
 use std::convert::Infallible;
 use std::error::Error;
@@ -431,6 +432,46 @@ impl Error for ImageError {
     }
 }
 
+/// A capture's region does not fit the window, such as after it shrank.
+///
+/// The capture reports it inside an [`io::Error`] of kind
+/// [`io::ErrorKind::InvalidInput`], so a reader can learn the window's new
+/// size and capture a region that fits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutsideWindow {
+    /// The size of the window's whole frame.
+    pub window_size: Size,
+}
+
+impl OutsideWindow {
+    /// The window's size when `error` is this problem.
+    #[must_use]
+    pub fn in_error(error: &io::Error) -> Option<Size> {
+        error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<Self>())
+            .map(|outside| outside.window_size)
+    }
+}
+
+impl fmt::Display for OutsideWindow {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "the region lies outside the {} window",
+            self.window_size
+        )
+    }
+}
+
+impl Error for OutsideWindow {}
+
+impl From<OutsideWindow> for io::Error {
+    fn from(outside: OutsideWindow) -> Self {
+        Self::new(io::ErrorKind::InvalidInput, outside)
+    }
+}
+
 /// What a capture copies out of each frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Crop {
@@ -551,6 +592,26 @@ mod tests {
             .flat_map(|&[red, green, blue]| [blue, green, red, u8::MAX])
             .collect();
         Image::new(Size { width, height }, bgra).unwrap()
+    }
+
+    #[test]
+    fn a_region_outside_the_window_carries_the_windows_size() {
+        let window_size = Size {
+            width: 640,
+            height: 480,
+        };
+        let error = io::Error::from(OutsideWindow { window_size });
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            error.to_string(),
+            "the region lies outside the 640x480 window"
+        );
+        assert_eq!(OutsideWindow::in_error(&error), Some(window_size));
+        assert_eq!(OutsideWindow::in_error(&io::Error::other("other")), None);
+        assert_eq!(
+            OutsideWindow::in_error(&io::Error::from(io::ErrorKind::InvalidInput)),
+            None
+        );
     }
 
     #[test]
