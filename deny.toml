@@ -3,6 +3,13 @@
 # yanked crates are promoted to deny. Duplicate versions surface as warnings,
 # not failures; the handoff report carries them forward (AGENTS.md
 # dependencies and review).
+# AppyTappy ships for Windows only, so the checks read the dependency graph
+# for that target. Tauri's Linux and macOS webview stacks pull in crates, such
+# as gtk-rs's unmaintained proc-macro-error, that the shipped program never
+# builds.
+[graph]
+targets = ["x86_64-pc-windows-msvc"]
+
 [advisories]
 unmaintained = "all"
 yanked = "deny"

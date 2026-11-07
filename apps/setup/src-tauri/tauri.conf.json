@@ -20,7 +20,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' blob: data:; style-src 'self'"
+      "csp": "default-src 'self'; img-src 'self' blob: data:; style-src 'self'",
+      "devCsp": "default-src 'self'; connect-src 'self' ws://localhost:1420; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

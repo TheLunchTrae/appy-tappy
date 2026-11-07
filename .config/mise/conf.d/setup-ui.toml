@@ -1,0 +1,71 @@
+# The setup app's web UI, in apps/setup, with its own Bun lockfile. Its Rust
+# side embeds the built UI from apps/setup/dist, so ui:build runs before any
+# task that compiles the workspace.
+
+[tasks."ui:install"]
+description = "Install the setup UI's locked dependencies"
+dir = "apps/setup"
+run = "bun install --frozen-lockfile"
+
+[tasks."ui:lock"]
+description = "Refresh the setup UI's Bun lockfile"
+dir = "apps/setup"
+run = "bun install"
+
+[tasks."ui:build"]
+description = "Build the setup UI into apps/setup/dist"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run build"
+
+[tasks."ui:fmt"]
+description = "Format the setup UI"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run format"
+
+[tasks."ui:fmt:check"]
+description = "Check the setup UI's formatting"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run format:check"
+
+[tasks."ui:lint"]
+description = "Lint the setup UI with type-aware rules"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run lint"
+
+[tasks."ui:type"]
+description = "Type-check the setup UI"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run typecheck"
+
+[tasks."ui:test"]
+description = "Run the setup UI's tests"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run test"
+
+[tasks."ui:knip"]
+description = "Find unused files, exports and dependencies in the setup UI"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run knip"
+
+[tasks."ui:audit"]
+description = "Audit the setup UI's dependencies"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run audit"
+
+[tasks."ui:standards"]
+description = "Run the setup UI's autofixes"
+depends = ["ui:install"]
+dir = "apps/setup"
+run = "bun run lint:fix && bun run format"
+
+[tasks."ui:standards:check"]
+description = "Run the setup UI's CI gate"
+depends = ["ui:fmt:check", "ui:lint", "ui:type", "ui:test", "ui:knip", "ui:build"]

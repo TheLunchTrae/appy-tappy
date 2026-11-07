@@ -8,6 +8,13 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["custom-protocol"]
+# Serves the UI built into apps/setup/dist from inside the program. Without
+# it, Tauri loads the UI from the Vite dev server instead, for live reloading
+# while the UI is worked on (`--no-default-features`).
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 appytappy-config = { version = "=0.1.0", path = "../../../crates/config" }
 appytappy-sources = { version = "=0.1.0", path = "../../../crates/sources" }
@@ -31,3 +38,8 @@ tauri-build = { version = "=2.7.4", features = [] }
 
 [lints]
 workspace = true
+
+# cargo-machete reads only the package's library and binary sources, so it
+# misses build.rs, which calls tauri-build.
+[package.metadata.cargo-machete]
+ignored = ["tauri-build"]

@@ -37,6 +37,12 @@ jobs:
           version: '2026.10.19'
           install: true
           cache: true
+      # Tauri builds the setup app against the Linux webview stack here, so
+      # the workspace lints and tests on this runner too.
+      - name: Install the webview build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev
       - name: Run the mandatory gate
         run: mise run standards:check
 
@@ -67,8 +73,11 @@ jobs:
         with:
           version: '2026.10.19'
           install: true
-          install_args: rust github:nextest-rs/nextest
+          install_args: rust github:nextest-rs/nextest bun
           cache: true
+      # The setup app's Rust side embeds the built UI, so the UI builds first.
+      - name: Build the setup UI
+        run: mise run ui:build
       - name: Check formatting
         run: mise run rust:fmt:check
       - name: Lint

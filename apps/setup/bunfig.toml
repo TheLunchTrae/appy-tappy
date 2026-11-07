@@ -1,0 +1,6 @@
+[install]
+# New dependencies land exact-pinned, matching the manifest policy.
+exact = true
+# Delay newly resolved versions for three days; most malicious packages are
+# flagged within that window. Locked versions are not revalidated.
+minimumReleaseAge = 259200
