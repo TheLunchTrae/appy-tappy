@@ -82,7 +82,8 @@ pub struct TrayMenu {
 /// One line of the tray menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuItem {
-    /// A line the user can pick. Picking it sends [`Picked`] with its `id`.
+    /// A line the user can pick. Picking it sends [`TrayEvent::Picked`]
+    /// with its `id`.
     Action {
         /// What a pick reports.
         id: NonZeroU16,
@@ -106,14 +107,24 @@ pub enum MenuItem {
     Separator,
 }
 
-/// The user picked the [`MenuItem::Action`] with this id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Picked(pub NonZeroU16);
+/// What the tray reports to its owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayEvent {
+    /// The user picked the [`MenuItem::Action`] with this id.
+    Picked(NonZeroU16),
+    /// Windows asked the program to close, as `taskkill` without `/F`, an
+    /// installer that replaces the program, or signing out does.
+    CloseRequested,
+    /// The tray stopped before [`Tray::stop`] for this reason, and its icon
+    /// is gone.
+    Ended(String),
+}
 
 /// The tray icon, with its own thread and hidden window.
 ///
-/// Right-clicking the icon opens the menu, and a pick goes to the sender
-/// given to [`Tray::start`]. When Explorer restarts, the icon comes back.
+/// Right-clicking the icon opens the menu, and each [`TrayEvent`] goes to
+/// the sender given to [`Tray::start`]. When Explorer restarts, the icon
+/// comes back.
 #[derive(Debug)]
 pub struct Tray(host::Tray);
 
@@ -127,11 +138,11 @@ impl Tray {
     ///
     /// Returns the operating system's error when the thread or the window
     /// cannot start.
-    pub fn start<E>(picks: Sender<E>, menu: TrayMenu) -> io::Result<Self>
+    pub fn start<E>(events: Sender<E>, menu: TrayMenu) -> io::Result<Self>
     where
-        E: From<Picked> + Send + 'static,
+        E: From<TrayEvent> + Send + 'static,
     {
-        host::Tray::start(picks, menu).map(Self)
+        host::Tray::start(events, menu).map(Self)
     }
 
     /// Replaces the tooltip and the menu. A menu that is open keeps what it
@@ -158,6 +169,38 @@ impl Tray {
     pub fn stop(self) -> io::Result<()> {
         self.0.stop()
     }
+}
+
+/// A menu label as Windows should show it: a lone `&` would underline the
+/// next letter and a tab would split the line, so `&` is doubled and a tab
+/// becomes a space.
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows adapter draws menus")
+)]
+fn menu_label(label: &str) -> String {
+    label.replace('&', "&&").replace('\t', " ")
+}
+
+/// The UTF-16 units of the longest start of `text` that fits a tooltip,
+/// without splitting a character.
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows adapter shows tooltips")
+)]
+fn tooltip_units(text: &str) -> Vec<u16> {
+    /// Windows shows at most this many UTF-16 units of a tooltip.
+    const LIMIT: usize = 127;
+    let mut units = Vec::with_capacity(LIMIT);
+    let mut buffer = [0; 2];
+    for character in text.chars() {
+        let encoded = character.encode_utf16(&mut buffer);
+        if units.len().saturating_add(encoded.len()) > LIMIT {
+            break;
+        }
+        units.extend_from_slice(encoded);
+    }
+    units
 }
 
 /// Proof that this is the only running copy of a program in the user's
@@ -259,6 +302,23 @@ impl fmt::Display for LocalTime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_labels_show_ampersands_and_tabs_literally() {
+        assert_eq!(menu_label("Rock & Roll\tnow"), "Rock && Roll now");
+    }
+
+    #[test]
+    fn a_tooltip_keeps_whole_characters_within_the_limit() {
+        let short = tooltip_units("AppyTappy: idle");
+        assert_eq!(short, "AppyTappy: idle".encode_utf16().collect::<Vec<_>>());
+        let long = format!("{}\u{1F3AE}", "a".repeat(126));
+        let cut = tooltip_units(&long);
+        assert_eq!(cut.len(), 126, "the two-unit emoji would pass 127");
+        let exact = "a".repeat(127);
+        assert_eq!(tooltip_units(&exact).len(), 127);
+        assert_eq!(tooltip_units(&"a".repeat(200)).len(), 127);
+    }
 
     #[test]
     fn a_panic_reason_is_its_message() {

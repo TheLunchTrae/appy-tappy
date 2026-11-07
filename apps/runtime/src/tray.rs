@@ -6,15 +6,20 @@
 
 use std::num::NonZeroU16;
 
-use appytappy_platform::{MenuItem, Picked, TrayMenu};
+use appytappy_platform::{MenuItem, TrayMenu};
 
 use crate::model::Model;
 
-/// The Enabled item.
-const ENABLED: NonZeroU16 = NonZeroU16::MIN;
+/// The Enabled item while automations are disabled: picking it enables them.
+pub(crate) const ENABLE: NonZeroU16 = NonZeroU16::MIN;
+
+/// The Enabled item while automations are enabled: picking it disables them.
+/// The item names what it does rather than flipping whatever is current, so a
+/// pick from a menu that was out of date cannot undo the change it showed.
+pub(crate) const DISABLE: NonZeroU16 = NonZeroU16::MIN.saturating_add(1);
 
 /// The Quit item.
-const QUIT: NonZeroU16 = NonZeroU16::MIN.saturating_add(1);
+pub(crate) const QUIT: NonZeroU16 = NonZeroU16::MIN.saturating_add(2);
 
 /// What the user asked for from the tray menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +50,7 @@ pub(crate) fn menu(model: &Model) -> TrayMenu {
         tooltip,
         items: vec![
             MenuItem::Action {
-                id: ENABLED,
+                id: if model.enabled() { DISABLE } else { ENABLE },
                 label: "Enabled".to_owned(),
                 checked: model.enabled(),
             },
@@ -63,12 +68,12 @@ pub(crate) fn menu(model: &Model) -> TrayMenu {
     }
 }
 
-/// What a pick from the menu asks for, given whether automations are
-/// enabled now. Enabled flips them.
-pub(crate) fn command(picked: Picked, enabled: bool) -> Option<Command> {
-    match picked.0 {
-        id if id == ENABLED => Some(Command::SetEnabled(!enabled)),
-        id if id == QUIT => Some(Command::Quit),
+/// What the menu item `id` asks for.
+pub(crate) fn command(id: NonZeroU16) -> Option<Command> {
+    match id {
+        ENABLE => Some(Command::SetEnabled(true)),
+        DISABLE => Some(Command::SetEnabled(false)),
+        QUIT => Some(Command::Quit),
         _ => None,
     }
 }
@@ -89,7 +94,7 @@ mod tests {
                 tooltip: "AppyTappy: idle".to_owned(),
                 items: vec![
                     MenuItem::Action {
-                        id: ENABLED,
+                        id: DISABLE,
                         label: "Enabled".to_owned(),
                         checked: true,
                     },
@@ -122,7 +127,7 @@ mod tests {
         assert_eq!(
             disabled.items.first(),
             Some(&MenuItem::Action {
-                id: ENABLED,
+                id: ENABLE,
                 label: "Enabled".to_owned(),
                 checked: false,
             })
@@ -143,17 +148,10 @@ mod tests {
     }
 
     #[test]
-    fn picks_toggle_enabled_or_quit() {
-        assert_eq!(
-            command(Picked(ENABLED), true),
-            Some(Command::SetEnabled(false))
-        );
-        assert_eq!(
-            command(Picked(ENABLED), false),
-            Some(Command::SetEnabled(true))
-        );
-        assert_eq!(command(Picked(QUIT), true), Some(Command::Quit));
-        let unknown = NonZeroU16::MAX;
-        assert_eq!(command(Picked(unknown), true), None);
+    fn picks_enable_disable_or_quit() {
+        assert_eq!(command(ENABLE), Some(Command::SetEnabled(true)));
+        assert_eq!(command(DISABLE), Some(Command::SetEnabled(false)));
+        assert_eq!(command(QUIT), Some(Command::Quit));
+        assert_eq!(command(NonZeroU16::MAX), None);
     }
 }

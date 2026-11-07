@@ -156,7 +156,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   is valid. Otherwise it keeps the old config, logs the problem, and shows it
   in the status file and the tray.
 - **Tray thread.** Owns the hidden window behind the tray icon, runs its
-  Windows message loop, and sends the user's menu picks to the owner.
+  Windows message loop, and sends the user's menu picks, Windows' requests
+  to close, and its own early end to the owner.
   [Tray](#tray) describes what it shows.
 
 Shared flags are banned, so a worker learns to stop from its channel. Each
@@ -273,17 +274,32 @@ small menu:
   automations, so it always shows `None`.
 - **Quit.** Stops the runtime until the next sign-in or start.
 
+When Windows asks the program to close, as when the session ends or a tool
+sends it a close message, the runtime logs it and quits the same way.
+
 `appytappy-platform` draws the icon and the menu from a description the
 runtime gives it, and the runtime's `tray` module decides what the
 description says. The tray thread makes a hidden top-level window, which,
 unlike a message-only window, hears when Explorer restarts, so it adds the
 icon again. At sign-in the taskbar may not exist yet; the icon then appears
-when it starts. The window's procedure keeps no state: it posts a right-click
-and a taskbar restart back to its own window, and the tray thread's loop,
-which holds the menu, handles them. After each event the owner gives the tray
-a fresh description. The icon is Windows' generic program icon until the
-runtime has its own. When the runtime cannot make the tray, such as without a
-desktop, it logs that and runs without one.
+when it starts. The window's procedure keeps no state: it posts a right-click,
+a taskbar restart, and a close request back to its own window, and the tray
+thread's loop, which holds the menu, handles them. A close request never
+destroys the window, so the icon cannot outlive its menu.
+
+While the menu is open, Windows runs its own loop, which drops those posts.
+The tray loop therefore refreshes the icon each time the menu closes, which
+covers a taskbar restart in that time; a close request in that time is lost,
+and the next one works. Stopping the tray closes an open menu first.
+
+The Enabled item names what a pick does, enable or disable, rather than
+flipping the current setting, so a pick from a menu that was out of date
+does what the menu showed. The menu opens where the shell says, which is the
+pointer for a right-click and the icon for the keyboard. After each event the
+owner gives the tray a fresh description. The icon is Windows' generic
+program icon until the runtime has its own. When the runtime cannot make the
+tray, such as without a desktop, it logs that and runs without one; when the
+tray stops on its own, the runtime logs why and keeps running without it.
 
 ## Sources, rules, and actions
 

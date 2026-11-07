@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::sync::mpsc::Sender;
 
-use crate::{LocalTime, Picked, TrayMenu, WindowEvent};
+use crate::{LocalTime, TrayEvent, TrayMenu, WindowEvent};
 
 fn unsupported<T>() -> io::Result<T> {
     Err(io::Error::new(
@@ -39,9 +39,9 @@ impl WindowWatch {
 pub(crate) struct Tray(Infallible);
 
 impl Tray {
-    pub(crate) fn start<E>(_picks: Sender<E>, _menu: TrayMenu) -> io::Result<Self>
+    pub(crate) fn start<E>(_events: Sender<E>, _menu: TrayMenu) -> io::Result<Self>
     where
-        E: From<Picked> + Send + 'static,
+        E: From<TrayEvent> + Send + 'static,
     {
         unsupported()
     }
@@ -92,14 +92,14 @@ mod tests {
     #[test]
     fn every_service_is_unsupported() {
         let (events, _received) = mpsc::channel();
-        let (picks, _picked) = mpsc::channel::<Picked>();
+        let (tray_events, _tray_received) = mpsc::channel::<TrayEvent>();
         let menu = TrayMenu {
             tooltip: "AppyTappy".to_owned(),
             items: Vec::new(),
         };
         let kinds = [
             WindowWatch::start(events).map(drop),
-            Tray::start(picks, menu).map(drop),
+            Tray::start(tray_events, menu).map(drop),
             InstanceGuard::acquire(InstanceGuard::RUNTIME).map(drop),
             crate::enable_autostart("test", OsStr::new("runtime.exe")),
             crate::disable_autostart("test"),

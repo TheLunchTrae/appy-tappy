@@ -9,9 +9,11 @@
 //!
 //! The tray works the same way. Its window procedure keeps no state: it
 //! turns the shell's notices into messages posted to its own window, and the
-//! tray thread's message loop, which owns the menu, handles them. Messages
-//! posted to a window still arrive while a menu is open, where messages
-//! posted to the thread would be lost.
+//! tray thread's message loop, which owns the menu, handles them. While the
+//! menu is open, its own loop dispatches those posts to the procedure, which
+//! drops them, so the tray loop refreshes the icon each time the menu
+//! closes. Stopping the tray works even then, because the procedure itself
+//! closes the menu and ends the loop.
 
 use std::ffi::OsStr;
 use std::io;
@@ -25,7 +27,7 @@ use std::thread::{self, JoinHandle};
 
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CLASS_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND,
-    GetLastError, HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM,
+    GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
@@ -40,17 +42,17 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CHILDID_SELF, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-    DestroyWindow, DispatchMessageW, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, GA_ROOT,
-    GetAncestor, GetCursorPos, GetMessageW, HMENU, IDI_APPLICATION, LoadIconW, MENU_ITEM_FLAGS,
-    MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, OBJID_WINDOW,
-    PM_NOREMOVE, PeekMessageW, PostMessageW, PostQuitMessage, PostThreadMessageW, RegisterClassW,
+    DestroyWindow, DispatchMessageW, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EndMenu, GA_ROOT,
+    GetAncestor, GetMessageW, HMENU, IDI_APPLICATION, LoadIconW, MENU_ITEM_FLAGS, MF_CHECKED,
+    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, OBJID_WINDOW, PM_NOREMOVE,
+    PeekMessageW, PostMessageW, PostQuitMessage, PostThreadMessageW, RegisterClassW,
     RegisterWindowMessageW, SetForegroundWindow, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TrackPopupMenu, WINDOW_EX_STYLE, WINEVENT_OUTOFCONTEXT, WM_APP, WM_CONTEXTMENU, WM_NULL,
-    WM_QUIT, WNDCLASSW, WS_OVERLAPPED,
+    TrackPopupMenu, WINDOW_EX_STYLE, WINEVENT_OUTOFCONTEXT, WM_APP, WM_CLOSE, WM_CONTEXTMENU,
+    WM_DESTROY, WM_ENDSESSION, WM_NULL, WM_QUIT, WNDCLASSW, WS_OVERLAPPED,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
-use crate::{LocalTime, MenuItem, Picked, TrayMenu, WindowEvent};
+use crate::{LocalTime, MenuItem, TrayEvent, TrayMenu, WindowEvent};
 
 /// The thread message the callback posts for a created top-level window.
 const CREATED: u32 = WM_APP;
@@ -62,7 +64,7 @@ const DESTROYED: u32 = WM_APP + 1;
 const TRAY_CALLBACK: u32 = WM_APP + 2;
 
 /// Posted by the tray window to its own queue when the user right-clicks the
-/// icon, so the loop opens the menu.
+/// icon, so the loop opens the menu. It carries the shell's anchor point.
 const OPEN_MENU: u32 = WM_APP + 3;
 
 /// Posted by the tray window when the taskbar restarts and has forgotten
@@ -75,14 +77,18 @@ const MENU_CHANGED: u32 = WM_APP + 5;
 /// Posted by [`Tray::stop`] to end the loop.
 const STOP_TRAY: u32 = WM_APP + 6;
 
+/// Posted by the tray window when Windows asks the program to close.
+const CLOSE_REQUESTED: u32 = WM_APP + 7;
+
+/// The exit code of the tray loop's `WM_QUIT` when [`Tray::stop`] ended it.
+/// Any other `WM_QUIT` means the window went away.
+const STOPPED: i32 = 1;
+
 /// The tray window's class.
 const TRAY_CLASS: PCWSTR = w!("AppyTappy.Tray");
 
 /// The icon's number among the tray window's icons.
 const ICON_ID: u32 = 1;
-
-/// Windows shows at most this many UTF-16 units of a tooltip.
-const TOOLTIP_UNITS: usize = 127;
 
 /// The user's `Run` key, relative to `HKEY_CURRENT_USER`.
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -281,15 +287,30 @@ pub(crate) struct Tray {
 }
 
 impl Tray {
-    pub(crate) fn start<E>(picks: Sender<E>, menu: TrayMenu) -> io::Result<Self>
+    pub(crate) fn start<E>(events: Sender<E>, menu: TrayMenu) -> io::Result<Self>
     where
-        E: From<Picked> + Send + 'static,
+        E: From<TrayEvent> + Send + 'static,
     {
         let (ready, started) = mpsc::sync_channel(1);
         let (menus, updates) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("tray".to_owned())
-            .spawn(move || run_tray(&picks, menu, &updates, &ready))?;
+            .spawn(move || {
+                let result = run_tray(&events, menu, &updates, &ready);
+                let reason = match &result {
+                    Ok(TrayExit::Stopped | TrayExit::NotStarted | TrayExit::OwnerGone) => None,
+                    Ok(TrayExit::WindowGone) => Some("its window was destroyed".to_owned()),
+                    Err(error) => Some(error.to_string()),
+                };
+                if let Some(reason) = reason {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "a failed send means the owner already stopped, so nobody needs to know"
+                    )]
+                    let _ = events.send(E::from(TrayEvent::Ended(reason)));
+                }
+                result.map(drop)
+            })?;
         let (window, thread) = wait_for_start(&started, thread, "tray")?;
         Ok(Self {
             window,
@@ -325,23 +346,42 @@ fn post(address: usize, message: u32) -> io::Result<()> {
     posted.map_err(io::Error::from)
 }
 
+/// Why the tray loop ended without an error.
+enum TrayExit {
+    /// [`Tray::stop`] ended it.
+    Stopped,
+    /// The window or the icon could not be made; [`Tray::start`] reports why.
+    NotStarted,
+    /// Nobody receives the tray's events any more.
+    OwnerGone,
+    /// The window was destroyed by someone else.
+    WindowGone,
+}
+
 /// The tray thread: creates the window and the icon, reports the start, and
-/// runs the message loop until [`Tray::stop`] or nobody receives picks.
-fn run_tray<E: From<Picked>>(
-    picks: &Sender<E>,
+/// runs the message loop until [`Tray::stop`], the window goes, or nobody
+/// receives events.
+fn run_tray<E: From<TrayEvent>>(
+    events: &Sender<E>,
     mut menu: TrayMenu,
     updates: &Receiver<TrayMenu>,
     ready: &SyncSender<io::Result<usize>>,
-) -> io::Result<()> {
+) -> io::Result<TrayExit> {
     // The icon is declared after the window, so it is removed before the
     // window is destroyed.
     let window = match TrayWindow::create() {
         Ok(window) => window,
-        Err(error) => return ready.send(Err(error)).map_err(io::Error::other),
+        Err(error) => {
+            ready.send(Err(error)).map_err(io::Error::other)?;
+            return Ok(TrayExit::NotStarted);
+        },
     };
     let mut icon = match TrayIcon::new(window.0) {
         Ok(icon) => icon,
-        Err(error) => return ready.send(Err(error)).map_err(io::Error::other),
+        Err(error) => {
+            ready.send(Err(error)).map_err(io::Error::other)?;
+            return Ok(TrayExit::NotStarted);
+        },
     };
     // Before Explorer runs, as at sign-in, the add fails; the icon is added
     // when the taskbar starts.
@@ -356,29 +396,40 @@ fn run_tray<E: From<Picked>>(
         // inside this call, on this thread.
         let got = unsafe { GetMessageW(&raw mut message, None, 0, 0) };
         match got.0 {
-            0 => return Ok(()),
+            0 if usize::try_from(STOPPED) == Ok(message.wParam.0) => return Ok(TrayExit::Stopped),
+            0 => return Ok(TrayExit::WindowGone),
             -1 => return Err(io::Error::last_os_error()),
             _ => {},
         }
-        match message.message {
+        let event = match message.message {
             OPEN_MENU => {
                 // A menu that cannot be built stays closed; the next
                 // right-click tries again.
-                if let Ok(Some(id)) = pick(window.0, &menu.items)
-                    && picks.send(E::from(Picked(id))).is_err()
-                {
-                    return Ok(());
-                }
+                let picked = pick(window.0, &menu.items, message.wParam);
+                // A taskbar that restarted while the menu was open has
+                // forgotten the icon, and that notice was dropped.
+                icon.show(&menu.tooltip);
+                picked.ok().flatten().map(TrayEvent::Picked)
             },
-            ADD_ICON_AGAIN => icon.add(),
-            MENU_CHANGED => {},
+            CLOSE_REQUESTED => Some(TrayEvent::CloseRequested),
+            ADD_ICON_AGAIN => {
+                icon.add();
+                None
+            },
+            MENU_CHANGED => None,
             _ => {
                 #[expect(unsafe_code, reason = "a Win32 call")]
                 // SAFETY: `message` came from GetMessageW on this thread.
                 unsafe {
                     DispatchMessageW(&raw const message);
                 }
+                None
             },
+        };
+        if let Some(event) = event
+            && events.send(E::from(event)).is_err()
+        {
+            return Ok(TrayExit::OwnerGone);
         }
         let mut changed = false;
         while let Ok(next) = updates.try_recv() {
@@ -483,9 +534,8 @@ impl TrayIcon {
     /// Shows `tooltip` on the icon, adding the icon when it is missing.
     fn show(&mut self, tooltip: &str) {
         self.data.szTip = [0; 128];
-        for (unit, slot) in tooltip
-            .encode_utf16()
-            .take(TOOLTIP_UNITS)
+        for (unit, slot) in crate::tooltip_units(tooltip)
+            .into_iter()
             .zip(self.data.szTip.iter_mut())
         {
             *slot = unit;
@@ -495,9 +545,11 @@ impl TrayIcon {
         }
     }
 
-    /// Adds the icon to the taskbar.
+    /// Adds the icon to the taskbar. An add fails when the icon is already
+    /// there, and a busy Explorer can report a failed add that worked, so a
+    /// working modify counts too.
     fn add(&mut self) {
-        self.added = notify(NIM_ADD, &self.data);
+        self.added = notify(NIM_ADD, &self.data) || notify(NIM_MODIFY, &self.data);
         if self.added {
             #[expect(
                 clippy::let_underscore_must_use,
@@ -510,13 +562,13 @@ impl TrayIcon {
 
 impl Drop for TrayIcon {
     fn drop(&mut self) {
-        if self.added {
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "the shell removes a dead window's icon itself, and Drop has no caller to report to"
-            )]
-            let _ = notify(NIM_DELETE, &self.data);
-        }
+        // The delete runs even when no add was seen to work, because the
+        // icon may be there anyway; deleting a missing icon does nothing.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the shell removes a dead window's icon itself, and Drop has no caller to report to"
+        )]
+        let _ = notify(NIM_DELETE, &self.data);
     }
 }
 
@@ -531,9 +583,9 @@ fn notify(action: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> bool {
 }
 
 /// The tray window's procedure. It keeps no state: a right-click on the
-/// icon and a restarted taskbar become messages posted to the window, which
-/// the tray thread's loop handles. It never panics, because it runs inside a
-/// Windows call.
+/// icon, a restarted taskbar, and a request to close become messages posted
+/// to the window, which the tray thread's loop handles. It never panics,
+/// because it runs inside a Windows call.
 extern "system" fn on_tray_message(
     window: HWND,
     message: u32,
@@ -541,29 +593,35 @@ extern "system" fn on_tray_message(
     lparam: LPARAM,
 ) -> LRESULT {
     let next = match message {
-        // The low word of `lparam` names the shell's notice.
-        TRAY_CALLBACK => {
-            (u32::try_from(lparam.0 & 0xFFFF) == Ok(WM_CONTEXTMENU)).then_some(OPEN_MENU)
+        // The low word of `lparam` names the shell's notice, and `wparam`
+        // holds the point to open the menu at.
+        TRAY_CALLBACK if u32::try_from(lparam.0 & 0xFFFF) == Ok(WM_CONTEXTMENU) => {
+            Some((OPEN_MENU, wparam))
         },
+        // A close request must not destroy the window, or the icon would stay
+        // with no menu; the owner decides what it means. A non-zero `wparam`
+        // on WM_ENDSESSION means the session really ends.
+        WM_CLOSE => Some((CLOSE_REQUESTED, WPARAM(0))),
+        WM_ENDSESSION if wparam.0 != 0 => Some((CLOSE_REQUESTED, WPARAM(0))),
         STOP_TRAY => {
-            #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: the call takes an integer and ends this thread's loop.
-            unsafe {
-                PostQuitMessage(0);
-            }
+            end_loop(STOPPED);
+            return LRESULT(0);
+        },
+        WM_DESTROY => {
+            end_loop(0);
             return LRESULT(0);
         },
         // Registered messages start at 0xC000.
-        _ if message >= 0xC000 && message == taskbar_created() => Some(ADD_ICON_AGAIN),
+        _ if message >= 0xC000 && message == taskbar_created() => Some((ADD_ICON_AGAIN, WPARAM(0))),
         _ => None,
     };
-    if let Some(next) = next {
+    if let Some((next, argument)) = next {
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: the call takes this window's handle and integers.
-        let posted = unsafe { PostMessageW(Some(window), next, WPARAM(0), LPARAM(0)) };
+        let posted = unsafe { PostMessageW(Some(window), next, argument, LPARAM(0)) };
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "a full queue drops one right-click, which the user repeats"
+            reason = "a full queue drops one notice, and the user or Windows repeats it"
         )]
         let _ = posted;
         return LRESULT(0);
@@ -572,6 +630,23 @@ extern "system" fn on_tray_message(
     // SAFETY: the arguments are the ones Windows passed to this procedure.
     unsafe {
         DefWindowProcW(window, message, wparam, lparam)
+    }
+}
+
+/// Closes an open menu, then ends the tray loop with `code`.
+fn end_loop(code: i32) {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes no arguments and closes this thread's open menu.
+    let ended = unsafe { EndMenu() };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "it fails when no menu is open, which is the usual case"
+    )]
+    let _ = ended;
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes an integer and ends this thread's loop.
+    unsafe {
+        PostQuitMessage(code);
     }
 }
 
@@ -585,14 +660,13 @@ fn taskbar_created() -> u32 {
     }
 }
 
-/// Opens the menu at the pointer and returns the id of the action the user
-/// picked, if any.
-fn pick(window: HWND, items: &[MenuItem]) -> io::Result<Option<NonZeroU16>> {
+/// Opens the menu at the shell's `anchor` point and returns the id of the
+/// action the user picked, if any. The anchor is the pointer for a click and
+/// the icon for the keyboard.
+fn pick(window: HWND, items: &[MenuItem], anchor: WPARAM) -> io::Result<Option<NonZeroU16>> {
     let menu = PopupMenu::new(items)?;
-    let mut point = POINT::default();
-    #[expect(unsafe_code, reason = "a Win32 call")]
-    // SAFETY: `point` is a writable POINT.
-    unsafe { GetCursorPos(&raw mut point) }?;
+    let x = signed_word(anchor.0);
+    let y = signed_word(anchor.0 >> 16);
     // The menu closes when the user clicks elsewhere only while its window
     // is in the foreground.
     #[expect(unsafe_code, reason = "a Win32 call")]
@@ -610,8 +684,8 @@ fn pick(window: HWND, items: &[MenuItem]) -> io::Result<Option<NonZeroU16>> {
         TrackPopupMenu(
             menu.0,
             TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
-            point.x,
-            point.y,
+            x,
+            y,
             None,
             window,
             None,
@@ -628,6 +702,13 @@ fn pick(window: HWND, items: &[MenuItem]) -> io::Result<Option<NonZeroU16>> {
     )]
     let _ = posted;
     Ok(u16::try_from(chosen.0).ok().and_then(NonZeroU16::new))
+}
+
+/// The low 16 bits of `value` as a signed coordinate, as a screen point to
+/// the left of or above the main display is negative.
+fn signed_word(value: usize) -> i32 {
+    let word = u16::try_from(value & 0xFFFF).unwrap_or(0);
+    i32::from(i16::from_ne_bytes(word.to_ne_bytes()))
 }
 
 /// A menu built from [`MenuItem`]s, destroyed on drop with its submenus.
@@ -682,7 +763,7 @@ fn fill(menu: HMENU, items: &[MenuItem]) -> io::Result<()> {
 
 /// Appends one line to `menu`.
 fn append(menu: HMENU, flags: MENU_ITEM_FLAGS, id: usize, label: Option<&str>) -> io::Result<()> {
-    let text = label.map(HSTRING::from);
+    let text = label.map(|label| HSTRING::from(crate::menu_label(label)));
     let text = text
         .as_ref()
         .map_or_else(PCWSTR::null, |text| PCWSTR(text.as_ptr()));
@@ -941,9 +1022,34 @@ mod tests {
 
     #[test]
     fn the_tray_starts_takes_a_new_menu_and_stops() {
-        let (picks, _picked) = mpsc::channel::<Picked>();
-        let tray = Tray::start(picks, sample_menu()).expect("start");
+        let (events, _received) = mpsc::channel::<TrayEvent>();
+        let tray = Tray::start(events, sample_menu()).expect("start");
         tray.show(sample_menu()).expect("show");
         tray.stop().expect("stop");
+    }
+
+    #[test]
+    fn a_close_request_reaches_the_owner_and_keeps_the_tray() {
+        let (events, received) = mpsc::channel::<TrayEvent>();
+        let tray = Tray::start(events, sample_menu()).expect("start");
+        let window = HWND(ptr::without_provenance_mut(tray.window));
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes the tray's window handle and integers.
+        let posted = unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+        posted.expect("post");
+        let event = received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("an event");
+        assert_eq!(event, TrayEvent::CloseRequested);
+        tray.show(sample_menu()).expect("the tray still runs");
+        tray.stop().expect("stop");
+        assert!(received.try_recv().is_err(), "a stop reports no end");
+    }
+
+    #[test]
+    fn anchor_words_are_signed() {
+        assert_eq!(signed_word(0x0001_0010), 16);
+        assert_eq!(signed_word(0xFFFF), -1);
+        assert_eq!(signed_word(0x8000), -32768);
     }
 }
