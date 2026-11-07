@@ -459,12 +459,14 @@ application. The owner thread keeps one capture for each overlay, of the
 smallest region that holds the values drawn at the window's current size, and
 the capture thread reads them from each frame, so only the readings cross to
 the owner. The window over the application is transparent, lets clicks
-through, and cannot take the focus. It is shown once, off the screen, and a
-thread of its own asks the owner over the channel where it goes about twenty
-times a second: the corner of the application's window while that window is in
-front, at the size its page measured for the card, and off the screen
-otherwise. Moving it never shows it again, which could take the focus, and a
-page that the webview throttles cannot hold it back. `sources` answers where
+through, and cannot take the focus. Tauri's window library activates a window
+it shows, so `platform` shows it once, off the screen, without activating it.
+From then on a thread of its own asks the owner over the channel where it goes
+about twenty times a second: the corner of the application's window while that
+window is in front, at the size its page measured for the card, and off the
+screen otherwise. Moving it never shows it again, so a page that the webview
+throttles cannot hold its place back; the page's own polls still open the
+overlay, start its capture and restart it after a change. `sources` answers where
 one window is with a few calls about that window alone, so following it costs
 no listing of every window. The picture-in-picture panel reports where it was
 moved, and the owner saves that once the panel stops moving.

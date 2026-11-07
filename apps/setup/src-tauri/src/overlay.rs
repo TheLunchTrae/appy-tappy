@@ -658,6 +658,30 @@ mod tests {
     }
 
     #[test]
+    fn regions_outside_a_window_of_their_own_size_are_unreadable_and_another_size_is_a_resize() {
+        let size = Size {
+            width: 4,
+            height: 2,
+        };
+        let outside = |window_size| Err(OutsideWindow { window_size }.into());
+        let readables = [None];
+        assert_eq!(
+            read_all(size, &readables, outside(size)),
+            Ok(FrameRead::Values(vec![ValueRead::Unreadable(
+                "the region lies outside the 4x2 window".to_owned()
+            )]))
+        );
+        let wider = Size {
+            width: 6,
+            height: 2,
+        };
+        assert_eq!(
+            read_all(size, &readables, outside(wider)),
+            Ok(FrameRead::Resized(wider))
+        );
+    }
+
+    #[test]
     fn an_overlay_goes_on_its_window_only_while_it_shows_in_front() {
         assert_eq!(
             place_of(window(true, true), CARD),

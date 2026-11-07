@@ -50,7 +50,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetAncestor, GetMessageW, HMENU, IDI_APPLICATION, LoadIconW, MENU_ITEM_FLAGS, MF_CHECKED,
     MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, OBJID_WINDOW, PM_NOREMOVE,
     PeekMessageW, PostMessageW, PostQuitMessage, PostThreadMessageW, RegisterClassW,
-    RegisterWindowMessageW, SetForegroundWindow, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    RegisterWindowMessageW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+    SetForegroundWindow, SetWindowPos, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
     TrackPopupMenu, WINDOW_EX_STYLE, WINEVENT_OUTOFCONTEXT, WM_APP, WM_CLOSE, WM_CONTEXTMENU,
     WM_DESTROY, WM_ENDSESSION, WM_NULL, WM_QUIT, WNDCLASSW, WS_OVERLAPPED,
 };
@@ -991,6 +992,25 @@ pub(crate) fn request_reload(name: &str) -> io::Result<bool> {
         Err(error) if error.code() == ERROR_FILE_NOT_FOUND.to_hresult() => Ok(false),
         Err(error) => Err(error.into()),
     }
+}
+
+pub(crate) fn show_without_focus(window: usize) -> io::Result<()> {
+    let window = HWND(ptr::without_provenance_mut(window));
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes any handle by value and fails for one that names
+    // no window.
+    unsafe {
+        SetWindowPos(
+            window,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        )
+    }
+    .map_err(io::Error::from)
 }
 
 pub(crate) fn enable_autostart(value: &str, command: &OsStr) -> io::Result<()> {

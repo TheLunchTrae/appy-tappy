@@ -1,7 +1,7 @@
 //! The runtime's Windows host services: the window events that drive app
 //! detection, the tray icon and its menu, the single-instance guard, the
-//! reload requests the setup app sends, autostart at sign-in, and the local
-//! clock.
+//! reload requests the setup app sends, autostart at sign-in, the local
+//! clock, and showing the setup app's overlay windows without the focus.
 //!
 //! Each service turns Windows API calls into a typed value or an error and
 //! makes no decisions of its own. The Windows adapter lives in `win`; other
@@ -313,6 +313,20 @@ pub fn disable_autostart(value: &str) -> io::Result<()> {
     host::disable_autostart(value)
 }
 
+/// Shows the window with the handle `window` without activating it.
+///
+/// The window the user is typing in keeps the keyboard, and the window
+/// stays where it is. The setup app shows its overlay windows this way,
+/// since the window library it uses activates a window it shows.
+///
+/// # Errors
+///
+/// Returns the operating system's error, such as for a handle that names
+/// no window.
+pub fn show_without_focus(window: usize) -> io::Result<()> {
+    host::show_without_focus(window)
+}
+
 /// The message a panicking thread left, for the error that reports it.
 #[must_use]
 pub fn panic_reason(payload: &(dyn Any + Send)) -> &str {
@@ -364,6 +378,11 @@ impl fmt::Display for LocalTime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn showing_a_window_that_does_not_exist_fails() {
+        assert!(show_without_focus(0).is_err());
+    }
 
     #[test]
     fn menu_labels_show_ampersands_and_tabs_literally() {

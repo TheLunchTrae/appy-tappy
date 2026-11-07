@@ -104,6 +104,10 @@ pub(crate) fn disable_autostart(_value: &str) -> io::Result<()> {
     unsupported()
 }
 
+pub(crate) fn show_without_focus(_window: usize) -> io::Result<()> {
+    unsupported()
+}
+
 pub(crate) const fn local_time() -> Option<LocalTime> {
     None
 }

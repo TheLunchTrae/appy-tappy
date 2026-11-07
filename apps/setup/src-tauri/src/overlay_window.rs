@@ -4,8 +4,8 @@
 //! In overlay mode the window is transparent, lets clicks through, never
 //! takes the focus and has no taskbar entry. It is only as big as its card,
 //! and a thread of its own puts it in the corner of the application's window
-//! while that window is in front, and off the screen otherwise, so it never
-//! has to be shown again, which could take the focus. In picture-in-picture
+//! while that window is in front, and off the screen otherwise, so it is
+//! shown once and only moved after that. In picture-in-picture
 //! mode it is a small panel the user moves and resizes, which stays on top
 //! and remembers its place. Neither hooks, injects into or opens anything
 //! in the application's process.
@@ -52,10 +52,6 @@ const OVERLAY_START: (f64, f64) = (400.0, 400.0);
 /// How far the card sits from the application window's corner, in logical
 /// pixels, past the border Windows leaves around a window.
 const CARD_INSET: f64 = 16.0;
-
-/// Where an overlay window waits while it should not show: off every
-/// screen, where Windows also puts minimized windows.
-const OFF_SCREEN: PhysicalPosition<i32> = PhysicalPosition::new(-32_000, -32_000);
 
 /// How often an overlay window looks for where its application's window is:
 /// often enough to keep up with a dragged window.
@@ -148,13 +144,7 @@ pub(crate) fn sync<R: Runtime>(
     for overlay in wanted {
         let label = label(&overlay.app, overlay.mode);
         if handle.get_webview_window(&label).is_none() {
-            let opened = open(handle, &label, overlay, &areas);
-            // Two syncs can race to open the same window, such as one from
-            // the main window opening and one from a changed setting; the
-            // window the other opened is the one wanted.
-            if opened.is_err() && handle.get_webview_window(&label).is_none() {
-                return opened;
-            }
+            open(handle, &label, overlay, &areas)?;
         }
     }
     Ok(())
@@ -162,6 +152,10 @@ pub(crate) fn sync<R: Runtime>(
 
 /// Opens `overlay`'s window, labeled `label`. It needs a running app, so no
 /// unit test can reach it.
+///
+/// Both kinds are built so that showing them leaves the focus where it is:
+/// the window library activates a window that it shows, or that it changes
+/// once it shows, unless it was built without the focus and shown with it.
 #[mutants::skip]
 fn open<R: Runtime>(
     handle: &AppHandle<R>,
@@ -169,51 +163,110 @@ fn open<R: Runtime>(
     overlay: &OverlayWindow,
     areas: &[Area],
 ) -> tauri::Result<()> {
+    // Where a panel opens, in logical pixels each way, before it goes back to
+    // its saved place: off every screen, where Windows also puts minimized
+    // windows.
+    const PANEL_OFF_SCREEN: f64 = -32_000.0;
     let builder = WebviewWindowBuilder::new(handle, label, WebviewUrl::App("index.html".into()))
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false);
-    match overlay.mode {
-        OverlayModeDef::Overlay => {
-            // Shown once, off the screen, while it is created: a window shown
-            // later takes the focus. Its thread moves it from then on.
-            let window = builder
-                .title(format!("{} overlay", overlay.name))
-                .transparent(true)
-                .decorations(false)
-                .shadow(false)
-                .resizable(false)
-                .focusable(false)
-                .inner_size(OVERLAY_START.0, OVERLAY_START.1)
-                .visible(true)
-                .build()?;
-            window.set_position(OFF_SCREEN)?;
-            // Clicks reach the application under it.
-            window.set_ignore_cursor_events(true)?;
-            let messages = handle.state::<Bridge>().0.clone();
-            let app = overlay.app.clone();
-            std::thread::Builder::new()
-                .name(format!("overlay {app}"))
-                .spawn(move || follow_while_open(&window, &app, &messages))?;
-        },
+    let panel = overlay.panel.filter(|panel| in_reach(*panel, areas));
+    let built = match overlay.mode {
+        // Hidden until it lets clicks through, since that change would show
+        // it with the focus.
+        OverlayModeDef::Overlay => builder
+            .title(format!("{} overlay", overlay.name))
+            .transparent(true)
+            .decorations(false)
+            .shadow(false)
+            .resizable(false)
+            .focusable(false)
+            .inner_size(OVERLAY_START.0, OVERLAY_START.1)
+            .visible(false)
+            .build(),
+        // Shown as it is built, off the screen when it has a place to go
+        // back to, since moving it there afterwards keeps the focus too.
         OverlayModeDef::PictureInPicture => {
-            let window = builder
+            let builder = builder
                 .title(format!("{} values", overlay.name))
                 .inner_size(PANEL_SIZE.0, PANEL_SIZE.1)
                 .min_inner_size(PANEL_MIN.0, PANEL_MIN.1)
                 .minimizable(false)
                 .maximizable(false)
                 .closable(false)
-                .visible(false)
-                .build()?;
-            if let Some(panel) = overlay.panel.filter(|panel| in_reach(*panel, areas)) {
-                window.set_position(PhysicalPosition::new(panel.x, panel.y))?;
-                window.set_size(PhysicalSize::new(panel.width, panel.height))?;
+                .visible(true);
+            match panel {
+                Some(_) => builder.position(PANEL_OFF_SCREEN, PANEL_OFF_SCREEN),
+                None => builder.center(),
             }
-            window.show()?;
+            .build()
         },
+    };
+    let window = match built {
+        Ok(window) => window,
+        // Two syncs can race to open the same window, such as one from the
+        // main window opening and one from a changed setting; the window the
+        // other opened is the one wanted.
+        Err(_) if handle.get_webview_window(label).is_some() => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let set_up = match (overlay.mode, panel) {
+        (OverlayModeDef::Overlay, _) => set_up_overlay(handle, &window, &overlay.app),
+        (OverlayModeDef::PictureInPicture, Some(panel)) => window
+            .set_position(PhysicalPosition::new(panel.x, panel.y))
+            .and_then(|()| window.set_size(PhysicalSize::new(panel.width, panel.height))),
+        (OverlayModeDef::PictureInPicture, None) => Ok(()),
+    };
+    // A window left half set up could sit over the screen without letting
+    // clicks through, so it goes, and the next sync tries again.
+    match set_up {
+        Ok(()) => Ok(()),
+        Err(error) => window.destroy().and(Err(error)),
     }
+}
+
+/// Moves an overlay-mode `window` off the screen, lets clicks through it,
+/// shows it without the focus and starts the thread that moves it from then
+/// on. It needs a running app, so no unit test can reach it.
+#[mutants::skip]
+fn set_up_overlay<R: Runtime>(
+    handle: &AppHandle<R>,
+    window: &WebviewWindow<R>,
+    app: &str,
+) -> tauri::Result<()> {
+    follow(window, None)?;
+    // Clicks reach the application under it.
+    window.set_ignore_cursor_events(true)?;
+    show_without_focus(window)?;
+    let messages = handle.state::<Bridge>().0.clone();
+    let follower = window.clone();
+    let app = app.to_owned();
+    std::thread::Builder::new()
+        .name(format!("overlay {app}"))
+        .spawn(move || follow_while_open(&follower, &app, &messages))?;
     Ok(())
+}
+
+/// Shows `window` without taking the focus. Windows is the only platform
+/// the setup app runs its overlays on; elsewhere it shows `window` as the
+/// window library does.
+///
+/// Asking for the window's handle waits for the window library to apply the
+/// changes asked of it before, so the window is shown with them.
+#[cfg(windows)]
+#[mutants::skip]
+fn show_without_focus<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    let handle = window.hwnd()?.0.addr();
+    appytappy_platform::show_without_focus(handle).map_err(tauri::Error::Io)
+}
+
+/// Shows `window` as the window library does, on a platform where the setup
+/// app runs no overlays.
+#[cfg(not(windows))]
+#[mutants::skip]
+fn show_without_focus<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    window.show()
 }
 
 /// Whether enough of `panel` lies in one of the monitors' work `areas` for
@@ -273,14 +326,20 @@ fn follow_while_open<R: Runtime>(window: &WebviewWindow<R>, app: &str, messages:
 /// Returns Tauri's error when the window cannot be moved or resized.
 #[mutants::skip]
 fn follow<R: Runtime>(window: &WebviewWindow<R>, place: Option<Place>) -> tauri::Result<()> {
+    // Off every screen, where Windows also puts minimized windows.
+    const OFF_SCREEN: PhysicalPosition<i32> = PhysicalPosition::new(-32_000, -32_000);
     let Some(place) = place else {
         if window.outer_position()? != OFF_SCREEN {
             window.set_position(OFF_SCREEN)?;
         }
         return Ok(());
     };
-    // The card takes the scale of the monitor it goes onto.
-    let scale = match window.monitor_from_point(f64::from(place.x), f64::from(place.y))? {
+    // The card takes the scale of the monitor the application's window is
+    // on. Its corner can lie outside every monitor, as a maximized window's
+    // border does, so its middle is the point that picks the monitor.
+    let middle_x = f64::from(place.x) + f64::from(place.width) / 2.0;
+    let middle_y = f64::from(place.y) + f64::from(place.height) / 2.0;
+    let scale = match window.monitor_from_point(middle_x, middle_y)? {
         Some(monitor) => monitor.scale_factor(),
         None => window.scale_factor()?,
     };
@@ -293,11 +352,13 @@ fn follow<R: Runtime>(window: &WebviewWindow<R>, place: Option<Place>) -> tauri:
         place.x.saturating_add(inset.x),
         place.y.saturating_add(inset.y),
     );
-    if window.inner_size()? != size {
-        window.set_size(size)?;
-    }
+    // Moved first, since Windows rescales a window that moves onto a
+    // monitor of another scale, which would undo a new size.
     if window.outer_position()? != position {
         window.set_position(position)?;
+    }
+    if window.inner_size()? != size {
+        window.set_size(size)?;
     }
     Ok(())
 }
