@@ -13,7 +13,7 @@
 use std::io;
 use std::ptr;
 use std::slice;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -69,20 +69,15 @@ enum Event {
     Stop,
 }
 
-/// Wakes the capture thread from the system's event handlers.
+/// Wakes the capture thread from the system's event handlers and from the
+/// session. The channel is unbounded, so no send ever blocks, `Drop`'s
+/// included. An extra frame wake costs one look at an empty pool, because
+/// the thread takes every frame in the pool when it wakes.
 #[derive(Clone)]
-struct Wake(SyncSender<Event>);
+struct Wake(Sender<Event>);
 
 impl Wake {
-    /// Reports a new frame. A wake already queued covers it, because the
-    /// thread takes every frame in the pool when it wakes.
-    fn frame(&self) {
-        match self.0.try_send(Event::Frame) {
-            Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {},
-        }
-    }
-
-    /// Reports an event that must not be lost behind a queued frame wake.
+    /// Sends `event` without waiting.
     fn send(&self, event: Event) {
         #[expect(
             clippy::let_underscore_must_use,
@@ -145,9 +140,7 @@ impl Capture for WindowsSystem {
     ) -> io::Result<WindowsCaptureSession> {
         let window = usize::try_from(window)
             .map_err(|_overflow| io::Error::from(io::ErrorKind::InvalidInput))?;
-        // One queued wake is enough: the thread takes every frame in the
-        // pool when it wakes, so further wakes would only repeat it.
-        let (events, received) = mpsc::sync_channel(1);
+        let (events, received) = mpsc::channel();
         let events = Wake(events);
         let (ready, started) = mpsc::sync_channel(1);
         let wake = events.clone();
@@ -233,9 +226,13 @@ impl Capturer {
     fn start(window: HWND, throttle: Duration, wake: &Wake) -> windows::core::Result<Self> {
         let (device, context) = create_device()?;
         let multithread: ID3D11Multithread = device.cast()?;
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the result is the previous setting, which nothing needs"
+        )]
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: the call takes a flag; `multithread` is live.
-        let _previous = unsafe { multithread.SetMultithreadProtected(true) };
+        let _ = unsafe { multithread.SetMultithreadProtected(true) };
         let dxgi: IDXGIDevice = device.cast()?;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `dxgi` is a live DXGI device; the call returns a new reference.
@@ -255,7 +252,7 @@ impl Capturer {
         )?;
         let frames = wake.clone();
         let arrived = pool.FrameArrived(&TypedEventHandler::new(move |_, _| {
-            frames.frame();
+            frames.send(Event::Frame);
             Ok(())
         }))?;
         let ended = wake.clone();
