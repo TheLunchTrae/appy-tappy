@@ -31,7 +31,7 @@ on, so it must stay small. Every design choice below follows from that split.
   │ lifecycle ─ started, exited ────┤                       │
   │ source workers ─ samples ───────┼─► owner thread:       │
   │ action worker ─ results ────────┤   root model + engine │
-  │ tray ─ pause, open, quit ───────┘           │           │
+  │ tray ─ enable, disable, quit ───┘           │           │
   │ ◄── action requests, worker start and stop ─┘           │
   └─────────────────────────────────────────────────────────┘
 ```
@@ -155,12 +155,10 @@ Each thread below is a plain `std::thread`, and each channel is a
   `ConfigChanged`. The owner validates the new file and swaps it in only if it
   is valid. Otherwise it keeps the old config, logs the problem, and shows it
   in the status file and the tray.
-- **Message thread.** Owns the hidden window behind the tray icon, runs the
-  Windows message loop, and sends tray commands to the owner. The tray shows
-  idle, attached, or problem and offers pause, open setup, and quit. Whether
-  the tray is worth its cost belongs to
-  [#18](https://github.com/TheLunchTrae/appy-tappy/issues/18); without it, the
-  status file still reports the same states.
+- **Tray thread.** Owns the hidden window behind the tray icon, runs its
+  Windows message loop, and sends the user's menu picks, Windows' requests
+  to close, and its own early end to the owner.
+  [Tray](#tray) describes what it shows.
 
 Shared flags are banned, so a worker learns to stop from its channel. Each
 worker owns a control `Receiver` and waits on it with `recv_timeout`, using the
@@ -257,6 +255,51 @@ older one, so the log never takes more than about 1 MiB. Only the copy that
 holds the single-instance guard rotates it; a second copy or an `--autostart`
 command only adds its line. When `%LOCALAPPDATA%` is unknown or the log
 cannot be opened, nothing is logged, and running exits with code 1.
+
+### Tray
+
+The runtime shows an icon in the taskbar's notification area. Pointing at it
+shows a tooltip with the state, such as `AppyTappy: idle`, or
+`AppyTappy: disabled` while automations are off. Right-clicking it opens a
+small menu:
+
+- **Enabled.** A check mark that turns automations on and off. Off, rules do
+  not fire, but detection keeps running, so turning it back on finds the
+  games already attached. The runtime starts enabled, and the setting is not
+  kept across restarts.
+- **Active automations.** A submenu that lists, by name, the automations of
+  the games attached now, and only those. With none, it shows a grayed
+  `None`. Until the runtime loads the compiled config
+  ([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)), there are no
+  automations, so it always shows `None`.
+- **Quit.** Stops the runtime until the next sign-in or start.
+
+When Windows asks the program to close, as when the session ends or a tool
+sends it a close message, the runtime logs it and quits the same way.
+
+`appytappy-platform` draws the icon and the menu from a description the
+runtime gives it, and the runtime's `tray` module decides what the
+description says. The tray thread makes a hidden top-level window, which,
+unlike a message-only window, hears when Explorer restarts, so it adds the
+icon again. At sign-in the taskbar may not exist yet; the icon then appears
+when it starts. The window's procedure keeps no state: it posts a right-click,
+a taskbar restart, and a close request back to its own window, and the tray
+thread's loop, which holds the menu, handles them. A close request never
+destroys the window, so the icon cannot outlive its menu.
+
+While the menu is open, Windows runs its own loop, which drops those posts.
+The tray loop therefore refreshes the icon each time the menu closes, which
+covers a taskbar restart in that time; a close request in that time is lost,
+and the next one works. Stopping the tray closes an open menu first.
+
+The Enabled item names what a pick does, enable or disable, rather than
+flipping the current setting, so a pick from a menu that was out of date
+does what the menu showed. The menu opens where the shell says, which is the
+pointer for a right-click and the icon for the keyboard. After each event the
+owner gives the tray a fresh description. The icon is Windows' generic
+program icon until the runtime has its own. When the runtime cannot make the
+tray, such as without a desktop, it logs that and runs without one; when the
+tray stops on its own, the runtime logs why and keeps running without it.
 
 ## Sources, rules, and actions
 
@@ -438,7 +481,7 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
 - **[`windows`](https://github.com/microsoft/windows-rs).** Microsoft's
   official Rust bindings for Windows APIs, generated from Windows metadata.
   Its features select which APIs compile, which mainly keeps build times down.
-  The runtime's tray icon, message loop, and directory watching use it
+  The runtime's tray icon, message loops, and directory watching use it
   directly, with no extra crates. Screen capture does too, rather than through
   the `windows-capture` crate, which adds its own thread pool and locks.
 - **[`png`](https://docs.rs/png).** Reads and writes the PNG files that hold

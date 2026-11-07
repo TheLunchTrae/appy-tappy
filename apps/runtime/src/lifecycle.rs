@@ -210,10 +210,10 @@ impl Lifecycle {
 
 /// The lifecycle thread: runs snapshots when they are due and sends what
 /// changed. It ends when the window events stop or nobody receives changes.
-pub(crate) fn run(
+pub(crate) fn run<E: From<Change>>(
     mut lifecycle: Lifecycle,
     events: &Receiver<WindowEvent>,
-    changes: &Sender<Change>,
+    changes: &Sender<E>,
     mut snapshot: impl FnMut() -> io::Result<Vec<ProcessEntry>>,
 ) {
     loop {
@@ -221,7 +221,7 @@ pub(crate) fn run(
         let event = match lifecycle.deadline() {
             Some(due) if due <= now => {
                 for change in lifecycle.scan(snapshot(), now) {
-                    if changes.send(change).is_err() {
+                    if changes.send(E::from(change)).is_err() {
                         return;
                     }
                 }
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn the_thread_reports_a_start_then_an_exit_after_a_destroyed_window() {
         let (window_events, events) = mpsc::channel();
-        let (sender, changes) = mpsc::channel();
+        let (sender, changes) = mpsc::channel::<Change>();
         let mut snapshots = vec![Vec::new(), vec![entry(42, "GeometryDash.exe")]];
         let lifecycle = Lifecycle::new(geometry_dash(), Instant::now());
         let thread = thread::spawn(move || {

@@ -1,5 +1,6 @@
-//! The root model on the owner thread: which games are attached and what
-//! problem, if any, stops the runtime from watching.
+//! The root model on the owner thread: which games are attached, what
+//! problem, if any, stops the runtime from watching, and whether
+//! automations are enabled.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -31,15 +32,44 @@ impl fmt::Display for State {
 }
 
 /// The owner thread's state.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Model {
     /// The process each attached game's session follows.
     attached: BTreeMap<GameIndex, ProcessId>,
     /// The problem that degrades the runtime.
     problem: Option<String>,
+    /// Whether rules may fire. Turning it off from the tray keeps detection
+    /// running, so turning it back on finds the games already attached.
+    enabled: bool,
+    /// The names of the automations of the attached games. The engine fills
+    /// it once the runtime loads the compiled config
+    /// ([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)); until
+    /// then it stays empty.
+    pub(crate) automations: Vec<String>,
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Self {
+            attached: BTreeMap::new(),
+            problem: None,
+            enabled: true,
+            automations: Vec::new(),
+        }
+    }
 }
 
 impl Model {
+    /// Whether rules may fire.
+    pub(crate) const fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Lets rules fire, or stops them, without stopping detection.
+    pub(crate) const fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
     /// The current state.
     pub(crate) fn state(&self) -> State {
         if self.problem.is_some() {
@@ -108,6 +138,19 @@ mod tests {
         );
         assert_eq!(model.apply(exited(0)), None, "degraded overrides attached");
         assert_eq!(model.apply(Change::ScanRestored), Some(State::Idle));
+    }
+
+    #[test]
+    fn automations_start_enabled_and_can_be_turned_off() {
+        let mut model = Model::default();
+        assert!(model.enabled());
+        model.set_enabled(false);
+        assert!(!model.enabled());
+        assert_eq!(
+            model.apply(started(0)),
+            Some(State::Attached),
+            "detection goes on"
+        );
     }
 
     #[test]

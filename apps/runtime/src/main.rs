@@ -11,10 +11,12 @@ mod cli;
 mod lifecycle;
 mod log;
 mod model;
+mod tray;
 
 use std::env;
 use std::ffi::OsString;
 use std::io;
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::mpsc;
@@ -22,7 +24,7 @@ use std::thread;
 use std::time::Instant;
 
 use appytappy_config::paths::Locations;
-use appytappy_platform::{AUTOSTART_VALUE, InstanceGuard, LocalTime, WindowWatch};
+use appytappy_platform::{AUTOSTART_VALUE, InstanceGuard, LocalTime, Tray, TrayEvent, WindowWatch};
 use appytappy_sources::HostSystem;
 use appytappy_sources::system::System;
 
@@ -149,36 +151,138 @@ fn note(log: &mut Log, message: &str) {
     let _ = log.write(LocalTime::now(), message);
 }
 
-/// The owner loop: detection runs on its own threads and sends changes
-/// here, where the root model applies them. It ends when the window watch
-/// ends.
+/// What reaches the owner thread.
+#[derive(Debug)]
+enum Event {
+    /// Detection found a change.
+    Detected(Change),
+    /// The tray reported a pick, a request to close, or its own end.
+    Tray(TrayEvent),
+    /// Detection stopped because the window events ended.
+    DetectionEnded,
+}
+
+impl From<Change> for Event {
+    fn from(change: Change) -> Self {
+        Self::Detected(change)
+    }
+}
+
+impl From<TrayEvent> for Event {
+    fn from(event: TrayEvent) -> Self {
+        Self::Tray(event)
+    }
+}
+
+/// The owner loop: detection and the tray run on their own threads and send
+/// events here, where the root model applies them. It ends on Quit from the
+/// tray, when Windows asks it to close, or when detection ends.
 fn watch(watchlist: Watchlist, log: &mut Log) -> io::Result<()> {
+    // The host system sets the process's DPI awareness, which Windows
+    // requires before any window exists, so it comes before the tray window.
+    let system = HostSystem::default();
     let (window_sender, window_events) = mpsc::channel();
     let windows = WindowWatch::start(window_sender)?;
-    let (change_sender, changes) = mpsc::channel();
+    let (sender, events) = mpsc::channel();
+    let mut model = Model::default();
+    // Without a desktop the runtime still works; it only has no icon.
+    let tray = match Tray::start(sender.clone(), tray::menu(&model)) {
+        Ok(tray) => Some(tray),
+        Err(error) => {
+            note(log, &format!("no tray icon: {error}"));
+            None
+        },
+    };
     let lifecycle = Lifecycle::new(watchlist.clone(), Instant::now());
-    let system = HostSystem::default();
-    let detector = thread::Builder::new()
+    let spawned = thread::Builder::new()
         .name("lifecycle".to_owned())
         .spawn(move || {
-            lifecycle::run(lifecycle, &window_events, &change_sender, || {
-                system.processes()
-            });
-        })?;
-    let mut model = Model::default();
-    for change in changes {
-        note(log, &describe(&watchlist, &change));
-        if let Some(state) = model.apply(change) {
-            note(log, &format!("state: {state}"));
+            lifecycle::run(lifecycle, &window_events, &sender, || system.processes());
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a failed send means the owner already stopped, which is what this tells it"
+            )]
+            let _ = sender.send(Event::DetectionEnded);
+        });
+    let detector = match spawned {
+        Ok(detector) => detector,
+        Err(error) => {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the spawn error is the one to report; the threads only need to end"
+            )]
+            let _ = (tray.map(Tray::stop), windows.stop());
+            return Err(error);
+        },
+    };
+    for event in &events {
+        if handle(&mut model, &watchlist, log, event).is_break() {
+            break;
+        }
+        if let Some(tray) = &tray {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a tray that ended reports why when it is stopped"
+            )]
+            let _ = tray.show(tray::menu(&model));
         }
     }
-    detector.join().map_err(|payload| {
+    // The tray stops first, so its icon goes before anything else. Stopping
+    // the window watch ends detection, so the join below returns.
+    let tray_stopped = tray.map_or(Ok(()), Tray::stop);
+    let windows_stopped = windows.stop();
+    let detected = detector.join().map_err(|payload| {
         io::Error::other(format!(
             "the lifecycle thread panicked: {}",
             appytappy_platform::panic_reason(payload.as_ref())
         ))
-    })?;
-    windows.stop()
+    });
+    detected.and(tray_stopped).and(windows_stopped)
+}
+
+/// Applies one event to the model and logs it. Breaks when the runtime
+/// should stop.
+fn handle(
+    model: &mut Model,
+    watchlist: &Watchlist,
+    log: &mut Log,
+    event: Event,
+) -> ControlFlow<()> {
+    match event {
+        Event::Detected(change) => {
+            note(log, &describe(watchlist, &change));
+            if let Some(state) = model.apply(change) {
+                note(log, &format!("state: {state}"));
+            }
+        },
+        Event::Tray(TrayEvent::CloseRequested) => {
+            note(log, "Windows asked the runtime to close");
+            return ControlFlow::Break(());
+        },
+        Event::Tray(TrayEvent::Ended(reason)) => {
+            note(log, &format!("the tray icon stopped: {reason}"));
+        },
+        Event::Tray(TrayEvent::Picked(id)) => match tray::command(id) {
+            Some(tray::Command::SetEnabled(enabled)) => {
+                model.set_enabled(enabled);
+                note(
+                    log,
+                    if enabled {
+                        "automations enabled"
+                    } else {
+                        "automations disabled"
+                    },
+                );
+            },
+            Some(tray::Command::Quit) => {
+                note(log, "quit from the tray");
+                return ControlFlow::Break(());
+            },
+            None => {},
+        },
+        Event::DetectionEnded => return ControlFlow::Break(()),
+    }
+    ControlFlow::Continue(())
 }
 
 fn describe(watchlist: &Watchlist, change: &Change) -> String {
@@ -204,6 +308,8 @@ fn describe(watchlist: &Watchlist, change: &Change) -> String {
 mod tests {
     use std::fs;
     use std::process;
+
+    use std::num::NonZeroU16;
 
     use appytappy_config::anti_cheat::ProcessId;
 
@@ -275,6 +381,70 @@ mod tests {
         assert_eq!(
             autostart_line(&Autostart::Off, &failed),
             "autostart off failed: denied"
+        );
+    }
+
+    #[test]
+    fn events_update_the_model_and_the_log_until_quit() {
+        let folder = env::temp_dir().join(format!("appytappy-handle-{}", process::id()));
+        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let watchlist = Watchlist::new(vec![vec!["Game.exe".to_owned()]]);
+        let mut model = Model::default();
+        let started = Event::from(Change::Started {
+            game: GameIndex(0),
+            process: ProcessId::new(7),
+        });
+        let disable = Event::from(TrayEvent::Picked(tray::DISABLE));
+        let unknown = Event::from(TrayEvent::Picked(NonZeroU16::MAX));
+        let ended = Event::from(TrayEvent::Ended("its window was destroyed".to_owned()));
+        let mut flows = Vec::new();
+        for event in [started, disable, unknown, ended] {
+            flows.push(handle(&mut model, &watchlist, &mut log, event));
+        }
+        let disabled = model.enabled();
+        let ends = [
+            Event::from(TrayEvent::Picked(tray::ENABLE)),
+            Event::from(TrayEvent::Picked(tray::QUIT)),
+            Event::from(TrayEvent::CloseRequested),
+            Event::DetectionEnded,
+        ];
+        for event in ends {
+            flows.push(handle(&mut model, &watchlist, &mut log, event));
+        }
+        let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
+        fs::remove_dir_all(&folder).expect("clean up");
+        assert_eq!(
+            flows,
+            [
+                ControlFlow::Continue(()),
+                ControlFlow::Continue(()),
+                ControlFlow::Continue(()),
+                ControlFlow::Continue(()),
+                ControlFlow::Continue(()),
+                ControlFlow::Break(()),
+                ControlFlow::Break(()),
+                ControlFlow::Break(()),
+            ]
+        );
+        assert!(!disabled, "Disable disables");
+        assert!(model.enabled(), "Enable enables again");
+        assert_eq!(model.state(), model::State::Attached);
+        assert_eq!(written.lines().count(), 7, "{written:?}");
+        assert!(
+            written.contains("Game.exe started (process 7): attached"),
+            "{written:?}"
+        );
+        assert!(written.contains("state: attached"), "{written:?}");
+        assert!(written.contains("automations disabled"), "{written:?}");
+        assert!(written.contains("automations enabled"), "{written:?}");
+        assert!(written.contains("quit from the tray"), "{written:?}");
+        assert!(
+            written.contains("the tray icon stopped: its window was destroyed"),
+            "{written:?}"
+        );
+        assert!(
+            written.contains("Windows asked the runtime to close"),
+            "{written:?}"
         );
     }
 

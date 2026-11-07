@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::sync::mpsc::Sender;
 
-use crate::{LocalTime, WindowEvent};
+use crate::{LocalTime, TrayEvent, TrayMenu, WindowEvent};
 
 fn unsupported<T>() -> io::Result<T> {
     Err(io::Error::new(
@@ -28,6 +28,31 @@ impl WindowWatch {
 
     // `WindowWatch` holds `Infallible`, so no value exists and this body
     // never runs. No test can call it, so mutating it cannot be caught.
+    #[mutants::skip]
+    pub(crate) fn stop(self) -> io::Result<()> {
+        match self.0 {}
+    }
+}
+
+/// A tray icon, which cannot be constructed here.
+#[derive(Debug)]
+pub(crate) struct Tray(Infallible);
+
+impl Tray {
+    pub(crate) fn start<E>(_events: Sender<E>, _menu: TrayMenu) -> io::Result<Self>
+    where
+        E: From<TrayEvent> + Send + 'static,
+    {
+        unsupported()
+    }
+
+    // `Tray` holds `Infallible`, so no value exists and this body never runs.
+    #[mutants::skip]
+    pub(crate) fn show(&self, _menu: TrayMenu) -> io::Result<()> {
+        match self.0 {}
+    }
+
+    // `Tray` holds `Infallible`, so no value exists and this body never runs.
     #[mutants::skip]
     pub(crate) fn stop(self) -> io::Result<()> {
         match self.0 {}
@@ -60,21 +85,27 @@ pub(crate) const fn local_time() -> Option<LocalTime> {
 mod tests {
     use std::sync::mpsc;
 
-    use crate::{InstanceGuard, WindowWatch};
+    use crate::{InstanceGuard, Tray, WindowWatch};
 
     use super::*;
 
     #[test]
     fn every_service_is_unsupported() {
         let (events, _received) = mpsc::channel();
+        let (tray_events, _tray_received) = mpsc::channel::<TrayEvent>();
+        let menu = TrayMenu {
+            tooltip: "AppyTappy".to_owned(),
+            items: Vec::new(),
+        };
         let kinds = [
             WindowWatch::start(events).map(drop),
+            Tray::start(tray_events, menu).map(drop),
             InstanceGuard::acquire(InstanceGuard::RUNTIME).map(drop),
             crate::enable_autostart("test", OsStr::new("runtime.exe")),
             crate::disable_autostart("test"),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 4]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 5]);
         assert_eq!(LocalTime::now(), None);
     }
 }

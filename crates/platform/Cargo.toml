@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-platform"
-description = "The runtime's Windows host services: window events, single-instance guard, autostart, and the local clock."
+description = "The runtime's Windows host services: window events, the tray icon, single-instance guard, autostart, and the local clock."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,17 +14,20 @@ publish.workspace = true
 mutants = "0.0.4"
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
-# in `win.rs` calls: the window event hook and its message loop, the named
-# mutex behind the single-instance guard, the `Run` registry key, and the
-# local clock.
+# in `win.rs` calls: the window event hook and its message loop, the tray
+# icon with its hidden window and menu, the named mutex behind the
+# single-instance guard, the `Run` registry key, and the local clock.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = [
   "Win32_Foundation",
+  "Win32_Graphics_Gdi",
   "Win32_Security",
+  "Win32_System_LibraryLoader",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Accessibility",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 
