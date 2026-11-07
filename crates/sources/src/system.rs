@@ -317,11 +317,12 @@ mod tests {
         let kinds = [
             system.processes().map(drop),
             system.windows().map(drop),
+            system.foreground_window().map(drop),
             system.ask_memory_access(&entry, &[]).map(drop),
             system.open(&permit).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 5]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 6]);
     }
 }

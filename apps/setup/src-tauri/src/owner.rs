@@ -1225,11 +1225,13 @@ mod tests {
                 title: "AppyTappy setup".to_owned(),
                 class: "SetupWindow".to_owned(),
                 visible: true,
+                // Elsewhere on the screen, so an overlay that followed it
+                // instead of its application's window would show it.
                 bounds: Bounds {
-                    left: 0,
-                    top: 0,
-                    right: 4,
-                    bottom: 2,
+                    left: 10,
+                    top: 20,
+                    right: 14,
+                    bottom: 22,
                 },
             };
             Ok(vec![
@@ -2502,6 +2504,7 @@ mod tests {
         let unsupported = appytappy_sources::system::Unsupported;
         assert!(Host::windows(&unsupported).is_err());
         assert!(Host::processes(&unsupported).is_err());
+        assert!(Host::foreground_window(&unsupported).is_err());
         let handler: FrameHandler = Box::new(|_frame| Duration::ZERO);
         assert!(Host::capture(&unsupported, 7, Crop::Whole, PREVIEW_INTERVAL, handler).is_err());
     }

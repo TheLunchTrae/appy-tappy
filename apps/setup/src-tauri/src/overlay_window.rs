@@ -60,22 +60,38 @@ pub(crate) fn parse_label(label: &str) -> Option<(&str, OverlayModeDef)> {
         .filter(|(app, _mode)| !app.is_empty())
 }
 
-/// Opens a window for each overlay in `wanted` that has none, and closes
-/// the overlay windows nothing wants any more.
-///
-/// # Errors
-///
-/// Returns Tauri's error when a window cannot be opened or closed.
-pub(crate) fn sync<R: Runtime>(
-    handle: &AppHandle<R>,
+/// The labels in `open` of overlay windows that nothing in `wanted` wants,
+/// such as one whose overlay was turned off or changed mode.
+pub(crate) fn unwanted<'a>(
+    open: impl IntoIterator<Item = &'a str>,
     wanted: &[OverlayWindow],
-) -> tauri::Result<()> {
+) -> Vec<&'a str> {
     let labels: BTreeSet<String> = wanted
         .iter()
         .map(|overlay| label(&overlay.app, overlay.mode))
         .collect();
-    for (open, window) in handle.webview_windows() {
-        if parse_label(&open).is_some() && !labels.contains(&open) {
+    open.into_iter()
+        .filter(|open| parse_label(open).is_some() && !labels.contains(*open))
+        .collect()
+}
+
+/// Opens a window for each overlay in `wanted` that has none, and closes
+/// the overlay windows nothing wants any more.
+///
+/// It needs a running app, so no unit test can reach it; the choice of
+/// windows to close is [`unwanted`]'s.
+///
+/// # Errors
+///
+/// Returns Tauri's error when a window cannot be opened or closed.
+#[mutants::skip]
+pub(crate) fn sync<R: Runtime>(
+    handle: &AppHandle<R>,
+    wanted: &[OverlayWindow],
+) -> tauri::Result<()> {
+    let windows = handle.webview_windows();
+    for label in unwanted(windows.keys().map(String::as_str), wanted) {
+        if let Some(window) = windows.get(label) {
             window.destroy()?;
         }
     }
@@ -99,7 +115,9 @@ pub(crate) fn sync<R: Runtime>(
     Ok(())
 }
 
-/// Opens `overlay`'s window, labeled `label`.
+/// Opens `overlay`'s window, labeled `label`. It needs a running app, so no
+/// unit test can reach it.
+#[mutants::skip]
 fn open<R: Runtime>(
     handle: &AppHandle<R>,
     label: &str,
@@ -157,11 +175,13 @@ pub(crate) fn on_a_monitor(panel: PanelDef, monitors: &[Place]) -> bool {
 }
 
 /// Puts an overlay-mode `window` on its application's window while that
-/// window is in front, and hides it otherwise.
+/// window is in front, and hides it otherwise. It needs a running app, so
+/// no unit test can reach it.
 ///
 /// # Errors
 ///
 /// Returns Tauri's error when the window cannot be moved, shown or hidden.
+#[mutants::skip]
 pub(crate) fn follow<R: Runtime>(
     window: &WebviewWindow<R>,
     place: Option<Place>,
@@ -251,6 +271,28 @@ mod tests {
         for other in ["main", "overlay-", "panel-", "overlays"] {
             assert_eq!(parse_label(other), None, "{other}");
         }
+    }
+
+    #[test]
+    fn only_overlay_windows_nothing_wants_are_closed() {
+        let wanted = [OverlayWindow {
+            app: "example".to_owned(),
+            name: "Example App".to_owned(),
+            mode: OverlayModeDef::Overlay,
+            panel: None,
+        }];
+        let open = [
+            "main",
+            "overlay-example",
+            "panel-example",
+            "overlay-other",
+            "overlay-",
+        ];
+        assert_eq!(unwanted(open, &wanted), ["panel-example", "overlay-other"]);
+        assert_eq!(
+            unwanted(open, &[]),
+            ["overlay-example", "panel-example", "overlay-other"]
+        );
     }
 
     #[test]

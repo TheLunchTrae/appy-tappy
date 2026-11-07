@@ -515,3 +515,50 @@ pub(crate) fn windows<'file>(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_sources::system::Bounds;
+
+    use super::*;
+
+    fn entry(visible: bool, left: i32) -> WindowEntry {
+        WindowEntry {
+            handle: 7,
+            process: ProcessId::new(3),
+            title: "Example App".to_owned(),
+            class: "ExampleWindow".to_owned(),
+            visible,
+            bounds: Bounds {
+                left,
+                top: -8,
+                right: left.saturating_add(1288),
+                bottom: 712,
+            },
+        }
+    }
+
+    #[test]
+    fn a_window_has_a_place_only_while_it_shows_and_is_not_minimized() {
+        assert_eq!(
+            place_of(&entry(true, -8), false),
+            Some(Place {
+                x: -8,
+                y: -8,
+                width: 1288,
+                height: 720,
+                front: false,
+            })
+        );
+        assert_eq!(
+            place_of(&entry(true, 0), true).map(|place| place.front),
+            Some(true)
+        );
+        // Windows moves a minimized window to -32000, and a hidden one
+        // keeps its last place.
+        assert_eq!(place_of(&entry(true, MINIMIZED_LEFT), true), None);
+        assert!(place_of(&entry(true, MINIMIZED_LEFT + 1), true).is_some());
+        assert_eq!(place_of(&entry(false, 0), true), None);
+    }
+}
