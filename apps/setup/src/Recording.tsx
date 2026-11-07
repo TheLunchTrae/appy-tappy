@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 import type { RecordedReading, RecordingView } from './api.ts';
 import { PictureCanvas } from './canvas.tsx';
 import type { Picture } from './pixels.ts';
@@ -39,6 +41,8 @@ interface PanelProps {
   readonly crops: ReadonlyMap<number, Picture>;
   readonly error: string | null;
   readonly onStart: () => void;
+  /** Goes on with the stopped recording. */
+  readonly onMore: () => void;
   readonly onStop: () => void;
   readonly onDiscard: () => void;
   readonly onReview: () => void;
@@ -47,6 +51,14 @@ interface PanelProps {
 /** The inspector's part for recording a number's region. */
 export function RecordPanel(props: PanelProps) {
   const { view, reviewing, kept, keeping, blocked, appName, crops, error } = props;
+  const isRecording = view?.recording === true;
+  // Starting removes the Start button, so focus moves to Stop rather than the page.
+  const stopButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (isRecording) {
+      stopButton.current?.focus();
+    }
+  }, [isRecording]);
   const warning = error ?? view?.problem ?? null;
   const warn = warning === null ? null : <p className="warn">{warning}</p>;
   if (view === null) {
@@ -97,7 +109,7 @@ export function RecordPanel(props: PanelProps) {
         )}
         <p className="note">Recording goes on while you use {appName}. Come back here to stop.</p>
         <div className="row">
-          <button type="button" className="btn primary" onClick={props.onStop}>
+          <button type="button" className="btn primary" ref={stopButton} onClick={props.onStop}>
             Stop and review
           </button>
           <button type="button" className="btn" onClick={props.onDiscard}>
@@ -130,8 +142,11 @@ export function RecordPanel(props: PanelProps) {
         <button type="button" className="btn" onClick={props.onReview}>
           Review recording
         </button>
-        <button type="button" className="btn" disabled={blocked !== null} onClick={props.onStart}>
+        <button type="button" className="btn" disabled={blocked !== null} onClick={props.onMore}>
           Record more
+        </button>
+        <button type="button" className="btn" onClick={props.onDiscard}>
+          Discard
         </button>
       </div>
     </section>
@@ -144,19 +159,37 @@ interface SheetProps {
   /** Why the check cannot learn a kept reading, by reading index. */
   readonly problems: ReadonlyMap<number, string>;
   readonly crops: ReadonlyMap<number, Picture>;
+  /** Why Keep is not available yet, or null when it is. */
+  readonly blocked: string | null;
+  readonly error: string | null;
   readonly onEntry: (index: number, entry: ReviewEntry) => void;
   readonly onKeepAll: (keep: boolean) => void;
 }
 
 /** Every reading of a stopped recording, to keep or leave out and to correct. */
-export function ReviewSheet({ view, entries, problems, crops, onEntry, onKeepAll }: SheetProps) {
+export function ReviewSheet(props: SheetProps) {
+  const { view, entries, problems, crops, blocked, error, onEntry, onKeepAll } = props;
+  // Opening review removes the button that had focus, so focus moves here.
+  const head = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    head.current?.focus();
+  }, []);
   return (
     <>
       <div className="sheet-head">
-        <p>
-          Check each reading&apos;s text and fix any the reader got wrong. Kept readings teach the number check its
-          characters, like labeled screenshots.
-        </p>
+        <div>
+          <h2 ref={head} tabIndex={-1}>
+            Review the recording
+          </h2>
+          <p>
+            Check each reading&apos;s text and fix any the reader got wrong. Kept readings teach the number check its
+            characters, like labeled screenshots.
+          </p>
+          <p id="keep-blocked" className={blocked === null ? 'note' : 'note pending'} aria-live="polite">
+            {blocked ?? ''}
+          </p>
+          {error === null ? null : <p className="warn">{error}</p>}
+        </div>
         <div className="end">
           <button
             type="button"

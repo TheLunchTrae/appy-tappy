@@ -20,7 +20,16 @@ import {
 } from './api.ts';
 import { readingText } from './automation.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
-import { type CheckKind, type Draft, buildSpec, CHECK_KINDS, EMPTY_DRAFT, KIND_NAMES, withKind } from './check.ts';
+import {
+  type CheckKind,
+  type Draft,
+  buildSpec,
+  CHECK_KINDS,
+  EMPTY_DRAFT,
+  KIND_NAMES,
+  reviewSpec,
+  withKind,
+} from './check.ts';
 import type { Choice } from './Picker.tsx';
 import { type Color, type Picture, colorAt, hex } from './pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
@@ -367,7 +376,13 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   const [recordError, setRecordError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [edits, setEdits] = useState<ReadonlyMap<number, ReviewEntry>>(new Map());
-  const [problems, setProblems] = useState<ReadonlyMap<number, string>>(new Map());
+  // Why the check cannot learn each flagged reading, for the review spec they were found on.
+  const [problems, setProblems] = useState<{ readonly spec: string; readonly found: ReadonlyMap<number, string> }>({
+    spec: '',
+    found: new Map(),
+  });
+  // Bumped by each start, stop, or discard, so a poll sent before one is ignored.
+  const recordingTurn = useRef(0);
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<{ readonly id: number; readonly pictures: ReadonlyMap<number, Picture> }>({
     id: -1,
@@ -472,8 +487,12 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   useRepeat(readNow, READING_PAUSE_MS, checkState.kind === 'set');
 
   const readRecording = useCallback(async (): Promise<void> => {
+    const turn = recordingTurn.current;
     try {
-      setRecording(await recordingState());
+      const state = await recordingState();
+      if (turn === recordingTurn.current) {
+        setRecording(state);
+      }
     } catch (error: unknown) {
       setRecordError(errorText(error));
     }
@@ -519,27 +538,29 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     [recording, edits, draft.recorded],
   );
   const keeping = useMemo(() => keptLabels(reviewEntries), [reviewEntries]);
-  // Asks which kept readings the check cannot learn, such as a character
-  // typed like another one that has another shape.
+  const toReview = useMemo(() => reviewSpec(draft, keeping), [draft, keeping]);
+  const reviewKey = toReview === null ? '' : JSON.stringify(toReview);
+  // Asks which kept readings the check cannot learn, such as one whose shape
+  // a labeled screenshot or an earlier reading gave to another character.
   useEffect(() => {
-    if (!reviewing) {
+    if (!reviewing || toReview === null) {
       return undefined;
     }
     let current = true;
     const timer = setTimeout(() => {
-      reviewProblems(keeping)
+      reviewProblems(toReview)
         .then((answers) => {
           if (!current) {
             return;
           }
           const found = new Map<number, string>();
           answers.forEach((answer, position_) => {
-            const label = keeping[position_];
+            const label = toReview.recorded[position_];
             if (answer !== null && label !== undefined) {
               found.set(label.reading, answer);
             }
           });
-          setProblems(found);
+          setProblems({ spec: JSON.stringify(toReview), found });
         })
         .catch((error: unknown) => {
           if (current) {
@@ -551,7 +572,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       current = false;
       clearTimeout(timer);
     };
-  }, [reviewing, keeping]);
+  }, [reviewing, toReview]);
+  // Flags found on another spec are stale: none show, and Keep waits for the answer.
+  const flagged = problems.spec === reviewKey ? problems.found : new Map<number, string>();
+  const checked = problems.spec === reviewKey;
 
   const onFrame = useCallback((width: number, height: number): void => {
     setLiveError(null);
@@ -638,60 +662,68 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     return null;
   })();
 
-  const record = async (): Promise<void> => {
+  // Starts a new recording, or with `more` goes on with the stopped one. The
+  // owner refuses to go on with other settings rather than start over, so
+  // kept readings and review edits are never dropped without a discard.
+  const record = async (more: boolean): Promise<void> => {
     if (draft.region === null || draft.ink === null || drawnOn === null) {
       return;
     }
+    recordingTurn.current += 1;
     try {
-      await startRecording(draft.region, draft.ink, draft.tolerance, drawnOn);
+      await startRecording(draft.region, draft.ink, draft.tolerance, drawnOn, more);
       setRecordError(null);
       setReviewing(false);
       setSelected(null);
       setPicking(null);
-      const started = await recordingState();
-      if (started !== null && started.id !== recording?.id) {
-        // A new recording: what was kept from the old one is gone.
+      if (!more) {
         setEdits(new Map());
         setDraft((current) => ({ ...current, recorded: new Map() }));
       }
-      setRecording(started);
+      setRecording(await recordingState());
     } catch (error: unknown) {
       setRecordError(errorText(error));
     }
   };
 
-  const stop = async (): Promise<void> => {
+  // Stops recording; `review` opens the readings to review.
+  const stop = async (review: boolean): Promise<void> => {
+    recordingTurn.current += 1;
     try {
       await stopRecording();
       setRecording(await recordingState());
-      setEdits(new Map());
-      setReviewing(true);
+      setReviewing(review);
     } catch (error: unknown) {
       setRecordError(errorText(error));
     }
   };
 
   const discard = async (): Promise<void> => {
+    recordingTurn.current += 1;
     try {
       await discardRecording();
       setRecording(null);
       setRecordError(null);
       setReviewing(false);
       setEdits(new Map());
-      setProblems(new Map());
       setDraft((current) => ({ ...current, recorded: new Map() }));
     } catch (error: unknown) {
       setRecordError(errorText(error));
     }
   };
 
+  // Review edits stay after Keep, so reviewing again starts from them.
   const keep = (): void => {
     setDraft((current) => ({ ...current, recorded: new Map(keeping.map((label) => [label.reading, label.text])) }));
-    setEdits(new Map());
     setReviewing(false);
   };
 
-  const keptProblem = keeping.some((label) => problems.has(label.reading));
+  const keptProblem = keeping.some((label) => flagged.has(label.reading));
+  const keepBlocked = keptProblem
+    ? 'Fix or leave out the flagged readings to keep them.'
+    : checked
+      ? null
+      : 'Checking the readings…';
 
   const canSave = valueName.trim().length > 0 && built.ok && drawnOn !== null && checkState.kind === 'set' && !saving;
   const position = (index: number): number => shots.findIndex((shot) => shot.index === index) + 1;
@@ -748,7 +780,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
                 className="btn"
                 disabled={recordBlocked !== null}
                 onClick={() => {
-                  background(record());
+                  background(record(true));
                 }}
               >
                 Record more
@@ -756,8 +788,8 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
               <button
                 type="button"
                 className="btn primary"
-                disabled={keptProblem}
-                title={keptProblem ? 'Fix or leave out the flagged readings' : undefined}
+                disabled={keepBlocked !== null}
+                aria-describedby={keepBlocked === null ? undefined : 'keep-blocked'}
                 onClick={keep}
               >
                 {keeping.length === 1 ? 'Keep 1 reading' : `Keep ${keeping.length} readings`}
@@ -797,8 +829,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
           <ReviewSheet
             view={recording}
             entries={reviewEntries}
-            problems={problems}
+            problems={flagged}
             crops={pictures}
+            blocked={keepBlocked}
+            error={recordError}
             onEntry={(index, entry) => {
               setEdits((current) => new Map(current).set(index, entry));
             }}
@@ -910,6 +944,14 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
                 onClick={() => {
                   setDraft((current) => withKind(current, kind));
                   setPicking(null);
+                  if (kind !== 'number') {
+                    // Recording and review belong to a number check, so
+                    // leaving it stops recording and closes review.
+                    setReviewing(false);
+                    if (recording?.recording === true) {
+                      background(stop(false));
+                    }
+                  }
                 }}
               >
                 {KIND_NAMES[kind]}
@@ -943,16 +985,18 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
             crops={pictures}
             error={recordError}
             onStart={() => {
-              background(record());
+              background(record(false));
+            }}
+            onMore={() => {
+              background(record(true));
             }}
             onStop={() => {
-              background(stop());
+              background(stop(true));
             }}
             onDiscard={() => {
               background(discard());
             }}
             onReview={() => {
-              setEdits(new Map());
               setReviewing(true);
             }}
           />

@@ -16,7 +16,7 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 
 use crate::automations::AutomationSummary;
-use crate::check_spec::{CheckSpec, ColorSpec, RecordedLabel, RegionSpec};
+use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::overlay_window;
 use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
@@ -293,8 +293,8 @@ pub(crate) async fn overlay_card(
 }
 
 /// Records `region` of the picked window, drawn on `screenshot`, keeping
-/// each reading it shows; goes on with a stopped recording of the same
-/// region and ink.
+/// each reading it shows. With `more`, goes on with the stopped recording;
+/// otherwise starts a new one.
 #[tauri::command]
 pub(crate) async fn start_recording(
     app: AppHandle,
@@ -302,12 +302,14 @@ pub(crate) async fn start_recording(
     ink: ColorSpec,
     tolerance: u8,
     screenshot: usize,
+    more: bool,
 ) -> Result<(), String> {
     ask(&app, |reply| Request::StartRecording {
         region,
         ink,
         tolerance,
         screenshot,
+        more,
         reply,
     })
     .await?
@@ -348,12 +350,12 @@ pub(crate) async fn recorded_reading(
     .map(pixels)
 }
 
-/// Why a number check cannot learn each of `readings`, in order: `None` for
-/// one it can.
+/// Why the number check `spec` describes cannot learn each of its recorded
+/// readings, in order: `None` for one it can.
 #[tauri::command]
 pub(crate) async fn review_problems(
     app: AppHandle,
-    readings: Vec<RecordedLabel>,
+    spec: CheckSpec,
 ) -> Result<Vec<Option<String>>, String> {
-    ask(&app, |reply| Request::ReviewProblems { readings, reply }).await
+    ask(&app, |reply| Request::ReviewProblems { spec, reply }).await?
 }

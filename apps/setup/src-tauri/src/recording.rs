@@ -24,11 +24,19 @@ pub(crate) const MAX_READINGS: usize = 200;
 /// Bits in one word of an [`Ink`] mask.
 const WORD_BITS: usize = 64;
 
-/// Which pixels of a crop are ink, one bit per pixel, row by row.
+/// How near a pixel's distance from the characters' color may be to the
+/// tolerance for it to count as uncertain. A pixel where a character's edge
+/// blends into the background lands near the tolerance, and can fall either
+/// side of it from one frame to the next.
+const EDGE_BAND: u8 = 32;
+
+/// Which pixels of a crop are ink, one bit per pixel, row by row, and which
+/// of them are clearly ink or clearly not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Ink {
     words: Vec<u64>,
-    count: u32,
+    /// Pixels clearly on one side of the tolerance, not near a blended edge.
+    sure: Vec<u64>,
     width: usize,
     height: usize,
 }
@@ -38,22 +46,42 @@ impl Ink {
     fn of(image: &Image, reader: &DigitReader) -> Self {
         let pixels = image.pixels();
         let mut words = vec![0_u64; pixels.len().div_ceil(WORD_BITS)];
-        let mut count = 0_u32;
+        let mut sure = words.clone();
+        let tolerance = reader.tolerance();
+        let low = tolerance.saturating_sub(EDGE_BAND);
+        let high = tolerance.saturating_add(EDGE_BAND);
         for (index, &pixel) in pixels.iter().enumerate() {
-            if reader.is_ink(pixel)
-                && let Some(word) = words.get_mut(index / WORD_BITS)
+            let distance = reader.distance(pixel);
+            let slot = index / WORD_BITS;
+            if distance <= tolerance
+                && let Some(word) = words.get_mut(slot)
             {
                 *word |= bit(index);
-                count = count.saturating_add(1);
+            }
+            // At the tolerance itself a pixel is ink, so an ink pixel is
+            // sure up to the band's low end and a background one past its
+            // high end.
+            let clear = if distance <= tolerance {
+                distance <= low
+            } else {
+                distance > high
+            };
+            if clear && let Some(word) = sure.get_mut(slot) {
+                *word |= bit(index);
             }
         }
         let size = image.size();
         Self {
             words,
-            count,
+            sure,
             width: usize::try_from(size.width).unwrap_or(0),
             height: usize::try_from(size.height).unwrap_or(0),
         }
+    }
+
+    /// Whether any pixel is ink.
+    fn any(&self) -> bool {
+        self.words.iter().any(|&word| word != 0)
     }
 
     /// Whether the pixel at (`x`, `y`) is ink.
@@ -65,19 +93,20 @@ impl Ink {
     }
 
     /// Whether `other`, a crop of the same size, shows the same characters.
-    /// A pixel at a character's edge can fall either side of the tolerance
-    /// from one frame to the next, so the two may differ in one pixel, and
-    /// one more for each 32 pixels of ink. Two different characters differ
-    /// in far more.
+    /// Pixels near a blended edge, uncertain in either crop, can flip from
+    /// one frame to the next and are not compared. Of the rest, the two may
+    /// differ in one pixel, for a speck of noise; a stroke of a different
+    /// character differs in more, however much ink the region holds.
     fn same_shape(&self, other: &Self) -> bool {
         let differ = self
             .words
             .iter()
             .zip(&other.words)
-            .fold(0_u32, |sum, (mine, theirs)| {
-                sum.saturating_add((mine ^ theirs).count_ones())
+            .zip(self.sure.iter().zip(&other.sure))
+            .fold(0_u32, |sum, ((mine, theirs), (my_sure, their_sure))| {
+                sum.saturating_add(((mine ^ theirs) & my_sure & their_sure).count_ones())
             });
-        differ <= (self.count.max(other.count) / 32).saturating_add(1)
+        differ <= 1
     }
 
     /// The ink as the text reader takes it: one byte a pixel, black ink on
@@ -240,7 +269,7 @@ impl Recording {
         };
         self.problem = None;
         let ink = Ink::of(&crop, &self.reader);
-        if ink.count == 0 {
+        if !ink.any() {
             return None;
         }
         if let Some(known) = self
@@ -292,11 +321,6 @@ impl Recording {
         if let Some(recorded) = self.stopped.take() {
             self.started = at.checked_sub(recorded).unwrap_or(at);
         }
-    }
-
-    /// How it tells ink from background, with nothing learned yet.
-    pub(crate) const fn reader(&self) -> &DigitReader {
-        &self.reader
     }
 
     /// The readings it kept, in the order they first showed.
@@ -423,6 +447,73 @@ mod tests {
         assert_eq!(recording.offer(&bar(2), start), None);
         let seen: Vec<u32> = recording.readings().iter().map(|kept| kept.seen).collect();
         assert_eq!(seen, [3, 1]);
+    }
+
+    /// A recording of a `width` by `height` window, all of it the region,
+    /// with ink within `tolerance` of the characters' color.
+    fn recording_of(width: u32, height: u32, tolerance: u8, started: Instant) -> Recording {
+        let reader = DigitReader::new(
+            Rgb {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            tolerance,
+        );
+        let region = Region::new(0, 0, width, height).expect("not empty");
+        Recording::new(1, region, reader, Size { width, height }, started)
+    }
+
+    #[test]
+    fn one_stroke_differs_however_long_the_number() {
+        let start = Instant::now();
+        let mut recording = recording_of(64, 8, 0, start);
+        // Eight solid six-pixel-wide digits: 384 pixels of ink.
+        let digits = |x: u32| x % 8 < 6;
+        let first = frame(64, 8, |x, _| digits(x));
+        assert!(recording.offer(&first, start).is_some());
+        // The last digit loses a two by three stroke, six pixels of 384.
+        let stroke = frame(64, 8, |x, y| {
+            digits(x) && !((58..60).contains(&x) && (2..5).contains(&y))
+        });
+        assert!(
+            recording.offer(&stroke, start).is_some(),
+            "a new character is a new reading"
+        );
+        // One speck of noise is not.
+        let speck = frame(64, 8, |x, y| digits(x) || (x, y) == (7, 0));
+        assert_eq!(recording.offer(&speck, start), None);
+    }
+
+    #[test]
+    fn a_blended_edge_is_not_compared() {
+        const BLEND: [u8; 4] = [0, 0, 225, 0];
+        let start = Instant::now();
+        // Tolerance 40: ink 30 away from the color is ink, but near the edge.
+        let mut recording = recording_of(8, 4, 40, start);
+        let bar = |x: u32| x < 3;
+        let plain = |x: u32, _: u32| if bar(x) { INK } else { PAPER };
+        let shown = |pixel: &dyn Fn(u32, u32) -> [u8; 4]| {
+            let pixels = (0..4_u32)
+                .flat_map(|y| (0..8_u32).map(move |x| (x, y)))
+                .flat_map(|(x, y)| pixel(x, y))
+                .collect();
+            Image::new(
+                Size {
+                    width: 8,
+                    height: 4,
+                },
+                pixels,
+            )
+            .expect("matching length")
+        };
+        assert!(recording.offer(&shown(&plain), start).is_some());
+        // Three blended pixels beside the bar turn to ink: the same reading.
+        let blended = |x: u32, y: u32| if x == 3 && y < 3 { BLEND } else { plain(x, y) };
+        assert_eq!(recording.offer(&shown(&blended), start), None);
+        // Three pixels of the characters' own color there are a new one.
+        let inked = |x: u32, y: u32| if x == 3 && y < 3 { INK } else { plain(x, y) };
+        assert!(recording.offer(&shown(&inked), start).is_some());
     }
 
     #[test]
@@ -554,7 +645,14 @@ mod tests {
     #[test]
     fn it_records_only_the_same_region_ink_and_window() {
         let recording = recording(Instant::now());
-        let reader = recording.reader().clone();
+        let reader = DigitReader::new(
+            Rgb {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            0,
+        );
         assert!(recording.records(region(), &reader, size()));
         let other_region = Region::new(1, 0, 7, 4).expect("not empty");
         assert!(!recording.records(other_region, &reader, size()));

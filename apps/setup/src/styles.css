@@ -1071,6 +1071,7 @@ select {
 
 .record .row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
@@ -1128,10 +1129,28 @@ select {
   gap: 12px;
 }
 
+.sheet-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.sheet-head h2:focus {
+  outline: none;
+}
+
 .sheet-head p {
   margin: 0;
   color: var(--muted);
   max-width: 70ch;
+}
+
+.sheet-head p:empty {
+  display: none;
+}
+
+.sheet-head p.pending {
+  color: var(--warn);
 }
 
 .sheet-head .end {

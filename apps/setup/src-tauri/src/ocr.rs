@@ -8,7 +8,9 @@
 //! records never loads it. Only the setup app reads text this way; the
 //! runtime reads numbers with the shapes the user's labels taught it.
 
+use std::collections::VecDeque;
 use std::error::Error;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -48,11 +50,34 @@ pub(crate) fn model_path(program: &Path) -> PathBuf {
 /// Reads each job's line as text and sends the owner the result, until the
 /// owner drops its sender. The model at `model` loads on the first job;
 /// when it cannot, every reading says why, and the user types the text.
+/// Jobs of a recording older than the newest one queued are skipped: the
+/// user discarded or replaced it, and the owner would drop their text.
 pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path) {
     let mut engine: Option<Result<OcrEngine, String>> = None;
-    for job in jobs {
+    let mut queue = VecDeque::new();
+    let mut newest = 0_u64;
+    loop {
+        queue.extend(jobs.try_iter());
+        if queue.is_empty() {
+            match jobs.recv() {
+                Ok(job) => queue.push_back(job),
+                Err(_closed) => break,
+            }
+        }
+        newest = queue.iter().map(|job| job.recording).fold(newest, u64::max);
+        let Some(job) = queue.pop_front() else {
+            continue;
+        };
+        if job.recording < newest {
+            continue;
+        }
         let text = match engine.get_or_insert_with(|| load(model)) {
-            Ok(engine) => read(engine, &job.line),
+            // A panic inside the model's code fails this reading alone,
+            // rather than leaving it pending and ending the reader.
+            Ok(engine) => panic::catch_unwind(AssertUnwindSafe(|| read(engine, &job.line)))
+                .unwrap_or_else(|_panic| {
+                    Text::Failed("The text reader failed on this reading".to_owned())
+                }),
             Err(why) => Text::Failed(why.clone()),
         };
         let recognized = Message::Recognized {
@@ -161,5 +186,36 @@ mod tests {
                 other => panic!("unexpected {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn a_newer_recording_skips_the_older_ones_jobs() {
+        let (jobs, inbox) = mpsc::channel();
+        let (messages, outbox) = mpsc::channel();
+        let model = std::env::temp_dir().join("appytappy-no-model.onnx");
+        for (recording, index) in [(1, 0), (1, 1), (2, 0), (1, 2)] {
+            jobs.send(Job {
+                recording,
+                index,
+                line: Line {
+                    width: 1,
+                    height: 1,
+                    pixels: vec![0],
+                },
+            })
+            .expect("reader listens");
+        }
+        drop(jobs);
+        run(&inbox, &messages, &model);
+        let answered: Vec<(u64, usize)> = outbox
+            .try_iter()
+            .map(|message| match message {
+                Message::Recognized {
+                    recording, index, ..
+                } => (recording, index),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(answered, [(2, 0)]);
     }
 }

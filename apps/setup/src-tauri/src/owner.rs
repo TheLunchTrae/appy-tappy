@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::automations::{self, AutomationSummary, Stores};
-use crate::check_spec::{self, CheckSpec, ColorSpec, RecordedLabel, RegionCheck, RegionSpec};
+use crate::check_spec::{self, CheckSpec, ColorSpec, RegionCheck, RegionSpec};
 use crate::ocr;
 use crate::overlay::{self, Card, FrameRead, OverlayView, OverlayWindow, Overlays, Place};
 use crate::pixels;
@@ -286,8 +286,9 @@ pub(crate) enum Request {
     /// set up and a frame arrived.
     Reading(Reply<Result<Option<Reading>, String>>),
     /// Records `region` of the picked window, drawn on `screenshot`, keeping
-    /// each reading it shows. Goes on with a stopped recording of the same
-    /// region and ink; otherwise starts a new one in its place.
+    /// each reading it shows. With `more`, goes on with the stopped
+    /// recording, which must be of the same region, ink, and window size;
+    /// otherwise starts a new one in place of any recording.
     StartRecording {
         /// The region to record.
         region: RegionSpec,
@@ -297,6 +298,8 @@ pub(crate) enum Request {
         tolerance: u8,
         /// The screenshot the region was drawn on.
         screenshot: usize,
+        /// Whether to go on with the recording rather than start over.
+        more: bool,
         /// Answered once it records, or with why it cannot.
         reply: Reply<Result<(), String>>,
     },
@@ -315,14 +318,15 @@ pub(crate) enum Request {
         /// The pixels, or `None` for a reading that does not exist.
         reply: Reply<Option<Vec<u8>>>,
     },
-    /// What a number check would make of each labeled reading, learned in
-    /// order: `None` for one it learns, or why it cannot, such as a
-    /// character that an earlier reading showed with another shape.
+    /// Why the number check `spec` describes could not learn each of its
+    /// recorded readings, such as one whose shape an earlier reading or a
+    /// labeled screenshot gave to another character.
     ReviewProblems {
-        /// The readings with what they show.
-        readings: Vec<RecordedLabel>,
-        /// One answer per reading, in order.
-        reply: Reply<Vec<Option<String>>>,
+        /// The check with the readings review would keep.
+        spec: CheckSpec,
+        /// One answer per recorded reading, in order: `None` for one it
+        /// learns. An error when the labeled screenshots cannot be learned.
+        reply: Reply<Result<Vec<Option<String>>, String>>,
     },
     /// Captures the region of a saved value on its application's window,
     /// for the automation editor. Like [`Request::Pick`], it drops the
@@ -735,10 +739,11 @@ impl<H: Host> Owner<H> {
                 ink,
                 tolerance,
                 screenshot,
+                more,
                 reply,
             } => send(
                 reply,
-                self.start_recording(region, ink, tolerance, screenshot),
+                self.start_recording(region, ink, tolerance, screenshot, more),
             ),
             Request::StopRecording(reply) => {
                 if let Some(recording) = &mut self.recording {
@@ -767,9 +772,11 @@ impl<H: Host> Owner<H> {
                     .and_then(|recording| recording.readings().get(index))
                     .map(|kept| pixels::rgba(&kept.image, max_width)),
             ),
-            Request::ReviewProblems { readings, reply } => {
-                send(reply, self.review_problems(&readings));
-            },
+            Request::ReviewProblems { spec, reply } => send(
+                reply,
+                check_spec::recorded_problems(&spec, &self.screenshots, self.recording.as_ref())
+                    .map_err(|error| error.to_string()),
+            ),
             Request::WatchValue { app, value, reply } => send(reply, self.watch(&app, &value)),
             Request::WatchedReading { watch, when, reply } => {
                 send(reply, self.watched_reading(watch, when.as_deref()));
@@ -1165,6 +1172,7 @@ impl<H: Host> Owner<H> {
         ink: ColorSpec,
         tolerance: u8,
         screenshot: usize,
+        more: bool,
     ) -> Result<(), String> {
         if self.session.is_none() {
             return Err("Pick a window to record.".to_owned());
@@ -1185,8 +1193,16 @@ impl<H: Host> Owner<H> {
         let reader = DigitReader::new(ink.into(), tolerance);
         let now = Instant::now();
         match &mut self.recording {
-            Some(recording) if recording.records(region, &reader, window_size) => {
+            Some(recording) if more && recording.records(region, &reader, window_size) => {
                 recording.resume(now);
+            },
+            Some(_) if more => {
+                return Err(
+                    "Recording more needs the region, characters' color, and tolerance it was \
+                     recorded with, on a screenshot of the same window size. Put them back, or \
+                     discard the recording to start a new one."
+                        .to_owned(),
+                );
             },
             _ => {
                 self.recording_id = self.recording_id.wrapping_add(1);
@@ -1200,36 +1216,6 @@ impl<H: Host> Owner<H> {
             },
         }
         Ok(())
-    }
-
-    /// Learns `readings` in order on a check of their own, and answers why
-    /// each one it cannot learn fails. One that fails is left out, so the
-    /// ones after it are judged on the ones that worked.
-    fn review_problems(&self, readings: &[RecordedLabel]) -> Vec<Option<String>> {
-        let Some(recording) = &self.recording else {
-            return vec![
-                Some("That recording is gone. Record the region again.".to_owned());
-                readings.len()
-            ];
-        };
-        let mut reader = recording.reader().clone();
-        readings
-            .iter()
-            .map(|label| {
-                let Some(kept) = recording.readings().get(label.reading) else {
-                    return Some("That reading is gone. Record the region again.".to_owned());
-                };
-                let image = &kept.image;
-                let mut trial = reader.clone();
-                match trial.learn(image, &label.text) {
-                    Ok(()) => {
-                        reader = trial;
-                        None
-                    },
-                    Err(error) => Some(sentence(&error.to_string())),
-                }
-            })
-            .collect()
     }
 
     fn reading(&self) -> Result<Option<Reading>, String> {
@@ -1324,14 +1310,6 @@ impl<H: Host> Owner<H> {
             holds,
         })
     }
-}
-
-/// `text` as a sentence of its own: capitalized, with a full stop.
-fn sentence(text: &str) -> String {
-    let mut characters = text.chars();
-    characters.next().map_or_else(String::new, |first| {
-        format!("{}{}.", first.to_uppercase(), characters.as_str())
-    })
 }
 
 /// A preview capture's message for one frame.
@@ -1809,7 +1787,7 @@ mod tests {
     }
 
     /// Records the whole 4 by 2 frame, red as ink, drawn on screenshot 0.
-    fn start_recording(red: u8) -> impl FnOnce(Reply<Result<(), String>>) -> Request {
+    fn start_recording(red: u8, more: bool) -> impl FnOnce(Reply<Result<(), String>>) -> Request {
         let region: RegionSpec =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let ink: ColorSpec =
@@ -1820,6 +1798,7 @@ mod tests {
             ink,
             tolerance: 0,
             screenshot: 0,
+            more,
             reply,
         }
     }
@@ -1848,7 +1827,7 @@ mod tests {
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
         assert_eq!(harness.recording(), None);
-        assert_eq!(harness.ask(start_recording(255)), Ok(()));
+        assert_eq!(harness.ask(start_recording(255, false)), Ok(()));
         for frame in [
             red_columns(2),
             red_columns(2),
@@ -1915,17 +1894,27 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        harness.ask(start_recording(255)).expect("records");
+        harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(&mut handler, Ok(&red_columns(3)));
-        let label = |reading, text: &str| RecordedLabel {
-            reading,
-            text: text.to_owned(),
+        // Screenshot 0 shows the same two columns as reading 0.
+        let review = |labels: &str, recorded: &[(usize, &str)]| {
+            let recorded: Vec<String> = recorded
+                .iter()
+                .map(|(reading, text)| format!(r#"{{"reading":{reading},"text":"{text}"}}"#))
+                .collect();
+            let spec: CheckSpec = serde_json::from_str(&format!(
+                r#"{{"kind":"number","region":{{"x":0,"y":0,"width":4,"height":2}},
+                    "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[{labels}],
+                    "recorded":[{}]}}"#,
+                recorded.join(",")
+            ))
+            .expect("valid JSON");
+            move |reply| Request::ReviewProblems { spec, reply }
         };
-        let problems = harness.ask(|reply| Request::ReviewProblems {
-            readings: vec![label(0, "1"), label(1, "12"), label(1, "7"), label(9, "1")],
-            reply,
-        });
+        let problems = harness
+            .ask(review("", &[(0, "1"), (1, "12"), (1, "7"), (9, "1")]))
+            .expect("no labels to learn");
         assert_eq!(problems[0], None);
         assert_eq!(
             problems[1].as_deref(),
@@ -1938,8 +1927,19 @@ mod tests {
         assert_eq!(problems[2], None, "judged without the reading that failed");
         assert_eq!(
             problems[3].as_deref(),
-            Some("That reading is gone. Record the region again.")
+            Some("That recording is gone. Record the region again.")
         );
+        let labeled = harness
+            .ask(review(
+                r#"{"screenshot":0,"text":"7"}"#,
+                &[(0, "1"), (1, "1")],
+            ))
+            .expect("the label is learned");
+        assert!(
+            labeled[0].is_some(),
+            "the labeled screenshot gave the same shape to another character"
+        );
+        assert_eq!(labeled[1], None);
         let number = |reading| -> CheckSpec {
             serde_json::from_str(&format!(
                 r#"{{"kind":"number","region":{{"x":0,"y":0,"width":4,"height":2}},
@@ -1965,13 +1965,10 @@ mod tests {
             Err("That recording is gone. Record the region again.".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::ReviewProblems {
-                readings: vec![label(0, "1")],
-                reply,
-            }),
-            [Some(
+            harness.ask(review("", &[(0, "1")])),
+            Ok(vec![Some(
                 "That recording is gone. Record the region again.".to_owned()
-            )]
+            )])
         );
     }
 
@@ -1981,15 +1978,27 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        harness.ask(start_recording(255)).expect("records");
+        harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.ask(Request::StopRecording);
-        harness.ask(start_recording(255)).expect("goes on");
+        harness.ask(start_recording(255, true)).expect("goes on");
         assert!(harness.recording().expect("kept").recording);
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         assert_eq!(harness.readings().len(), 2, "the same recording went on");
+        harness.ask(Request::StopRecording);
+        assert_eq!(
+            harness.ask(start_recording(200, true)),
+            Err(
+                "Recording more needs the region, characters' color, and tolerance it was \
+                 recorded with, on a screenshot of the same window size. Put them back, or \
+                 discard the recording to start a new one."
+                    .to_owned()
+            ),
+            "recording more never replaces the recording"
+        );
+        assert_eq!(harness.readings().len(), 2, "kept as it was");
         harness
-            .ask(start_recording(200))
+            .ask(start_recording(200, false))
             .expect("records other ink");
         assert_eq!(harness.readings().len(), 0, "a new recording");
         let jobs: Vec<u64> = harness.jobs.try_iter().map(|job| job.recording).collect();
@@ -2017,12 +2026,12 @@ mod tests {
     fn a_recording_needs_a_window_a_screenshot_and_a_region_inside_it() {
         let mut harness = harness(false);
         assert_eq!(
-            harness.ask(start_recording(255)),
+            harness.ask(start_recording(255, false)),
             Err("Pick a window to record.".to_owned())
         );
         let mut handler = harness.pick();
         assert_eq!(
-            harness.ask(start_recording(255)),
+            harness.ask(start_recording(255, false)),
             Err("Take a screenshot first.".to_owned())
         );
         let small = Image::new(
@@ -2036,7 +2045,7 @@ mod tests {
         harness.deliver(&mut handler, Ok(&small));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
         assert_eq!(
-            harness.ask(start_recording(255)),
+            harness.ask(start_recording(255, false)),
             Err(
                 "The region reaches past the edge of the window. Draw it inside the window."
                     .to_owned()
@@ -2052,6 +2061,7 @@ mod tests {
                 ink,
                 tolerance: 0,
                 screenshot: 0,
+                more: false,
                 reply,
             }),
             Err("Draw the region to record first.".to_owned())
@@ -2064,7 +2074,7 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        harness.ask(start_recording(255)).expect("records");
+        harness.ask(start_recording(255, false)).expect("records");
         let (closed, _) = mpsc::channel();
         harness.owner.ocr = closed;
         harness.deliver(&mut handler, Ok(&red_columns(2)));
@@ -2075,12 +2085,6 @@ mod tests {
                 Text::Failed("The text reader stopped. Type what this shows.".to_owned())
             )]
         );
-    }
-
-    #[test]
-    fn a_problem_reads_as_a_sentence_of_its_own() {
-        assert_eq!(sentence("a character was given"), "A character was given.");
-        assert_eq!(sentence(""), "");
     }
 
     #[test]

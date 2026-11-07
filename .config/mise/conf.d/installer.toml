@@ -29,8 +29,9 @@ if [ ! -f "$model" ] || [ "$(sha256sum "$model" | cut -d' ' -f1)" != "$expected"
   fi
   mv "$model.part" "$model"
 fi
-mkdir -p target/debug/models
-cp "$model" target/debug/models/
+debug="${CARGO_TARGET_DIR:-target}/debug/models"
+mkdir -p "$debug"
+cp "$model" "$debug/"
 '''
 
 [tasks."installer:build"]

@@ -45,22 +45,30 @@ This page covers what the user guide leaves out.
 value editor's preview capture already takes, about 30 a second, in the owner
 thread (`recording.rs`). Each frame is cut to the region and reduced to a
 bitmask of its ink, the pixels the number check's
-`DigitReader::is_ink` takes for the characters' color. A crop whose mask
-differs from a kept reading's in at most one pixel, plus one per 32 pixels of
-ink, is another sighting of that reading; a pixel at a character's edge can
-fall either side of the tolerance between frames, and two different characters
-differ in far more. Every kept reading is compared, not only the latest, so a
-value that comes back is not kept twice. A crop with no ink is skipped, and so
+`DigitReader::is_ink` takes for the characters' color. Pixels whose distance
+from that color is within 32 of the tolerance are uncertain: they are where a
+character's edge blends into the background, and can fall either side of the
+tolerance from one frame to the next. A crop whose mask differs from a kept
+reading's in at most one pixel that is certain in both is another sighting of
+that reading. The allowance does not grow with the amount of ink, so one
+stroke of a different character in a long number still counts. Every kept
+reading is compared, not only the latest, so a value that comes back is not
+kept twice. A crop with no ink is skipped, and so
 is a frame of another size than the screenshot the region was drawn on. One
 recording keeps at most 200 readings.
 
 Kept readings are named by index in the spec the UI sends, so their pixels
 never cross into the UI except as thumbnails. A number check learns the
 labeled screenshots first and then the kept readings, and saves both as its
-samples. Review asks the owner which kept readings a check could not learn,
-learning them in order on a reader of its own and leaving out each one that
-fails, so a conflict such as an `l` typed for a `1` is flagged on the reading
-that causes it.
+samples. Review sends the check it would build and asks which kept readings
+it could not learn. The owner learns them as the check would, labeled
+screenshots first and then the readings in order, with the check's own
+characters' color and tolerance, and leaves out each reading that fails, so a
+conflict such as one shape typed as `l` in one reading and `1` in another is
+flagged on the reading that causes it. **Record more** goes on with the stopped
+recording only when the region, color, tolerance, and window size are the
+ones it was recorded with, and otherwise says so rather than start over, so
+kept readings are lost only on a discard.
 
 ### The text reader
 

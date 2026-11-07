@@ -174,10 +174,24 @@ impl DigitReader {
     /// [`Image::pixels`] holds it, is ink: each of its red, green, and blue
     /// within the tolerance of the text color.
     #[must_use]
-    pub fn is_ink(&self, [blue, green, red, _]: [u8; 4]) -> bool {
-        blue.abs_diff(self.ink.blue) <= self.tolerance
-            && green.abs_diff(self.ink.green) <= self.tolerance
-            && red.abs_diff(self.ink.red) <= self.tolerance
+    pub fn is_ink(&self, pixel: [u8; 4]) -> bool {
+        self.distance(pixel) <= self.tolerance
+    }
+
+    /// How far `pixel` is from the text color: the largest difference in
+    /// its red, green, or blue. It is ink when this is within
+    /// [`tolerance`](Self::tolerance).
+    #[must_use]
+    pub fn distance(&self, [blue, green, red, _]: [u8; 4]) -> u8 {
+        blue.abs_diff(self.ink.blue)
+            .max(green.abs_diff(self.ink.green))
+            .max(red.abs_diff(self.ink.red))
+    }
+
+    /// How far a pixel may be from the text color and still be ink.
+    #[must_use]
+    pub const fn tolerance(&self) -> u8 {
+        self.tolerance
     }
 
     fn is_ink_at(&self, image: &Image, x: u32, y: u32) -> bool {

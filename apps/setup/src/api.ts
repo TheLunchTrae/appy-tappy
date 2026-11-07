@@ -270,9 +270,15 @@ export async function readValue(): Promise<Reading | null> {
   return invoke<Reading | null>('read_value');
 }
 
-/** Records `region` of the picked window, drawn on `screenshot`; goes on with a stopped recording of the same region and ink. */
-export async function startRecording(region: Rect, ink: Color, tolerance: number, screenshot: number): Promise<void> {
-  await invoke('start_recording', { region, ink, tolerance, screenshot });
+/** Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped recording, which needs the same region, ink and window size; otherwise starts a new one. */
+export async function startRecording(
+  region: Rect,
+  ink: Color,
+  tolerance: number,
+  screenshot: number,
+  more: boolean,
+): Promise<void> {
+  await invoke('start_recording', { region, ink, tolerance, screenshot, more });
 }
 
 /** Stops the recording, keeping its readings for review. */
@@ -295,9 +301,9 @@ export async function recordedReading(index: number, maxWidth: number): Promise<
   return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { index, maxWidth }));
 }
 
-/** Why the number check cannot learn each of `readings`, in order, or null for one it can. */
-export async function reviewProblems(readings: readonly RecordedLabel[]): Promise<readonly (string | null)[]> {
-  return invoke<readonly (string | null)[]>('review_problems', { readings });
+/** Why the number check `spec` describes cannot learn each of its recorded readings, in order, or null for one it can. */
+export async function reviewProblems(spec: CheckSpec): Promise<readonly (string | null)[]> {
+  return invoke<readonly (string | null)[]>('review_problems', { spec });
 }
 
 /** Captures a saved value's region on its application's window, replacing any capture, and returns the watch's number. */

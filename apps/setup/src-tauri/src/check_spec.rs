@@ -264,18 +264,7 @@ pub(crate) fn build(
             if labels.is_empty() && recorded.is_empty() {
                 return Err(SpecError::NoLabels);
             }
-            let mut reader = DigitReader::new((*ink).into(), *tolerance);
-            let learn = |reader: &mut DigitReader, image: &Image, text: &str| {
-                reader
-                    .learn(image, text)
-                    .map_err(|source| SpecError::Learn {
-                        text: text.to_owned(),
-                        source,
-                    })
-            };
-            for label in labels {
-                learn(&mut reader, &crop(label.screenshot)?, &label.text)?;
-            }
+            let mut reader = labeled_reader(*ink, *tolerance, labels, &crop)?;
             for label in recorded {
                 learn(
                     &mut reader,
@@ -307,8 +296,94 @@ pub(crate) fn build(
     Ok(RegionCheck { region, check })
 }
 
+/// Why a number check built from `spec` could not learn each of its
+/// recorded readings: `None` for one it learns. It learns the labeled
+/// screenshots first and then the readings in order, as [`build`] does,
+/// but leaves out each reading it cannot learn, so the ones after it are
+/// judged on the ones that worked. Review flags the readings this finds,
+/// so the check built from the kept ones learns them all. Any other check
+/// has no recorded readings.
+pub(crate) fn recorded_problems(
+    spec: &CheckSpec,
+    screenshots: &[Image],
+    recording: Option<&Recording>,
+) -> Result<Vec<Option<String>>, SpecError> {
+    let CheckSpec::Number {
+        region,
+        ink,
+        tolerance,
+        labels,
+        recorded,
+    } = spec
+    else {
+        return Ok(Vec::new());
+    };
+    let region = Region::new(region.x, region.y, region.width, region.height)
+        .ok_or(SpecError::EmptyRegion)?;
+    let crop = |screenshot: usize| {
+        screenshots
+            .get(screenshot)
+            .ok_or(SpecError::NoScreenshot)?
+            .crop(region)
+            .ok_or(SpecError::Outside)
+    };
+    let mut reader = labeled_reader(*ink, *tolerance, labels, &crop)?;
+    Ok(recorded
+        .iter()
+        .map(|label| {
+            let image = match recorded_image(recording, region, label.reading) {
+                Ok(image) => image,
+                Err(error) => return Some(error.to_string()),
+            };
+            let mut trial = reader.clone();
+            match trial.learn(image, &label.text) {
+                Ok(()) => {
+                    reader = trial;
+                    None
+                },
+                Err(error) => Some(sentence(&error.to_string())),
+            }
+        })
+        .collect())
+}
+
+/// A number check's reader with the characters of `ink`, having learned
+/// what `labels` say their screenshots show, cut by `crop`.
+fn labeled_reader(
+    ink: ColorSpec,
+    tolerance: u8,
+    labels: &[Label],
+    crop: &impl Fn(usize) -> Result<Image, SpecError>,
+) -> Result<DigitReader, SpecError> {
+    let mut reader = DigitReader::new(ink.into(), tolerance);
+    for label in labels {
+        learn(&mut reader, &crop(label.screenshot)?, &label.text)?;
+    }
+    Ok(reader)
+}
+
+/// Teaches `reader` that `image` shows `text`.
+fn learn(reader: &mut DigitReader, image: &Image, text: &str) -> Result<(), SpecError> {
+    reader
+        .learn(image, text)
+        .map_err(|source| SpecError::Learn {
+            text: text.to_owned(),
+            source,
+        })
+}
+
+/// `text` as a sentence: capitalized, with a full stop.
+pub(crate) fn sentence(text: &str) -> String {
+    let mut characters = text.chars();
+    characters.next().map_or_else(String::new, |first| {
+        format!("{}{}.", first.to_uppercase(), characters.as_str())
+    })
+}
+
 /// The pixels of reading `reading` of `recording`, which must be of
-/// `region`.
+/// `region`. The check relearns them with its own characters' color and
+/// tolerance, like the labeled screenshots, so they need not match the
+/// recording's.
 fn recorded_image(
     recording: Option<&Recording>,
     region: Region,
@@ -434,6 +509,12 @@ mod tests {
             width: 4,
             height: 2,
         }
+    }
+
+    #[test]
+    fn a_problem_reads_as_a_sentence_of_its_own() {
+        assert_eq!(sentence("a character was given"), "A character was given.");
+        assert_eq!(sentence(""), "");
     }
 
     #[test]

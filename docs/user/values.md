@@ -84,12 +84,14 @@ you use the application, and keep each different reading it shows.
 3. **Stop and review.** Come back and select **Stop and review**. Each
    reading shows with the text AppyTappy read. Fix any text it got wrong, and
    clear **Keep** on any reading that is not the value, such as a paused
-   screen. A reading whose text gives a character two shapes, such as an `l`
-   typed for a `1`, is flagged: fix it or leave it out.
+   screen. A reading whose text gives one shape two different characters,
+   such as a `1` typed as `l`, is flagged: fix it or leave it out.
 4. **Keep them.** Select the button that says how many you keep, such as
    **Keep 12 readings**. The kept readings teach the check like labeled
-   screenshots. **Review recording** opens them again, and **Record more**
-   goes on with the same recording.
+   screenshots. **Review recording** opens them again with your choices, and
+   **Record more** goes on with the same recording. To record more, keep the
+   region, the characters' color, and the tolerance as they were, or
+   **Discard** the recording to start a new one.
 
 Keep the window the size it was when you took the screenshot you drew the
 region on: at another size, recording pauses and says to resize the window.
