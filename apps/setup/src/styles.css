@@ -691,3 +691,204 @@ select {
 .surface.still {
   cursor: default;
 }
+
+/* Automations */
+.strong {
+  font-weight: 600;
+}
+
+.switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--raise);
+  cursor: pointer;
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.switch[aria-disabled='true'] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.switch:checked,
+.switch[aria-checked='true'] {
+  background: var(--capture);
+  border-color: var(--capture);
+}
+
+.switch:checked::after,
+.switch[aria-checked='true']::after {
+  left: auto;
+  right: 3px;
+  background: var(--on-capture);
+}
+
+.chip {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+  font-size: 12px;
+}
+
+.chip.value {
+  border-color: var(--capture);
+  color: var(--capture);
+}
+
+.steps {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  counter-reset: step;
+}
+
+.steps li::before {
+  counter-increment: step;
+  content: counter(step) '. ';
+  color: var(--muted);
+}
+
+.running-app {
+  display: inline-flex;
+  white-space: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor {
+  width: 100%;
+  max-width: 860px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.when-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.value-select {
+  border-color: var(--capture);
+}
+
+.action-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1.2fr) minmax(0, 1.3fr) minmax(0, 1.3fr) 80px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+}
+
+.step-number {
+  color: var(--muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.percent {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.row-tools {
+  display: flex;
+  gap: 4px;
+}
+
+.btn.add {
+  align-self: flex-start;
+  border-style: dashed;
+  background: none;
+  color: var(--muted);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.field.narrow {
+  max-width: 260px;
+}
+
+.editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* The hint and the error share the space left of the buttons; only one has text at a time. */
+.editor-foot > [role='alert'] {
+  margin-right: auto;
+}
+
+/* Read by screen readers, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A heading that takes focus after a deleted row only marks the place. */
+.page-head h1:focus {
+  outline: none;
+}

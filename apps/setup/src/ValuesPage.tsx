@@ -1,18 +1,28 @@
 import { useState } from 'react';
 
-import { type AppSummary, deleteValue, errorText } from './api.ts';
+import { type AppSummary, type AutomationSummary, deleteValue, errorText } from './api.ts';
+import { usedBy } from './automation.ts';
 import { checkSummary } from './describe.ts';
 import { hex } from './pixels.ts';
 import { background } from './repeat.ts';
 
 interface AppRowsProps {
   readonly app: AppSummary;
+  readonly automations: readonly AutomationSummary[] | null;
   readonly confirming: string | null;
   readonly onConfirm: (key: string | null) => void;
   readonly onDelete: (value: string) => void;
 }
 
-function AppRows({ app, confirming, onConfirm, onDelete }: AppRowsProps) {
+/** The automations that use a value, in a few words. */
+function usedByText(names: readonly string[] | null): string {
+  if (names === null) {
+    return '';
+  }
+  return names.length === 0 ? 'No automations yet' : names.join(', ');
+}
+
+function AppRows({ app, automations, confirming, onConfirm, onDelete }: AppRowsProps) {
   const running = app.windows.length > 0;
   if (app.file === null) {
     return (
@@ -54,7 +64,7 @@ function AppRows({ app, confirming, onConfirm, onDelete }: AppRowsProps) {
             <td className="note">
               {region.width} × {region.height} at {region.x}, {region.y} of {windowSize.width} × {windowSize.height}
             </td>
-            <td className="note">No automations yet</td>
+            <td className="note">{usedByText(automations === null ? null : usedBy(automations, app.id, value.id))}</td>
             <td className="end">
               {confirming === key ? (
                 <span className="confirm">
@@ -98,12 +108,13 @@ function AppRows({ app, confirming, onConfirm, onDelete }: AppRowsProps) {
 
 interface Props {
   readonly apps: readonly AppSummary[] | null;
+  readonly automations: readonly AutomationSummary[] | null;
   readonly loadError: string | null;
   readonly onChanged: () => Promise<void>;
   readonly onNew: () => void;
 }
 
-export function ValuesPage({ apps, loadError, onChanged, onNew }: Props) {
+export function ValuesPage({ apps, automations, loadError, onChanged, onNew }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -131,8 +142,16 @@ export function ValuesPage({ apps, loadError, onChanged, onNew }: Props) {
           </button>
         </div>
       </div>
-      {loadError === null ? null : <p className="warn">{loadError}</p>}
-      {deleteError === null ? null : <p className="warn">{deleteError}</p>}
+      {loadError === null ? null : (
+        <p className="warn" role="alert">
+          {loadError}
+        </p>
+      )}
+      {deleteError === null ? null : (
+        <p className="warn" role="alert">
+          {deleteError}
+        </p>
+      )}
       {apps !== null && total === 0 && apps.every((app) => app.error === null) ? (
         <div className="empty">
           <h2>No values yet</h2>
@@ -164,6 +183,7 @@ export function ValuesPage({ apps, loadError, onChanged, onNew }: Props) {
               <AppRows
                 key={app.id}
                 app={app}
+                automations={automations}
                 confirming={confirming}
                 onConfirm={setConfirming}
                 onDelete={(value) => {

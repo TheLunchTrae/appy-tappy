@@ -1,22 +1,23 @@
 # Setup app
 
 The setup app is where the user tells AppyTappy what to read from an
-application's window and, next, what to do about it. It is a Tauri v2 program:
+application's window and what to do about it. It is a Tauri v2 program:
 the UI is React and TypeScript in `apps/setup/src`, and the Rust side in
 `apps/setup/src-tauri` holds the capture and the checks.
 [Architecture](architecture.md#the-setup-app) explains why it is built this
-way. Issue [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16) tracks
-it.
+way. Issues [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16) and
+[#17](https://github.com/TheLunchTrae/appy-tappy/issues/17) track it.
 
 ## Pages
 
 - **Values** lists each saved value under its application: its check, its
   region, and the automations that use it. A green dot marks an application
   whose window is open now. **New value** starts the flow below.
-- **Automations** will list automations: the values they use, their conditions,
-  their actions in order, and the applications that must be running. Issue
-  [#17](https://github.com/TheLunchTrae/appy-tappy/issues/17) adds them; the
-  page says so until then.
+- **Automations** lists each automation: a switch that turns it on or off, its
+  condition, its actions in order, and the application that must be running.
+  An automation that can no longer run, such as one whose value was deleted,
+  says why under its name. **New automation** and **Edit** open the editor
+  below.
 - **Applications** lists how each saved application's window is recognized,
   its anti-cheat class, and how many of its windows are open.
 
@@ -47,6 +48,36 @@ it.
    cannot work, such as a bar whose two colors are the same, says why there.
 6. **Save.** The value is saved with its application; a new application is
    saved with its first value.
+
+## Making an automation
+
+An automation is its own thing, apart from the values: it watches one saved
+value, and any number of automations can watch the same one.
+
+1. **Name it**, such as `Pause music near the end`.
+2. **When.** Pick the value, then how it compares: a value that reads a number
+   is at least, above, at most, below, is, or is not a number; a value that
+   reads yes or no is or is not yes. Conditions on several values come later
+   ([#34](https://github.com/TheLunchTrae/appy-tappy/issues/34)).
+3. **Do, in order.** Add any number of actions and move them up or down. Each
+   one pauses, plays, or skips media, or sets a volume, for whatever is
+   playing or the whole system, or for one application named by its
+   executable, such as `Player.exe`. The open windows' executables are
+   offered as suggestions.
+4. **Afterwards.** With **Undo these when the condition stops being true**,
+   paused media plays again, started media pauses again, and each volume goes
+   back. A skipped track cannot be unskipped, so an automation that only skips
+   cannot undo. Either way, it can run again once the condition has stopped
+   being true. An optional wait, in seconds, keeps it from running again
+   sooner.
+5. **Save.** The editor says what is still missing until the automation is
+   complete. Saving checks the value is still saved and reads the kind of
+   target the condition compares.
+
+A value that an automation watches cannot be deleted; the Values page names
+the automations to change or delete first. The runtime starts running saved
+automations in the next step
+([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)).
 
 ## Window matching
 
@@ -102,10 +133,38 @@ cropped to the region, and a picture check's reference.
 }
 ```
 
-`appytappy-config` owns the format (`app_file.rs`) and the folder
-(`store.rs`). Each save writes a temporary file and renames it over the old
+The automations live in one file, `%APPDATA%\AppyTappy\automations.json`.
+Each names its value by application ID and value ID:
+
+```json
+{
+  "format": 1,
+  "automations": [
+    {
+      "id": "pause_music_near_the_end",
+      "name": "Pause music near the end",
+      "enabled": true,
+      "when": { "app": "example", "value": "progress", "is": "atLeast", "target": 90.0 },
+      "actions": [
+        { "kind": "media", "command": "pause", "app": "Player.exe" },
+        { "kind": "volume", "percent": 20, "app": null }
+      ],
+      "undo": true,
+      "cooldownMs": 0
+    }
+  ]
+}
+```
+
+A yes-or-no condition has `"is": "equals"` or `"notEquals"` and a `true` or
+`false` target. An action's `app` is `null` for whatever is playing, or for
+the whole system's volume.
+
+`appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`) and
+the files (`store.rs`). Each save writes a temporary file and renames it over the old
 one, so a crash never leaves half a file. A file that cannot be read is listed
-with the reason and left alone. A new application's anti-cheat class starts
+with the reason and left alone; an automations file that cannot be read stops
+automations from being saved until it is fixed, rather than being replaced. A new application's anti-cheat class starts
 as `unknown`, which blocks key press actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
