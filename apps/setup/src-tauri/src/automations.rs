@@ -67,7 +67,7 @@ fn problem(automation: &AutomationDef, apps: &[StoredApp]) -> Option<String> {
         .find(|app| app.id == automation.when.app && app.file.is_err())
     {
         return Some(format!(
-            "Its application's file ({}.json) cannot be read.",
+            "Its application's app.json, in the {} folder, cannot be read.",
             broken.id
         ));
     }
@@ -428,7 +428,7 @@ mod tests {
         fs::write(folder.join("apps").join("example").join("app.json"), b"{").expect("breaks");
         assert_eq!(
             list(&stores).expect("lists")[0].problem.as_deref(),
-            Some("Its application's file (example.json) cannot be read.")
+            Some("Its application's app.json, in the example folder, cannot be read.")
         );
         fs::remove_dir_all(folder).expect("clean up");
     }

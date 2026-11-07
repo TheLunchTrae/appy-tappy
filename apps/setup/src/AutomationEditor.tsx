@@ -395,15 +395,13 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
         </section>
 
         <div className="editor-foot">
-          {saveError === null ? (
-            <span className="note" role="status">
-              {built.ok ? 'Ready to save.' : built.next}
-            </span>
-          ) : (
-            <span className="warn" role="alert">
-              {saveError}
-            </span>
-          )}
+          {/* Both regions stay mounted, so a screen reader announces each change of their text. */}
+          <span className="note" role="status">
+            {saveError === null ? (built.ok ? 'Ready to save.' : built.next) : ''}
+          </span>
+          <span className="warn" role="alert">
+            {saveError ?? ''}
+          </span>
           <button type="button" className="btn" onClick={onCancel}>
             Cancel
           </button>

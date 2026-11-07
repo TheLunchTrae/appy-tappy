@@ -23,15 +23,16 @@ function Row({ summary, apps, choices, toggling, confirming, onConfirm, onToggle
   const choice = findValue(choices, when);
   const keepRef = useRef<HTMLButtonElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
-  const wasConfirming = useRef(false);
-  // The delete buttons swap places, so focus moves to the one that took the pressed one's place.
+  // Pressing Delete or Keep swaps the two buttons, so focus moves to the one that took the pressed one's place.
+  // Only this row's own press moves it: another row's confirm or a refresh leaves focus where it is.
+  const focusNext = useRef<'keep' | 'delete' | null>(null);
   useEffect(() => {
-    if (confirming) {
+    if (focusNext.current === 'keep' && confirming) {
       keepRef.current?.focus();
-    } else if (wasConfirming.current) {
+    } else if (focusNext.current === 'delete' && !confirming) {
       deleteRef.current?.focus();
     }
-    wasConfirming.current = confirming;
+    focusNext.current = null;
   }, [confirming]);
   const app = apps.find((candidate) => candidate.id === when.app);
   const running = (app?.windows.length ?? 0) > 0;
@@ -45,7 +46,7 @@ function Row({ summary, apps, choices, toggling, confirming, onConfirm, onToggle
           aria-checked={automation.enabled}
           aria-label={automation.name}
           aria-busy={toggling}
-          disabled={toggling}
+          aria-disabled={toggling}
           onClick={onToggle}
         />
       </td>
@@ -87,6 +88,7 @@ function Row({ summary, apps, choices, toggling, confirming, onConfirm, onToggle
               type="button"
               className="btn small"
               onClick={() => {
+                focusNext.current = 'delete';
                 onConfirm(false);
               }}
             >
@@ -106,6 +108,7 @@ function Row({ summary, apps, choices, toggling, confirming, onConfirm, onToggle
               type="button"
               className="btn small"
               onClick={() => {
+                focusNext.current = 'keep';
                 onConfirm(true);
               }}
             >
@@ -131,6 +134,8 @@ interface Props {
 export function AutomationsPage({ apps, automations, loadError, onChanged, onNew, onEdit }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [toggling, setToggling] = useState<ReadonlySet<string>>(new Set());
+  // The same set, read when a press arrives: a second press can come before the first one's render.
+  const inFlight = useRef(new Set<string>());
   const [actionError, setActionError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -148,11 +153,17 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
   };
 
   // A switch sends the state it shows, so it waits for the list to show the change before it takes another press.
+  // It stays focusable meanwhile, because disabling a focused button drops keyboard focus.
   const toggle = async (id: string, enabled: boolean): Promise<void> => {
+    if (inFlight.current.has(id)) {
+      return;
+    }
+    inFlight.current.add(id);
     setToggling((current) => new Set(current).add(id));
     await run(async () => {
       await setAutomationEnabled(id, enabled);
     });
+    inFlight.current.delete(id);
     setToggling((current) => {
       const next = new Set(current);
       next.delete(id);

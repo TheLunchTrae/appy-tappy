@@ -722,7 +722,7 @@ select {
   background: var(--muted);
 }
 
-.switch:disabled {
+.switch[aria-disabled='true'] {
   cursor: progress;
   opacity: 0.6;
 }
@@ -873,7 +873,8 @@ select {
   gap: 8px;
 }
 
-.editor-foot > span {
+/* The hint and the error share the space left of the buttons; only one has text at a time. */
+.editor-foot > [role='alert'] {
   margin-right: auto;
 }
 
