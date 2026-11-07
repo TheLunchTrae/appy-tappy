@@ -27,14 +27,17 @@ use std::thread::{self, JoinHandle};
 
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CLASS_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND,
-    GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM,
+    GetLastError, HANDLE, HWND, LPARAM, LRESULT, WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW,
 };
 use windows::Win32::System::SystemInformation::GetLocalTime;
-use windows::Win32::System::Threading::{CreateMutexW, GetCurrentThreadId};
+use windows::Win32::System::Threading::{
+    CreateEventW, CreateMutexW, EVENT_MODIFY_STATE, GetCurrentThreadId, INFINITE, OpenEventW,
+    SetEvent, WaitForMultipleObjects,
+};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
@@ -52,7 +55,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
-use crate::{LocalTime, MenuItem, TrayEvent, TrayMenu, WindowEvent};
+use crate::{LocalTime, MenuItem, ReloadRequest, TrayEvent, TrayMenu, WindowEvent};
 
 /// The thread message the callback posts for a created top-level window.
 const CREATED: u32 = WM_APP;
@@ -101,7 +104,10 @@ pub(crate) struct WindowWatch {
 }
 
 impl WindowWatch {
-    pub(crate) fn start(events: Sender<WindowEvent>) -> io::Result<Self> {
+    pub(crate) fn start<E>(events: Sender<E>) -> io::Result<Self>
+    where
+        E: From<WindowEvent> + Send + 'static,
+    {
         let (ready, started) = mpsc::sync_channel(1);
         let thread = thread::Builder::new()
             .name("window events".to_owned())
@@ -178,8 +184,8 @@ impl Drop for Hook {
 
 /// The window events thread: installs the hook, reports the start, and
 /// forwards events until `WM_QUIT` arrives or nobody receives them.
-fn watch_windows(
-    events: &Sender<WindowEvent>,
+fn watch_windows<E: From<WindowEvent>>(
+    events: &Sender<E>,
     ready: &SyncSender<io::Result<u32>>,
 ) -> io::Result<()> {
     let mut message = MSG::default();
@@ -229,7 +235,7 @@ fn watch_windows(
                 _ => continue,
             },
         };
-        if events.send(event).is_err() {
+        if events.send(E::from(event)).is_err() {
             return Ok(());
         }
     }
@@ -821,6 +827,142 @@ impl Drop for InstanceGuard {
     }
 }
 
+/// An event handle, closed on drop.
+#[derive(Debug)]
+struct Event(HANDLE);
+
+impl Event {
+    /// The handle as an address, because a handle may not cross threads but
+    /// waiting on it or setting it from any thread is safe.
+    fn address(&self) -> usize {
+        self.0.0.addr()
+    }
+
+    /// Signals the event.
+    fn set(&self) -> io::Result<()> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the handle came from a successful CreateEventW or OpenEventW and
+        // stays open until this value drops.
+        unsafe { SetEvent(self.0) }.map_err(io::Error::from)
+    }
+}
+
+impl Drop for Event {
+    fn drop(&mut self) {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the handle came from a successful CreateEventW or OpenEventW and
+        // is closed once.
+        let closed = unsafe { CloseHandle(self.0) };
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "closing a handle this value owns cannot be retried, and Drop has no caller to report to"
+        )]
+        let _ = closed;
+    }
+}
+
+/// The thread that waits for reload requests.
+#[derive(Debug)]
+pub(crate) struct ReloadWatch {
+    thread: Option<JoinHandle<io::Result<()>>>,
+    /// Ends the thread's wait. It drops after the thread is joined, so the
+    /// thread never waits on a closed handle.
+    stop: Event,
+}
+
+impl ReloadWatch {
+    pub(crate) fn start<E>(name: &str, events: Sender<E>) -> io::Result<Self>
+    where
+        E: From<ReloadRequest> + Send + 'static,
+    {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the default security attributes and no name need no pointers.
+        let stop = Event(unsafe { CreateEventW(None, true, false, None) }?);
+        let stop_address = stop.address();
+        let name = HSTRING::from(name);
+        let (ready, started) = mpsc::sync_channel(1);
+        let thread = thread::Builder::new()
+            .name("reload requests".to_owned())
+            .spawn(move || watch_reload(&name, stop_address, &events, &ready))?;
+        let ((), thread) = wait_for_start(&started, thread, "reload requests")?;
+        Ok(Self {
+            thread: Some(thread),
+            stop,
+        })
+    }
+
+    pub(crate) fn stop(mut self) -> io::Result<()> {
+        self.end()
+    }
+
+    fn end(&mut self) -> io::Result<()> {
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        let set = self.stop.set();
+        let joined = join(thread, "reload requests");
+        set.and(joined)
+    }
+}
+
+impl Drop for ReloadWatch {
+    fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "Drop has no caller to report to; `stop` reports the same result"
+        )]
+        let _ = self.end();
+    }
+}
+
+/// The reload thread: opens the named event, reports the start, and sends a
+/// request each time the event is set, until the stop event is set or nobody
+/// receives requests.
+fn watch_reload<E: From<ReloadRequest>>(
+    name: &HSTRING,
+    stop: usize,
+    events: &Sender<E>,
+    ready: &SyncSender<io::Result<()>>,
+) -> io::Result<()> {
+    // An auto-reset event: each wait that returns it clears it, so a burst
+    // of requests while one is handled becomes one more request.
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: `name` is a null-terminated wide string that outlives the call, and
+    // the default security attributes need no pointer.
+    let reload = match unsafe { CreateEventW(None, false, false, name) } {
+        Ok(handle) => Event(handle),
+        Err(error) => return ready.send(Err(error.into())).map_err(io::Error::other),
+    };
+    ready.send(Ok(())).map_err(io::Error::other)?;
+    let handles = [HANDLE(ptr::without_provenance_mut(stop)), reload.0];
+    loop {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: both handles stay open while this thread runs: the stop event
+        // until `ReloadWatch` joins this thread, and `reload` until it drops below.
+        let woken = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
+        match woken.0.checked_sub(WAIT_OBJECT_0.0) {
+            Some(0) => return Ok(()),
+            Some(1) => {
+                if events.send(E::from(ReloadRequest)).is_err() {
+                    return Ok(());
+                }
+            },
+            _ => return Err(io::Error::last_os_error()),
+        }
+    }
+}
+
+pub(crate) fn request_reload(name: &str) -> io::Result<bool> {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the name is a null-terminated wide string that outlives the call.
+    let opened = unsafe { OpenEventW(EVENT_MODIFY_STATE, false, &HSTRING::from(name)) };
+    match opened {
+        Ok(handle) => Event(handle).set().map(|()| true),
+        Err(error) if error.code() == ERROR_FILE_NOT_FOUND.to_hresult() => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub(crate) fn enable_autostart(value: &str, command: &OsStr) -> io::Result<()> {
     let command: Vec<u16> = command.encode_wide().chain(iter::once(0)).collect();
     let bytes = u32::try_from(size_of_val(command.as_slice())).map_err(io::Error::other)?;
@@ -926,13 +1068,28 @@ mod tests {
     #[test]
     fn autostart_writes_the_command_and_removes_it() {
         let value = format!("AppyTappyTest{}", process::id());
-        let command = r#""C:\Program Files\AppyTappy\appytappy-runtime.exe" --watch "Example.exe""#;
+        let command = r#""C:\Program Files\AppyTappy\appytappy-runtime.exe""#;
         enable_autostart(&value, OsStr::new(command)).expect("enable");
         let expected: Vec<u16> = command.encode_utf16().collect();
         assert_eq!(run_value(&value), Some(expected));
         disable_autostart(&value).expect("disable");
         assert_eq!(run_value(&value), None);
         disable_autostart(&value).expect("an absent value is not an error");
+    }
+
+    #[test]
+    fn a_reload_request_reaches_the_watch_and_stops_with_it() {
+        let name = format!(r"Local\AppyTappy.Test.Reload.{}", process::id());
+        assert!(!request_reload(&name).expect("ask"), "nobody waits yet");
+        let (sender, requests) = mpsc::channel::<ReloadRequest>();
+        let watch = ReloadWatch::start(&name, sender).expect("start");
+        assert!(request_reload(&name).expect("ask"), "the watch waits");
+        assert_eq!(
+            requests.recv_timeout(Duration::from_secs(10)),
+            Ok(ReloadRequest)
+        );
+        watch.stop().expect("stop");
+        assert!(!request_reload(&name).expect("ask"), "the event is gone");
     }
 
     fn next_event(events: &mpsc::Receiver<WindowEvent>, wanted: WindowEvent) {

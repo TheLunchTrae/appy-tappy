@@ -10,6 +10,7 @@
 
 pub mod check;
 pub mod digits;
+pub mod saved;
 
 use std::convert::Infallible;
 use std::error::Error;

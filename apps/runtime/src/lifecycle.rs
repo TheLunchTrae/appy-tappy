@@ -17,6 +17,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::window_match::Pattern;
 use appytappy_platform::WindowEvent;
 use appytappy_sources::system::ProcessEntry;
 
@@ -26,49 +27,34 @@ pub(crate) const SETTLE: Duration = Duration::from_millis(250);
 /// How often a snapshot runs while an app runs or snapshots fail.
 pub(crate) const RESCAN: Duration = Duration::from_secs(5);
 
-/// The position of an app in the watchlist.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct AppIndex(pub(crate) usize);
-
-/// The apps to watch, each named by the executables that run it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Watchlist {
-    /// Each app's executable names, lowercased, because Windows compares
-    /// file names without case.
-    apps: Vec<Vec<String>>,
-    /// Each app's first executable name as given, for the log.
-    names: Vec<String>,
-}
+/// The apps to watch: each app's ID and the pattern its executable's file
+/// name matches, such as `Example.exe` or `Example*.exe`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Watchlist(BTreeMap<String, Pattern>);
 
 impl Watchlist {
-    /// Watches `apps`, each a list of executable names such as
-    /// `Example.exe`. An app with no names is never detected.
-    pub(crate) fn new(apps: Vec<Vec<String>>) -> Self {
-        let names = apps
-            .iter()
-            .map(|executables| executables.first().cloned().unwrap_or_default())
-            .collect();
-        let apps = apps
-            .into_iter()
-            .map(|executables| {
-                executables
-                    .iter()
-                    .map(|executable| executable.to_lowercase())
-                    .collect()
-            })
-            .collect();
-        Self { apps, names }
-    }
-
-    /// A name for `app` in the log.
-    pub(crate) fn name(&self, app: AppIndex) -> &str {
-        self.names
-            .get(app.0)
-            .map_or("an unknown app", String::as_str)
+    /// Watches `apps`, each an app's ID and its executable's pattern.
+    pub(crate) fn new(apps: impl IntoIterator<Item = (String, Pattern)>) -> Self {
+        Self(apps.into_iter().collect())
     }
 
     fn is_empty(&self) -> bool {
-        self.apps.is_empty()
+        self.0.is_empty()
+    }
+}
+
+/// What reaches the lifecycle thread.
+#[derive(Debug)]
+pub(crate) enum Input {
+    /// The desktop's windows changed.
+    Window(WindowEvent),
+    /// The saved files changed, so these are the apps to watch now.
+    Watch(Watchlist),
+}
+
+impl From<WindowEvent> for Input {
+    fn from(event: WindowEvent) -> Self {
+        Self::Window(event)
     }
 }
 
@@ -77,15 +63,18 @@ impl Watchlist {
 pub(crate) enum Change {
     /// A watched app started; the session follows this process.
     Started {
-        /// The app.
-        app: AppIndex,
+        /// The app's ID.
+        app: String,
         /// The process its session follows.
         process: ProcessId,
+        /// The file name of the process's executable, such as `Example.exe`.
+        executable: String,
     },
-    /// The process an app's session followed exited.
+    /// The process an app's session followed exited, or the app is no longer
+    /// watched.
     Exited {
-        /// The app.
-        app: AppIndex,
+        /// The app's ID.
+        app: String,
         /// The process that exited.
         process: ProcessId,
     },
@@ -99,8 +88,8 @@ pub(crate) enum Change {
 #[derive(Debug)]
 pub(crate) struct Lifecycle {
     watchlist: Watchlist,
-    /// The process each running app's session follows.
-    running: BTreeMap<AppIndex, ProcessId>,
+    /// The process each running app's session follows, by app ID.
+    running: BTreeMap<String, ProcessId>,
     failing: bool,
     /// When the snapshot that window events asked for runs.
     scan_at: Option<Instant>,
@@ -146,6 +135,31 @@ impl Lifecycle {
         }
     }
 
+    /// Watches `watchlist` from `now` on. Each running app that it drops, or
+    /// whose executable's pattern it changes, exits; a snapshot is due at once
+    /// to find the apps it adds.
+    pub(crate) fn watch(&mut self, watchlist: Watchlist, now: Instant) -> Vec<Change> {
+        let mut changes = Vec::new();
+        self.running.retain(|app, &mut process| {
+            let kept = self.watchlist.0.get(app) == watchlist.0.get(app);
+            if !kept {
+                changes.push(Change::Exited {
+                    app: app.clone(),
+                    process,
+                });
+            }
+            kept
+        });
+        self.watchlist = watchlist;
+        if !self.watchlist.is_empty() {
+            self.scan_at = Some(now);
+        }
+        if self.running.is_empty() && !self.failing {
+            self.rescan_at = None;
+        }
+        changes
+    }
+
     /// Applies a snapshot taken at `now` and returns what changed.
     pub(crate) fn scan(
         &mut self,
@@ -178,66 +192,78 @@ impl Lifecycle {
     /// with the lowest ID, so a second copy of an app does not start a second
     /// session.
     fn reconcile(&mut self, processes: &[ProcessEntry], changes: &mut Vec<Change>) {
-        let processes: Vec<(ProcessId, String)> = processes
-            .iter()
-            .map(|entry| (entry.id, entry.executable.to_lowercase()))
-            .collect();
-        for (position, executables) in self.watchlist.apps.iter().enumerate() {
-            let app = AppIndex(position);
-            let runs = |name: &String| executables.contains(name);
-            if let Some(&process) = self.running.get(&app) {
+        for (app, executable) in &self.watchlist.0 {
+            let runs = |entry: &ProcessEntry| executable.matches(&entry.executable);
+            if let Some(&process) = self.running.get(app) {
                 // The name check catches a process ID that Windows reused.
                 if processes
                     .iter()
-                    .any(|(id, name)| *id == process && runs(name))
+                    .any(|entry| entry.id == process && runs(entry))
                 {
                     continue;
                 }
-                self.running.remove(&app);
-                changes.push(Change::Exited { app, process });
+                self.running.remove(app);
+                changes.push(Change::Exited {
+                    app: app.clone(),
+                    process,
+                });
             }
-            if let Some(&(process, _)) = processes
+            if let Some(entry) = processes
                 .iter()
-                .filter(|(_, name)| runs(name))
-                .min_by_key(|(id, _)| *id)
+                .filter(|entry| runs(entry))
+                .min_by_key(|entry| entry.id)
             {
-                self.running.insert(app, process);
-                changes.push(Change::Started { app, process });
+                self.running.insert(app.clone(), entry.id);
+                changes.push(Change::Started {
+                    app: app.clone(),
+                    process: entry.id,
+                    executable: entry.executable.clone(),
+                });
             }
         }
     }
 }
 
 /// The lifecycle thread: runs snapshots when they are due and sends what
-/// changed. It ends when the window events stop or nobody receives changes.
+/// changed. It ends when its input stops or nobody receives changes.
 pub(crate) fn run<E: From<Change>>(
     mut lifecycle: Lifecycle,
-    events: &Receiver<WindowEvent>,
+    inputs: &Receiver<Input>,
     changes: &Sender<E>,
     mut snapshot: impl FnMut() -> io::Result<Vec<ProcessEntry>>,
 ) {
+    let send = |found: Vec<Change>| {
+        found
+            .into_iter()
+            .all(|change| changes.send(E::from(change)).is_ok())
+    };
     loop {
         let now = Instant::now();
-        let event = match lifecycle.deadline() {
+        let input = match lifecycle.deadline() {
             Some(due) if due <= now => {
-                for change in lifecycle.scan(snapshot(), now) {
-                    if changes.send(E::from(change)).is_err() {
-                        return;
-                    }
+                if !send(lifecycle.scan(snapshot(), now)) {
+                    return;
                 }
                 continue;
             },
-            Some(due) => match events.recv_timeout(due.saturating_duration_since(now)) {
-                Ok(event) => event,
+            Some(due) => match inputs.recv_timeout(due.saturating_duration_since(now)) {
+                Ok(input) => input,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return,
             },
-            None => match events.recv() {
-                Ok(event) => event,
+            None => match inputs.recv() {
+                Ok(input) => input,
                 Err(_disconnected) => return,
             },
         };
-        lifecycle.window_event(event, Instant::now());
+        match input {
+            Input::Window(event) => lifecycle.window_event(event, Instant::now()),
+            Input::Watch(watchlist) => {
+                if !send(lifecycle.watch(watchlist, Instant::now())) {
+                    return;
+                }
+            },
+        }
     }
 }
 
@@ -257,31 +283,34 @@ mod tests {
         }
     }
 
-    fn watching(executables: &[&[&str]]) -> Watchlist {
+    fn watching(apps: &[(&str, &str)]) -> Watchlist {
         Watchlist::new(
-            executables
-                .iter()
-                .map(|names| names.iter().map(|&name| name.to_owned()).collect())
-                .collect(),
+            apps.iter()
+                .map(|&(app, executable)| (app.to_owned(), Pattern::new(executable))),
         )
     }
 
     fn example_app() -> Watchlist {
-        watching(&[&["Example.exe"]])
+        watching(&[(APP, "Example.exe")])
     }
 
-    const APP: AppIndex = AppIndex(0);
+    const APP: &str = "example";
+
+    fn started_as(app: &str, id: u32, executable: &str) -> Change {
+        Change::Started {
+            app: app.to_owned(),
+            process: ProcessId::new(id),
+            executable: executable.to_owned(),
+        }
+    }
 
     fn started(id: u32) -> Change {
-        Change::Started {
-            app: APP,
-            process: ProcessId::new(id),
-        }
+        started_as(APP, id, "Example.exe")
     }
 
     fn exited(id: u32) -> Change {
         Change::Exited {
-            app: APP,
+            app: APP.to_owned(),
             process: ProcessId::new(id),
         }
     }
@@ -295,7 +324,7 @@ mod tests {
             Ok(vec![entry(7, "explorer.exe"), entry(42, "example.EXE")]),
             now,
         );
-        assert_eq!(changes, [started(42)]);
+        assert_eq!(changes, [started_as(APP, 42, "example.EXE")]);
     }
 
     #[test]
@@ -373,20 +402,44 @@ mod tests {
     }
 
     #[test]
-    fn any_of_an_apps_executables_detects_it_and_apps_are_independent() {
+    fn wildcards_detect_an_app_and_apps_are_independent() {
         let now = Instant::now();
-        let mut lifecycle = Lifecycle::new(watching(&[&["a.exe", "a64.exe"], &["b.exe"]]), now);
+        let mut lifecycle = Lifecycle::new(watching(&[("a", "a*.exe"), ("b", "b.exe")]), now);
         let changes = lifecycle.scan(Ok(vec![entry(1, "b.exe"), entry(2, "A64.exe")]), now);
         assert_eq!(
             changes,
-            [
-                started(2),
-                Change::Started {
-                    app: AppIndex(1),
-                    process: ProcessId::new(1)
-                }
-            ]
+            [started_as("a", 2, "A64.exe"), started_as("b", 1, "b.exe")]
         );
+    }
+
+    #[test]
+    fn a_new_watchlist_ends_dropped_apps_and_scans_for_new_ones() {
+        let now = Instant::now();
+        let both = watching(&[("a", "a.exe"), ("b", "b.exe")]);
+        let mut lifecycle = Lifecycle::new(both, now);
+        lifecycle.scan(Ok(vec![entry(1, "a.exe"), entry(2, "b.exe")]), now);
+        let later_on = later(now, Duration::from_secs(1));
+        let changes = lifecycle.watch(watching(&[("a", "a.exe"), ("b", "b2.exe")]), later_on);
+        assert_eq!(
+            changes,
+            [Change::Exited {
+                app: "b".to_owned(),
+                process: ProcessId::new(2)
+            }],
+            "a keeps its session; b's pattern changed"
+        );
+        assert_eq!(
+            lifecycle.deadline(),
+            Some(later_on),
+            "a snapshot is due at once"
+        );
+        assert_eq!(
+            lifecycle.scan(Ok(vec![entry(1, "a.exe"), entry(3, "b2.exe")]), later_on),
+            [started_as("b", 3, "b2.exe")]
+        );
+        let none = lifecycle.watch(watching(&[]), later_on);
+        assert_eq!(none.len(), 2, "{none:?}");
+        assert_eq!(lifecycle.deadline(), None, "nothing is left to watch");
     }
 
     #[test]
@@ -400,6 +453,13 @@ mod tests {
         );
         assert_eq!(lifecycle.deadline(), Some(later(now, RESCAN)));
         assert_eq!(lifecycle.scan(failure(), now), []);
+        lifecycle.watch(watching(&[]), now);
+        assert_eq!(
+            lifecycle.deadline(),
+            Some(later(now, RESCAN)),
+            "a failing scan keeps retrying"
+        );
+        lifecycle.watch(example_app(), now);
         assert_eq!(
             lifecycle.scan(Ok(vec![entry(42, "Example.exe")]), now),
             [Change::ScanRestored, started(42)]
@@ -407,36 +467,39 @@ mod tests {
     }
 
     #[test]
-    fn the_watchlist_names_each_app_by_its_first_executable() {
-        let watchlist = watching(&[&["Example.exe", "other.exe"], &[]]);
-        assert_eq!(watchlist.name(AppIndex(0)), "Example.exe");
-        assert_eq!(watchlist.name(AppIndex(1)), "");
-        assert_eq!(watchlist.name(AppIndex(2)), "an unknown app");
-    }
-
-    #[test]
-    fn the_thread_reports_a_start_then_an_exit_after_a_destroyed_window() {
-        let (window_events, events) = mpsc::channel();
+    fn the_thread_follows_window_events_and_new_watchlists() {
+        let (inputs, received) = mpsc::channel();
         let (sender, changes) = mpsc::channel::<Change>();
-        let mut snapshots = vec![Vec::new(), vec![entry(42, "Example.exe")]];
+        let mut snapshots = vec![
+            vec![entry(42, "Example.exe"), entry(7, "Other.exe")],
+            Vec::new(),
+            vec![entry(42, "Example.exe")],
+        ];
         let lifecycle = Lifecycle::new(example_app(), Instant::now());
         let thread = thread::spawn(move || {
-            run(lifecycle, &events, &sender, || {
+            run(lifecycle, &received, &sender, || {
                 Ok(snapshots.pop().unwrap_or_default())
             });
         });
         let wait = Duration::from_secs(5);
         assert_eq!(changes.recv_timeout(wait).expect("start"), started(42));
         let destroyed_at = Instant::now();
-        window_events.send(WindowEvent::Destroyed).expect("send");
+        inputs
+            .send(Input::from(WindowEvent::Destroyed))
+            .expect("send");
         assert_eq!(changes.recv_timeout(wait).expect("exit"), exited(42));
         assert!(
             destroyed_at.elapsed() >= SETTLE,
             "the snapshot waited for the burst to settle"
         );
-        drop(window_events);
-        thread
-            .join()
-            .expect("the thread ends when window events stop");
+        inputs
+            .send(Input::Watch(watching(&[("other", "Other.exe")])))
+            .expect("send");
+        assert_eq!(
+            changes.recv_timeout(wait).expect("start"),
+            started_as("other", 7, "Other.exe")
+        );
+        drop(inputs);
+        thread.join().expect("the thread ends when its input stops");
     }
 }

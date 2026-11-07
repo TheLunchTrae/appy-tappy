@@ -104,9 +104,12 @@ dependencies = [
 name = "appytappy-runtime"
 version = "0.1.0"
 dependencies = [
+ "appytappy-actions",
  "appytappy-config",
+ "appytappy-engine",
  "appytappy-platform",
  "appytappy-sources",
+ "mutants",
 ]
 
 [[package]]
@@ -114,7 +117,9 @@ name = "appytappy-setup"
 version = "0.1.0"
 dependencies = [
  "appytappy-config",
+ "appytappy-platform",
  "appytappy-sources",
+ "mutants",
  "serde",
  "serde_json",
  "tauri",
