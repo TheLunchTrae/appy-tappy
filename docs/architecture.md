@@ -148,8 +148,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   nothing changes. When the window closes or changes size, it sends `Unseen`,
   and the owner undoes what the application's automations changed and starts
   its rules over, so no rule acts on a value nobody can see. When the window
-  closes it looks for one again, once a second, until the application exits. Other kinds of source, such as a log tail or a memory
-  read, join them later
+  closes it looks for one again, once a second, until the application exits.
+  Other kinds of source, such as a log tail or a memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
   back what failed. It makes the media and audio controls on its own thread,
@@ -176,8 +176,9 @@ worker owns a control `Receiver` and waits on it with `recv_timeout`, using the
 poll interval as its tick. A stop message ends the worker, and the owner sends
 one to each worker it started when it stops. A worker that holds no sender of
 its own channel also ends when the owner drops the `Sender`; a reader holds one
-to restart itself when its window closes, so only a stop message ends it. A push source must also be able to cancel its blocking read,
-for example with `CancelIoEx`, so that it does not hang on a quiet file.
+to restart itself when its window closes, so only a stop message ends it. A
+push source must also be able to cancel its blocking read, for example with
+`CancelIoEx`, so that it does not hang on a quiet file.
 
 Some Windows callbacks, such as the hook that reports window events, carry no
 pointer back to the code that registered them. The usual way out is a static
