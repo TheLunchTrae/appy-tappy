@@ -90,10 +90,17 @@ description = "Validate Rust package contents"
 wait_for = ["rust:test"]
 run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 
+# MUTANTS_SHARD=k/n runs only shard k of n (counting from 0), so CI can split
+# the sweep across runners; unset, it runs every mutant.
 [tasks."rust:mutants"]
 description = "Run mutation testing; a surviving mutant is a review finding"
 run = """
 set -eu
+
+set --
+if [ -n "${MUTANTS_SHARD:-}" ]; then
+  set -- "--shard=$MUTANTS_SHARD"
+fi
 
 . scripts/mutants-lock.sh
 acquire_mutants_task_lock full
@@ -104,7 +111,7 @@ trap 'exit 143' TERM
 
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --cargo-arg=--locked
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --cargo-arg=--locked "$@"
 run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 """
 
@@ -187,9 +194,24 @@ run = "cargo deny --workspace --all-features --locked check"
 description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
-# Member crates hold product code, so the gate runs the full mutation sweep.
-# rust:mutants:diff is the faster inner loop; the two lanes share one lock, so
-# the gate runs only one of them.
+# Member crates hold product code, so the gate runs a mutation lane: the full
+# sweep by default, or only changed code with MUTANTS_LANE=diff, which CI sets
+# for pull requests. The two lanes share one lock, so the gate runs only one.
+[tasks."rust:mutants:gate"]
+description = "Run the mutation lane MUTANTS_LANE names: full (default) or diff"
+run = """
+set -eu
+
+case "${MUTANTS_LANE:-full}" in
+  full) mise run rust:mutants ;;
+  diff) mise run rust:mutants:diff ;;
+  *)
+    echo "MUTANTS_LANE must be full or diff, got '$MUTANTS_LANE'." >&2
+    exit 2
+    ;;
+esac
+"""
+
 [tasks."rust:standards:check"]
 description = "Run the Rust standards CI gate"
 depends = [
@@ -199,7 +221,7 @@ depends = [
   "rust:doc",
   "rust:test",
   "rust:package",
-  "rust:mutants",
+  "rust:mutants:gate",
   "rust:machete",
   "rust:deny",
 ]

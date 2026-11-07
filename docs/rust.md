@@ -97,11 +97,19 @@ or build dependencies.
 
 ## Mutation testing
 
-`rust:mutants`, the full sweep, runs in the gate. `rust:mutants:diff` is the
-faster inner loop. It mutates code changed since the merge
-base with `MUTANTS_BASE_REF`, which defaults to `origin/main`, then local
-`main`, so it needs full Git history. Untracked files fail the lane;
-stage them with `git add -N`. A diff that selects no mutants passes.
+`rust:mutants` is the full sweep. `rust:mutants:diff` mutates code changed
+since the merge base with `MUTANTS_BASE_REF`, which defaults to `origin/main`,
+then local `main`, so it needs full Git history. Untracked files fail the
+lane; stage them with `git add -N`. A diff that selects no mutants passes.
+
+`rust:standards:check` runs `rust:mutants:gate`, which picks the lane from
+`MUTANTS_LANE`: `full`, the default, or `diff`. In CI, pull requests and merge
+groups run the `diff` lane against their base, so the quality job fits its
+time limit. Pushes to main and manual runs take the full sweep in four
+shards: `MUTANTS_SHARD=k/n` passes `--shard` to cargo-mutants, the quality job
+runs shard 0, and the `mutants` job runs shards 1 to 3. A pull request that
+only removes or weakens tests selects no mutants, so run the workflow manually
+on its branch to check the whole workspace before merging it.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in

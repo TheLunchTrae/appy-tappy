@@ -24,10 +24,11 @@ and no task covers it.
 
 ## Platform
 
-AppyTappy ships for Windows only. CI runs two jobs from
+AppyTappy ships for Windows only. CI runs these jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check` on
-Linux and is the required gate, and `windows` runs `rust:fmt:check`,
-`rust:lint`, `rust:doc`, and `rust:test:members` on Windows.
+Linux and is the required gate, `windows` runs `rust:fmt:check`,
+`rust:lint`, `rust:doc`, and `rust:test:members` on Windows, and on main,
+`mutants` runs the rest of the full mutation sweep in shards.
 
 - Inline mise tasks are POSIX `sh`. On a Windows workstation, run mise from
   Git Bash and set this in the global mise config
@@ -166,10 +167,11 @@ source changes; add `rust:doc` for public API changes.
 `rust:standards` formats code. Refresh `Cargo.lock` through `rust:lock` after
 dependency changes and commit it.
 
-`rust:mutants` runs the full sweep and is part of `rust:standards:check`.
-`rust:mutants:diff` mutates only changed code for a faster inner loop; its
-base defaults to `origin/main`, then local `main`, and can be set with
-`MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
+`rust:mutants` runs the full sweep. `rust:mutants:diff` mutates only changed
+code; its base defaults to `origin/main`, then local `main`, and can be set
+with `MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
+`rust:standards:check` runs the lane that `MUTANTS_LANE` names, `full` by
+default; CI sets `diff` for pull requests.
 Before handoff, run `mise run rust:standards:check`; report skipped checks and their
 reasons.
 
@@ -307,7 +309,8 @@ dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-The gate requires executed mutation evidence for the whole workspace.
+Every merge to main gets executed mutation evidence for the whole workspace;
+a pull request gets it for the code it changes.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
 approval, because the Linux gate compiles them out. Read [mutation operation](docs/rust.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.

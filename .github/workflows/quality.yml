@@ -16,8 +16,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The mandatory gate. The mutation lane resolves its diff base from history,
-  # so the checkout is not shallow.
+  # The mandatory gate. Pull requests and merge groups mutation-test only the
+  # code they change, against their base, so the checkout is not shallow.
+  # Pushes to main and manual runs take the full sweep, split into four
+  # shards: this job runs shard 0 and the mutants job runs the rest.
   quality:
     name: quality
     runs-on: ubuntu-26.04
@@ -25,6 +27,9 @@ jobs:
     env:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MUTANTS_LANE: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'diff' || 'full' }}
+      MUTANTS_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      MUTANTS_SHARD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && '0/4' || '' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,6 +50,41 @@ jobs:
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
       - name: Run the mandatory gate
         run: mise run standards:check
+
+  # The rest of the full mutation sweep, beside the quality job's shard 0.
+  mutants:
+    name: mutants (${{ matrix.shard }}/4)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MUTANTS_SHARD: ${{ matrix.shard }}/4
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned tools
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          version: '2026.10.19'
+          install: true
+          cache: true
+      - name: Install the webview build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
+      # The setup app's Rust side embeds the built UI, so the UI builds first.
+      - name: Build the setup UI
+        run: mise run ui:build
+      - name: Run the mutation shard
+        run: mise run rust:mutants
 
   # AppyTappy ships for Windows only. This job proves the Rust workspace
   # formats, lints, documents, and passes the member crates' tests on the
