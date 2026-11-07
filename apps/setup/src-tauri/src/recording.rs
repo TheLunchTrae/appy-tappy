@@ -125,7 +125,10 @@ impl Ink {
 
 /// The bit for pixel `index` in its word.
 fn bit(index: usize) -> u64 {
-    1_u64.wrapping_shl(u32::try_from(index % WORD_BITS).unwrap_or(0))
+    u32::try_from(index % WORD_BITS)
+        .ok()
+        .and_then(|shift| 1_u64.checked_shl(shift))
+        .unwrap_or(0)
 }
 
 /// One line of text for the text reader: gray pixels, one byte each, row by
@@ -420,6 +423,31 @@ mod tests {
         assert_eq!(recording.offer(&bar(2), start), None);
         let seen: Vec<u32> = recording.readings().iter().map(|kept| kept.seen).collect();
         assert_eq!(seen, [3, 1]);
+    }
+
+    #[test]
+    fn tall_ink_gets_a_margin_of_half_its_height() {
+        let start = Instant::now();
+        let reader = DigitReader::new(
+            Rgb {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            0,
+        );
+        let tall = Size {
+            width: 1,
+            height: 10,
+        };
+        let region = Region::new(0, 0, 1, 10).expect("not empty");
+        let mut recording = Recording::new(1, region, reader, tall, start);
+        let line = recording
+            .offer(&frame(1, 10, |_, _| true), start)
+            .expect("a new reading")
+            .line;
+        // Ten pixels of ink take a margin of five all round.
+        assert_eq!((line.width, line.height), (11, 20));
     }
 
     #[test]

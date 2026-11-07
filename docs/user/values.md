@@ -86,9 +86,10 @@ you use the application, and keep each different reading it shows.
    clear **Keep** on any reading that is not the value, such as a paused
    screen. A reading whose text gives a character two shapes, such as an `l`
    typed for a `1`, is flagged: fix it or leave it out.
-4. **Keep them.** Select **Keep**. The kept readings teach the check like
-   labeled screenshots. **Review recording** opens them again, and
-   **Record more** goes on with the same recording.
+4. **Keep them.** Select the button that says how many you keep, such as
+   **Keep 12 readings**. The kept readings teach the check like labeled
+   screenshots. **Review recording** opens them again, and **Record more**
+   goes on with the same recording.
 
 Keep the window the size it was when you took the screenshot you drew the
 region on: at another size, recording pauses and says to resize the window.
