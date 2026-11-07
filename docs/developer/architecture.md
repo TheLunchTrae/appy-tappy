@@ -279,7 +279,9 @@ cannot be opened, nothing is logged, and running exits with code 1.
 ### Tray
 
 [The tray icon](../user/tray.md) in the user guide describes the tray as the
-user sees it. The runtime shows an icon in the taskbar's notification area. Pointing at it
+user sees it. The runtime shows an icon in the taskbar's notification area:
+the setup app's icon, which `apps/runtime/runtime.rc` also links into the
+runtime's program file. Pointing at it
 shows a tooltip with the state, such as `AppyTappy: idle`, or
 `AppyTappy: disabled` while automations are off. Right-clicking it opens a
 small menu:
