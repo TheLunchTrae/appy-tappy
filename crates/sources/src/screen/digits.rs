@@ -637,8 +637,8 @@ mod tests {
             .learn(&draw(&["#.###", "#.#.#", "#.###"]), "1%")
             .unwrap();
         // "1%" and then a character never learned.
-        let labelled = draw(&["#.###.#.#", "#.#.#.###", "#.###.#.#"]);
-        assert_eq!(reader.read(&labelled), Ok(Number::new(1.0).unwrap()));
+        let labeled = draw(&["#.###.#.#", "#.#.#.###", "#.###.#.#"]);
+        assert_eq!(reader.read(&labeled), Ok(Number::new(1.0).unwrap()));
     }
 
     #[test]
