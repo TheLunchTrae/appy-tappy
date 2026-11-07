@@ -24,14 +24,15 @@ const INVALID_PARAMS: i64 = -32602;
 /// What the server tells the agent when it connects.
 const INSTRUCTIONS: &str = "AppyTappy investigates how a Windows application exposes a value, \
 such as a number shown in one spot of its window, so the user can automate on it. Every tool \
-only reads. Prefer sources that do not touch the application: windows, screen pixels. To find a value in memory: process_list, \
-then process_attach (the user must allow it in a dialog; if they refuse, do not retry and use \
-another source), then memory_scan_first, then ask the user to make the value change and run \
-memory_scan_next until few candidates remain, then memory_scan_results. Addresses change when \
-the application restarts, so find a stable pointer chain before relying on one: inspect the \
-structure around the value with memory_read_bytes, scan for pointer-sized values in a range just \
-below the address to find what points at it, repeat until a result has a module_offset, then \
-check the chain with memory_follow_pointer after the user restarts the application.";
+only reads. Prefer sources that do not touch the application: windows, screen pixels. To find a \
+value in memory: process_list, then process_attach (the user must allow it in a dialog; if they \
+refuse, do not retry and use another source), then memory_scan_first, then ask the user to make \
+the value change and run memory_scan_next until few candidates remain, then memory_scan_results. \
+Addresses change when the application restarts, so find a stable pointer chain before relying on \
+one: inspect the structure around the value with memory_read_bytes, scan for pointer-sized \
+values in a range just below the address to find what points at it, repeat until a result has a \
+module_offset, then check the chain with memory_follow_pointer after the user restarts the \
+application.";
 
 /// Reads messages from `input` and writes each response to `output` until
 /// the input ends.

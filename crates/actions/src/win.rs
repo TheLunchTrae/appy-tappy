@@ -2,10 +2,10 @@
 //! value or an error and makes no decisions of its own.
 //!
 //! Media sessions come from the Windows Runtime media transport controls,
-//! which music players and browsers publish without any app-specific API. Volumes
-//! come from Core Audio on the default playback device. Naming an audio
-//! session's app takes a process snapshot, which never opens a process, so no
-//! action opens a watched application's process.
+//! which music players and browsers publish without any app-specific API.
+//! Volumes come from Core Audio on the default playback device. Naming an
+//! audio session's app takes a process snapshot, which never opens a process,
+//! so no action opens a watched app's process.
 
 use std::collections::BTreeMap;
 use std::io;

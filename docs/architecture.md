@@ -3,8 +3,8 @@
 AppyTappy has two programs that share a set of library crates:
 
 - The **setup app** runs when the user wants to change something. It finds out
-  how to read an application's state, lets the user build rules, and compiles them into
-  one file.
+  how to read an application's state, lets the user build rules, and compiles
+  them into one file.
 - The **runtime** runs in the background all the time. It loads that file,
   watches the applications it names, and runs actions when a rule fires.
 
@@ -133,19 +133,19 @@ Each thread below is a plain `std::thread`, and each channel is a
 `std::sync::mpsc` channel.
 
 - **Owner thread.** Holds the root model: the loaded compiled config, which
-  applications are attached, and one engine session per attached application, which holds
-  its signal values and rule state. It
-  applies each event as a `(state, event) -> (state, effects)` transition.
-  Effects are action requests and orders to start or stop a worker.
+  applications are attached, and one engine session per attached application,
+  which holds its signal values and rule state. It applies each event as a
+  `(state, event) -> (state, effects)` transition. Effects are action requests
+  and orders to start or stop a worker.
 - **Lifecycle.** Reports when a watched application starts and exits. It matches
   processes to applications by the executable name in a process snapshot
   (`CreateToolhelp32Snapshot`), which does not open any process, so it is safe
   for every anti-cheat class. It never waits on a process handle.
   [Lifecycle](#lifecycle) describes when it takes a snapshot.
 - **Source workers.** One per attached application. Each runs the bindings the
-  compiled config chose for that application's version and sends `Sample` events.
-  Push sources, such as a log tail, send when data arrives; polled sources,
-  such as a memory read, run at the interval the binding sets.
+  compiled config chose for that application's version and sends `Sample`
+  events. Push sources, such as a log tail, send when data arrives; polled
+  sources, such as a memory read, run at the interval the binding sets.
 - **Action worker.** Runs action requests and releases in order and sends
   back results. It keeps the restore journal: the state each restoring rule
   changed, such as the volume before a change, so a release can put it back
@@ -179,12 +179,12 @@ thread that receives them must never show UI.
 
 The runtime is in one of three states:
 
-- **Idle.** No watched application runs. The window event hook is installed, and no
-  timer runs. A new top-level window anywhere on the desktop, a tooltip or a
+- **Idle.** No watched application runs. The window event hook is installed, and
+  no timer runs. A new top-level window anywhere on the desktop, a tooltip or a
   menu included, still leads to a snapshot; what that costs is measured in
   [#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
-- **Attached.** At least one watched application runs, and each has a session that
-  follows one of its processes.
+- **Attached.** At least one watched application runs, and each has a session
+  that follows one of its processes.
 - **Degraded.** A problem stops the runtime from watching applications: process
   snapshots fail. It overrides the other two states until a snapshot works
   again. Source failures and rejected configs join it when the runtime loads
@@ -206,25 +206,29 @@ window only when it is top-level; Windows cannot say whether a destroyed
 window was, so it keeps every destroyed window. The lifecycle thread, in the
 runtime, turns those events into snapshots:
 
-- While no watched application runs, only a new top-level window makes a snapshot
-  due. While one runs, any destroyed window does too, child windows included,
-  so a busy desktop can mean a few snapshots a second while an application runs.
+- While no watched application runs, only a new top-level window makes a
+  snapshot due. While one runs, any destroyed window does too, child windows
+  included, so a busy desktop can mean a few snapshots a second while an
+  application runs.
 - A burst of events becomes one snapshot 250 ms after its first event.
-- While an application runs or snapshots fail, a backstop snapshot runs every
-  5 seconds. It finds an application that exits without an event, such as a process
-  that never made a window, and an application that takes longer than 250 ms to exit
-  after closing its window. So an exit can take up to 5 seconds to notice.
-- The first snapshot runs at startup, so an application that already runs is found.
+- While an application runs or snapshots fail, a backstop snapshot runs
+  every 5 seconds. It finds an application that exits without an event, such as a
+  process that never made a window, and an application that takes longer than
+  250 ms to exit after closing its window. So an exit can take up to 5 seconds
+  to notice.
+- The first snapshot runs at startup, so an application that already runs is
+  found.
 
-Each snapshot ends the session of an application whose process is gone, then starts
-one for an application that runs without one. A session follows the running process
-with the lowest ID, so a second copy of an application starts no second session, and
-it takes over when the first exits. A process ID that Windows reused for
-another executable ends the session. An application relaunched within 5 seconds that
-gets its old process ID back keeps its session, because a snapshot cannot
-tell the two processes apart. A crashed application is the same as one that
-exits: its windows are destroyed and its process leaves the snapshot. Nothing
-holds a handle to an application, so detaching leaves nothing to clean up.
+Each snapshot ends the session of an application whose process is gone, then
+starts one for an application that runs without one. A session follows the
+running process with the lowest ID, so a second copy of an application starts no
+second session, and it takes over when the first exits. A process ID that
+Windows reused for another executable ends the session. An application
+relaunched within 5 seconds that gets its old process ID back keeps its session,
+because a snapshot cannot tell the two processes apart. A crashed application is
+the same as one that exits: its windows are destroyed and its process leaves the
+snapshot. Nothing holds a handle to an application, so detaching leaves nothing
+to clean up.
 
 Until the compiled config names the applications to watch, each
 `--watch <executable>` argument names one by its file name, such as
@@ -263,10 +267,10 @@ shows a tooltip with the state, such as `AppyTappy: idle`, or
 `AppyTappy: disabled` while automations are off. Right-clicking it opens a
 small menu:
 
-- **Enabled.** A check mark that turns automations on and off. Off, rules do
-  not fire, but detection keeps running, so turning it back on finds the
-  applications already attached. The runtime starts enabled, and the setting is not
-  kept across restarts.
+- **Enabled.** A check mark that turns automations on and off. Off, rules do not
+  fire, but detection keeps running, so turning it back on finds the
+  applications already attached. The runtime starts enabled, and the setting is
+  not kept across restarts.
 - **Active automations.** A submenu that lists, by name, the automations of
   the applications attached now, and only those. With none, it shows a grayed
   `None`. Until the runtime loads the compiled config
@@ -307,14 +311,14 @@ These three parts stay separate so that each one can grow without the others
 changing.
 
 - A **source primitive** reads one kind of state: a memory pointer chain, a
-  screen region, a log file, a local API, or process and window events. It
-  knows nothing about rules. The runtime ships a fixed set; an application is data,
+  screen region, a log file, a local API, or process and window events. It knows
+  nothing about rules. The runtime ships a fixed set; an application is data,
   never code. The v1 set and its Windows APIs belong to
   [#3](https://github.com/TheLunchTrae/appy-tappy/issues/3).
   [Screen regions](screen.md) describes the screen region source: its checks
   are portable Rust, and only capture calls Windows.
 - A **signal** is a named, typed value an application exposes, such as
-  `score`. An app definition binds each signal to a source primitive
+  `progress`. An app definition binds each signal to a source primitive
   per application version. The format belongs to
   [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6), and version
   changes to [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7).
@@ -362,11 +366,11 @@ changing.
 ## Anti-cheat enforcement
 
 AppyTappy must never get a user banned. The policy and its classes belong to
-[#11](https://github.com/TheLunchTrae/appy-tappy/issues/11). For any application whose
-anti-cheat class is not `none`, three things are blocked: memory sources,
+[#11](https://github.com/TheLunchTrae/appy-tappy/issues/11). For any application
+whose anti-cheat class is not `none`, three things are blocked: memory sources,
 input-injection actions, and anything else that opens the application's process.
-Screen, log, local API, and process and window event sources stay allowed.
-The design enforces the block in four places:
+Screen, log, local API, and process and window event sources stay allowed. The
+design enforces the block in four places:
 
 1. The compile step in `config` refuses a blocked binding or action.
 2. The runtime applies the same check when it loads the compiled config.
@@ -377,9 +381,9 @@ The design enforces the block in four places:
    validation does not compile.
 4. Every path that opens an application's process needs a process-access permit,
    including the guided memory scan
-   ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any
-   version detection that reads the running process. Only `config` issues one, and
-   only for an application of class `none`. The scan runs before any binding exists,
+   ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any version
+   detection that reads the running process. Only `config` issues one, and only
+   for an application of class `none`. The scan runs before any binding exists,
    so this point, not the first three, is what blocks it.
 
 ## The setup app

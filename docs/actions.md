@@ -15,12 +15,12 @@ calls that crate; the engine only says which rule fired.
   on that device. It uses Core Audio, the API behind the Windows volume
   mixer.
 
-An app is named the way Windows reports it, ignoring ASCII case. For media,
-that is the session's app ID: the executable name, such as `Player.exe`,
-for a desktop app, the package name for a Microsoft Store app, or the
-browser's name. For volume, it is the executable name, such as `Player.exe`.
-Naming an audio session's executable takes a process snapshot, which never
-opens a process, so no action opens a watched application's process.
+An app is named the way Windows reports it, ignoring ASCII case. For media, that
+is the session's app ID: usually the executable name, such as `Player.exe`, for
+a desktop app, unless the app sets its own ID; the package name for a Microsoft
+Store app; or the browser's name. For volume, it is the executable name, such as
+`Player.exe`. Naming an audio session's executable takes a process snapshot,
+which never opens a process, so no action opens a watched application's process.
 
 An app can have several sessions at once, such as one per browser tab:
 
@@ -81,9 +81,10 @@ audio sessions, what it changed before the failure is still restored.
 
 CI compiles and lints the Windows code, and the logic is tested with fake
 controls on every platform. Two tests drive a real media player; they change
-what is playing, so they only run when asked. Start any desktop app that
-plays audio and shows in the Windows media controls, play something, and run
-with `APPYTAPPY_TEST_PLAYER` set to its executable name:
+what is playing, so they only run when asked. Start a desktop app that plays
+audio and whose media session reports its executable name as its app ID,
+which most desktop apps do. Play something, and run with
+`APPYTAPPY_TEST_PLAYER` set to that executable name:
 
 ```sh
 APPYTAPPY_TEST_PLAYER=Player.exe cargo test -p appytappy-actions --test media_player -- --ignored --test-threads=1

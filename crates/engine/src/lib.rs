@@ -295,7 +295,7 @@ mod tests {
     const SECOND: RuleIndex = RuleIndex(1);
 
     #[test]
-    fn a_threshold_rule_fires_once_per_run_and_releases_when_the_value_resets() {
+    fn a_threshold_rule_fires_once_per_crossing_and_releases_when_the_value_resets() {
         let clock = Clock::new();
         let mut session = start(
             vec![becomes(

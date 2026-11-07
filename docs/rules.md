@@ -83,25 +83,25 @@ the focus.
 
 ## Evaluation
 
-The engine evaluates rules on events, not on a timer. The runtime's owner
-thread keeps one session per running application. A session starts when the
-application starts, with every rule armed and no signal values, and ends when
-the application exits. It takes three kinds of events, each with the time it
-happened: a signal's new value, a focus change, and the application's exit. For each event it
-returns effects: release a rule, or fire it. Releases come first, then fires,
-each in rule order, so a restore never undoes a change that another rule
-makes for the same event.
+The engine evaluates rules on events, not on a timer. The runtime's owner thread
+keeps one session per running application. A session starts when the application
+starts, with every rule armed and no signal values, and ends when the
+application exits. It takes three kinds of events, each with the time it
+happened: a signal's new value, a focus change, and the application's exit. For
+each event it returns effects: release a rule, or fire it. Releases come first,
+then fires, each in rule order, so a restore never undoes a change that another
+rule makes for the same event.
 
-The first focus report of a session fires the matching focus rules, whether
-the application has the focus or not. A report that repeats the current focus does
+The first focus report of a session fires the matching focus rules, whether the
+application has the focus or not. A report that repeats the current focus does
 nothing.
 
-At exit, the session releases every active rule first and then fires the
-exit rules, so restores run before anything the exit rules do. The runtime
-can also stop a session while the application keeps running, for a pause or a
-config change: that releases every active rule and fires nothing. The session that
-replaces it resumes without firing the start rules again; like any new
-session, it starts with every rule armed and no signal values.
+At exit, the session releases every active rule first and then fires the exit
+rules, so restores run before anything the exit rules do. The runtime can also
+stop a session while the application keeps running, for a pause or a config
+change: that releases every active rule and fires nothing. The session that
+replaces it resumes without firing the start rules again; like any new session,
+it starts with every rule armed and no signal values.
 
 ## Examples
 
@@ -128,8 +128,8 @@ cooldown: none
 restore:  on release (put the volume back when it loses the focus or exits)
 ```
 
-A counter on screen goes up while an icon is visible: skip to the next track
-each time it changes.
+A counter on screen changes while an icon is visible: skip to the next track
+each time.
 
 ```text
 trigger:  changes counter, guard icon_visible equals yes

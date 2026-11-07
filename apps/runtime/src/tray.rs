@@ -137,12 +137,14 @@ mod tests {
     #[test]
     fn active_automations_are_listed_by_name() {
         let mut model = Model::default();
-        model.automations = vec!["Pause music on death".to_owned()];
+        model.automations = vec!["Pause music while the icon shows".to_owned()];
         assert_eq!(
             menu(&model).items.get(1),
             Some(&MenuItem::Submenu {
                 label: "Active automations".to_owned(),
-                items: vec![MenuItem::Note("Pause music on death".to_owned())],
+                items: vec![MenuItem::Note(
+                    "Pause music while the icon shows".to_owned()
+                )],
             })
         );
     }

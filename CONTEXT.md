@@ -39,12 +39,12 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
   whether those actions restore.
 - **Runtime.** The always-on background program.
 - **Sample.** One value a source read for a signal.
-- **Session.** One run of an application, from its start to its exit, or
-  until the runtime stops it for a pause or a config change. Rule state resets with
+- **Session.** One run of an application, from its start to its exit, or until
+  the runtime stops it for a pause or a config change. Rule state resets with
   each session.
 - **Setup app.** The program the user opens to discover signals, build rules,
   and compile the config.
-- **Signal.** A named, typed value an application exposes, such as `score`
+- **Signal.** A named, typed value an application exposes, such as `progress`
   or `icon_visible`.
 - **Source primitive.** One kind of state reader the runtime ships: memory
   pointer chain, screen region, log file, local API, or process and window

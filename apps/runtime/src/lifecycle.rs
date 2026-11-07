@@ -113,7 +113,7 @@ fn later(now: Instant, delay: Duration) -> Instant {
 }
 
 impl Lifecycle {
-    /// Starts detection at `now`. The first snapshot is due at once, so a
+    /// Starts detection at `now`. The first snapshot is due at once, so an
     /// app that already runs is found.
     pub(crate) fn new(watchlist: Watchlist, now: Instant) -> Self {
         let scan_at = (!watchlist.is_empty()).then_some(now);

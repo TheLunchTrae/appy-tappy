@@ -27,9 +27,9 @@ input.
 | `memory_follow_pointer` | Follows a pointer chain from a module and reads the value it ends at. |
 
 The first three never open an application's process, so they are safe for
-protected applications too, such as ones with anti-cheat. Tool names are `area_verb`, so the definition and
-config tools that come next slot in as `definition_*`, `rule_*`,
-`source_test`, and `config_compile`.
+protected applications too, such as ones with anti-cheat. Tool names are
+`area_verb`, so the definition and config tools that come next slot in as
+`definition_*`, `rule_*`, `source_test`, and `config_compile`.
 
 ## Anti-cheat safety
 

@@ -165,7 +165,8 @@ struct Entry<O, M, V> {
 /// session that was already paused, still holds its target, but releasing
 /// it sends nothing unless it took over another rule's "before" state.
 ///
-/// `O` names a rule: the runtime passes the watched application and the rule's position.
+/// `O` names a rule: the runtime passes the watched app and the rule's
+/// position.
 #[derive(Debug)]
 pub struct Actions<O, C: Controls> {
     controls: C,

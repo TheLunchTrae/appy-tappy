@@ -374,8 +374,8 @@ impl System for WindowsSystem {
         };
         let text = format!(
             "An AI agent connected to AppyTappy wants to read the memory of {} (process {}).\n\n\
-             Only allow this for an application that has no anti-cheat. Reading the memory of an application \
-             that anti-cheat protects can get your account banned.\n\n\
+             Only allow this for an application that has no anti-cheat. Reading the memory of \
+             an application that anti-cheat protects can get your account banned.\n\n\
              {warning}AppyTappy only reads memory. It never changes the application.\n\nAllow it?",
             process.executable, process.id
         );

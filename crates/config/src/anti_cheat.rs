@@ -1,5 +1,5 @@
 //! The anti-cheat policy: protection classes and the permit that every path
-//! opening an application's process requires.
+//! opening an app's process requires.
 
 use std::error::Error;
 use std::fmt;

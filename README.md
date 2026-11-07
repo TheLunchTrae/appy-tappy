@@ -1,9 +1,9 @@
 # appy-tappy
 
 AppyTappy is a Windows background app that runs automations when another
-application reaches a state you can see: a certain number appears in a region
-of its window, an icon becomes visible, a bar fills past a threshold, or a
-color changes. An automation then acts, such as pausing media or changing an
+application reaches a state, such as a certain number appearing in a region of
+its window, an icon becoming visible, a bar filling past a threshold, or a
+color changing. An automation then acts, such as pausing media or changing an
 app's volume.
 
 ## Development

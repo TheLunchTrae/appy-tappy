@@ -1,9 +1,9 @@
 //! Manual checks against a real media player on Windows.
 //!
-//! They change what is playing, so they are ignored by default. Start any
-//! desktop app that plays audio and shows in the Windows media controls,
-//! play something, set `APPYTAPPY_TEST_PLAYER` to its executable name, and
-//! run:
+//! They change what is playing, so they are ignored by default. Start a
+//! desktop app that plays audio and whose media session reports its
+//! executable name as its app ID, which most desktop apps do. Play something,
+//! set `APPYTAPPY_TEST_PLAYER` to that executable name, and run:
 //!
 //! ```sh
 //! APPYTAPPY_TEST_PLAYER=Player.exe cargo test -p appytappy-actions --test media_player -- --ignored --test-threads=1
@@ -86,7 +86,8 @@ fn pauses_and_resumes_the_player() {
     assert_eq!(
         playing(actions.controls()).expect("readable"),
         Some(true),
-        "start playing something in the player first"
+        "no playing media session matches APPYTAPPY_TEST_PLAYER; play something and check \
+         that the player reports this name"
     );
     // Overlapping rules rely on Windows handing out the same session object
     // each time, which keeps their restores in order.
@@ -126,7 +127,7 @@ fn lowers_and_restores_the_player_volume() {
     let before = levels(actions.controls()).expect("readable");
     assert!(
         !before.is_empty(),
-        "start playing something in the player first"
+        "no audio session matches APPYTAPPY_TEST_PLAYER; play something in the player first"
     );
     let lower = Action::SetVolume {
         target: VolumeTarget::App(player().expect("APPYTAPPY_TEST_PLAYER names the player")),
