@@ -811,6 +811,20 @@ select {
   border-color: var(--capture);
 }
 
+.live-reading {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--base);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-reading.holds {
+  border-color: var(--holds);
+  color: var(--holds);
+}
+
 .action-list {
   list-style: none;
   padding: 0;

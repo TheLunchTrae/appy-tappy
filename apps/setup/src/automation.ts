@@ -9,6 +9,7 @@ import type {
   Comparison,
   MediaCommand,
   ValueDef,
+  Reading,
   WhenDef,
 } from './api.ts';
 
@@ -62,6 +63,16 @@ export const COMPARISON_NAMES: Readonly<Record<Comparison, string>> = {
   atLeast: 'is at least',
   above: 'is above',
 };
+
+/** A reading as the UI shows it, such as `87`, `12.5` or `Yes`. */
+export function readingText(reading: Reading): string {
+  switch (reading.kind) {
+    case 'number':
+      return Number.isInteger(reading.value) ? String(reading.value) : reading.value.toFixed(1);
+    case 'flag':
+      return reading.value ? 'Yes' : 'No';
+  }
+}
 
 /** A target as the condition reads it. */
 export function targetText(target: number | boolean): string {
@@ -221,6 +232,22 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
   return { kind: 'volume', percent, app };
 }
 
+/** The condition `draft` describes on the value `choice`, or the next thing to fill in. */
+export function buildWhen(draft: Draft, choice: ValueChoice): WhenDef | string {
+  let target: number | boolean = draft.flag;
+  if (choice.kind === 'number') {
+    const number = typedNumber(draft.number);
+    if (number === null) {
+      return `Enter the number ${choice.value.name} is compared with, such as 90 or 12.5.`;
+    }
+    target = number;
+  }
+  if (!COMPARISONS[choice.kind].includes(draft.is)) {
+    return `Pick how ${choice.value.name} is compared.`;
+  }
+  return { app: choice.app, value: choice.value.id, is: draft.is, target };
+}
+
 /** The automation a draft describes, or the next thing to fill in. */
 export type Built =
   | { readonly ok: true; readonly automation: AutomationDef }
@@ -236,16 +263,9 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
   if (choice === null) {
     return { ok: false, next: 'Pick the value to watch.' };
   }
-  let target: number | boolean = draft.flag;
-  if (choice.kind === 'number') {
-    const number = typedNumber(draft.number);
-    if (number === null) {
-      return { ok: false, next: `Enter the number ${choice.value.name} is compared with, such as 90 or 12.5.` };
-    }
-    target = number;
-  }
-  if (!COMPARISONS[choice.kind].includes(draft.is)) {
-    return { ok: false, next: `Pick how ${choice.value.name} is compared.` };
+  const when = buildWhen(draft, choice);
+  if (typeof when === 'string') {
+    return { ok: false, next: when };
   }
   if (draft.actions.length === 0) {
     return { ok: false, next: 'Add an action.' };
@@ -271,7 +291,7 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
       id,
       name,
       enabled: draft.enabled,
-      when: { app: choice.app, value: choice.value.id, is: draft.is, target },
+      when,
       actions,
       undo: draft.undo,
       cooldownMs: Math.round(cooldown * 1000),

@@ -5,8 +5,10 @@ import {
   EMPTY_DRAFT,
   actionText,
   buildAutomation,
+  buildWhen,
   findValue,
   newAction,
+  readingText,
   targetText,
   toDraft,
   undoable,
@@ -247,5 +249,39 @@ describe('buildAutomation', () => {
       [0, 'app', 'Player.exe'],
       [1, 'default', ''],
     ]);
+  });
+});
+
+describe('buildWhen', () => {
+  test('builds the condition the live reading tests, or says what to fill in', () => {
+    const number = findValue(choices, { app: 'example', value: 'progress' });
+    const icon = findValue(choices, { app: 'example', value: 'icon_visible' });
+    if (number === null || icon === null) {
+      throw new Error('values exist');
+    }
+    const draft = { ...EMPTY_DRAFT, source: { app: 'example', value: 'progress' } };
+    expect(buildWhen({ ...draft, number: ' 90 ' }, number)).toEqual({
+      app: 'example',
+      value: 'progress',
+      is: 'atLeast',
+      target: 90,
+    });
+    expect(buildWhen(draft, number)).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
+    expect(buildWhen({ ...draft, flag: false, is: 'notEquals' }, icon)).toEqual({
+      app: 'example',
+      value: 'icon_visible',
+      is: 'notEquals',
+      target: false,
+    });
+    expect(buildWhen(draft, icon)).toBe('Pick how Icon visible is compared.');
+  });
+});
+
+describe('readingText', () => {
+  test('shows whole numbers as they are, others to one decimal, and flags as yes or no', () => {
+    expect(readingText({ kind: 'number', value: 87 })).toBe('87');
+    expect(readingText({ kind: 'number', value: 12.46 })).toBe('12.5');
+    expect(readingText({ kind: 'flag', value: true })).toBe('Yes');
+    expect(readingText({ kind: 'flag', value: false })).toBe('No');
   });
 });

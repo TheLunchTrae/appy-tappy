@@ -56,6 +56,8 @@ fn main() -> ExitCode {
             commands::screenshot,
             commands::set_check,
             commands::read_value,
+            commands::watch_value,
+            commands::watched_reading,
             commands::match_windows,
             commands::list_apps,
             commands::save_value,

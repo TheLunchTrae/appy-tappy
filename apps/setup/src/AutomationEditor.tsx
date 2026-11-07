@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   type AppSummary,
   type AutomationDef,
+  type Live,
   type MediaCommand,
+  type WhenDef,
   errorText,
   listWindows,
   saveAutomation,
+  stopCapture,
+  watchValue,
+  watchedReading,
 } from './api.ts';
 import {
   type ActionDraft,
@@ -15,15 +20,18 @@ import {
   COMPARISON_NAMES,
   EMPTY_DRAFT,
   MEDIA_NAMES,
+  type ValueChoice,
   buildAutomation,
+  buildWhen,
   findValue,
   newAction,
+  readingText,
   toDraft,
   undoText,
   valueChoices,
   withSource,
 } from './automation.ts';
-import { background } from './repeat.ts';
+import { background, useRepeat } from './repeat.ts';
 
 /** The action menu's choices: each media command, then setting a volume. */
 type ActionChoice = MediaCommand | 'volume';
@@ -140,6 +148,82 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
   );
 }
 
+/** The pause between two live readings: often enough to follow a value as it changes. */
+const LIVE_PAUSE_MS = 500;
+
+/** A live reading in a sentence, such as `Progress reads 87 now, so this is true.` */
+function liveText(live: Live | string | null, name: string): string {
+  if (live === null || typeof live === 'string') {
+    return live ?? `Looking for the window ${name} is read on…`;
+  }
+  switch (live.kind) {
+    case 'waiting':
+      return `Waiting for the window to show ${name}…`;
+    case 'problem':
+      return live.message;
+    case 'read': {
+      const reads = `${name} reads ${readingText(live.reading)} now`;
+      if (live.holds === null) {
+        return `${reads}.`;
+      }
+      return live.holds ? `${reads}, so the condition is true.` : `${reads}, so the condition is not true.`;
+    }
+  }
+}
+
+/**
+ * What the watched value reads on its window now, and whether `when` holds for
+ * it. It watches again after the window closes, and stops capturing once it
+ * goes away.
+ */
+function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly when: WhenDef | null }) {
+  const [live, setLive] = useState<Live | string | null>(null);
+  const watching = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      background(stopCapture());
+    };
+  }, []);
+  useRepeat(
+    async () => {
+      try {
+        if (watching.current) {
+          try {
+            setLive(await watchedReading(when));
+            return;
+          } catch {
+            // The window closed or the capture was replaced: watch again,
+            // which says why the value cannot be read when it cannot.
+            watching.current = false;
+          }
+        }
+        await watchValue(choice.app, choice.value.id);
+        if (!mounted.current) {
+          // The editor closed while the capture started.
+          await stopCapture();
+          return;
+        }
+        watching.current = true;
+        setLive(await watchedReading(when));
+      } catch (error: unknown) {
+        watching.current = false;
+        setLive(errorText(error));
+      }
+    },
+    LIVE_PAUSE_MS,
+    true,
+  );
+  const holds = typeof live === 'object' && live?.kind === 'read' ? live.holds : null;
+  return (
+    <p className={holds === true ? 'live-reading holds' : 'live-reading'} role="status">
+      {liveText(live, choice.value.name)}
+    </p>
+  );
+}
+
 interface Props {
   readonly apps: readonly AppSummary[];
   /** The saved automation to change, or null for a new one. */
@@ -178,6 +262,8 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
   const choices = useMemo(() => valueChoices(apps), [apps]);
   const choice = draft.source === null ? null : findValue(choices, draft.source);
   const built = buildAutomation(draft, choices, existing?.id ?? '');
+  const typedWhen = choice === null ? null : buildWhen(draft, choice);
+  const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
   const undoWords = built.ok ? undoText(built.automation.actions) : null;
 
   const update = (change: Partial<Draft>): void => {
@@ -304,6 +390,9 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
               />
             )}
           </div>
+          {choice === null ? null : (
+            <LiveReading key={`${choice.app}/${choice.value.id}`} choice={choice} when={liveWhen} />
+          )}
           <p className="note">
             {runningApp === null || runningApp === undefined
               ? 'One value for now. Conditions that combine several values come later.'

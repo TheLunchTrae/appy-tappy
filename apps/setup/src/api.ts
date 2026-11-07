@@ -93,6 +93,13 @@ export type Reading =
   | { readonly kind: 'number'; readonly value: number }
   | { readonly kind: 'flag'; readonly value: boolean };
 
+/** What a watched value reads on its window now, for the automation editor. */
+export type Live =
+  | { readonly kind: 'waiting' }
+  /** `holds` says whether the condition asked about is true, or is null when none was asked about. */
+  | { readonly kind: 'read'; readonly reading: Reading; readonly holds: boolean | null }
+  | { readonly kind: 'problem'; readonly message: string };
+
 /** A value to save, with a new application when `app` is null. */
 export interface SaveSpec {
   readonly app: string | null;
@@ -190,6 +197,16 @@ export async function setCheck(spec: CheckSpec): Promise<void> {
 /** What the check reads on the newest frame, or null without a check or a frame. */
 export async function readValue(): Promise<Reading | null> {
   return invoke<Reading | null>('read_value');
+}
+
+/** Captures the window of a saved value's application to read the value on it, replacing any capture. */
+export async function watchValue(application: string, value: string): Promise<void> {
+  await invoke('watch_value', { application, value });
+}
+
+/** What the watched value reads now, and whether `when` holds for it. Fails when nothing is watched or the window closed. */
+export async function watchedReading(when: WhenDef | null): Promise<Live> {
+  return invoke<Live>('watched_reading', { when });
 }
 
 /** The handles of the running windows `window` matches, the best fit first. */
