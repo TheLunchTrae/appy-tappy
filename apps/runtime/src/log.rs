@@ -42,6 +42,13 @@ impl Log {
         })
     }
 
+    /// Makes the log rotate at `limit` bytes from now on. Only the copy that
+    /// holds the single-instance guard rotates, so another copy that only
+    /// notes why it exits never moves the file under it.
+    pub(crate) const fn rotate_at(&mut self, limit: u64) {
+        self.limit = limit;
+    }
+
     /// Appends `message` as one line, after `time` when there is one.
     pub(crate) fn write(&mut self, time: Option<LocalTime>, message: &str) -> io::Result<()> {
         let line = match time {
@@ -135,6 +142,18 @@ mod tests {
         log.write(None, "second").expect("write");
         log.write(None, "third").expect("write");
         assert_eq!(read(&folder.0.join("runtime.old.log")), "second\n");
+        assert_eq!(read(&folder.0.join("runtime.log")), "third\n");
+    }
+
+    #[test]
+    fn a_log_rotates_only_once_given_a_limit() {
+        let folder = Folder::new("unlimited");
+        let mut log = Log::open(&folder.0, u64::MAX).expect("open");
+        log.write(None, "first").expect("write");
+        log.write(None, "second").expect("write");
+        log.rotate_at(10);
+        log.write(None, "third").expect("write");
+        assert_eq!(read(&folder.0.join("runtime.old.log")), "first\nsecond\n");
         assert_eq!(read(&folder.0.join("runtime.log")), "third\n");
     }
 

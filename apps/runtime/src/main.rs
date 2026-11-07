@@ -36,10 +36,11 @@ const USAGE: u8 = 2;
 
 fn main() -> ExitCode {
     // The runtime has no console, so the log is the only place a problem
-    // can show, even for a command that exits at once.
+    // can show, even for a command that exits at once. It rotates only once
+    // this copy holds the single-instance guard.
     let mut log = Locations::from_env()
         .map_err(io::Error::other)
-        .and_then(|locations| Log::open(&locations.logs(), log::LIMIT));
+        .and_then(|locations| Log::open(&locations.logs(), u64::MAX));
     let command = match cli::parse(env::args_os().skip(1)) {
         Ok(command) => command,
         Err(error) => {
@@ -128,6 +129,7 @@ fn run(watchlist: Watchlist, log: &mut Log) -> io::Result<()> {
             return Err(error);
         },
     };
+    log.rotate_at(log::LIMIT);
     note(log, "runtime started");
     let result = watch(watchlist, log);
     match &result {

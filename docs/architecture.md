@@ -253,9 +253,10 @@ commands; the runtime never turns autostart on by itself.
 The log is `runtime.log` in `%LOCALAPPDATA%\AppyTappy\logs\`, one
 timestamped line per start, exit, state change, and problem. A line that
 would take it past 512 KiB first moves it to `runtime.old.log`, replacing the
-older one, so the log never takes more than about 1 MiB. When
-`%LOCALAPPDATA%` is unknown or the log cannot be opened, the runtime has
-nowhere to report and exits with code 1.
+older one, so the log never takes more than about 1 MiB. Only the copy that
+holds the single-instance guard rotates it; a second copy or an `--autostart`
+command only adds its line. When `%LOCALAPPDATA%` is unknown or the log
+cannot be opened, nothing is logged, and running exits with code 1.
 
 ## Sources, rules, and actions
 
