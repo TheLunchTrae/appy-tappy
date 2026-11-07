@@ -50,20 +50,32 @@ in that order, then one key, joined by `+`. The key is a letter, a digit,
 `Right`. Reading it ignores case and spaces around each part, and the setup
 app saves it in the spelling above.
 
-The action holds the modifiers down in order, presses and releases the key,
-then lets the modifiers go in reverse. It uses `SendInput`, so the keys go to
-the window that has the keyboard focus, as if typed. They reach the watched
-application only while it is in front. Windows does not deliver them to a
-window running as administrator unless AppyTappy runs as administrator too.
-The modifiers are the left-hand ones, and the navigation and arrow keys are
-sent as the dedicated keys, not the number pad's.
+The action holds the modifiers down in order, presses the key, holds them
+for 40 ms so an application that checks the keyboard once a frame still sees
+them, then lets the key and the modifiers go in reverse. A modifier the user is
+holding already is left alone, so it stays down for them; a held modifier that
+the keys do not name joins the press. The modifiers are the left-hand ones, and
+the navigation and arrow keys are sent as the dedicated keys, not the number
+pad's.
+
+It uses `SendInput`, which types into whichever window has the keyboard focus,
+so the action first checks that the window in front belongs to the watched
+application's executable, the one the runtime follows. If another window is in
+front, it presses nothing and the log says so; anti-cheat was checked only for
+the watched application, so keys never go anywhere else. Naming the window's
+executable takes a process snapshot, so it never opens that process. Windows
+drops keys meant for a window that runs as administrator unless AppyTappy runs
+as administrator too; when it takes only some of the keys, every key that went
+down is let go again.
 
 Anti-cheat can see injected input and treat it as cheating, so an automation
 with a key press action runs only for an application whose anti-cheat class
 is `none` (see [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)). A
 new application starts as `unknown`, so the user has to set it first. Saving
-an automation checks this, and so does the runtime when it reads them: if the
-class changes later, the runtime stops running that automation.
+an automation checks this, and so does the runtime whenever it reads the
+automations. Changing the class in the setup app makes the runtime read them
+again at once, so it stops running that automation; a class changed by
+editing `app.json` by hand counts from the next reload or restart.
 
 ## Restoring
 
@@ -93,8 +105,9 @@ audio sessions, what it changed before the failure is still restored.
 
 ## Not in v1
 
-- **Sending keys to a window other than the focused one:** a hotkey meant for
-  another application reaches the watched one instead while it is in front.
+- **Sending keys to another application:** keys go only to the watched
+  application while it is in front, so a hotkey meant for another application
+  cannot be sent.
 - **Running a command or opening a URL:** configs may be shared, and a
   shared config should not be able to run programs.
 - **HTTP and WebSocket calls** (OBS, Streamer.bot, Home Assistant): useful,

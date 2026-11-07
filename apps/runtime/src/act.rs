@@ -29,6 +29,10 @@ pub(crate) enum Job {
         owner: Owner,
         /// Its name, for the log.
         automation: String,
+        /// The executable of the process its session follows, such as
+        /// `Example.exe`: a key press presses keys only while that
+        /// application is in front.
+        executable: String,
         /// Its actions.
         actions: Box<[Action]>,
         /// Whether its changes are undone when it is released.
@@ -74,13 +78,14 @@ pub(crate) fn run<C, E>(
             Job::Run {
                 owner,
                 automation,
+                executable,
                 actions: steps,
                 restore,
             } => steps
                 .iter()
                 .enumerate()
                 .filter_map(|(position, step)| {
-                    let error = actions.perform(owner, step, restore).err()?;
+                    let error = actions.perform(owner, step, restore, &executable).err()?;
                     Some(format!(
                         "{automation}: action {} failed: {error}",
                         position.saturating_add(1)
@@ -105,10 +110,11 @@ pub(crate) fn run<C, E>(
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
+    use std::time::Duration;
 
-    use appytappy_actions::{MediaSession, Volume};
+    use appytappy_actions::{MediaSession, Stroke, Volume};
     use appytappy_config::action::{
-        KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
+        MediaCommand, MediaTarget, Modifier, VolumeLevel, VolumeTarget,
     };
 
     use super::*;
@@ -153,9 +159,19 @@ mod tests {
             Ok(())
         }
 
-        fn press_keys(&mut self, _keys: &KeyChord) -> io::Result<()> {
-            Ok(())
+        fn focused_executable(&mut self) -> io::Result<Option<String>> {
+            Ok(Some("Example.exe".to_owned()))
         }
+
+        fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
+            Ok(Vec::new())
+        }
+
+        fn send_strokes(&mut self, strokes: &[Stroke]) -> io::Result<usize> {
+            Ok(strokes.len())
+        }
+
+        fn hold(&mut self, _time: Duration) {}
     }
 
     const OWNER: Owner = (SessionId(1), RuleIndex(0));
@@ -180,6 +196,7 @@ mod tests {
         jobs.send(Job::Run {
             owner: OWNER,
             automation: "Pause near the end".to_owned(),
+            executable: "Example.exe".to_owned(),
             actions: pause_then_mute(),
             restore: Restore::OnRelease,
         })

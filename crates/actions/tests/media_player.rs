@@ -99,8 +99,8 @@ fn pauses_and_resumes_the_player() {
         target: MediaTarget::App(player().expect("APPYTAPPY_TEST_PLAYER names the player")),
         command: MediaCommand::Pause,
     };
-    let paused = actions.perform(1_u8, &pause, Restore::OnRelease);
-    let held = actions.perform(2_u8, &pause, Restore::OnRelease);
+    let paused = actions.perform(1_u8, &pause, Restore::OnRelease, "Example.exe");
+    let held = actions.perform(2_u8, &pause, Restore::OnRelease, "Example.exe");
     thread::sleep(SETTLE);
     let while_paused = playing(actions.controls());
     let first_release = actions.release(1);
@@ -133,7 +133,7 @@ fn lowers_and_restores_the_player_volume() {
         target: VolumeTarget::App(player().expect("APPYTAPPY_TEST_PLAYER names the player")),
         level: VolumeLevel::from_percent(20).expect("at most 100"),
     };
-    let lowered = actions.perform(0_u8, &lower, Restore::OnRelease);
+    let lowered = actions.perform(0_u8, &lower, Restore::OnRelease, "Example.exe");
     let while_lowered = levels(actions.controls());
     thread::sleep(SETTLE);
     actions.release(0).expect("the volume goes back");

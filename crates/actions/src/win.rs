@@ -6,7 +6,8 @@
 //! Volumes come from Core Audio on the default playback device. Naming an
 //! audio session's app takes a process snapshot, which never opens a process,
 //! so no action opens a watched app's process. Key presses go through
-//! `SendInput`, which types into whichever window has the keyboard focus.
+//! `SendInput`, which types into whichever window has the keyboard focus;
+//! that window's executable comes from the same process snapshot.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -16,7 +17,7 @@ use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use appytappy_config::action::{Key, KeyChord, MediaCommand, Modifier, VolumeLevel};
+use appytappy_config::action::{Key, MediaCommand, Modifier, VolumeLevel};
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
@@ -35,15 +36,17 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-    KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VIRTUAL_KEY, VK_BACK, VK_DELETE,
-    VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU,
-    VK_LSHIFT, VK_LWIN, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput,
+    VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME,
+    VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR,
+    VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 use windows::core::{GUID, IUnknown, Interface, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
-use crate::{Controls, MediaSession, Stroke, Volume, strokes};
+use crate::{Controls, MediaSession, Stroke, Volume};
 
 /// How long a media request may take before it counts as failed, so an app
 /// that hangs cannot stall the action worker.
@@ -294,38 +297,67 @@ impl Controls for WindowsControls {
         Ok(())
     }
 
-    fn press_keys(&mut self, keys: &KeyChord) -> io::Result<()> {
-        let pressed: Vec<INPUT> = strokes(keys).into_iter().map(input).collect();
-        if send_input(&pressed)? {
-            return Ok(());
+    fn focused_executable(&mut self) -> io::Result<Option<String>> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes no arguments.
+        let window = unsafe { GetForegroundWindow() };
+        if window.is_invalid() {
+            return Ok(None);
         }
-        let error = io::Error::last_os_error();
-        // Windows took only some of the keys, so let go of every one of them
-        // rather than leave a modifier held down.
-        let released: Vec<INPUT> = strokes(keys)
+        let mut process = 0_u32;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `window` came from Windows, and `process` outlives the call.
+        unsafe {
+            GetWindowThreadProcessId(window, Some(&raw mut process))
+        };
+        if process == 0 {
+            return Ok(None);
+        }
+        Ok(executables()?.remove(&process))
+    }
+
+    fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
+        Ok(Modifier::ALL
             .into_iter()
-            .filter_map(|stroke| match stroke {
-                Stroke::Modifier(_, false) | Stroke::Key(_, false) => Some(input(stroke)),
-                Stroke::Modifier(_, true) | Stroke::Key(_, true) => None,
+            .filter(|&modifier| {
+                held_keys(modifier).iter().any(|key| {
+                    #[expect(unsafe_code, reason = "a Win32 call")]
+                    // SAFETY: the call takes one integer and reads no memory.
+                    let state = unsafe { GetAsyncKeyState(i32::from(key.0)) };
+                    // The high bit is set while the key is down.
+                    state < 0
+                })
             })
-            .collect();
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "the press already failed, and its error says why"
-        )]
-        let _ = send_input(&released);
-        Err(error)
+            .collect())
+    }
+
+    fn send_strokes(&mut self, strokes: &[Stroke]) -> io::Result<usize> {
+        if strokes.is_empty() {
+            return Ok(0);
+        }
+        let inputs: Vec<INPUT> = strokes.iter().copied().map(input).collect();
+        let size = i32::try_from(size_of::<INPUT>()).map_err(io::Error::other)?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the slice holds initialized keyboard inputs, and `size` is
+        // the size of one, as the call requires.
+        let sent = unsafe { SendInput(&inputs, size) };
+        Ok(usize::try_from(sent).unwrap_or(0))
+    }
+
+    fn hold(&mut self, time: Duration) {
+        thread::sleep(time);
     }
 }
 
-/// Sends `inputs` as one batch. Answers whether Windows took all of them.
-fn send_input(inputs: &[INPUT]) -> io::Result<bool> {
-    let size = i32::try_from(size_of::<INPUT>()).map_err(io::Error::other)?;
-    #[expect(unsafe_code, reason = "a Win32 call")]
-    // SAFETY: the slice holds initialized keyboard inputs, and `size` is the
-    // size of one, as the call requires.
-    let sent = unsafe { SendInput(inputs, size) };
-    Ok(usize::try_from(sent).is_ok_and(|sent| sent == inputs.len()))
+/// The keys that count as `modifier` held down: either Ctrl, Alt, or
+/// Shift, and either Windows key.
+const fn held_keys(modifier: Modifier) -> &'static [VIRTUAL_KEY] {
+    match modifier {
+        Modifier::Ctrl => &[VK_CONTROL],
+        Modifier::Alt => &[VK_MENU],
+        Modifier::Shift => &[VK_SHIFT],
+        Modifier::Win => &[VK_LWIN, VK_RWIN],
+    }
 }
 
 /// The keyboard input for one stroke. It names the key both by its virtual

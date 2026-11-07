@@ -412,7 +412,22 @@ impl appytappy_actions::Controls for NoControls {
     }
 
     #[mutants::skip]
-    fn press_keys(&mut self, _keys: &appytappy_config::action::KeyChord) -> io::Result<()> {
+    fn focused_executable(&mut self) -> io::Result<Option<String>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn held_modifiers(&mut self) -> io::Result<Vec<appytappy_config::action::Modifier>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn send_strokes(&mut self, _strokes: &[appytappy_actions::Stroke]) -> io::Result<usize> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn hold(&mut self, _time: std::time::Duration) {
         match self.0 {}
     }
 }
@@ -825,6 +840,7 @@ mod tests {
             Order::Act(act::Job::Run {
                 owner,
                 automation: "Mute".to_owned(),
+                executable: "Example.exe".to_owned(),
                 actions: Box::new([]),
                 restore: appytappy_config::rule::Restore::OnRelease,
             }),

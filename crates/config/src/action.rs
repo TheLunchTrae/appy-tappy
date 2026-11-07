@@ -116,8 +116,9 @@ pub enum VolumeTarget {
 
 /// A key that a key press presses after its modifiers.
 ///
-/// Only [`KeyChord::parse`] makes one, so a letter is always `A` to `Z`, a
-/// digit `0` to `9`, and a function key `F1` to `F24`.
+/// A [`KeyChord`] holds only keys that [`KeyChord::parse`] read, so its
+/// letter is always `A` to `Z`, its digit `0` to `9`, and its function key
+/// `F1` to `F24`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     /// A letter key, `A` to `Z`.

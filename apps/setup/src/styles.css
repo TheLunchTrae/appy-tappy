@@ -862,7 +862,7 @@ select {
   gap: 4px;
 }
 
-/* The keys field takes the target and application columns, and the level column stays empty. */
+/* The keys field takes the target, application and level columns. */
 .keys-field {
   grid-column: span 3;
   display: flex;
@@ -879,6 +879,11 @@ select {
 .btn.recording {
   border-color: var(--capture);
   color: var(--capture);
+}
+
+/* The anti-cheat menu is as wide as its longest choice, not the whole column. */
+.table select.input {
+  width: auto;
 }
 
 .confirm-none {

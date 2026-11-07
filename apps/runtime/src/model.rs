@@ -66,6 +66,8 @@ struct Running {
     id: SessionId,
     plan: Arc<AppPlan>,
     session: Session,
+    /// The executable of the process the session follows.
+    executable: String,
 }
 
 /// The owner thread's state.
@@ -211,7 +213,7 @@ impl Model {
             return Vec::new();
         };
         let effects = running.session.sample(signal, value, at);
-        acts(id, &running.plan, effects)
+        acts(id, &running.plan, &running.executable, effects)
     }
 
     /// Forgets the values a session's reader can no longer see. Each rule
@@ -244,10 +246,18 @@ impl Model {
             plan: Arc::clone(plan),
             executable: attached.executable.clone(),
         })];
-        orders.extend(acts(id, plan, effects));
+        let executable = attached.executable.clone();
+        orders.extend(acts(id, plan, &executable, effects));
         let plan = Arc::clone(plan);
-        self.running
-            .insert(app.to_owned(), Running { id, plan, session });
+        self.running.insert(
+            app.to_owned(),
+            Running {
+                id,
+                plan,
+                session,
+                executable,
+            },
+        );
         orders
     }
 
@@ -262,7 +272,12 @@ impl Model {
         };
         let name = running.plan.name.clone();
         let mut orders = vec![Order::StopReading(running.id, name)];
-        orders.extend(acts(running.id, &running.plan, effects));
+        orders.extend(acts(
+            running.id,
+            &running.plan,
+            &running.executable,
+            effects,
+        ));
         orders
     }
 }
@@ -288,7 +303,7 @@ enum Stop {
 }
 
 /// The action jobs for a session's `effects`.
-fn acts(id: SessionId, plan: &AppPlan, effects: Vec<Effect>) -> Vec<Order> {
+fn acts(id: SessionId, plan: &AppPlan, executable: &str, effects: Vec<Effect>) -> Vec<Order> {
     effects
         .into_iter()
         .filter_map(|effect| {
@@ -301,6 +316,7 @@ fn acts(id: SessionId, plan: &AppPlan, effects: Vec<Effect>) -> Vec<Order> {
                     Job::Run {
                         owner,
                         automation,
+                        executable: executable.to_owned(),
                         actions: fired.actions().into(),
                         restore: fired.restore(),
                     }
@@ -565,6 +581,7 @@ mod tests {
             [Order::Act(Job::Run {
                 owner: (SessionId(0), RuleIndex(0)),
                 automation: "Pause A".to_owned(),
+                executable: "Example.exe".to_owned(),
                 actions: pause(),
                 restore: Restore::OnRelease,
             })]

@@ -14,6 +14,7 @@ import type {
   ValueDef,
   WhenDef,
 } from './api.ts';
+import { spellKeys } from './shortcut.ts';
 
 /** What a value reads: a number, or yes or no. */
 export type ValueKind = 'number' | 'flag';
@@ -324,8 +325,13 @@ function typedNumber(text: string): number | null {
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
   if (draft.kind === 'keys') {
-    const keys = draft.keys.trim();
-    return keys === '' ? `Choose the keys for action ${position} to press.` : { kind: 'keys', keys };
+    if (draft.keys.trim() === '') {
+      return `Choose the keys for action ${position} to press.`;
+    }
+    const keys = spellKeys(draft.keys);
+    return keys === null
+      ? `Spell the keys for action ${position} as any of Ctrl, Alt, Shift and Win, then one key such as M, 5, F9, Space or Enter, joined by +, such as Ctrl+Shift+M.`
+      : { kind: 'keys', keys };
   }
   const app = draft.target === 'app' ? draft.app.trim() : null;
   if (app === '') {

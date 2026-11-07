@@ -20,7 +20,7 @@ way. Issues [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16) and
   below.
 - **Applications** lists how each saved application's window is recognized,
   its anti-cheat class, and how many of its windows are open. The anti-cheat
-  class is picked from a menu: not set, none, user-mode, or kernel-level.
+  class is picked from a menu: not set, user-mode, kernel-level, or none.
   Only none lets automations press keys into the application, so picking it
   asks first and warns that pressing keys into an application with
   anti-cheat can get the user's account banned.
@@ -77,9 +77,11 @@ value, and any number of automations can watch the same one.
    executable, such as `Player.exe`. The open windows' executables are
    offered as suggestions. A key press action presses keys such as
    `Ctrl+Shift+M`, typed or recorded with **Record**, which takes the next
-   keys pressed, Tab and Escape included. Keys go to the window that has the
-   keyboard focus, and only into an application whose anti-cheat is set to
-   none on the Applications page ([Key presses](actions.md#key-presses)).
+   keys pressed, Tab included; Escape stops recording, so type `Escape` to
+   press it. A letter is recorded as the keyboard layout types it. Keys are
+   pressed only while the watched application is in front, and only into an
+   application whose anti-cheat is set to none on the Applications page
+   ([Key presses](actions.md#key-presses)).
 4. **Afterwards.** With **Undo these when the condition stops being true**,
    paused media plays again, started media pauses again, and each volume goes
    back. A skipped track cannot be unskipped and pressed keys cannot be
@@ -142,7 +144,7 @@ cropped to the region, and a picture check's reference.
     "executable": "Example.exe",
     "priority": "titleElseExecutable"
   },
-  "antiCheat": "unknown",
+  "antiCheat": "none",
   "values": [
     {
       "id": "progress",

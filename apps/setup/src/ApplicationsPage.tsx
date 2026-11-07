@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { type AntiCheat, type AppSummary, errorText, setAntiCheat } from './api.ts';
 import { ANTI_CHEAT_NAMES, PRIORITY_NAMES } from './describe.ts';
 import { background } from './repeat.ts';
 
-/** The anti-cheat menu's choices, with not set first since every application starts there. */
-const ANTI_CHEAT_CHOICES: readonly AntiCheat[] = ['unknown', 'none', 'userMode', 'kernelLevel'];
+/**
+ * The anti-cheat menu's choices: not set first, since every application starts there, and none last,
+ * so stepping through the menu with the arrow keys reaches every other choice before the one that asks.
+ */
+const ANTI_CHEAT_CHOICES: readonly AntiCheat[] = ['unknown', 'userMode', 'kernelLevel', 'none'];
 
 interface AntiCheatCellProps {
   readonly name: string;
@@ -20,15 +23,35 @@ interface AntiCheatCellProps {
  * press keys into it, so picking None asks first.
  */
 function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCheatCellProps) {
+  const keep = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLSelectElement>(null);
+  const asked = useRef(false);
+  const warning = useId();
+  // The question takes the menu's place, so focus moves to its safe answer, and back to the menu after.
+  useEffect(() => {
+    if (confirming) {
+      asked.current = true;
+      keep.current?.focus();
+    } else if (asked.current) {
+      asked.current = false;
+      menu.current?.focus();
+    }
+  }, [confirming]);
   if (confirming) {
     return (
-      <span className="confirm-none">
-        <span className="warn">
+      <span
+        className="confirm-none"
+        role="alertdialog"
+        aria-label={`Set ${name}'s anti-cheat to None?`}
+        aria-describedby={warning}
+      >
+        <span id={warning} className="warn">
           Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat can get your
           account banned.
         </span>
         <span className="confirm">
           <button
+            ref={keep}
             type="button"
             className="btn small"
             onClick={() => {
@@ -52,6 +75,7 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCh
   }
   return (
     <select
+      ref={menu}
       className="input"
       aria-label={`${name}: anti-cheat`}
       value={antiCheat}

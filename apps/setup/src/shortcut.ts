@@ -94,12 +94,18 @@ const ACTION_KEYS: Readonly<Record<string, string>> = {
   ArrowRight: 'Right',
 };
 
+/** A key press as a recording reads it: the key's place, and the character it types. */
+export interface TypedKeyPress extends KeyPress {
+  readonly key: string;
+}
+
 /**
  * The keys `press` presses, as a key press action spells them, such as `Ctrl+Shift+M`, or null for a
- * modifier alone or a key that an action cannot press.
+ * modifier alone or a key that an action cannot press. A letter is the one the keyboard layout types,
+ * not the one in that place on an English keyboard, because the runtime presses the letter.
  */
-export function actionKeys(press: KeyPress): string | null {
-  const letter = /^Key([A-Z])$/u.exec(press.code)?.[1];
+export function actionKeys(press: TypedKeyPress): string | null {
+  const letter = /^[a-z]$/iu.test(press.key) ? press.key.toUpperCase() : /^Key([A-Z])$/u.exec(press.code)?.[1];
   const digit = /^Digit(\d)$/u.exec(press.code)?.[1];
   const function_ = /^F([1-9]|1\d|2[0-4])$/u.test(press.code) ? press.code : undefined;
   const found = letter ?? digit ?? function_ ?? ACTION_KEYS[press.code];
@@ -115,4 +121,47 @@ export function actionKeys(press: KeyPress): string | null {
   ]
     .filter((part) => part !== null)
     .join('+');
+}
+
+const MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Win'] as const;
+
+/** The names of the keys a key press action can press besides letters, digits and function keys. */
+const NAMED_ACTION_KEYS: readonly string[] = Object.values(ACTION_KEYS);
+
+/** One key's name as an action spells it, or null when an action cannot press it. */
+function keyName(name: string): string | null {
+  if (/^[a-z0-9]$/iu.test(name)) {
+    return name.toUpperCase();
+  }
+  const function_ = /^f([1-9]\d*)$/iu.exec(name)?.[1];
+  if (function_ !== undefined) {
+    return Number(function_) <= 24 ? `F${function_}` : null;
+  }
+  return NAMED_ACTION_KEYS.find((named) => named.toLowerCase() === name.toLowerCase()) ?? null;
+}
+
+/**
+ * `text` in the one spelling a key press action is saved in, such as `Ctrl+Shift+M`, or null when it
+ * is not any of Ctrl, Alt, Shift and Win then one key, joined by `+`. It reads the keys as the
+ * runtime does: ignoring case and the spaces around each part.
+ */
+export function spellKeys(text: string): string | null {
+  const held = new Set<string>();
+  let key: string | null = null;
+  for (const part of text.split('+').map((name) => name.trim())) {
+    const modifier = MODIFIERS.find((name) => name.toLowerCase() === part.toLowerCase());
+    if (key !== null || (modifier !== undefined && held.has(modifier))) {
+      // The key comes last, and each modifier once.
+      return null;
+    }
+    if (modifier === undefined) {
+      key = keyName(part);
+      if (key === null) {
+        return null;
+      }
+    } else {
+      held.add(modifier);
+    }
+  }
+  return key === null ? null : [...MODIFIERS.filter((name) => held.has(name)), key].join('+');
 }

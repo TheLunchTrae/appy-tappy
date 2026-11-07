@@ -213,13 +213,6 @@ pub enum ActionDef {
 }
 
 impl ActionDef {
-    /// Whether the action sends input that anti-cheat can see; see
-    /// [`Action::injects_input`].
-    #[must_use]
-    pub const fn injects_input(&self) -> bool {
-        matches!(self, Self::Keys { .. })
-    }
-
     /// The action this describes.
     ///
     /// # Errors
@@ -340,8 +333,13 @@ impl AutomationDef {
         let Some(value) = app.values.iter().find(|value| value.id == self.when.value) else {
             return Err(format!("{} no longer has the value it watches", app.name));
         };
-        if self.actions.iter().any(ActionDef::injects_input)
-            && !allows_input(AntiCheatClass::from(app.anti_cheat))
+        // Read from the action itself, so a new kind of action that sends
+        // input is covered as soon as `Action::injects_input` names it.
+        if self.actions.iter().any(|action| {
+            action
+                .to_action()
+                .is_ok_and(|action| action.injects_input())
+        }) && !allows_input(AntiCheatClass::from(app.anti_cheat))
         {
             return Err(format!(
                 "it presses keys, which anti-cheat can treat as cheating, so it can run only once \
@@ -799,7 +797,6 @@ mod tests {
     fn keys_are_spelled_as_text_and_read_as_a_key_press() {
         let json = r#"{"kind":"keys","keys":"ctrl+shift+m"}"#;
         let keys: ActionDef = serde_json::from_str(json).expect("valid");
-        assert!(keys.injects_input());
         assert_eq!(
             keys.to_action(),
             Ok(Action::PressKeys(
@@ -810,13 +807,6 @@ mod tests {
             serde_json::to_string(&keys).expect("serializes"),
             json,
             "the file keeps the keys as written"
-        );
-        assert!(
-            !ActionDef::Volume {
-                percent: 5,
-                app: None
-            }
-            .injects_input()
         );
     }
 

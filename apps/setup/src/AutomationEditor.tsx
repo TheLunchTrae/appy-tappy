@@ -53,9 +53,13 @@ interface KeysFieldProps {
   readonly onChange: (keys: string) => void;
 }
 
-/** The keys an action presses: typed, such as `Ctrl+Shift+M`, or recorded from the next keys pressed. */
+/**
+ * The keys an action presses: typed, such as `Ctrl+Shift+M`, or recorded from the next keys pressed.
+ * While it records, every key but Escape goes to the recording, Tab included; Escape stops it.
+ */
 function KeysField({ label, keys, onChange }: KeysFieldProps) {
   const [recording, setRecording] = useState(false);
+  const [heard, setHeard] = useState('');
   return (
     <span className="keys-field">
       <input
@@ -71,9 +75,10 @@ function KeysField({ label, keys, onChange }: KeysFieldProps) {
         type="button"
         className={recording ? 'btn small recording' : 'btn small'}
         aria-pressed={recording}
-        aria-label={recording ? `${label}: press the keys to record` : `Record the keys for ${label.toLowerCase()}`}
+        aria-label={`Record the keys for ${label.toLowerCase()}`}
         onClick={() => {
           setRecording((now) => !now);
+          setHeard(recording ? '' : 'Press the keys to record, or Escape to stop.');
         }}
         onBlur={() => {
           setRecording(false);
@@ -82,17 +87,33 @@ function KeysField({ label, keys, onChange }: KeysFieldProps) {
           if (!recording) {
             return;
           }
-          // Every key goes to the recording, Tab and Escape too, until one that an action can press.
           event.preventDefault();
-          const pressed = actionKeys(event);
-          if (pressed !== null) {
-            onChange(pressed);
-            setRecording(false);
+          if (event.repeat) {
+            return;
           }
+          if (event.key === 'Escape') {
+            setRecording(false);
+            setHeard('Stopped recording.');
+            return;
+          }
+          const pressed = actionKeys(event);
+          if (pressed === null) {
+            // A modifier alone waits for its key; any other key cannot be pressed by an action.
+            if (!['Control', 'Alt', 'Shift', 'Meta', 'AltGraph'].includes(event.key)) {
+              setHeard('An action cannot press that key. Try another, or Escape to stop.');
+            }
+            return;
+          }
+          onChange(pressed);
+          setRecording(false);
+          setHeard(`Recorded ${pressed}.`);
         }}
       >
         {recording ? 'Press the keys' : 'Record'}
       </button>
+      <span className="visually-hidden" role="status">
+        {heard}
+      </span>
     </span>
   );
 }
@@ -529,8 +550,8 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
           {keysWarning === null ? null : <p className="warn">{keysWarning}</p>}
           {pressesKeys ? (
             <p className="note">
-              Keys go to the window that has the keyboard focus, so they reach the application only while it is in
-              front.
+              Keys are pressed only while {choice?.appName ?? 'the application'} is the window in front, so they never
+              reach another application.
             </p>
           ) : null}
           <button

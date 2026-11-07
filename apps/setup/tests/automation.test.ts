@@ -266,7 +266,7 @@ describe('key presses', () => {
     expect(buildAutomation(draft, valueChoices(free), 'pause_music')).toEqual({ ok: true, automation: pressKeys });
   });
 
-  test('need keys, trimmed as typed', () => {
+  test('need keys an action can press, in the one spelling the file keeps', () => {
     const draft = toDraft(pressKeys);
     const typed = (keys: string): ReturnType<typeof buildAutomation> =>
       buildAutomation(
@@ -275,7 +275,11 @@ describe('key presses', () => {
         'pause_music',
       );
     expect(typed('  ')).toEqual({ ok: false, next: 'Choose the keys for action 1 to press.' });
-    expect(typed(' Ctrl+M ')).toEqual({
+    expect(typed('Ctrl+Mute')).toEqual({
+      ok: false,
+      next: 'Spell the keys for action 1 as any of Ctrl, Alt, Shift and Win, then one key such as M, 5, F9, Space or Enter, joined by +, such as Ctrl+Shift+M.',
+    });
+    expect(typed(' ctrl + m ')).toEqual({
       ok: true,
       automation: { ...pressKeys, actions: [{ kind: 'keys', keys: 'Ctrl+M' }] },
     });
