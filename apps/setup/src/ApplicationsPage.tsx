@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { type AntiCheat, type AppSummary, errorText, setAntiCheat } from './api.ts';
 import { ANTI_CHEAT_NAMES, PRIORITY_NAMES } from './describe.ts';
@@ -25,21 +25,38 @@ interface AntiCheatCellProps {
 function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCheatCellProps) {
   const keep = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLSelectElement>(null);
-  const asked = useRef(false);
+  const question = useRef<HTMLSpanElement>(null);
+  // Whether focus was in the question when it went, so it comes back to the menu only then.
+  const hadFocus = useRef(false);
   const warning = useId();
   // The question takes the menu's place, so focus moves to its safe answer, and back to the menu after.
   useEffect(() => {
     if (confirming) {
-      asked.current = true;
       keep.current?.focus();
-    } else if (asked.current) {
-      asked.current = false;
+    } else if (hadFocus.current) {
+      hadFocus.current = false;
       menu.current?.focus();
     }
   }, [confirming]);
+  const answer = (set: boolean): void => {
+    hadFocus.current = question.current?.contains(document.activeElement) ?? false;
+    if (set) {
+      onSet('none');
+    } else {
+      onConfirm(false);
+    }
+  };
+  // Escape is the same as Keep, on either answer.
+  const escape = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      answer(false);
+    }
+  };
   if (confirming) {
     return (
       <span
+        ref={question}
         className="confirm-none"
         role="alertdialog"
         aria-label={`Set ${name}'s anti-cheat to None?`}
@@ -54,8 +71,9 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCh
             ref={keep}
             type="button"
             className="btn small"
+            onKeyDown={escape}
             onClick={() => {
-              onConfirm(false);
+              answer(false);
             }}
           >
             Keep {ANTI_CHEAT_NAMES[antiCheat]}
@@ -63,8 +81,9 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCh
           <button
             type="button"
             className="btn small danger"
+            onKeyDown={escape}
             onClick={() => {
-              onSet('none');
+              answer(true);
             }}
           >
             Set to None

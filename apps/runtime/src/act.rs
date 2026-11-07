@@ -9,7 +9,7 @@
 use std::io;
 use std::sync::mpsc::{Receiver, Sender};
 
-use appytappy_actions::{Actions, Controls};
+use appytappy_actions::{Actions, Controls, Watched};
 use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
 use appytappy_engine::RuleIndex;
@@ -29,10 +29,9 @@ pub(crate) enum Job {
         owner: Owner,
         /// Its name, for the log.
         automation: String,
-        /// The executable of the process its session follows, such as
-        /// `Example.exe`: a key press presses keys only while that
-        /// application is in front.
-        executable: String,
+        /// The process its session follows: a key press presses keys only
+        /// while that process's window is in front.
+        watched: Watched,
         /// Its actions.
         actions: Box<[Action]>,
         /// Whether its changes are undone when it is released.
@@ -78,14 +77,14 @@ pub(crate) fn run<C, E>(
             Job::Run {
                 owner,
                 automation,
-                executable,
+                watched,
                 actions: steps,
                 restore,
             } => steps
                 .iter()
                 .enumerate()
                 .filter_map(|(position, step)| {
-                    let error = actions.perform(owner, step, restore, &executable).err()?;
+                    let error = actions.perform(owner, step, restore, &watched).err()?;
                     Some(format!(
                         "{automation}: action {} failed: {error}",
                         position.saturating_add(1)
@@ -116,6 +115,7 @@ mod tests {
     use appytappy_config::action::{
         MediaCommand, MediaTarget, Modifier, VolumeLevel, VolumeTarget,
     };
+    use appytappy_config::anti_cheat::ProcessId;
 
     use super::*;
 
@@ -159,8 +159,8 @@ mod tests {
             Ok(())
         }
 
-        fn focused_executable(&mut self) -> io::Result<Option<String>> {
-            Ok(Some("Example.exe".to_owned()))
+        fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
+            Ok(None)
         }
 
         fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
@@ -196,7 +196,10 @@ mod tests {
         jobs.send(Job::Run {
             owner: OWNER,
             automation: "Pause near the end".to_owned(),
-            executable: "Example.exe".to_owned(),
+            watched: Watched {
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
             actions: pause_then_mute(),
             restore: Restore::OnRelease,
         })

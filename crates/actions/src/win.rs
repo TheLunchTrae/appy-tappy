@@ -6,8 +6,8 @@
 //! Volumes come from Core Audio on the default playback device. Naming an
 //! audio session's app takes a process snapshot, which never opens a process,
 //! so no action opens a watched app's process. Key presses go through
-//! `SendInput`, which types into whichever window has the keyboard focus;
-//! that window's executable comes from the same process snapshot.
+//! `SendInput`, which types into whichever window has the keyboard focus,
+//! after asking which process that window belongs to.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -18,6 +18,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use appytappy_config::action::{Key, MediaCommand, Modifier, VolumeLevel};
+use appytappy_config::anti_cheat::ProcessId;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
@@ -297,7 +298,7 @@ impl Controls for WindowsControls {
         Ok(())
     }
 
-    fn focused_executable(&mut self) -> io::Result<Option<String>> {
+    fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: the call takes no arguments.
         let window = unsafe { GetForegroundWindow() };
@@ -310,10 +311,7 @@ impl Controls for WindowsControls {
         unsafe {
             GetWindowThreadProcessId(window, Some(&raw mut process))
         };
-        if process == 0 {
-            return Ok(None);
-        }
-        Ok(executables()?.remove(&process))
+        Ok((process != 0).then(|| ProcessId::new(process)))
     }
 
     fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {

@@ -412,7 +412,7 @@ impl appytappy_actions::Controls for NoControls {
     }
 
     #[mutants::skip]
-    fn focused_executable(&mut self) -> io::Result<Option<String>> {
+    fn focused_process(&mut self) -> io::Result<Option<appytappy_config::anti_cheat::ProcessId>> {
         match self.0 {}
     }
 
@@ -840,7 +840,10 @@ mod tests {
             Order::Act(act::Job::Run {
                 owner,
                 automation: "Mute".to_owned(),
-                executable: "Example.exe".to_owned(),
+                watched: appytappy_actions::Watched {
+                    process: appytappy_config::anti_cheat::ProcessId::new(1),
+                    executable: "Example.exe".to_owned(),
+                },
                 actions: Box::new([]),
                 restore: appytappy_config::rule::Restore::OnRelease,
             }),

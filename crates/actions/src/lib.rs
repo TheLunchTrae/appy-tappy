@@ -17,6 +17,7 @@ use std::time::Duration;
 use appytappy_config::action::{
     Action, Key, KeyChord, MediaCommand, MediaTarget, Modifier, VolumeLevel, VolumeTarget,
 };
+use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::rule::Restore;
 
 #[cfg(windows)]
@@ -40,6 +41,17 @@ pub struct Volume<K> {
     pub key: K,
     /// Its level now.
     pub level: VolumeLevel,
+}
+
+/// The application whose automation runs an action: the process its session
+/// follows, and that process's executable, such as `Example.exe`. A key
+/// press presses keys only into that process's window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Watched {
+    /// The process.
+    pub process: ProcessId,
+    /// Its executable, for messages.
+    pub executable: String,
 }
 
 /// The operating system controls that actions use. Each method lists what
@@ -96,14 +108,13 @@ pub trait Controls {
     /// gone.
     fn set_volume(&mut self, control: &Self::Volume, level: VolumeLevel) -> io::Result<()>;
 
-    /// The executable of the process whose window has the keyboard focus,
-    /// such as `Example.exe`, or `None` when no window has it. It takes a
-    /// process snapshot, so it never opens that process.
+    /// The process whose window has the keyboard focus, or `None` when no
+    /// window has it.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error.
-    fn focused_executable(&mut self) -> io::Result<Option<String>>;
+    fn focused_process(&mut self) -> io::Result<Option<ProcessId>>;
 
     /// The modifiers the user is holding down now.
     ///
@@ -114,8 +125,7 @@ pub trait Controls {
 
     /// Sends `strokes`, in order, to whichever window has the keyboard
     /// focus. Answers how many of them the operating system took, from the
-    /// first; it can take fewer, such as when that window runs as
-    /// administrator.
+    /// first; it takes fewer when another program blocks input.
     ///
     /// # Errors
     ///
@@ -288,10 +298,9 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
     ///
     /// # Errors
     ///
-    /// A key press presses its keys only while a window of `watched`, the
-    /// executable of the application whose automation runs it, has the
-    /// keyboard focus, because that is the application whose anti-cheat was
-    /// checked. Otherwise it fails and presses nothing.
+    /// A key press presses its keys only while a window of `watched`'s
+    /// process has the keyboard focus, because that is the application whose
+    /// anti-cheat was checked. Otherwise it fails and presses nothing.
     ///
     /// # Errors
     ///
@@ -303,7 +312,7 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         owner: O,
         action: &Action,
         restore: Restore,
-        watched: &str,
+        watched: &Watched,
     ) -> Result<(), ActionError> {
         let restores = restore == Restore::OnRelease;
         match action {
@@ -347,10 +356,9 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
 
     /// Presses `keys` into `watched`'s window, if it has the keyboard focus.
     /// Every key that went down goes up again, even when Windows drops some.
-    fn press(&mut self, keys: &KeyChord, watched: &str) -> Result<(), ActionError> {
-        let focused = self.controls.focused_executable()?;
-        if !focused.is_some_and(|focused| focused.eq_ignore_ascii_case(watched)) {
-            return Err(ActionError::NotInFront(watched.to_owned()));
+    fn press(&mut self, keys: &KeyChord, watched: &Watched) -> Result<(), ActionError> {
+        if self.controls.focused_process()? != Some(watched.process) {
+            return Err(ActionError::NotInFront(watched.executable.clone()));
         }
         let held = self.controls.held_modifiers()?;
         let (down, up) = strokes(keys, &held);
@@ -375,17 +383,23 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
             });
         }
         self.controls.hold(HOLD);
-        let sent = self.controls.send_strokes(&up)?;
+        // A key left down would stay down for the user, so whatever did not
+        // come up gets one more try, whether Windows dropped it or failed.
+        let (sent, failed) = match self.controls.send_strokes(&up) {
+            Ok(sent) => (sent, None),
+            Err(error) => (0, Some(error)),
+        };
         if sent < up.len() {
-            // A key left down would stay down for the user, so the rest get
-            // one more try.
             let rest = up.get(sent..).unwrap_or_default();
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "the release already failed, and its error says why"
             )]
             let _ = self.controls.send_strokes(rest);
-            return Err(ActionError::KeysDropped { sent, of: up.len() });
+            return Err(failed.map_or(
+                ActionError::KeysDropped { sent, of: up.len() },
+                ActionError::Os,
+            ));
         }
         Ok(())
     }
@@ -545,11 +559,9 @@ impl fmt::Display for ActionError {
                 formatter,
                 "the keys were not pressed, because {watched} was not the window in front"
             ),
-            Self::KeysDropped { sent, of } => write!(
-                formatter,
-                "Windows took only {sent} of {of} key events, as it does when the window in front \
-                 runs as administrator"
-            ),
+            Self::KeysDropped { sent, of } => {
+                write!(formatter, "Windows took only {sent} of {of} key events")
+            },
             Self::Os(error) => write!(formatter, "the operating system failed: {error}"),
         }
     }
@@ -590,7 +602,7 @@ mod tests {
         system: Option<Volume<&'static str>>,
         apps: Vec<(String, Volume<&'static str>)>,
         broken: Option<&'static str>,
-        focused: Option<&'static str>,
+        focused: Option<u32>,
         held: Vec<Modifier>,
         /// How many strokes each next send takes, first first; once it runs
         /// out, a send takes them all.
@@ -656,8 +668,8 @@ mod tests {
             Ok(())
         }
 
-        fn focused_executable(&mut self) -> io::Result<Option<String>> {
-            Ok(self.focused.map(str::to_owned))
+        fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
+            Ok(self.focused.map(ProcessId::new))
         }
 
         fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
@@ -719,6 +731,13 @@ mod tests {
     }
 
     /// A media player as session 1, current, and playing or not.
+    fn watched() -> Watched {
+        Watched {
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        }
+    }
+
     fn player(playing: bool) -> Actions<char, Fake> {
         Actions::new(Fake {
             sessions: vec![session(1, "Player.exe", playing)],
@@ -766,7 +785,7 @@ mod tests {
         let mut actions = player(true);
         let pause = current(MediaCommand::Pause);
         actions
-            .perform('a', &pause, Restore::OnRelease, "Example.exe")
+            .perform('a', &pause, Restore::OnRelease, &watched())
             .expect("paused");
         assert!(!actions.controls().playing(1));
         actions.release('a').expect("resumed");
@@ -775,7 +794,7 @@ mod tests {
         let mut actions = player(false);
         let play = current(MediaCommand::Play);
         actions
-            .perform('a', &play, Restore::OnRelease, "Example.exe")
+            .perform('a', &play, Restore::OnRelease, &watched())
             .expect("played");
         assert!(actions.controls().playing(1));
         actions.release('a').expect("paused");
@@ -788,7 +807,7 @@ mod tests {
         let mut actions = player(false);
         let pause = current(MediaCommand::Pause);
         actions
-            .perform('a', &pause, Restore::OnRelease, "Example.exe")
+            .perform('a', &pause, Restore::OnRelease, &watched())
             .expect("nothing to do");
         actions.release('a').expect("nothing to undo");
         assert_eq!(actions.controls().log, [] as [String; 0]);
@@ -800,10 +819,10 @@ mod tests {
         for order in [['a', 'b'], ['b', 'a']] {
             let mut actions = player(true);
             actions
-                .perform('a', &pause, Restore::OnRelease, "Example.exe")
+                .perform('a', &pause, Restore::OnRelease, &watched())
                 .expect("paused");
             actions
-                .perform('b', &pause, Restore::OnRelease, "Example.exe")
+                .perform('b', &pause, Restore::OnRelease, &watched())
                 .expect("already paused");
             actions.release(order[0]).expect("first release");
             assert!(!actions.controls().playing(1), "{order:?}");
@@ -822,11 +841,11 @@ mod tests {
                     'a',
                     &volume(VolumeTarget::System, 20),
                     Restore::OnRelease,
-                    "Example.exe",
+                    &watched(),
                 )
                 .expect("set");
             actions
-                .perform('b', &system(), Restore::OnRelease, "Example.exe")
+                .perform('b', &system(), Restore::OnRelease, &watched())
                 .expect("set");
             actions.release(order[0]).expect("first release");
             let held = if order[0] == 'a' { 0 } else { 20 };
@@ -863,7 +882,7 @@ mod tests {
                 'a',
                 &volume(VolumeTarget::System, 20),
                 Restore::OnRelease,
-                "Example.exe",
+                &watched(),
             )
             .expect("set");
         actions
@@ -871,12 +890,12 @@ mod tests {
                 'a',
                 &current(MediaCommand::Pause),
                 Restore::OnRelease,
-                "Example.exe",
+                &watched(),
             )
             .expect("paused");
         let player = VolumeTarget::App(app("Player.exe"));
         actions
-            .perform('b', &volume(player, 10), Restore::OnRelease, "Example.exe")
+            .perform('b', &volume(player, 10), Restore::OnRelease, &watched())
             .expect("set");
         actions.release('a').expect("released");
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
@@ -892,7 +911,7 @@ mod tests {
                 'a',
                 &volume(VolumeTarget::System, 80),
                 Restore::OnRelease,
-                "Example.exe",
+                &watched(),
             )
             .expect("set");
         actions.release('a').expect("nothing to undo");
@@ -908,7 +927,7 @@ mod tests {
                     'a',
                     &volume(VolumeTarget::System, level),
                     Restore::OnRelease,
-                    "Example.exe",
+                    &watched(),
                 )
                 .expect("set");
         }
@@ -933,7 +952,7 @@ mod tests {
                 'a',
                 &volume(VolumeTarget::System, 20),
                 Restore::OnRelease,
-                "Example.exe",
+                &watched(),
             )
             .expect("set");
         actions
@@ -941,7 +960,7 @@ mod tests {
                 'n',
                 &volume(VolumeTarget::System, 50),
                 Restore::Never,
-                "Example.exe",
+                &watched(),
             )
             .expect("set");
         actions.release('a').expect("nothing to undo");
@@ -967,7 +986,7 @@ mod tests {
                 'a',
                 &media(chrome(), MediaCommand::Pause),
                 Restore::OnRelease,
-                "Example.exe",
+                &watched(),
             )
             .expect("paused");
         assert_eq!(actions.controls().log, ["Pause 3", "Pause 4"]);
@@ -986,7 +1005,7 @@ mod tests {
                 'a',
                 &media(chrome(), MediaCommand::Play),
                 Restore::Never,
-                "Example.exe",
+                &watched(),
             )
             .expect("already playing");
         assert_eq!(actions.controls().log, [] as [String; 0]);
@@ -999,7 +1018,7 @@ mod tests {
                 'a',
                 &media(chrome(), MediaCommand::Play),
                 Restore::Never,
-                "Example.exe",
+                &watched(),
             )
             .expect("played");
         assert_eq!(actions.controls().log, ["Play 2"]);
@@ -1013,10 +1032,10 @@ mod tests {
         });
         let pause = media(MediaTarget::App(app("Chrome")), MediaCommand::Pause);
         actions
-            .perform('a', &pause, Restore::OnRelease, "Example.exe")
+            .perform('a', &pause, Restore::OnRelease, &watched())
             .expect("paused");
         actions
-            .perform('b', &pause, Restore::OnRelease, "Example.exe")
+            .perform('b', &pause, Restore::OnRelease, &watched())
             .expect("already paused");
         actions.release('a').expect("released");
         assert!(!actions.controls().playing(2));
@@ -1034,7 +1053,7 @@ mod tests {
         });
         let next = media(MediaTarget::App(app("Chrome")), MediaCommand::Next);
         actions
-            .perform('a', &next, Restore::OnRelease, "Example.exe")
+            .perform('a', &next, Restore::OnRelease, &watched())
             .expect("skipped");
         actions
             .controls()
@@ -1043,7 +1062,7 @@ mod tests {
             .for_each(|session| session.playing = false);
         let previous = media(MediaTarget::App(app("Chrome")), MediaCommand::Previous);
         actions
-            .perform('a', &previous, Restore::OnRelease, "Example.exe")
+            .perform('a', &previous, Restore::OnRelease, &watched())
             .expect("skipped");
         actions.release('a').expect("nothing to undo");
         assert_eq!(actions.controls().log, ["Next 2", "Previous 1"]);
@@ -1058,7 +1077,7 @@ mod tests {
                     'a',
                     &media(target, MediaCommand::Pause),
                     Restore::Never,
-                    "Example.exe"
+                    &watched()
                 ),
                 Err(ActionError::NoMediaSession)
             ));
@@ -1070,7 +1089,7 @@ mod tests {
                 'a',
                 &current(MediaCommand::Pause),
                 Restore::OnRelease,
-                "Example.exe"
+                &watched()
             ),
             Err(ActionError::Refused)
         ));
@@ -1106,12 +1125,7 @@ mod tests {
         });
         let discord = || VolumeTarget::App(app("Discord.exe"));
         actions
-            .perform(
-                'a',
-                &volume(discord(), 20),
-                Restore::OnRelease,
-                "Example.exe",
-            )
+            .perform('a', &volume(discord(), 20), Restore::OnRelease, &watched())
             .expect("set");
         assert_eq!(actions.controls().level("call"), Some(percent(20)));
         assert_eq!(actions.controls().level("ping"), Some(percent(20)));
@@ -1145,7 +1159,7 @@ mod tests {
         });
         let discord = VolumeTarget::App(app("Discord.exe"));
         assert!(matches!(
-            actions.perform('a', &volume(discord, 20), Restore::OnRelease, "Example.exe"),
+            actions.perform('a', &volume(discord, 20), Restore::OnRelease, &watched()),
             Err(ActionError::Os(_))
         ));
         actions.release('a').expect("restored");
@@ -1173,12 +1187,12 @@ mod tests {
                 'a',
                 &volume(VolumeTarget::System, 20),
                 Restore::OnRelease,
-                "Example.exe",
+                &watched(),
             )
             .expect("set");
         let player = VolumeTarget::App(app("Player.exe"));
         actions
-            .perform('a', &volume(player, 10), Restore::OnRelease, "Example.exe")
+            .perform('a', &volume(player, 10), Restore::OnRelease, &watched())
             .expect("set");
         actions.controls().broken = Some("music");
         assert!(matches!(actions.release('a'), Err(ActionError::Os(_))));
@@ -1242,18 +1256,18 @@ mod tests {
     #[test]
     fn keys_are_held_then_let_go_and_leave_nothing_to_restore() {
         let mut actions = player(true);
-        actions.controls().focused = Some("example.EXE");
+        actions.controls().focused = Some(7);
         let keys = Action::PressKeys(KeyChord::parse("Ctrl+M").expect("valid"));
         actions
             .perform(
                 'a',
                 &current(MediaCommand::Pause),
                 Restore::OnRelease,
-                "Example.exe",
+                &watched(),
             )
             .expect("paused");
         actions
-            .perform('a', &keys, Restore::OnRelease, "Example.exe")
+            .perform('a', &keys, Restore::OnRelease, &watched())
             .expect("pressed");
         actions.release('a').expect("released");
         assert_eq!(
@@ -1269,7 +1283,7 @@ mod tests {
         );
         actions.controls().broken = Some("keyboard");
         assert!(matches!(
-            actions.perform('a', &keys, Restore::Never, "Example.exe"),
+            actions.perform('a', &keys, Restore::Never, &watched()),
             Err(ActionError::Os(_))
         ));
     }
@@ -1278,9 +1292,11 @@ mod tests {
     fn keys_go_only_to_the_watched_application_in_front() {
         let mut actions = Actions::<char, _>::new(Fake::default());
         let keys = Action::PressKeys(KeyChord::parse("Ctrl+M").expect("valid"));
-        for focused in [None, Some("Other.exe"), Some("Example.exe.bak")] {
+        // Another process counts as another application, even one with the
+        // same executable name.
+        for focused in [None, Some(8), Some(0)] {
             actions.controls().focused = focused;
-            let pressed = actions.perform('a', &keys, Restore::Never, "Example.exe");
+            let pressed = actions.perform('a', &keys, Restore::Never, &watched());
             assert!(
                 matches!(&pressed, Err(ActionError::NotInFront(watched)) if watched == "Example.exe"),
                 "{focused:?}: {pressed:?}"
@@ -1300,13 +1316,13 @@ mod tests {
     #[test]
     fn keys_that_went_down_come_up_when_windows_drops_some() {
         let mut actions = Actions::<char, _>::new(Fake {
-            focused: Some("Example.exe"),
+            focused: Some(7),
             held: vec![Modifier::Alt],
             takes: vec![1],
             ..Fake::default()
         });
         let keys = Action::PressKeys(KeyChord::parse("Ctrl+Alt+Shift+M").expect("valid"));
-        let pressed = actions.perform('a', &keys, Restore::Never, "Example.exe");
+        let pressed = actions.perform('a', &keys, Restore::Never, &watched());
         assert!(
             matches!(pressed, Err(ActionError::KeysDropped { sent: 1, of: 3 })),
             "{pressed:?}"
@@ -1316,14 +1332,13 @@ mod tests {
             ["keys Ctrl↓", "keys Ctrl↑"],
             "only Ctrl went down, so only Ctrl comes up, and the held Alt is left alone"
         );
-        assert!(
-            ActionError::KeysDropped { sent: 1, of: 3 }
-                .to_string()
-                .starts_with("Windows took only 1 of 3 key events")
+        assert_eq!(
+            ActionError::KeysDropped { sent: 1, of: 3 }.to_string(),
+            "Windows took only 1 of 3 key events"
         );
         actions.controls().takes = vec![0];
         assert!(matches!(
-            actions.perform('a', &keys, Restore::Never, "Example.exe"),
+            actions.perform('a', &keys, Restore::Never, &watched()),
             Err(ActionError::KeysDropped { sent: 0, of: 3 })
         ));
         assert_eq!(
@@ -1336,13 +1351,13 @@ mod tests {
     #[test]
     fn keys_left_down_get_one_more_try_to_come_up() {
         let mut actions = Actions::<char, _>::new(Fake {
-            focused: Some("Example.exe"),
+            focused: Some(7),
             takes: vec![2, 1],
             ..Fake::default()
         });
         let keys = Action::PressKeys(KeyChord::parse("Ctrl+M").expect("valid"));
         assert!(matches!(
-            actions.perform('a', &keys, Restore::Never, "Example.exe"),
+            actions.perform('a', &keys, Restore::Never, &watched()),
             Err(ActionError::KeysDropped { sent: 1, of: 2 })
         ));
         assert_eq!(
@@ -1356,7 +1371,7 @@ mod tests {
         let mut actions = Actions::<char, _>::new(Fake::default());
         for target in [VolumeTarget::System, VolumeTarget::App(app("Player.exe"))] {
             assert!(matches!(
-                actions.perform('a', &volume(target, 20), Restore::OnRelease, "Example.exe"),
+                actions.perform('a', &volume(target, 20), Restore::OnRelease, &watched()),
                 Err(ActionError::NoAudio)
             ));
         }

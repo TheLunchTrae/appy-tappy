@@ -59,14 +59,15 @@ the navigation and arrow keys are sent as the dedicated keys, not the number
 pad's.
 
 It uses `SendInput`, which types into whichever window has the keyboard focus,
-so the action first checks that the window in front belongs to the watched
-application's executable, the one the runtime follows. If another window is in
-front, it presses nothing and the log says so; anti-cheat was checked only for
-the watched application, so keys never go anywhere else. Naming the window's
-executable takes a process snapshot, so it never opens that process. Windows
-drops keys meant for a window that runs as administrator unless AppyTappy runs
-as administrator too; when it takes only some of the keys, every key that went
-down is let go again.
+so the action first checks that the window in front belongs to the process the
+runtime follows for the watched application. If another window is in front,
+even one of another process with the same executable name, it presses nothing
+and the log says so; anti-cheat was checked only for the watched application,
+so keys never go anywhere else. An application whose window belongs to a second
+process of its own cannot be pressed into for now. Windows does not deliver
+keys to a window that runs as administrator unless AppyTappy does too, and says
+nothing when it drops them. When it takes only some of the keys, every key that
+went down is let go again.
 
 Anti-cheat can see injected input and treat it as cheating, so an automation
 with a key press action runs only for an application whose anti-cheat class

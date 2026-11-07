@@ -105,7 +105,7 @@ export interface TypedKeyPress extends KeyPress {
  * not the one in that place on an English keyboard, because the runtime presses the letter.
  */
 export function actionKeys(press: TypedKeyPress): string | null {
-  const letter = /^[a-z]$/iu.test(press.key) ? press.key.toUpperCase() : /^Key([A-Z])$/u.exec(press.code)?.[1];
+  const letter = /^[A-Za-z]$/u.test(press.key) ? press.key.toUpperCase() : /^Key([A-Z])$/u.exec(press.code)?.[1];
   const digit = /^Digit(\d)$/u.exec(press.code)?.[1];
   const function_ = /^F([1-9]|1\d|2[0-4])$/u.test(press.code) ? press.code : undefined;
   const found = letter ?? digit ?? function_ ?? ACTION_KEYS[press.code];
@@ -130,7 +130,7 @@ const NAMED_ACTION_KEYS: readonly string[] = Object.values(ACTION_KEYS);
 
 /** One key's name as an action spells it, or null when an action cannot press it. */
 function keyName(name: string): string | null {
-  if (/^[a-z0-9]$/iu.test(name)) {
+  if (/^[A-Za-z0-9]$/u.test(name)) {
     return name.toUpperCase();
   }
   const function_ = /^f([1-9]\d*)$/iu.exec(name)?.[1];

@@ -97,6 +97,8 @@ describe('spellKeys', () => {
       'é',
       'Numpad1',
       'ArrowUp',
+      // The Kelvin sign, which a case-insensitive match would read as K.
+      '\u212A',
     ]) {
       expect(spellKeys(text)).toBeNull();
     }
