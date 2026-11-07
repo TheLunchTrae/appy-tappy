@@ -9,9 +9,10 @@
 //!
 //! See `docs/architecture.md` for this crate's boundaries.
 
+use std::any::Any;
+use std::ffi::OsStr;
 use std::fmt;
 use std::io;
-use std::path::Path;
 use std::sync::mpsc::Sender;
 
 #[cfg(not(windows))]
@@ -93,14 +94,15 @@ impl InstanceGuard {
 /// sign-in.
 pub const AUTOSTART_VALUE: &str = "AppyTappy";
 
-/// Makes Windows start `executable` when the user signs in, through the
-/// `Run` key value `value`. It replaces any command the value held.
+/// Makes Windows run `command` when the user signs in, through the `Run`
+/// key value `value`. It replaces any command the value held. The command
+/// is a whole command line, with the program's path quoted.
 ///
 /// # Errors
 ///
 /// Returns the operating system's error.
-pub fn enable_autostart(value: &str, executable: &Path) -> io::Result<()> {
-    host::enable_autostart(value, executable)
+pub fn enable_autostart(value: &str, command: &OsStr) -> io::Result<()> {
+    host::enable_autostart(value, command)
 }
 
 /// Removes the `Run` key value `value`. A value that is already absent is
@@ -111,6 +113,16 @@ pub fn enable_autostart(value: &str, executable: &Path) -> io::Result<()> {
 /// Returns the operating system's error.
 pub fn disable_autostart(value: &str) -> io::Result<()> {
     host::disable_autostart(value)
+}
+
+/// The message a panicking thread left, for the error that reports it.
+#[must_use]
+pub fn panic_reason(payload: &(dyn Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("an unknown reason")
 }
 
 /// A wall-clock time in the user's time zone, to the second.
@@ -154,6 +166,16 @@ impl fmt::Display for LocalTime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panic_reason_is_its_message() {
+        let fixed: Box<dyn Any + Send> = Box::new("fixed");
+        let formatted: Box<dyn Any + Send> = Box::new(format!("formatted {}", 1));
+        let other: Box<dyn Any + Send> = Box::new(1_u8);
+        let reasons =
+            [fixed, formatted, other].map(|payload| panic_reason(payload.as_ref()).to_owned());
+        assert_eq!(reasons, ["fixed", "formatted 1", "an unknown reason"]);
+    }
 
     #[test]
     fn local_time_reads_year_first_with_padded_fields() {

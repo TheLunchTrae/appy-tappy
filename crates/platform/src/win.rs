@@ -7,11 +7,11 @@
 //! back to the watch, so it posts a thread message to its own thread, and
 //! the message loop forwards the event over the channel.
 
+use std::ffi::OsStr;
 use std::io;
 use std::iter;
 use std::mem::size_of_val;
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
 use std::sync::mpsc::{self, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 
@@ -90,12 +90,9 @@ impl WindowWatch {
         )]
         let _ = posted;
         self.thread.join().unwrap_or_else(|payload| {
-            let reason = payload
-                .downcast_ref::<&str>()
-                .copied()
-                .unwrap_or("an unknown reason");
             Err(io::Error::other(format!(
-                "the window events thread panicked: {reason}"
+                "the window events thread panicked: {}",
+                crate::panic_reason(payload.as_ref())
             )))
         })
     }
@@ -125,8 +122,8 @@ fn watch_windows(
 ) -> io::Result<()> {
     let mut message = MSG::default();
     #[expect(unsafe_code, reason = "a Win32 call")]
-    // SAFETY: `message` is a writable MSG. Peeking creates this thread's message
-    // queue, so a post from `stop` cannot arrive before the queue exists.
+    // SAFETY: `message` is a writable MSG. Peeking makes sure this thread has a
+    // message queue before its ID is published for `stop` to post to.
     let peeked = unsafe { PeekMessageW(&raw mut message, None, 0, 0, PM_NOREMOVE) };
     #[expect(
         clippy::let_underscore_must_use,
@@ -250,14 +247,8 @@ impl Drop for InstanceGuard {
     }
 }
 
-pub(crate) fn enable_autostart(value: &str, executable: &Path) -> io::Result<()> {
-    // The command quotes the path, because a path with spaces would otherwise
-    // run its first word.
-    let quote = u16::from(b'"');
-    let command: Vec<u16> = iter::once(quote)
-        .chain(executable.as_os_str().encode_wide())
-        .chain([quote, 0])
-        .collect();
+pub(crate) fn enable_autostart(value: &str, command: &OsStr) -> io::Result<()> {
+    let command: Vec<u16> = command.encode_wide().chain(iter::once(0)).collect();
     let bytes = u32::try_from(size_of_val(command.as_slice())).map_err(io::Error::other)?;
     #[expect(unsafe_code, reason = "a Win32 call")]
     // SAFETY: the key and value names are null-terminated wide strings, and
@@ -362,13 +353,11 @@ mod tests {
     }
 
     #[test]
-    fn autostart_writes_the_quoted_path_and_removes_it() {
+    fn autostart_writes_the_command_and_removes_it() {
         let value = format!("AppyTappyTest{}", process::id());
-        let executable = Path::new(r"C:\Program Files\AppyTappy\appytappy-runtime.exe");
-        enable_autostart(&value, executable).expect("enable");
-        let expected: Vec<u16> = format!("\"{}\"", executable.display())
-            .encode_utf16()
-            .collect();
+        let command = r#""C:\Program Files\AppyTappy\appytappy-runtime.exe" --watch "Game.exe""#;
+        enable_autostart(&value, OsStr::new(command)).expect("enable");
+        let expected: Vec<u16> = command.encode_utf16().collect();
         assert_eq!(run_value(&value), Some(expected));
         disable_autostart(&value).expect("disable");
         assert_eq!(run_value(&value), None);
@@ -393,35 +382,33 @@ mod tests {
     fn the_watch_reports_a_top_level_window_created_and_destroyed() {
         let (sender, events) = mpsc::channel();
         let watch = WindowWatch::start(sender).expect("start");
-        thread::spawn(|| {
-            #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: the class is a system class, the title is a static wide
-            // string, and the window has no parent, menu, or creation data.
-            let window = unsafe {
-                CreateWindowExW(
-                    WINDOW_EX_STYLE(0),
-                    w!("STATIC"),
-                    w!("AppyTappy test"),
-                    WS_OVERLAPPED,
-                    0,
-                    0,
-                    10,
-                    10,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-            }
-            .expect("create a window");
-            #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: this thread created the window and destroys it once.
-            let destroyed = unsafe { DestroyWindow(window) };
-            destroyed.expect("destroy the window");
-        })
-        .join()
-        .expect("window thread");
+        // The callback checks a created window's root after the fact, so the
+        // window stays until its creation is seen.
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the class is a system class, the title is a static wide
+        // string, and the window has no parent, menu, or creation data.
+        let window = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                w!("AppyTappy test"),
+                WS_OVERLAPPED,
+                0,
+                0,
+                10,
+                10,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("create a window");
         next_event(&events, WindowEvent::Created);
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: this thread created the window and destroys it once.
+        let destroyed = unsafe { DestroyWindow(window) };
+        destroyed.expect("destroy the window");
         next_event(&events, WindowEvent::Destroyed);
         watch.stop().expect("stop");
     }

@@ -1,9 +1,10 @@
 //! The runtime's command line.
 //!
-//! With no arguments the runtime runs in the background. `--autostart on`
-//! and `--autostart off` change whether Windows starts it at sign-in, then
-//! exit. Until the compiled config names the games to watch, each
-//! `--watch <executable>` names one.
+//! Until the compiled config names the games to watch, each
+//! `--watch <executable>` names one, and the runtime runs in the background
+//! watching them. `--autostart on` with the same `--watch` options makes
+//! Windows start it that way at sign-in, and `--autostart off` stops that;
+//! both exit at once.
 
 use std::error::Error;
 use std::ffi::OsString;
@@ -19,10 +20,10 @@ pub(crate) enum Command {
 }
 
 /// Whether Windows starts the runtime at sign-in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Autostart {
-    /// Start the runtime at sign-in.
-    On,
+    /// Start the runtime at sign-in, watching these executables.
+    On(Vec<String>),
     /// Do not start the runtime at sign-in.
     Off,
 }
@@ -59,21 +60,29 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
             .transpose()?
             .ok_or_else(|| usage("an option is missing its value"))?;
         match argument.as_str() {
+            // Process snapshots list bare file names, so a path never matches.
+            "--watch" if value.is_empty() || value.contains(['\\', '/', ':', '"']) => {
+                return Err(usage(
+                    "--watch takes a file name such as GeometryDash.exe, not a path",
+                ));
+            },
             "--watch" => watched.push(value),
             "--autostart" if autostart.is_none() => {
                 autostart = Some(match value.as_str() {
-                    "on" => Autostart::On,
-                    "off" => Autostart::Off,
+                    "on" => true,
+                    "off" => false,
                     _ => return Err(usage("--autostart takes on or off")),
                 });
             },
             _ => return Err(usage("unknown option")),
         }
     }
-    match autostart {
-        None => Ok(Command::Run(watched)),
-        Some(setting) if watched.is_empty() => Ok(Command::Autostart(setting)),
-        Some(_) => Err(usage("--autostart cannot be combined with --watch")),
+    match (autostart, watched.is_empty()) {
+        (None, false) => Ok(Command::Run(watched)),
+        (Some(true), false) => Ok(Command::Autostart(Autostart::On(watched))),
+        (Some(false), true) => Ok(Command::Autostart(Autostart::Off)),
+        (None | Some(true), true) => Err(usage("name a game to watch with --watch")),
+        (Some(false), false) => Err(usage("--autostart off takes no --watch")),
     }
 }
 
@@ -83,11 +92,6 @@ mod tests {
 
     fn parse_strs(arguments: &[&str]) -> Result<Command, UsageError> {
         parse(arguments.iter().map(OsString::from))
-    }
-
-    #[test]
-    fn no_arguments_runs_watching_nothing() {
-        assert_eq!(parse_strs(&[]), Ok(Command::Run(Vec::new())));
     }
 
     #[test]
@@ -102,10 +106,18 @@ mod tests {
     }
 
     #[test]
-    fn autostart_takes_on_or_off() {
+    fn autostart_takes_on_with_games_or_off() {
         assert_eq!(
-            parse_strs(&["--autostart", "on"]),
-            Ok(Command::Autostart(Autostart::On))
+            parse_strs(&["--autostart", "on", "--watch", "Game.exe"]),
+            Ok(Command::Autostart(Autostart::On(vec![
+                "Game.exe".to_owned()
+            ])))
+        );
+        assert_eq!(
+            parse_strs(&["--watch", "Game.exe", "--autostart", "on"]),
+            Ok(Command::Autostart(Autostart::On(vec![
+                "Game.exe".to_owned()
+            ])))
         );
         assert_eq!(
             parse_strs(&["--autostart", "off"]),
@@ -115,22 +127,43 @@ mod tests {
 
     #[test]
     fn malformed_command_lines_are_refused() {
-        for arguments in [
-            &["--watch"][..],
-            &["--autostart", "maybe"],
-            &["--autostart", "on", "--autostart", "off"],
-            &["--autostart", "on", "--watch", "Game.exe"],
-            &["--watch", "Game.exe", "--autostart", "on"],
-            &["--verbose", "yes"],
+        for (arguments, problem) in [
+            (&[][..], "name a game to watch with --watch"),
+            (&["--autostart", "on"], "name a game to watch with --watch"),
+            (&["--watch"], "an option is missing its value"),
+            (&["--autostart", "maybe"], "--autostart takes on or off"),
+            (
+                &["--autostart", "on", "--autostart", "off"],
+                "unknown option",
+            ),
+            (
+                &["--autostart", "off", "--watch", "Game.exe"],
+                "--autostart off takes no --watch",
+            ),
+            (&["--verbose", "yes"], "unknown option"),
         ] {
-            assert!(parse_strs(arguments).is_err(), "{arguments:?}");
+            let error = parse_strs(arguments).expect_err("refused");
+            assert_eq!(error.to_string(), problem, "{arguments:?}");
         }
-        assert_eq!(
-            parse_strs(&["--verbose", "yes"])
-                .expect_err("unknown")
-                .to_string(),
-            "unknown option"
-        );
+    }
+
+    #[test]
+    fn a_watched_game_is_a_bare_file_name() {
+        for value in [
+            "",
+            r"C:\Games\Game.exe",
+            "Games/Game.exe",
+            "C:Game.exe",
+            "\"Game.exe",
+        ] {
+            assert_eq!(
+                parse_strs(&["--watch", value]),
+                Err(usage(
+                    "--watch takes a file name such as GeometryDash.exe, not a path"
+                )),
+                "{value:?}"
+            );
+        }
     }
 
     #[cfg(unix)]

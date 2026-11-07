@@ -4,8 +4,8 @@
 #![forbid(unsafe_code)]
 
 use std::convert::Infallible;
+use std::ffi::OsStr;
 use std::io;
-use std::path::Path;
 use std::sync::mpsc::Sender;
 
 use crate::{LocalTime, WindowEvent};
@@ -44,7 +44,7 @@ impl InstanceGuard {
     }
 }
 
-pub(crate) fn enable_autostart(_value: &str, _executable: &Path) -> io::Result<()> {
+pub(crate) fn enable_autostart(_value: &str, _command: &OsStr) -> io::Result<()> {
     unsupported()
 }
 
@@ -70,7 +70,7 @@ mod tests {
         let kinds = [
             WindowWatch::start(events).map(drop),
             InstanceGuard::acquire(InstanceGuard::RUNTIME).map(drop),
-            crate::enable_autostart("test", Path::new("runtime.exe")),
+            crate::enable_autostart("test", OsStr::new("runtime.exe")),
             crate::disable_autostart("test"),
         ]
         .map(|result| result.expect_err("unsupported").kind());
