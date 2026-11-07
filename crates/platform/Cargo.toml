@@ -16,7 +16,8 @@ mutants = "0.0.4"
 # Microsoft's Windows API bindings; the features select the APIs the adapter
 # in `win.rs` calls: the window event hook and its message loop, the tray
 # icon with its hidden window and menu, the named mutex behind the
-# single-instance guard, the `Run` registry key, and the local clock.
+# single-instance guard, the `Run` registry key, the local clock, and
+# showing a window without activating it.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = [
   "Win32_Foundation",

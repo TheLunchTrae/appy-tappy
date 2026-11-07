@@ -10,6 +10,8 @@
 mod automations;
 mod check_spec;
 mod commands;
+mod overlay;
+mod overlay_window;
 mod owner;
 mod pixels;
 mod window_list;
@@ -47,6 +49,7 @@ fn main() -> ExitCode {
     let code = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Bridge(sender.clone()))
+        .on_window_event(overlay_window::on_event)
         .invoke_handler(tauri::generate_handler![
             commands::list_windows,
             commands::pick_window,
@@ -68,6 +71,10 @@ fn main() -> ExitCode {
             commands::save_automation,
             commands::set_automation_enabled,
             commands::delete_automation,
+            commands::sync_overlays,
+            commands::set_overlay,
+            commands::overlay_state,
+            commands::overlay_card,
         ])
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));

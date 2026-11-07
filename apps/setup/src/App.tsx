@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
   type AppSummary,
@@ -7,6 +7,7 @@ import {
   errorText,
   listApps,
   listAutomations,
+  syncOverlays,
 } from './api.ts';
 import { ApplicationsPage } from './ApplicationsPage.tsx';
 import { AutomationEditor } from './AutomationEditor.tsx';
@@ -52,6 +53,10 @@ export function App() {
     } else {
       setAutomationError(errorText(automationsRead.reason));
     }
+  }, []);
+  // The overlays that are on open with the app.
+  useEffect(() => {
+    background(syncOverlays());
   }, []);
   // A flow that makes a value captures a window, so the lists wait until it ends.
   useRepeat(refresh, REFRESH_MS, flow?.kind !== 'value');

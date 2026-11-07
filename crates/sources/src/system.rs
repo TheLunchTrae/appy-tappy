@@ -47,6 +47,17 @@ pub struct WindowEntry {
     pub bounds: Bounds,
 }
 
+/// Where a window is on the screen, and whether the user can see it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowPlace {
+    /// The window's bounds in screen pixels.
+    pub bounds: Bounds,
+    /// Whether it is visible and not minimized.
+    pub shown: bool,
+    /// Whether it is the window in front, the one with the keyboard focus.
+    pub front: bool,
+}
+
 /// A rectangle in screen pixels; `right` and `bottom` are exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bounds {
@@ -98,6 +109,15 @@ pub trait System {
     ///
     /// Returns the operating system's error.
     fn windows(&self) -> io::Result<Vec<WindowEntry>>;
+
+    /// Where `window` is and whether it shows, or `None` once it closed.
+    /// It asks only about that window, so it is cheap enough to call many
+    /// times a second.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
     /// Asks the user, outside the agent's reach, whether `process` may be
     /// read. `anti_cheat` names anti-cheat products that are running.
@@ -179,6 +199,10 @@ impl System for Unsupported {
     }
 
     fn windows(&self) -> io::Result<Vec<WindowEntry>> {
+        unsupported()
+    }
+
+    fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
         unsupported()
     }
 
@@ -304,11 +328,12 @@ mod tests {
         let kinds = [
             system.processes().map(drop),
             system.windows().map(drop),
+            system.window_place(7).map(drop),
             system.ask_memory_access(&entry, &[]).map(drop),
             system.open(&permit).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 5]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 6]);
     }
 }

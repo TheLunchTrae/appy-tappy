@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 
-import { type AntiCheat, type AppSummary, errorText, setAntiCheat } from './api.ts';
+import { type AntiCheat, type AppSummary, type OverlayMode, errorText, setAntiCheat, setOverlay } from './api.ts';
 import { ANTI_CHEAT_NAMES, PRIORITY_NAMES } from './describe.ts';
 import { background } from './repeat.ts';
 
@@ -116,6 +116,22 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCh
   );
 }
 
+/** The overlay menu's choices: off, or one of the two places the readings show. */
+type OverlayChoice = 'off' | OverlayMode;
+
+const OVERLAY_NAMES: Readonly<Record<OverlayChoice, string>> = {
+  off: 'Off',
+  overlay: 'Over the window',
+  pictureInPicture: 'Picture in picture',
+};
+
+const OVERLAY_CHOICES: readonly OverlayChoice[] = ['off', 'overlay', 'pictureInPicture'];
+
+/** The overlay menu's choice for a saved overlay setting. */
+function overlayChoice(overlay: { readonly enabled: boolean; readonly mode: OverlayMode } | undefined): OverlayChoice {
+  return overlay?.enabled === true ? overlay.mode : 'off';
+}
+
 interface Props {
   readonly apps: readonly AppSummary[] | null;
   readonly loadError: string | null;
@@ -137,12 +153,24 @@ export function ApplicationsPage({ apps, loadError, onChanged }: Props) {
     }
   };
 
+  const changeOverlay = async (app: string, choice: OverlayChoice, kept: OverlayMode): Promise<void> => {
+    try {
+      // Turning it off keeps the mode, so turning it on again shows it where it was.
+      await (choice === 'off' ? setOverlay(app, false, kept) : setOverlay(app, true, choice));
+      setSetError(null);
+      await onChanged();
+    } catch (error: unknown) {
+      setSetError(errorText(error));
+    }
+  };
+
   return (
     <main className="page">
       <div className="page-head">
         <h1>Applications</h1>
         <span className="lead">
-          How AppyTappy recognizes each application&apos;s window, and whether automations may press keys into it.
+          How AppyTappy recognizes each application&apos;s window, whether automations may press keys into it, and
+          whether its live values show on top of it while this app is open.
         </span>
       </div>
       {loadError === null ? null : <p className="warn">{loadError}</p>}
@@ -167,6 +195,7 @@ export function ApplicationsPage({ apps, loadError, onChanged }: Props) {
               <th scope="col">Executable</th>
               <th scope="col">Fallback</th>
               <th scope="col">Anti-cheat</th>
+              <th scope="col">Overlay</th>
               <th scope="col">Running</th>
             </tr>
           </thead>
@@ -175,7 +204,7 @@ export function ApplicationsPage({ apps, loadError, onChanged }: Props) {
               app.file === null ? (
                 <tr key={app.id}>
                   <td>{app.id}</td>
-                  <td colSpan={6} className="warn">
+                  <td colSpan={7} className="warn">
                     {app.error ?? 'This application could not be read.'}
                   </td>
                 </tr>
@@ -198,6 +227,25 @@ export function ApplicationsPage({ apps, loadError, onChanged }: Props) {
                         background(set(app.id, antiCheat));
                       }}
                     />
+                  </td>
+                  <td>
+                    <select
+                      className="input"
+                      aria-label={`${app.file.name}: overlay`}
+                      value={overlayChoice(app.file.overlay)}
+                      onChange={(event) => {
+                        const picked = OVERLAY_CHOICES.find((choice) => choice === event.target.value);
+                        if (picked !== undefined) {
+                          background(changeOverlay(app.id, picked, app.file?.overlay?.mode ?? 'overlay'));
+                        }
+                      }}
+                    >
+                      {OVERLAY_CHOICES.map((choice) => (
+                        <option key={choice} value={choice}>
+                          {OVERLAY_NAMES[choice]}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td>
                     {app.windows.length > 0 ? (

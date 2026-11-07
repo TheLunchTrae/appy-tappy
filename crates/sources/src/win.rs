@@ -33,14 +33,14 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IDYES,
-    IsWindowVisible, MB_DEFBUTTON2, MB_ICONWARNING, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
-    MessageBoxW,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IDYES, IsIconic, IsWindow, IsWindowVisible, MB_DEFBUTTON2,
+    MB_ICONWARNING, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO, MessageBoxW,
 };
 use windows::core::{BOOL, HSTRING, PWSTR};
 
 use crate::memory::{Module, PointerWidth, ProcessMemory, Region};
-use crate::system::{AccessAnswer, Bounds, ProcessEntry, Rgb, System, WindowEntry};
+use crate::system::{AccessAnswer, Bounds, ProcessEntry, Rgb, System, WindowEntry, WindowPlace};
 
 mod capture;
 
@@ -356,6 +356,39 @@ impl System for WindowsSystem {
         // which outlives this call.
         unsafe { EnumWindows(Some(collect_window), collected) }?;
         Ok(handles.into_iter().map(window_entry).collect())
+    }
+
+    fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
+        let handle = HWND(ptr::without_provenance_mut(
+            usize::try_from(window).map_err(io::Error::other)?,
+        ));
+        let mut rect = RECT::default();
+        #[expect(unsafe_code, reason = "Win32 calls")]
+        // SAFETY: each call only reads the state of the window `handle` names,
+        // and fails without harm when no such window exists; `rect` is a live
+        // local the call writes.
+        let (exists, visible, minimized, rect_read, front) = unsafe {
+            (
+                IsWindow(Some(handle)).as_bool(),
+                IsWindowVisible(handle).as_bool(),
+                IsIconic(handle).as_bool(),
+                GetWindowRect(handle, &raw mut rect).is_ok(),
+                GetForegroundWindow() == handle,
+            )
+        };
+        if !exists || !rect_read {
+            return Ok(None);
+        }
+        Ok(Some(WindowPlace {
+            bounds: Bounds {
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            },
+            shown: visible && !minimized,
+            front,
+        }))
     }
 
     fn ask_memory_access(

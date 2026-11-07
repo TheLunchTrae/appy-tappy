@@ -499,7 +499,7 @@ mod tests {
     use appytappy_sources::screen::saved::SavedCheck;
     use appytappy_sources::screen::{FrameHandler, Image};
     use appytappy_sources::system::{
-        AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry,
+        AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry, WindowPlace,
     };
 
     use super::*;
@@ -854,6 +854,10 @@ mod tests {
             let gone = || io::Error::from(io::ErrorKind::BrokenPipe);
             self.lists.send(answer).map_err(|_gone| gone())?;
             answered.recv().map_err(|_gone| gone())?
+        }
+
+        fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
         fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {

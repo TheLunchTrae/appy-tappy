@@ -23,7 +23,8 @@ way. Issues [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16) and
   class is picked from a menu: not set, user-mode, kernel-level, or none.
   Only none lets automations press keys into the application, so picking it
   asks first and warns that pressing keys into an application with
-  anti-cheat can get the user's account banned.
+  anti-cheat can get the user's account banned. Its **Overlay** menu shows the
+  application's values live, as described in [Overlay](#overlay).
 
 ## Making a value
 
@@ -127,6 +128,35 @@ what it changed while the window is out of sight.
 When the window has a size no value was drawn at, the runtime reads nothing
 and logs that the window should be resized or the value drawn again.
 
+## Overlay
+
+The Applications page's **Overlay** menu shows an application's values as
+they read now, in one of two ways:
+
+- **Over the window** puts the readings in the top-left corner of the
+  application's window, in a window only as big as the readings. It lets
+  clicks through to the application, never takes the keyboard, and has no
+  taskbar entry. It follows the window as it moves or changes size, and moves
+  off the screen while another window is in front or the window is minimized.
+- **Picture in picture** shows the readings in a small panel that stays on top
+  of every window. The user moves and resizes it, and it opens where it was
+  left, unless too little of that place is still on a monitor to grab it.
+  While the application is minimized, the panel says so in place of its
+  readings, which would no longer change.
+
+Either way, the readings are a window of the setup app's own: AppyTappy does
+not hook, inject into, or change the application. The overlay shows only
+while the setup app is open, and the panel closes when the overlay is turned
+off. It reads values as the runtime does: it reads those drawn at the
+window's current size, capturing only the part of the window that holds them,
+a few times a second, and starts again with the others when the window
+changes to their size. A value that cannot be read says why in place of its
+reading, such as one drawn at another window size, and the others still read.
+
+An application in exclusive fullscreen draws over every other window, so
+**Over the window** cannot show on it. Borderless or windowed fullscreen
+works, and a panel on another monitor works with either.
+
 ## Saved files
 
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
@@ -145,6 +175,7 @@ cropped to the region, and a picture check's reference.
     "priority": "titleElseExecutable"
   },
   "antiCheat": "none",
+  "overlay": { "enabled": true, "mode": "pictureInPicture" },
   "values": [
     {
       "id": "progress",
@@ -187,6 +218,11 @@ Each names its value by application ID and value ID:
   ]
 }
 ```
+
+An application's `overlay` is left out until the user first picks one. Its
+`mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
+its `panel` holds its place and size in screen pixels, as `x`, `y`, `width`,
+and `height`.
 
 A yes-or-no condition has `"is": "equals"` or `"notEquals"` and a `true` or
 `false` target. An action's `app` is `null` for whatever is playing, or for

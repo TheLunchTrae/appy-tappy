@@ -9,7 +9,7 @@
 
 use std::sync::mpsc::Sender;
 
-use appytappy_config::app_file::{AntiCheatDef, WindowDef};
+use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager};
@@ -17,6 +17,8 @@ use tokio::sync::oneshot;
 
 use crate::automations::AutomationSummary;
 use crate::check_spec::CheckSpec;
+use crate::overlay::{Card, OverlayView};
+use crate::overlay_window;
 use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
 use crate::window_list::WindowList;
 
@@ -231,4 +233,60 @@ pub(crate) async fn set_automation_enabled(
 #[tauri::command]
 pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), String> {
     ask(&app, |reply| Request::DeleteAutomation { id, reply }).await?
+}
+
+/// Opens a window for each overlay that is on, and closes the rest.
+#[tauri::command]
+pub(crate) async fn sync_overlays(app: AppHandle) -> Result<(), String> {
+    let wanted = ask(&app, Request::Overlays).await??;
+    overlay_window::sync(&app, &wanted).map_err(|error| error.to_string())
+}
+
+/// Turns `application`'s overlay on or off and sets where it shows, then
+/// opens or closes its window to match.
+#[tauri::command]
+pub(crate) async fn set_overlay(
+    app: AppHandle,
+    application: String,
+    enabled: bool,
+    mode: OverlayModeDef,
+) -> Result<(), String> {
+    ask(&app, |reply| Request::SetOverlay {
+        app: application,
+        enabled,
+        mode,
+        reply,
+    })
+    .await??;
+    sync_overlays(app).await
+}
+
+/// What `application`'s overlay shows now.
+#[tauri::command]
+pub(crate) async fn overlay_state(
+    app: AppHandle,
+    application: String,
+) -> Result<OverlayView, String> {
+    ask(&app, |reply| Request::OverlayState {
+        app: application,
+        reply,
+    })
+    .await?
+}
+
+/// Keeps the size of `application`'s overlay card in logical pixels, which
+/// its window over the application takes.
+#[tauri::command]
+pub(crate) async fn overlay_card(
+    app: AppHandle,
+    application: String,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    ask(&app, |reply| Request::OverlayCard {
+        app: application,
+        card: Card { width, height },
+        reply,
+    })
+    .await
 }
