@@ -51,8 +51,8 @@ it.
 
 An application's window is found the way OBS finds one: patterns on the
 title, the class, and the executable, where `*` matches any run of characters
-and `?` matches one, ignoring case. `Geometry Dash*` matches a title that
-gains a level name. When no open window fits all three patterns, the
+and `?` matches one, ignoring case. `Example App*` matches a title that
+gains a document name. When no open window fits all three patterns, the
 application falls back as its setting says:
 
 - **Only a window that matches all three.**
@@ -67,25 +67,25 @@ same rules ([#6](https://github.com/TheLunchTrae/appy-tappy/issues/6)).
 ## Saved files
 
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
-made from its executable, such as `geometrydash`. The folder holds `app.json`
+made from its executable, such as `exampleapp`. The folder holds `app.json`
 and the pictures its values need: a number check's labeled screenshots,
 cropped to the region, and a picture check's reference.
 
 ```json
 {
   "format": 1,
-  "name": "Geometry Dash",
+  "name": "Example App",
   "window": {
-    "title": "Geometry Dash*",
-    "class": "GLFW30",
-    "executable": "GeometryDash.exe",
+    "title": "Example App*",
+    "class": "ExampleWindow",
+    "executable": "ExampleApp.exe",
     "priority": "titleElseExecutable"
   },
   "antiCheat": "unknown",
   "values": [
     {
-      "id": "level_percent",
-      "name": "Level percent",
+      "id": "progress_percent",
+      "name": "Progress percent",
       "screen": {
         "windowSize": { "width": 1920, "height": 1080 },
         "region": { "x": 1146, "y": 14, "width": 74, "height": 38 },
@@ -93,7 +93,7 @@ cropped to the region, and a picture check's reference.
           "kind": "number",
           "ink": { "red": 255, "green": 255, "blue": 255 },
           "tolerance": 40,
-          "samples": [{ "image": "level_percent-1.png", "text": "87%" }]
+          "samples": [{ "image": "progress_percent-1.png", "text": "87%" }]
         }
       }
     }

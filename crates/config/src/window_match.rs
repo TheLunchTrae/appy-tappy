@@ -116,7 +116,7 @@ pub struct WindowFacts<'window> {
     pub title: &'window str,
     /// The window's class name.
     pub class: &'window str,
-    /// The file name of the window's executable, such as `GeometryDash.exe`.
+    /// The file name of the window's executable, such as `ExampleApp.exe`.
     pub executable: &'window str,
 }
 
@@ -193,23 +193,23 @@ mod tests {
     #[test]
     fn wildcards_match_runs_and_single_characters() {
         let cases = [
-            ("Geometry Dash", "Geometry Dash", true),
-            ("geometry dash", "GEOMETRY DASH", true),
-            ("Geometry*", "Geometry Dash", true),
-            ("*Dash", "Geometry Dash", true),
-            ("*met*", "Geometry Dash", true),
-            ("G?ometry Dash", "Geometry Dash", true),
+            ("Example App", "Example App", true),
+            ("example app", "EXAMPLE APP", true),
+            ("Example*", "Example App", true),
+            ("*App", "Example App", true),
+            ("*amp*", "Example App", true),
+            ("E?ample App", "Example App", true),
             ("*", "", true),
             ("", "", true),
             ("**a*", "banana", true),
             ("a*a*a", "banana", false),
             ("b*n*a", "banana", true),
             ("?", "", false),
-            ("Geometry", "Geometry Dash", false),
-            ("Dash", "Geometry Dash", false),
-            ("*x", "Geometry Dash", false),
+            ("Example", "Example App", false),
+            ("App", "Example App", false),
+            ("*x", "Example App", false),
             ("", "x", false),
-            ("Level ? of 3", "Level 12 of 3", false),
+            ("Page ? of 3", "Page 12 of 3", false),
         ];
         for (pattern, text, expected) in cases {
             assert_eq!(
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn a_pattern_keeps_its_text_and_matches_it() {
-        for text in ["Level 3 * practice", "What? Me?", "Spotify Premium", ""] {
+        for text in ["Page 3 * draft", "What? Me?", "Music Player", ""] {
             let pattern = Pattern::new(text);
             assert_eq!(pattern.as_str(), text);
             assert_eq!(pattern.to_string(), text);
@@ -230,10 +230,10 @@ mod tests {
         }
     }
 
-    const DASH: WindowFacts<'static> = WindowFacts {
-        title: "Geometry Dash",
-        class: "GLFW30",
-        executable: "GeometryDash.exe",
+    const WINDOW: WindowFacts<'static> = WindowFacts {
+        title: "Example App",
+        class: "ExampleWindow",
+        executable: "ExampleApp.exe",
     };
 
     fn with(
@@ -250,16 +250,12 @@ mod tests {
 
     #[test]
     fn the_priority_sets_how_far_matching_falls_back() {
-        let renamed = with(
-            "Geometry Dash - Stereo Madness",
-            "GLFW30",
-            "GeometryDash.exe",
-        );
-        let dialog = with("Geometry Dash", "#32770", "GeometryDash.exe");
-        let other = with("Geometry Dash", "GLFW30", "Other.exe");
-        let mut matcher = WindowMatch::exact(DASH);
+        let renamed = with("Example App - Project 1", "ExampleWindow", "ExampleApp.exe");
+        let dialog = with("Example App", "#32770", "ExampleApp.exe");
+        let other = with("Example App", "ExampleWindow", "Other.exe");
+        let mut matcher = WindowMatch::exact(WINDOW);
         assert_eq!(matcher.priority, MatchPriority::TitleElseExecutable);
-        assert_eq!(matcher.fit(DASH), Some(Fit::Full));
+        assert_eq!(matcher.fit(WINDOW), Some(Fit::Full));
         assert_eq!(matcher.fit(renamed), Some(Fit::ClassAndExecutable));
         assert_eq!(matcher.fit(dialog), Some(Fit::Executable));
         assert_eq!(matcher.fit(other), None);
@@ -269,33 +265,29 @@ mod tests {
         assert_eq!(matcher.fit(dialog), None);
 
         matcher.priority = MatchPriority::Title;
-        assert_eq!(matcher.fit(DASH), Some(Fit::Full));
+        assert_eq!(matcher.fit(WINDOW), Some(Fit::Full));
         assert_eq!(matcher.fit(renamed), None);
         assert_eq!(matcher.fit(dialog), None);
     }
 
     #[test]
     fn a_loosened_title_fits_fully() {
-        let mut matcher = WindowMatch::exact(DASH);
-        matcher.title = Pattern::new("Geometry Dash*");
+        let mut matcher = WindowMatch::exact(WINDOW);
+        matcher.title = Pattern::new("Example App*");
         matcher.priority = MatchPriority::Title;
-        let renamed = with(
-            "Geometry Dash - Stereo Madness",
-            "GLFW30",
-            "geometrydash.EXE",
-        );
+        let renamed = with("Example App - Project 1", "ExampleWindow", "exampleapp.EXE");
         assert_eq!(matcher.fit(renamed), Some(Fit::Full));
     }
 
     #[test]
     fn ranking_puts_the_best_fits_first() {
-        let matcher = WindowMatch::exact(DASH);
+        let matcher = WindowMatch::exact(WINDOW);
         let windows = [
-            with("Settings", "#32770", "GeometryDash.exe"),
-            with("Spotify Premium", "Chrome_WidgetWin_0", "Spotify.exe"),
-            with("Geometry Dash - menu", "GLFW30", "GeometryDash.exe"),
-            DASH,
-            with("Another", "#32770", "GeometryDash.exe"),
+            with("Settings", "#32770", "ExampleApp.exe"),
+            with("Music Player", "Chrome_WidgetWin_0", "MusicPlayer.exe"),
+            with("Example App - Settings", "ExampleWindow", "ExampleApp.exe"),
+            WINDOW,
+            with("Another", "#32770", "ExampleApp.exe"),
         ];
         assert_eq!(matcher.rank(windows), [3, 2, 0, 4]);
         assert_eq!(matcher.rank([]), [0_usize; 0]);

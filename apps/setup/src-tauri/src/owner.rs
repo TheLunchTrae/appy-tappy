@@ -26,7 +26,7 @@ use crate::pixels;
 use crate::window_list::{self, WindowList};
 
 /// The shortest time between two frames the preview takes: about 30 a
-/// second, smooth to the eye at a fraction of a game's frame rate.
+/// second, smooth to the eye at a fraction of an application's frame rate.
 const PREVIEW_INTERVAL: Duration = Duration::from_millis(33);
 
 /// What the setup app needs from the operating system: its windows and
@@ -106,7 +106,7 @@ pub(crate) struct SaveSpec {
     pub(crate) name: String,
     /// How to recognize a new application's window.
     pub(crate) window: WindowDef,
-    /// The value's name, such as `Level percent`.
+    /// The value's name, such as `Progress percent`.
     pub(crate) value_name: String,
     /// The check, with the session's screenshots it names.
     pub(crate) check: CheckSpec,
@@ -582,8 +582,8 @@ mod tests {
             Ok(vec![WindowEntry {
                 handle: 7,
                 process: ProcessId::new(3),
-                title: "Geometry Dash".to_owned(),
-                class: "GLFW30".to_owned(),
+                title: "Example App".to_owned(),
+                class: "ExampleWindow".to_owned(),
                 visible: true,
                 bounds: Bounds {
                     left: 0,
@@ -598,7 +598,7 @@ mod tests {
             Ok(vec![ProcessEntry {
                 id: ProcessId::new(3),
                 parent: ProcessId::new(0),
-                executable: "GeometryDash.exe".to_owned(),
+                executable: "ExampleApp.exe".to_owned(),
                 threads: 1,
             }])
         }
@@ -709,7 +709,7 @@ mod tests {
         let mut harness = harness(false);
         let list = harness.ask(Request::ListWindows).expect("the host answers");
         assert_eq!(list.windows.len(), 1);
-        assert_eq!(list.windows[0].executable, "GeometryDash.exe");
+        assert_eq!(list.windows[0].executable, "ExampleApp.exe");
     }
 
     #[test]
@@ -869,11 +869,11 @@ mod tests {
     fn spec(app: Option<&str>, value_name: &str, check: &str) -> Box<SaveSpec> {
         Box::new(SaveSpec {
             app: app.map(str::to_owned),
-            name: " Geometry Dash ".to_owned(),
+            name: " Example App ".to_owned(),
             window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
-                title: "Geometry Dash",
-                class: "GLFW30",
-                executable: "GeometryDash.exe",
+                title: "Example App",
+                class: "ExampleWindow",
+                executable: "ExampleApp.exe",
             }),
             value_name: value_name.to_owned(),
             check: serde_json::from_str(check).expect("valid JSON"),
@@ -893,7 +893,7 @@ mod tests {
         let mut handler = harness.pick();
         let save = |spec| move |reply| Request::SaveValue { spec, reply };
         assert_eq!(
-            harness.ask(save(spec(None, "In a level", REFERENCE))),
+            harness.ask(save(spec(None, "Icon showing", REFERENCE))),
             Err("No frame has arrived from the window yet.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
@@ -903,22 +903,22 @@ mod tests {
             Err("Name the value first.".to_owned())
         );
         let saved = harness
-            .ask(save(spec(None, "In a level", REFERENCE)))
+            .ask(save(spec(None, "Icon showing", REFERENCE)))
             .expect("saves a new app");
         assert_eq!(
             saved,
             SavedValue {
-                app: "geometrydash".to_owned(),
-                value: "in_a_level".to_owned()
+                app: "exampleapp".to_owned(),
+                value: "icon_showing".to_owned()
             }
         );
         harness
-            .ask(save(spec(Some("geometrydash"), "Level bar", BAR)))
+            .ask(save(spec(Some("exampleapp"), "Progress bar", BAR)))
             .expect("adds to the app");
         assert_eq!(
-            harness.ask(save(spec(Some("geometrydash"), "Level BAR", BAR))),
+            harness.ask(save(spec(Some("exampleapp"), "Progress BAR", BAR))),
             Err(
-                "Geometry Dash already has a value named like \"Level BAR\". Pick another name."
+                "Example App already has a value named like \"Progress BAR\". Pick another name."
                     .to_owned()
             )
         );
@@ -930,12 +930,12 @@ mod tests {
         let apps = harness.ask(Request::ListApps).expect("lists");
         assert_eq!(apps.len(), 1);
         let app = &apps[0];
-        assert_eq!((app.id.as_str(), &app.error), ("geometrydash", &None));
+        assert_eq!((app.id.as_str(), &app.error), ("exampleapp", &None));
         assert_eq!(app.windows, [7]);
         let file = app.file.as_ref().expect("a good file");
-        assert_eq!(file.name, "Geometry Dash");
+        assert_eq!(file.name, "Example App");
         let ids: Vec<&str> = file.values.iter().map(|value| value.id.as_str()).collect();
-        assert_eq!(ids, ["in_a_level", "level_bar"]);
+        assert_eq!(ids, ["icon_showing", "progress_bar"]);
         assert_eq!(
             file.values[0].screen.window_size,
             SizeDef {
@@ -943,17 +943,17 @@ mod tests {
                 height: 2
             }
         );
-        let folder = root.join("geometrydash");
-        assert!(folder.join("in_a_level.png").exists());
+        let folder = root.join("exampleapp");
+        assert!(folder.join("icon_showing.png").exists());
 
         harness
             .ask(|reply| Request::DeleteValue {
-                app: "geometrydash".to_owned(),
-                value: "in_a_level".to_owned(),
+                app: "exampleapp".to_owned(),
+                value: "icon_showing".to_owned(),
                 reply,
             })
             .expect("removes");
-        assert!(!folder.join("in_a_level.png").exists());
+        assert!(!folder.join("icon_showing.png").exists());
         let apps = harness.ask(Request::ListApps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(file.values.len(), 1);
@@ -996,9 +996,9 @@ mod tests {
     fn a_window_match_finds_the_running_window() {
         let mut harness = harness(false);
         let window = WindowDef::exact(appytappy_config::window_match::WindowFacts {
-            title: "Geometry Dash",
-            class: "GLFW30",
-            executable: "GeometryDash.exe",
+            title: "Example App",
+            class: "ExampleWindow",
+            executable: "ExampleApp.exe",
         });
         assert_eq!(
             harness.ask(|reply| Request::MatchWindows { window, reply }),

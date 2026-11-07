@@ -31,7 +31,7 @@ const MAX_IMAGE_NAME_LEN: usize = 64;
 pub struct AppFile {
     /// The format version, [`FORMAT`].
     pub format: u32,
-    /// The application's name as the user sees it, such as `Geometry Dash`.
+    /// The application's name as the user sees it, such as `Example App`.
     pub name: String,
     /// How to recognize the application's window.
     pub window: WindowDef,
@@ -148,9 +148,9 @@ impl From<AntiCheatDef> for AntiCheatClass {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ValueDef {
     /// The value's signal name, unique within the file, such as
-    /// `level_percent`. Automations refer to the value by it.
+    /// `progress_percent`. Automations refer to the value by it.
     pub id: String,
-    /// The value's name as the user sees it, such as `Level percent`.
+    /// The value's name as the user sees it, such as `Progress percent`.
     pub name: String,
     /// Where on the window the value is read and how.
     pub screen: ScreenDef,
@@ -407,8 +407,8 @@ impl fmt::Display for AppFileError {
 
 impl Error for AppFileError {}
 
-/// A value ID made from a name the user typed, such as `level_percent` from
-/// `Level percent`.
+/// A value ID made from a name the user typed, such as `progress_percent` from
+/// `Progress percent`.
 ///
 /// It keeps lowercase ASCII letters and digits, with an underscore for each
 /// run of anything else. A name with no letter or digit, or
@@ -449,16 +449,16 @@ mod tests {
     fn dash() -> AppFile {
         AppFile {
             format: FORMAT,
-            name: "Geometry Dash".to_owned(),
+            name: "Example App".to_owned(),
             window: WindowDef::exact(WindowFacts {
-                title: "Geometry Dash",
-                class: "GLFW30",
-                executable: "GeometryDash.exe",
+                title: "Example App",
+                class: "ExampleWindow",
+                executable: "ExampleApp.exe",
             }),
             anti_cheat: AntiCheatDef::Unknown,
             values: vec![ValueDef {
-                id: "level_percent".to_owned(),
-                name: "Level percent".to_owned(),
+                id: "progress_percent".to_owned(),
+                name: "Progress percent".to_owned(),
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 1920,
@@ -478,7 +478,7 @@ mod tests {
                         },
                         tolerance: 40,
                         samples: vec![SampleDef {
-                            image: "level_percent-1.png".to_owned(),
+                            image: "progress_percent-1.png".to_owned(),
                             text: "87%".to_owned(),
                         }],
                     },
@@ -515,7 +515,7 @@ mod tests {
                 tolerance: 3,
             },
             CheckDef::Reference {
-                image: "in_level.png".to_owned(),
+                image: "icon_showing.png".to_owned(),
                 tolerance: 9,
             },
         ];
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn the_window_def_describes_its_matcher() {
         let def = dash().window;
-        assert_eq!(def.title, "Geometry Dash");
+        assert_eq!(def.title, "Example App");
         assert_eq!(def.priority, PriorityDef::TitleElseExecutable);
         let matcher = def.to_match();
         assert_eq!(WindowDef::from(&matcher), def);
@@ -566,7 +566,7 @@ mod tests {
         let mut unnamed = dash();
         unnamed.name = " ".to_owned();
         let mut bad_id = dash();
-        bad_id.values[0].id = "Level".to_owned();
+        bad_id.values[0].id = "Score".to_owned();
         let mut twice = dash();
         twice.values.push(twice.values[0].clone());
         let mut no_value_name = dash();
@@ -594,28 +594,31 @@ mod tests {
                 "the file has format 2, but this version of AppyTappy reads format 1",
             ),
             (unnamed, "the application has no name"),
-            (bad_id, "value \"Level\": signal name"),
+            (bad_id, "value \"Score\": signal name"),
             (
                 twice,
-                "value \"level_percent\": another value has the same ID",
+                "value \"progress_percent\": another value has the same ID",
             ),
-            (no_value_name, "value \"level_percent\": it has no name"),
+            (no_value_name, "value \"progress_percent\": it has no name"),
             (
                 outside,
-                "value \"level_percent\": its region is empty or reaches past",
+                "value \"progress_percent\": its region is empty or reaches past",
             ),
-            (empty_region, "value \"level_percent\": its region is empty"),
+            (
+                empty_region,
+                "value \"progress_percent\": its region is empty",
+            ),
             (
                 taller,
-                "value \"level_percent\": its region is empty or reaches past",
+                "value \"progress_percent\": its region is empty or reaches past",
             ),
             (
                 no_samples,
-                "value \"level_percent\": its number check has no sample",
+                "value \"progress_percent\": its number check has no sample",
             ),
             (
                 escape,
-                "value \"level_percent\": picture \"../app.png\" must be",
+                "value \"progress_percent\": picture \"../app.png\" must be",
             ),
         ];
         for (file, message) in cases {
@@ -631,7 +634,7 @@ mod tests {
 
     #[test]
     fn picture_names_stay_inside_the_folder() {
-        for name in ["a.png", "level_percent-1.png", "x9.png"] {
+        for name in ["a.png", "progress_percent-1.png", "x9.png"] {
             assert!(is_image_name(name), "{name}");
         }
         let long = format!("{}.png", "a".repeat(61));
@@ -655,8 +658,8 @@ mod tests {
     #[test]
     fn value_ids_come_from_the_names_users_type() {
         let cases = [
-            ("Level percent", "level_percent"),
-            ("  In a level? ", "in_a_level"),
+            ("Progress percent", "progress_percent"),
+            ("  Icon showing? ", "icon_showing"),
             ("HP / max HP", "hp_max_hp"),
             ("2 laps", "value_2_laps"),
             ("!!!", "value"),

@@ -1,8 +1,8 @@
-//! The windows the user can pick a game from.
+//! The windows the user can pick an application from.
 //!
 //! Only a running window can be captured, so the setup app lists windows
 //! rather than asking for an executable file. Each choice names its process's
-//! executable, which the setup app saves so the runtime finds the game later.
+//! executable, which the setup app saves so the runtime finds the application later.
 
 use std::collections::BTreeMap;
 
@@ -25,7 +25,7 @@ pub(crate) struct WindowChoice {
     pub(crate) title: String,
     /// The window's class name, which a window match can use.
     pub(crate) class: String,
-    /// The file name of the window's executable, such as `GeometryDash.exe`.
+    /// The file name of the window's executable, such as `ExampleApp.exe`.
     pub(crate) executable: String,
     /// The window's width on screen, in pixels.
     pub(crate) width: u32,
@@ -40,7 +40,7 @@ pub(crate) struct WindowList {
     /// The windows the user can pick, sorted by title.
     pub(crate) windows: Vec<WindowChoice>,
     /// The anti-cheat products whose processes run now, sorted and without
-    /// repeats. A running product may protect any game, so the list is a
+    /// repeats. A running product may protect any application, so the list is a
     /// warning, not a classification.
     pub(crate) anti_cheat: Vec<&'static str>,
 }
@@ -131,7 +131,7 @@ mod tests {
             handle,
             process: ProcessId::new(process),
             title: title.to_owned(),
-            class: "GameWindow".to_owned(),
+            class: "AppWindow".to_owned(),
             visible: true,
             bounds: Bounds {
                 left: 10,
@@ -145,8 +145,8 @@ mod tests {
     #[test]
     fn offers_visible_titled_app_windows_sorted_by_title() {
         let processes = [
-            process(1, "GeometryDash.exe"),
-            process(2, "Spotify.exe"),
+            process(1, "ExampleApp.exe"),
+            process(2, "MusicPlayer.exe"),
             process(3, "explorer.exe"),
             process(9, "appytappy-setup.exe"),
         ];
@@ -157,8 +157,8 @@ mod tests {
         let mut collapsed = window(7, 2, "Collapsed");
         collapsed.bounds.right = collapsed.bounds.left;
         let windows = vec![
-            window(4, 2, "spotify Premium"),
-            window(3, 1, "Geometry Dash"),
+            window(4, 2, "music Player"),
+            window(3, 1, "Example App"),
             hidden,
             desktop,
             collapsed,
@@ -174,17 +174,17 @@ mod tests {
             [
                 WindowChoice {
                     handle: 3,
-                    title: "Geometry Dash".to_owned(),
-                    class: "GameWindow".to_owned(),
-                    executable: "GeometryDash.exe".to_owned(),
+                    title: "Example App".to_owned(),
+                    class: "AppWindow".to_owned(),
+                    executable: "ExampleApp.exe".to_owned(),
                     width: 800,
                     height: 600,
                 },
                 WindowChoice {
                     handle: 4,
-                    title: "spotify Premium".to_owned(),
-                    class: "GameWindow".to_owned(),
-                    executable: "Spotify.exe".to_owned(),
+                    title: "music Player".to_owned(),
+                    class: "AppWindow".to_owned(),
+                    executable: "MusicPlayer.exe".to_owned(),
                     width: 800,
                     height: 600,
                 },
@@ -206,19 +206,19 @@ mod tests {
 
     #[test]
     fn matching_ranks_the_offered_windows_by_fit() {
-        let processes = [process(1, "GeometryDash.exe"), process(2, "Spotify.exe")];
+        let processes = [process(1, "ExampleApp.exe"), process(2, "MusicPlayer.exe")];
         let mut settings = window(5, 1, "Settings");
         settings.class = "Dialog".to_owned();
         let windows = vec![
-            window(4, 2, "Spotify Premium"),
+            window(4, 2, "Music Player"),
             settings,
-            window(3, 1, "Geometry Dash"),
+            window(3, 1, "Example App"),
         ];
         let offered = list(windows, &processes, 0).windows;
         let exact = WindowDef::exact(WindowFacts {
-            title: "Geometry Dash",
-            class: "GameWindow",
-            executable: "geometrydash.exe",
+            title: "Example App",
+            class: "AppWindow",
+            executable: "exampleapp.exe",
         });
         assert_eq!(matching(&offered, &exact), [3, 5]);
         let nothing = WindowDef {

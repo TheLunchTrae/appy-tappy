@@ -78,8 +78,8 @@ function MatcherFields({ name, matcher, onName, onPattern, onPriority }: Matcher
         />
       </div>
       <p className="note">
-        AppyTappy finds this application by its window. Use * for any run of characters and ? for one, such as Geometry
-        Dash* for a title that changes. Case is ignored.
+        AppyTappy finds this application by its window. Use * for any run of characters and ? for one, such as Example
+        App* for a title that changes. Case is ignored.
       </p>
       {(['title', 'class', 'executable'] as const).map((part) => (
         <div className="field" key={part}>

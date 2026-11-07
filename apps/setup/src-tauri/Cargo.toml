@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-setup"
-description = "The AppyTappy setup app, where the user points at a game to build automations."
+description = "The AppyTappy setup app, where the user points at an application to build automations."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -22,7 +22,7 @@ appytappy-sources = { version = "=0.1.0", path = "../../../crates/sources" }
 serde = { version = "=1.0.229", features = ["derive"] }
 # The window, the web view, and the bridge between the React UI and Rust.
 tauri = { version = "=2.12.5", features = [] }
-# The screenshot hotkey, which works while the game has the keyboard focus.
+# The screenshot hotkey, which works while the other application has the keyboard focus.
 tauri-plugin-global-shortcut = "=2.4.1"
 # Each command awaits the owner thread's answer on a oneshot channel, so a
 # slow request never freezes the window; Tauri does not re-export it.

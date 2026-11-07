@@ -137,8 +137,9 @@ export function ValuesPage({ apps, loadError, onChanged, onNew }: Props) {
         <div className="empty">
           <h2>No values yet</h2>
           <p>
-            A value is something AppyTappy reads from an application&apos;s window, such as a level percent or a health
-            bar. Pick a window, take a screenshot and draw around what to read.
+            A value is something AppyTappy reads from an application&apos;s window, such as a number in a certain place
+            on screen, whether an icon is showing or how full a bar is. Pick a window, take a screenshot and draw around
+            what to read.
           </p>
           <button type="button" className="btn primary" onClick={onNew}>
             New value
