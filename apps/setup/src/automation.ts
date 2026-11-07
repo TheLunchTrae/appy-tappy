@@ -197,11 +197,13 @@ export function withSource(draft: Draft, choice: ValueChoice): Draft {
 /** The longest cooldown, in seconds: a day. */
 const MAX_COOLDOWN_SECONDS = 86_400;
 
-/** A number typed into a field, or null when it is blank or not a number. */
+/** A plain decimal number, such as `90`, `-3` or `12.5`. */
+const DECIMAL = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/u;
+
+/** A number typed into a field, or null when it is not a plain decimal number. */
 function typedNumber(text: string): number | null {
   const trimmed = text.trim();
-  const number = Number(trimmed);
-  return trimmed === '' || !Number.isFinite(number) ? null : number;
+  return DECIMAL.test(trimmed) ? Number(trimmed) : null;
 }
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
@@ -238,9 +240,12 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
   if (choice.kind === 'number') {
     const number = typedNumber(draft.number);
     if (number === null) {
-      return { ok: false, next: `Enter the number ${choice.value.name} is compared with.` };
+      return { ok: false, next: `Enter the number ${choice.value.name} is compared with, such as 90 or 12.5.` };
     }
     target = number;
+  }
+  if (!COMPARISONS[choice.kind].includes(draft.is)) {
+    return { ok: false, next: `Pick how ${choice.value.name} is compared.` };
   }
   if (draft.actions.length === 0) {
     return { ok: false, next: 'Add an action.' };
@@ -260,14 +265,13 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
   if (cooldown === null || cooldown < 0 || cooldown > MAX_COOLDOWN_SECONDS) {
     return { ok: false, next: 'Set the wait before it runs again in seconds, from 0 to 86400.' };
   }
-  const is = COMPARISONS[choice.kind].includes(draft.is) ? draft.is : 'equals';
   return {
     ok: true,
     automation: {
       id,
       name,
       enabled: draft.enabled,
-      when: { app: choice.app, value: choice.value.id, is, target },
+      when: { app: choice.app, value: choice.value.id, is: draft.is, target },
       actions,
       undo: draft.undo,
       cooldownMs: Math.round(cooldown * 1000),

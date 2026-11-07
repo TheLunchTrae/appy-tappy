@@ -159,8 +159,10 @@ describe('buildAutomation', () => {
     expect(next(named)).toBe('Pick the value to watch.');
     expect(next({ ...named, source: { app: 'example', value: 'gone' } })).toBe('Pick the value to watch.');
     const watching = { ...named, source: { app: 'example', value: 'progress' } };
-    expect(next(watching)).toBe('Enter the number Progress is compared with.');
-    expect(next({ ...watching, number: 'ninety' })).toBe('Enter the number Progress is compared with.');
+    for (const number of ['', 'ninety', '0x5A', '1e2', '12,5', 'Infinity']) {
+      expect(next({ ...watching, number })).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
+    }
+    expect(next({ ...watching, number: '-.5' })).toBe('ok');
     const complete = { ...watching, number: ' 90 ' };
     expect(next(complete)).toBe('ok');
     expect(next({ ...complete, actions: [] })).toBe('Add an action.');
@@ -218,12 +220,16 @@ describe('buildAutomation', () => {
     expect(withSource({ ...picked, is: 'notEquals' }, icon).is).toBe('notEquals');
     expect(withSource({ ...picked, is: 'notEquals' }, number).is).toBe('notEquals');
     expect(withSource({ ...picked, is: 'atMost' }, number).is).toBe('atMost');
-    const built = buildAutomation({ ...picked, is: 'atLeast', flag: false }, choices, '');
+    const built = buildAutomation({ ...picked, flag: false }, choices, '');
     expect(built.ok && built.automation.when).toEqual({
       app: 'example',
       value: 'icon_visible',
       is: 'equals',
       target: false,
+    });
+    expect(buildAutomation({ ...picked, is: 'atLeast' }, choices, '')).toEqual({
+      ok: false,
+      next: 'Pick how Icon visible is compared.',
     });
   });
 

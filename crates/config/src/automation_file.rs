@@ -20,7 +20,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, AppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget};
-use crate::app_file::{AppFile, value_id};
+use crate::app_file::{AppFile, id_from_name};
 use crate::rule::{Comparison, Condition, Rearm, Restore, Rule, RuleError, Trigger};
 use crate::signal::{Number, SignalName, Value};
 
@@ -31,9 +31,12 @@ pub const FORMAT: u32 = 1;
 /// ID still fits [`SignalName`]'s limit.
 const MAX_AUTOMATION_ID_LEN: usize = 44;
 
-/// What [`value_id`] puts in front of a name that does not start with a
-/// letter.
-const VALUE_PREFIX: &str = "value";
+/// The longest cooldown, in milliseconds: a day.
+pub const MAX_COOLDOWN_MS: u32 = 86_400_000;
+
+/// What an ID must look like, as a sentence.
+const ID_RULES: &str = "must start with a lowercase letter and use only lowercase letters, \
+                        digits and underscores";
 
 /// Every automation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -213,8 +216,13 @@ impl ActionDef {
 }
 
 impl AutomationDef {
-    /// The rule the runtime runs for this automation, watching the value
-    /// under its own ID.
+    /// The rule the runtime runs for this automation, reading the watched
+    /// value as the signal `signal`.
+    ///
+    /// The caller names the signal because a value's ID is unique only
+    /// within its application: two applications can each have a `progress`,
+    /// so whoever feeds the runtime's readings picks a name that tells them
+    /// apart.
     ///
     /// The rule runs its actions when the condition becomes true, and may run
     /// again once the condition stopped being true. With `undo`, it undoes
@@ -223,9 +231,10 @@ impl AutomationDef {
     /// # Errors
     ///
     /// Returns the problem as a sentence the setup app can show.
-    pub fn to_rule(&self) -> Result<Rule, String> {
-        let signal = SignalName::new(&self.when.value)
-            .map_err(|_invalid| format!("value {:?} is not a valid value ID", self.when.value))?;
+    pub fn to_rule(&self, signal: SignalName) -> Result<Rule, String> {
+        if self.cooldown_ms > MAX_COOLDOWN_MS {
+            return Err("the wait before it can run again is longer than a day".to_owned());
+        }
         let target = match self.when.target {
             TargetDef::Number(number) => Value::Number(
                 Number::new(number)
@@ -266,6 +275,18 @@ impl AutomationDef {
                 .to_owned(),
             other => other.to_string(),
         })
+    }
+
+    /// Checks everything the automation can get wrong on its own: the ID of
+    /// the value it watches, and that it makes a valid rule.
+    ///
+    /// # Errors
+    ///
+    /// Returns the problem as a sentence the setup app can show.
+    pub fn validate(&self) -> Result<(), String> {
+        let signal = SignalName::new(&self.when.value)
+            .map_err(|_invalid| format!("the ID of the value it watches {ID_RULES}"))?;
+        self.to_rule(signal).map(drop)
     }
 
     /// Checks the automation against the saved applications: its value must
@@ -349,14 +370,15 @@ impl AutomationsFile {
         for automation in &self.automations {
             let problem =
                 |problem: String| AutomationsError::Automation(automation.id.clone(), problem);
-            SignalName::new(&automation.id).map_err(|error| problem(error.to_string()))?;
+            SignalName::new(&automation.id)
+                .map_err(|_invalid| problem(format!("its ID {ID_RULES}")))?;
             if !ids.insert(automation.id.as_str()) {
                 return Err(problem("another automation has the same ID".to_owned()));
             }
             if automation.name.trim().is_empty() {
                 return Err(problem("it has no name".to_owned()));
             }
-            automation.to_rule().map_err(problem)?;
+            automation.validate().map_err(problem)?;
         }
         Ok(())
     }
@@ -406,19 +428,8 @@ impl Error for AutomationsError {}
 /// when that is taken.
 #[must_use]
 pub fn new_automation_id(name: &str, taken: &[&str]) -> String {
-    let mut base = value_id(name);
-    // [`value_id`] puts `value` in front of a name that does not start with a
-    // letter; an automation's ID says `automation` there instead.
-    let starts_with_letter = name
-        .chars()
-        .flat_map(char::to_lowercase)
-        .find(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
-        .is_some_and(|first| first.is_ascii_lowercase());
-    if !starts_with_letter {
-        base.replace_range(..VALUE_PREFIX.len(), "automation");
-    }
-    base.truncate(MAX_AUTOMATION_ID_LEN);
-    let base = base.trim_end_matches('_');
+    let base = id_from_name(name, "automation", MAX_AUTOMATION_ID_LEN);
+    let base = base.as_str();
     if !taken.contains(&base) {
         return base.to_owned();
     }
@@ -520,6 +531,10 @@ mod tests {
         }
     }
 
+    fn progress() -> SignalName {
+        SignalName::new("example_progress").expect("valid")
+    }
+
     fn pause_music() -> AutomationDef {
         AutomationDef {
             id: "pause_music".to_owned(),
@@ -554,7 +569,7 @@ mod tests {
     }
 
     fn problem(automation: AutomationDef) -> String {
-        automation.to_rule().expect_err("broken")
+        automation.validate().expect_err("broken")
     }
 
     #[test]
@@ -600,15 +615,16 @@ mod tests {
 
     #[test]
     fn an_automation_becomes_a_rule_that_runs_when_its_condition_starts_to_hold() {
-        let rule = pause_music().to_rule().expect("valid");
+        let rule = pause_music().to_rule(progress()).expect("valid");
         let Trigger::Becomes { condition, rearm } = rule.trigger() else {
             panic!("a becomes trigger");
         };
         assert_eq!(rearm, &Rearm::WhenFalse);
-        let progress = SignalName::new("progress").expect("valid");
+        // The rule reads the signal it was given, not the value's bare ID.
+        let signal = progress();
         let reading = |raw| {
             BTreeMap::from([(
-                progress.clone(),
+                signal.clone(),
                 Value::Number(Number::new(raw).expect("finite")),
             )])
         };
@@ -637,7 +653,7 @@ mod tests {
             command: MediaCommandDef::Play,
             app: None,
         }];
-        let rule = kept.to_rule().expect("valid");
+        let rule = kept.to_rule(progress()).expect("valid");
         assert_eq!(rule.restore(), Restore::Never);
         assert_eq!(rule.cooldown(), Duration::from_millis(2500));
         assert_eq!(
@@ -653,7 +669,7 @@ mod tests {
             app: Some(" Player.exe ".to_owned()),
         }];
         assert_eq!(
-            app_volume.to_rule().expect("valid").actions(),
+            app_volume.to_rule(progress()).expect("valid").actions(),
             [Action::SetVolume {
                 target: VolumeTarget::App(AppName::new("Player.exe").expect("valid")),
                 level: VolumeLevel::from_percent(0).expect("valid"),
@@ -698,10 +714,6 @@ mod tests {
         let mut infinite = pause_music();
         infinite.when.target = TargetDef::Number(f64::INFINITY);
         assert!(problem(infinite).contains("not finite"));
-
-        let mut bad_value = pause_music();
-        bad_value.when.value = "Progress".to_owned();
-        assert!(problem(bad_value).contains("\"Progress\""));
 
         let mut loud = pause_music();
         loud.actions = vec![ActionDef::Volume {
@@ -761,10 +773,29 @@ mod tests {
 
         let mut bad_id = pause_music();
         bad_id.id = "Pause music".to_owned();
-        assert!(matches!(
+        assert_eq!(
             file(vec![bad_id]).check(),
-            Err(AutomationsError::Automation(id, _)) if id == "Pause music"
-        ));
+            Err(AutomationsError::Automation(
+                "Pause music".to_owned(),
+                format!("its ID {ID_RULES}")
+            ))
+        );
+
+        let mut bad_value = pause_music();
+        bad_value.when.value = "Progress".to_owned();
+        assert_eq!(
+            problem(bad_value),
+            format!("the ID of the value it watches {ID_RULES}")
+        );
+
+        let mut slow = pause_music();
+        slow.cooldown_ms = MAX_COOLDOWN_MS;
+        assert_eq!(slow.validate(), Ok(()));
+        slow.cooldown_ms = MAX_COOLDOWN_MS + 1;
+        assert_eq!(
+            problem(slow),
+            "the wait before it can run again is longer than a day"
+        );
 
         let mut broken = pause_music();
         broken.actions.clear();

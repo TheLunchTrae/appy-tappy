@@ -144,7 +144,7 @@ Each names its value by application ID and value ID:
       "id": "pause_music_near_the_end",
       "name": "Pause music near the end",
       "enabled": true,
-      "when": { "app": "example", "value": "progress", "is": "atLeast", "target": 90 },
+      "when": { "app": "example", "value": "progress", "is": "atLeast", "target": 90.0 },
       "actions": [
         { "kind": "media", "command": "pause", "app": "Player.exe" },
         { "kind": "volume", "percent": 20, "app": null }

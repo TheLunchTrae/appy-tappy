@@ -7,7 +7,9 @@
 //! that later goes away shows as a problem on the automation that used it.
 
 use appytappy_config::app_file::AppFile;
-use appytappy_config::automation_file::{AutomationDef, AutomationsFile, new_automation_id};
+use appytappy_config::automation_file::{
+    ActionDef, AutomationDef, AutomationsFile, new_automation_id,
+};
 use appytappy_config::store::{AppStore, AutomationStore, StoredApp};
 use serde::Serialize;
 
@@ -65,7 +67,7 @@ fn problem(automation: &AutomationDef, apps: &[StoredApp]) -> Option<String> {
         .find(|app| app.id == automation.when.app && app.file.is_err())
     {
         return Some(format!(
-            "The file of the application it watches, {}, cannot be read.",
+            "Its application's file ({}.json) cannot be read.",
             broken.id
         ));
     }
@@ -110,7 +112,13 @@ pub(crate) fn save(
     if draft.name.is_empty() {
         return Err("Name the automation first.".to_owned());
     }
-    draft.to_rule().map_err(|problem| sentence(&problem))?;
+    for action in &mut draft.actions {
+        let (ActionDef::Media { app, .. } | ActionDef::Volume { app, .. }) = action;
+        if let Some(name) = app {
+            *name = name.trim().to_owned();
+        }
+    }
+    draft.validate().map_err(|problem| sentence(&problem))?;
     let apps = apps(stores)?;
     if let Some(problem) = problem(&draft, &apps) {
         return Err(problem);
@@ -152,14 +160,22 @@ pub(crate) fn save(
     Ok(id)
 }
 
-/// Turns the automation `id` on or off.
+/// Turns the automation `id` on or off. One that cannot run as saved stays
+/// off until it is fixed.
 pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<(), String> {
     let mut file = load(stores)?;
-    file.automations
+    let automation = file
+        .automations
         .iter_mut()
         .find(|automation| automation.id == id)
-        .ok_or_else(|| "That automation is no longer saved.".to_owned())?
-        .enabled = enabled;
+        .ok_or_else(|| "That automation is no longer saved.".to_owned())?;
+    if enabled && let Some(problem) = problem(automation, &apps(stores)?) {
+        return Err(format!(
+            "{} cannot run until it is fixed. {problem}",
+            automation.name
+        ));
+    }
+    automation.enabled = enabled;
     stores
         .automations
         .save(&file)
@@ -399,10 +415,20 @@ mod tests {
             list(&stores).expect("lists")[0].problem.as_deref(),
             Some("Example App no longer has the value it watches.")
         );
+        set_enabled(&stores, "pause_music", false).expect("turns off");
+        assert_eq!(
+            set_enabled(&stores, "pause_music", true),
+            Err(
+                "Pause music cannot run until it is fixed. Example App no longer has the value \
+                 it watches."
+                    .to_owned()
+            )
+        );
+        assert!(!list(&stores).expect("lists")[0].automation.enabled);
         fs::write(folder.join("apps").join("example").join("app.json"), b"{").expect("breaks");
         assert_eq!(
             list(&stores).expect("lists")[0].problem.as_deref(),
-            Some("The file of the application it watches, example, cannot be read.")
+            Some("Its application's file (example.json) cannot be read.")
         );
         fs::remove_dir_all(folder).expect("clean up");
     }

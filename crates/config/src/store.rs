@@ -3,8 +3,9 @@
 //! Each application has a folder under [`crate::paths::Locations::apps`]
 //! named by its ID, holding `app.json` and the pictures its values name.
 //! The automations live in one file of their own, at
-//! [`crate::paths::Locations::automations`]. Every write goes to a temporary file first and then replaces the old file
-//! in one step, so a reader never sees half a file.
+//! [`crate::paths::Locations::automations`]. Every write goes to a temporary
+//! file first and then replaces the old file in one step, so a reader never
+//! sees half a file.
 
 use std::fs;
 use std::io::{self, Write};

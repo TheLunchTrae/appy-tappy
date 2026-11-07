@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { type AppSummary, type AutomationSummary, deleteAutomation, errorText, setAutomationEnabled } from './api.ts';
-import { COMPARISON_NAMES, actionText, findValue, targetText, valueChoices } from './automation.ts';
+import { COMPARISON_NAMES, type ValueChoice, actionText, findValue, targetText, valueChoices } from './automation.ts';
 import { background } from './repeat.ts';
 
 interface RowProps {
   readonly summary: AutomationSummary;
   readonly apps: readonly AppSummary[];
+  readonly choices: readonly ValueChoice[];
+  /** Whether a change to its switch is still on its way. */
+  readonly toggling: boolean;
   readonly confirming: boolean;
   readonly onConfirm: (confirming: boolean) => void;
   readonly onToggle: () => void;
@@ -14,10 +17,22 @@ interface RowProps {
   readonly onDelete: () => void;
 }
 
-function Row({ summary, apps, confirming, onConfirm, onToggle, onEdit, onDelete }: RowProps) {
+function Row({ summary, apps, choices, toggling, confirming, onConfirm, onToggle, onEdit, onDelete }: RowProps) {
   const { automation, problem } = summary;
   const { when } = automation;
-  const choice = findValue(valueChoices(apps), when);
+  const choice = findValue(choices, when);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const deleteRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  // The delete buttons swap places, so focus moves to the one that took the pressed one's place.
+  useEffect(() => {
+    if (confirming) {
+      keepRef.current?.focus();
+    } else if (wasConfirming.current) {
+      deleteRef.current?.focus();
+    }
+    wasConfirming.current = confirming;
+  }, [confirming]);
   const app = apps.find((candidate) => candidate.id === when.app);
   const running = (app?.windows.length ?? 0) > 0;
   return (
@@ -28,7 +43,9 @@ function Row({ summary, apps, confirming, onConfirm, onToggle, onEdit, onDelete 
           role="switch"
           className="switch"
           aria-checked={automation.enabled}
-          aria-label={`${automation.name} on`}
+          aria-label={automation.name}
+          aria-busy={toggling}
+          disabled={toggling}
           onClick={onToggle}
         />
       </td>
@@ -66,6 +83,7 @@ function Row({ summary, apps, confirming, onConfirm, onToggle, onEdit, onDelete 
         {confirming ? (
           <span className="confirm">
             <button
+              ref={keepRef}
               type="button"
               className="btn small"
               onClick={() => {
@@ -84,6 +102,7 @@ function Row({ summary, apps, confirming, onConfirm, onToggle, onEdit, onDelete 
               Edit
             </button>
             <button
+              ref={deleteRef}
               type="button"
               className="btn small"
               onClick={() => {
@@ -111,26 +130,58 @@ interface Props {
 /** The saved automations: what each watches, what it does, and whether it is on. */
 export function AutomationsPage({ apps, automations, loadError, onChanged, onNew, onEdit }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<ReadonlySet<string>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
-  const run = async (change: () => Promise<void>): Promise<void> => {
+  const run = async (change: () => Promise<void>): Promise<boolean> => {
     try {
       await change();
       setActionError(null);
       setConfirming(null);
       await onChanged();
+      return true;
     } catch (error: unknown) {
       setActionError(errorText(error));
+      return false;
     }
   };
 
-  const hasValues = apps !== null && valueChoices(apps).length > 0;
+  // A switch sends the state it shows, so it waits for the list to show the change before it takes another press.
+  const toggle = async (id: string, enabled: boolean): Promise<void> => {
+    setToggling((current) => new Set(current).add(id));
+    await run(async () => {
+      await setAutomationEnabled(id, enabled);
+    });
+    setToggling((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  const remove = async (id: string): Promise<void> => {
+    if (
+      await run(async () => {
+        await deleteAutomation(id);
+      })
+    ) {
+      // The deleted row took the focused button with it.
+      headingRef.current?.focus();
+    }
+  };
+
+  const choices = apps === null ? [] : valueChoices(apps);
+  const hasValues = choices.length > 0;
+  const canCreate = hasValues && loadError === null;
   const head = (
     <div className="page-head">
-      <h1>Automations</h1>
+      <h1 ref={headingRef} tabIndex={-1}>
+        Automations
+      </h1>
       <span className="lead">When a value becomes true, AppyTappy runs the actions in order.</span>
       <div className="end">
-        <button type="button" className="btn primary" disabled={!hasValues} onClick={onNew}>
+        <button type="button" className="btn primary" disabled={!canCreate} onClick={onNew}>
           New automation
         </button>
       </div>
@@ -156,7 +207,7 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
               happens when it changes.
             </p>
           )}
-          {hasValues ? (
+          {canCreate ? (
             <button type="button" className="btn primary" onClick={onNew}>
               New automation
             </button>
@@ -174,7 +225,7 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
             <th scope="col">Do, in order</th>
             <th scope="col">Needs running</th>
             <th scope="col">
-              <span className="note">Actions</span>
+              <span className="visually-hidden">Edit or delete</span>
             </th>
           </tr>
         </thead>
@@ -186,26 +237,20 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
                 key={id}
                 summary={summary}
                 apps={apps}
+                choices={choices}
+                toggling={toggling.has(id)}
                 confirming={confirming === id}
                 onConfirm={(confirm) => {
                   setConfirming(confirm ? id : null);
                 }}
                 onToggle={() => {
-                  background(
-                    run(async () => {
-                      await setAutomationEnabled(id, !enabled);
-                    }),
-                  );
+                  background(toggle(id, !enabled));
                 }}
                 onEdit={() => {
                   onEdit(summary);
                 }}
                 onDelete={() => {
-                  background(
-                    run(async () => {
-                      await deleteAutomation(id);
-                    }),
-                  );
+                  background(remove(id));
                 }}
               />
             );
@@ -218,8 +263,16 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
   return (
     <main className="page">
       {head}
-      {loadError === null ? null : <p className="warn">{loadError}</p>}
-      {actionError === null ? null : <p className="warn">{actionError}</p>}
+      {loadError === null ? null : (
+        <p className="warn" role="alert">
+          {loadError}
+        </p>
+      )}
+      {actionError === null ? null : (
+        <p className="warn" role="alert">
+          {actionError}
+        </p>
+      )}
       {body}
       {automations !== null && automations.length > 0 ? (
         <p className="note">

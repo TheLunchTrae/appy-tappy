@@ -632,6 +632,7 @@ mod tests {
     use std::time::Instant;
 
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::automation_file::{ActionDef, MediaCommandDef};
     use appytappy_sources::screen::{Frame, Size};
     use appytappy_sources::system::Bounds;
 
@@ -1087,8 +1088,12 @@ mod tests {
             "name": "Pause music",
             "enabled": true,
             "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": true},
-            "actions": [{"kind": "media", "command": "pause", "app": "Player.exe"}],
-            "undo": true
+            "actions": [
+                {"kind": "media", "command": "pause", "app": " Player.exe "},
+                {"kind": "volume", "percent": 20, "app": null}
+            ],
+            "undo": true,
+            "cooldownMs": 1500
         }))
         .expect("the UI's spelling");
         let id = harness
@@ -1117,6 +1122,14 @@ mod tests {
         let listed = harness.ask(Request::ListAutomations).expect("lists");
         assert_eq!(listed.len(), 1);
         assert!(!listed[0].automation.enabled);
+        assert_eq!(listed[0].automation.cooldown_ms, 1500);
+        assert_eq!(
+            listed[0].automation.actions[0],
+            ActionDef::Media {
+                command: MediaCommandDef::Pause,
+                app: Some("Player.exe".to_owned()),
+            }
+        );
         harness
             .ask(|reply| Request::DeleteAutomation { id, reply })
             .expect("removes");

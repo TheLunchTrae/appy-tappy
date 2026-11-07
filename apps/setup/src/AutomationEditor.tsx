@@ -132,7 +132,7 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
         >
           ↓
         </button>
-        <button type="button" className="btn small" onClick={onRemove}>
+        <button type="button" className="btn small" aria-label={`Remove action ${position}`} onClick={onRemove}>
           Remove
         </button>
       </span>
@@ -395,9 +395,15 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
         </section>
 
         <div className="editor-foot">
-          <span className={saveError === null ? 'note' : 'warn'}>
-            {saveError ?? (built.ok ? 'Ready to save.' : built.next)}
-          </span>
+          {saveError === null ? (
+            <span className="note" role="status">
+              {built.ok ? 'Ready to save.' : built.next}
+            </span>
+          ) : (
+            <span className="warn" role="alert">
+              {saveError}
+            </span>
+          )}
           <button type="button" className="btn" onClick={onCancel}>
             Cancel
           </button>

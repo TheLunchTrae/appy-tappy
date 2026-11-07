@@ -142,8 +142,16 @@ export function ValuesPage({ apps, automations, loadError, onChanged, onNew }: P
           </button>
         </div>
       </div>
-      {loadError === null ? null : <p className="warn">{loadError}</p>}
-      {deleteError === null ? null : <p className="warn">{deleteError}</p>}
+      {loadError === null ? null : (
+        <p className="warn" role="alert">
+          {loadError}
+        </p>
+      )}
+      {deleteError === null ? null : (
+        <p className="warn" role="alert">
+          {deleteError}
+        </p>
+      )}
       {apps !== null && total === 0 && apps.every((app) => app.error === null) ? (
         <div className="empty">
           <h2>No values yet</h2>

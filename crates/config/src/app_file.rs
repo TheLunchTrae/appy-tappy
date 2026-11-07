@@ -427,6 +427,13 @@ impl Error for AppFileError {}
 /// one that starts with a digit, gets a `value` prefix so the ID is valid.
 #[must_use]
 pub fn value_id(name: &str) -> String {
+    id_from_name(name, "value", MAX_VALUE_ID_LEN)
+}
+
+/// An ID made from a name the user typed, as [`value_id`] describes, with
+/// `prefix` in front when the name does not start with a letter, and at most
+/// `max_len` bytes long.
+pub(crate) fn id_from_name(name: &str, prefix: &str, max_len: usize) -> String {
     let mut id = String::new();
     for character in name.chars().flat_map(char::to_lowercase) {
         if character.is_ascii_lowercase() || character.is_ascii_digit() {
@@ -439,9 +446,16 @@ pub fn value_id(name: &str) -> String {
         id.pop();
     }
     if !id.starts_with(|first: char| first.is_ascii_lowercase()) {
-        id.insert_str(0, if id.is_empty() { "value" } else { "value_" });
+        id.insert_str(
+            0,
+            &if id.is_empty() {
+                prefix.to_owned()
+            } else {
+                format!("{prefix}_")
+            },
+        );
     }
-    id.truncate(MAX_VALUE_ID_LEN);
+    id.truncate(max_len);
     while id.ends_with('_') {
         id.pop();
     }
