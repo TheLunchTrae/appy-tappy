@@ -149,13 +149,18 @@ export function RegionSurface({
     }
   };
 
-  const end = (): void => {
+  const end = (event: PointerEvent<HTMLDivElement>): void => {
     const current = drag.current;
     drag.current = null;
-    if (current?.mode === 'rough' && rough !== null) {
-      onSnap?.(rough, current.combine);
-    }
     setRough(null);
+    if (current?.mode === 'rough') {
+      // Taken from where the pointer was let go, since the last move may not
+      // have been drawn yet.
+      const box = fromCorners(current.from, at(event), size);
+      if (box !== null) {
+        onSnap?.(box, current.combine);
+      }
+    }
   };
 
   const scale = size.width > 0 ? shown.width / size.width : 0;

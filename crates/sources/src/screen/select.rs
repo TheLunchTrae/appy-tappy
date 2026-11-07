@@ -10,13 +10,15 @@
 //! Colors are compared per channel: two colors are alike when each of their
 //! red, green, and blue differ by at most a tolerance, as a color check does.
 
+use std::collections::HashMap;
+
 use super::mask::{Mask, pixels};
 use super::{Image, Region, Size};
 
 /// The most background colors [`snap`] collects from a box's edge. A plain
-/// background, even a gradient, needs a handful; more means the edge is not
+/// background, even a gradient, has far fewer; more means the edge is not
 /// plain, and further colors would only slow the snap down.
-const MAX_BACKGROUND_COLORS: usize = 64;
+const MAX_BACKGROUND_COLORS: usize = 256;
 
 /// A thing selected on a screenshot: its box and which pixels in the box
 /// belong to it.
@@ -49,8 +51,9 @@ impl Selection {
             return false;
         };
         let size = self.region.size();
+        // A row past the bottom gives an index past the end, which `get`
+        // refuses; a column past the right would wrap into the next row.
         column < size.width
-            && row < size.height
             && index(column, row, size)
                 .and_then(|index| self.mask.kept().get(index))
                 .is_some_and(|&kept| kept)
@@ -96,36 +99,40 @@ impl Selection {
 /// The thing inside `rough`, a box the user dragged around it on `image`
 /// with some background on every side.
 ///
-/// The colors along the box's edge are the background. Every pixel within
-/// `tolerance` of one of them is left out, including background showing
-/// between and inside the thing's parts, such as inside the letter O. It is
-/// `None` when `rough` reaches past the image or holds only background.
+/// The colors along the box's edge are the background, the first 256
+/// different ones. Every pixel within `tolerance` of one of them is left
+/// out, including background showing between and inside the thing's parts,
+/// such as inside the letter O. It is `None` when `rough` reaches past the
+/// image or holds only background.
 #[must_use]
 pub fn snap(image: &Image, rough: Region, tolerance: u8) -> Option<Selection> {
     if !rough.fits(image.size()) {
         return None;
     }
     let mut background: Vec<[u8; 3]> = Vec::new();
-    for (x, y) in edge(rough) {
-        let Some(color) = color(image, x, y) else {
-            continue;
-        };
-        // Colors within half the tolerance of one already collected add
-        // nothing a pixel could be matched against.
-        if background.len() < MAX_BACKGROUND_COLORS
-            && !background
-                .iter()
-                .any(|known| alike(*known, color, tolerance / 2))
-        {
+    for color in edge(rough).filter_map(|(x, y)| color(image, x, y)) {
+        if background.len() < MAX_BACKGROUND_COLORS && !background.contains(&color) {
             background.push(color);
         }
     }
-    trim(rough, |x, y| {
-        color(image, x, y).is_some_and(|color| {
-            !background
-                .iter()
-                .any(|known| alike(*known, color, tolerance))
+    // A screenshot repeats its colors, so each is compared with the
+    // background once.
+    let mut known: HashMap<[u8; 3], bool> = HashMap::new();
+    let kept: Vec<bool> = points(rough)
+        .map(|(x, y)| {
+            color(image, x, y).is_some_and(|color| {
+                *known.entry(color).or_insert_with(|| {
+                    !background.iter().any(|edge| alike(*edge, color, tolerance))
+                })
+            })
         })
+        .collect();
+    trim(rough, |x, y| {
+        x.checked_sub(rough.x())
+            .zip(y.checked_sub(rough.y()))
+            .and_then(|(column, row)| index(column, row, rough.size()))
+            .and_then(|index| kept.get(index))
+            .is_some_and(|&kept| kept)
     })
 }
 
@@ -347,6 +354,42 @@ mod tests {
         let strict = snap(&image, Region::new(1, 0, 3, 3).unwrap(), 4).unwrap();
         assert_eq!(strict.region(), Region::new(2, 1, 1, 1).unwrap());
         assert_eq!(snap(&image, Region::new(8, 0, 3, 3).unwrap(), 24), None);
+    }
+
+    #[test]
+    fn snap_takes_the_first_256_different_edge_colors_as_background() {
+        // The top row has 300 different colors and the bottom row repeats
+        // the first. The edge is read across both rows together, so the
+        // repeats must not use up the 256.
+        let shade = |i: u32| {
+            [
+                u8::try_from(i % 256).unwrap(),
+                u8::try_from(i / 256).unwrap(),
+                0,
+            ]
+        };
+        let (width, height) = (300, 3);
+        let mut bgra = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let [red, green, blue] = match (x, y) {
+                    (x, 0) => shade(x),
+                    (150, 1) => shade(256),
+                    (151, 1) => shade(200),
+                    _ => shade(0),
+                };
+                bgra.extend_from_slice(&[blue, green, red, 255]);
+            }
+        }
+        let image = Image::new(Size { width, height }, bgra).unwrap();
+        let selection = snap(&image, Region::whole(image.size()).unwrap(), 0).unwrap();
+        // Colors past the first 256 are the thing, on the edge or inside;
+        // the 201st is background.
+        assert_eq!(selection.region(), Region::new(150, 0, 150, 2).unwrap());
+        assert!(selection.contains(150, 1));
+        assert!(!selection.contains(151, 1));
+        assert!(selection.contains(256, 0));
+        assert!(!selection.contains(255, 0));
     }
 
     #[test]

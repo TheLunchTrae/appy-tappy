@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { contains, dragCorner, fit, fromCorners, moveRect, toPicture } from '../src/lib/region.ts';
+import { contains, dragCorner, fit, fromCorners, moveRect, sameRect, toPicture } from '../src/lib/region.ts';
 
 const bounds = { width: 100, height: 50 };
 
@@ -77,4 +77,16 @@ test('toPicture scales a point from the drawn size to the picture', () => {
     y: 270,
   });
   expect(toPicture({ x: 4, y: 4 }, { width: 0, height: 0 }, { width: 10, height: 10 })).toEqual({ x: 0, y: 0 });
+});
+
+test('sameRect compares every side, and two missing rectangles are the same', () => {
+  const rect = { x: 1, y: 2, width: 3, height: 4 };
+  expect(sameRect(rect, { ...rect })).toBe(true);
+  expect(sameRect(rect, { ...rect, x: 0 })).toBe(false);
+  expect(sameRect(rect, { ...rect, y: 0 })).toBe(false);
+  expect(sameRect(rect, { ...rect, width: 0 })).toBe(false);
+  expect(sameRect(rect, { ...rect, height: 0 })).toBe(false);
+  expect(sameRect(rect, null)).toBe(false);
+  expect(sameRect(null, rect)).toBe(false);
+  expect(sameRect(null, null)).toBe(true);
 });

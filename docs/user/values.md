@@ -81,7 +81,8 @@ Hold **Shift** while you drag or click to add a part, or **Alt** to take one
 away. **Color match** says how close a color must be to count as the same:
 raise it if the selection stops short, and lower it if it spills over. The
 region fits the selection, and the screenshot you select on becomes the one
-the check compares against.
+the check compares against. Selecting on another screenshot, or choosing
+another with **Use this one**, starts the selection over.
 
 While **Ignore the background** is on, the pixels left out are shaded over the
 screenshot, and the check skips them. The note under it says how many pixels

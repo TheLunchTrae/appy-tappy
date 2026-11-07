@@ -53,15 +53,20 @@ export function combineOf(keys: { readonly shiftKey: boolean; readonly altKey: b
 /**
  * The steps after `step`, taken on screenshot `on`, when the earlier ones
  * were taken on `before`. A step that starts over, or one on another
- * screenshot, begins a new selection.
+ * screenshot, begins a new selection. Taking away from nothing changes
+ * nothing, so it is `null`.
  */
 export function withStep(
   steps: readonly SelectStep[],
   before: number | null,
   on: number,
   step: SelectStep,
-): readonly SelectStep[] {
-  if (step.combine === 'replace' || before !== on) {
+): readonly SelectStep[] | null {
+  const fresh = steps.length === 0 || before !== on;
+  if (step.combine === 'remove' && fresh) {
+    return null;
+  }
+  if (step.combine === 'replace' || fresh) {
     return [{ ...step, combine: 'replace' }];
   }
   return [...steps, step];

@@ -27,6 +27,14 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(Math.max(value, low), high);
 }
 
+/** Whether `a` and `b` are the same rectangle, or both missing. */
+export function sameRect(a: Rect | null, b: Rect | null): boolean {
+  if (a === null || b === null) {
+    return a === b;
+  }
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
 /** The whole-pixel rectangle between two points, kept inside `bounds`, or null when it covers no pixel. */
 export function fromCorners(start: Point, end: Point, bounds: Size): Rect | null {
   const left = Math.floor(clamp(Math.min(start.x, end.x), 0, bounds.width));

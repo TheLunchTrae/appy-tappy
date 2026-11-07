@@ -35,7 +35,7 @@ import type { Choice } from './Picker.tsx';
 import { type Color, type Picture, colorAt, hex } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { type ReviewEntry, clock, entries, keptLabels } from '../lib/review.ts';
-import { type Point, type Rect, type Size, fit } from '../lib/region.ts';
+import { type Point, type Rect, type Size, fit, sameRect } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
 import {
   type SelectStep,
@@ -448,7 +448,11 @@ function KindFields({ draft, masking, picking, canPick, selected, position, onDr
                 className="btn small"
                 disabled={selected === null}
                 onClick={() => {
-                  onDraft((current) => ({ ...current, reference: selected }));
+                  // Steps taken on another screenshot would select something
+                  // else on this one, so the selection starts over.
+                  onDraft((current) =>
+                    current.reference === selected ? current : { ...current, reference: selected, steps: [] },
+                  );
                 }}
               >
                 Use this one
@@ -632,6 +636,11 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   // Makes the selection the steps describe on the screenshot the picture is
   // compared against, and fits the region to it.
   const { reference, colorMatch, steps } = draft;
+  // The box the region was last fitted to, and the steps it came from, so a
+  // new color match refits a region the user has not changed by hand.
+  const fitted = useRef<{ readonly steps: readonly SelectStep[]; readonly region: Rect } | null>(null);
+  const shownRegion = useRef(draft.region);
+  shownRegion.current = draft.region;
   useEffect(() => {
     if (reference === null || steps.length === 0) {
       setSelection(null);
@@ -646,7 +655,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
           }
           setSelectError(null);
           setSelection({ steps, view });
-          if (view !== null) {
+          const last = fitted.current;
+          const untouched = last === null || last.steps !== steps || sameRect(shownRegion.current, last.region);
+          if (view !== null && untouched) {
+            fitted.current = { steps, region: view.region };
             setDraft((latest) => ({ ...latest, region: view.region }));
           }
         })
@@ -678,11 +690,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     if (selected === null) {
       return;
     }
-    setDraft((current) => ({
-      ...current,
-      steps: withStep(current.steps, current.reference, selected, step),
-      reference: selected,
-    }));
+    setDraft((current) => {
+      const steps = withStep(current.steps, current.reference, selected, step);
+      return steps === null ? current : { ...current, steps, reference: selected };
+    });
   };
 
   const readNow = useCallback(async (): Promise<void> => {

@@ -22,7 +22,13 @@ describe('withStep', () => {
   test('starts over for a plain step or another screenshot', () => {
     expect(withStep(first, 2, 2, click(5, 'replace'))).toEqual([click(5, 'replace')]);
     expect(withStep(first, 2, 4, click(5, 'add'))).toEqual([click(5, 'replace')]);
-    expect(withStep([], null, 4, click(5, 'remove'))).toEqual([click(5, 'replace')]);
+    expect(withStep([], null, 4, click(5, 'add'))).toEqual([click(5, 'replace')]);
+  });
+
+  test('ignores taking away from nothing', () => {
+    expect(withStep([], null, 4, click(5, 'remove'))).toBeNull();
+    expect(withStep([], 4, 4, click(5, 'remove'))).toBeNull();
+    expect(withStep(first, 2, 4, click(5, 'remove'))).toBeNull();
   });
 });
 

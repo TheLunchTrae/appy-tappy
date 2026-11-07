@@ -34,9 +34,13 @@ This page covers what the user guide leaves out.
   selection, with one color match for all of them (`selection.rs`). The owner
   replays them on the screenshot the check compares against, both to answer
   the UI's `select` command and to build and save the check, so moving the
-  slider or choosing another screenshot remakes the selection from the same
-  steps. The UI gets the selection's box and its runs of selected pixels, and
-  shades the rest of the region itself.
+  slider remakes the selection from the same steps. A new step fits the region
+  to the selection, and so does the slider while the region is as it was last
+  fitted; a region changed by hand stays. Steps on one screenshot mean nothing
+  on another, so a step on another screenshot, or **Use this one**, starts the
+  selection over, and taking away from nothing is ignored. The UI gets the
+  selection's box and its runs of selected pixels, and shades the rest of the
+  region itself.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to

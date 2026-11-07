@@ -67,11 +67,11 @@ leaves any out.
 `screen::select` finds the thing to compare on a screenshot, without a model:
 
 - **Snap** takes a rough box drawn around the thing. The colors along the
-  box's edge are the background, up to 64 of them: a new one counts only when
-  it is not within half the tolerance of one already found. Every pixel
+  box's edge are the background, the first 256 different ones. Every pixel
   within the tolerance of a background color is left out, wherever it is, so
-  background showing inside the thing is left out too. The selection is the
-  rest, trimmed to its box.
+  background showing inside the thing is left out too; each color in the box
+  is compared with the background once. The selection is the rest, trimmed
+  to its box.
 - **Grow** takes a point. It floods out to the pixels beside it, left, right,
   up, and down, whose colors are within the tolerance of the point's color,
   then fills the holes: unselected pixels that cannot reach the edge of the
