@@ -1,7 +1,7 @@
 name: Release
 
 # Builds the Windows installer. A pushed v* tag publishes it as a GitHub
-# release. A manual run on any branch, or a pull request that changes the
+# release. A manual run on any branch or tag, or a pull request that changes the
 # installer or its build, keeps it as a test build in the run's artifacts.
 # docs/installer.md describes the builds.
 on:
@@ -15,6 +15,9 @@ on:
       - apps/setup/src-tauri/tauri.conf.json
       - apps/setup/src-tauri/tauri.installer.conf.json
       - apps/setup/src-tauri/windows/**
+      # The installer hooks find the runtime's tray window by its class and
+      # title, which this file sets.
+      - crates/platform/src/win.rs
   workflow_dispatch:
 
 permissions:
@@ -54,7 +57,7 @@ jobs:
           cache: true
       - name: Build the installer
         env:
-          INSTALLER_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          INSTALLER_TAG: ${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name || '' }}
         run: mise run installer:build
       # Unzipped, so the run's artifact downloads as the installer itself,
       # named for its version.
@@ -70,7 +73,7 @@ jobs:
   release:
     name: release
     needs: installer
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:

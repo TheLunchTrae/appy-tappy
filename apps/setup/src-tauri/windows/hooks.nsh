@@ -1,18 +1,33 @@
 ; Hooks into the installer that Tauri's bundler builds from
 ; tauri.installer.conf.json. The runtime, appytappy-runtime.exe, runs from
 ; sign-in, so these hooks stop it before its file is replaced or removed, and
-; turn its autostart on and off. docs/installer.md describes the behavior.
+; turn its autostart on. docs/installer.md describes the behavior.
 
-; Asks the runtime to quit the way Windows does when the session ends: its
-; tray window gets WM_CLOSE, so the runtime undoes what its automations
-; changed and exits. It gets 10 seconds, and is then killed, because a
-; running runtime keeps its file locked.
+; Asks the runtime to close: its tray window gets WM_CLOSE, which the runtime
+; treats like the end of the session, so it undoes what its automations
+; changed and exits. The class and title are TRAY_CLASS and the window title in
+; crates/platform/src/win.rs. The request goes again each second, since one
+; sent while the tray menu is open is lost. A runtime that is still running
+; after 10 seconds, or that has no tray window, is killed, because a running
+; runtime keeps its file locked.
 !macro APPYTAPPY_STOP_RUNTIME
-  FindWindow $0 "AppyTappy.Tray" "AppyTappy"
-  ${If} $0 <> 0
-    SendMessage $0 ${WM_CLOSE} 0 0 /TIMEOUT=5000
-  ${EndIf}
   StrCpy $1 0
+  ${Do}
+    FindWindow $0 "AppyTappy.Tray" "AppyTappy"
+    ${If} $0 = 0
+      ${ExitDo}
+    ${EndIf}
+    IntOp $2 $1 % 10
+    ${If} $2 = 0
+      SendMessage $0 ${WM_CLOSE} 0 0 /TIMEOUT=1000
+    ${EndIf}
+    ${If} $1 >= 100
+      ${ExitDo}
+    ${EndIf}
+    Sleep 100
+    IntOp $1 $1 + 1
+  ${Loop}
+  ; The tray window goes before the program exits, so wait for the program.
   ${Do}
     nsis_tauri_utils::FindProcessCurrentUser "appytappy-runtime.exe"
     Pop $0
@@ -42,14 +57,17 @@
     DetailPrint "AppyTappy could not turn on starting at sign-in."
   ${EndIf}
   nsis_tauri_utils::RunAsUser "$INSTDIR\appytappy-runtime.exe" ""
+  Pop $0
+  ${If} $0 <> 0
+    DetailPrint "AppyTappy could not start its runtime; it starts at the next sign-in."
+  ${EndIf}
 !macroend
 
-; An update installs again straight after, so it keeps the autostart entry.
+; Tauri's uninstaller removes the Run value named for the product after this,
+; once it knows the uninstall goes ahead, so the product name stays
+; AUTOSTART_VALUE from crates/platform/src/lib.rs.
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro APPYTAPPY_STOP_RUNTIME
-  ${If} $UpdateMode <> 1
-    ExecWait '"$INSTDIR\appytappy-runtime.exe" --autostart off'
-  ${EndIf}
 !macroend
 
 ; Tauri's "Delete the application data" box removes only the setup app's web
@@ -58,7 +76,6 @@
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
-    SetShellVarContext current
     RMDir /r "$APPDATA\AppyTappy"
     RMDir /r "$LOCALAPPDATA\AppyTappy\logs"
     RMDir "$LOCALAPPDATA\AppyTappy"

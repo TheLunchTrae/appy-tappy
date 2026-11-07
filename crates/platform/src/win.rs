@@ -88,7 +88,9 @@ const CLOSE_REQUESTED: u32 = WM_APP + 7;
 /// Any other `WM_QUIT` means the window went away.
 const STOPPED: i32 = 1;
 
-/// The tray window's class.
+/// The tray window's class. The installer hooks in
+/// `apps/setup/src-tauri/windows/hooks.nsh` find the window by this class and
+/// its title to ask the runtime to close.
 const TRAY_CLASS: PCWSTR = w!("AppyTappy.Tray");
 
 /// The icon's number among the tray window's icons.
@@ -483,6 +485,7 @@ impl TrayWindow {
             CreateWindowExW(
                 WINDOW_EX_STYLE(0),
                 TRAY_CLASS,
+                // The installer hooks match this title too; see TRAY_CLASS.
                 w!("AppyTappy"),
                 WS_OVERLAPPED,
                 0,

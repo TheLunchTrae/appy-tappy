@@ -23,7 +23,7 @@ if [ -n "${INSTALLER_TAG:-}" ]; then
   version=$release
 else
   build=$(git rev-parse --short HEAD)
-  git diff --quiet HEAD || build="$build.dirty"
+  [ -z "$(git status --porcelain)" ] || build="$build.dirty"
   version="$release-dev+$build"
 fi
 host=$(rustc -vV | sed -n 's/^host: //p')
@@ -31,7 +31,7 @@ cargo build --profile dist --locked -p appytappy-runtime
 mkdir -p apps/setup/src-tauri/binaries
 cp target/dist/appytappy-runtime.exe "apps/setup/src-tauri/binaries/appytappy-runtime-$host.exe"
 cd apps/setup
-bun run tauri build --ci --bundles nsis \
+bun run tauri build --ci \
   --config src-tauri/tauri.installer.conf.json \
   --config "{\"version\":\"$version\"}" \
   -- --profile dist --locked

@@ -264,8 +264,8 @@ options. Either command exits without
 starting the runtime and logs its result. The exit code is 0 on success, 1 on
 failure, and 2 for a command line it does not understand, but the runtime is
 a windowed program, so a console does not wait for it: the code shows only to
-an installer or to `start /wait`. The [installer](installer.md) or the setup
-app runs these commands; the runtime never turns autostart on by itself.
+an installer or to `start /wait`. The [installer](installer.md) runs these
+commands; the runtime never turns autostart on by itself.
 
 The log is `runtime.log` in `%LOCALAPPDATA%\AppyTappy\logs\`, one
 timestamped line per start, exit, state change, and problem. A line that

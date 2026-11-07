@@ -1,14 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AppyTappy",
-  "mainBinaryName": "appytappy-setup",
   "bundle": {
     "active": true,
     "targets": ["nsis"],
     "publisher": "Trae Stevens",
     "copyright": "Copyright (C) 2026 Trae Stevens",
-    "license": "GPL-3.0-only",
-    "shortDescription": "Runs automations when another application reaches a state",
     "externalBin": ["binaries/appytappy-runtime"],
     "windows": {
       "nsis": {
