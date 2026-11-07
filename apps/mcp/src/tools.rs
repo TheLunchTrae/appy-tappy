@@ -8,19 +8,29 @@
 //! the user allows it in a prompt the system shows outside the agent's reach,
 //! and never opens a known anti-cheat's own process.
 
-use std::io;
+mod args;
+mod definitions;
+mod format;
 
 use appytappy_config::anti_cheat::{
     AntiCheatClass, ProcessAccessPermit, ProcessId, known_anti_cheat,
 };
 use appytappy_sources::memory::{
-    FirstScan, Module, NextScan, Number, ProcessMemory, Scan, ValueTest, ValueType,
-    follow_pointer_chain,
+    FirstScan, Module, NextScan, Number, ProcessMemory, Scan, ValueType, follow_pointer_chain,
 };
 use appytappy_sources::system::{AccessAnswer, ProcessEntry, System};
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+
+use self::args::{
+    AttachArgs, FirstMode, FollowPointerArgs, NextMode, NoArgs, OffsetArg, ProcessListArgs,
+    ReadArgs, ReadBytesArgs, ScanFirstArgs, ScanNextArgs, ScanResultsArgs, ScreenSampleArgs,
+    WindowListArgs, exact, parse, range, value_type,
+};
+use self::format::{
+    hex, module_offset, no_scan, not_attached, number_json, os_error, scan_summary,
+};
+
+pub(crate) use self::definitions::definitions;
 
 /// The most results one `memory_scan_results` call returns.
 const RESULTS_LIMIT: usize = 200;
@@ -384,77 +394,6 @@ impl<S: System> Session<S> {
     }
 }
 
-fn parse<T: DeserializeOwned>(arguments: Value) -> Result<T, String> {
-    serde_json::from_value(arguments).map_err(|error| format!("invalid arguments: {error}"))
-}
-
-fn os_error(operation: &'static str) -> impl FnOnce(io::Error) -> String {
-    move |error| format!("cannot {operation}: {error}")
-}
-
-fn not_attached() -> String {
-    "no process is attached; call process_attach first".to_owned()
-}
-
-fn no_scan() -> String {
-    "no scan is running; call memory_scan_first first".to_owned()
-}
-
-fn hex(value: u64) -> String {
-    format!("{value:#x}")
-}
-
-/// Names the module an address lies in, as `module+0xoffset`, so the agent
-/// can see which candidates are static and can start a pointer chain.
-fn module_offset(modules: &[Module], address: u64) -> Option<String> {
-    modules.iter().find_map(|module| {
-        let offset = address.checked_sub(module.base)?;
-        (offset < module.size).then(|| format!("{}+{offset:#x}", module.name))
-    })
-}
-
-fn value_type(name: &str) -> Result<ValueType, String> {
-    ValueType::from_name(name).ok_or_else(|| format!("unknown value type: {name}"))
-}
-
-fn number(value: &serde_json::Number) -> Number {
-    if let Some(int) = value.as_i64() {
-        Number::Int(int.into())
-    } else if let Some(int) = value.as_u64() {
-        Number::Int(int.into())
-    } else {
-        Number::Float(value.as_f64().unwrap_or(f64::NAN))
-    }
-}
-
-fn number_json(value: Number) -> Value {
-    match value {
-        Number::Int(int) => i64::try_from(int)
-            .map(Value::from)
-            .or_else(|_| u64::try_from(int).map(Value::from))
-            .unwrap_or_else(|_| Value::from(int.to_string())),
-        Number::Float(float) => Value::from(float),
-    }
-}
-
-fn exact(value: Option<serde_json::Number>) -> Result<ValueTest, String> {
-    let value = value.ok_or("mode exact needs value")?;
-    Ok(ValueTest::Exact(number(&value)))
-}
-
-fn range(
-    min: Option<serde_json::Number>,
-    max: Option<serde_json::Number>,
-) -> Result<ValueTest, String> {
-    match (min, max) {
-        (Some(min), Some(max)) => Ok(ValueTest::Range {
-            min: number(&min),
-            max: number(&max),
-        }),
-        _ => Err("mode range needs min and max".to_owned()),
-    }
-}
-
 fn read_value(memory: &impl ProcessMemory, address: u64, value_type: ValueType) -> Outcome<Number> {
     let mut bytes = vec![0; value_type.size()];
     memory
@@ -465,309 +404,9 @@ fn read_value(memory: &impl ProcessMemory, address: u64, value_type: ValueType) 
         .ok_or_else(|| "the read returned too few bytes".to_owned())
 }
 
-fn scan_summary(scan: &Scan) -> Value {
-    json!({
-        "value_type": scan.value_type().name(),
-        "candidates": scan.count(),
-        "narrowed": scan.candidates().is_some(),
-    })
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NoArgs {}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProcessListArgs {
-    name_contains: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WindowListArgs {
-    pid: Option<u32>,
-    #[serde(default)]
-    include_hidden: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AttachArgs {
-    pid: u32,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum FirstMode {
-    Exact,
-    Range,
-    Unknown,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum NextMode {
-    Exact,
-    Range,
-    Changed,
-    Unchanged,
-    Increased,
-    Decreased,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScanFirstArgs {
-    value_type: String,
-    mode: FirstMode,
-    value: Option<serde_json::Number>,
-    min: Option<serde_json::Number>,
-    max: Option<serde_json::Number>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScanNextArgs {
-    mode: NextMode,
-    value: Option<serde_json::Number>,
-    min: Option<serde_json::Number>,
-    max: Option<serde_json::Number>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScanResultsArgs {
-    #[serde(default)]
-    offset: usize,
-    limit: Option<usize>,
-}
-
-/// An address as a number or a hex (`0x…`) or decimal string.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum AddressArg {
-    Number(u64),
-    Text(String),
-}
-
-impl AddressArg {
-    fn parse(&self) -> Result<u64, String> {
-        match self {
-            Self::Number(value) => Ok(*value),
-            Self::Text(text) => {
-                parse_unsigned(text).ok_or_else(|| format!("not an address: {text}"))
-            },
-        }
-    }
-}
-
-/// A pointer offset as a number or a hex or decimal string, optionally
-/// negative.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum OffsetArg {
-    Number(i64),
-    Text(String),
-}
-
-impl OffsetArg {
-    fn parse(&self) -> Result<i64, String> {
-        match self {
-            Self::Number(value) => Ok(*value),
-            Self::Text(text) => {
-                let (negative, digits) = text
-                    .strip_prefix('-')
-                    .map_or((false, text.as_str()), |rest| (true, rest));
-                let magnitude = parse_unsigned(digits).and_then(|value| i64::try_from(value).ok());
-                magnitude
-                    .and_then(|value| {
-                        if negative {
-                            value.checked_neg()
-                        } else {
-                            Some(value)
-                        }
-                    })
-                    .ok_or_else(|| format!("not an offset: {text}"))
-            },
-        }
-    }
-}
-
-fn parse_unsigned(text: &str) -> Option<u64> {
-    let text = text.trim();
-    match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
-        Some(digits) => u64::from_str_radix(digits, 16).ok(),
-        None => text.parse().ok(),
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReadArgs {
-    address: AddressArg,
-    value_type: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReadBytesArgs {
-    address: AddressArg,
-    length: usize,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FollowPointerArgs {
-    module: Option<String>,
-    base: AddressArg,
-    #[serde(default)]
-    offsets: Vec<OffsetArg>,
-    value_type: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScreenSampleArgs {
-    points: Vec<Point>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Point {
-    x: i32,
-    y: i32,
-}
-
-/// The tool definitions `tools/list` returns.
-pub(crate) fn definitions() -> Value {
-    let value_types: Vec<&str> = ValueType::ALL.iter().map(|kind| kind.name()).collect();
-    let address = json!({
-        "type": ["string", "integer"],
-        "description": "An address as a hex string such as \"0x1a2b3c\", or a number.",
-    });
-    let number = json!({ "type": "number" });
-    let tools = [
-        tool(
-            "process_list",
-            "List running processes without opening any of them. Each entry names a known anti-cheat product when the process is one.",
-            json!({ "name_contains": { "type": "string", "description": "Keep processes whose executable name contains this, ignoring case." } }),
-            &[],
-        ),
-        tool(
-            "window_list",
-            "List top-level windows with their process, title, class, and bounds in screen pixels, without opening any process.",
-            json!({
-                "pid": { "type": "integer", "description": "Keep this process's windows only." },
-                "include_hidden": { "type": "boolean", "description": "Include hidden windows. Defaults to false." },
-            }),
-            &[],
-        ),
-        tool(
-            "process_attach",
-            "Open a process to read its memory, replacing any attached process and its scan. The user must allow it in a dialog; if they refuse, do not retry. Known anti-cheat processes are refused. Returns the loaded modules.",
-            json!({ "pid": { "type": "integer" } }),
-            &["pid"],
-        ),
-        tool(
-            "process_detach",
-            "Close the attached process and drop its scan.",
-            json!({}),
-            &[],
-        ),
-        tool(
-            "memory_scan_first",
-            "Start a value scan of the attached process's writable memory. exact needs value, range needs min and max (inclusive), and unknown snapshots everything for a value you cannot see yet. Floats in exact mode must match the stored value; prefer range for floats.",
-            json!({
-                "value_type": { "type": "string", "enum": value_types },
-                "mode": { "type": "string", "enum": ["exact", "range", "unknown"] },
-                "value": number,
-                "min": number,
-                "max": number,
-            }),
-            &["value_type", "mode"],
-        ),
-        tool(
-            "memory_scan_next",
-            "Narrow the scan: keep addresses whose value now passes the test, comparing with the value at the previous scan for changed, unchanged, increased, and decreased. Have the user change the value in the app between scans.",
-            json!({
-                "mode": { "type": "string", "enum": ["exact", "range", "changed", "unchanged", "increased", "decreased"] },
-                "value": number,
-                "min": number,
-                "max": number,
-            }),
-            &["mode"],
-        ),
-        tool(
-            "memory_scan_results",
-            "List the scan's addresses with their previous and current values. module_offset names the module an address lies in; such an address is static and can start a pointer chain.",
-            json!({
-                "offset": { "type": "integer", "minimum": 0 },
-                "limit": { "type": "integer", "minimum": 1, "maximum": RESULTS_LIMIT },
-            }),
-            &[],
-        ),
-        tool(
-            "memory_read",
-            "Read one value from the attached process.",
-            json!({ "address": address, "value_type": { "type": "string", "enum": value_types } }),
-            &["address", "value_type"],
-        ),
-        tool(
-            "memory_read_bytes",
-            "Read raw bytes from the attached process as hex, to inspect a structure around an address.",
-            json!({ "address": address, "length": { "type": "integer", "minimum": 1, "maximum": READ_BYTES_LIMIT } }),
-            &["address", "length"],
-        ),
-        tool(
-            "memory_follow_pointer",
-            "Follow a pointer chain: start at the module's base plus base (or at base alone without a module); for each offset, read a pointer there and add the offset. Returns each step and the final address, and its value when value_type is given. A chain that still reaches the value after the app restarts is stable.",
-            json!({
-                "module": { "type": "string", "description": "A loaded module's name, such as \"Example.exe\"." },
-                "base": address,
-                "offsets": { "type": "array", "items": { "type": ["string", "integer"] }, "description": "Offsets as numbers or hex strings such as \"0x1c\" or \"-0x8\"." },
-                "value_type": { "type": "string", "enum": value_types },
-            }),
-            &["base"],
-        ),
-        tool(
-            "screen_sample",
-            "Read the color of screen pixels, in the screen coordinates window_list reports. This never touches an app's process, so it works whatever its anti-cheat.",
-            json!({
-                "points": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": SCREEN_POINTS_LIMIT,
-                    "items": {
-                        "type": "object",
-                        "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } },
-                        "required": ["x", "y"],
-                        "additionalProperties": false,
-                    },
-                },
-            }),
-            &["points"],
-        ),
-    ];
-    Value::Array(tools.into())
-}
-
-fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
-    json!({
-        "name": name,
-        "description": description,
-        "inputSchema": {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-            "additionalProperties": false,
-        },
-        "annotations": { "readOnlyHint": true, "openWorldHint": false },
-    })
-}
-
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::sync::mpsc;
 
     use appytappy_sources::memory::{PointerWidth, Region};
@@ -1119,34 +758,6 @@ mod tests {
     }
 
     #[test]
-    fn module_offset_names_only_addresses_inside_a_module() {
-        let modules = [
-            Module {
-                name: "Example.exe".to_owned(),
-                base: 0x1000,
-                size: 0x100,
-            },
-            Module {
-                name: "ntdll.dll".to_owned(),
-                base: 0x8000,
-                size: 0x10,
-            },
-        ];
-        let named =
-            [0xfff, 0x1000, 0x10ff, 0x1100, 0x800f].map(|address| module_offset(&modules, address));
-        assert_eq!(
-            named,
-            [
-                None,
-                Some("Example.exe+0x0".to_owned()),
-                Some("Example.exe+0xff".to_owned()),
-                None,
-                Some("ntdll.dll+0xf".to_owned()),
-            ]
-        );
-    }
-
-    #[test]
     fn scan_modes_require_their_values() {
         let (mut session, _questions) = attached();
         assert_eq!(
@@ -1375,31 +986,6 @@ mod tests {
             call(&mut session, "process_detach", json!({ "force": true }))
                 .unwrap_err()
                 .starts_with("invalid arguments: unknown field `force`")
-        );
-    }
-
-    #[test]
-    fn parses_offsets_and_formats_numbers() {
-        let offset = |text: &str| OffsetArg::Text(text.to_owned()).parse();
-        assert_eq!(offset("-0x10"), Ok(-16));
-        assert_eq!(offset("0X1f"), Ok(31));
-        assert_eq!(offset(" 12 "), Ok(12));
-        assert!(offset("-x").is_err());
-        assert!(offset("0x8000000000000000").is_err());
-
-        assert_eq!(number_json(Number::Int(-5)), json!(-5));
-        assert_eq!(number_json(Number::Int(u64::MAX.into())), json!(u64::MAX));
-        assert_eq!(
-            number_json(Number::Int(i128::MAX)),
-            json!(i128::MAX.to_string())
-        );
-        assert_eq!(
-            number(&serde_json::Number::from(u64::MAX)),
-            Number::Int(u64::MAX.into())
-        );
-        assert_eq!(
-            number(&serde_json::Number::from_f64(0.5).unwrap()),
-            Number::Float(0.5)
         );
     }
 
