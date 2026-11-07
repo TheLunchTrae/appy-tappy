@@ -2,12 +2,29 @@ import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState }
 
 import { type ShortcutEvent, register, unregister } from '@tauri-apps/plugin-global-shortcut';
 
-import { type Reading, errorText, readValue, saveValue, screenshot, setCheck, takeScreenshot } from './api.ts';
+import {
+  type Reading,
+  type RecordingView,
+  discardRecording,
+  errorText,
+  readValue,
+  recordedReading,
+  recordingState,
+  reviewProblems,
+  saveValue,
+  screenshot,
+  setCheck,
+  startRecording,
+  stopRecording,
+  takeScreenshot,
+} from './api.ts';
 import { readingText } from './automation.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import { type CheckKind, type Draft, buildSpec, CHECK_KINDS, EMPTY_DRAFT, KIND_NAMES, withKind } from './check.ts';
 import type { Choice } from './Picker.tsx';
 import { type Color, type Picture, colorAt, hex } from './pixels.ts';
+import { RecordPanel, ReviewSheet } from './Recording.tsx';
+import { type ReviewEntry, clock, entries, keptLabels } from './review.ts';
 import { type Point, type Rect, type Size, fit } from './region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
 import { background, useRepeat } from './repeat.ts';
@@ -40,14 +57,24 @@ const LIVE_MAX_WIDTH = 1600;
 const CHECK_DELAY_MS = 250;
 /** How long the live reading waits between reads. */
 const READING_PAUSE_MS = 120;
+/** How long the recording's state waits between reads, while it records or text is still being read. */
+const RECORDING_PAUSE_MS = 250;
+/** The widest a recorded reading is asked for: a region is small, and review shows it a few times larger. */
+const CROP_WIDTH = 480;
+/** How long review waits after the last edit before it asks which readings the check cannot learn. */
+const REVIEW_DELAY_MS = 200;
 
 function viewHint(
+  recording: boolean,
   selected: number | null,
   shotCount: number,
   picking: boolean,
   liveError: string | null,
   shortcut: string,
 ): string {
+  if (recording && selected === null) {
+    return 'Recording. Use the application; each different reading is kept.';
+  }
   if (selected === null) {
     if (liveError !== null) {
       return liveError;
@@ -334,8 +361,18 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [shortcut, setShortcut] = useState(loadShortcut);
-  const [recording, setRecording] = useState(false);
+  const [changingShortcut, setChangingShortcut] = useState(false);
   const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [recording, setRecording] = useState<RecordingView | null>(null);
+  const [recordError, setRecordError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [edits, setEdits] = useState<ReadonlyMap<number, ReviewEntry>>(new Map());
+  const [problems, setProblems] = useState<ReadonlyMap<number, string>>(new Map());
+  // Each recorded reading's pixels, for the recording they belong to.
+  const [crops, setCrops] = useState<{ readonly id: number; readonly pictures: ReadonlyMap<number, Picture> }>({
+    id: -1,
+    pictures: new Map(),
+  });
 
   const view = useRef<HTMLDivElement>(null);
   const space = useSize(view);
@@ -366,7 +403,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   // effect asked for them, so a quick unregister cannot overtake a register.
   const shortcutQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
-    if (recording) {
+    if (changingShortcut) {
       return undefined;
     }
     let current = true;
@@ -395,7 +432,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
           // A shortcut that never registered has nothing to remove.
         });
     };
-  }, [shortcut, recording]);
+  }, [shortcut, changingShortcut]);
 
   const built = useMemo(() => buildSpec(draft), [draft]);
   useEffect(() => {
@@ -433,6 +470,88 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     }
   }, []);
   useRepeat(readNow, READING_PAUSE_MS, checkState.kind === 'set');
+
+  const readRecording = useCallback(async (): Promise<void> => {
+    try {
+      setRecording(await recordingState());
+    } catch (error: unknown) {
+      setRecordError(errorText(error));
+    }
+  }, []);
+  const recordingLive =
+    recording !== null &&
+    (recording.recording || recording.readings.some((reading) => reading.text.kind === 'pending'));
+  useRepeat(readRecording, RECORDING_PAUSE_MS, recordingLive);
+
+  // Fetches the pixels of each reading that has none yet, once.
+  const asked = useRef<{ id: number; readings: Set<number> }>({ id: -1, readings: new Set() });
+  const readingCount = recording?.readings.length ?? 0;
+  const recordingId = recording?.id ?? null;
+  useEffect(() => {
+    if (recordingId === null) {
+      return;
+    }
+    if (asked.current.id !== recordingId) {
+      asked.current = { id: recordingId, readings: new Set() };
+    }
+    for (let index = 0; index < readingCount; index += 1) {
+      if (asked.current.readings.has(index)) {
+        continue;
+      }
+      asked.current.readings.add(index);
+      background(
+        recordedReading(index, CROP_WIDTH).then((picture) => {
+          if (picture === null) {
+            return;
+          }
+          setCrops((current) => {
+            const pictures = current.id === recordingId ? new Map(current.pictures) : new Map<number, Picture>();
+            return { id: recordingId, pictures: pictures.set(index, picture) };
+          });
+        }),
+      );
+    }
+  }, [recordingId, readingCount]);
+  const pictures = crops.id === recordingId ? crops.pictures : new Map<number, Picture>();
+
+  const reviewEntries = useMemo(
+    () => entries(recording?.readings ?? [], edits, draft.recorded),
+    [recording, edits, draft.recorded],
+  );
+  const keeping = useMemo(() => keptLabels(reviewEntries), [reviewEntries]);
+  // Asks which kept readings the check cannot learn, such as a character
+  // typed like another one that has another shape.
+  useEffect(() => {
+    if (!reviewing) {
+      return undefined;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      reviewProblems(keeping)
+        .then((answers) => {
+          if (!current) {
+            return;
+          }
+          const found = new Map<number, string>();
+          answers.forEach((answer, position_) => {
+            const label = keeping[position_];
+            if (answer !== null && label !== undefined) {
+              found.set(label.reading, answer);
+            }
+          });
+          setProblems(found);
+        })
+        .catch((error: unknown) => {
+          if (current) {
+            setRecordError(errorText(error));
+          }
+        });
+    }, REVIEW_DELAY_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [reviewing, keeping]);
 
   const onFrame = useCallback((width: number, height: number): void => {
     setLiveError(null);
@@ -489,22 +608,90 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     }
   };
 
-  const recordKey = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (!recording) {
+  const shortcutKey = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (!changingShortcut) {
       return;
     }
     event.preventDefault();
     if (event.code === 'Escape') {
-      setRecording(false);
+      setChangingShortcut(false);
       return;
     }
     const next = accelerator(event);
     if (next !== null) {
       setShortcut(next);
       saveShortcut(next);
-      setRecording(false);
+      setChangingShortcut(false);
     }
   };
+
+  const recordBlocked = ((): string | null => {
+    if (draft.kind !== 'number') {
+      return null;
+    }
+    if (draft.region === null || drawnOn === null) {
+      return 'Draw the region on a screenshot to record it.';
+    }
+    if (draft.ink === null) {
+      return "Pick the characters' color to record.";
+    }
+    return null;
+  })();
+
+  const record = async (): Promise<void> => {
+    if (draft.region === null || draft.ink === null || drawnOn === null) {
+      return;
+    }
+    try {
+      await startRecording(draft.region, draft.ink, draft.tolerance, drawnOn);
+      setRecordError(null);
+      setReviewing(false);
+      setSelected(null);
+      setPicking(null);
+      const started = await recordingState();
+      if (started !== null && started.id !== recording?.id) {
+        // A new recording: what was kept from the old one is gone.
+        setEdits(new Map());
+        setDraft((current) => ({ ...current, recorded: new Map() }));
+      }
+      setRecording(started);
+    } catch (error: unknown) {
+      setRecordError(errorText(error));
+    }
+  };
+
+  const stop = async (): Promise<void> => {
+    try {
+      await stopRecording();
+      setRecording(await recordingState());
+      setEdits(new Map());
+      setReviewing(true);
+    } catch (error: unknown) {
+      setRecordError(errorText(error));
+    }
+  };
+
+  const discard = async (): Promise<void> => {
+    try {
+      await discardRecording();
+      setRecording(null);
+      setRecordError(null);
+      setReviewing(false);
+      setEdits(new Map());
+      setProblems(new Map());
+      setDraft((current) => ({ ...current, recorded: new Map() }));
+    } catch (error: unknown) {
+      setRecordError(errorText(error));
+    }
+  };
+
+  const keep = (): void => {
+    setDraft((current) => ({ ...current, recorded: new Map(keeping.map((label) => [label.reading, label.text])) }));
+    setEdits(new Map());
+    setReviewing(false);
+  };
+
+  const keptProblem = keeping.some((label) => problems.has(label.reading));
 
   const canSave = valueName.trim().length > 0 && built.ok && drawnOn !== null && checkState.kind === 'set' && !saving;
   const position = (index: number): number => shots.findIndex((shot) => shot.index === index) + 1;
@@ -514,48 +701,120 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       <section className="stage" aria-label="Capture">
         <div className="bar">
           <span className="crumb">
-            Values / <b>New value</b>
+            {reviewing ? (
+              <>
+                Values / New value / <b>Review recording</b>
+              </>
+            ) : (
+              <>
+                Values / <b>New value</b>
+              </>
+            )}
           </span>
-          <span className="pill">
-            <span className="dot live" />
-            Live · {choice.name}
-          </span>
-          {native === undefined ? null : (
+          {recording?.recording === true ? (
+            <span className="pill recording">
+              <span className="dot" />
+              Recording {clock(recording.elapsedMs)}
+            </span>
+          ) : reviewing && recording !== null ? (
+            <span className="pill">
+              {recording.readings.length === 1 ? '1 reading' : `${recording.readings.length} readings`} from{' '}
+              {clock(recording.elapsedMs)}
+            </span>
+          ) : (
+            <span className="pill">
+              <span className="dot live" />
+              Live · {choice.name}
+            </span>
+          )}
+          {native === undefined || reviewing ? null : (
             <span className="pill">
               {native.width} × {native.height}
             </span>
           )}
-          <div className="end">
-            <button type="button" className="btn" onClick={onChangeWindow}>
-              Change window
-            </button>
-            <button
-              type="button"
-              className="btn small"
-              aria-pressed={recording}
-              onClick={() => {
-                setRecording((current) => !current);
-              }}
-              onKeyDown={recordKey}
-            >
-              {recording ? 'Press the new shortcut, or Esc' : 'Change shortcut'}
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => {
-                background(take());
-              }}
-            >
-              Take screenshot<span className="kbd">{shortcutLabel(shortcut)}</span>
-            </button>
-          </div>
+          {reviewing ? (
+            <div className="end">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  background(discard());
+                }}
+              >
+                Discard recording
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={recordBlocked !== null}
+                onClick={() => {
+                  background(record());
+                }}
+              >
+                Record more
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={keptProblem}
+                title={keptProblem ? 'Fix or leave out the flagged readings' : undefined}
+                onClick={keep}
+              >
+                {keeping.length === 1 ? 'Keep 1 reading' : `Keep ${keeping.length} readings`}
+              </button>
+            </div>
+          ) : (
+            <div className="end">
+              <button type="button" className="btn" onClick={onChangeWindow}>
+                Change window
+              </button>
+              <button
+                type="button"
+                className="btn small"
+                aria-pressed={changingShortcut}
+                onClick={() => {
+                  setChangingShortcut((current) => !current);
+                }}
+                onKeyDown={shortcutKey}
+              >
+                {changingShortcut ? 'Press the new shortcut, or Esc' : 'Change shortcut'}
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => {
+                  background(take());
+                }}
+              >
+                Take screenshot<span className="kbd">{shortcutLabel(shortcut)}</span>
+              </button>
+            </div>
+          )}
         </div>
         {shortcutError === null ? null : <p className="warn">{shortcutError}</p>}
         {shotError === null ? null : <p className="warn">{shotError}</p>}
-        <div className="view" ref={view}>
+        {reviewing && recording !== null ? (
+          <ReviewSheet
+            view={recording}
+            entries={reviewEntries}
+            problems={problems}
+            crops={pictures}
+            onEntry={(index, entry) => {
+              setEdits((current) => new Map(current).set(index, entry));
+            }}
+            onKeepAll={(keepAll) => {
+              setEdits(
+                new Map(
+                  reviewEntries.map((entry, index) => [index, { ...entry, keep: keepAll && entry.text.trim() !== '' }]),
+                ),
+              );
+            }}
+          />
+        ) : null}
+        {/* Hidden rather than removed during review, so the view keeps its measured size. */}
+        <div className="view" ref={view} hidden={reviewing}>
           <div className="frame" style={frameStyle}>
-            {selected === null ? (
+            {reviewing ? null : selected === null ? (
               <LiveCanvas
                 maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
                 onFrame={onFrame}
@@ -569,6 +828,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
                 size={native}
                 shown={shown}
                 region={draft.region}
+                recording={recording?.recording === true && selected === null}
                 label={valueName.trim() === '' ? 'Region' : valueName.trim()}
                 editable={shownPicture !== null}
                 picking={picking !== null}
@@ -580,10 +840,17 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
             )}
           </div>
           <p className="hint">
-            {viewHint(selected, shots.length, picking !== null, liveError, shortcutLabel(shortcut))}
+            {viewHint(
+              recording?.recording === true,
+              selected,
+              shots.length,
+              picking !== null,
+              liveError,
+              shortcutLabel(shortcut),
+            )}
           </p>
         </div>
-        <div className="strip">
+        <div className="strip" hidden={reviewing}>
           <button
             type="button"
             className="thumb"
@@ -665,6 +932,31 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
           onDraft={setDraft}
           onPicking={setPicking}
         />
+        {draft.kind === 'number' ? (
+          <RecordPanel
+            view={recording}
+            reviewing={reviewing}
+            kept={draft.recorded.size}
+            keeping={keeping.length}
+            blocked={recordBlocked}
+            appName={choice.name}
+            crops={pictures}
+            error={recordError}
+            onStart={() => {
+              background(record());
+            }}
+            onStop={() => {
+              background(stop());
+            }}
+            onDiscard={() => {
+              background(discard());
+            }}
+            onReview={() => {
+              setEdits(new Map());
+              setReviewing(true);
+            }}
+          />
+        ) : null}
         <ReadingBox built={built.ok ? null : built.next} state={checkState} reading={reading} />
         <div className="sep" />
         {saveError === null ? null : <p className="warn">{saveError}</p>}

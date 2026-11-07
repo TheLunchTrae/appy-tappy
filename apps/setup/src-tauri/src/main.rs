@@ -10,12 +10,15 @@
 mod automations;
 mod check_spec;
 mod commands;
+mod ocr;
 mod overlay;
 mod overlay_window;
 mod owner;
 mod pixels;
+mod recording;
 mod window_list;
 
+use std::env;
 use std::process::{self, ExitCode};
 use std::sync::mpsc;
 use std::thread;
@@ -39,7 +42,21 @@ fn main() -> ExitCode {
             automations: AutomationStore::new(locations.automations()),
         })
         .map_err(|error| format!("AppyTappy cannot find where to keep your values: {error}."));
-    let owner = Owner::new(system, stores, process::id(), sender.clone());
+    // The text reader reads recorded readings on a thread of its own, and
+    // ends once the owner drops its sender.
+    let (jobs, inbox) = mpsc::channel();
+    let model = env::current_exe().map_or_else(
+        |_unknown| ocr::model_path(ocr::MODEL_FILE.as_ref()),
+        |program| ocr::model_path(&program),
+    );
+    let reader_messages = sender.clone();
+    let Ok(reader_thread) = thread::Builder::new()
+        .name("text reader".to_owned())
+        .spawn(move || ocr::run(&inbox, &reader_messages, &model))
+    else {
+        return ExitCode::FAILURE;
+    };
+    let owner = Owner::new(system, stores, process::id(), sender.clone(), jobs);
     let Ok(owner_thread) = thread::Builder::new()
         .name("owner".to_owned())
         .spawn(move || owner::run(owner, &messages))
@@ -59,6 +76,12 @@ fn main() -> ExitCode {
             commands::screenshot,
             commands::set_check,
             commands::read_value,
+            commands::start_recording,
+            commands::stop_recording,
+            commands::discard_recording,
+            commands::recording_state,
+            commands::recorded_reading,
+            commands::review_problems,
             commands::watch_value,
             commands::watched_reading,
             commands::stop_watching,
@@ -79,9 +102,12 @@ fn main() -> ExitCode {
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));
     // The owner stops its capture before it ends, so the join waits for it.
+    // The owner's sender to the text reader goes with it, so the reader
+    // ends after the reading it is on.
     let stopped = sender.send(Message::Shutdown).is_ok()
         && owner_thread.join().is_ok_and(|closed| closed.is_ok());
-    if code == 0 && stopped {
+    let read = reader_thread.join().is_ok();
+    if code == 0 && stopped && read {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE

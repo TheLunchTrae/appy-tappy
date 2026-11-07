@@ -23,6 +23,15 @@ appytappy-sources = { version = "=0.1.0", path = "../../../crates/sources" }
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
 mutants = "0.0.4"
+# Reads a recorded reading's text so the user only corrects it: a pure-Rust
+# neural text reader, so it runs the same on every system and needs no
+# operating system OCR. Only its recognition model loads, from the file
+# docs/setup-app.md names. Not used by the runtime.
+ocrs = { version = "=0.13.1", default-features = false, features = ["onnx"] }
+# Loads the text reader's model file, and gives the rectangle of the line
+# it reads.
+rten = { version = "=0.26.0", default-features = false, features = ["onnx_format"] }
+rten-imageproc = "=0.26.0"
 # Command arguments and replies cross into the web UI as JSON.
 serde = { version = "=1.0.229", features = ["derive"] }
 # The window, the web view, and the bridge between the React UI and Rust.

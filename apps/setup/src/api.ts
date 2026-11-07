@@ -93,10 +93,52 @@ export type CheckSpec =
       readonly ink: Color;
       readonly tolerance: number;
       readonly labels: readonly { readonly screenshot: number; readonly text: string }[];
+      /** Readings of this session's recording, which must be of `region`. */
+      readonly recorded: readonly RecordedLabel[];
     }
   | { readonly kind: 'barFill'; readonly region: Rect; readonly filled: Color; readonly empty: Color }
   | { readonly kind: 'color'; readonly region: Rect; readonly color: Color; readonly tolerance: number }
   | { readonly kind: 'reference'; readonly region: Rect; readonly screenshot: number; readonly tolerance: number };
+
+/** What a recorded reading shows, as the user confirmed it in review. */
+export interface RecordedLabel {
+  /** The reading's index in the recording. */
+  readonly reading: number;
+  readonly text: string;
+}
+
+/** What the text reader made of a recorded reading. */
+type RecordedText =
+  | { readonly kind: 'pending' }
+  /** The text it read, which is empty when it found none. */
+  | { readonly kind: 'read'; readonly text: string }
+  /** Why it could not read it, such as a missing model. */
+  | { readonly kind: 'failed'; readonly text: string };
+
+/** One reading a recording kept. */
+export interface RecordedReading {
+  /** When it first showed, from the start of the recording. */
+  readonly firstMs: number;
+  /** How many frames showed it. */
+  readonly seen: number;
+  readonly text: RecordedText;
+}
+
+/** A recording of a region, as the setup app shows it. */
+export interface RecordingView {
+  /** Its number this session; a new recording gets a new one. */
+  readonly id: number;
+  /** Whether it still records. */
+  readonly recording: boolean;
+  /** How long it has recorded, not counting pauses. */
+  readonly elapsedMs: number;
+  /** Whether it holds as many readings as it keeps. */
+  readonly full: boolean;
+  /** Why the latest frame could not be recorded, such as a resized window. */
+  readonly problem: string | null;
+  /** Its readings, in the order they first showed. */
+  readonly readings: readonly RecordedReading[];
+}
 
 /** What a check read. */
 export type Reading =
@@ -226,6 +268,36 @@ export async function setCheck(spec: CheckSpec): Promise<void> {
 /** What the check reads on the newest frame, or null without a check or a frame. */
 export async function readValue(): Promise<Reading | null> {
   return invoke<Reading | null>('read_value');
+}
+
+/** Records `region` of the picked window, drawn on `screenshot`; goes on with a stopped recording of the same region and ink. */
+export async function startRecording(region: Rect, ink: Color, tolerance: number, screenshot: number): Promise<void> {
+  await invoke('start_recording', { region, ink, tolerance, screenshot });
+}
+
+/** Stops the recording, keeping its readings for review. */
+export async function stopRecording(): Promise<void> {
+  await invoke('stop_recording');
+}
+
+/** Forgets the recording and its readings. */
+export async function discardRecording(): Promise<void> {
+  await invoke('discard_recording');
+}
+
+/** The recording and its readings so far, or null without one. */
+export async function recordingState(): Promise<RecordingView | null> {
+  return invoke<RecordingView | null>('recording_state');
+}
+
+/** A recorded reading at most `maxWidth` wide, or null for an unknown index. */
+export async function recordedReading(index: number, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { index, maxWidth }));
+}
+
+/** Why the number check cannot learn each of `readings`, in order, or null for one it can. */
+export async function reviewProblems(readings: readonly RecordedLabel[]): Promise<readonly (string | null)[]> {
+  return invoke<readonly (string | null)[]>('review_problems', { readings });
 }
 
 /** Captures a saved value's region on its application's window, replacing any capture, and returns the watch's number. */

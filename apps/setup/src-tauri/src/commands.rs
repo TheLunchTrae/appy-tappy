@@ -16,10 +16,11 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 
 use crate::automations::AutomationSummary;
-use crate::check_spec::CheckSpec;
+use crate::check_spec::{CheckSpec, ColorSpec, RecordedLabel, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::overlay_window;
 use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
+use crate::recording::RecordingView;
 use crate::window_list::WindowList;
 
 /// The UI's way to the owner thread.
@@ -289,4 +290,70 @@ pub(crate) async fn overlay_card(
         reply,
     })
     .await
+}
+
+/// Records `region` of the picked window, drawn on `screenshot`, keeping
+/// each reading it shows; goes on with a stopped recording of the same
+/// region and ink.
+#[tauri::command]
+pub(crate) async fn start_recording(
+    app: AppHandle,
+    region: RegionSpec,
+    ink: ColorSpec,
+    tolerance: u8,
+    screenshot: usize,
+) -> Result<(), String> {
+    ask(&app, |reply| Request::StartRecording {
+        region,
+        ink,
+        tolerance,
+        screenshot,
+        reply,
+    })
+    .await?
+}
+
+/// Stops the recording, keeping its readings for review.
+#[tauri::command]
+pub(crate) async fn stop_recording(app: AppHandle) -> Result<(), String> {
+    ask(&app, Request::StopRecording).await
+}
+
+/// Forgets the recording and its readings.
+#[tauri::command]
+pub(crate) async fn discard_recording(app: AppHandle) -> Result<(), String> {
+    ask(&app, Request::DiscardRecording).await
+}
+
+/// The recording and its readings so far; `None` without one.
+#[tauri::command]
+pub(crate) async fn recording_state(app: AppHandle) -> Result<Option<RecordingView>, String> {
+    ask(&app, Request::RecordingState).await
+}
+
+/// A recorded reading, at most `max_width` wide; no bytes for an unknown
+/// index.
+#[tauri::command]
+pub(crate) async fn recorded_reading(
+    app: AppHandle,
+    index: usize,
+    max_width: u32,
+) -> Result<Response, String> {
+    ask(&app, |reply| Request::RecordedPixels {
+        index,
+        max_width,
+        reply,
+    })
+    .await
+    .map(pixels)
+}
+
+/// Why a number check cannot learn each of `readings`, in order: `None` for
+/// one it can.
+#[tauri::command]
+pub(crate) async fn review_problems(
+    app: AppHandle,
+    readings: Vec<RecordedLabel>,
+) -> Result<Vec<Option<String>>, String> {
+    ask(&app, |reply| Request::ReviewProblems { readings, reply }).await
 }

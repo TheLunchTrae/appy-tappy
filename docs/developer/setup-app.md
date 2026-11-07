@@ -39,6 +39,52 @@ This page covers what the user guide leaves out.
   the runtime does not read them. [The runtime](architecture.md#the-runtime)
   describes how it reads them.
 
+## Recording
+
+[Recording a number](../user/values.md#record-a-number) samples the frames the
+value editor's preview capture already takes, about 30 a second, in the owner
+thread (`recording.rs`). Each frame is cut to the region and reduced to a
+bitmask of its ink, the pixels the number check's
+`DigitReader::is_ink` takes for the characters' color. A crop whose mask
+differs from a kept reading's in at most one pixel, plus one per 32 pixels of
+ink, is another sighting of that reading; a pixel at a character's edge can
+fall either side of the tolerance between frames, and two different characters
+differ in far more. Every kept reading is compared, not only the latest, so a
+value that comes back is not kept twice. A crop with no ink is skipped, and so
+is a frame of another size than the screenshot the region was drawn on. One
+recording keeps at most 200 readings.
+
+Kept readings are named by index in the spec the UI sends, so their pixels
+never cross into the UI except as thumbnails. A number check learns the
+labeled screenshots first and then the kept readings, and saves both as its
+samples. Review asks the owner which kept readings a check could not learn,
+learning them in order on a reader of its own and leaving out each one that
+fails, so a conflict such as an `l` typed for a `1` is flagged on the reading
+that causes it.
+
+### The text reader
+
+The text reader guesses each new reading's text so review only needs
+corrections (`ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs),
+a pure-Rust neural text reader, so it reads the same on every system without
+the operating system's OCR. Only its recognition model loads: the region holds
+one line, so there is no text to find first. It runs on a thread of its own,
+because a read takes tens of milliseconds and the owner answers the UI in
+microseconds, and only for new readings, a few times a recording. It gets each
+reading's ink as black text on white with a margin, whatever the application's
+colors. Text for a recording the user discarded or replaced is dropped by the
+recording's number. Only the setup app uses it; the runtime reads numbers with
+the shapes the user's labels and kept readings taught it
+([Screen regions](screen.md#checks)).
+
+Its model, `text-recognition.onnx`, is in a `models` folder beside the setup
+app's program, where [the installer](installer.md) puts it. It loads on the
+first reading, so a session that never records never loads it. When it cannot
+load, recording still works and each reading says why, for the user to type
+its text. For a development build, `mise run ocr:model` downloads it, checks
+it against the hash pinned in `.config/mise/conf.d/installer.toml`, and copies
+it beside the debug build.
+
 ## Window matching
 
 [How AppyTappy finds the window](../user/applications.md#how-appytappy-finds-the-window)
@@ -60,7 +106,8 @@ logs that the window should be resized or the value drawn again.
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures its values need: a number check's labeled screenshots,
-cropped to the region, and a picture check's reference.
+cropped to the region, then its kept recorded readings, and a picture
+check's reference.
 
 ```json
 {

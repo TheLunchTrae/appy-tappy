@@ -46,7 +46,8 @@ the new value.
   **Characters' color**, select **Pick**, then click the characters on a
   screenshot. Then select each screenshot and type what the region shows on
   it, such as `87%`. AppyTappy learns the shape of each character from what
-  you type, so label enough screenshots to show every digit it needs to know.
+  you type, so label enough screenshots to show every digit it needs to know,
+  or [record the region](#record-a-number) to collect them as they show.
   **Tolerance** says how far a pixel's color may be from the characters'
   color and still count.
 - **Bar fill** reads how full a bar is, from 0 to 100. Use **Pick** next to
@@ -64,6 +65,37 @@ the new value.
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
 **Picture** check on the part that matters often works instead.
+
+## Record a number
+
+Typing what a counter shows on screenshot after screenshot is slow when it
+shows many values. A **Number** check can record its region instead, while
+you use the application, and keep each different reading it shows.
+
+1. **Start recording.** Draw the region and pick the **Characters' color**
+   first. Then select **Start recording** under **Record readings**. The
+   region turns red while it records.
+2. **Use the application.** Go on in it until the region has shown the
+   characters you need, such as every digit. Each different reading is kept
+   once, with the time it first showed, and AppyTappy reads its text for you.
+   Readings appear under **Recording** as they are found. Moments when the
+   region shows none of the characters' color, such as while a menu covers
+   it, are skipped.
+3. **Stop and review.** Come back and select **Stop and review**. Each
+   reading shows with the text AppyTappy read. Fix any text it got wrong, and
+   clear **Keep** on any reading that is not the value, such as a paused
+   screen. A reading whose text gives a character two shapes, such as an `l`
+   typed for a `1`, is flagged: fix it or leave it out.
+4. **Keep them.** Select **Keep**. The kept readings teach the check like
+   labeled screenshots. **Review recording** opens them again, and
+   **Record more** goes on with the same recording.
+
+Keep the window the size it was when you took the screenshot you drew the
+region on: at another size, recording pauses and says to resize the window.
+One recording keeps at most 200 readings.
+
+If AppyTappy cannot read a reading's text, review leaves its text empty for
+you to type.
 
 ## Window size
 

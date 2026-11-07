@@ -170,7 +170,11 @@ impl DigitReader {
         number.parse().ok_or(ReadError::NoNumber)
     }
 
-    fn is_ink(&self, [blue, green, red, _]: [u8; 4]) -> bool {
+    /// Whether `pixel`, as `[blue, green, red, unused]` like
+    /// [`Image::pixels`] holds it, is ink: each of its red, green, and blue
+    /// within the tolerance of the text color.
+    #[must_use]
+    pub fn is_ink(&self, [blue, green, red, _]: [u8; 4]) -> bool {
         blue.abs_diff(self.ink.blue) <= self.tolerance
             && green.abs_diff(self.ink.green) <= self.tolerance
             && red.abs_diff(self.ink.red) <= self.tolerance

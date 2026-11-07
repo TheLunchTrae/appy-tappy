@@ -5,9 +5,37 @@
 # tasks compile the setup app without a built runtime. docs/developer/installer.md
 # describes the installer and the builds CI makes.
 
+[tasks."ocr:model"]
+description = "Download the setup app's text reader model, checked against its pinned hash"
+run = '''
+set -eu
+# The recognition model of ocrs, the setup app's text reader, which reads
+# recorded readings (docs/developer/setup-app.md). It is not committed: this task
+# downloads it once into apps/setup/src-tauri/models, where the installer
+# bundles it from, and copies it beside the debug build, where `tauri dev`
+# runs the setup app. The hash pins the file, so a changed download fails
+# the build instead of shipping.
+url=https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.onnx
+expected=PIN_FROM_FIRST_CI_RUN
+model=apps/setup/src-tauri/models/text-recognition.onnx
+mkdir -p apps/setup/src-tauri/models
+if [ ! -f "$model" ] || [ "$(sha256sum "$model" | cut -d' ' -f1)" != "$expected" ]; then
+  curl -fsSL --retry 3 -o "$model.part" "$url"
+  actual=$(sha256sum "$model.part" | cut -d' ' -f1)
+  if [ "$actual" != "$expected" ]; then
+    rm -f "$model.part"
+    echo "the text reader model's SHA-256 is $actual, not the pinned $expected" >&2
+    exit 1
+  fi
+  mv "$model.part" "$model"
+fi
+mkdir -p target/debug/models
+cp "$model" target/debug/models/
+'''
+
 [tasks."installer:build"]
 description = "Build the Windows installer into target/dist/bundle/nsis (Windows only)"
-depends = ["ui:install"]
+depends = ["ui:install", "ocr:model"]
 run = '''
 set -eu
 # A release build, which sets INSTALLER_TAG, takes the workspace version and

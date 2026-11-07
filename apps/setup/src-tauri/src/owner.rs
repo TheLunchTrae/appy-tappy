@@ -11,7 +11,7 @@ use std::fs;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_config::app_file::{
     AntiCheatDef, AppFile, FORMAT, OverlayDef, OverlayModeDef, PanelDef, ScreenDef, SizeDef,
@@ -21,18 +21,21 @@ use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_config::store::new_app_id;
 use appytappy_sources::screen::check::Check;
+use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::saved;
 use appytappy_sources::screen::{
-    Capture, CaptureSession, Crop, Frame, FrameHandler, Image, OutsideWindow, Size,
+    Capture, CaptureSession, Crop, Frame, FrameHandler, Image, OutsideWindow, Region, Size,
 };
 use appytappy_sources::system::{ProcessEntry, System, WindowEntry, WindowPlace, best_window};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::automations::{self, AutomationSummary, Stores};
-use crate::check_spec::{self, CheckSpec, RegionCheck};
+use crate::check_spec::{self, CheckSpec, ColorSpec, RecordedLabel, RegionCheck, RegionSpec};
+use crate::ocr;
 use crate::overlay::{self, Card, FrameRead, OverlayView, OverlayWindow, Overlays, Place};
 use crate::pixels;
+use crate::recording::{Recording, RecordingView, Text};
 use crate::window_list::{self, WindowList};
 
 /// The shortest time between two frames the preview takes: about 30 a
@@ -282,6 +285,45 @@ pub(crate) enum Request {
     /// What the check reads on the newest frame: `None` until a check is
     /// set up and a frame arrived.
     Reading(Reply<Result<Option<Reading>, String>>),
+    /// Records `region` of the picked window, drawn on `screenshot`, keeping
+    /// each reading it shows. Goes on with a stopped recording of the same
+    /// region and ink; otherwise starts a new one in its place.
+    StartRecording {
+        /// The region to record.
+        region: RegionSpec,
+        /// The characters' color.
+        ink: ColorSpec,
+        /// How far a pixel may be from `ink` and still be ink.
+        tolerance: u8,
+        /// The screenshot the region was drawn on.
+        screenshot: usize,
+        /// Answered once it records, or with why it cannot.
+        reply: Reply<Result<(), String>>,
+    },
+    /// Stops the recording, keeping its readings for review.
+    StopRecording(Reply<()>),
+    /// Forgets the recording and its readings.
+    DiscardRecording(Reply<()>),
+    /// The recording as the UI shows it: `None` without one.
+    RecordingState(Reply<Option<RecordingView>>),
+    /// A recorded reading's pixels, scaled and encoded like a preview.
+    RecordedPixels {
+        /// The reading's index.
+        index: usize,
+        /// The widest the UI draws it.
+        max_width: u32,
+        /// The pixels, or `None` for a reading that does not exist.
+        reply: Reply<Option<Vec<u8>>>,
+    },
+    /// What a number check would make of each labeled reading, learned in
+    /// order: `None` for one it learns, or why it cannot, such as a
+    /// character that an earlier reading showed with another shape.
+    ReviewProblems {
+        /// The readings with what they show.
+        readings: Vec<RecordedLabel>,
+        /// One answer per reading, in order.
+        reply: Reply<Vec<Option<String>>>,
+    },
     /// Captures the region of a saved value on its application's window,
     /// for the automation editor. Like [`Request::Pick`], it drops the
     /// previous window's capture, screenshots and check.
@@ -435,6 +477,18 @@ pub(crate) enum Message {
         generation: u64,
         /// The window's whole frame.
         image: Image,
+        /// When it arrived.
+        received: Instant,
+    },
+    /// The text reader read reading `index` of recording `recording`.
+    Recognized {
+        /// Which recording it belongs to; text for an earlier one is
+        /// dropped.
+        recording: u64,
+        /// The reading's index.
+        index: usize,
+        /// What it read.
+        text: Text,
     },
     /// The watch with this generation saw a frame, or stopped and why.
     Watch {
@@ -491,6 +545,13 @@ pub(crate) struct Owner<H: Host> {
     failure: Option<String>,
     screenshots: Vec<Image>,
     check: Option<RegionCheck>,
+    /// The region the user records, with the readings it showed.
+    recording: Option<Recording>,
+    /// Counts recordings, so text read for one the user discarded or
+    /// replaced is dropped.
+    recording_id: u64,
+    /// Sends new readings to the text reader's thread.
+    ocr: Sender<ocr::Job>,
     /// The saved value the automation editor watches.
     watched: Option<Watched>,
     /// The overlays that show, each with a capture of its own.
@@ -504,6 +565,7 @@ impl<H: Host> Owner<H> {
         stores: Result<Stores, String>,
         own_process: u32,
         messages: Sender<Message>,
+        ocr: Sender<ocr::Job>,
     ) -> Self {
         Self {
             host,
@@ -516,6 +578,9 @@ impl<H: Host> Owner<H> {
             failure: None,
             screenshots: Vec::new(),
             check: None,
+            recording: None,
+            recording_id: 0,
+            ocr,
             watched: None,
             overlays: Overlays::new(),
         }
@@ -525,9 +590,27 @@ impl<H: Host> Owner<H> {
     pub(crate) fn handle(&mut self, message: Message) -> ControlFlow<()> {
         match message {
             Message::Request(request) => self.answer(request),
-            Message::Frame { generation, image } => {
+            Message::Frame {
+                generation,
+                image,
+                received,
+            } => {
                 if generation == self.generation {
+                    self.record(&image, received);
                     self.latest = Some(image);
+                }
+            },
+            Message::Recognized {
+                recording,
+                index,
+                text,
+            } => {
+                if let Some(current) = self
+                    .recording
+                    .as_mut()
+                    .filter(|current| current.id == recording)
+                {
+                    current.read(index, text);
                 }
             },
             Message::CaptureFailed { generation, error } => {
@@ -638,7 +721,7 @@ impl<H: Host> Owner<H> {
             ),
             Request::SetCheck { spec, reply } => send(
                 reply,
-                check_spec::build(&spec, &self.screenshots)
+                check_spec::build(&spec, &self.screenshots, self.recording.as_ref())
                     .map(|check| self.check = Some(check))
                     .map_err(|error| error.to_string()),
             ),
@@ -647,6 +730,46 @@ impl<H: Host> Owner<H> {
                 send(reply, ());
             },
             Request::Reading(reply) => send(reply, self.reading()),
+            Request::StartRecording {
+                region,
+                ink,
+                tolerance,
+                screenshot,
+                reply,
+            } => send(
+                reply,
+                self.start_recording(region, ink, tolerance, screenshot),
+            ),
+            Request::StopRecording(reply) => {
+                if let Some(recording) = &mut self.recording {
+                    recording.stop(Instant::now());
+                }
+                send(reply, ());
+            },
+            Request::DiscardRecording(reply) => {
+                self.recording = None;
+                send(reply, ());
+            },
+            Request::RecordingState(reply) => send(
+                reply,
+                self.recording
+                    .as_ref()
+                    .map(|recording| recording.view(Instant::now())),
+            ),
+            Request::RecordedPixels {
+                index,
+                max_width,
+                reply,
+            } => send(
+                reply,
+                self.recording
+                    .as_ref()
+                    .and_then(|recording| recording.readings().get(index))
+                    .map(|kept| pixels::rgba(&kept.image, max_width)),
+            ),
+            Request::ReviewProblems { readings, reply } => {
+                send(reply, self.review_problems(&readings));
+            },
             Request::WatchValue { app, value, reply } => send(reply, self.watch(&app, &value)),
             Request::WatchedReading { watch, when, reply } => {
                 send(reply, self.watched_reading(watch, when.as_deref()));
@@ -886,8 +1009,9 @@ impl<H: Host> Owner<H> {
                 file.name
             ));
         }
-        let saved = check_spec::to_saved(&spec.check, &self.screenshots, &id)
-            .map_err(|error| error.to_string())?;
+        let saved =
+            check_spec::to_saved(&spec.check, &self.screenshots, self.recording.as_ref(), &id)
+                .map_err(|error| error.to_string())?;
         file.values.push(ValueDef {
             id: id.clone(),
             name: name.to_owned(),
@@ -950,7 +1074,8 @@ impl<H: Host> Owner<H> {
         Ok(window_list::list(windows, &processes, self.own_process))
     }
 
-    /// Stops the capture and forgets its frames, screenshots, and check.
+    /// Stops the capture and forgets its frames, screenshots, recording, and
+    /// check.
     fn stop(&mut self) {
         // A capture that failed already said why; what comes next matters now.
         #[expect(
@@ -963,6 +1088,7 @@ impl<H: Host> Owner<H> {
         self.failure = None;
         self.screenshots.clear();
         self.check = None;
+        self.recording = None;
         self.watched = None;
     }
 
@@ -1009,6 +1135,101 @@ impl<H: Host> Owner<H> {
             .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
         self.screenshots.push(image);
         Ok(self.screenshots.len().saturating_sub(1))
+    }
+
+    /// Records `frame`, which arrived at `received`, and sends a new reading
+    /// it shows to the text reader.
+    fn record(&mut self, frame: &Image, received: Instant) {
+        let Some(recording) = &mut self.recording else {
+            return;
+        };
+        let Some(new) = recording.offer(frame, received) else {
+            return;
+        };
+        let job = ocr::Job {
+            recording: recording.id,
+            index: new.index,
+            line: new.line,
+        };
+        if self.ocr.send(job).is_err() {
+            recording.read(
+                new.index,
+                Text::Failed("The text reader stopped. Type what this shows.".to_owned()),
+            );
+        }
+    }
+
+    fn start_recording(
+        &mut self,
+        region: RegionSpec,
+        ink: ColorSpec,
+        tolerance: u8,
+        screenshot: usize,
+    ) -> Result<(), String> {
+        if self.session.is_none() {
+            return Err("Pick a window to record.".to_owned());
+        }
+        let region = Region::new(region.x, region.y, region.width, region.height)
+            .ok_or_else(|| "Draw the region to record first.".to_owned())?;
+        let drawn_on = self
+            .screenshots
+            .get(screenshot)
+            .ok_or_else(|| "Take a screenshot first.".to_owned())?;
+        if drawn_on.crop(region).is_none() {
+            return Err(
+                "The region reaches past the edge of the window. Draw it inside the window."
+                    .to_owned(),
+            );
+        }
+        let window_size = drawn_on.size();
+        let reader = DigitReader::new(ink.into(), tolerance);
+        let now = Instant::now();
+        match &mut self.recording {
+            Some(recording) if recording.records(region, &reader, window_size) => {
+                recording.resume(now);
+            },
+            _ => {
+                self.recording_id = self.recording_id.wrapping_add(1);
+                self.recording = Some(Recording::new(
+                    self.recording_id,
+                    region,
+                    reader,
+                    window_size,
+                    now,
+                ));
+            },
+        }
+        Ok(())
+    }
+
+    /// Learns `readings` in order on a check of their own, and answers why
+    /// each one it cannot learn fails. One that fails is left out, so the
+    /// ones after it are judged on the ones that worked.
+    fn review_problems(&self, readings: &[RecordedLabel]) -> Vec<Option<String>> {
+        let Some(recording) = &self.recording else {
+            return vec![
+                Some("That recording is gone. Record the region again.".to_owned());
+                readings.len()
+            ];
+        };
+        let mut reader = recording.reader().clone();
+        readings
+            .iter()
+            .map(|label| {
+                let Some(kept) = recording.readings().get(label.reading) else {
+                    return Some("That reading is gone. Record the region again.".to_owned());
+                };
+                let image = &kept.image;
+                let mut trial = reader.clone();
+                match trial.learn(image, &label.text) {
+                    Ok(()) => {
+                        reader = trial;
+                        None
+                    },
+                    Err(error) => Some(sentence(&error.to_string())),
+                }
+            })
+            .collect()
     }
 
     fn reading(&self) -> Result<Option<Reading>, String> {
@@ -1105,12 +1326,21 @@ impl<H: Host> Owner<H> {
     }
 }
 
+/// `text` as a sentence of its own: capitalized, with a full stop.
+fn sentence(text: &str) -> String {
+    let mut characters = text.chars();
+    characters.next().map_or_else(String::new, |first| {
+        format!("{}{}.", first.to_uppercase(), characters.as_str())
+    })
+}
+
 /// A preview capture's message for one frame.
 fn preview_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
     match frame {
         Ok(frame) => Message::Frame {
             generation,
             image: frame.image.clone(),
+            received: frame.received,
         },
         Err(error) => Message::CaptureFailed {
             generation,
@@ -1358,6 +1588,8 @@ mod tests {
         messages: Receiver<Message>,
         handlers: Receiver<Started>,
         closed: Receiver<u64>,
+        /// What the owner sends the text reader.
+        jobs: Receiver<ocr::Job>,
     }
 
     /// Fresh, empty stores for one test, all in one folder.
@@ -1382,6 +1614,7 @@ mod tests {
         let (sender, messages) = mpsc::channel();
         let (handler_sender, handlers) = mpsc::channel();
         let (closed_sender, closed) = mpsc::channel();
+        let (job_sender, jobs) = mpsc::channel();
         let host = FakeHost {
             handlers: handler_sender,
             closed: closed_sender,
@@ -1390,10 +1623,11 @@ mod tests {
             minimized: false,
         };
         Harness {
-            owner: Owner::new(host, store, OWN_PROCESS, sender),
+            owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),
             messages,
             handlers,
             closed,
+            jobs,
         }
     }
 
@@ -1551,6 +1785,302 @@ mod tests {
         assert_eq!(harness.ask(pixels_of(2)), None);
         let _next = harness.pick();
         assert_eq!(harness.ask(pixels_of(0)), None);
+    }
+
+    /// A 4 by 2 frame with its left `red` columns red and the rest gray.
+    fn red_columns(red: usize) -> Image {
+        let row: Vec<u8> = (0..4)
+            .flat_map(|x| {
+                if x < red {
+                    [0, 0, 255, 0]
+                } else {
+                    [40, 40, 40, 0]
+                }
+            })
+            .collect();
+        Image::new(
+            Size {
+                width: 4,
+                height: 2,
+            },
+            [row.clone(), row].concat(),
+        )
+        .expect("matching length")
+    }
+
+    /// Records the whole 4 by 2 frame, red as ink, drawn on screenshot 0.
+    fn start_recording(red: u8) -> impl FnOnce(Reply<Result<(), String>>) -> Request {
+        let region: RegionSpec =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
+        let ink: ColorSpec =
+            serde_json::from_str(&format!(r#"{{"red":{red},"green":0,"blue":0}}"#))
+                .expect("valid JSON");
+        move |reply| Request::StartRecording {
+            region,
+            ink,
+            tolerance: 0,
+            screenshot: 0,
+            reply,
+        }
+    }
+
+    impl Harness {
+        /// The recording as the UI sees it.
+        fn recording(&mut self) -> Option<RecordingView> {
+            self.ask(Request::RecordingState)
+        }
+
+        /// Each reading's sightings and text.
+        fn readings(&mut self) -> Vec<(u32, Text)> {
+            self.recording()
+                .expect("a recording")
+                .readings
+                .into_iter()
+                .map(|reading| (reading.seen, reading.text))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn a_recording_keeps_each_reading_once_and_has_it_read_as_text() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.recording(), None);
+        assert_eq!(harness.ask(start_recording(255)), Ok(()));
+        for frame in [
+            red_columns(2),
+            red_columns(2),
+            red_columns(0),
+            red_columns(3),
+        ] {
+            harness.deliver(&mut handler, Ok(&frame));
+        }
+        let jobs: Vec<(u64, usize)> = harness
+            .jobs
+            .try_iter()
+            .map(|job| (job.recording, job.index))
+            .collect();
+        assert_eq!(jobs, [(1, 0), (1, 1)], "one job per new reading");
+        assert_eq!(
+            harness.readings(),
+            [(2, Text::Pending), (1, Text::Pending)],
+            "a frame with no ink is skipped"
+        );
+        for (recording, text) in [(0, "stale"), (1, "1")] {
+            assert!(
+                harness
+                    .owner
+                    .handle(Message::Recognized {
+                        recording,
+                        index: 0,
+                        text: Text::Read(text.to_owned()),
+                    })
+                    .is_continue()
+            );
+        }
+        assert_eq!(
+            harness.readings(),
+            [(2, Text::Read("1".to_owned())), (1, Text::Pending)]
+        );
+        let pixels_of = |index| {
+            move |reply| Request::RecordedPixels {
+                index,
+                max_width: 4,
+                reply,
+            }
+        };
+        assert_eq!(
+            harness.ask(pixels_of(1)),
+            Some(pixels::rgba(&red_columns(3), 4))
+        );
+        assert_eq!(harness.ask(pixels_of(2)), None);
+
+        harness.ask(Request::StopRecording);
+        harness.deliver(&mut handler, Ok(&red_columns(4)));
+        let stopped = harness.recording().expect("kept for review");
+        assert!(!stopped.recording);
+        assert_eq!(
+            stopped.readings.len(),
+            2,
+            "a stopped recording keeps no more"
+        );
+        assert_eq!(harness.jobs.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn review_and_the_check_learn_from_recorded_readings() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        let label = |reading, text: &str| RecordedLabel {
+            reading,
+            text: text.to_owned(),
+        };
+        let problems = harness.ask(|reply| Request::ReviewProblems {
+            readings: vec![label(0, "1"), label(1, "12"), label(1, "7"), label(9, "1")],
+            reply,
+        });
+        assert_eq!(problems[0], None);
+        assert_eq!(
+            problems[1].as_deref(),
+            Some(
+                "The region shows 1 characters but the text has 2; characters that touch count \
+                 as one."
+            ),
+            "one blob cannot be two characters"
+        );
+        assert_eq!(problems[2], None, "judged without the reading that failed");
+        assert_eq!(
+            problems[3].as_deref(),
+            Some("That reading is gone. Record the region again.")
+        );
+        let number = |reading| -> CheckSpec {
+            serde_json::from_str(&format!(
+                r#"{{"kind":"number","region":{{"x":0,"y":0,"width":4,"height":2}},
+                    "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[],
+                    "recorded":[{{"reading":{reading},"text":"1"}}]}}"#
+            ))
+            .expect("valid JSON")
+        };
+        assert_eq!(
+            harness.ask(|reply| Request::SetCheck {
+                spec: number(0),
+                reply
+            }),
+            Ok(())
+        );
+        harness.ask(Request::DiscardRecording);
+        assert_eq!(harness.recording(), None);
+        assert_eq!(
+            harness.ask(|reply| Request::SetCheck {
+                spec: number(0),
+                reply
+            }),
+            Err("That recording is gone. Record the region again.".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::ReviewProblems {
+                readings: vec![label(0, "1")],
+                reply,
+            }),
+            [Some(
+                "That recording is gone. Record the region again.".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn recording_goes_on_after_a_stop_and_starts_over_for_other_ink() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.ask(Request::StopRecording);
+        harness.ask(start_recording(255)).expect("goes on");
+        assert!(harness.recording().expect("kept").recording);
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        assert_eq!(harness.readings().len(), 2, "the same recording went on");
+        harness
+            .ask(start_recording(200))
+            .expect("records other ink");
+        assert_eq!(harness.readings().len(), 0, "a new recording");
+        let jobs: Vec<u64> = harness.jobs.try_iter().map(|job| job.recording).collect();
+        assert_eq!(jobs, [1, 1]);
+        assert!(
+            harness
+                .owner
+                .handle(Message::Recognized {
+                    recording: 1,
+                    index: 0,
+                    text: Text::Read("1".to_owned()),
+                })
+                .is_continue()
+        );
+        assert_eq!(
+            harness.readings().len(),
+            0,
+            "text for the old one is dropped"
+        );
+        let _next = harness.pick();
+        assert_eq!(harness.recording(), None, "another window drops it");
+    }
+
+    #[test]
+    fn a_recording_needs_a_window_a_screenshot_and_a_region_inside_it() {
+        let mut harness = harness(false);
+        assert_eq!(
+            harness.ask(start_recording(255)),
+            Err("Pick a window to record.".to_owned())
+        );
+        let mut handler = harness.pick();
+        assert_eq!(
+            harness.ask(start_recording(255)),
+            Err("Take a screenshot first.".to_owned())
+        );
+        let small = Image::new(
+            Size {
+                width: 2,
+                height: 2,
+            },
+            [0, 0, 255, 0].repeat(4),
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&small));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(
+            harness.ask(start_recording(255)),
+            Err(
+                "The region reaches past the edge of the window. Draw it inside the window."
+                    .to_owned()
+            )
+        );
+        let empty: RegionSpec =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":0,"height":2}"#).expect("valid JSON");
+        let ink: ColorSpec =
+            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+        assert_eq!(
+            harness.ask(|reply| Request::StartRecording {
+                region: empty,
+                ink,
+                tolerance: 0,
+                screenshot: 0,
+                reply,
+            }),
+            Err("Draw the region to record first.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_reading_the_text_reader_cannot_take_says_to_type_it() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255)).expect("records");
+        let (closed, _) = mpsc::channel();
+        harness.owner.ocr = closed;
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        assert_eq!(
+            harness.readings(),
+            [(
+                1,
+                Text::Failed("The text reader stopped. Type what this shows.".to_owned())
+            )]
+        );
+    }
+
+    #[test]
+    fn a_problem_reads_as_a_sentence_of_its_own() {
+        assert_eq!(sentence("a character was given"), "A character was given.");
+        assert_eq!(sentence(""), "");
     }
 
     #[test]

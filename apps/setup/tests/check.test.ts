@@ -33,6 +33,34 @@ describe('buildSpec', () => {
           { screenshot: 0, text: '12%' },
           { screenshot: 2, text: '87%' },
         ],
+        recorded: [],
+      },
+    });
+  });
+
+  test('builds a number from kept recorded readings alone, in reading order', () => {
+    const draft = {
+      ...EMPTY_DRAFT,
+      region,
+      ink: red,
+      recorded: new Map([
+        [4, '9%'],
+        [1, ' 8% '],
+        [2, ''],
+      ]),
+    };
+    expect(buildSpec(draft)).toEqual({
+      ok: true,
+      spec: {
+        kind: 'number',
+        region,
+        ink: red,
+        tolerance: DEFAULT_TOLERANCE.number,
+        labels: [],
+        recorded: [
+          { reading: 1, text: '8%' },
+          { reading: 4, text: '9%' },
+        ],
       },
     });
   });
@@ -44,7 +72,7 @@ describe('buildSpec', () => {
     });
     expect(buildSpec({ ...EMPTY_DRAFT, region, ink: red, labels: new Map([[0, ' ']]) })).toEqual({
       ok: false,
-      next: 'Type what the region shows on a screenshot.',
+      next: 'Type what the region shows on a screenshot, or record it.',
     });
   });
 

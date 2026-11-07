@@ -34,6 +34,8 @@ export interface Draft {
   readonly ink: Color | null;
   /** What the region shows on each labeled screenshot, by screenshot index. */
   readonly labels: ReadonlyMap<number, string>;
+  /** What each reading kept from the recording shows, by reading index. */
+  readonly recorded: ReadonlyMap<number, string>;
   readonly filled: Color | null;
   readonly empty: Color | null;
   readonly color: Color | null;
@@ -47,6 +49,7 @@ export const EMPTY_DRAFT: Draft = {
   tolerance: DEFAULT_TOLERANCE.number,
   ink: null,
   labels: new Map(),
+  recorded: new Map(),
   filled: null,
   empty: null,
   color: null,
@@ -75,10 +78,14 @@ export function buildSpec(draft: Draft): Built {
         .map(([screenshot, text]) => ({ screenshot, text: text.trim() }))
         .filter((label) => label.text.length > 0)
         .toSorted((left, right) => left.screenshot - right.screenshot);
-      if (labels.length === 0) {
-        return missing('Type what the region shows on a screenshot.');
+      const recorded = [...draft.recorded]
+        .map(([reading, text]) => ({ reading, text: text.trim() }))
+        .filter((label) => label.text.length > 0)
+        .toSorted((left, right) => left.reading - right.reading);
+      if (labels.length === 0 && recorded.length === 0) {
+        return missing('Type what the region shows on a screenshot, or record it.');
       }
-      return { ok: true, spec: { kind: 'number', region, ink: draft.ink, tolerance, labels } };
+      return { ok: true, spec: { kind: 'number', region, ink: draft.ink, tolerance, labels, recorded } };
     }
     case 'barFill': {
       if (draft.filled === null) {
