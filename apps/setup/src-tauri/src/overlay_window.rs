@@ -181,6 +181,9 @@ fn open<R: Runtime>(
             .decorations(false)
             .shadow(false)
             .resizable(false)
+            // Windows minimizing every window would leave it minimized
+            // while its thread moves it.
+            .minimizable(false)
             .focusable(false)
             .inner_size(OVERLAY_START.0, OVERLAY_START.1)
             .visible(false)
@@ -238,6 +241,9 @@ fn set_up_overlay<R: Runtime>(
     follow(window, None)?;
     // Clicks reach the application under it.
     window.set_ignore_cursor_events(true)?;
+    // The window library is not told that it shows, and would hide it again
+    // on a change to how it behaves, such as staying on top or being
+    // resizable; only moving and resizing it are safe from here on.
     show_without_focus(window)?;
     let messages = handle.state::<Bridge>().0.clone();
     let follower = window.clone();
