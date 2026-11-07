@@ -13,20 +13,49 @@ appytappy-config = { version = "=0.1.0", path = "../config" }
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
 mutants = "0.0.4"
+# Reads and writes the PNG files that hold a screen binding's reference image;
+# a hand-written decoder would need its own inflate implementation.
+png = "=0.18.1"
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
-# in `win.rs` calls.
+# in `win.rs` and `win/capture.rs` calls. Capture uses them directly rather
+# than the `windows-capture` crate, which adds its own thread pool and locks.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = [
+  "Foundation",
+  "Graphics",
+  "Graphics_Capture",
+  "Graphics_DirectX",
+  "Graphics_DirectX_Direct3D11",
   "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Gdi",
   "Win32_System_Diagnostics_Debug",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Memory",
+  "Win32_System_Performance",
   "Win32_System_Threading",
+  "Win32_System_WinRT",
+  "Win32_System_WinRT_Direct3D11",
+  "Win32_System_WinRT_Graphics_Capture",
   "Win32_UI_HiDpi",
+  "Security_Authorization_AppCapabilityAccess",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+# Generates images for the reference-image round trip, a trust boundary.
+proptest = "=1.12.0"
+
+# Times each check and capture-to-decision latency with a small harness of
+# its own, which reports percentiles; `criterion` would add a C build step
+# that breaks cross-compiling to Windows.
+[[bench]]
+name = "screen"
+harness = false
 
 [lints]
 workspace = true

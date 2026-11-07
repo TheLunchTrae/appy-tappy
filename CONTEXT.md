@@ -14,6 +14,8 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
   writes. The runtime never reads them.
 - **Binding.** The concrete way to read one signal for one game version: a
   source primitive and its parameters, such as a pointer chain.
+- **Check.** How a screen region binding turns a region's pixels into a value:
+  a number, a bar's fill, a color match, or a match with a reference picture.
 - **Compiled config.** The one file the setup app compiles from authoring
   files and the runtime loads.
 - **Game.** Any application AppyTappy watches. Most are games, but nothing
@@ -22,6 +24,9 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
   `none`; every path that opens a game's process requires one.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
+- **Read interval.** The minimum and maximum time between a source's reads.
+  The source reads at the minimum while its value moves and backs off toward
+  the maximum while it holds still.
 - **Re-arm.** Let a rule that fired fire again, once its condition stops
   holding and its re-arm condition holds.
 - **Release.** End a fired rule's effect: it re-armed, the opposite focus

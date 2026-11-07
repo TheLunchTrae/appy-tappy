@@ -191,6 +191,8 @@ changing.
   knows nothing about rules. The runtime ships a fixed set; a game is data,
   never code. The v1 set and its Windows APIs belong to
   [#3](https://github.com/TheLunchTrae/appy-tappy/issues/3).
+  [Screen regions](screen.md) describes the screen region source: its checks
+  are portable Rust, and only capture calls Windows.
 - A **signal** is a named, typed value a game exposes, such as
   `level_percent`. An app definition binds each signal to a source primitive
   per game version. The format belongs to
@@ -313,7 +315,8 @@ crate are `unsafe`, because Rust cannot check what Windows does with the
 pointers it receives. That covers reading another process's memory, Core
 Audio, window hooks, the tray icon, directory watching, and the Direct3D
 interop that screen capture needs. WinRT calls, such as media sessions and the
-screen capture API itself, are safe Rust methods.
+screen capture API itself, are safe Rust methods. Screen capture lives in
+`sources/src/win/capture.rs`, a submodule of `win.rs`, under the same rules.
 
 The owner approved changing the workspace lint from `forbid` to `deny` with
 the first `unsafe` Windows call, in `sources`, as
@@ -343,6 +346,9 @@ Terms:
   compiling for Windows.
 - **Feature.** An optional part of a crate that a dependent turns on in
   `Cargo.toml`, so it compiles only what it uses.
+- **Benchmarks.** `cargo bench` runs the files in a crate's `benches/`
+  folder. AppyTappy's benchmarks use a small timing loop of their own rather
+  than a benchmark crate, so they add no dependency.
 
 Dependencies the design expects. Each is added with the issue that needs it,
 and `AGENTS.md` asks every addition to state what complexity it removes.
@@ -356,7 +362,10 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   official Rust bindings for Windows APIs, generated from Windows metadata.
   Its features select which APIs compile, which mainly keeps build times down.
   The runtime's tray icon, message loop, and directory watching use it
-  directly, with no extra crates.
+  directly, with no extra crates. Screen capture does too, rather than through
+  the `windows-capture` crate, which adds its own thread pool and locks.
+- **[`png`](https://docs.rs/png).** Reads and writes the PNG files that hold
+  a screen check's reference picture.
 - **[`tauri`](https://v2.tauri.app/).** The setup app framework: a Rust
   backend with a web frontend shown in WebView2.
 - **[`tokio`](https://tokio.rs/).** The async runtime Tauri runs on. The setup
