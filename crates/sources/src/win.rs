@@ -42,6 +42,10 @@ use windows::core::{BOOL, HSTRING, PWSTR};
 use crate::memory::{Module, PointerWidth, ProcessMemory, Region};
 use crate::system::{AccessAnswer, Bounds, ProcessEntry, Rgb, System, WindowEntry};
 
+mod capture;
+
+pub use capture::WindowsCaptureSession;
+
 /// The Windows implementation of [`System`].
 #[derive(Debug)]
 pub struct WindowsSystem(());

@@ -2,12 +2,16 @@
 //! and the guided memory scan that finds what to read.
 //!
 //! The scan and the pointer-chain walker are portable and take a
-//! [`memory::ProcessMemory`]. The Windows adapter in `win` implements it and
-//! [`system::System`]; other platforms get [`system::Unsupported`].
+//! [`memory::ProcessMemory`]. The screen region checks are portable and take
+//! a cropped [`screen::Image`]. The Windows adapter in `win` implements
+//! [`memory::ProcessMemory`], [`system::System`], and [`screen::Capture`];
+//! other platforms get [`system::Unsupported`].
 //!
 //! See `docs/architecture.md` for this crate's boundaries.
 
 pub mod memory;
+pub mod schedule;
+pub mod screen;
 pub mod system;
 #[cfg(windows)]
 pub mod win;

@@ -77,3 +77,7 @@ jobs:
         run: mise run rust:doc
       - name: Test member crates
         run: mise run rust:test:members
+      # Prints the screen checks' timings on a Windows runner; it fails only
+      # if a benchmark errors, never on a slow time.
+      - name: Benchmark
+        run: mise run rust:bench
