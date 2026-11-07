@@ -280,8 +280,8 @@ cannot be opened, nothing is logged, and running exits with code 1.
 
 [The tray icon](../user/tray.md) in the user guide describes the tray as the
 user sees it. The runtime shows an icon in the taskbar's notification area:
-the setup app's icon, which `apps/runtime/runtime.rc` also links into the
-runtime's program file. Pointing at it
+the setup app's icon, which the runtime's build script also links into its
+program file from `apps/runtime/runtime.rc`. Pointing at it
 shows a tooltip with the state, such as `AppyTappy: idle`, or
 `AppyTappy: disabled` while automations are off. Right-clicking it opens a
 small menu:
@@ -319,8 +319,7 @@ The Enabled item names what a pick does, enable or disable, rather than
 flipping the current setting, so a pick from a menu that was out of date
 does what the menu showed. The menu opens where the shell says, which is the
 pointer for a right-click and the icon for the keyboard. After each event the
-owner gives the tray a fresh description. The icon is Windows' generic
-program icon until the runtime has its own. When the runtime cannot make the
+owner gives the tray a fresh description. When the runtime cannot make the
 tray, such as without a desktop, it logs that and runs without one; when the
 tray stops on its own, the runtime logs why and keeps running without it.
 

@@ -27,3 +27,8 @@ embed-resource = "=3.0.12"
 
 [lints]
 workspace = true
+
+# cargo-machete reads only the package's library and binary sources, so it
+# misses build.rs, which calls embed-resource.
+[package.metadata.cargo-machete]
+ignored = ["embed-resource"]
