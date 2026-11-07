@@ -132,9 +132,9 @@ threads send it events over channels instead of sharing state behind locks.
 Each thread below is a plain `std::thread`, and each channel is a
 `std::sync::mpsc` channel.
 
-- **Owner thread.** Holds the root model: the loaded compiled config, which
-  applications are attached, and one engine session per attached application,
-  which holds its signal values and rule state. It applies each event as a
+- **Owner thread.** Holds the root model: the saved automations it runs, which
+  applications are attached, and one engine session per attached application
+  that has automations, which holds its signal values and rule state. It applies each event as a
   `(state, event) -> (state, effects)` transition. Effects are action requests
   and orders to start or stop a worker.
 - **Lifecycle.** Reports when a watched application starts and exits. It matches
@@ -142,19 +142,30 @@ Each thread below is a plain `std::thread`, and each channel is a
   (`CreateToolhelp32Snapshot`), which does not open any process, so it is safe
   for every anti-cheat class. It never waits on a process handle.
   [Lifecycle](#lifecycle) describes when it takes a snapshot.
-- **Source workers.** One per attached application. Each runs the bindings the
-  compiled config chose for that application's version and sends `Sample`
-  events. Push sources, such as a log tail, send when data arrives; polled
-  sources, such as a memory read, run at the interval the binding sets.
+- **Readers.** One per attached application that has automations. Each finds
+  the application's window with its [window match](setup-app.md#window-matching),
+  captures the one rectangle that covers every value its automations watch,
+  and reads each value from its own region of each frame. It sends a `Sample`
+  only when a value changes, and reads less often while nothing changes. When
+  the window closes it looks for one again, once a second, until the
+  application exits. Other kinds of source, such as a log tail or a memory
+  read, join them later
+  ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
-  back results. It keeps the restore journal: the state each restoring rule
+  back what failed. It makes the media and audio controls on its own thread,
+  because Windows ties them to the thread that made them. It keeps the restore
+  journal: the state each restoring rule
   changed, such as the volume before a change, so a release can put it back
   even when several rules changed the same thing.
-- **Config watcher.** Watches the compiled config's folder, ignores every file
-  but the compiled config, and turns a burst of change events into one
-  `ConfigChanged`. The owner validates the new file and swaps it in only if it
-  is valid. Otherwise it keeps the old config, logs the problem, and shows it
-  in the status file and the tray.
+- **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
+  the setup app sets after each save, and sends `Reload`. The owner reads the
+  saved applications and automations again. An application whose automations
+  did not change keeps running untouched; one whose automations changed starts
+  over, undoing what they changed first. An automation that cannot run, such
+  as one whose value lost a picture, is logged, and the rest run. The runtime
+  reads the setup app's files directly; the compiled config under
+  [Files and handoff](#files-and-handoff) stays planned in
+  [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
 - **Tray thread.** Owns the hidden window behind the tray icon, runs its
   Windows message loop, and sends the user's menu picks, Windows' requests
   to close, and its own early end to the owner.
@@ -187,9 +198,8 @@ The runtime is in one of three states:
   that follows one of its processes.
 - **Degraded.** A problem stops the runtime from watching applications: process
   snapshots fail. It overrides the other two states until a snapshot works
-  again. Source failures and rejected configs join it when the runtime loads
-  the compiled config
-  ([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)).
+  again. A value that cannot be read is logged instead, because the other
+  applications still run.
 
 ```text
           app starts              last app exits
@@ -230,10 +240,11 @@ the same as one that exits: its windows are destroyed and its process leaves the
 snapshot. Nothing holds a handle to an application, so detaching leaves nothing
 to clean up.
 
-Until the compiled config names the applications to watch, each
-`--watch <executable>` argument names one by its file name, such as
-`appytappy-runtime.exe --watch Example.exe`. At least one is required,
-and a path is refused, because snapshots list bare file names.
+The runtime watches the saved applications that have at least one automation
+that can run, and matches each by its window match's executable pattern, such
+as `Example.exe`, against the file names in the snapshot. A reload changes the
+list at once: an application that is no longer watched detaches, and one that
+is newly watched is found by the next snapshot.
 
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
 second copy that finds it logs that and exits at once, and the setup app can
@@ -243,9 +254,9 @@ Autostart is the `AppyTappy` value under the user's
 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` key,
 which starts the runtime at sign-in without elevation. A scheduled task can
 also do that, but it takes more setup for no gain here.
-`appytappy-runtime.exe --autostart on --watch Example.exe` writes the
-value as the runtime's own quoted path followed by the same `--watch`
-options, and `--autostart off` removes it. Either command exits without
+`appytappy-runtime.exe --autostart on` writes the value as the runtime's own
+quoted path, and `--autostart off` removes it. The runtime takes no other
+options. Either command exits without
 starting the runtime and logs its result. The exit code is 0 on success, 1 on
 failure, and 2 for a command line it does not understand, but the runtime is
 a windowed program, so a console does not wait for it: the code shows only to
@@ -268,18 +279,18 @@ shows a tooltip with the state, such as `AppyTappy: idle`, or
 small menu:
 
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
-  fire, but detection keeps running, so turning it back on finds the
-  applications already attached. The runtime starts enabled, and the setting is
+  fire, the readers stop, and what the automations changed is undone, but
+  detection keeps running, so turning it back on finds the applications
+  already attached. The runtime starts enabled, and the setting is
   not kept across restarts.
-- **Active automations.** A submenu that lists, by name, the automations of
-  the applications attached now, and only those. With none, it shows a grayed
-  `None`. Until the runtime loads the compiled config
-  ([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)), there are no
-  automations, so it always shows `None`.
+- **Active automations.** A submenu that lists, by name, the automations that
+  run now: those of the attached applications, while automations are on. With
+  none, it shows a grayed `None`.
 - **Quit.** Stops the runtime until the next sign-in or start.
 
 When Windows asks the program to close, as when the session ends or a tool
-sends it a close message, the runtime logs it and quits the same way.
+sends it a close message, the runtime logs it and quits the same way. Either
+way it undoes what the running automations changed before it exits.
 
 `appytappy-platform` draws the icon and the menu from a description the
 runtime gives it, and the runtime's `tray` module decides what the

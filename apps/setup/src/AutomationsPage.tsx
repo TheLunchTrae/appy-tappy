@@ -287,8 +287,7 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
       {body}
       {automations !== null && automations.length > 0 ? (
         <p className="note">
-          Each automation watches one value for now; conditions that combine several values come later. The runtime
-          starts running saved automations in the next version of AppyTappy.
+          Each automation watches one value for now; conditions that combine several values come later.
         </p>
       ) : null}
     </main>

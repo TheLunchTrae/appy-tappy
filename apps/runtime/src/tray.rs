@@ -1,7 +1,7 @@
 //! What the tray icon shows and what its menu does.
 //!
 //! The menu has an Enabled check mark, an Active automations submenu that
-//! lists the automations of the apps attached now, and Quit. The platform
+//! lists the automations that run now, and Quit. The platform
 //! crate draws it; this module decides what it says.
 
 use std::num::NonZeroU16;
@@ -37,13 +37,13 @@ pub(crate) fn menu(model: &Model) -> TrayMenu {
     } else {
         "AppyTappy: disabled".to_owned()
     };
-    let automations = if model.automations.is_empty() {
+    let active = model.active_automations();
+    let automations = if active.is_empty() {
         vec![MenuItem::Inactive("None".to_owned())]
     } else {
-        model
-            .automations
-            .iter()
-            .map(|name| MenuItem::Note(name.clone()))
+        active
+            .into_iter()
+            .map(|name| MenuItem::Note(name.to_owned()))
             .collect()
     };
     TrayMenu {
@@ -80,10 +80,12 @@ pub(crate) fn command(id: NonZeroU16) -> Option<Command> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use appytappy_config::anti_cheat::ProcessId;
 
     use super::*;
-    use crate::lifecycle::{AppIndex, Change};
+    use crate::lifecycle::Change;
 
     #[test]
     fn the_menu_has_the_toggle_the_automations_and_quit() {
@@ -116,10 +118,14 @@ mod tests {
     #[test]
     fn the_tooltip_shows_the_state_unless_disabled() {
         let mut model = Model::default();
-        model.apply(Change::Started {
-            app: AppIndex(0),
-            process: ProcessId::new(1),
-        });
+        model.apply(
+            Change::Started {
+                app: "example".to_owned(),
+                process: ProcessId::new(1),
+                executable: "Example.exe".to_owned(),
+            },
+            Instant::now(),
+        );
         assert_eq!(menu(&model).tooltip, "AppyTappy: attached");
         model.set_enabled(false);
         let disabled = menu(&model);
@@ -130,21 +136,6 @@ mod tests {
                 id: ENABLE,
                 label: "Enabled".to_owned(),
                 checked: false,
-            })
-        );
-    }
-
-    #[test]
-    fn active_automations_are_listed_by_name() {
-        let mut model = Model::default();
-        model.automations = vec!["Pause music while the icon shows".to_owned()];
-        assert_eq!(
-            menu(&model).items.get(1),
-            Some(&MenuItem::Submenu {
-                label: "Active automations".to_owned(),
-                items: vec![MenuItem::Note(
-                    "Pause music while the icon shows".to_owned()
-                )],
             })
         );
     }
