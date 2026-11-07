@@ -410,6 +410,26 @@ impl appytappy_actions::Controls for NoControls {
     ) -> io::Result<()> {
         match self.0 {}
     }
+
+    #[mutants::skip]
+    fn focused_process(&mut self) -> io::Result<Option<appytappy_config::anti_cheat::ProcessId>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn held_modifiers(&mut self) -> io::Result<Vec<appytappy_config::action::Modifier>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn send_strokes(&mut self, _strokes: &[appytappy_actions::Stroke]) -> io::Result<usize> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn hold(&mut self, _time: std::time::Duration) {
+        match self.0 {}
+    }
 }
 
 /// Starts a named thread.
@@ -820,6 +840,10 @@ mod tests {
             Order::Act(act::Job::Run {
                 owner,
                 automation: "Mute".to_owned(),
+                watched: appytappy_actions::Watched {
+                    process: appytappy_config::anti_cheat::ProcessId::new(1),
+                    executable: "Example.exe".to_owned(),
+                },
                 actions: Box::new([]),
                 restore: appytappy_config::rule::Restore::OnRelease,
             }),

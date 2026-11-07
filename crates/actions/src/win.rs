@@ -5,7 +5,9 @@
 //! which music players and browsers publish without any app-specific API.
 //! Volumes come from Core Audio on the default playback device. Naming an
 //! audio session's app takes a process snapshot, which never opens a process,
-//! so no action opens a watched app's process.
+//! so no action opens a watched app's process. Key presses go through
+//! `SendInput`, which types into whichever window has the keyboard focus,
+//! after asking which process that window belongs to.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -15,7 +17,8 @@ use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use appytappy_config::action::{MediaCommand, VolumeLevel};
+use appytappy_config::action::{Key, MediaCommand, Modifier, VolumeLevel};
+use appytappy_config::anti_cheat::ProcessId;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
@@ -33,10 +36,18 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput,
+    VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME,
+    VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR,
+    VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 use windows::core::{GUID, IUnknown, Interface, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
-use crate::{Controls, MediaSession, Volume};
+use crate::{Controls, MediaSession, Stroke, Volume};
 
 /// How long a media request may take before it counts as failed, so an app
 /// that hangs cannot stall the action worker.
@@ -285,6 +296,140 @@ impl Controls for WindowsControls {
             },
         }
         Ok(())
+    }
+
+    fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes no arguments.
+        let window = unsafe { GetForegroundWindow() };
+        if window.is_invalid() {
+            return Ok(None);
+        }
+        let mut process = 0_u32;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `window` came from Windows, and `process` outlives the call.
+        unsafe {
+            GetWindowThreadProcessId(window, Some(&raw mut process))
+        };
+        Ok((process != 0).then(|| ProcessId::new(process)))
+    }
+
+    fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
+        Ok(Modifier::ALL
+            .into_iter()
+            .filter(|&modifier| {
+                held_keys(modifier).iter().any(|key| {
+                    #[expect(unsafe_code, reason = "a Win32 call")]
+                    // SAFETY: the call takes one integer and reads no memory.
+                    let state = unsafe { GetAsyncKeyState(i32::from(key.0)) };
+                    // The high bit is set while the key is down.
+                    state < 0
+                })
+            })
+            .collect())
+    }
+
+    fn send_strokes(&mut self, strokes: &[Stroke]) -> io::Result<usize> {
+        if strokes.is_empty() {
+            return Ok(0);
+        }
+        let inputs: Vec<INPUT> = strokes.iter().copied().map(input).collect();
+        let size = i32::try_from(size_of::<INPUT>()).map_err(io::Error::other)?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the slice holds initialized keyboard inputs, and `size` is
+        // the size of one, as the call requires.
+        let sent = unsafe { SendInput(&inputs, size) };
+        Ok(usize::try_from(sent).unwrap_or(0))
+    }
+
+    fn hold(&mut self, time: Duration) {
+        thread::sleep(time);
+    }
+}
+
+/// The keys that count as `modifier` held down: either Ctrl, Alt, or
+/// Shift, and either Windows key.
+const fn held_keys(modifier: Modifier) -> &'static [VIRTUAL_KEY] {
+    match modifier {
+        Modifier::Ctrl => &[VK_CONTROL],
+        Modifier::Alt => &[VK_MENU],
+        Modifier::Shift => &[VK_SHIFT],
+        Modifier::Win => &[VK_LWIN, VK_RWIN],
+    }
+}
+
+/// The keyboard input for one stroke. It names the key both by its virtual
+/// key and by its scan code, because some applications read only one.
+fn input(stroke: Stroke) -> INPUT {
+    let ((key, extended), down) = match stroke {
+        Stroke::Modifier(modifier, down) => (modifier_key(modifier), down),
+        Stroke::Key(key, down) => (virtual_key(key), down),
+    };
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes two integers and reads no memory.
+    let scan = unsafe { MapVirtualKeyW(u32::from(key.0), MAPVK_VK_TO_VSC) };
+    let mut flags = if down {
+        KEYBD_EVENT_FLAGS(0)
+    } else {
+        KEYEVENTF_KEYUP
+    };
+    if extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: key,
+                wScan: u16::try_from(scan).unwrap_or(0),
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+/// A modifier's left-hand key, and whether it is an extended key.
+const fn modifier_key(modifier: Modifier) -> (VIRTUAL_KEY, bool) {
+    match modifier {
+        Modifier::Ctrl => (VK_LCONTROL, false),
+        Modifier::Alt => (VK_LMENU, false),
+        Modifier::Shift => (VK_LSHIFT, false),
+        Modifier::Win => (VK_LWIN, true),
+    }
+}
+
+/// A key's virtual key, and whether it is an extended key: the keys of the
+/// navigation block and the arrows are, so Windows does not read them as the
+/// number pad's.
+fn virtual_key(key: Key) -> (VIRTUAL_KEY, bool) {
+    match key {
+        // Letters and digits are their own virtual keys, `A` to `Z` and `0`
+        // to `9`, and a function key counts up from F1.
+        Key::Letter(key) | Key::Digit(key) => (
+            VIRTUAL_KEY(u16::try_from(u32::from(key)).unwrap_or(0)),
+            false,
+        ),
+        Key::Function(number) => (
+            VIRTUAL_KEY(VK_F1.0.saturating_add(u16::from(number.saturating_sub(1)))),
+            false,
+        ),
+        Key::Space => (VK_SPACE, false),
+        Key::Enter => (VK_RETURN, false),
+        Key::Tab => (VK_TAB, false),
+        Key::Escape => (VK_ESCAPE, false),
+        Key::Backspace => (VK_BACK, false),
+        Key::Insert => (VK_INSERT, true),
+        Key::Delete => (VK_DELETE, true),
+        Key::Home => (VK_HOME, true),
+        Key::End => (VK_END, true),
+        Key::PageUp => (VK_PRIOR, true),
+        Key::PageDown => (VK_NEXT, true),
+        Key::Up => (VK_UP, true),
+        Key::Down => (VK_DOWN, true),
+        Key::Left => (VK_LEFT, true),
+        Key::Right => (VK_RIGHT, true),
     }
 }
 

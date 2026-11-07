@@ -12,6 +12,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
+use appytappy_actions::Watched;
+use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_engine::{Effect, Session};
 
@@ -56,6 +58,8 @@ pub(crate) enum Order {
 /// An attached app's process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Attached {
+    /// The process.
+    process: ProcessId,
     /// Its executable, such as `Example.exe`.
     executable: String,
 }
@@ -66,6 +70,8 @@ struct Running {
     id: SessionId,
     plan: Arc<AppPlan>,
     session: Session,
+    /// The process the session follows.
+    watched: Watched,
 }
 
 /// The owner thread's state.
@@ -136,9 +142,17 @@ impl Model {
     pub(crate) fn apply(&mut self, change: Change, at: Instant) -> Vec<Order> {
         match change {
             Change::Started {
-                app, executable, ..
+                app,
+                process,
+                executable,
             } => {
-                self.attached.insert(app.clone(), Attached { executable });
+                self.attached.insert(
+                    app.clone(),
+                    Attached {
+                        process,
+                        executable,
+                    },
+                );
                 self.start(&app, Start::Fresh(at))
             },
             Change::Exited { app, .. } => {
@@ -211,7 +225,7 @@ impl Model {
             return Vec::new();
         };
         let effects = running.session.sample(signal, value, at);
-        acts(id, &running.plan, effects)
+        acts(id, &running.plan, &running.watched, effects)
     }
 
     /// Forgets the values a session's reader can no longer see. Each rule
@@ -244,10 +258,21 @@ impl Model {
             plan: Arc::clone(plan),
             executable: attached.executable.clone(),
         })];
-        orders.extend(acts(id, plan, effects));
+        let watched = Watched {
+            process: attached.process,
+            executable: attached.executable.clone(),
+        };
+        orders.extend(acts(id, plan, &watched, effects));
         let plan = Arc::clone(plan);
-        self.running
-            .insert(app.to_owned(), Running { id, plan, session });
+        self.running.insert(
+            app.to_owned(),
+            Running {
+                id,
+                plan,
+                session,
+                watched,
+            },
+        );
         orders
     }
 
@@ -262,7 +287,7 @@ impl Model {
         };
         let name = running.plan.name.clone();
         let mut orders = vec![Order::StopReading(running.id, name)];
-        orders.extend(acts(running.id, &running.plan, effects));
+        orders.extend(acts(running.id, &running.plan, &running.watched, effects));
         orders
     }
 }
@@ -288,7 +313,7 @@ enum Stop {
 }
 
 /// The action jobs for a session's `effects`.
-fn acts(id: SessionId, plan: &AppPlan, effects: Vec<Effect>) -> Vec<Order> {
+fn acts(id: SessionId, plan: &AppPlan, watched: &Watched, effects: Vec<Effect>) -> Vec<Order> {
     effects
         .into_iter()
         .filter_map(|effect| {
@@ -301,6 +326,7 @@ fn acts(id: SessionId, plan: &AppPlan, effects: Vec<Effect>) -> Vec<Order> {
                     Job::Run {
                         owner,
                         automation,
+                        watched: watched.clone(),
                         actions: fired.actions().into(),
                         restore: fired.restore(),
                     }
@@ -565,6 +591,10 @@ mod tests {
             [Order::Act(Job::Run {
                 owner: (SessionId(0), RuleIndex(0)),
                 automation: "Pause A".to_owned(),
+                watched: Watched {
+                    process: ProcessId::new(7),
+                    executable: "Example.exe".to_owned(),
+                },
                 actions: pause(),
                 restore: Restore::OnRelease,
             })]

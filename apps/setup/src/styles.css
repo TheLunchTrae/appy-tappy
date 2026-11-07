@@ -862,6 +862,37 @@ select {
   gap: 4px;
 }
 
+/* The keys field takes the target, application and level columns. */
+.keys-field {
+  grid-column: span 3;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.keys-field .input {
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.btn.recording {
+  border-color: var(--capture);
+  color: var(--capture);
+}
+
+/* The anti-cheat menu is as wide as its longest choice, not the whole column. */
+.table select.input {
+  width: auto;
+}
+
+.confirm-none {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 320px;
+}
+
 .btn.add {
   align-self: flex-start;
   border-style: dashed;

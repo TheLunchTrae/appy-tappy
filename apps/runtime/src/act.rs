@@ -9,7 +9,7 @@
 use std::io;
 use std::sync::mpsc::{Receiver, Sender};
 
-use appytappy_actions::{Actions, Controls};
+use appytappy_actions::{Actions, Controls, Watched};
 use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
 use appytappy_engine::RuleIndex;
@@ -29,6 +29,9 @@ pub(crate) enum Job {
         owner: Owner,
         /// Its name, for the log.
         automation: String,
+        /// The process its session follows: a key press presses keys only
+        /// while that process's window is in front.
+        watched: Watched,
         /// Its actions.
         actions: Box<[Action]>,
         /// Whether its changes are undone when it is released.
@@ -74,13 +77,14 @@ pub(crate) fn run<C, E>(
             Job::Run {
                 owner,
                 automation,
+                watched,
                 actions: steps,
                 restore,
             } => steps
                 .iter()
                 .enumerate()
                 .filter_map(|(position, step)| {
-                    let error = actions.perform(owner, step, restore).err()?;
+                    let error = actions.perform(owner, step, restore, &watched).err()?;
                     Some(format!(
                         "{automation}: action {} failed: {error}",
                         position.saturating_add(1)
@@ -105,9 +109,13 @@ pub(crate) fn run<C, E>(
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
+    use std::time::Duration;
 
-    use appytappy_actions::{MediaSession, Volume};
-    use appytappy_config::action::{MediaCommand, MediaTarget, VolumeLevel, VolumeTarget};
+    use appytappy_actions::{MediaSession, Stroke, Volume};
+    use appytappy_config::action::{
+        MediaCommand, MediaTarget, Modifier, VolumeLevel, VolumeTarget,
+    };
+    use appytappy_config::anti_cheat::ProcessId;
 
     use super::*;
 
@@ -150,6 +158,20 @@ mod tests {
         fn set_volume(&mut self, (): &(), _level: VolumeLevel) -> io::Result<()> {
             Ok(())
         }
+
+        fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
+            Ok(None)
+        }
+
+        fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
+            Ok(Vec::new())
+        }
+
+        fn send_strokes(&mut self, strokes: &[Stroke]) -> io::Result<usize> {
+            Ok(strokes.len())
+        }
+
+        fn hold(&mut self, _time: Duration) {}
     }
 
     const OWNER: Owner = (SessionId(1), RuleIndex(0));
@@ -174,6 +196,10 @@ mod tests {
         jobs.send(Job::Run {
             owner: OWNER,
             automation: "Pause near the end".to_owned(),
+            watched: Watched {
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
             actions: pause_then_mute(),
             restore: Restore::OnRelease,
         })

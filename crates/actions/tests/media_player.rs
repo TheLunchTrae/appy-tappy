@@ -20,10 +20,11 @@ use std::thread;
 use std::time::Duration;
 
 use appytappy_actions::win::{MediaKey, WindowsControls};
-use appytappy_actions::{Actions, Controls};
+use appytappy_actions::{Actions, Controls, Watched};
 use appytappy_config::action::{
     Action, AppName, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
 };
+use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::rule::Restore;
 
 /// How long a player takes to report a new playback state.
@@ -99,8 +100,8 @@ fn pauses_and_resumes_the_player() {
         target: MediaTarget::App(player().expect("APPYTAPPY_TEST_PLAYER names the player")),
         command: MediaCommand::Pause,
     };
-    let paused = actions.perform(1_u8, &pause, Restore::OnRelease);
-    let held = actions.perform(2_u8, &pause, Restore::OnRelease);
+    let paused = actions.perform(1_u8, &pause, Restore::OnRelease, &watched());
+    let held = actions.perform(2_u8, &pause, Restore::OnRelease, &watched());
     thread::sleep(SETTLE);
     let while_paused = playing(actions.controls());
     let first_release = actions.release(1);
@@ -133,7 +134,7 @@ fn lowers_and_restores_the_player_volume() {
         target: VolumeTarget::App(player().expect("APPYTAPPY_TEST_PLAYER names the player")),
         level: VolumeLevel::from_percent(20).expect("at most 100"),
     };
-    let lowered = actions.perform(0_u8, &lower, Restore::OnRelease);
+    let lowered = actions.perform(0_u8, &lower, Restore::OnRelease, &watched());
     let while_lowered = levels(actions.controls());
     thread::sleep(SETTLE);
     actions.release(0).expect("the volume goes back");
@@ -152,5 +153,13 @@ fn lowers_and_restores_the_player_volume() {
             (after - before).abs() < TOLERANCE,
             "{after} is back to {before}"
         );
+    }
+}
+
+/// No key press runs here, so the watched process is never asked about.
+fn watched() -> Watched {
+    Watched {
+        process: ProcessId::new(0),
+        executable: "Example.exe".to_owned(),
     }
 }

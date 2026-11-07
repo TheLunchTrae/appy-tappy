@@ -2,6 +2,7 @@
 
 import type {
   ActionDef,
+  AntiCheat,
   AppSummary,
   AutomationDef,
   AutomationSummary,
@@ -13,6 +14,7 @@ import type {
   ValueDef,
   WhenDef,
 } from './api.ts';
+import { spellKeys } from './shortcut.ts';
 
 /** What a value reads: a number, or yes or no. */
 export type ValueKind = 'number' | 'flag';
@@ -26,6 +28,8 @@ export function valueKind(check: CheckDef): ValueKind {
 export interface ValueChoice {
   readonly app: string;
   readonly appName: string;
+  /** The anti-cheat class of the value's application. */
+  readonly antiCheat: AntiCheat;
   readonly value: ValueDef;
   readonly kind: ValueKind;
 }
@@ -38,6 +42,7 @@ export function valueChoices(apps: readonly AppSummary[]): readonly ValueChoice[
       : app.file.values.map((value) => ({
           app: app.id,
           appName: app.file?.name ?? app.id,
+          antiCheat: app.file?.antiCheat ?? 'unknown',
           value,
           kind: valueKind(value.screen.check),
         })),
@@ -160,15 +165,44 @@ export const MEDIA_NAMES: Readonly<Record<MediaCommand, string>> = {
 
 /** An action in a few words, such as `Pause media · Player.exe`. */
 export function actionText(action: ActionDef): string {
-  if (action.kind === 'media') {
-    return `${MEDIA_NAMES[action.command]} · ${action.app ?? 'whatever is playing'}`;
+  switch (action.kind) {
+    case 'media':
+      return `${MEDIA_NAMES[action.command]} · ${action.app ?? 'whatever is playing'}`;
+    case 'volume':
+      return `Volume · ${action.app ?? 'system'} ${action.percent}%`;
+    case 'keys':
+      return `Press ${action.keys}`;
   }
-  return `Volume · ${action.app ?? 'system'} ${action.percent}%`;
 }
 
-/** Whether undo can put back what `action` changed: a skipped track cannot be unskipped. */
+/**
+ * Whether undo can put back what `action` changed: a skipped track cannot be unskipped, and pressed keys
+ * cannot be unpressed.
+ */
 export function undoable(action: ActionDef): boolean {
-  return action.kind === 'volume' || action.command === 'play' || action.command === 'pause';
+  switch (action.kind) {
+    case 'media':
+      return action.command === 'play' || action.command === 'pause';
+    case 'volume':
+      return true;
+    case 'keys':
+      return false;
+  }
+}
+
+/**
+ * Why `actions` cannot run for an application whose anti-cheat is `antiCheat`, or null when they can: keys
+ * are pressed only for an application without anti-cheat, as the runtime also checks.
+ */
+export function keysBlocked(
+  actions: readonly { readonly kind: ActionDef['kind'] }[],
+  antiCheat: AntiCheat,
+  appName: string,
+): string | null {
+  if (antiCheat === 'none' || !actions.some((action) => action.kind === 'keys')) {
+    return null;
+  }
+  return `Anti-cheat can treat pressed keys as cheating, so keys are pressed only once ${appName}'s anti-cheat is set to None on the Applications page.`;
 }
 
 /** What undo does for `actions`, as a sentence, or null when none of them can be undone. */
@@ -201,12 +235,14 @@ type ActionTarget = 'default' | 'app';
 export interface ActionDraft {
   /** Tells the rows apart while they are added, moved and removed. */
   readonly key: number;
-  readonly kind: 'media' | 'volume';
+  readonly kind: ActionDef['kind'];
   readonly command: MediaCommand;
   readonly percent: string;
   readonly target: ActionTarget;
   /** The application's executable, such as `Player.exe`, when `target` is `app`. */
   readonly app: string;
+  /** The keys to press, such as `Ctrl+Shift+M`. */
+  readonly keys: string;
 }
 
 /** An automation as the editor holds it. */
@@ -228,7 +264,7 @@ export interface Draft {
 
 /** A new action row of `kind`. */
 export function newAction(key: number, kind: ActionDraft['kind'] = 'media'): ActionDraft {
-  return { key, kind, command: 'pause', percent: '20', target: 'default', app: '' };
+  return { key, kind, command: 'pause', percent: '20', target: 'default', app: '', keys: '' };
 }
 
 /** A new automation: pause whatever is playing, and undo it afterwards. */
@@ -259,8 +295,9 @@ export function toDraft(automation: AutomationDef): Draft {
       kind: action.kind,
       command: action.kind === 'media' ? action.command : 'pause',
       percent: action.kind === 'volume' ? String(action.percent) : '20',
-      target: action.app === null ? 'default' : 'app',
-      app: action.app ?? '',
+      target: action.kind === 'keys' || action.app === null ? 'default' : 'app',
+      app: action.kind === 'keys' ? '' : (action.app ?? ''),
+      keys: action.kind === 'keys' ? action.keys : '',
     })),
     undo: automation.undo,
     cooldown: String(automation.cooldownMs / 1000),
@@ -287,6 +324,15 @@ function typedNumber(text: string): number | null {
 }
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
+  if (draft.kind === 'keys') {
+    if (draft.keys.trim() === '') {
+      return `Choose the keys for action ${position} to press.`;
+    }
+    const keys = spellKeys(draft.keys);
+    return keys === null
+      ? `Spell the keys for action ${position} as any of Ctrl, Alt, Shift and Win, then one key such as M, 5, F9, Space or Enter, joined by +, such as Ctrl+Shift+M.`
+      : { kind: 'keys', keys };
+  }
   const app = draft.target === 'app' ? draft.app.trim() : null;
   if (app === '') {
     return `Name the application for action ${position}, such as Player.exe.`;
@@ -348,7 +394,17 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
     actions.push(built);
   }
   if (draft.undo && !actions.some(undoable)) {
-    return { ok: false, next: 'Turn off undo: a skipped track cannot be unskipped.' };
+    const skips = actions.some((action) => action.kind === 'media');
+    const presses = actions.some((action) => action.kind === 'keys');
+    const why = [
+      skips ? 'a skipped track cannot be unskipped' : null,
+      presses ? 'pressed keys cannot be unpressed' : null,
+    ].filter((part) => part !== null);
+    return { ok: false, next: `Turn off undo: ${why.join(', and ')}.` };
+  }
+  const blocked = keysBlocked(actions, choice.antiCheat, choice.appName);
+  if (blocked !== null) {
+    return { ok: false, next: blocked };
   }
   const cooldown = typedNumber(draft.cooldown);
   if (cooldown === null || cooldown < 0 || cooldown > MAX_COOLDOWN_SECONDS) {

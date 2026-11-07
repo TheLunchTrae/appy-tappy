@@ -24,6 +24,7 @@ import {
   buildAutomation,
   buildWhen,
   findValue,
+  keysBlocked,
   liveAnnouncement,
   liveText,
   newAction,
@@ -33,50 +34,102 @@ import {
   withSource,
 } from './automation.ts';
 import { background, useRepeat } from './repeat.ts';
+import { actionKeys } from './shortcut.ts';
 
-/** The action menu's choices: each media command, then setting a volume. */
-type ActionChoice = MediaCommand | 'volume';
+/** The action menu's choices: each media command, then setting a volume, then pressing keys. */
+type ActionChoice = MediaCommand | 'volume' | 'keys';
 
-const ACTION_CHOICES: readonly ActionChoice[] = ['pause', 'play', 'next', 'previous', 'volume'];
+const ACTION_CHOICES: readonly ActionChoice[] = ['pause', 'play', 'next', 'previous', 'volume', 'keys'];
 
-const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = { ...MEDIA_NAMES, volume: 'Set volume' };
+const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = {
+  ...MEDIA_NAMES,
+  volume: 'Set volume',
+  keys: 'Press keys',
+};
+
+interface KeysFieldProps {
+  readonly label: string;
+  readonly keys: string;
+  readonly onChange: (keys: string) => void;
+}
+
+/**
+ * The keys an action presses: typed, such as `Ctrl+Shift+M`, or recorded from the next keys pressed.
+ * While it records, every key but Escape goes to the recording, Tab included; Escape stops it.
+ */
+function KeysField({ label, keys, onChange }: KeysFieldProps) {
+  const [recording, setRecording] = useState(false);
+  const [heard, setHeard] = useState('');
+  return (
+    <span className="keys-field">
+      <input
+        className="input"
+        aria-label={`${label}: keys`}
+        placeholder="Ctrl+Shift+M"
+        value={keys}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      />
+      <button
+        type="button"
+        className={recording ? 'btn small recording' : 'btn small'}
+        aria-pressed={recording}
+        aria-label={`Record the keys for ${label.toLowerCase()}`}
+        onClick={() => {
+          setRecording((now) => !now);
+          setHeard(recording ? '' : 'Press the keys to record, or Escape to stop.');
+        }}
+        onBlur={() => {
+          setRecording(false);
+        }}
+        onKeyDown={(event) => {
+          if (!recording) {
+            return;
+          }
+          event.preventDefault();
+          if (event.repeat) {
+            return;
+          }
+          if (event.key === 'Escape') {
+            setRecording(false);
+            setHeard('Stopped recording.');
+            return;
+          }
+          const pressed = actionKeys(event);
+          if (pressed === null) {
+            // A modifier alone waits for its key; any other key cannot be pressed by an action.
+            if (!['Control', 'Alt', 'Shift', 'Meta', 'AltGraph'].includes(event.key)) {
+              setHeard('An action cannot press that key. Try another, or Escape to stop.');
+            }
+            return;
+          }
+          onChange(pressed);
+          setRecording(false);
+          setHeard(`Recorded ${pressed}.`);
+        }}
+      >
+        {recording ? 'Press the keys' : 'Record'}
+      </button>
+      <span className="visually-hidden" role="status">
+        {heard}
+      </span>
+    </span>
+  );
+}
 
 const EXECUTABLES_ID = 'running-executables';
 
-interface ActionRowProps {
+interface ActionTargetProps {
   readonly action: ActionDraft;
-  readonly position: number;
-  readonly count: number;
+  readonly label: string;
   readonly onChange: (action: ActionDraft) => void;
-  readonly onMove: (by: -1 | 1) => void;
-  readonly onRemove: () => void;
 }
 
-function ActionRow({ action, position, count, onChange, onMove, onRemove }: ActionRowProps) {
-  const choice: ActionChoice = action.kind === 'volume' ? 'volume' : action.command;
-  const label = `Action ${position}`;
+/** Whose media or volume a media or volume action changes, and the level a volume action sets. */
+function ActionTarget({ action, label, onChange }: ActionTargetProps) {
   return (
-    <li className="action-row">
-      <span className="step-number">{position}</span>
-      <select
-        className="input"
-        aria-label={`${label}: what to do`}
-        value={choice}
-        onChange={(event) => {
-          const picked = ACTION_CHOICES.find((option) => option === event.target.value);
-          if (picked !== undefined) {
-            onChange(
-              picked === 'volume' ? { ...action, kind: 'volume' } : { ...action, kind: 'media', command: picked },
-            );
-          }
-        }}
-      >
-        {ACTION_CHOICES.map((option) => (
-          <option key={option} value={option}>
-            {ACTION_NAMES[option]}
-          </option>
-        ))}
-      </select>
+    <>
       <select
         className="input"
         aria-label={`${label}: for`}
@@ -117,6 +170,57 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
         </span>
       ) : (
         <span />
+      )}
+    </>
+  );
+}
+
+interface ActionRowProps {
+  readonly action: ActionDraft;
+  readonly position: number;
+  readonly count: number;
+  readonly onChange: (action: ActionDraft) => void;
+  readonly onMove: (by: -1 | 1) => void;
+  readonly onRemove: () => void;
+}
+
+function ActionRow({ action, position, count, onChange, onMove, onRemove }: ActionRowProps) {
+  const choice: ActionChoice = action.kind === 'media' ? action.command : action.kind;
+  const label = `Action ${position}`;
+  return (
+    <li className="action-row">
+      <span className="step-number">{position}</span>
+      <select
+        className="input"
+        aria-label={`${label}: what to do`}
+        value={choice}
+        onChange={(event) => {
+          const picked = ACTION_CHOICES.find((option) => option === event.target.value);
+          if (picked !== undefined) {
+            onChange(
+              picked === 'volume' || picked === 'keys'
+                ? { ...action, kind: picked }
+                : { ...action, kind: 'media', command: picked },
+            );
+          }
+        }}
+      >
+        {ACTION_CHOICES.map((option) => (
+          <option key={option} value={option}>
+            {ACTION_NAMES[option]}
+          </option>
+        ))}
+      </select>
+      {action.kind === 'keys' ? (
+        <KeysField
+          label={label}
+          keys={action.keys}
+          onChange={(keys) => {
+            onChange({ ...action, keys });
+          }}
+        />
+      ) : (
+        <ActionTarget action={action} label={label} onChange={onChange} />
       )}
       <span className="row-tools">
         <button
@@ -275,6 +379,8 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
   const typedWhen = choice === null ? null : buildWhen(draft, choice);
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
   const undoWords = built.ok ? undoText(built.automation.actions) : null;
+  const pressesKeys = draft.actions.some((action) => action.kind === 'keys');
+  const keysWarning = choice === null ? null : keysBlocked(draft.actions, choice.antiCheat, choice.appName);
 
   const update = (change: Partial<Draft>): void => {
     setDraft((current) => ({ ...current, ...change }));
@@ -441,6 +547,13 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
               />
             ))}
           </ol>
+          {keysWarning === null ? null : <p className="warn">{keysWarning}</p>}
+          {pressesKeys ? (
+            <p className="note">
+              Keys are pressed only while {choice?.appName ?? 'the application'} is the window in front, so they never
+              reach another application.
+            </p>
+          ) : null}
           <button
             type="button"
             className="btn add"

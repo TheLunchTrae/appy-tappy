@@ -14,6 +14,8 @@ calls that crate; the engine only says which rule fired.
 - **Set volume:** the default playback device's volume, or one app's volume
   on that device. It uses Core Audio, the API behind the Windows volume
   mixer.
+- **Press keys:** one key, with any of Ctrl, Alt, Shift, and Win held, such
+  as `Ctrl+Shift+M`. See [Key presses](#key-presses).
 
 An app is named the way Windows reports it, ignoring ASCII case. For media, that
 is the session's app ID: usually the executable name, such as `Player.exe`, for
@@ -39,6 +41,43 @@ A media request that gets no answer within two seconds fails, so an app
 that hangs cannot hold up the actions behind it. The app may still act on
 a request after it times out; such a late change is not restored.
 
+## Key presses
+
+A key press action is saved as text: any of `Ctrl`, `Alt`, `Shift`, and `Win`,
+in that order, then one key, joined by `+`. The key is a letter, a digit,
+`F1` to `F24`, `Space`, `Enter`, `Tab`, `Escape`, `Backspace`, `Insert`,
+`Delete`, `Home`, `End`, `PageUp`, `PageDown`, `Up`, `Down`, `Left`, or
+`Right`. Reading it ignores case and spaces around each part, and the setup
+app saves it in the spelling above.
+
+The action holds the modifiers down in order, presses the key, holds them
+for 40 ms so an application that checks the keyboard once a frame still sees
+them, then lets the key and the modifiers go in reverse. A modifier the user is
+holding already is left alone, so it stays down for them; a held modifier that
+the keys do not name joins the press. The modifiers are the left-hand ones, and
+the navigation and arrow keys are sent as the dedicated keys, not the number
+pad's.
+
+It uses `SendInput`, which types into whichever window has the keyboard focus,
+so the action first checks that the window in front belongs to the process the
+runtime follows for the watched application. If another window is in front,
+even one of another process with the same executable name, it presses nothing
+and the log says so; anti-cheat was checked only for the watched application,
+so keys are pressed only into the watched application. An application whose
+window belongs to a second process of its own cannot be pressed into. Windows does not deliver
+keys to a window that runs as administrator unless AppyTappy does too, and says
+nothing when it drops them. When it takes only some of the keys, every key that
+went down is let go again.
+
+Anti-cheat can see injected input and treat it as cheating, so an automation
+with a key press action runs only for an application whose anti-cheat class
+is `none` (see [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)). A
+new application starts as `unknown`, so the user has to set it first. Saving
+an automation checks this, and so does the runtime whenever it reads the
+automations. Changing the class in the setup app makes the runtime read them
+again at once, so it stops running that automation; a class changed by
+editing `app.json` by hand counts from the next reload or restart.
+
 ## Restoring
 
 A rule that restores on release undoes its actions when it is released (see
@@ -50,8 +89,8 @@ it touched, just before it acted:
 - **Set volume** puts back each audio session's own level, or the device's.
   A restore goes to the same device or session the action changed, even if
   the default device has changed since.
-- **Next** and **previous** cannot be undone. A rule that restores needs at
-  least one action that can.
+- **Next**, **previous**, and **press keys** cannot be undone. A rule that
+  restores needs at least one action that can.
 
 A rule's actions are undone newest first. When several restoring rules change
 the same session or volume, the original state comes back only when the last
@@ -67,10 +106,9 @@ audio sessions, what it changed before the failure is still restored.
 
 ## Not in v1
 
-- **Keypresses:** input goes to the focused window, which is the watched
-  application, so a hotkey meant for another app would reach it instead.
-  Injected input is also visible to anti-cheat (see
-  [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+- **Sending keys to another application:** keys go only to the watched
+  application while it is in front, so a hotkey meant for another application
+  cannot be sent.
 - **Running a command or opening a URL:** configs may be shared, and a
   shared config should not be able to run programs.
 - **HTTP and WebSocket calls** (OBS, Streamer.bot, Home Assistant): useful,

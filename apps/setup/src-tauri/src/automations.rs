@@ -6,6 +6,7 @@
 //! is not there or compares a value with the wrong kind of target. A value
 //! that later goes away shows as a problem on the automation that used it.
 
+use appytappy_config::action::KeyChord;
 use appytappy_config::app_file::AppFile;
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
@@ -113,9 +114,18 @@ pub(crate) fn save(
         return Err("Name the automation first.".to_owned());
     }
     for action in &mut draft.actions {
-        let (ActionDef::Media { app, .. } | ActionDef::Volume { app, .. }) = action;
-        if let Some(name) = app {
-            *name = name.trim().to_owned();
+        match action {
+            ActionDef::Media { app, .. } | ActionDef::Volume { app, .. } => {
+                if let Some(name) = app {
+                    *name = name.trim().to_owned();
+                }
+            },
+            // The file keeps the keys in one spelling, such as Ctrl+Shift+M.
+            ActionDef::Keys { keys } => {
+                if let Ok(chord) = KeyChord::parse(keys) {
+                    *keys = chord.to_string();
+                }
+            },
         }
     }
     draft.validate().map_err(|problem| sentence(&problem))?;

@@ -12,10 +12,11 @@ publish.workspace = true
 appytappy-config = { version = "=0.1.0", path = "../config" }
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
-# in `win.rs` calls: media sessions, Core Audio, COM, and the process snapshot
-# that names each audio session's executable. `windows-future` is the part of
-# the same bindings that `windows` already uses for requests that finish later;
-# naming it lets the adapter wait for a media request with a timeout.
+# in `win.rs` calls: media sessions, Core Audio, COM, the process snapshot
+# that names each audio session's executable, and `SendInput` for key
+# presses. `windows-future` is the part of the same bindings that `windows`
+# already uses for requests that finish later; naming it lets the adapter
+# wait for a media request with a timeout.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = [
   "Foundation_Collections",
@@ -27,6 +28,8 @@ windows = { version = "=0.62.2", features = [
   "Win32_System_Com_StructuredStorage",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Variant",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 windows-future = "=0.3.2"
 

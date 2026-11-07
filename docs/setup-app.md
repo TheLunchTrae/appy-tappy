@@ -19,7 +19,11 @@ way. Issues [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16) and
   says why under its name. **New automation** and **Edit** open the editor
   below.
 - **Applications** lists how each saved application's window is recognized,
-  its anti-cheat class, and how many of its windows are open.
+  its anti-cheat class, and how many of its windows are open. The anti-cheat
+  class is picked from a menu: not set, user-mode, kernel-level, or none.
+  Only none lets automations press keys into the application, so picking it
+  asks first and warns that pressing keys into an application with
+  anti-cheat can get the user's account banned.
 
 ## Making a value
 
@@ -71,11 +75,18 @@ value, and any number of automations can watch the same one.
    one pauses, plays, or skips media, or sets a volume, for whatever is
    playing or the whole system, or for one application named by its
    executable, such as `Player.exe`. The open windows' executables are
-   offered as suggestions.
+   offered as suggestions. A key press action presses keys such as
+   `Ctrl+Shift+M`, typed or recorded with **Record**, which takes the next
+   keys pressed, Tab included; Escape stops recording, so type `Escape` to
+   press it. A letter is recorded as the keyboard layout types it. Keys are
+   pressed only while the watched application is in front, and only into an
+   application whose anti-cheat is set to none on the Applications page
+   ([Key presses](actions.md#key-presses)).
 4. **Afterwards.** With **Undo these when the condition stops being true**,
    paused media plays again, started media pauses again, and each volume goes
-   back. A skipped track cannot be unskipped, so an automation that only skips
-   cannot undo. Either way, it can run again once the condition has stopped
+   back. A skipped track cannot be unskipped and pressed keys cannot be
+   unpressed, so an automation that only skips or presses keys cannot undo.
+   Either way, it can run again once the condition has stopped
    being true. An optional wait, in seconds, keeps it from running again
    sooner.
 5. **Save.** The editor says what is still missing until the automation is
@@ -133,7 +144,7 @@ cropped to the region, and a picture check's reference.
     "executable": "Example.exe",
     "priority": "titleElseExecutable"
   },
-  "antiCheat": "unknown",
+  "antiCheat": "none",
   "values": [
     {
       "id": "progress",
@@ -167,7 +178,8 @@ Each names its value by application ID and value ID:
       "when": { "app": "example", "value": "progress", "is": "atLeast", "target": 90.0 },
       "actions": [
         { "kind": "media", "command": "pause", "app": "Player.exe" },
-        { "kind": "volume", "percent": 20, "app": null }
+        { "kind": "volume", "percent": 20, "app": null },
+        { "kind": "keys", "keys": "Ctrl+Shift+M" }
       ],
       "undo": true,
       "cooldownMs": 0
