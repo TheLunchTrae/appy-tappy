@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AppyTappy Setup",
-  "version": "0.1.0",
   "identifier": "dev.traejks.appytappy.setup",
   "build": {
     "frontendDist": "../dist",

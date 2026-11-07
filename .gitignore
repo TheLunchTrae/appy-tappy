@@ -46,6 +46,8 @@ node_modules/
 /apps/setup/dist/
 # Tauri writes the setup app's permission schemas here on every build.
 /apps/setup/src-tauri/gen/
+# The runtime that `mise run installer:build` copies in for the installer.
+/apps/setup/src-tauri/binaries/
 /out/
 /sbom/
 

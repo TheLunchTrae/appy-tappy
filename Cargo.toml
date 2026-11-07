@@ -150,3 +150,12 @@ workspace = true
 # covers `#[expect]`ed sites and dependency code.
 [profile.release]
 overflow-checks = true
+
+# The profile the installer ships, built by `mise run installer:build`. It
+# trades a slower build for a smaller, faster program: one codegen unit and
+# link-time optimization across every crate, with no symbols in the binaries.
+[profile.dist]
+inherits = "release"
+codegen-units = 1
+lto = true
+strip = true

@@ -6,6 +6,12 @@ its window, an icon becoming visible, a bar filling past a threshold, or a
 color changing. An automation then acts, such as pausing media or changing an
 app's volume.
 
+## Install
+
+Download the installer from the
+[latest release](https://github.com/TheLunchTrae/appy-tappy/releases/latest).
+[Installer](docs/installer.md) describes what it installs and how to build it.
+
 ## Development
 
 Install [mise](https://mise.jdx.dev/), then run:
