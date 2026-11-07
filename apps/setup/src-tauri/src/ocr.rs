@@ -71,7 +71,18 @@ pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path
         if job.recording < newest {
             continue;
         }
-        let text = match engine.get_or_insert_with(|| load(model)) {
+        // A panic while loading the model fails every reading with a reason,
+        // as a missing model does, rather than ending the reader.
+        let loaded = engine.get_or_insert_with(|| {
+            panic::catch_unwind(|| load(model)).unwrap_or_else(|_panic| {
+                Err(format!(
+                    "The text reader's model, {}, could not be loaded. Reinstall AppyTappy to put \
+                     it back",
+                    model.display()
+                ))
+            })
+        });
+        let text = match loaded {
             // A panic inside the model's code fails this reading alone,
             // rather than leaving it pending and ending the reader.
             Ok(engine) => panic::catch_unwind(AssertUnwindSafe(|| read(engine, &job.line)))

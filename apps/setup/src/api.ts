@@ -138,6 +138,15 @@ export interface RecordingView {
   readonly problem: string | null;
   /** Its readings, in the order they first showed. */
   readonly readings: readonly RecordedReading[];
+  /** What it records with; Record more needs the same. */
+  readonly settings: RecordingSettings;
+}
+
+/** The region, color and tolerance a recording reads with. */
+interface RecordingSettings {
+  readonly region: Rect;
+  readonly ink: Color;
+  readonly tolerance: number;
 }
 
 /** What a check read. */

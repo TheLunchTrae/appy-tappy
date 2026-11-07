@@ -46,11 +46,15 @@ interface PanelProps {
   readonly onStop: () => void;
   readonly onDiscard: () => void;
   readonly onReview: () => void;
+  /** Whether the draft's region, color or tolerance differ from the stopped recording's. */
+  readonly settingsChanged: boolean;
+  /** Puts the stopped recording's settings back on the draft. */
+  readonly onUseSettings: () => void;
 }
 
 /** The inspector's part for recording a number's region. */
 export function RecordPanel(props: PanelProps) {
-  const { view, reviewing, kept, keeping, blocked, appName, crops, error } = props;
+  const { view, reviewing, kept, keeping, blocked, appName, crops, error, settingsChanged } = props;
   const isRecording = view?.recording === true;
   // Starting removes the Start button, so focus moves to Stop rather than the page.
   const stopButton = useRef<HTMLButtonElement>(null);
@@ -59,12 +63,20 @@ export function RecordPanel(props: PanelProps) {
       stopButton.current?.focus();
     }
   }, [isRecording]);
-  const warning = error ?? view?.problem ?? null;
-  const warn = warning === null ? null : <p className="warn">{warning}</p>;
+  // A frame's problem and a failed command are told apart, and a later
+  // command's success clears only its own error.
+  const warn = (
+    <>
+      {view === null || view.problem === null ? null : <p className="warn">{view.problem}</p>}
+      {error === null ? null : <p className="warn">{error}</p>}
+    </>
+  );
   if (view === null) {
     return (
       <section className="record" aria-labelledby="record-title">
-        <h3 id="record-title">Record readings</h3>
+        <h3 id="record-title" tabIndex={-1}>
+          Record readings
+        </h3>
         <p className="note">
           Record the region while you use {appName}. Each different reading is kept once and read as text, so you only
           check it.
@@ -87,7 +99,9 @@ export function RecordPanel(props: PanelProps) {
       .toReversed();
     return (
       <section className="record on" aria-labelledby="record-title">
-        <h3 id="record-title">Recording</h3>
+        <h3 id="record-title" tabIndex={-1}>
+          Recording
+        </h3>
         <p aria-live="polite">
           {count === 1 ? '1 different reading so far.' : `${count} different readings so far.`}
           {view.full ? ' That is as many as one recording keeps.' : ''}
@@ -122,7 +136,9 @@ export function RecordPanel(props: PanelProps) {
   if (reviewing) {
     return (
       <section className="record" aria-labelledby="record-title">
-        <h3 id="record-title">Reviewing the recording</h3>
+        <h3 id="record-title" tabIndex={-1}>
+          Reviewing the recording
+        </h3>
         <p className="note" aria-live="polite">
           {keeping} of {count} readings will be kept. The value saves only what you keep.
         </p>
@@ -131,20 +147,33 @@ export function RecordPanel(props: PanelProps) {
   }
   return (
     <section className="record" aria-labelledby="record-title">
-      <h3 id="record-title">Recorded readings</h3>
+      <h3 id="record-title" tabIndex={-1}>
+        Recorded readings
+      </h3>
       <p className="note">
         {kept === 0
           ? `${count === 1 ? '1 reading' : `${count} readings`} recorded, none kept yet.`
           : `Learned from ${kept === 1 ? '1 recorded reading' : `${kept} recorded readings`}.`}
       </p>
       {warn}
+      {settingsChanged ? (
+        <p className="note">
+          The region, color or tolerance changed since recording. Record more needs the recording&apos;s own.
+        </p>
+      ) : null}
       <div className="row">
         <button type="button" className="btn" onClick={props.onReview}>
           Review recording
         </button>
-        <button type="button" className="btn" disabled={blocked !== null} onClick={props.onMore}>
-          Record more
-        </button>
+        {settingsChanged ? (
+          <button type="button" className="btn" onClick={props.onUseSettings}>
+            Use its settings
+          </button>
+        ) : (
+          <button type="button" className="btn" disabled={blocked !== null} onClick={props.onMore}>
+            Record more
+          </button>
+        )}
         <button type="button" className="btn" onClick={props.onDiscard}>
           Discard
         </button>

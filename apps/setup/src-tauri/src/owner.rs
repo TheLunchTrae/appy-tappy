@@ -21,7 +21,6 @@ use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_config::store::new_app_id;
 use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::saved;
 use appytappy_sources::screen::{
     Capture, CaptureSession, Crop, Frame, FrameHandler, Image, OutsideWindow, Region, Size,
@@ -1190,17 +1189,24 @@ impl<H: Host> Owner<H> {
             );
         }
         let window_size = drawn_on.size();
-        let reader = DigitReader::new(ink.into(), tolerance);
+        let settings = (ink.into(), tolerance);
         let now = Instant::now();
         match &mut self.recording {
-            Some(recording) if more && recording.records(region, &reader, window_size) => {
+            Some(recording) if more && recording.records(region, settings, window_size) => {
                 recording.resume(now);
             },
-            Some(_) if more => {
+            Some(recording) if more => {
+                return Err(format!(
+                    "Recording more needs the settings it was recorded with: the same region, \
+                     the characters' color, a tolerance of {}, and a screenshot of the same \
+                     window size. Use its settings, or discard the recording to start a new one.",
+                    recording.view(now).settings.tolerance
+                ));
+            },
+            None if more => {
                 return Err(
-                    "Recording more needs the region, characters' color, and tolerance it was \
-                     recorded with, on a screenshot of the same window size. Put them back, or \
-                     discard the recording to start a new one."
+                    "That recording is gone, so there is nothing to record more of. Start a new \
+                     recording."
                         .to_owned(),
                 );
             },
@@ -1209,7 +1215,7 @@ impl<H: Host> Owner<H> {
                 self.recording = Some(Recording::new(
                     self.recording_id,
                     region,
-                    reader,
+                    settings,
                     window_size,
                     now,
                 ));
@@ -1978,6 +1984,16 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(
+            harness.ask(start_recording(255, true)),
+            Err(
+                "That recording is gone, so there is nothing to record more of. Start a new \
+                 recording."
+                    .to_owned()
+            ),
+            "recording more never starts a recording"
+        );
+        assert!(harness.recording().is_none());
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.ask(Request::StopRecording);
@@ -1989,9 +2005,9 @@ mod tests {
         assert_eq!(
             harness.ask(start_recording(200, true)),
             Err(
-                "Recording more needs the region, characters' color, and tolerance it was \
-                 recorded with, on a screenshot of the same window size. Put them back, or \
-                 discard the recording to start a new one."
+                "Recording more needs the settings it was recorded with: the same region, the \
+                 characters' color, a tolerance of 0, and a screenshot of the same window size. \
+                 Use its settings, or discard the recording to start a new one."
                     .to_owned()
             ),
             "recording more never replaces the recording"

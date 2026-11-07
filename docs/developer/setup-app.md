@@ -43,15 +43,15 @@ This page covers what the user guide leaves out.
 
 [Recording a number](../user/values.md#record-a-number) samples the frames the
 value editor's preview capture already takes, about 30 a second, in the owner
-thread (`recording.rs`). Each frame is cut to the region and reduced to a
-bitmask of its ink, the pixels the number check's
-`DigitReader::is_ink` takes for the characters' color. Pixels whose distance
-from that color is within 32 of the tolerance are uncertain: they are where a
-character's edge blends into the background, and can fall either side of the
-tolerance from one frame to the next. A crop whose mask differs from a kept
-reading's in at most one pixel that is certain in both is another sighting of
-that reading. The allowance does not grow with the amount of ink, so one
-stroke of a different character in a long number still counts. Every kept
+thread (`recording.rs`). Each frame is cut to the region and reduced to the
+shapes the number check reads: `DigitReader::shapes` finds the ink, splits it
+into characters, and scales each to the grid the check compares. A crop whose
+shapes equal a kept reading's is another sighting of that reading, because it
+would teach the check nothing new. A blended edge seldom changes a grid
+cell, and when it does the reading is kept twice, which costs a tile in review
+and teaches no wrong shape. One stroke of a different character changes a
+shape however long the number. The
+shapes ignore size, so a counter drawn larger is the same reading. Every kept
 reading is compared, not only the latest, so a value that comes back is not
 kept twice. A crop with no ink is skipped, and so
 is a frame of another size than the screenshot the region was drawn on. One
@@ -67,8 +67,11 @@ characters' color and tolerance, and leaves out each reading that fails, so a
 conflict such as one shape typed as `l` in one reading and `1` in another is
 flagged on the reading that causes it. **Record more** goes on with the stopped
 recording only when the region, color, tolerance, and window size are the
-ones it was recorded with, and otherwise says so rather than start over, so
-kept readings are lost only on a discard.
+ones it was recorded with, and otherwise says so rather than start over. The
+UI then offers **Use its settings**, which puts the recording's region, color,
+and tolerance back on the draft. Kept readings are lost only on a discard or
+when the capture stops, such as on **Change window**. **Back** and Escape
+leave review without keeping, and review's edits stay for the next one.
 
 ### The text reader
 

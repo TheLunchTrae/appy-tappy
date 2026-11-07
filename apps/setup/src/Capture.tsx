@@ -492,6 +492,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       const state = await recordingState();
       if (turn === recordingTurn.current) {
         setRecording(state);
+        setRecordError(null);
       }
     } catch (error: unknown) {
       setRecordError(errorText(error));
@@ -540,9 +541,14 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   const keeping = useMemo(() => keptLabels(reviewEntries), [reviewEntries]);
   const toReview = useMemo(() => reviewSpec(draft, keeping), [draft, keeping]);
   const reviewKey = toReview === null ? '' : JSON.stringify(toReview);
+  // The effect below runs when the spec's contents change, not on each new
+  // object with the same contents, so it reads the spec through a ref.
+  const reviewSpecRef = useRef(toReview);
+  reviewSpecRef.current = toReview;
   // Asks which kept readings the check cannot learn, such as one whose shape
   // a labeled screenshot or an earlier reading gave to another character.
   useEffect(() => {
+    const toReview = reviewSpecRef.current;
     if (!reviewing || toReview === null) {
       return undefined;
     }
@@ -560,10 +566,14 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
               found.set(label.reading, answer);
             }
           });
-          setProblems({ spec: JSON.stringify(toReview), found });
+          setProblems({ spec: reviewKey, found });
+          setRecordError(null);
         })
         .catch((error: unknown) => {
           if (current) {
+            // Saving checks the readings again, so a failed check flags none
+            // rather than leaving Keep waiting for an answer that never comes.
+            setProblems({ spec: reviewKey, found: new Map() });
             setRecordError(errorText(error));
           }
         });
@@ -572,7 +582,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       current = false;
       clearTimeout(timer);
     };
-  }, [reviewing, toReview]);
+  }, [reviewing, reviewKey]);
   // Flags found on another spec are stale: none show, and Keep waits for the answer.
   const flagged = problems.spec === reviewKey ? problems.found : new Map<number, string>();
   const checked = problems.spec === reviewKey;
@@ -662,6 +672,18 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     return null;
   })();
 
+  // Closing review removes the button that had focus, so focus moves to the
+  // inspector's recording part once it shows again.
+  const closeReview = (): void => {
+    if (!reviewing) {
+      return;
+    }
+    setReviewing(false);
+    requestAnimationFrame(() => {
+      document.getElementById('record-title')?.focus();
+    });
+  };
+
   // Starts a new recording, or with `more` goes on with the stopped one. The
   // owner refuses to go on with other settings rather than start over, so
   // kept readings and review edits are never dropped without a discard.
@@ -704,7 +726,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       await discardRecording();
       setRecording(null);
       setRecordError(null);
-      setReviewing(false);
+      closeReview();
       setEdits(new Map());
       setDraft((current) => ({ ...current, recorded: new Map() }));
     } catch (error: unknown) {
@@ -715,7 +737,41 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   // Review edits stay after Keep, so reviewing again starts from them.
   const keep = (): void => {
     setDraft((current) => ({ ...current, recorded: new Map(keeping.map((label) => [label.reading, label.text])) }));
-    setReviewing(false);
+    closeReview();
+  };
+
+  // Escape leaves review without keeping; its edits stay for the next review.
+  useEffect(() => {
+    if (!reviewing) {
+      return undefined;
+    }
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        closeReview();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  });
+
+  // The stopped recording's settings, when the draft no longer has them, so
+  // Record more can offer to take them back.
+  const settings = recording?.settings;
+  const settingsChanged =
+    recording !== null &&
+    !recording.recording &&
+    settings !== undefined &&
+    (draft.tolerance !== settings.tolerance ||
+      JSON.stringify(draft.region) !== JSON.stringify(settings.region) ||
+      JSON.stringify(draft.ink) !== JSON.stringify(settings.ink));
+  const useSettings = (): void => {
+    if (settings === undefined) {
+      return;
+    }
+    setDraft((current) => ({ ...current, region: settings.region, ink: settings.ink, tolerance: settings.tolerance }));
+    setRecordError(null);
   };
 
   const keptProblem = keeping.some((label) => flagged.has(label.reading));
@@ -766,6 +822,9 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
           )}
           {reviewing ? (
             <div className="end">
+              <button type="button" className="btn" onClick={closeReview}>
+                Back
+              </button>
               <button
                 type="button"
                 className="btn"
@@ -837,11 +896,17 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
               setEdits((current) => new Map(current).set(index, entry));
             }}
             onKeepAll={(keepAll) => {
-              setEdits(
-                new Map(
-                  reviewEntries.map((entry, index) => [index, { ...entry, keep: keepAll && entry.text.trim() !== '' }]),
-                ),
-              );
+              // A reading still being read gets no edit, so its text and
+              // keep come from the reader once it answers.
+              setEdits((current) => {
+                const next = new Map(current);
+                reviewEntries.forEach((entry, index) => {
+                  if (recording.readings[index]?.text.kind !== 'pending' || current.has(index)) {
+                    next.set(index, { ...entry, keep: keepAll && entry.text.trim() !== '' });
+                  }
+                });
+                return next;
+              });
             }}
           />
         ) : null}
@@ -999,6 +1064,8 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
             onReview={() => {
               setReviewing(true);
             }}
+            settingsChanged={settingsChanged}
+            onUseSettings={useSettings}
           />
         ) : null}
         <ReadingBox built={built.ok ? null : built.next} state={checkState} reading={reading} />

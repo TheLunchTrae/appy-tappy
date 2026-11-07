@@ -763,8 +763,7 @@ mod tests {
     fn recorded_readings_are_learned_and_saved_after_the_labels() {
         let now = std::time::Instant::now();
         let region = Region::new(0, 0, 4, 2).expect("not empty");
-        let reader = DigitReader::new(RED.into(), 0);
-        let mut recording = Recording::new(1, region, reader, screenshot().size(), now);
+        let mut recording = Recording::new(1, region, (RED.into(), 0), screenshot().size(), now);
         recording.offer(&screenshot(), now).expect("a reading");
         let number = |labels, recorded| CheckSpec::Number {
             region: whole(),
