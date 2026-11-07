@@ -19,10 +19,10 @@ on:
       - apps/setup/src-tauri/tauri.installer.conf.json
       - apps/setup/src-tauri/windows/**
       # The installer hooks find the runtime's tray window by the class and
-      # title in win.rs, and the uninstaller removes the autostart value that
-      # lib.rs names.
-      - crates/platform/src/lib.rs
-      - crates/platform/src/win.rs
+      # title in win/tray.rs, and the uninstaller removes the autostart value
+      # that autostart.rs names.
+      - crates/platform/src/autostart.rs
+      - crates/platform/src/win/tray.rs
   workflow_dispatch:
 
 permissions:

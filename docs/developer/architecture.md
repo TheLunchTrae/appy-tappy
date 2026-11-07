@@ -480,8 +480,9 @@ crate are `unsafe`, because Rust cannot check what Windows does with the
 pointers it receives. That covers reading another process's memory, Core
 Audio, window hooks, the tray icon, directory watching, and the Direct3D
 interop that screen capture needs. WinRT calls, such as media sessions and the
-screen capture API itself, are safe Rust methods. Screen capture lives in
-`sources/src/win/capture.rs`, a submodule of `win.rs`, under the same rules.
+screen capture API itself, are safe Rust methods. A `win.rs` module's
+submodules, such as screen capture in `sources/src/win/capture.rs` and the
+tray in `platform/src/win/tray.rs`, follow the same rules.
 
 The owner approved changing the workspace lint from `forbid` to `deny` with
 the first `unsafe` Windows call, in `sources`, as
