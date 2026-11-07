@@ -210,7 +210,6 @@ pub(super) struct Point {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

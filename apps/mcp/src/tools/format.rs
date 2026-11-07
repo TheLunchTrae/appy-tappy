@@ -50,7 +50,6 @@ pub(super) fn scan_summary(scan: &Scan) -> Value {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

@@ -1,5 +1,5 @@
-//! The tool list the agent sees: each tool's name, description and input
-//! schema.
+//! The tool list the agent sees: each tool's name, description, and
+//! input schema.
 
 use appytappy_sources::memory::ValueType;
 use serde_json::{Value, json};
