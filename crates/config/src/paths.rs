@@ -13,39 +13,51 @@ use std::path::PathBuf;
 /// machine-specific files.
 const PRODUCT_FOLDER: &str = "AppyTappy";
 
-/// AppyTappy's folders on this machine.
+/// AppyTappy's folders for this user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Locations {
+    /// Under the local app data folder: what belongs to this machine.
     local: PathBuf,
+    /// Under the roaming app data folder: the authoring files, which are
+    /// small and may roam with the user's profile.
+    roaming: PathBuf,
 }
 
 impl Locations {
-    /// Resolves the folders from the `LOCALAPPDATA` environment variable.
+    /// Resolves the folders from the `LOCALAPPDATA` and `APPDATA`
+    /// environment variables.
     ///
     /// # Errors
     ///
-    /// Returns [`LocationError`] when the variable is unset or not an
+    /// Returns [`LocationError`] when a variable is unset or not an
     /// absolute path.
     pub fn from_env() -> Result<Self, LocationError> {
-        Self::from_local_app_data(env::var_os("LOCALAPPDATA"))
+        Self::from_app_data(env::var_os("LOCALAPPDATA"), env::var_os("APPDATA"))
     }
 
-    /// Resolves the folders from the value of `LOCALAPPDATA`.
+    /// Resolves the folders from the values of `LOCALAPPDATA` and
+    /// `APPDATA`.
     ///
     /// # Errors
     ///
-    /// Returns [`LocationError`] when `value` is `None` or not an absolute
-    /// path. A relative path would put the files wherever the program
-    /// happened to start.
-    pub fn from_local_app_data(value: Option<OsString>) -> Result<Self, LocationError> {
-        let base = PathBuf::from(value.ok_or(LocationError)?);
-        if base.is_absolute() {
-            Ok(Self {
-                local: base.join(PRODUCT_FOLDER),
-            })
-        } else {
-            Err(LocationError)
-        }
+    /// Returns [`LocationError`] naming the first value that is `None` or
+    /// not an absolute path. A relative path would put the files wherever
+    /// the program happened to start.
+    pub fn from_app_data(
+        local: Option<OsString>,
+        roaming: Option<OsString>,
+    ) -> Result<Self, LocationError> {
+        let product = |value: Option<OsString>, variable| {
+            value
+                .map(PathBuf::from)
+                .filter(|base| base.is_absolute())
+                .map(|base| base.join(PRODUCT_FOLDER))
+                .ok_or(LocationError(variable))
+        };
+        Ok(Self {
+            local: product(local, "LOCALAPPDATA")?,
+            roaming: product(roaming, "APPDATA")?,
+        })
     }
 
     /// The folder for the runtime's log files.
@@ -53,15 +65,22 @@ impl Locations {
     pub fn logs(&self) -> PathBuf {
         self.local.join("logs")
     }
+
+    /// The folder that holds one folder per application, each with its
+    /// authoring file and pictures.
+    #[must_use]
+    pub fn apps(&self) -> PathBuf {
+        self.roaming.join("apps")
+    }
 }
 
-/// The user's local app data folder is unknown.
+/// An app data folder is unknown; it names the environment variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocationError;
+pub struct LocationError(&'static str);
 
 impl fmt::Display for LocationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("LOCALAPPDATA is not set to an absolute path")
+        write!(formatter, "{} is not set to an absolute path", self.0)
     }
 }
 
@@ -74,23 +93,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn logs_live_in_the_product_folder_under_local_app_data() {
-        let base = env::temp_dir();
-        let locations = Locations::from_local_app_data(Some(base.clone().into_os_string()))
-            .expect("an absolute path");
-        assert_eq!(locations.logs(), base.join("AppyTappy").join("logs"));
+    fn each_folder_lives_in_the_product_folder_under_its_app_data() {
+        let local = env::temp_dir().join("local");
+        let roaming = env::temp_dir().join("roaming");
+        let locations = Locations::from_app_data(
+            Some(local.clone().into_os_string()),
+            Some(roaming.clone().into_os_string()),
+        )
+        .expect("absolute paths");
+        assert_eq!(locations.logs(), local.join("AppyTappy").join("logs"));
+        assert_eq!(locations.apps(), roaming.join("AppyTappy").join("apps"));
     }
 
     #[test]
-    fn a_missing_or_relative_value_is_refused() {
-        assert_eq!(Locations::from_local_app_data(None), Err(LocationError));
-        assert_eq!(
-            Locations::from_local_app_data(Some(Path::new("relative").into())),
-            Err(LocationError)
-        );
-        assert_eq!(
-            LocationError.to_string(),
-            "LOCALAPPDATA is not set to an absolute path"
-        );
+    fn a_missing_or_relative_value_is_refused_by_name() {
+        let absolute = Some(env::temp_dir().into_os_string());
+        let relative = Some(Path::new("relative").into());
+        let cases = [
+            (None, absolute.clone(), "LOCALAPPDATA"),
+            (relative.clone(), absolute.clone(), "LOCALAPPDATA"),
+            (absolute.clone(), None, "APPDATA"),
+            (absolute, relative, "APPDATA"),
+        ];
+        for (local, roaming, variable) in cases {
+            let error = Locations::from_app_data(local, roaming).expect_err(variable);
+            assert_eq!(error, LocationError(variable));
+            assert_eq!(
+                error.to_string(),
+                format!("{variable} is not set to an absolute path")
+            );
+        }
     }
 }

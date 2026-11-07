@@ -69,6 +69,12 @@ impl Number {
     pub fn new(raw: f64) -> Option<Self> {
         raw.is_finite().then_some(Self(raw))
     }
+
+    /// The number, which is never NaN or infinite.
+    #[must_use]
+    pub const fn raw(self) -> f64 {
+        self.0
+    }
 }
 
 /// A value of a signal, as a source read it or a rule names it.
@@ -117,6 +123,7 @@ mod tests {
     #[test]
     fn numbers_are_finite() {
         assert_eq!(Number::new(90.5), Some(Number(90.5)));
+        assert_eq!(Number::new(-2.0).map(Number::raw), Some(-2.0));
         for raw in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert_eq!(Number::new(raw), None);
         }

@@ -81,15 +81,15 @@ crates/
 | `appytappy-platform` | Windows  | `windows`                                            | runtime        |
 | `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`           | —              |
 | `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform` | —              |
-| setup app            | Windows  | `config`, `engine`, `sources`, `tauri`, `tokio`      | —              |
+| setup app            | Windows  | `config`, `sources`, `tauri`, `tokio`, `serde`       | —              |
 
 Each crate's owning issue adds its code and its dependencies. Where issues #6, #8,
 and #11 say "the core crate", they mean `appytappy-config` for formats, validation,
 and policy, and `appytappy-engine` for rule evaluation. `config` owns what a
 condition means, so the setup app and the runtime agree on it; `engine` owns
 the state of each game session. `apps/setup/src-tauri`
-joins the workspace `members` list with
-[#16](https://github.com/TheLunchTrae/appy-tappy/issues/16).
+is a workspace member like the other programs; the setup app takes `engine`
+once it previews automations.
 
 The design uses the [`windows`](https://github.com/microsoft/windows-rs) crate
 rather than `windows-sys`. Media sessions and Core Audio are WinRT and COM
@@ -332,7 +332,9 @@ changing.
   programs call it. The setup app does not use Tauri's path resolver, which
   names folders after the app's bundle identifier.
   - `%APPDATA%\AppyTappy\` holds the authoring files, which are small and can
-    roam with the user's profile.
+    roam with the user's profile. Each application has a folder in `apps\`,
+    named by its ID, that holds its `app.json` and the pictures its values
+    learned from; [Setup app](setup-app.md#saved-files) describes the file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine: the
     compiled config in `compiled\`, the status file, scan caches, and logs in
     `logs\`. The compiled config names install paths and memory layouts that
@@ -420,13 +422,14 @@ The webview's cost lands only while the user has the setup app open, and the
 always-on runtime has no UI framework at all. In return, Tauri gets React,
 which is the quickest of these to build a rich rule editor in.
 
-The Tauri work in #16 needs two gate changes, each with the owner's approval.
-Tauri's Linux build pulls in GTK, so CI needs either GTK's development
-packages or a setup-app check that runs only on Windows. One of those
-Linux-only GTK dependencies is also unmaintained, which fails `rust:deny`;
-setting `[graph] targets = ["x86_64-pc-windows-msvc"]` in `deny.toml` checks
-only what ships on Windows. The same change brings in the TypeScript standards
-profile.
+Tauri brought gate changes, each with the owner's approval. The Linux CI job
+installs the webview's development packages, so the workspace still lints and
+tests there. `deny.toml` checks only the `x86_64-pc-windows-msvc` graph,
+because a Linux-only GTK dependency is unmaintained and never ships. The
+setup app's entry point and commands, which only forward to the owner thread,
+are left out of mutation testing. The UI has its own Bun lockfile and `ui:`
+mise tasks, which the gate runs first because the Rust side embeds the built
+UI. [Setup app](setup-app.md) describes the screens and how they work.
 
 ## Unsafe code
 
@@ -491,6 +494,9 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
 - **[`tokio`](https://tokio.rs/).** The async runtime Tauri runs on. The setup
   app lists it directly, with only its `sync` feature, for the `oneshot`
   channel its commands await; Tauri does not re-export that channel.
+- **[`tauri-plugin-global-shortcut`](https://v2.tauri.app/plugin/global-shortcut/).**
+  Tauri's plugin for a key press that works while another window has focus,
+  which the setup app uses for its screenshot shortcut.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
   many random inputs to check a property, such as "a compiled config reads back
   to the same value". The standards require it at trust boundaries such as file

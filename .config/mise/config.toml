@@ -14,31 +14,33 @@ gitleaks = "8.30.1"
 description = "Scan the working tree for secrets"
 run = "gitleaks dir . --redact --no-banner"
 
-# The repository has two profiles, Rust and Markdown, so the aggregate tasks
-# name them directly instead of detecting them from marker files.
+# The repository has three profiles, Rust, the setup UI and Markdown, so the
+# aggregate tasks name them directly instead of detecting them from marker
+# files.
 [tasks.fmt]
-description = "Format Rust and Markdown"
-depends = ["rust:fmt", "md:fmt"]
+description = "Format Rust, the setup UI and Markdown"
+depends = ["rust:fmt", "ui:fmt", "md:fmt"]
 
 [tasks."fmt:check"]
-description = "Check Rust and Markdown formatting"
-depends = ["rust:fmt:check", "md:fmt:check"]
+description = "Check Rust, setup UI and Markdown formatting"
+depends = ["rust:fmt:check", "ui:fmt:check", "md:fmt:check"]
 
 [tasks.lint]
-description = "Lint Rust and Markdown"
-depends = ["rust:lint", "md:lint"]
+description = "Lint Rust, the setup UI and Markdown"
+depends = ["rust:lint", "ui:lint", "md:lint"]
 
 [tasks.test]
-description = "Run the Rust tests"
-depends = ["rust:test"]
+description = "Run the Rust and setup UI tests"
+depends = ["rust:test", "ui:test"]
 
 [tasks.standards]
 description = "Run the standards workflows and their autofixes"
-depends = ["rust:standards", "md:standards"]
+depends = ["rust:standards", "ui:standards", "md:standards"]
 
 # Secrets and hygiene check the tree before the profile gates write their
-# build and probe output.
+# build and probe output. The setup UI's gate runs first because it builds
+# apps/setup/dist, which the setup app's Rust side embeds when it compiles.
 [tasks."standards:check"]
 description = "Run the standards CI gate"
 depends = ["secrets", "hygiene"]
-run = [{ task = "rust:standards:check" }, { task = "md:standards:check" }]
+run = [{ task = "ui:standards:check" }, { task = "rust:standards:check" }, { task = "md:standards:check" }]
