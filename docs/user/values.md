@@ -60,7 +60,34 @@ the new value.
 - **Picture** is yes when the region looks like it does on a screenshot you
   choose, such as an icon that appears. Select that screenshot, then
   **Use this one** next to **Compare against**. **Tolerance** says how much
-  it may differ on average.
+  it may differ on average. To compare only the thing itself and not what is
+  behind it, [select it](#select-the-thing-in-a-picture).
+
+## Select the thing in a picture
+
+A **Picture** check compares every pixel of its region, so a background that
+changes, such as a sky behind an icon or a scene behind a word, can stop it
+from matching. **Select with** marks just the thing instead:
+
+- **Box** draws the region by hand, as for other checks.
+- **Snap** takes a rough box. Drag one around the thing with some plain
+  background on every side, and it shrinks to fit. The background around the
+  thing and between its parts, such as inside the letter O, is left out.
+- **Click** takes the thing under the pointer. Click it, and the selection
+  spreads over the colors like the one you clicked and fills any holes, such
+  as a star inside a shield.
+
+Hold **Shift** while you drag or click to add a part, or **Alt** to take one
+away. **Color match** says how close a color must be to count as the same:
+raise it if the selection stops short, and lower it if it spills over. The
+region fits the selection, and the screenshot you select on becomes the one
+the check compares against.
+
+While **Ignore the background** is on, the pixels left out are shaded over the
+screenshot, and the check skips them. The note under it says how many pixels
+it compares. Turn it off to compare the whole region again. You can still
+adjust the region by hand with **Box**; anything you add to it counts as
+background.
 
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
