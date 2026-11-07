@@ -2976,7 +2976,40 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     let Some(diff) = task_definition(&tasks, "rust:mutants:diff") else {
         panic!("the diff Rust mutation task should exist");
     };
+    let Some(gate) = task_definition(&tasks, "rust:mutants:gate") else {
+        panic!("the Rust mutation gate task should exist");
+    };
+    let Some(check) = task_definition(&tasks, "rust:standards:check") else {
+        panic!("the Rust standards gate task should exist");
+    };
 
+    assert!(
+        check.contains("\"rust:mutants:gate\""),
+        "the Rust standards gate must run a mutation lane"
+    );
+    for contract in [
+        "case \"${MUTANTS_LANE:-full}\" in",
+        "full) exec mise run rust:mutants ;;",
+        "diff) exec mise run rust:mutants:diff ;;",
+        "exit 2",
+    ] {
+        assert!(
+            gate.contains(contract),
+            "the mutation gate must default to the full sweep and reject unknown lanes; missing {contract}"
+        );
+    }
+
+    assert!(
+        full.contains("set -- \"--shard=$MUTANTS_SHARD\""),
+        "the full mutation task must pass MUTANTS_SHARD to cargo-mutants"
+    );
+    assert!(
+        full.lines().any(
+            |line| line.starts_with("run_mutants_task_child cargo mutants ")
+                && line.ends_with(" \"$@\"")
+        ),
+        "the full mutation task must hand its shard arguments to cargo-mutants"
+    );
     assert!(
         full.contains("--test-workspace=true"),
         "the full mutation task must run every workspace test"
