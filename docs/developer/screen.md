@@ -5,8 +5,8 @@ as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
 `screen/image.rs` holds images and regions, `screen/capture.rs` the capture
-trait, `screen/check.rs` and `screen/digits.rs` the checks, and `schedule.rs`
-the read interval.
+trait, `screen/check.rs` and `screen/digits.rs` the checks, `screen/saved.rs`
+the saved checks, and `schedule.rs` the read interval.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
 
 ## Checks

@@ -1,6 +1,6 @@
 //! The capture interface: what a capture copies out of each frame, the frame it
 //! lends to its handler, and the [`Capture`] trait that the operating system's
-//! capture implements.
+//! capture implements, with a stand-in for systems that cannot capture.
 
 use std::convert::Infallible;
 use std::io;
