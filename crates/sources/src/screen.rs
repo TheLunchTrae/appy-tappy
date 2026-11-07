@@ -10,7 +10,9 @@
 
 pub mod check;
 pub mod digits;
+pub mod mask;
 pub mod saved;
+pub mod select;
 
 mod capture;
 mod image;
