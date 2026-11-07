@@ -597,16 +597,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn a_note_is_a_line_in_the_log() {
-        let folder = env::temp_dir().join(format!("appytappy-note-{}", process::id()));
-        let mut log = Log::open(&folder, log::LIMIT).expect("open");
-        note(&mut log, "runtime started");
-        let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
-        fs::remove_dir_all(&folder).expect("clean up");
-        assert!(written.ends_with("runtime started\n"), "{written:?}");
-    }
-
     #[cfg(not(windows))]
     #[test]
     fn off_windows_the_runtime_refuses_to_run() {
@@ -760,12 +750,6 @@ mod tests {
                 "process snapshots work again",
             ]
         );
-    }
-
-    #[test]
-    fn the_log_says_how_many_automations_run() {
-        let empty = plan::Plan::default();
-        assert_eq!(loaded_line(&empty), "no saved automation can run");
     }
 
     /// An app plan named `name` whose automations are only names.

@@ -461,7 +461,15 @@ mod tests {
             .into_iter()
             .find(|entry| entry.id == own)
             .expect("the snapshot lists this process");
-        assert!(entry.executable.to_ascii_lowercase().ends_with(".exe"));
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy();
+        assert!(
+            entry.executable.eq_ignore_ascii_case(&name),
+            "{} is not {name}",
+            entry.executable
+        );
+        assert_ne!(entry.parent, own, "a process is not its own parent");
+        assert!(entry.threads > 0, "a running process has a thread");
     }
 
     #[test]
@@ -515,7 +523,13 @@ mod tests {
     #[test]
     fn enumerates_windows_and_reads_screen_pixels() {
         let system = WindowsSystem::new();
-        system.windows().unwrap();
+        for window in system.windows().unwrap() {
+            assert_ne!(window.handle, 0, "{window:?}");
+            assert!(
+                !window.class.is_empty(),
+                "every window has a class: {window:?}"
+            );
+        }
         system.screen_pixel(0, 0).unwrap();
         assert!(system.screen_pixel(-1_000_000, -1_000_000).is_err());
     }

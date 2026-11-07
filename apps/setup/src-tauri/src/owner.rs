@@ -1326,14 +1326,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn readings_reach_the_ui_tagged_by_kind() {
-        let number = serde_json::to_string(&Reading::Number(87.0)).expect("serializes");
-        let flag = serde_json::to_string(&Reading::Flag(true)).expect("serializes");
-        assert_eq!(number, r#"{"kind":"number","value":87.0}"#);
-        assert_eq!(flag, r#"{"kind":"flag","value":true}"#);
-    }
-
     fn spec(app: Option<&str>, value_name: &str, check: &str) -> Box<SaveSpec> {
         Box::new(SaveSpec {
             app: app.map(str::to_owned),
@@ -1802,6 +1794,10 @@ mod tests {
             serde_json::json!({"kind": "read", "reading": {"kind": "flag", "value": true}, "holds": null})
         );
         assert_eq!(
+            serde_json::to_value(Reading::Number(87.0)).expect("serializes"),
+            serde_json::json!({"kind": "number", "value": 87.0})
+        );
+        assert_eq!(
             serde_json::to_value(Live::Waiting).expect("serializes"),
             serde_json::json!({"kind": "waiting"})
         );
@@ -1946,7 +1942,26 @@ mod tests {
 
     #[test]
     fn only_requests_that_save_tell_the_runtime() {
+        let automation: AutomationDef = serde_json::from_value(serde_json::json!({
+            "id": "",
+            "name": "x",
+            "enabled": true,
+            "when": {"app": "example", "value": "x", "is": "equals", "target": true},
+            "actions": [],
+            "undo": false,
+            "cooldownMs": 0
+        }))
+        .expect("the UI's spelling");
         let saves = [
+            Request::SaveValue {
+                spec: spec(None, "x", BAR),
+                reply: oneshot::channel().0,
+            },
+            Request::SaveAutomation {
+                existing: None,
+                automation: Box::new(automation),
+                reply: oneshot::channel().0,
+            },
             Request::DeleteValue {
                 app: "example".to_owned(),
                 value: "progress".to_owned(),

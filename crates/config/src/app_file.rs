@@ -559,15 +559,19 @@ mod tests {
         assert_eq!(def.priority, PriorityDef::TitleElseExecutable);
         let matcher = def.to_match();
         assert_eq!(WindowDef::from(&matcher), def);
-        for priority in [
-            PriorityDef::Title,
-            PriorityDef::TitleElseClass,
-            PriorityDef::TitleElseExecutable,
+        for (priority, matches) in [
+            (PriorityDef::Title, MatchPriority::Title),
+            (PriorityDef::TitleElseClass, MatchPriority::TitleElseClass),
+            (
+                PriorityDef::TitleElseExecutable,
+                MatchPriority::TitleElseExecutable,
+            ),
         ] {
             let def = WindowDef {
                 priority,
                 ..def.clone()
             };
+            assert_eq!(def.to_match().priority, matches);
             assert_eq!(WindowDef::from(&def.to_match()).priority, priority);
         }
     }

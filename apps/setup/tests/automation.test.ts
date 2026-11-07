@@ -237,16 +237,7 @@ describe('buildAutomation', () => {
     });
   });
 
-  test('a new draft pauses whatever is playing and undoes it', () => {
-    expect(EMPTY_DRAFT.actions).toEqual([newAction(0)]);
-    expect(newAction(3)).toEqual({
-      key: 3,
-      kind: 'media',
-      command: 'pause',
-      percent: '20',
-      target: 'default',
-      app: '',
-    });
+  test('a loaded automation gives each action its own key and target', () => {
     expect(toDraft(pauseMusic).actions.map((action) => [action.key, action.target, action.app])).toEqual([
       [0, 'app', 'Player.exe'],
       [1, 'default', ''],

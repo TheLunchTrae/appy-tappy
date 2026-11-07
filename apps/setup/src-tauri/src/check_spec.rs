@@ -364,17 +364,25 @@ mod tests {
 
     #[test]
     fn a_bar_fill_reads_the_share_of_filled_pixels() {
+        // Two red columns and one gray column, so a swap of the filled and
+        // empty colors reads a third instead of two thirds.
         let spec = CheckSpec::BarFill {
-            region: whole(),
+            region: RegionSpec {
+                x: 0,
+                y: 0,
+                width: 3,
+                height: 2,
+            },
             filled: RED,
             empty: GRAY,
         };
         let built = build(&spec, &[]).expect("valid bar");
-        assert_eq!(built.region, Region::new(0, 0, 4, 2).expect("not empty"));
-        let value = built.check.read(&screenshot()).expect("readable");
+        assert_eq!(built.region, Region::new(0, 0, 3, 2).expect("not empty"));
+        let bar = screenshot().crop(built.region).expect("inside");
+        let value = built.check.read(&bar).expect("readable");
         assert_eq!(
             value,
-            Value::Number(appytappy_config::signal::Number::new(50.0).expect("finite"))
+            Value::Number(appytappy_config::signal::Number::new(400.0 / 6.0).expect("finite"))
         );
     }
 
@@ -500,28 +508,30 @@ mod tests {
 
     #[test]
     fn the_ui_describes_checks_in_camel_case_json() {
-        let json = r#"{"kind":"barFill","region":{"x":1,"y":2,"width":3,"height":4},
-            "filled":{"red":1,"green":2,"blue":3},"empty":{"red":4,"green":5,"blue":6}}"#;
+        // owner.rs's requests parse the other kinds; this is the number.
+        let json = r#"{"kind":"number","region":{"x":1,"y":2,"width":3,"height":4},
+            "ink":{"red":1,"green":2,"blue":3},"tolerance":5,
+            "labels":[{"screenshot":0,"text":"12"}]}"#;
         let spec: CheckSpec = serde_json::from_str(json).expect("valid JSON");
         assert_eq!(
             spec,
-            CheckSpec::BarFill {
+            CheckSpec::Number {
                 region: RegionSpec {
                     x: 1,
                     y: 2,
                     width: 3,
                     height: 4
                 },
-                filled: ColorSpec {
+                ink: ColorSpec {
                     red: 1,
                     green: 2,
                     blue: 3
                 },
-                empty: ColorSpec {
-                    red: 4,
-                    green: 5,
-                    blue: 6
-                },
+                tolerance: 5,
+                labels: vec![Label {
+                    screenshot: 0,
+                    text: "12".to_owned(),
+                }],
             }
         );
     }
