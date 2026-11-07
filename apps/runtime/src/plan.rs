@@ -245,6 +245,7 @@ mod tests {
                 priority: PriorityDef::TitleElseExecutable,
             },
             anti_cheat: AntiCheatDef::None,
+            overlay: None,
             values,
         }
     }

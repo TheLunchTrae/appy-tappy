@@ -285,6 +285,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             anti_cheat: AntiCheatDef::Unknown,
+            overlay: None,
             values: vec![
                 value(
                     "icon_visible",

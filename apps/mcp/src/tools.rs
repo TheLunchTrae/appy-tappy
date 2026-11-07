@@ -863,6 +863,10 @@ mod tests {
             ])
         }
 
+        fn foreground_window(&self) -> io::Result<Option<u64>> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+
         fn ask_memory_access(
             &self,
             process: &ProcessEntry,

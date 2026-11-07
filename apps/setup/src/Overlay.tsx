@@ -1,0 +1,59 @@
+import { useEffect, useState } from 'react';
+
+import { type OverlayMode, type OverlayView, errorText, overlayState } from './api.ts';
+import { readingText } from './automation.ts';
+import { useRepeat } from './repeat.ts';
+
+/** How long the overlay waits between two polls: often enough to follow a dragged window. */
+const POLL_MS = 100;
+
+interface Props {
+  readonly app: string;
+  readonly mode: OverlayMode;
+}
+
+/** An application's live readings, in a window of its own over the application or in a panel kept on top. */
+export function Overlay({ app, mode }: Props) {
+  const [view, setView] = useState<OverlayView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // The window over the application is transparent, so the page behind the card must be too.
+  useEffect(() => {
+    document.documentElement.classList.add(mode === 'overlay' ? 'overlay-page' : 'panel-page');
+  }, [mode]);
+
+  useRepeat(
+    async () => {
+      try {
+        setView(await overlayState(app));
+        setError(null);
+      } catch (caught: unknown) {
+        setError(errorText(caught));
+      }
+    },
+    POLL_MS,
+    true,
+  );
+
+  // A message says why there are no readings, so the values are left out under it.
+  const message = error ?? view?.message ?? null;
+  return (
+    <section className={mode === 'overlay' ? 'overlay-card' : 'panel-card'} aria-label={view?.name ?? 'Live values'}>
+      {mode === 'overlay' && view !== null ? <h1 className="overlay-name">{view.name}</h1> : null}
+      {message === null ? null : <p className="overlay-message">{message}</p>}
+      {message !== null || view === null || view.values.length === 0 ? null : (
+        <dl className="overlay-values">
+          {view.values.map((value) => (
+            // An application's values have names unique to it, since their IDs come from them.
+            <div key={value.name} className="overlay-row">
+              <dt>{value.name}</dt>
+              <dd className={value.problem === null ? undefined : 'overlay-problem'}>
+                {value.reading === null ? (value.problem ?? '…') : readingText(value.reading)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
+}

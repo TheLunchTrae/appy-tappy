@@ -451,6 +451,18 @@ are left out of mutation testing. The UI has its own Bun lockfile and `ui:`
 mise tasks, which the gate runs first because the Rust side embeds the built
 UI. [Setup app](setup-app.md) describes the screens and how they work.
 
+The overlay ([#36](https://github.com/TheLunchTrae/appy-tappy/issues/36))
+is more windows of the setup app, one for each application whose overlay is
+on, so nothing is hooked or injected into the application. Each window loads
+the same UI, which renders only the readings when its label names an
+application. The owner thread keeps one capture for each overlay, of the
+smallest region that holds all of the application's values, and the capture
+thread reads the values from each frame, so only the readings cross to the
+owner. The window over the application is transparent, lets clicks through,
+and cannot take the focus; it asks the owner where the application's window
+is on each poll and follows it. The picture-in-picture panel reports where it
+was moved, and the owner saves that once the panel stops moving.
+
 ## Unsafe code
 
 The standards deny `unsafe` code. Win32 and COM calls through the `windows`

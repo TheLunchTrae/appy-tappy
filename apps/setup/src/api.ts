@@ -58,13 +58,23 @@ export interface ValueDef {
   };
 }
 
-/** A saved application's file. */
+/** Where an application's live readings show: over its window, or in a panel kept on top. */
+export type OverlayMode = 'overlay' | 'pictureInPicture';
+
+/** How the setup app shows an application's live readings on top of it. */
+interface OverlayDef {
+  readonly enabled: boolean;
+  readonly mode: OverlayMode;
+}
+
+/** A saved application's file. `overlay` is absent until the overlay was first set. */
 interface AppFile {
   readonly format: number;
   readonly name: string;
   readonly window: WindowDef;
   readonly antiCheat: AntiCheat;
   readonly values: readonly ValueDef[];
+  readonly overlay?: OverlayDef;
 }
 
 /** A saved application, with the running windows that match it. */
@@ -92,6 +102,19 @@ export type CheckSpec =
 export type Reading =
   | { readonly kind: 'number'; readonly value: number }
   | { readonly kind: 'flag'; readonly value: boolean };
+
+/** What an application's overlay shows now. */
+export interface OverlayView {
+  readonly name: string;
+  readonly mode: OverlayMode;
+  /** Why there are no readings, such as that the application is not running. */
+  readonly message: string | null;
+  readonly values: readonly {
+    readonly name: string;
+    readonly reading: Reading | null;
+    readonly problem: string | null;
+  }[];
+}
 
 /** What a watched value reads on its window now, for the automation editor. */
 export type Live =
@@ -257,4 +280,19 @@ export async function setAutomationEnabled(id: string, enabled: boolean): Promis
 
 export async function deleteAutomation(id: string): Promise<void> {
   await invoke('delete_automation', { id });
+}
+
+/** Opens a window for each overlay that is on, and closes the rest. */
+export async function syncOverlays(): Promise<void> {
+  await invoke('sync_overlays');
+}
+
+/** Turns an application's overlay on or off and sets where it shows. */
+export async function setOverlay(application: string, enabled: boolean, mode: OverlayMode): Promise<void> {
+  await invoke('set_overlay', { application, enabled, mode });
+}
+
+/** What an application's overlay shows now; in overlay mode, its window also moves onto the application's. */
+export async function overlayState(application: string): Promise<OverlayView> {
+  return invoke<OverlayView>('overlay_state', { application });
 }

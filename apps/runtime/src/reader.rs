@@ -856,6 +856,10 @@ mod tests {
             answered.recv().map_err(|_gone| gone())?
         }
 
+        fn foreground_window(&self) -> io::Result<Option<u64>> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+
         fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }

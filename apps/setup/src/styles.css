@@ -937,3 +937,91 @@ select {
 .page-head h1:focus {
   outline: none;
 }
+
+/* Overlay: the live readings on top of an application, in a window of their own */
+.overlay-page,
+.overlay-page body {
+  background: transparent;
+}
+
+.overlay-page #root {
+  padding: 16px;
+}
+
+.overlay-card {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  max-width: 320px;
+  padding: 8px 12px 10px;
+  border-left: 3px solid var(--capture);
+  border-radius: 4px;
+  background: rgb(20 23 29 / 78%);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 60%);
+}
+
+.overlay-name {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.overlay-values {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  row-gap: 2px;
+}
+
+.overlay-row {
+  display: contents;
+}
+
+.overlay-row dt {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-row dd {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A reason it cannot read takes a line of its own under the value's name. */
+.overlay-values .overlay-row dd.overlay-problem {
+  grid-column: 1 / -1;
+  max-width: 280px;
+  margin-bottom: 2px;
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.overlay-message {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.panel-page #root {
+  height: 100vh;
+}
+
+.panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+.panel-card .overlay-row dd {
+  font-size: 18px;
+}

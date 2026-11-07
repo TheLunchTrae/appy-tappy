@@ -44,6 +44,50 @@ pub struct AppFile {
     pub anti_cheat: AntiCheatDef,
     /// The values read from the application's window.
     pub values: Vec<ValueDef>,
+    /// How the setup app shows the values' live readings on top of the
+    /// application, or `None` when it never has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<OverlayDef>,
+}
+
+/// How the setup app shows an application's live readings on top of it. The
+/// runtime ignores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OverlayDef {
+    /// Whether it shows.
+    pub enabled: bool,
+    /// Where it shows.
+    pub mode: OverlayModeDef,
+    /// Where the user last put the picture-in-picture panel, or `None`
+    /// before they moved it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<PanelDef>,
+}
+
+/// Where the live readings show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayModeDef {
+    /// Over the application's window, following it and letting clicks
+    /// through.
+    Overlay,
+    /// In a small panel the user moves and resizes, kept on top.
+    PictureInPicture,
+}
+
+/// A picture-in-picture panel's place and size in screen pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PanelDef {
+    /// The left edge.
+    pub x: i32,
+    /// The top edge.
+    pub y: i32,
+    /// The width.
+    pub width: u32,
+    /// The height.
+    pub height: u32,
 }
 
 /// How to recognize an application's window: see [`WindowMatch`].
@@ -482,6 +526,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             anti_cheat: AntiCheatDef::Unknown,
+            overlay: None,
             values: vec![ValueDef {
                 id: "progress".to_owned(),
                 name: "Progress".to_owned(),
@@ -522,6 +567,25 @@ mod tests {
         assert!(json.contains("\"priority\": \"titleElseExecutable\""));
         assert!(json.contains("\"kind\": \"number\""));
         assert!(json.contains("\"windowSize\""));
+        assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn the_overlay_setting_is_left_out_until_set_and_round_trips() {
+        let mut file = dash();
+        assert!(!file.to_json().contains("overlay"));
+        file.overlay = Some(OverlayDef {
+            enabled: true,
+            mode: OverlayModeDef::PictureInPicture,
+            panel: Some(PanelDef {
+                x: -1200,
+                y: 40,
+                width: 240,
+                height: 160,
+            }),
+        });
+        let json = file.to_json();
+        assert!(json.contains("\"mode\": \"pictureInPicture\""));
         assert_eq!(AppFile::parse(&json), Ok(file));
     }
 

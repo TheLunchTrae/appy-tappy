@@ -315,6 +315,7 @@ mod tests {
                 executable: "Example.exe",
             }),
             anti_cheat: AntiCheatDef::Unknown,
+            overlay: None,
             values: vec![ValueDef {
                 id: "icon_visible".to_owned(),
                 name: "Icon visible".to_owned(),

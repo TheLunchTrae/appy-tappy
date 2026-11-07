@@ -99,6 +99,15 @@ pub trait System {
     /// Returns the operating system's error.
     fn windows(&self) -> io::Result<Vec<WindowEntry>>;
 
+    /// The handle of the window in front, the one with the keyboard focus,
+    /// or `None` when no window is in front, such as while the screen is
+    /// locked.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn foreground_window(&self) -> io::Result<Option<u64>>;
+
     /// Asks the user, outside the agent's reach, whether `process` may be
     /// read. `anti_cheat` names anti-cheat products that are running.
     ///
@@ -179,6 +188,10 @@ impl System for Unsupported {
     }
 
     fn windows(&self) -> io::Result<Vec<WindowEntry>> {
+        unsupported()
+    }
+
+    fn foreground_window(&self) -> io::Result<Option<u64>> {
         unsupported()
     }
 

@@ -33,9 +33,9 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IDYES,
-    IsWindowVisible, MB_DEFBUTTON2, MB_ICONWARNING, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
-    MessageBoxW,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IDYES, IsWindowVisible, MB_DEFBUTTON2, MB_ICONWARNING,
+    MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO, MessageBoxW,
 };
 use windows::core::{BOOL, HSTRING, PWSTR};
 
@@ -356,6 +356,13 @@ impl System for WindowsSystem {
         // which outlives this call.
         unsafe { EnumWindows(Some(collect_window), collected) }?;
         Ok(handles.into_iter().map(window_entry).collect())
+    }
+
+    fn foreground_window(&self) -> io::Result<Option<u64>> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: GetForegroundWindow takes no arguments and only reads state.
+        let window = unsafe { GetForegroundWindow() };
+        Ok((!window.is_invalid()).then(|| window.0.addr() as u64))
     }
 
     fn ask_memory_access(
