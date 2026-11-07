@@ -9,11 +9,11 @@ import {
   listAutomations,
   syncOverlays,
 } from './lib/api.ts';
+import { background, useRepeat } from './lib/repeat.ts';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
 import { NewValue } from './pages/NewValue.tsx';
-import { background, useRepeat } from './lib/repeat.ts';
 import { ValuesPage } from './pages/ValuesPage.tsx';
 
 type Page = 'values' | 'automations' | 'applications';
