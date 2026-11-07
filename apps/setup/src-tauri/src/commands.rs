@@ -10,14 +10,14 @@
 use std::sync::mpsc::Sender;
 
 use appytappy_config::app_file::WindowDef;
-use appytappy_config::automation_file::AutomationDef;
+use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 
 use crate::automations::AutomationSummary;
 use crate::check_spec::CheckSpec;
-use crate::owner::{AppSummary, Message, Reading, Reply, Request, SaveSpec, SavedValue};
+use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
 use crate::window_list::WindowList;
 
 /// The UI's way to the owner thread.
@@ -101,6 +101,44 @@ pub(crate) async fn set_check(app: AppHandle, spec: CheckSpec) -> Result<(), Str
 #[tauri::command]
 pub(crate) async fn read_value(app: AppHandle) -> Result<Option<Reading>, String> {
     ask(&app, Request::Reading).await?
+}
+
+/// Captures the region of the saved value `value` of the application
+/// `application` on its window, for the automation editor, and returns the
+/// watch's number.
+#[tauri::command]
+pub(crate) async fn watch_value(
+    app: AppHandle,
+    application: String,
+    value: String,
+) -> Result<u64, String> {
+    ask(&app, |reply| Request::WatchValue {
+        app: application,
+        value,
+        reply,
+    })
+    .await?
+}
+
+/// What the watch's value reads now, and whether `when` holds for it.
+#[tauri::command]
+pub(crate) async fn watched_reading(
+    app: AppHandle,
+    watch: u64,
+    when: Option<WhenDef>,
+) -> Result<Live, String> {
+    ask(&app, |reply| Request::WatchedReading {
+        watch,
+        when: when.map(Box::new),
+        reply,
+    })
+    .await?
+}
+
+/// Stops the watch, unless another capture replaced it already.
+#[tauri::command]
+pub(crate) async fn stop_watching(app: AppHandle, watch: u64) -> Result<(), String> {
+    ask(&app, |reply| Request::StopWatching { watch, reply }).await
 }
 
 /// The handles of the running windows `window` matches, the best fit first.
