@@ -491,18 +491,58 @@ mod tests {
 
     #[test]
     fn values_out_of_sight_are_forgotten_but_their_automations_stay() {
+        // Pause while progress is high or a flag is set.
+        let flag = SignalName::new("flag").expect("valid");
+        let either = Condition::any(vec![
+            Condition::compare(signal(), Comparison::AtLeast, number(90.0)).expect("valid"),
+            Condition::compare(flag.clone(), Comparison::Equals, Value::Flag(true)).expect("valid"),
+        ])
+        .expect("valid");
+        let rule = Rule::new(
+            Trigger::Becomes {
+                condition: either,
+                rearm: Rearm::WhenFalse,
+            },
+            pause(),
+            Duration::ZERO,
+            Restore::OnRelease,
+        )
+        .expect("valid");
+        let base = plan("A", 90.0);
+        let a = Arc::new(AppPlan {
+            name: base.name.clone(),
+            window: base.window.clone(),
+            values: Vec::new(),
+            rules: Arc::from(vec![rule]),
+            automations: base.automations.clone(),
+        });
         let mut model = Model::default();
         let now = Instant::now();
-        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.replan(plans(&[("a", &a)]));
         model.apply(started("a", 7), now);
+        assert_eq!(
+            model.sample(SessionId(0), flag.clone(), Value::Flag(false), now),
+            []
+        );
         let fired = model.sample(SessionId(0), signal(), number(95.0), now);
         assert_eq!(kinds(&fired), ["run 0 Pause A"]);
-        model.forget(SessionId(0));
         model.forget(SessionId(9));
-        assert_eq!(model.active_automations(), ["Pause A"]);
+        let other = model.sample(SessionId(0), signal(), number(10.0), now);
+        assert_eq!(
+            kinds(&other),
+            ["undo 0 Pause A"],
+            "another session's forget"
+        );
         let again = model.sample(SessionId(0), signal(), number(95.0), now);
-        assert_eq!(again, [], "still true: it neither undoes nor runs again");
-        let released = model.sample(SessionId(0), signal(), number(10.0), now);
+        assert_eq!(kinds(&again), ["run 0 Pause A"]);
+        model.forget(SessionId(0));
+        let low = model.sample(SessionId(0), signal(), number(10.0), now);
+        assert_eq!(
+            low,
+            [],
+            "the forgotten flag might be set, so the pause is not undone yet"
+        );
+        let released = model.sample(SessionId(0), flag, Value::Flag(false), now);
         assert_eq!(kinds(&released), ["undo 0 Pause A"]);
     }
 

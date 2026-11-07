@@ -369,6 +369,41 @@ mod tests {
     }
 
     #[test]
+    fn a_forgotten_value_cannot_release_an_any_group() {
+        let clock = Clock::new();
+        let lobby = Condition::compare(name("lobby"), Comparison::Equals, Value::Flag(true))
+            .expect("valid");
+        let either =
+            Condition::any(vec![progress(Comparison::AtLeast, 90.0), lobby]).expect("valid");
+        let rule = Rule::new(
+            Trigger::Becomes {
+                condition: either,
+                rearm: Rearm::WhenFalse,
+            },
+            pause(),
+            Duration::ZERO,
+            Restore::OnRelease,
+        )
+        .expect("valid");
+        let mut session = start(vec![rule], &clock);
+        session.sample(name("lobby"), Value::Flag(false), clock.at(1));
+        assert_eq!(
+            feed(&mut session, &clock, 2, &[95.0]),
+            [Effect::Fire(FIRST)]
+        );
+        session.forget_values();
+        assert_eq!(
+            feed(&mut session, &clock, 3, &[10.0]),
+            [],
+            "the lobby might be true now"
+        );
+        assert_eq!(
+            session.sample(name("lobby"), Value::Flag(false), clock.at(4)),
+            [Effect::Release(FIRST)]
+        );
+    }
+
+    #[test]
     fn a_condition_that_holds_on_the_first_value_fires() {
         let clock = Clock::new();
         let mut session = start(
