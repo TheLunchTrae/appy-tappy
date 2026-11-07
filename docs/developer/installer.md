@@ -1,6 +1,8 @@
 # Installer
 
-AppyTappy ships as one Windows installer that holds both programs. Tauri's
+AppyTappy ships as one Windows installer that holds both programs.
+[Install](../user/install.md) in the user guide describes it from the user's
+side. Tauri's
 bundler builds it as an NSIS installer from the setup app, with the runtime
 added as a sidecar. Issue
 [#19](https://github.com/TheLunchTrae/appy-tappy/issues/19) tracks packaging.
@@ -35,7 +37,8 @@ bundling on and adds the sidecar for installer builds only, so the other Rust
 tasks build the setup app without a built runtime.
 
 The installer and the programs are not signed, so Windows SmartScreen warns
-the first time the installer runs. Select **More info**, then **Run anyway**.
+the first time the installer runs; [Install](../user/install.md) tells the user
+what to select.
 
 ## Builds
 

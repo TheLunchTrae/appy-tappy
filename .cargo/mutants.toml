@@ -1,6 +1,6 @@
 # The Windows adapters compile only on Windows, so the Linux mutation lanes
 # cannot test them; the owner approved this exclusion
-# (docs/architecture.md#portable-core-thin-windows-adapters).
+# (docs/developer/architecture.md#portable-core-thin-windows-adapters).
 # The setup app's Tauri glue (its entry point and the commands that only
 # forward to the owner thread) needs a running webview, so no unit test can
 # kill its mutants; the owner approved excluding it too. Its logic lives in

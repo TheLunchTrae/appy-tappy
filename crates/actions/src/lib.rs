@@ -5,9 +5,9 @@
 //! state even when several rules changed the same thing. [`Controls`] only
 //! lists things and acts on one of them; every choice is made here, where it
 //! is tested with fake controls on every platform. The Windows adapter in
-//! `win` implements [`Controls`]. `docs/actions.md` explains the v1 set.
+//! `win` implements [`Controls`]. `docs/developer/actions.md` explains the v1 set.
 //!
-//! See `docs/architecture.md` for this crate's boundaries.
+//! See `docs/developer/architecture.md` for this crate's boundaries.
 
 use std::error::Error;
 use std::fmt;

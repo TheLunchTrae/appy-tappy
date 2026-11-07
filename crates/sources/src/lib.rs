@@ -7,7 +7,7 @@
 //! [`memory::ProcessMemory`], [`system::System`], and [`screen::Capture`];
 //! other platforms get [`system::Unsupported`].
 //!
-//! See `docs/architecture.md` for this crate's boundaries.
+//! See `docs/developer/architecture.md` for this crate's boundaries.
 
 pub mod memory;
 pub mod schedule;

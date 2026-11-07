@@ -2,7 +2,7 @@
 # and the runtime. Tauri's bundler builds it from
 # apps/setup/src-tauri/tauri.installer.conf.json, which adds the runtime as a
 # sidecar; the base tauri.conf.json leaves bundling off, so the other Rust
-# tasks compile the setup app without a built runtime. docs/installer.md
+# tasks compile the setup app without a built runtime. docs/developer/installer.md
 # describes the installer and the builds CI makes.
 
 [tasks."installer:build"]
