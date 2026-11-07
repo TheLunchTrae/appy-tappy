@@ -24,9 +24,7 @@ On the Automations page, select **New automation**. To change one, select
    - A value that reads yes or no: **is** or **is not**, then **Yes** or
      **No**.
 
-   An automation watches one value. Conditions that combine several values
-   are planned in
-   [#34](https://github.com/TheLunchTrae/appy-tappy/issues/34).
+   An automation watches one value.
 
    While the value's application is open, the editor reads the value about
    twice a second and says what it reads now and whether the condition is
@@ -42,10 +40,11 @@ On the Automations page, select **New automation**. To change one, select
 5. **Save automation.** Until the automation is complete, the editor says
    what is still missing.
 
-Saving, deleting, or switching an automation takes effect at once. So does
-saving or deleting a value or changing an anti-cheat setting. Each change
-starts the affected application's automations over: they undo what they
-changed first, and one whose condition still holds runs again.
+Saving, deleting, or switching an automation takes effect at once, and so
+does any other change that affects an application's automations, such as
+changing its anti-cheat setting. Such a change starts all of that
+application's automations over: they undo what they changed first, and one
+whose condition still holds runs again.
 
 ## Actions
 
@@ -113,8 +112,8 @@ Whether undo is on or not, an automation runs once each time its condition
 becomes true. It runs again only after the condition has stopped being true
 and then becomes true again. **Wait before it can run again, in seconds**
 also keeps it from running again until that many seconds after it last ran.
-If its condition becomes true during the wait and is still true when the wait
-ends, it runs then.
+If its condition became true during the wait, it runs the next time the value
+changes and still makes the condition true.
 
 ## Delete an automation
 
