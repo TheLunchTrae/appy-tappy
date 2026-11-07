@@ -1,6 +1,6 @@
 //! The runtime's command line.
 //!
-//! Until the compiled config names the games to watch, each
+//! Until the compiled config names the apps to watch, each
 //! `--watch <executable>` names one, and the runtime runs in the background
 //! watching them. `--autostart on` with the same `--watch` options makes
 //! Windows start it that way at sign-in, and `--autostart off` stops that;
@@ -13,7 +13,7 @@ use std::fmt;
 /// What the runtime was asked to do.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
-    /// Run in the background, watching these executables, one game each.
+    /// Run in the background, watching these executables, one app each.
     Run(Vec<String>),
     /// Turn autostart at sign-in on or off.
     Autostart(Autostart),
@@ -63,7 +63,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
             // Process snapshots list bare file names, so a path never matches.
             "--watch" if value.is_empty() || value.contains(['\\', '/', ':', '"']) => {
                 return Err(usage(
-                    "--watch takes a file name such as GeometryDash.exe, not a path",
+                    "--watch takes a file name such as Example.exe, not a path",
                 ));
             },
             "--watch" => watched.push(value),
@@ -81,7 +81,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
         (None, false) => Ok(Command::Run(watched)),
         (Some(true), false) => Ok(Command::Autostart(Autostart::On(watched))),
         (Some(false), true) => Ok(Command::Autostart(Autostart::Off)),
-        (None | Some(true), true) => Err(usage("name a game to watch with --watch")),
+        (None | Some(true), true) => Err(usage("name an application to watch with --watch")),
         (Some(false), false) => Err(usage("--autostart off takes no --watch")),
     }
 }
@@ -97,26 +97,26 @@ mod tests {
     #[test]
     fn each_watch_names_one_executable() {
         assert_eq!(
-            parse_strs(&["--watch", "GeometryDash.exe", "--watch", "Other.exe"]),
+            parse_strs(&["--watch", "Example.exe", "--watch", "Other.exe"]),
             Ok(Command::Run(vec![
-                "GeometryDash.exe".to_owned(),
+                "Example.exe".to_owned(),
                 "Other.exe".to_owned()
             ]))
         );
     }
 
     #[test]
-    fn autostart_takes_on_with_games_or_off() {
+    fn autostart_takes_on_with_apps_or_off() {
         assert_eq!(
-            parse_strs(&["--autostart", "on", "--watch", "Game.exe"]),
+            parse_strs(&["--autostart", "on", "--watch", "Example.exe"]),
             Ok(Command::Autostart(Autostart::On(vec![
-                "Game.exe".to_owned()
+                "Example.exe".to_owned()
             ])))
         );
         assert_eq!(
-            parse_strs(&["--watch", "Game.exe", "--autostart", "on"]),
+            parse_strs(&["--watch", "Example.exe", "--autostart", "on"]),
             Ok(Command::Autostart(Autostart::On(vec![
-                "Game.exe".to_owned()
+                "Example.exe".to_owned()
             ])))
         );
         assert_eq!(
@@ -128,8 +128,11 @@ mod tests {
     #[test]
     fn malformed_command_lines_are_refused() {
         for (arguments, problem) in [
-            (&[][..], "name a game to watch with --watch"),
-            (&["--autostart", "on"], "name a game to watch with --watch"),
+            (&[][..], "name an application to watch with --watch"),
+            (
+                &["--autostart", "on"],
+                "name an application to watch with --watch",
+            ),
             (&["--watch"], "an option is missing its value"),
             (&["--autostart", "maybe"], "--autostart takes on or off"),
             (
@@ -137,7 +140,7 @@ mod tests {
                 "unknown option",
             ),
             (
-                &["--autostart", "off", "--watch", "Game.exe"],
+                &["--autostart", "off", "--watch", "Example.exe"],
                 "--autostart off takes no --watch",
             ),
             (&["--verbose", "yes"], "unknown option"),
@@ -148,18 +151,18 @@ mod tests {
     }
 
     #[test]
-    fn a_watched_game_is_a_bare_file_name() {
+    fn a_watched_app_is_a_bare_file_name() {
         for value in [
             "",
-            r"C:\Games\Game.exe",
-            "Games/Game.exe",
-            "C:Game.exe",
-            "\"Game.exe",
+            r"C:\Apps\Example.exe",
+            "Apps/Example.exe",
+            "C:Example.exe",
+            "\"Example.exe",
         ] {
             assert_eq!(
                 parse_strs(&["--watch", value]),
                 Err(usage(
-                    "--watch takes a file name such as GeometryDash.exe, not a path"
+                    "--watch takes a file name such as Example.exe, not a path"
                 )),
                 "{value:?}"
             );

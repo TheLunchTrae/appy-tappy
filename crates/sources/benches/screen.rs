@@ -46,8 +46,8 @@ fn main() -> BenchResult {
     }
     let mut out = io::stdout().lock();
     let [first, second] = [
-        include_bytes!("../tests/fixtures/attempt_37.png").as_slice(),
-        include_bytes!("../tests/fixtures/attempt_90.png").as_slice(),
+        include_bytes!("../tests/fixtures/progress_37.png").as_slice(),
+        include_bytes!("../tests/fixtures/progress_90.png").as_slice(),
     ]
     .map(Image::decode_png);
     let (first, second) = (first?, second?);

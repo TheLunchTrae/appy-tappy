@@ -1,18 +1,18 @@
-//! The anti-cheat policy: game classes and the permit that every path opening a
-//! game's process requires.
+//! The anti-cheat policy: protection classes and the permit that every path
+//! opening an app's process requires.
 
 use std::error::Error;
 use std::fmt;
 
-/// How a game protects itself from other programs.
+/// How an app protects itself from other programs.
 ///
 /// Only [`AntiCheatClass::None`] permits memory sources and anything else that
-/// opens the game's process.
+/// opens the app's process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AntiCheatClass {
-    /// The game has no anti-cheat.
+    /// The app has no anti-cheat.
     None,
-    /// An anti-cheat runs inside the game or beside it in user mode.
+    /// An anti-cheat runs inside the app or beside it in user mode.
     UserMode,
     /// An anti-cheat runs a kernel driver.
     KernelLevel,
@@ -69,7 +69,7 @@ pub struct ProcessAccessPermit {
 }
 
 impl ProcessAccessPermit {
-    /// Issues a permit for `process` when its game's class is
+    /// Issues a permit for `process` when its app's class is
     /// [`AntiCheatClass::None`].
     ///
     /// # Errors
@@ -122,7 +122,7 @@ impl Error for AccessBlocked {}
 /// its class.
 ///
 /// The list is not exhaustive. A match proves an anti-cheat is present; no
-/// match proves nothing, so an unlisted game stays [`AntiCheatClass::Unknown`]
+/// match proves nothing, so an unlisted app stays [`AntiCheatClass::Unknown`]
 /// until the user says otherwise.
 const KNOWN_ANTI_CHEAT: [(&str, &str, AntiCheatClass); 12] = [
     (
@@ -168,7 +168,7 @@ const KNOWN_ANTI_CHEAT: [(&str, &str, AntiCheatClass); 12] = [
 pub struct KnownAntiCheat {
     /// The product's name, such as `BattlEye`.
     pub product: &'static str,
-    /// The class the product implies for a game it protects.
+    /// The class the product implies for an app it protects.
     pub class: AntiCheatClass,
 }
 
@@ -213,7 +213,7 @@ mod tests {
                 class: AntiCheatClass::KernelLevel,
             })
         );
-        assert_eq!(known_anti_cheat("GeometryDash.exe"), None);
+        assert_eq!(known_anti_cheat("Example.exe"), None);
     }
 
     #[test]

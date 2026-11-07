@@ -368,15 +368,15 @@ impl System for WindowsSystem {
         } else {
             format!(
                 "Anti-cheat software is running right now: {}. Choose No unless you are sure \
-                 it does not protect this game.\n\n",
+                 it does not protect this application.\n\n",
                 anti_cheat.join(", ")
             )
         };
         let text = format!(
             "An AI agent connected to AppyTappy wants to read the memory of {} (process {}).\n\n\
-             Only allow this for a game that has no anti-cheat. Reading the memory of a game \
-             that anti-cheat protects can get your account banned.\n\n\
-             {warning}AppyTappy only reads memory. It never changes the game.\n\nAllow it?",
+             Only allow this for an application that has no anti-cheat. Reading the memory of \
+             an application that anti-cheat protects can get your account banned.\n\n\
+             {warning}AppyTappy only reads memory. It never changes the application.\n\nAllow it?",
             process.executable, process.id
         );
         #[expect(unsafe_code, reason = "a Win32 call")]

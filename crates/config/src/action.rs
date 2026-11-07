@@ -9,7 +9,7 @@ use std::fmt;
 const MAX_APP_NAME_LEN: usize = 256;
 
 /// An app as Windows reports it: a media session's app ID, such as
-/// `Spotify.exe`, or a process's executable name.
+/// `Player.exe`, or a process's executable name.
 ///
 /// A name is 1 to 256 bytes with no control characters. It matches a
 /// reported name regardless of ASCII case.
@@ -87,7 +87,7 @@ impl VolumeLevel {
 pub enum MediaTarget {
     /// The session Windows considers current, which its media overlay shows.
     Current,
-    /// The session of one app, such as `Spotify.exe`.
+    /// The session of one app, such as `Player.exe`.
     App(AppName),
 }
 
@@ -109,7 +109,7 @@ pub enum MediaCommand {
 pub enum VolumeTarget {
     /// The default playback device.
     System,
-    /// Every audio session of one executable, such as `Spotify.exe`, on the
+    /// Every audio session of one executable, such as `Player.exe`, on the
     /// default playback device.
     App(AppName),
 }
@@ -158,8 +158,8 @@ mod tests {
         let longest = "a".repeat(MAX_APP_NAME_LEN);
         let too_long = "a".repeat(MAX_APP_NAME_LEN.checked_add(1).expect("small"));
         for valid in [
-            "Spotify.exe",
-            "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+            "Player.exe",
+            "Contoso.MusicPlayer_8wekyb3d8bbwe!App",
             longest.as_str(),
         ] {
             assert_eq!(
@@ -167,12 +167,12 @@ mod tests {
                 Ok(valid.to_owned())
             );
         }
-        for invalid in ["", "Spotify\n.exe", "\u{7}", too_long.as_str()] {
+        for invalid in ["", "Player\n.exe", "\u{7}", too_long.as_str()] {
             assert_eq!(AppName::new(invalid), Err(InvalidAppName), "{invalid:?}");
         }
-        let spotify = AppName::new("Spotify.exe").expect("valid");
-        assert!(spotify.matches("spotify.EXE"));
-        assert!(!spotify.matches("Spotify"));
+        let player = AppName::new("Player.exe").expect("valid");
+        assert!(player.matches("player.EXE"));
+        assert!(!player.matches("Player"));
         assert!(InvalidAppName.to_string().contains("256"));
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-sources"
-description = "Windows source primitives that read game state for the runtime and the setup app."
+description = "Windows source primitives that read app state for the runtime and the setup app."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

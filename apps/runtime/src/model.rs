@@ -1,4 +1,4 @@
-//! The root model on the owner thread: which games are attached, what
+//! The root model on the owner thread: which apps are attached, what
 //! problem, if any, stops the runtime from watching, and whether
 //! automations are enabled.
 
@@ -7,16 +7,16 @@ use std::fmt;
 
 use appytappy_config::anti_cheat::ProcessId;
 
-use crate::lifecycle::{Change, GameIndex};
+use crate::lifecycle::{AppIndex, Change};
 
 /// The runtime's state, as the log and the tray report it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum State {
-    /// No watched game runs.
+    /// No watched app runs.
     Idle,
-    /// At least one watched game runs and is attached.
+    /// At least one watched app runs and is attached.
     Attached,
-    /// A problem stops the runtime from watching games: process snapshots
+    /// A problem stops the runtime from watching apps: process snapshots
     /// fail. It overrides the other two states until the problem clears.
     Degraded,
 }
@@ -34,14 +34,14 @@ impl fmt::Display for State {
 /// The owner thread's state.
 #[derive(Debug)]
 pub(crate) struct Model {
-    /// The process each attached game's session follows.
-    attached: BTreeMap<GameIndex, ProcessId>,
+    /// The process each attached app's session follows.
+    attached: BTreeMap<AppIndex, ProcessId>,
     /// The problem that degrades the runtime.
     problem: Option<String>,
     /// Whether rules may fire. Turning it off from the tray keeps detection
-    /// running, so turning it back on finds the games already attached.
+    /// running, so turning it back on finds the apps already attached.
     enabled: bool,
-    /// The names of the automations of the attached games. The engine fills
+    /// The names of the automations of the attached apps. The engine fills
     /// it once the runtime loads the compiled config
     /// ([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)); until
     /// then it stays empty.
@@ -86,11 +86,11 @@ impl Model {
     pub(crate) fn apply(&mut self, change: Change) -> Option<State> {
         let before = self.state();
         match change {
-            Change::Started { game, process } => {
-                self.attached.insert(game, process);
+            Change::Started { app, process } => {
+                self.attached.insert(app, process);
             },
-            Change::Exited { game, .. } => {
-                self.attached.remove(&game);
+            Change::Exited { app, .. } => {
+                self.attached.remove(&app);
             },
             Change::ScanFailed(problem) => self.problem = Some(problem),
             Change::ScanRestored => self.problem = None,
@@ -104,22 +104,22 @@ impl Model {
 mod tests {
     use super::*;
 
-    fn started(game: usize) -> Change {
+    fn started(app: usize) -> Change {
         Change::Started {
-            game: GameIndex(game),
+            app: AppIndex(app),
             process: ProcessId::new(1),
         }
     }
 
-    fn exited(game: usize) -> Change {
+    fn exited(app: usize) -> Change {
         Change::Exited {
-            game: GameIndex(game),
+            app: AppIndex(app),
             process: ProcessId::new(1),
         }
     }
 
     #[test]
-    fn the_runtime_is_attached_while_any_game_runs() {
+    fn the_runtime_is_attached_while_any_app_runs() {
         let mut model = Model::default();
         assert_eq!(model.state(), State::Idle);
         assert_eq!(model.apply(started(0)), Some(State::Attached));

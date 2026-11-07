@@ -1,7 +1,7 @@
 //! What the tray icon shows and what its menu does.
 //!
 //! The menu has an Enabled check mark, an Active automations submenu that
-//! lists the automations of the games attached now, and Quit. The platform
+//! lists the automations of the apps attached now, and Quit. The platform
 //! crate draws it; this module decides what it says.
 
 use std::num::NonZeroU16;
@@ -83,7 +83,7 @@ mod tests {
     use appytappy_config::anti_cheat::ProcessId;
 
     use super::*;
-    use crate::lifecycle::{Change, GameIndex};
+    use crate::lifecycle::{AppIndex, Change};
 
     #[test]
     fn the_menu_has_the_toggle_the_automations_and_quit() {
@@ -117,7 +117,7 @@ mod tests {
     fn the_tooltip_shows_the_state_unless_disabled() {
         let mut model = Model::default();
         model.apply(Change::Started {
-            game: GameIndex(0),
+            app: AppIndex(0),
             process: ProcessId::new(1),
         });
         assert_eq!(menu(&model).tooltip, "AppyTappy: attached");
@@ -137,12 +137,14 @@ mod tests {
     #[test]
     fn active_automations_are_listed_by_name() {
         let mut model = Model::default();
-        model.automations = vec!["Pause music on death".to_owned()];
+        model.automations = vec!["Pause music while the icon shows".to_owned()];
         assert_eq!(
             menu(&model).items.get(1),
             Some(&MenuItem::Submenu {
                 label: "Active automations".to_owned(),
-                items: vec![MenuItem::Note("Pause music on death".to_owned())],
+                items: vec![MenuItem::Note(
+                    "Pause music while the icon shows".to_owned()
+                )],
             })
         );
     }

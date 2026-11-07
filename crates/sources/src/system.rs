@@ -21,7 +21,7 @@ pub struct ProcessEntry {
     pub id: ProcessId,
     /// The ID of the process that started it.
     pub parent: ProcessId,
-    /// The executable's file name, such as `GeometryDash.exe`.
+    /// The executable's file name, such as `Example.exe`.
     pub executable: String,
     /// How many threads it runs.
     pub threads: u32,
@@ -72,7 +72,7 @@ pub struct Rgb {
 /// The user's answer to a request to read a process's memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessAnswer {
-    /// The user confirmed that the game has no anti-cheat.
+    /// The user confirmed that the app has no anti-cheat.
     Allowed,
     /// The user refused, or closed the prompt.
     Refused,
@@ -136,7 +136,7 @@ pub struct NoProcess(Infallible);
 fn unsupported<T>() -> io::Result<T> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "AppyTappy reads game state on Windows only",
+        "AppyTappy reads application state on Windows only",
     ))
 }
 
@@ -209,7 +209,7 @@ mod tests {
         let entry = ProcessEntry {
             id: ProcessId::new(1),
             parent: ProcessId::new(0),
-            executable: "game.exe".to_owned(),
+            executable: "example.exe".to_owned(),
             threads: 1,
         };
         let permit = ProcessAccessPermit::issue(entry.id, AntiCheatClass::None)

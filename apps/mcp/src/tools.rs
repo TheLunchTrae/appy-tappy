@@ -689,7 +689,7 @@ pub(crate) fn definitions() -> Value {
         ),
         tool(
             "memory_scan_next",
-            "Narrow the scan: keep addresses whose value now passes the test, comparing with the value at the previous scan for changed, unchanged, increased, and decreased. Have the user change the value in the game between scans.",
+            "Narrow the scan: keep addresses whose value now passes the test, comparing with the value at the previous scan for changed, unchanged, increased, and decreased. Have the user change the value in the app between scans.",
             json!({
                 "mode": { "type": "string", "enum": ["exact", "range", "changed", "unchanged", "increased", "decreased"] },
                 "value": number,
@@ -721,9 +721,9 @@ pub(crate) fn definitions() -> Value {
         ),
         tool(
             "memory_follow_pointer",
-            "Follow a pointer chain: start at the module's base plus base (or at base alone without a module); for each offset, read a pointer there and add the offset. Returns each step and the final address, and its value when value_type is given. A chain that still reaches the value after the game restarts is stable.",
+            "Follow a pointer chain: start at the module's base plus base (or at base alone without a module); for each offset, read a pointer there and add the offset. Returns each step and the final address, and its value when value_type is given. A chain that still reaches the value after the app restarts is stable.",
             json!({
-                "module": { "type": "string", "description": "A loaded module's name, such as \"GeometryDash.exe\"." },
+                "module": { "type": "string", "description": "A loaded module's name, such as \"Example.exe\"." },
                 "base": address,
                 "offsets": { "type": "array", "items": { "type": ["string", "integer"] }, "description": "Offsets as numbers or hex strings such as \"0x1c\" or \"-0x8\"." },
                 "value_type": { "type": "string", "enum": value_types },
@@ -732,7 +732,7 @@ pub(crate) fn definitions() -> Value {
         ),
         tool(
             "screen_sample",
-            "Read the color of screen pixels, in the screen coordinates window_list reports. This never touches a game's process, so it works whatever its anti-cheat.",
+            "Read the color of screen pixels, in the screen coordinates window_list reports. This never touches an app's process, so it works whatever its anti-cheat.",
             json!({
                 "points": {
                     "type": "array",
@@ -812,7 +812,7 @@ mod tests {
 
         fn modules(&self) -> io::Result<Vec<Module>> {
             Ok(vec![Module {
-                name: "Game.exe".to_owned(),
+                name: "Example.exe".to_owned(),
                 base: BASE,
                 size: 0x1000,
             }])
@@ -912,13 +912,13 @@ mod tests {
         let (asked, questions) = mpsc::channel();
         let system = FakeSystem {
             processes: vec![
-                entry(10, "Game.exe"),
+                entry(10, "Example.exe"),
                 entry(20, "BEService.exe"),
                 entry(21, "BEService_x64.exe"),
                 entry(30, "vgc.exe"),
                 entry(40, "browser.exe"),
             ],
-            image: "GAME.EXE".to_owned(),
+            image: "EXAMPLE.EXE".to_owned(),
             answer,
             asked,
         };
@@ -929,7 +929,7 @@ mod tests {
         session.call(name, arguments).expect("a known tool")
     }
 
-    /// A session attached to the game, with the receiver that keeps the
+    /// A session attached to the app, with the receiver that keeps the
     /// fake's question channel open.
     fn attached() -> (
         Session<FakeSystem>,
@@ -954,10 +954,10 @@ mod tests {
             attached,
             json!({
                 "pid": 10,
-                "executable": "Game.exe",
+                "executable": "Example.exe",
                 "pointer_bits": 64,
                 "scannable_bytes": 0x1000,
-                "modules": [{ "name": "Game.exe", "base": "0x10000", "size": 0x1000 }],
+                "modules": [{ "name": "Example.exe", "base": "0x10000", "size": 0x1000 }],
             })
         );
         assert_eq!(
@@ -978,12 +978,12 @@ mod tests {
     #[test]
     fn attach_closes_a_process_whose_id_now_runs_another_program() {
         let (mut session, _questions) = session(AccessAnswer::Allowed);
-        for image in ["other.exe", "Game.exe.bak", "BEService.exe"] {
+        for image in ["other.exe", "Example.exe.bak", "BEService.exe"] {
             image.clone_into(&mut session.system.image);
             assert_eq!(
                 call(&mut session, "process_attach", json!({ "pid": 10 })),
                 Err(format!(
-                    "process 10 now runs {image}, not the Game.exe the user allowed; it was closed"
+                    "process 10 now runs {image}, not the Example.exe the user allowed; it was closed"
                 ))
             );
             assert!(session.attached.is_none());
@@ -994,7 +994,7 @@ mod tests {
     fn attach_opens_nothing_the_user_refused_or_that_is_anti_cheat() {
         let (mut session, questions) = session(AccessAnswer::Refused);
         let refused = call(&mut session, "process_attach", json!({ "pid": 10 })).unwrap_err();
-        assert!(refused.starts_with("the user did not allow reading Game.exe's memory"));
+        assert!(refused.starts_with("the user did not allow reading Example.exe's memory"));
         assert_eq!(
             call(&mut session, "process_attach", json!({ "pid": 10 })),
             Err(refused),
@@ -1017,7 +1017,7 @@ mod tests {
         assert_eq!(
             questions.try_iter().count(),
             1,
-            "only the game was asked about"
+            "only the app was asked about"
         );
 
         assert_eq!(
@@ -1064,7 +1064,7 @@ mod tests {
                 "total": 1,
                 "results": [{
                     "address": "0x10010",
-                    "module_offset": "Game.exe+0x10",
+                    "module_offset": "Example.exe+0x10",
                     "previous": 20.0,
                     "current": 25.0,
                 }],
@@ -1109,7 +1109,7 @@ mod tests {
             .map(|result| &result["address"])
             .collect();
         assert_eq!(addresses, [&json!("0x10008"), &json!("0x10010")]);
-        assert_eq!(page["results"][0]["module_offset"], "Game.exe+0x8");
+        assert_eq!(page["results"][0]["module_offset"], "Example.exe+0x8");
         let capped = call(&mut session, "memory_scan_results", json!({ "limit": 500 })).unwrap();
         assert_eq!(capped["results"].as_array().unwrap().len(), 5);
     }
@@ -1118,7 +1118,7 @@ mod tests {
     fn module_offset_names_only_addresses_inside_a_module() {
         let modules = [
             Module {
-                name: "Game.exe".to_owned(),
+                name: "Example.exe".to_owned(),
                 base: 0x1000,
                 size: 0x100,
             },
@@ -1134,8 +1134,8 @@ mod tests {
             named,
             [
                 None,
-                Some("Game.exe+0x0".to_owned()),
-                Some("Game.exe+0xff".to_owned()),
+                Some("Example.exe+0x0".to_owned()),
+                Some("Example.exe+0xff".to_owned()),
                 None,
                 Some("ntdll.dll+0xf".to_owned()),
             ]
@@ -1194,7 +1194,7 @@ mod tests {
             .process_mut()
             .write(BASE + 0x38, &77_i32.to_le_bytes());
 
-        let chain = json!({ "module": "game.exe", "base": "0x20", "offsets": ["0x8"], "value_type": "i32" });
+        let chain = json!({ "module": "example.exe", "base": "0x20", "offsets": ["0x8"], "value_type": "i32" });
         assert_eq!(
             call(&mut session, "memory_follow_pointer", chain).unwrap(),
             json!({
@@ -1268,7 +1268,7 @@ mod tests {
         let (mut session, _questions) = attached();
         assert_eq!(
             call(&mut session, "process_detach", json!({})).unwrap(),
-            json!({ "detached": "Game.exe" })
+            json!({ "detached": "Example.exe" })
         );
         assert_eq!(
             call(&mut session, "process_detach", json!({})),

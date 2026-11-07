@@ -1,7 +1,7 @@
 //! Reads a number from a region by matching its characters against glyphs
 //! learned from the user's screenshots.
 //!
-//! A game draws its counter with one font at one size, so the screenshot's
+//! An app draws its counter with one font at one size, so the screenshot's
 //! own glyphs are the best possible templates. Reading is a fixed sequence of
 //! integer passes with no allocation, so it is deterministic and costs
 //! microseconds, where general text recognition costs milliseconds and can

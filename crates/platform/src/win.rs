@@ -926,7 +926,7 @@ mod tests {
     #[test]
     fn autostart_writes_the_command_and_removes_it() {
         let value = format!("AppyTappyTest{}", process::id());
-        let command = r#""C:\Program Files\AppyTappy\appytappy-runtime.exe" --watch "Game.exe""#;
+        let command = r#""C:\Program Files\AppyTappy\appytappy-runtime.exe" --watch "Example.exe""#;
         enable_autostart(&value, OsStr::new(command)).expect("enable");
         let expected: Vec<u16> = command.encode_utf16().collect();
         assert_eq!(run_value(&value), Some(expected));

@@ -124,7 +124,7 @@ impl fmt::Display for SameColors {
 impl Error for SameColors {}
 
 /// Whether a region's average color is within a tolerance of a color, such
-/// as a red flash when the player dies.
+/// as a panel turning red.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorMatch {
     /// The color to look for.

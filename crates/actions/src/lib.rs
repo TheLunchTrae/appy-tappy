@@ -24,7 +24,7 @@ pub mod win;
 pub struct MediaSession<K> {
     /// The session itself, for sending it commands.
     pub key: K,
-    /// The session's app ID, such as `Spotify.exe`.
+    /// The session's app ID, such as `Player.exe`.
     pub app: String,
     /// Whether it is playing.
     pub playing: bool,
@@ -78,7 +78,7 @@ pub trait Controls {
     fn system_volume(&mut self) -> io::Result<Option<Volume<Self::Volume>>>;
 
     /// Every audio session on the default playback device, each with the
-    /// executable name of the process that owns it, such as `Spotify.exe`.
+    /// executable name of the process that owns it, such as `Player.exe`.
     ///
     /// # Errors
     ///
@@ -165,7 +165,8 @@ struct Entry<O, M, V> {
 /// session that was already paused, still holds its target, but releasing
 /// it sends nothing unless it took over another rule's "before" state.
 ///
-/// `O` names a rule: the runtime passes the game and the rule's position.
+/// `O` names a rule: the runtime passes the watched app and the rule's
+/// position.
 #[derive(Debug)]
 pub struct Actions<O, C: Controls> {
     controls: C,
@@ -512,10 +513,10 @@ mod tests {
         }
     }
 
-    /// Spotify as session 1, current, and playing or not.
-    fn spotify(playing: bool) -> Actions<char, Fake> {
+    /// A media player as session 1, current, and playing or not.
+    fn player(playing: bool) -> Actions<char, Fake> {
         Actions::new(Fake {
-            sessions: vec![session(1, "Spotify.exe", playing)],
+            sessions: vec![session(1, "Player.exe", playing)],
             current: Some(1),
             ..Fake::default()
         })
@@ -557,7 +558,7 @@ mod tests {
 
     #[test]
     fn a_pause_is_undone_by_playing_and_a_play_by_pausing() {
-        let mut actions = spotify(true);
+        let mut actions = player(true);
         let pause = current(MediaCommand::Pause);
         actions
             .perform('a', &pause, Restore::OnRelease)
@@ -566,7 +567,7 @@ mod tests {
         actions.release('a').expect("resumed");
         assert!(actions.controls().playing(1));
 
-        let mut actions = spotify(false);
+        let mut actions = player(false);
         let play = current(MediaCommand::Play);
         actions
             .perform('a', &play, Restore::OnRelease)
@@ -579,7 +580,7 @@ mod tests {
 
     #[test]
     fn a_session_already_in_the_wanted_state_is_left_alone() {
-        let mut actions = spotify(false);
+        let mut actions = player(false);
         let pause = current(MediaCommand::Pause);
         actions
             .perform('a', &pause, Restore::OnRelease)
@@ -592,7 +593,7 @@ mod tests {
     fn overlapping_pauses_resume_only_after_the_last_release() {
         let pause = current(MediaCommand::Pause);
         for order in [['a', 'b'], ['b', 'a']] {
-            let mut actions = spotify(true);
+            let mut actions = player(true);
             actions
                 .perform('a', &pause, Restore::OnRelease)
                 .expect("paused");
@@ -632,14 +633,14 @@ mod tests {
     #[test]
     fn rules_on_different_targets_restore_independently() {
         let mut actions = Actions::new(Fake {
-            sessions: vec![session(1, "Spotify.exe", true)],
+            sessions: vec![session(1, "Player.exe", true)],
             current: Some(1),
             system: Some(Volume {
                 key: "speakers",
                 level: percent(80),
             }),
             apps: vec![(
-                "Spotify.exe".to_owned(),
+                "Player.exe".to_owned(),
                 Volume {
                     key: "music",
                     level: percent(70),
@@ -653,9 +654,9 @@ mod tests {
         actions
             .perform('a', &current(MediaCommand::Pause), Restore::OnRelease)
             .expect("paused");
-        let spotify = VolumeTarget::App(app("Spotify.exe"));
+        let player = VolumeTarget::App(app("Player.exe"));
         actions
-            .perform('b', &volume(spotify, 10), Restore::OnRelease)
+            .perform('b', &volume(player, 10), Restore::OnRelease)
             .expect("set");
         actions.release('a').expect("released");
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
@@ -715,7 +716,7 @@ mod tests {
     fn an_app_target_picks_its_sessions_among_others() {
         let tabs = || Fake {
             sessions: vec![
-                session(1, "Spotify.exe", true),
+                session(1, "Player.exe", true),
                 session(2, "Chrome", false),
                 session(3, "Chrome", true),
                 session(4, "Chrome", true),
@@ -804,13 +805,13 @@ mod tests {
     #[test]
     fn media_actions_fail_without_a_session_or_when_refused() {
         let mut actions = Actions::<char, _>::new(Fake::default());
-        for target in [MediaTarget::Current, MediaTarget::App(app("Spotify.exe"))] {
+        for target in [MediaTarget::Current, MediaTarget::App(app("Player.exe"))] {
             assert!(matches!(
                 actions.perform('a', &media(target, MediaCommand::Pause), Restore::Never),
                 Err(ActionError::NoMediaSession)
             ));
         }
-        let mut actions = spotify(true);
+        let mut actions = player(true);
         actions.controls().refuse = true;
         assert!(matches!(
             actions.perform('a', &current(MediaCommand::Pause), Restore::OnRelease),
@@ -830,7 +831,7 @@ mod tests {
                     },
                 ),
                 (
-                    "Spotify.exe".to_owned(),
+                    "Player.exe".to_owned(),
                     Volume {
                         key: "music",
                         level: percent(70),
@@ -897,7 +898,7 @@ mod tests {
                 level: percent(80),
             }),
             apps: vec![(
-                "Spotify.exe".to_owned(),
+                "Player.exe".to_owned(),
                 Volume {
                     key: "music",
                     level: percent(70),
@@ -908,9 +909,9 @@ mod tests {
         actions
             .perform('a', &volume(VolumeTarget::System, 20), Restore::OnRelease)
             .expect("set");
-        let spotify = VolumeTarget::App(app("Spotify.exe"));
+        let player = VolumeTarget::App(app("Player.exe"));
         actions
-            .perform('a', &volume(spotify, 10), Restore::OnRelease)
+            .perform('a', &volume(player, 10), Restore::OnRelease)
             .expect("set");
         actions.controls().broken = Some("music");
         assert!(matches!(actions.release('a'), Err(ActionError::Os(_))));
@@ -924,7 +925,7 @@ mod tests {
     #[test]
     fn volume_actions_fail_without_audio() {
         let mut actions = Actions::<char, _>::new(Fake::default());
-        for target in [VolumeTarget::System, VolumeTarget::App(app("Spotify.exe"))] {
+        for target in [VolumeTarget::System, VolumeTarget::App(app("Player.exe"))] {
             assert!(matches!(
                 actions.perform('a', &volume(target, 20), Restore::OnRelease),
                 Err(ActionError::NoAudio)

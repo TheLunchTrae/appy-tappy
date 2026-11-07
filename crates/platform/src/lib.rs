@@ -1,4 +1,4 @@
-//! The runtime's Windows host services: the window events that drive game
+//! The runtime's Windows host services: the window events that drive app
 //! detection, the tray icon and its menu, the single-instance guard,
 //! autostart at sign-in, and the local clock.
 //!

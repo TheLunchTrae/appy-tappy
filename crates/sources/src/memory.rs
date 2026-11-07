@@ -23,10 +23,10 @@ pub struct Region {
     pub size: u64,
 }
 
-/// A module, such as the game's executable or a DLL, loaded in a process.
+/// A module, such as the app's executable or a DLL, loaded in a process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
-    /// The module's file name, such as `GeometryDash.exe`.
+    /// The module's file name, such as `Example.exe`.
     pub name: String,
     /// The address the module is loaded at.
     pub base: u64,
@@ -57,7 +57,7 @@ impl PointerWidth {
 /// Read access to one opened process.
 pub trait ProcessMemory {
     /// The committed, writable regions a scan reads, in address order:
-    /// the process's heap, stacks, and modules' data, where game state
+    /// the process's heap, stacks, and modules' data, where app state
     /// lives.
     ///
     /// # Errors
@@ -83,7 +83,7 @@ pub trait ProcessMemory {
     fn pointer_width(&self) -> PointerWidth;
 
     /// The file name of the program the process runs, such as
-    /// `GeometryDash.exe`, read from the opened process itself.
+    /// `Example.exe`, read from the opened process itself.
     ///
     /// # Errors
     ///

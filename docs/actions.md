@@ -10,17 +10,17 @@ calls that crate; the engine only says which rule fired.
 - **Media:** play, pause, next track, or previous track, for the current
   media session or one app's session. It uses the Windows media transport
   controls, the same ones the media keys and the volume overlay use, so it
-  works for Spotify and browsers without any app's own API.
+  works for music players and browsers without any app's own API.
 - **Set volume:** the default playback device's volume, or one app's volume
   on that device. It uses Core Audio, the API behind the Windows volume
   mixer.
 
-An app is named the way Windows reports it, ignoring ASCII case. For media,
-that is the session's app ID: `Spotify.exe` for the desktop app, the
-package name for the Microsoft Store version, or the browser's name. For
-volume, it is the executable name, such as `Spotify.exe`. Naming an audio
-session's executable takes a process snapshot, which never opens a process,
-so no action opens a game's process.
+An app is named the way Windows reports it, ignoring ASCII case. For media, that
+is the session's app ID: usually the executable name, such as `Player.exe`, for
+a desktop app, unless the app sets its own ID; the package name for a Microsoft
+Store app; or the browser's name. For volume, it is the executable name, such as
+`Player.exe`. Naming an audio session's executable takes a process snapshot,
+which never opens a process, so no action opens a watched application's process.
 
 An app can have several sessions at once, such as one per browser tab:
 
@@ -56,9 +56,10 @@ it touched, just before it acted:
 A rule's actions are undone newest first. When several restoring rules change
 the same session or volume, the original state comes back only when the last
 of them is released; until then, releasing one leaves the others' changes in
-place. If a rule pauses Spotify at a boss and another lowers its volume
-while the game has the focus, alt-tabbing during the boss puts the volume
-back but keeps Spotify paused.
+place. If one rule pauses the music while an icon is visible and another
+lowers its volume while the watched application has the focus, switching to
+another window while the icon shows puts the volume back but keeps the music
+paused.
 
 A rule that does not restore makes a permanent change: no earlier rule's
 release undoes it. If an action fails partway, such as on the second of two
@@ -66,9 +67,9 @@ audio sessions, what it changed before the failure is still restored.
 
 ## Not in v1
 
-- **Keypresses:** input goes to the focused window, which is the game, so a
-  hotkey meant for another app would reach the game instead. Injected input
-  is also visible to anti-cheat (see
+- **Keypresses:** input goes to the focused window, which is the watched
+  application, so a hotkey meant for another app would reach it instead.
+  Injected input is also visible to anti-cheat (see
   [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 - **Running a command or opening a URL:** configs may be shared, and a
   shared config should not be able to run programs.
@@ -79,16 +80,18 @@ audio sessions, what it changed before the failure is still restored.
 ## Checking on Windows
 
 CI compiles and lints the Windows code, and the logic is tested with fake
-controls on every platform. Two tests drive the real Spotify desktop app;
-they change what is playing, so they only run when asked. Start Spotify,
-play a song, and run:
+controls on every platform. Two tests drive a real media player; they change
+what is playing, so they only run when asked. Start a desktop app that plays
+audio and whose media session reports its executable name as its app ID,
+which most desktop apps do. Play something, and run with
+`APPYTAPPY_TEST_PLAYER` set to that executable name:
 
 ```sh
-cargo test -p appytappy-actions --test spotify -- --ignored --test-threads=1
+APPYTAPPY_TEST_PLAYER=Player.exe cargo test -p appytappy-actions --test media_player -- --ignored --test-threads=1
 ```
 
-One test pauses Spotify with two overlapping rules and checks that it resumes
-only after both are released, which also checks that Windows keeps
-identifying Spotify's session the same way. The other lowers Spotify's volume
-and puts it back. Each puts Spotify back before checking anything, so a failed
-check leaves it as it was.
+One test pauses the player with two overlapping rules and checks that it
+resumes only after both are released, which also checks that Windows keeps
+identifying the player's session the same way. The other lowers the player's
+volume and puts it back. Each puts the player back before checking anything,
+so a failed check leaves it as it was.
