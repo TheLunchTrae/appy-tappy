@@ -14,13 +14,15 @@ use std::time::Duration;
 use appytappy_config::app_file::{
     AntiCheatDef, AppFile, FORMAT, ScreenDef, SizeDef, ValueDef, WindowDef, value_id,
 };
+use appytappy_config::automation_file::AutomationDef;
 use appytappy_config::signal::Value;
-use appytappy_config::store::{AppStore, new_app_id};
+use appytappy_config::store::new_app_id;
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler, Image};
 use appytappy_sources::system::{ProcessEntry, System, WindowEntry};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
+use crate::automations::{self, AutomationSummary, Stores};
 use crate::check_spec::{self, CheckSpec, RegionCheck};
 use crate::pixels;
 use crate::window_list::{self, WindowList};
@@ -200,12 +202,40 @@ pub(crate) enum Request {
         /// Where it was saved, or what to fix.
         reply: Reply<Result<SavedValue, String>>,
     },
-    /// Removes a saved value and the pictures only it used.
+    /// Removes a saved value and the pictures only it used, unless an
+    /// automation watches it.
     DeleteValue {
         /// The application's ID.
         app: String,
         /// The value's ID.
         value: String,
+        /// Answered once it is gone.
+        reply: Reply<Result<(), String>>,
+    },
+    /// The saved automations.
+    ListAutomations(Reply<Result<Vec<AutomationSummary>, String>>),
+    /// Saves an automation.
+    SaveAutomation {
+        /// The automation to replace, or `None` for a new one.
+        existing: Option<String>,
+        /// The automation; its ID is set on saving.
+        automation: Box<AutomationDef>,
+        /// Its ID, or what to fix.
+        reply: Reply<Result<String, String>>,
+    },
+    /// Turns an automation on or off.
+    SetAutomationEnabled {
+        /// The automation's ID.
+        id: String,
+        /// Whether it runs.
+        enabled: bool,
+        /// Answered once it is saved.
+        reply: Reply<Result<(), String>>,
+    },
+    /// Removes an automation.
+    DeleteAutomation {
+        /// The automation's ID.
+        id: String,
         /// Answered once it is gone.
         reply: Reply<Result<(), String>>,
     },
@@ -239,8 +269,9 @@ pub(crate) enum Message {
 #[derive(Debug)]
 pub(crate) struct Owner<H: Host> {
     host: H,
-    /// Where the applications' files live, or why that is unknown.
-    store: Result<AppStore, String>,
+    /// Where the applications' and automations' files live, or why that is
+    /// unknown.
+    stores: Result<Stores, String>,
     /// The setup app's own process, left out of the window list.
     own_process: u32,
     /// A sender for this thread's messages, handed to each capture.
@@ -258,13 +289,13 @@ impl<H: Host> Owner<H> {
     /// An owner with no window picked.
     pub(crate) const fn new(
         host: H,
-        store: Result<AppStore, String>,
+        stores: Result<Stores, String>,
         own_process: u32,
         messages: Sender<Message>,
     ) -> Self {
         Self {
             host,
-            store,
+            stores,
             own_process,
             messages,
             generation: 0,
@@ -349,15 +380,41 @@ impl<H: Host> Owner<H> {
             Request::DeleteValue { app, value, reply } => {
                 send(reply, self.delete(&app, &value));
             },
+            Request::ListAutomations(reply) => {
+                send(reply, self.stores().and_then(automations::list));
+            },
+            Request::SaveAutomation {
+                existing,
+                automation,
+                reply,
+            } => send(
+                reply,
+                self.stores()
+                    .and_then(|stores| automations::save(stores, existing.as_deref(), *automation)),
+            ),
+            Request::SetAutomationEnabled { id, enabled, reply } => send(
+                reply,
+                self.stores()
+                    .and_then(|stores| automations::set_enabled(stores, &id, enabled)),
+            ),
+            Request::DeleteAutomation { id, reply } => send(
+                reply,
+                self.stores()
+                    .and_then(|stores| automations::delete(stores, &id)),
+            ),
         }
     }
 
-    fn store(&self) -> Result<&AppStore, String> {
-        self.store.as_ref().map_err(Clone::clone)
+    fn stores(&self) -> Result<&Stores, String> {
+        self.stores.as_ref().map_err(Clone::clone)
     }
 
     fn apps(&self) -> Result<Vec<AppSummary>, String> {
-        let stored = self.store()?.load().map_err(|error| error.to_string())?;
+        let stored = self
+            .stores()?
+            .apps
+            .load()
+            .map_err(|error| error.to_string())?;
         // The saved files read fine without the running windows, so a
         // failed window listing only leaves each one's windows empty.
         let windows = self
@@ -386,7 +443,7 @@ impl<H: Host> Owner<H> {
     }
 
     fn save(&self, spec: &SaveSpec) -> Result<SavedValue, String> {
-        let store = self.store()?;
+        let store = &self.stores()?.apps;
         let name = spec.value_name.trim();
         if name.is_empty() {
             return Err("Name the value first.".to_owned());
@@ -448,7 +505,8 @@ impl<H: Host> Owner<H> {
     }
 
     fn delete(&self, app: &str, value: &str) -> Result<(), String> {
-        let store = self.store()?;
+        let stores = self.stores()?;
+        let store = &stores.apps;
         let mut file = store
             .load()
             .map_err(|error| error.to_string())?
@@ -456,6 +514,9 @@ impl<H: Host> Owner<H> {
             .find(|stored| stored.id == app)
             .ok_or_else(|| "That application is no longer saved.".to_owned())?
             .file?;
+        if let Some(saved) = file.values.iter().find(|saved| saved.id == value) {
+            automations::check_unused(stores, app, value, &saved.name)?;
+        }
         file.values.retain(|saved| saved.id != value);
         store
             .save(app, &file, &[])
@@ -571,10 +632,13 @@ mod tests {
     use std::time::Instant;
 
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::automation_file::{ActionDef, MediaCommandDef};
     use appytappy_sources::screen::{Frame, Size};
     use appytappy_sources::system::Bounds;
 
     use super::*;
+    use appytappy_config::store::{AppStore, AutomationStore};
+
     use crate::check_spec::CheckSpec;
 
     /// A host with one window whose captures the test drives by hand: each
@@ -677,21 +741,25 @@ mod tests {
         closed: Receiver<u64>,
     }
 
-    /// A fresh, empty store folder for one test.
-    fn scratch_store(name: &str) -> AppStore {
+    /// Fresh, empty stores for one test, all in one folder.
+    fn scratch_store(name: &str) -> (Stores, std::path::PathBuf) {
         let folder =
             std::env::temp_dir().join(format!("appytappy-setup-{name}-{}", std::process::id()));
         if folder.exists() {
             std::fs::remove_dir_all(&folder).expect("remove leftovers");
         }
-        AppStore::new(folder)
+        let stores = Stores {
+            apps: AppStore::new(folder.join("apps")),
+            automations: AutomationStore::new(folder.join("automations.json")),
+        };
+        (stores, folder)
     }
 
     fn harness(refuse: bool) -> Harness {
         harness_with(refuse, Err("no store in this test".to_owned()))
     }
 
-    fn harness_with(refuse: bool, store: Result<AppStore, String>) -> Harness {
+    fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harness {
         let (sender, messages) = mpsc::channel();
         let (handler_sender, handlers) = mpsc::channel();
         let (closed_sender, closed) = mpsc::channel();
@@ -944,9 +1012,9 @@ mod tests {
 
     #[test]
     fn saved_values_are_listed_with_their_running_windows_and_can_be_removed() {
-        let store = scratch_store("save");
-        let root = store.folder("");
-        let mut harness = harness_with(false, Ok(store));
+        let (stores, root) = scratch_store("save");
+        let apps_root = stores.apps.folder("");
+        let mut harness = harness_with(false, Ok(stores));
         let mut handler = harness.pick();
         let save = |spec| move |reply| Request::SaveValue { spec, reply };
         assert_eq!(
@@ -1012,8 +1080,60 @@ mod tests {
                 height: 2
             }
         );
-        let folder = root.join("example");
+        let folder = apps_root.join("example");
         assert!(folder.join("icon_visible.png").exists());
+
+        let automation: AutomationDef = serde_json::from_value(serde_json::json!({
+            "id": "",
+            "name": "Pause music",
+            "enabled": true,
+            "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": true},
+            "actions": [
+                {"kind": "media", "command": "pause", "app": " Player.exe "},
+                {"kind": "volume", "percent": 20, "app": null}
+            ],
+            "undo": true,
+            "cooldownMs": 1500
+        }))
+        .expect("the UI's spelling");
+        let id = harness
+            .ask(|reply| Request::SaveAutomation {
+                existing: None,
+                automation: Box::new(automation),
+                reply,
+            })
+            .expect("saves");
+        assert_eq!(id, "pause_music");
+        assert_eq!(
+            harness.ask(|reply| Request::DeleteValue {
+                app: "example".to_owned(),
+                value: "icon_visible".to_owned(),
+                reply,
+            }),
+            Err("Pause music uses Icon visible. Change or delete it first.".to_owned())
+        );
+        harness
+            .ask(|reply| Request::SetAutomationEnabled {
+                id: id.clone(),
+                enabled: false,
+                reply,
+            })
+            .expect("turns off");
+        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].automation.enabled);
+        assert_eq!(listed[0].automation.cooldown_ms, 1500);
+        assert_eq!(
+            listed[0].automation.actions[0],
+            ActionDef::Media {
+                command: MediaCommandDef::Pause,
+                app: Some("Player.exe".to_owned()),
+            }
+        );
+        harness
+            .ask(|reply| Request::DeleteAutomation { id, reply })
+            .expect("removes");
+        assert_eq!(harness.ask(Request::ListAutomations), Ok(Vec::new()));
 
         harness
             .ask(|reply| Request::DeleteValue {
@@ -1060,6 +1180,39 @@ mod tests {
             harness.ask(|reply| Request::DeleteValue {
                 app: "a".to_owned(),
                 value: "b".to_owned(),
+                reply
+            }),
+            Err("no store in this test".to_owned())
+        );
+        assert_eq!(
+            harness.ask(Request::ListAutomations),
+            Err("no store in this test".to_owned())
+        );
+        let automation: AutomationDef = serde_json::from_value(serde_json::json!({
+            "id": "", "name": "x", "enabled": true,
+            "when": {"app": "a", "value": "b", "is": "equals", "target": true},
+            "actions": [{"kind": "media", "command": "pause"}], "undo": false
+        }))
+        .expect("the UI's spelling");
+        assert_eq!(
+            harness.ask(|reply| Request::SaveAutomation {
+                existing: None,
+                automation: Box::new(automation),
+                reply
+            }),
+            Err("no store in this test".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::SetAutomationEnabled {
+                id: "x".to_owned(),
+                enabled: true,
+                reply
+            }),
+            Err("no store in this test".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::DeleteAutomation {
+                id: "x".to_owned(),
                 reply
             }),
             Err("no store in this test".to_owned())

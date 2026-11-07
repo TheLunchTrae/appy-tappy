@@ -72,6 +72,12 @@ impl Locations {
     pub fn apps(&self) -> PathBuf {
         self.roaming.join("apps")
     }
+
+    /// The authoring file that holds every automation.
+    #[must_use]
+    pub fn automations(&self) -> PathBuf {
+        self.roaming.join("automations.json")
+    }
 }
 
 /// An app data folder is unknown; it names the environment variable.
@@ -103,6 +109,10 @@ mod tests {
         .expect("absolute paths");
         assert_eq!(locations.logs(), local.join("AppyTappy").join("logs"));
         assert_eq!(locations.apps(), roaming.join("AppyTappy").join("apps"));
+        assert_eq!(
+            locations.automations(),
+            roaming.join("AppyTappy").join("automations.json")
+        );
     }
 
     #[test]

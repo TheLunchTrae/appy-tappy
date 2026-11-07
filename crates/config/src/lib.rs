@@ -7,6 +7,7 @@
 pub mod action;
 pub mod anti_cheat;
 pub mod app_file;
+pub mod automation_file;
 pub mod paths;
 pub mod rule;
 pub mod signal;

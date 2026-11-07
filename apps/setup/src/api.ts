@@ -48,7 +48,7 @@ export type CheckDef =
   | { readonly kind: 'reference'; readonly image: string; readonly tolerance: number };
 
 /** A saved value. */
-interface ValueDef {
+export interface ValueDef {
   readonly id: string;
   readonly name: string;
   readonly screen: {
@@ -110,6 +110,46 @@ export interface SavedValue {
   readonly value: string;
 }
 
+/** How a value relates to the target it is compared with. */
+export type Comparison = 'below' | 'atMost' | 'equals' | 'notEquals' | 'atLeast' | 'above';
+
+/** What a media action does. */
+export type MediaCommand = 'play' | 'pause' | 'next' | 'previous';
+
+/** One action. A null `app` means the media session Windows considers current, or the whole system's volume. */
+export type ActionDef =
+  | { readonly kind: 'media'; readonly command: MediaCommand; readonly app: string | null }
+  | { readonly kind: 'volume'; readonly percent: number; readonly app: string | null };
+
+/** The condition on one saved value that makes an automation run. */
+export interface WhenDef {
+  /** The application's ID. */
+  readonly app: string;
+  /** The value's ID. */
+  readonly value: string;
+  readonly is: Comparison;
+  /** A number for a value that reads a number; true or false for one that reads yes or no. */
+  readonly target: number | boolean;
+}
+
+/** A saved automation, as the automations file spells it. */
+export interface AutomationDef {
+  readonly id: string;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly when: WhenDef;
+  readonly actions: readonly ActionDef[];
+  /** Whether to undo the actions when the condition stops being true. */
+  readonly undo: boolean;
+  readonly cooldownMs: number;
+}
+
+/** A saved automation, with why it cannot run as saved, if so. */
+export interface AutomationSummary {
+  readonly automation: AutomationDef;
+  readonly problem: string | null;
+}
+
 /** The message of a failed command, which the Rust side writes for the user. */
 export function errorText(error: unknown): string {
   return typeof error === 'string' ? error : 'Something went wrong in AppyTappy setup.';
@@ -167,4 +207,21 @@ export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
 
 export async function deleteValue(application: string, value: string): Promise<void> {
   await invoke('delete_value', { application, value });
+}
+
+export async function listAutomations(): Promise<readonly AutomationSummary[]> {
+  return invoke<readonly AutomationSummary[]>('list_automations');
+}
+
+/** Saves `automation` over the automation `existing`, or as a new one; returns its ID. */
+export async function saveAutomation(existing: string | null, automation: AutomationDef): Promise<string> {
+  return invoke<string>('save_automation', { existing, automation });
+}
+
+export async function setAutomationEnabled(id: string, enabled: boolean): Promise<void> {
+  await invoke('set_automation_enabled', { id, enabled });
+}
+
+export async function deleteAutomation(id: string): Promise<void> {
+  await invoke('delete_automation', { id });
 }

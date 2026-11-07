@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![windows_subsystem = "windows"]
 
+mod automations;
 mod check_spec;
 mod commands;
 mod owner;
@@ -18,9 +19,10 @@ use std::sync::mpsc;
 use std::thread;
 
 use appytappy_config::paths::Locations;
-use appytappy_config::store::AppStore;
+use appytappy_config::store::{AppStore, AutomationStore};
 use appytappy_sources::HostSystem;
 
+use crate::automations::Stores;
 use crate::commands::Bridge;
 use crate::owner::{Message, Owner};
 
@@ -29,10 +31,13 @@ fn main() -> ExitCode {
     // before any window exists, so it comes before the app's window.
     let system = HostSystem::default();
     let (sender, messages) = mpsc::channel();
-    let store = Locations::from_env()
-        .map(|locations| AppStore::new(locations.apps()))
+    let stores = Locations::from_env()
+        .map(|locations| Stores {
+            apps: AppStore::new(locations.apps()),
+            automations: AutomationStore::new(locations.automations()),
+        })
         .map_err(|error| format!("AppyTappy cannot find where to keep your values: {error}."));
-    let owner = Owner::new(system, store, process::id(), sender.clone());
+    let owner = Owner::new(system, stores, process::id(), sender.clone());
     let Ok(owner_thread) = thread::Builder::new()
         .name("owner".to_owned())
         .spawn(move || owner::run(owner, &messages))
@@ -55,6 +60,10 @@ fn main() -> ExitCode {
             commands::list_apps,
             commands::save_value,
             commands::delete_value,
+            commands::list_automations,
+            commands::save_automation,
+            commands::set_automation_enabled,
+            commands::delete_automation,
         ])
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));
