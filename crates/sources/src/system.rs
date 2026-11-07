@@ -6,10 +6,12 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::io;
 
 use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
+use appytappy_config::window_match::{WindowFacts, WindowMatch};
 
 use crate::memory::ProcessMemory;
 
@@ -197,11 +199,96 @@ impl System for Unsupported {
     }
 }
 
+/// The handle of the visible window that `window` fits best.
+///
+/// Only windows of a process whose executable `window` fits count, and ties
+/// go to the window listed first. The runtime and the setup app both find an
+/// application's window this way, so the setup app reads the window the
+/// runtime would.
+#[must_use]
+pub fn best_window(
+    window: &WindowMatch,
+    processes: Vec<ProcessEntry>,
+    windows: Vec<WindowEntry>,
+) -> Option<u64> {
+    let executables: BTreeMap<_, _> = processes
+        .into_iter()
+        .filter(|process| window.executable.matches(&process.executable))
+        .map(|process| (process.id, process.executable))
+        .collect();
+    let candidates: Vec<_> = windows
+        .into_iter()
+        .filter(|entry| entry.visible)
+        .filter_map(|entry| {
+            let executable = executables.get(&entry.process)?;
+            Some((entry, executable))
+        })
+        .collect();
+    let ranked = window.rank(candidates.iter().map(|(entry, executable)| WindowFacts {
+        title: &entry.title,
+        class: &entry.class,
+        executable,
+    }));
+    ranked
+        .first()
+        .and_then(|&position| candidates.get(position))
+        .map(|(entry, _)| entry.handle)
+}
+
 #[cfg(test)]
 mod tests {
     use appytappy_config::anti_cheat::AntiCheatClass;
 
     use super::*;
+
+    fn process(id: u32, executable: &str) -> ProcessEntry {
+        ProcessEntry {
+            id: ProcessId::new(id),
+            parent: ProcessId::new(0),
+            executable: executable.to_owned(),
+            threads: 1,
+        }
+    }
+
+    fn window(handle: u64, process: u32, title: &str, visible: bool) -> WindowEntry {
+        WindowEntry {
+            handle,
+            process: ProcessId::new(process),
+            title: title.to_owned(),
+            class: "ExampleWindow".to_owned(),
+            visible,
+            bounds: Bounds {
+                left: 0,
+                top: 0,
+                right: 4,
+                bottom: 2,
+            },
+        }
+    }
+
+    #[test]
+    fn the_best_window_is_visible_belongs_to_the_executable_and_fits_best() {
+        let example = WindowMatch::exact(WindowFacts {
+            title: "Example App",
+            class: "ExampleWindow",
+            executable: "Example.exe",
+        });
+        let processes = || vec![process(1, "Example.exe"), process(2, "Other.exe")];
+        let best = |windows| best_window(&example, processes(), windows);
+        assert_eq!(best(vec![window(5, 1, "Example App", false)]), None);
+        assert_eq!(best(vec![window(5, 2, "Example App", true)]), None);
+        assert_eq!(best(vec![window(5, 9, "Example App", true)]), None);
+        // An untitled window of the application still counts.
+        assert_eq!(best(vec![window(5, 1, "", true)]), Some(5));
+        assert_eq!(
+            best(vec![
+                window(5, 1, "Launcher", true),
+                window(6, 1, "Example App", true),
+                window(7, 1, "Example App", true),
+            ]),
+            Some(6)
+        );
+    }
 
     #[test]
     fn unsupported_system_fails_every_call() {

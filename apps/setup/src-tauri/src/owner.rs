@@ -19,9 +19,12 @@ use appytappy_config::app_file::{
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_config::store::new_app_id;
+use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved;
-use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler, Image, Size};
-use appytappy_sources::system::{ProcessEntry, System, WindowEntry};
+use appytappy_sources::screen::{
+    Capture, CaptureSession, Crop, Frame, FrameHandler, Image, OutsideWindow, Size,
+};
+use appytappy_sources::system::{ProcessEntry, System, WindowEntry, best_window};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
@@ -33,6 +36,10 @@ use crate::window_list::{self, WindowList};
 /// The shortest time between two frames the preview takes: about 30 a
 /// second, smooth to the eye at a fraction of an application's frame rate.
 const PREVIEW_INTERVAL: Duration = Duration::from_millis(33);
+
+/// The shortest time between two frames the automation editor's live reading
+/// takes: often enough for a reading it shows about twice a second.
+const WATCH_INTERVAL: Duration = Duration::from_millis(250);
 
 /// What the setup app needs from the operating system: its windows and
 /// processes, and a capture of one window.
@@ -54,12 +61,19 @@ pub(crate) trait Host {
     /// Returns the operating system's error.
     fn processes(&self) -> io::Result<Vec<ProcessEntry>>;
 
-    /// Starts capturing the whole of `window`, calling `handler` with frames.
+    /// Starts capturing `crop` of `window`, calling `handler` with frames at
+    /// most every `interval`.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error when the capture cannot start.
-    fn capture(&self, window: u64, handler: FrameHandler) -> io::Result<Self::Session>;
+    fn capture(
+        &self,
+        window: u64,
+        crop: Crop,
+        interval: Duration,
+        handler: FrameHandler,
+    ) -> io::Result<Self::Session>;
 }
 
 impl<T: System + Capture> Host for T {
@@ -73,8 +87,14 @@ impl<T: System + Capture> Host for T {
         System::processes(self)
     }
 
-    fn capture(&self, window: u64, handler: FrameHandler) -> io::Result<Self::Session> {
-        self.start(window, Crop::Whole, PREVIEW_INTERVAL, handler)
+    fn capture(
+        &self,
+        window: u64,
+        crop: Crop,
+        interval: Duration,
+        handler: FrameHandler,
+    ) -> io::Result<Self::Session> {
+        self.start(window, crop, interval, handler)
     }
 }
 
@@ -120,6 +140,12 @@ pub(crate) enum Live {
         /// What is wrong, for the user.
         message: String,
     },
+    /// The capture stopped, such as when the window closed, and why. The
+    /// editor watches the value again.
+    Lost {
+        /// What happened, for the user.
+        message: String,
+    },
 }
 
 /// The saved value the automation editor watches.
@@ -133,8 +159,26 @@ struct Watched {
     name: String,
     /// The window's size when its region was drawn.
     window_size: Size,
-    /// The value's check.
-    check: RegionCheck,
+    /// The value's check, which reads the captured region.
+    check: Check,
+    /// What the newest frame showed, or `None` before one arrived.
+    seen: Option<Seen>,
+    /// Why the capture stopped, once it has.
+    failure: Option<String>,
+}
+
+/// What a frame of the watched value's window showed.
+#[derive(Debug)]
+pub(crate) enum Seen {
+    /// The value's region, on a window of `window_size`.
+    Region {
+        /// The window's size.
+        window_size: Size,
+        /// The region's pixels.
+        image: Image,
+    },
+    /// A window of this size, which the region lies outside.
+    Outside(Size),
 }
 
 /// A value to save, as the UI describes it.
@@ -225,25 +269,33 @@ pub(crate) enum Request {
     /// What the check reads on the newest frame: `None` until a check is
     /// set up and a frame arrived.
     Reading(Reply<Result<Option<Reading>, String>>),
-    /// Captures the window of a saved value's application and reads the
-    /// value on it, for the automation editor. Like [`Request::Pick`], it
-    /// drops the previous window's screenshots and check.
+    /// Captures the region of a saved value on its application's window,
+    /// for the automation editor. Like [`Request::Pick`], it drops the
+    /// previous window's capture, screenshots and check.
     WatchValue {
         /// The application's ID.
         app: String,
         /// The value's ID.
         value: String,
-        /// Answered once the capture started, or with why it cannot.
-        reply: Reply<Result<(), String>>,
+        /// The watch's number once the capture started, or why it cannot.
+        reply: Reply<Result<u64, String>>,
     },
     /// What the watched value reads on the newest frame, and whether `when`
-    /// holds for it; an error when nothing is watched or the capture
-    /// stopped, so the editor watches again.
+    /// holds for it; an error once the watch was stopped or replaced.
     WatchedReading {
+        /// The watch's number.
+        watch: u64,
         /// The condition to test, which must watch the watched value.
         when: Option<Box<WhenDef>>,
         /// The reading.
         reply: Reply<Result<Live, String>>,
+    },
+    /// Stops the watch, unless another capture replaced it already.
+    StopWatching {
+        /// The watch's number.
+        watch: u64,
+        /// Answered once it stopped.
+        reply: Reply<()>,
     },
     /// The handles of the running windows a window match finds, the best
     /// fit first.
@@ -312,6 +364,13 @@ pub(crate) enum Message {
         generation: u64,
         /// The window's whole frame.
         image: Image,
+    },
+    /// The watch with this generation saw a frame, or stopped and why.
+    Watch {
+        /// Which capture sent it; frames from an earlier one are dropped.
+        generation: u64,
+        /// What the frame showed, or why the capture stopped.
+        seen: Result<Seen, String>,
     },
     /// The capture with this generation stopped, such as when the window
     /// closed.
@@ -384,6 +443,18 @@ impl<H: Host> Owner<H> {
                     self.failure = Some(error);
                 }
             },
+            Message::Watch { generation, seen } => {
+                if let Some(watched) = self
+                    .watched
+                    .as_mut()
+                    .filter(|_| generation == self.generation)
+                {
+                    match seen {
+                        Ok(seen) => watched.seen = Some(seen),
+                        Err(error) => watched.failure = Some(error),
+                    }
+                }
+            },
             Message::Shutdown => return ControlFlow::Break(()),
         }
         ControlFlow::Continue(())
@@ -435,8 +506,14 @@ impl<H: Host> Owner<H> {
             },
             Request::Reading(reply) => send(reply, self.reading()),
             Request::WatchValue { app, value, reply } => send(reply, self.watch(&app, &value)),
-            Request::WatchedReading { when, reply } => {
-                send(reply, self.watched_reading(when.as_deref()));
+            Request::WatchedReading { watch, when, reply } => {
+                send(reply, self.watched_reading(watch, when.as_deref()));
+            },
+            Request::StopWatching { watch, reply } => {
+                if self.watched.is_some() && watch == self.generation {
+                    self.stop();
+                }
+                send(reply, ());
             },
             Request::MatchWindows { window, reply } => send(
                 reply,
@@ -618,36 +695,39 @@ impl<H: Host> Owner<H> {
     }
 
     fn pick(&mut self, window: u64) -> Result<(), String> {
+        self.start(window, Crop::Whole, PREVIEW_INTERVAL, preview_message)
+            .map(drop)
+    }
+
+    /// Stops the capture and starts capturing `crop` of `window`, sending
+    /// each frame as `to_message` makes it. Answers the new capture's
+    /// generation.
+    fn start(
+        &mut self,
+        window: u64,
+        crop: Crop,
+        interval: Duration,
+        to_message: fn(u64, io::Result<Frame<'_>>) -> Message,
+    ) -> Result<u64, String> {
         self.stop();
         let generation = self.generation;
         let messages = self.messages.clone();
         let handler: FrameHandler = Box::new(move |frame| {
-            let message = match frame {
-                Ok(frame) => Message::Frame {
-                    generation,
-                    image: frame.image.clone(),
-                },
-                Err(error) => Message::CaptureFailed {
-                    generation,
-                    error: error.to_string(),
-                },
-            };
             // The owner stopped when the send fails, and the capture is
             // about to be stopped too, so the wait does not matter.
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a failed send means the owner stopped and will close this capture"
             )]
-            let _ = messages.send(message);
-            PREVIEW_INTERVAL
+            let _ = messages.send(to_message(generation, frame));
+            interval
         });
-        match self.host.capture(window, handler) {
-            Ok(session) => {
-                self.session = Some(session);
-                Ok(())
-            },
-            Err(error) => Err(error.to_string()),
-        }
+        let session = self
+            .host
+            .capture(window, crop, interval, handler)
+            .map_err(|error| error.to_string())?;
+        self.session = Some(session);
+        Ok(generation)
     }
 
     fn screenshot(&mut self) -> Result<usize, String> {
@@ -666,7 +746,7 @@ impl<H: Host> Owner<H> {
         read(check, latest).map(|value| Some(value.into()))
     }
 
-    fn watch(&mut self, app: &str, value: &str) -> Result<(), String> {
+    fn watch(&mut self, app: &str, value: &str) -> Result<u64, String> {
         let store = &self.stores()?.apps;
         let file = store
             .load()
@@ -683,49 +763,61 @@ impl<H: Host> Owner<H> {
         let folder = store.folder(app);
         let check = saved::build(&saved.screen, |name| fs::read(folder.join(name)))
             .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
-        let windows = self.window_list()?.windows;
-        let window = *window_list::matching(&windows, &file.window)
-            .first()
+        let processes = self.host.processes().map_err(|error| error.to_string())?;
+        let windows = self.host.windows().map_err(|error| error.to_string())?;
+        let window = best_window(&file.window.to_match(), processes, windows)
             .ok_or_else(|| format!("Open {} to see what {} reads.", file.name, saved.name))?;
-        self.pick(window)?;
+        let watch = self.start(
+            window,
+            Crop::Region(check.region),
+            WATCH_INTERVAL,
+            watch_message,
+        )?;
         self.watched = Some(Watched {
             app: app.to_owned(),
             value: value.to_owned(),
             name: saved.name.clone(),
             window_size: check.window_size,
-            check: RegionCheck {
-                region: check.region,
-                check: check.check,
-            },
+            check: check.check,
+            seen: None,
+            failure: None,
         });
-        Ok(())
+        Ok(watch)
     }
 
-    fn watched_reading(&self, when: Option<&WhenDef>) -> Result<Live, String> {
+    fn watched_reading(&self, watch: u64, when: Option<&WhenDef>) -> Result<Live, String> {
         let watched = self
             .watched
             .as_ref()
+            .filter(|_| watch == self.generation)
             .ok_or_else(|| "No value is watched.".to_owned())?;
-        if let Some(error) = &self.failure {
-            return Err(error.clone());
-        }
-        let Some(latest) = &self.latest else {
-            return Ok(Live::Waiting);
-        };
-        if latest.size() != watched.window_size {
-            return Ok(Live::Problem {
-                message: format!(
-                    "{} was drawn when the window was {}, and it is {} now. \
-                     Resize the window to read it.",
-                    watched.name,
-                    watched.window_size,
-                    latest.size()
-                ),
+        let name = &watched.name;
+        if let Some(error) = &watched.failure {
+            return Ok(Live::Lost {
+                message: format!("{name} cannot be read: {error}."),
             });
         }
-        let value = match read(&watched.check, latest) {
+        let (window_size, image) = match &watched.seen {
+            None => return Ok(Live::Waiting),
+            Some(Seen::Region { window_size, image }) => (*window_size, Some(image)),
+            Some(Seen::Outside(window_size)) => (*window_size, None),
+        };
+        let Some(image) = image.filter(|_| window_size == watched.window_size) else {
+            return Ok(Live::Problem {
+                message: format!(
+                    "{name} was drawn when the window was {}, and it is {window_size} now. \
+                     Resize the window to read it.",
+                    watched.window_size
+                ),
+            });
+        };
+        let value = match watched.check.read(image) {
             Ok(value) => value,
-            Err(message) => return Ok(Live::Problem { message }),
+            Err(error) => {
+                return Ok(Live::Problem {
+                    message: format!("{name} cannot be read now: {error}."),
+                });
+            },
         };
         let holds = when
             .filter(|when| when.app == watched.app && when.value == watched.value)
@@ -739,6 +831,35 @@ impl<H: Host> Owner<H> {
             holds,
         })
     }
+}
+
+/// A preview capture's message for one frame.
+fn preview_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
+    match frame {
+        Ok(frame) => Message::Frame {
+            generation,
+            image: frame.image.clone(),
+        },
+        Err(error) => Message::CaptureFailed {
+            generation,
+            error: error.to_string(),
+        },
+    }
+}
+
+/// A watch's message for one frame. A window too small for the region is
+/// another size, not a stopped capture: the capture goes on.
+fn watch_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
+    let seen = match frame {
+        Ok(frame) => Ok(Seen::Region {
+            window_size: frame.window_size,
+            image: frame.image.clone(),
+        }),
+        Err(error) => OutsideWindow::in_error(&error)
+            .map(Seen::Outside)
+            .ok_or_else(|| error.to_string()),
+    };
+    Message::Watch { generation, seen }
 }
 
 /// What `check` reads on `frame`.
@@ -810,7 +931,7 @@ mod tests {
 
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::automation_file::{ActionDef, ComparisonDef, MediaCommandDef, TargetDef};
-    use appytappy_sources::screen::{Frame, Size};
+    use appytappy_sources::screen::Region;
     use appytappy_sources::system::Bounds;
 
     use super::*;
@@ -822,11 +943,19 @@ mod tests {
     /// started capture's handler goes to the test over a channel, and so
     /// does each closed capture's window.
     struct FakeHost {
-        handlers: Sender<(u64, FrameHandler)>,
+        handlers: Sender<Started>,
         closed: Sender<u64>,
         refuse: bool,
         /// Makes listing windows fail.
         unlisted: bool,
+    }
+
+    /// A capture the fake host started.
+    struct Started {
+        window: u64,
+        crop: Crop,
+        interval: Duration,
+        handler: FrameHandler,
     }
 
     /// The setup app's own process in the fake host.
@@ -899,11 +1028,24 @@ mod tests {
             ])
         }
 
-        fn capture(&self, window: u64, handler: FrameHandler) -> io::Result<FakeSession> {
+        fn capture(
+            &self,
+            window: u64,
+            crop: Crop,
+            interval: Duration,
+            handler: FrameHandler,
+        ) -> io::Result<FakeSession> {
             if self.refuse {
                 return Err(io::Error::other("no capture here"));
             }
-            self.handlers.send((window, handler)).expect("test listens");
+            self.handlers
+                .send(Started {
+                    window,
+                    crop,
+                    interval,
+                    handler,
+                })
+                .expect("test listens");
             Ok(FakeSession {
                 window,
                 closed: self.closed.clone(),
@@ -914,7 +1056,7 @@ mod tests {
     struct Harness {
         owner: Owner<FakeHost>,
         messages: Receiver<Message>,
-        handlers: Receiver<(u64, FrameHandler)>,
+        handlers: Receiver<Started>,
         closed: Receiver<u64>,
     }
 
@@ -986,20 +1128,36 @@ mod tests {
         fn pick(&mut self) -> FrameHandler {
             self.ask(|reply| Request::Pick { window: 7, reply })
                 .expect("capture starts");
-            let (window, handler) = self.handlers.try_recv().expect("capture started");
-            assert_eq!(window, 7);
-            handler
+            let started = self.handlers.try_recv().expect("capture started");
+            assert_eq!(
+                (started.window, started.crop, started.interval),
+                (7, Crop::Whole, PREVIEW_INTERVAL)
+            );
+            started.handler
         }
 
-        /// Runs `handler` on `frame` and applies what it sent the owner.
+        /// Runs `handler` on `frame`, a whole window's frame, and applies
+        /// what it sent the owner.
         fn deliver(&mut self, handler: &mut FrameHandler, frame: io::Result<&Image>) {
-            let frame = frame.map(|image| Frame {
-                window_size: image.size(),
+            let frame = frame.map(|image| (image.size(), image));
+            self.deliver_at(handler, frame, PREVIEW_INTERVAL);
+        }
+
+        /// Runs `handler` on `frame`, its window's size and pixels, checks
+        /// the wait it answers, and applies what it sent the owner.
+        fn deliver_at(
+            &mut self,
+            handler: &mut FrameHandler,
+            frame: io::Result<(Size, &Image)>,
+            interval: Duration,
+        ) {
+            let frame = frame.map(|(window_size, image)| Frame {
+                window_size,
                 image,
                 received: Instant::now(),
                 delay: Duration::ZERO,
             });
-            assert_eq!(handler(frame), PREVIEW_INTERVAL);
+            assert_eq!(handler(frame), interval);
             let message = self.messages.try_recv().expect("handler sent");
             assert!(self.owner.handle(message).is_continue());
         }
@@ -1339,13 +1497,17 @@ mod tests {
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
-    fn watch(app: &str, value: &str) -> impl FnOnce(Reply<Result<(), String>>) -> Request {
+    fn watch(app: &str, value: &str) -> impl FnOnce(Reply<Result<u64, String>>) -> Request {
         let (app, value) = (app.to_owned(), value.to_owned());
         move |reply| Request::WatchValue { app, value, reply }
     }
 
-    fn watched(when: Option<WhenDef>) -> impl FnOnce(Reply<Result<Live, String>>) -> Request {
+    fn watched(
+        watch: u64,
+        when: Option<WhenDef>,
+    ) -> impl FnOnce(Reply<Result<Live, String>>) -> Request {
         move |reply| Request::WatchedReading {
+            watch,
             when: when.map(Box::new),
             reply,
         }
@@ -1361,61 +1523,89 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_editor_reads_a_saved_value_on_its_window_and_tests_the_condition() {
-        let (stores, root) = scratch_store("watch");
+    /// A harness with the bar `Progress bar` saved for `Example App`, drawn
+    /// on the whole of window 7's 4 by 2 frame.
+    fn with_saved_bar(name: &str) -> (Harness, std::path::PathBuf) {
+        let (stores, root) = scratch_store(name);
         let mut harness = harness_with(false, Ok(stores));
-        assert_eq!(
-            harness.ask(watch("example", "progress_bar")),
-            Err("That application is no longer saved.".to_owned())
-        );
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        let save = |spec| move |reply| Request::SaveValue { spec, reply };
         harness
-            .ask(save(spec(None, "Progress bar", BAR)))
+            .ask(|reply| Request::SaveValue {
+                spec: spec(None, "Progress bar", BAR),
+                reply,
+            })
             .expect("saves");
+        (harness, root)
+    }
+
+    /// Watches `Progress bar` and returns the watch and its capture's
+    /// handler, checking it captures only the value's region.
+    fn watch_bar(harness: &mut Harness) -> (u64, FrameHandler) {
+        let watch = harness
+            .ask(watch("example", "progress_bar"))
+            .expect("watches");
+        let started = harness.handlers.try_recv().expect("capture started");
+        assert_eq!(
+            (started.window, started.crop, started.interval),
+            (
+                7,
+                Crop::Region(Region::new(0, 0, 4, 2).expect("not empty")),
+                WATCH_INTERVAL
+            )
+        );
+        (watch, started.handler)
+    }
+
+    const WINDOW: Size = Size {
+        width: 4,
+        height: 2,
+    };
+
+    #[test]
+    fn the_editor_reads_a_saved_value_on_its_window_and_tests_the_condition() {
+        let (mut harness, root) = with_saved_bar("watch");
+        assert_eq!(
+            harness.ask(watch("gone", "progress_bar")),
+            Err("That application is no longer saved.".to_owned())
+        );
         assert_eq!(
             harness.ask(watch("example", "gone")),
             Err("Example App no longer has that value.".to_owned())
         );
         assert_eq!(
-            harness.ask(watched(None)),
+            harness.ask(watched(0, None)),
             Err("No value is watched.".to_owned())
         );
 
-        harness
-            .ask(watch("example", "progress_bar"))
-            .expect("watches");
+        let (watch, mut handler) = watch_bar(&mut harness);
         assert_eq!(harness.closed.try_recv(), Ok(7), "the capture was replaced");
-        let (window, mut handler) = harness.handlers.try_recv().expect("capture started");
-        assert_eq!(window, 7);
-        assert_eq!(harness.ask(watched(None)), Ok(Live::Waiting));
-        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
+        harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), WATCH_INTERVAL);
         let read = |holds| {
             Ok(Live::Read {
                 reading: Reading::Number(50.0),
                 holds,
             })
         };
-        assert_eq!(harness.ask(watched(None)), read(None));
+        assert_eq!(harness.ask(watched(watch, None)), read(None));
         assert_eq!(
-            harness.ask(watched(Some(at_least("progress_bar", 50.0)))),
+            harness.ask(watched(watch, Some(at_least("progress_bar", 50.0)))),
             read(Some(true))
         );
         assert_eq!(
-            harness.ask(watched(Some(at_least("progress_bar", 51.0)))),
+            harness.ask(watched(watch, Some(at_least("progress_bar", 51.0)))),
             read(Some(false))
         );
         // A condition on another value says nothing about this one.
         assert_eq!(
-            harness.ask(watched(Some(at_least("other", 0.0)))),
+            harness.ask(watched(watch, Some(at_least("other", 0.0)))),
             read(None)
         );
         let mut elsewhere = at_least("progress_bar", 0.0);
         "other".clone_into(&mut elsewhere.app);
-        assert_eq!(harness.ask(watched(Some(elsewhere))), read(None));
+        assert_eq!(harness.ask(watched(watch, Some(elsewhere))), read(None));
         // A setup check of the capture screen does not change what is read.
         let spec: CheckSpec = serde_json::from_str(
             r#"{"kind":"color","region":{"x":0,"y":0,"width":1,"height":1},
@@ -1425,33 +1615,103 @@ mod tests {
         harness
             .ask(|reply| Request::SetCheck { spec, reply })
             .expect("valid check");
-        assert_eq!(harness.ask(watched(None)), read(None));
-
-        let shrunk = Image::new(
-            Size {
-                width: 2,
-                height: 1,
-            },
-            vec![0; 8],
-        )
-        .expect("matching length");
-        harness.deliver(&mut handler, Ok(&shrunk));
+        assert_eq!(harness.ask(watched(watch, None)), read(None));
         assert_eq!(
-            harness.ask(watched(None)),
+            harness.ask(watched(watch.wrapping_add(1), None)),
+            Err("No value is watched.".to_owned()),
+            "another watch's number reads nothing"
+        );
+
+        let resized = |width| {
             Ok(Live::Problem {
-                message: "Progress bar was drawn when the window was 4x2, and it is 2x1 now. \
-                          Resize the window to read it."
-                    .to_owned()
+                message: format!(
+                    "Progress bar was drawn when the window was 4x2, and it is {width}x2 now. \
+                     Resize the window to read it."
+                ),
+            })
+        };
+        let wider = Size {
+            width: 6,
+            height: 2,
+        };
+        harness.deliver_at(&mut handler, Ok((wider, &frame_image())), WATCH_INTERVAL);
+        assert_eq!(harness.ask(watched(watch, None)), resized(6));
+        let narrower = Size {
+            width: 3,
+            height: 2,
+        };
+        harness.deliver_at(
+            &mut handler,
+            Err(OutsideWindow {
+                window_size: narrower,
+            }
+            .into()),
+            WATCH_INTERVAL,
+        );
+        assert_eq!(harness.ask(watched(watch, None)), resized(3));
+        let white = Image::new(WINDOW, vec![255; 32]).expect("matching length");
+        harness.deliver_at(&mut handler, Ok((WINDOW, &white)), WATCH_INTERVAL);
+        let Ok(Live::Problem { message }) = harness.ask(watched(watch, None)) else {
+            panic!("a bar of neither color cannot be read");
+        };
+        assert!(
+            message.starts_with("Progress bar cannot be read now: ") && message.ends_with('.'),
+            "{message}"
+        );
+        harness.deliver_at(
+            &mut handler,
+            Err(io::Error::other("the window closed")),
+            WATCH_INTERVAL,
+        );
+        assert_eq!(
+            harness.ask(watched(watch, None)),
+            Ok(Live::Lost {
+                message: "Progress bar cannot be read: the window closed.".to_owned()
             })
         );
-        harness.deliver(&mut handler, Err(io::Error::other("the window closed")));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_watch_stops_only_itself() {
+        let (mut harness, root) = with_saved_bar("stop-watch");
+        let (first, mut stale) = watch_bar(&mut harness);
+        let (second, mut handler) = watch_bar(&mut harness);
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the first watch stopped");
         assert_eq!(
-            harness.ask(watched(None)),
-            Err("the window closed".to_owned())
+            harness.ask(watched(first, None)),
+            Err("No value is watched.".to_owned())
         );
-        harness.ask(Request::Stop);
+        // A late stop of the first watch leaves the second running.
+        harness.ask(|reply| Request::StopWatching {
+            watch: first,
+            reply,
+        });
+        assert!(harness.closed.try_recv().is_err());
+        assert_eq!(harness.ask(watched(second, None)), Ok(Live::Waiting));
+        // Frames from the first watch's capture are dropped.
+        harness.deliver_at(&mut stale, Err(io::Error::other("closed")), WATCH_INTERVAL);
+        assert_eq!(harness.ask(watched(second, None)), Ok(Live::Waiting));
+        harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), WATCH_INTERVAL);
+        // Picking a window for a new value stops the watch, and a stop of a
+        // watch that a pick replaced leaves the pick's capture running.
+        let _picked = harness.pick();
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        harness.ask(|reply| Request::StopWatching {
+            watch: second,
+            reply,
+        });
+        assert!(harness.closed.try_recv().is_err());
+        let (third, _handler) = watch_bar(&mut harness);
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        harness.ask(|reply| Request::StopWatching {
+            watch: third,
+            reply,
+        });
+        assert_eq!(harness.closed.try_recv(), Ok(7));
         assert_eq!(
-            harness.ask(watched(None)),
+            harness.ask(watched(third, None)),
             Err("No value is watched.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");
@@ -1486,6 +1746,7 @@ mod tests {
             .file
             .clone()
             .expect("a good file");
+        let saved_window = file.window.clone();
         file.window = WindowDef::exact(appytappy_config::window_match::WindowFacts {
             title: "Other App",
             class: "OtherWindow",
@@ -1496,21 +1757,21 @@ mod tests {
             harness.ask(watch("example", "icon_visible")),
             Err("Open Example App to see what Icon visible reads.".to_owned())
         );
+        file.window = saved_window;
+        apps.save("example", &file, &[]).expect("saves");
         harness.owner.host.unlisted = true;
         assert_eq!(
             harness.ask(watch("example", "icon_visible")),
             Err("no windows here".to_owned())
         );
-        harness.owner.host.refuse = true;
         harness.owner.host.unlisted = false;
-        file.window = spec(None, "x", BAR).window;
-        apps.save("example", &file, &[]).expect("saves");
+        harness.owner.host.refuse = true;
         assert_eq!(
             harness.ask(watch("example", "icon_visible")),
             Err("no capture here".to_owned())
         );
         assert_eq!(
-            harness.ask(watched(None)),
+            harness.ask(watched(harness.owner.generation, None)),
             Err("No value is watched.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");
@@ -1536,6 +1797,13 @@ mod tests {
             })
             .expect("serializes"),
             serde_json::json!({"kind": "problem", "message": "x"})
+        );
+        assert_eq!(
+            serde_json::to_value(Live::Lost {
+                message: "y".to_owned()
+            })
+            .expect("serializes"),
+            serde_json::json!({"kind": "lost", "message": "y"})
         );
     }
 
@@ -1659,7 +1927,7 @@ mod tests {
         assert!(Host::windows(&unsupported).is_err());
         assert!(Host::processes(&unsupported).is_err());
         let handler: FrameHandler = Box::new(|_frame| Duration::ZERO);
-        assert!(unsupported.capture(7, handler).is_err());
+        assert!(Host::capture(&unsupported, 7, Crop::Whole, PREVIEW_INTERVAL, handler).is_err());
     }
 
     #[test]
