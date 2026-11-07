@@ -51,8 +51,8 @@ windows = { version = "=0.62.2", features = [
 proptest = "=1.12.0"
 
 # Times each check and capture-to-decision latency with a small harness of
-# its own, which reports percentiles; `criterion` would add a C build step
-# that breaks cross-compiling to Windows.
+# its own, which reports percentiles. `criterion` 0.8 depends on `alloca`,
+# whose build script compiles C and breaks cross-compiling to Windows.
 [[bench]]
 name = "screen"
 harness = false

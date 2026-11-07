@@ -78,8 +78,8 @@ cargo test --workspace --exclude appy-tappy-workspace --doc --all-features --loc
 # Times the screen checks; on a Windows desktop it also times a live window's
 # capture-to-decision latency when APPYTAPPY_BENCH_WINDOW names one.
 [tasks."rust:bench"]
-description = "Run the Rust benchmarks and print their timings"
-run = "cargo bench --workspace --locked"
+description = "Run the screen benchmarks and print their timings"
+run = "cargo bench -p appytappy-sources --bench screen --locked"
 
 # Every package is unpublished (`publish = false`), and Cargo then resolves a
 # member's path dependencies on other members from crates.io, where they do not

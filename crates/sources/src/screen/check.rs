@@ -59,8 +59,8 @@ fn distance([blue, green, red, _]: [u8; 4], color: Rgb) -> u32 {
 /// empty color.
 ///
 /// Pixels far from both colors, such as a border or a label drawn on the bar,
-/// are left out: a pixel counts only when it is no farther from the nearer
-/// color than the two colors are from each other. Counting pixels instead of
+/// are left out: a pixel counts only when it is within half the distance
+/// between the two colors of the nearer one. Counting pixels instead of
 /// finding an edge makes the reading independent of the bar's direction and
 /// steady under a little noise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,7 +98,8 @@ impl BarFill {
         for &pixel in image.pixels() {
             let to_filled = distance(pixel, self.filled);
             let to_empty = distance(pixel, self.empty);
-            let near = to_filled.min(to_empty) <= reach;
+            // Squared distances, so half the distance is a quarter of `reach`.
+            let near = to_filled.min(to_empty).saturating_mul(4) <= reach;
             // Pixel counts fit in a u64, so these additions never wrap.
             filled = filled.wrapping_add(u64::from(near && to_filled < to_empty));
             counted = counted.wrapping_add(u64::from(near));
@@ -150,10 +151,7 @@ impl ColorMatch {
         let near = |average: u64, target: u8| {
             average.abs_diff(u64::from(target)) <= u64::from(self.tolerance)
         };
-        pixels > 0
-            && near(blue, self.color.blue)
-            && near(green, self.color.green)
-            && near(red, self.color.red)
+        near(blue, self.color.blue) && near(green, self.color.green) && near(red, self.color.red)
     }
 }
 
@@ -238,6 +236,40 @@ impl Error for CheckError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn errors_explain_themselves_and_keep_their_source() {
+        let size = Size {
+            width: 2,
+            height: 1,
+        };
+        assert_eq!(
+            SameColors.to_string(),
+            "a bar's filled and empty colors must differ"
+        );
+        assert_eq!(
+            CheckError::NoBar.to_string(),
+            "no pixel in the region is near the bar's filled or empty color"
+        );
+        let mismatch = CheckError::SizeMismatch {
+            expected: size,
+            found: Size {
+                width: 3,
+                height: 1,
+            },
+        };
+        assert_eq!(
+            mismatch.to_string(),
+            "the region is 3x1 but its reference image is 2x1"
+        );
+        assert!(mismatch.source().is_none());
+        let number = CheckError::Number(ReadError::NoNumber);
+        assert_eq!(number.to_string(), "the region's number could not be read");
+        assert_eq!(
+            number.source().map(ToString::to_string).as_deref(),
+            Some("the region holds no digits")
+        );
+    }
+
     fn solid(width: u32, color: Rgb) -> Image {
         let bgra = (0..width)
             .flat_map(|_| [color.blue, color.green, color.red, 255])
@@ -291,48 +323,46 @@ mod tests {
     }
 
     #[test]
-    fn bar_fill_counts_a_pixel_exactly_at_the_colors_distance() {
+    fn bar_fill_counts_a_pixel_exactly_at_half_the_colors_distance() {
+        let red = |red| Rgb {
+            red,
+            green: 0,
+            blue: 0,
+        };
+        let bar = BarFill::new(red(10), red(0)).unwrap();
+        // 15 is half the colors' distance from 10, so it counts as filled;
+        // 16 is farther and is skipped.
+        assert_eq!(
+            bar.percent(&row(&[red(15), red(0)])),
+            Ok(Number::new(50.0).unwrap())
+        );
+        assert_eq!(
+            bar.percent(&row(&[red(16), red(0)])),
+            Ok(Number::new(0.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn bar_fill_counts_a_pixel_midway_between_the_colors_as_empty() {
+        let red = |red| Rgb {
+            red,
+            green: 0,
+            blue: 0,
+        };
+        let bar = BarFill::new(red(10), red(0)).unwrap();
+        assert_eq!(bar.percent(&row(&[red(5)])), Ok(Number::new(0.0).unwrap()));
+    }
+
+    #[test]
+    fn bar_fill_skips_a_dark_border() {
         let black = Rgb {
             red: 0,
             green: 0,
             blue: 0,
         };
-        let ten = Rgb {
-            red: 10,
-            green: 0,
-            blue: 0,
-        };
-        let bar = BarFill::new(ten, black).unwrap();
-        // 20 is exactly as far from 10 as 10 is from 0, so it counts as
-        // filled; 21 is farther and is skipped.
-        let at_reach = Rgb {
-            red: 20,
-            green: 0,
-            blue: 0,
-        };
-        let past_reach = Rgb {
-            red: 21,
-            green: 0,
-            blue: 0,
-        };
-        assert_eq!(
-            bar.percent(&row(&[at_reach, black])),
-            Ok(Number::new(50.0).unwrap())
-        );
-        assert_eq!(
-            bar.percent(&row(&[past_reach, black])),
-            Ok(Number::new(0.0).unwrap())
-        );
-        // A pixel halfway between the colors counts as empty.
-        let halfway = Rgb {
-            red: 5,
-            green: 0,
-            blue: 0,
-        };
-        assert_eq!(
-            bar.percent(&row(&[halfway, ten])),
-            Ok(Number::new(50.0).unwrap())
-        );
+        let bar = BarFill::new(GREEN, GRAY).unwrap();
+        let image = row(&[black, black, GREEN, GREEN, GRAY, GRAY, black, black]);
+        assert_eq!(bar.percent(&image), Ok(Number::new(50.0).unwrap()));
     }
 
     #[test]

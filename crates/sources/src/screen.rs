@@ -228,8 +228,9 @@ impl Image {
         })
     }
 
-    /// Decodes a PNG file, such as a screen binding's reference image. Any
-    /// alpha is dropped.
+    /// Decodes a PNG file, such as a screen binding's reference image. Every
+    /// PNG color type and bit depth reads as 8-bit color, and any alpha is
+    /// dropped.
     ///
     /// # Errors
     ///
@@ -262,9 +263,9 @@ impl Image {
         let channels = match info.color_type {
             png::ColorType::Grayscale => 1,
             png::ColorType::GrayscaleAlpha => 2,
-            png::ColorType::Rgb => 3,
+            // The expand transformation turns palette images into RGB.
+            png::ColorType::Rgb | png::ColorType::Indexed => 3,
             png::ColorType::Rgba => 4,
-            png::ColorType::Indexed => return Err(ImageError::Unsupported),
         };
         let mut bgra = Vec::with_capacity(size.bytes().ok_or(ImageError::TooLarge { size })?);
         let width = usize::try_from(size.width)
@@ -333,6 +334,42 @@ impl FrameBuffer {
         image.size = size;
         image.bgra.resize(length, 0);
         Ok(&mut image.bgra)
+    }
+
+    /// Fills the buffer with a `size` image whose rows lie `pitch` bytes
+    /// apart in `source`, as graphics APIs lay out a mapped texture: each row
+    /// is `size.width * 4` bytes, followed by padding up to the pitch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImageError::Empty`] or [`ImageError::TooLarge`] as
+    /// [`FrameBuffer::prepare`] does, and [`ImageError::Length`] when
+    /// `pitch` is shorter than a row or `source` ends before the last row.
+    pub fn fill_pitched(
+        &mut self,
+        size: Size,
+        source: &[u8],
+        pitch: usize,
+    ) -> Result<(), ImageError> {
+        let target = self.prepare(size)?;
+        let row = usize::try_from(size.width)
+            .ok()
+            .and_then(|width| width.checked_mul(BYTES_PER_PIXEL))
+            .ok_or(ImageError::TooLarge { size })?;
+        if pitch < row {
+            return Err(ImageError::Length { size });
+        }
+        for (index, line) in target.chunks_exact_mut(row).enumerate() {
+            let start = index
+                .checked_mul(pitch)
+                .ok_or(ImageError::Length { size })?;
+            let bytes = start
+                .checked_add(row)
+                .and_then(|end| source.get(start..end))
+                .ok_or(ImageError::Length { size })?;
+            line.copy_from_slice(bytes);
+        }
+        Ok(())
     }
 
     /// The image the last [`FrameBuffer::prepare`] sized, or `None` before
@@ -603,25 +640,102 @@ mod tests {
         assert_eq!(decoded.as_bgra(), [10, 10, 10, 255, 200, 200, 200, 255]);
     }
 
+    fn gray_png(width: u32, height: u32) -> Vec<u8> {
+        let mut file = Vec::new();
+        let mut encoder = png::Encoder::new(&mut file, width, height);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let length = usize::try_from(width.checked_mul(height).unwrap()).unwrap();
+        writer.write_image_data(&vec![0; length]).unwrap();
+        writer.finish().unwrap();
+        file
+    }
+
     #[test]
     fn rejects_malformed_and_oversized_pngs() {
         assert!(matches!(
             Image::decode_png(b"not a png"),
             Err(ImageError::Decode(_))
         ));
+        assert!(Image::decode_png(&gray_png(MAX_PNG_SIDE, 1)).is_ok());
+        assert!(Image::decode_png(&gray_png(1, MAX_PNG_SIDE)).is_ok());
+        for (width, height) in [(MAX_PNG_SIDE + 1, 1), (1, MAX_PNG_SIDE + 1)] {
+            assert!(matches!(
+                Image::decode_png(&gray_png(width, height)),
+                Err(ImageError::TooLarge { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn decodes_palette_pngs() {
         let mut file = Vec::new();
-        let mut encoder = png::Encoder::new(&mut file, MAX_PNG_SIDE + 1, 1);
-        encoder.set_color(png::ColorType::Grayscale);
+        let mut encoder = png::Encoder::new(&mut file, 2, 1);
+        encoder.set_color(png::ColorType::Indexed);
         encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_palette(vec![1, 2, 3, 4, 5, 6]);
         let mut writer = encoder.write_header().unwrap();
-        writer
-            .write_image_data(&vec![0; usize::try_from(MAX_PNG_SIDE + 1).unwrap()])
-            .unwrap();
+        writer.write_image_data(&[1, 0]).unwrap();
         writer.finish().unwrap();
-        assert!(matches!(
-            Image::decode_png(&file),
-            Err(ImageError::TooLarge { .. })
-        ));
+        let decoded = Image::decode_png(&file).unwrap();
+        assert_eq!(decoded, image(2, 1, &[[4, 5, 6], [1, 2, 3]]));
+    }
+
+    #[test]
+    fn errors_explain_themselves_and_keep_their_source() {
+        let size = Size {
+            width: 3,
+            height: 2,
+        };
+        assert_eq!(size.to_string(), "3x2");
+        let decode = Image::decode_png(b"not a png").unwrap_err();
+        assert!(decode.source().is_some());
+        let encode = ImageError::Encode(io::Error::other("disk full").into());
+        assert_eq!(encode.to_string(), "the image could not be encoded as PNG");
+        assert!(encode.source().is_some());
+        assert_eq!(
+            format!("{:?}", image(3, 2, &[[0; 3]; 6])),
+            "Image { size: Size { width: 3, height: 2 }, .. }"
+        );
+        for (error, message) in [
+            (
+                ImageError::Empty,
+                "an image needs a width and a height above zero",
+            ),
+            (
+                ImageError::Length { size },
+                "a 3x2 image needs four bytes for each pixel",
+            ),
+            (
+                ImageError::TooLarge { size },
+                "a 3x2 image is larger than 8192 pixels on a side",
+            ),
+            (
+                ImageError::Unsupported,
+                "the PNG file uses an unsupported layout",
+            ),
+            (decode, "the PNG file could not be decoded"),
+        ] {
+            assert_eq!(error.to_string(), message);
+            if !matches!(error, ImageError::Decode(_)) {
+                assert!(error.source().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn a_frame_s_latency_adds_its_delay_to_the_time_since_it_arrived() {
+        let picture = image(1, 1, &[[0, 0, 0]]);
+        let frame = Frame {
+            window_size: picture.size(),
+            image: &picture,
+            received: Instant::now(),
+            delay: Duration::from_secs(60),
+        };
+        let latency = frame.latency();
+        assert!(latency >= Duration::from_secs(60), "{latency:?}");
+        assert!(latency < Duration::from_secs(61), "{latency:?}");
     }
 
     #[test]
@@ -650,6 +764,30 @@ mod tests {
                 })
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_frame_buffer_copies_pitched_rows() {
+        let mut buffer = FrameBuffer::default();
+        let size = Size {
+            width: 1,
+            height: 2,
+        };
+        // Two four-byte rows, each padded to six bytes; the last row needs no
+        // padding after it.
+        let source = [1, 2, 3, 4, 0, 0, 5, 6, 7, 8];
+        buffer.fill_pitched(size, &source, 6).unwrap();
+        assert_eq!(buffer.image().unwrap().as_bgra(), [1, 2, 3, 4, 5, 6, 7, 8]);
+        buffer.fill_pitched(size, &source[..8], 4).unwrap();
+        assert_eq!(buffer.image().unwrap().as_bgra(), [1, 2, 3, 4, 0, 0, 5, 6]);
+        assert!(matches!(
+            buffer.fill_pitched(size, &source, 3),
+            Err(ImageError::Length { .. })
+        ));
+        assert!(matches!(
+            buffer.fill_pitched(size, &source[..9], 6),
+            Err(ImageError::Length { .. })
+        ));
     }
 
     #[test]

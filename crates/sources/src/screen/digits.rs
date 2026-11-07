@@ -159,10 +159,13 @@ impl DigitReader {
         let mut number = NumberText::default();
         for (position, span) in spans.iter().take(count).enumerate() {
             let shape = self.shape(image, line, *span);
-            let character = self
-                .best_match(&shape)
-                .ok_or(ReadError::UnknownCharacter { position })?;
-            number.push(character);
+            match self.best_match(&shape) {
+                Some(character) => number.push(character),
+                // Text after a finished number, such as the "HP" in "37% HP",
+                // needs no glyphs.
+                None if number.ended => break,
+                None => return Err(ReadError::UnknownCharacter { position }),
+            }
         }
         number.parse().ok_or(ReadError::NoNumber)
     }
@@ -203,14 +206,7 @@ impl DigitReader {
         image: &Image,
         spans: &mut [Span; MAX_CHARACTERS],
     ) -> Result<(Line, usize), Segmentation> {
-        let mut inked_rows = image
-            .rows()
-            .zip(0_u32..)
-            .filter(|(row, _)| row.iter().any(|&pixel| self.is_ink(pixel)))
-            .map(|(_, y)| y);
-        let top = inked_rows.next().ok_or(Segmentation::NoInk)?;
-        let bottom = inked_rows.last().unwrap_or(top).saturating_add(1);
-        let line = Line { top, bottom };
+        let line = self.line(image).ok_or(Segmentation::NoInk)?;
 
         let mut count = 0_usize;
         let mut start = None;
@@ -229,6 +225,29 @@ impl DigitReader {
             }
         }
         Ok((line, count))
+    }
+
+    /// The run of adjacent inked rows that holds the most ink, so a stray
+    /// pixel elsewhere in the region does not stretch the line.
+    fn line(&self, image: &Image) -> Option<Line> {
+        let rows = image
+            .rows()
+            .map(|row| row.iter().filter(|&&pixel| self.is_ink(pixel)).count());
+        let mut best: Option<(Line, usize)> = None;
+        let mut run: Option<(Line, usize)> = None;
+        // The trailing zero ends a run that reaches the bottom edge.
+        for (ink, y) in rows.chain([0]).zip(0_u32..) {
+            if ink > 0 {
+                let (line, total) = run.get_or_insert((Line { top: y, bottom: y }, 0));
+                line.bottom = y.saturating_add(1);
+                *total = total.saturating_add(ink);
+            } else if let Some(ended) = run.take()
+                && best.is_none_or(|(_, most)| ended.1 > most)
+            {
+                best = Some(ended);
+            }
+        }
+        best.map(|(line, _)| line)
     }
 
     /// Samples the character in `span` onto the grid, scaled by the line's
@@ -433,6 +452,55 @@ mod tests {
     use super::*;
     use crate::screen::Size;
 
+    #[test]
+    fn errors_explain_themselves() {
+        for (error, message) in [
+            (
+                LearnError::NoInk,
+                "no pixel in the region has the text color",
+            ),
+            (
+                LearnError::TooManyCharacters,
+                "the region holds more than 24 characters",
+            ),
+            (
+                LearnError::CountMismatch {
+                    found: 2,
+                    expected: 3,
+                },
+                "the region shows 2 characters but the text has 3; characters that touch count \
+                 as one",
+            ),
+            (
+                LearnError::Conflict {
+                    learned: '1',
+                    new: '7',
+                },
+                "a character shaped like '1' was given as '7'",
+            ),
+            (LearnError::Full, "a reader learns at most 256 glyphs"),
+        ] {
+            assert_eq!(error.to_string(), message);
+        }
+        for (error, message) in [
+            (
+                ReadError::NoInk,
+                "no pixel in the region has the text color",
+            ),
+            (
+                ReadError::TooManyCharacters,
+                "the region holds more than 24 characters",
+            ),
+            (
+                ReadError::UnknownCharacter { position: 2 },
+                "character 2 from the left matches no learned glyph",
+            ),
+            (ReadError::NoNumber, "the region holds no digits"),
+        ] {
+            assert_eq!(error.to_string(), message);
+        }
+    }
+
     const WHITE: Rgb = Rgb {
         red: 255,
         green: 255,
@@ -440,6 +508,15 @@ mod tests {
     };
 
     /// Draws `rows` of `#` (ink) and `.` (background) as an image.
+    /// "12" in a five-pixel font, with sixteen ink pixels.
+    const TWELVE: [&str; 5] = [
+        "#.###", //
+        "#...#", //
+        "#.###", //
+        "#.#..", //
+        "#.###", //
+    ];
+
     fn draw(rows: &[&str]) -> Image {
         let mut bgra = Vec::new();
         for row in rows {
@@ -554,6 +631,30 @@ mod tests {
     }
 
     #[test]
+    fn text_after_a_finished_number_needs_no_glyphs() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader
+            .learn(&draw(&["#.###", "#.#.#", "#.###"]), "1%")
+            .unwrap();
+        // "1%" and then a character never learned.
+        let labelled = draw(&["#.###.#.#", "#.#.#.###", "#.###.#.#"]);
+        assert_eq!(reader.read(&labelled), Ok(Number::new(1.0).unwrap()));
+    }
+
+    #[test]
+    fn a_stray_pixel_does_not_stretch_the_line() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&TWELVE), "12").unwrap();
+        let mut noisy = TWELVE.to_vec();
+        noisy.extend([".....", "....#"]);
+        assert_eq!(reader.read(&draw(&noisy)), Ok(Number::new(12.0).unwrap()));
+        // Of two runs of inked rows, the one with more ink is the line.
+        let mut above = vec!["#....", "....."];
+        above.extend(TWELVE);
+        assert_eq!(reader.read(&draw(&above)), Ok(Number::new(12.0).unwrap()));
+    }
+
+    #[test]
     fn ink_is_each_channel_within_the_tolerance() {
         let reader = DigitReader::new(
             Rgb {
@@ -584,5 +685,43 @@ mod tests {
         let mut two_off = shape;
         two_off[1] = 0b11;
         assert_eq!(reader.best_match(&two_off), None);
+        // A missing cell counts against the cells either shape sets: one of
+        // four differs, a quarter, so it still matches.
+        let mut one_missing = shape;
+        one_missing[0] = 0b0111;
+        assert_eq!(reader.best_match(&one_missing), Some('7'));
+    }
+
+    #[test]
+    fn a_cell_is_set_when_at_least_half_its_pixels_are_ink() {
+        let reader = DigitReader::new(WHITE, 0);
+        let line = Line { top: 0, bottom: 1 };
+        let span = Span { left: 0, right: 1 };
+        assert_eq!(reader.shape(&draw(&["#"]), line, span)[0] & 1, 1);
+        assert_eq!(reader.shape(&draw(&["."]), line, span)[0] & 1, 0);
+    }
+
+    #[test]
+    fn of_two_lines_with_equal_ink_the_upper_one_is_read() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&TWELVE), "12").unwrap();
+        // Sixteen ink pixels, as many as "12", in one unlearned block.
+        let mut tied = TWELVE.to_vec();
+        tied.extend([".....", "#####", "#####", "#####", "#...."]);
+        assert_eq!(reader.read(&draw(&tied)), Ok(Number::new(12.0).unwrap()));
+    }
+
+    #[test]
+    fn a_reader_learns_at_most_256_glyphs() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        for index in 0..MAX_GLYPHS {
+            let mut shape = Shape::default();
+            shape[0] = u32::try_from(index).unwrap().wrapping_add(1) << 16;
+            reader.glyphs.push(Glyph {
+                character: 'x',
+                shape,
+            });
+        }
+        assert_eq!(reader.learn(&draw(&["#"]), "1"), Err(LearnError::Full));
     }
 }

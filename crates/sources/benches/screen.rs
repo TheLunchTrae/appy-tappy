@@ -182,12 +182,12 @@ mod live {
             Crop::Region(region),
             interval.min(),
             Box::new(move |frame| {
-                let Ok(frame) = frame else {
-                    return interval.max();
-                };
-                let read = fill.percent(frame.image).is_ok();
+                let sample = frame.map(|frame| {
+                    let read = fill.percent(frame.image).is_ok();
+                    (frame.latency(), read)
+                });
                 // A send fails only once the benchmark stopped listening.
-                let listening = sender.send((frame.latency(), read)).is_ok();
+                let listening = sender.send(sample).is_ok();
                 schedule.after_read(if listening {
                     Activity::Changed
                 } else {
@@ -198,7 +198,7 @@ mod live {
         let started = Instant::now();
         let mut samples = Vec::with_capacity(SAMPLES);
         while samples.len() < SAMPLES {
-            let (latency, _read) = latencies.recv_timeout(Duration::from_secs(10))?;
+            let (latency, _read) = latencies.recv_timeout(Duration::from_secs(10))??;
             samples.push(latency);
         }
         let elapsed = started.elapsed();
