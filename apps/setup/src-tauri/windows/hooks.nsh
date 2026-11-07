@@ -8,8 +8,8 @@
 ; changed and exits. The class and title are TRAY_CLASS and the window title in
 ; crates/platform/src/win.rs. The request goes again each second, since one
 ; sent while the tray menu is open is lost. A runtime that is still running
-; after 10 seconds, or that has no tray window, is killed, because a running
-; runtime keeps its file locked.
+; after about 10 seconds, with or without its tray window, is killed, because a
+; running runtime keeps its file locked.
 !macro APPYTAPPY_STOP_RUNTIME
   StrCpy $1 0
   ${Do}
@@ -19,7 +19,7 @@
     ${EndIf}
     IntOp $2 $1 % 10
     ${If} $2 = 0
-      SendMessage $0 ${WM_CLOSE} 0 0 /TIMEOUT=1000
+      SendMessage $0 ${WM_CLOSE} 0 0 /TIMEOUT=100
     ${EndIf}
     ${If} $1 >= 100
       ${ExitDo}
@@ -41,6 +41,9 @@
   ${If} $0 = 0
     nsis_tauri_utils::KillProcessCurrentUser "appytappy-runtime.exe"
     Pop $0
+    ${If} $0 <> 0
+      DetailPrint "AppyTappy could not stop its runtime; close it from the tray and retry."
+    ${EndIf}
     Sleep 500
   ${EndIf}
 !macroend

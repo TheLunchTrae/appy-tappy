@@ -12,11 +12,16 @@ on:
     paths:
       - .config/mise/conf.d/installer.toml
       - .github/workflows/release.yml
+      - Cargo.toml
+      - apps/setup/bun.lock
+      - apps/setup/package.json
       - apps/setup/src-tauri/tauri.conf.json
       - apps/setup/src-tauri/tauri.installer.conf.json
       - apps/setup/src-tauri/windows/**
-      # The installer hooks find the runtime's tray window by its class and
-      # title, which this file sets.
+      # The installer hooks find the runtime's tray window by the class and
+      # title in win.rs, and the uninstaller removes the autostart value that
+      # lib.rs names.
+      - crates/platform/src/lib.rs
       - crates/platform/src/win.rs
   workflow_dispatch:
 
