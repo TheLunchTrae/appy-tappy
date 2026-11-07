@@ -63,8 +63,8 @@ so the action first checks that the window in front belongs to the process the
 runtime follows for the watched application. If another window is in front,
 even one of another process with the same executable name, it presses nothing
 and the log says so; anti-cheat was checked only for the watched application,
-so keys never go anywhere else. An application whose window belongs to a second
-process of its own cannot be pressed into for now. Windows does not deliver
+so keys are pressed only into the watched application. An application whose
+window belongs to a second process of its own cannot be pressed into. Windows does not deliver
 keys to a window that runs as administrator unless AppyTappy does too, and says
 nothing when it drops them. When it takes only some of the keys, every key that
 went down is let go again.
