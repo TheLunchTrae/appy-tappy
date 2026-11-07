@@ -658,7 +658,7 @@ mod tests {
             ("Level percent", "level_percent"),
             ("  In a level? ", "in_a_level"),
             ("HP / max HP", "hp_max_hp"),
-            ("2nd lap", "value_2nd_lap"),
+            ("2 laps", "value_2_laps"),
             ("!!!", "value"),
             ("", "value"),
             ("Ünïcode name", "n_code_name"),
