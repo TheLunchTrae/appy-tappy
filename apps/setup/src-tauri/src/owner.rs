@@ -391,9 +391,14 @@ impl<H: Host> Owner<H> {
         if name.is_empty() {
             return Err("Name the value first.".to_owned());
         }
+        // A picture check's region was drawn on the screenshot it keeps.
+        let drawn_on = match &spec.check {
+            CheckSpec::Reference { screenshot, .. } => *screenshot,
+            _ => spec.screenshot,
+        };
         let size = self
             .screenshots
-            .get(spec.screenshot)
+            .get(drawn_on)
             .map(Image::size)
             .ok_or_else(|| "Take a screenshot first.".to_owned())?;
         let loaded = store.load().map_err(|error| error.to_string())?;
@@ -579,6 +584,8 @@ mod tests {
         handlers: Sender<(u64, FrameHandler)>,
         closed: Sender<u64>,
         refuse: bool,
+        /// Makes listing windows fail.
+        unlisted: bool,
     }
 
     /// The setup app's own process in the fake host.
@@ -600,6 +607,9 @@ mod tests {
         type Session = FakeSession;
 
         fn windows(&self) -> io::Result<Vec<WindowEntry>> {
+            if self.unlisted {
+                return Err(io::Error::other("no windows here"));
+            }
             let own = WindowEntry {
                 handle: 8,
                 process: ProcessId::new(OWN_PROCESS),
@@ -689,6 +699,7 @@ mod tests {
             handlers: handler_sender,
             closed: closed_sender,
             refuse,
+            unlisted: false,
         };
         Harness {
             owner: Owner::new(host, store, OWN_PROCESS, sender),
@@ -959,9 +970,10 @@ mod tests {
             harness.ask(save(spec(None, "  ", REFERENCE))),
             Err("Name the value first.".to_owned())
         );
-        let saved = harness
-            .ask(save(spec(None, "Icon visible", REFERENCE)))
-            .expect("saves a new app");
+        let mut stale = spec(None, "Icon visible", REFERENCE);
+        // A picture check's own screenshot wins over the one shown.
+        stale.screenshot = 9;
+        let saved = harness.ask(save(stale)).expect("saves a new app");
         assert_eq!(
             saved,
             SavedValue {
@@ -1014,6 +1026,11 @@ mod tests {
         let apps = harness.ask(Request::ListApps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(file.values.len(), 1);
+        // The saved values still list when the windows cannot be.
+        harness.owner.host.unlisted = true;
+        let apps = harness.ask(Request::ListApps).expect("lists");
+        assert_eq!((apps.len(), apps[0].windows.len()), (1, 0));
+        harness.owner.host.unlisted = false;
         assert_eq!(
             harness.ask(|reply| Request::DeleteValue {
                 app: "gone".to_owned(),
