@@ -170,7 +170,7 @@ export function RecordPanel(props: PanelProps) {
             Use its settings
           </button>
         ) : (
-          <button type="button" className="btn" disabled={blocked !== null} onClick={props.onMore}>
+          <button type="button" className="btn" data-record-more disabled={blocked !== null} onClick={props.onMore}>
             Record more
           </button>
         )}

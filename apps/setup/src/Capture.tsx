@@ -722,6 +722,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     try {
       await stopRecording();
       setRecording(await recordingState());
+      setRecordError(null);
       setReviewing(review);
     } catch (error: unknown) {
       setRecordError(errorText(error));
@@ -784,6 +785,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     }
     setDraft((current) => ({ ...current, region: settings.region, ink: settings.ink, tolerance: settings.tolerance }));
     setRecordError(null);
+    // The pressed button gives way to Record more, so focus moves to it.
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>('[data-record-more]')?.focus();
+    });
   };
 
   const keptProblem = keeping.some((label) => flagged.has(label.reading));
@@ -854,6 +859,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
                 <button
                   type="button"
                   className="btn"
+                  data-record-more
                   disabled={recordBlocked !== null}
                   onClick={() => {
                     background(record(true));
