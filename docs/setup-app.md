@@ -32,7 +32,8 @@ it.
    other application has the keyboard, so the user can carry on in it until
    it shows the value and press it then. **Change shortcut** records a new one;
    a letter, digit, or Space needs a modifier so it does not stop that key
-   working everywhere else. Screenshots last until the window changes.
+   working everywhere else. Screenshots last until the window changes or the
+   user leaves the new value.
 3. **Draw the region.** On a screenshot, drag to draw a box, drag inside it to
    move it, or drag a corner to resize it. The X, Y, width, and height fields
    set it to the pixel. The region is measured in the window's own pixels.
