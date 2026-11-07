@@ -196,7 +196,7 @@ description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
 # Member crates hold product code, so the gate runs a mutation lane; see
-# docs/rust.md#mutation-testing. The two lanes share one lock, so the gate runs
+# docs/developer/rust.md#mutation-testing. The two lanes share one lock, so the gate runs
 # only one. exec hands the lane mise's process, so a signal that stops the
 # gate reaches the lane's own traps.
 [tasks."rust:mutants:gate"]

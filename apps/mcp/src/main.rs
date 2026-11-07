@@ -2,7 +2,7 @@
 //! to investigate how an app stores its state.
 //!
 //! The agent launches it and talks MCP over stdin and stdout. See
-//! `docs/mcp.md` for setup and the tool workflow.
+//! `docs/developer/mcp.md` for setup and the tool workflow.
 
 #![forbid(unsafe_code)]
 

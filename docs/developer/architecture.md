@@ -11,7 +11,7 @@ AppyTappy has two programs that share a set of library crates:
 
 The setup app runs rarely, so it can afford a heavier UI. The runtime is always
 on, so it must stay small. Every design choice below follows from that split.
-[`CONTEXT.md`](../CONTEXT.md) defines the domain terms.
+[`CONTEXT.md`](../../CONTEXT.md) defines the domain terms.
 
 ## Components and data flow
 
@@ -113,7 +113,7 @@ out, and cargo-mutants reports its mutants as missed. So each crate keeps its
 Windows code in `win.rs` modules (not `windows.rs`, whose name would clash with
 the `windows` crate), and `.cargo/mutants.toml` excludes those files with the
 owner's approval.
-[`AGENTS.md`](../AGENTS.md#tests-and-mutation) requires that approval for any
+[`AGENTS.md`](../../AGENTS.md#tests-and-mutation) requires that approval for any
 configuration exclusion.
 
 ## The runtime
@@ -278,7 +278,8 @@ cannot be opened, nothing is logged, and running exits with code 1.
 
 ### Tray
 
-The runtime shows an icon in the taskbar's notification area. Pointing at it
+[The tray icon](../user/tray.md) in the user guide describes the tray as the
+user sees it. The runtime shows an icon in the taskbar's notification area. Pointing at it
 shows a tooltip with the state, such as `AppyTappy: idle`, or
 `AppyTappy: disabled` while automations are off. Right-clicking it opens a
 small menu:
@@ -449,7 +450,8 @@ because a Linux-only GTK dependency is unmaintained and never ships. The
 setup app's entry point and commands, which only forward to the owner thread,
 are left out of mutation testing. The UI has its own Bun lockfile and `ui:`
 mise tasks, which the gate runs first because the Rust side embeds the built
-UI. [Setup app](setup-app.md) describes the screens and how they work.
+UI. The [user guide](../user/README.md) describes the screens, and
+[Setup app](setup-app.md) how they work.
 
 The overlay ([#36](https://github.com/TheLunchTrae/appy-tappy/issues/36))
 is more windows of the setup app, one for each application whose overlay is
@@ -483,7 +485,7 @@ screen capture API itself, are safe Rust methods. Screen capture lives in
 
 The owner approved changing the workspace lint from `forbid` to `deny` with
 the first `unsafe` Windows call, in `sources`, as
-[`AGENTS.md`](../AGENTS.md#exceptions-and-workspace-policy) describes.
+[`AGENTS.md`](../../AGENTS.md#exceptions-and-workspace-policy) describes.
 `unsafe` may appear only in the `win.rs` modules of `sources`, `actions`, and
 `platform`, and each block carries a reasoned expectation and a `SAFETY`
 comment. Every crate root without such a module, including `config`,

@@ -1,7 +1,7 @@
 # Context
 
 Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
-[`docs/architecture.md`](docs/architecture.md) shows how the parts fit.
+[`docs/developer/architecture.md`](docs/developer/architecture.md) shows how the parts fit.
 
 - **Action.** A side effect from the runtime's fixed set, such as pausing media
   or setting an app's volume. A paired action restores the state it changed.

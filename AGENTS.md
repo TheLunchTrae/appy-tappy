@@ -3,8 +3,8 @@
 AppyTappy is a Windows background app that runs automations when another
 application reaches a state, such as a certain number appearing in a region of
 its window or an icon becoming visible. Read
-`CONTEXT.md` first if it exists. Then read the pages in `docs/` that own the
-change before changing architecture, domain language, or enforcement.
+`CONTEXT.md` first if it exists. Then read the pages in `docs/developer/` that
+own the change before changing architecture, domain language, or enforcement.
 
 ## Commands
 
@@ -128,8 +128,14 @@ version-numbered names.
   files, so a fresh agent can find them.
 - Write in the present tense. Do not date text or narrate history, as in "now
   uses", "no longer", "previously", or "the new parser".
-- `docs/` holds current pages and their images. Record owner decisions on one
-  current page and replace a decision when it changes.
+- `docs/` holds current pages and their images, in two sections.
+  `docs/user/` is the user guide: how to install and use AppyTappy, in the
+  setup app's own words, with no implementation, crates, frameworks, or
+  algorithms. `docs/developer/` holds the architecture, contracts, and
+  decisions, and links to the user guide for what the user sees rather than
+  repeating it. A change to what the user sees updates the user guide.
+- Record owner decisions on one current developer page and replace a decision
+  when it changes.
 - Follow the
   [Google developer documentation style guide](https://developers.google.com/style)
   for docs and commit prose.
@@ -158,7 +164,7 @@ version-numbered names.
 
 `Cargo.toml`, `clippy.toml`, and `deny.toml` own executable policy;
 `.config/mise/conf.d/rust.toml` owns commands. Read
-[`docs/rust.md`](docs/rust.md) for setup, scanner limits, and mutation
+[`docs/developer/rust.md`](docs/developer/rust.md) for setup, scanner limits, and mutation
 operation before changing enforcement.
 
 ### Work and verification
@@ -172,7 +178,7 @@ dependency changes and commit it.
 code; its base defaults to `origin/main`, then local `main`, and can be set
 with `MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
 `rust:standards:check` runs the lane that `MUTANTS_LANE` names, `full` by
-default; [mutation testing](docs/rust.md#mutation-testing) says which lane CI
+default; [mutation testing](docs/developer/rust.md#mutation-testing) says which lane CI
 runs.
 Before handoff, run `mise run rust:standards:check`; report skipped checks and their
 reasons.
@@ -182,7 +188,7 @@ reasons.
 This application profile favors one owner for state, pure `(state, event)`
 transitions, and messages to the owner. Libraries, runtimes, and concurrency
 primitives need a deliberate profile adaptation; see
-[`docs/rust.md`](docs/rust.md#ownership-boundary).
+[`docs/developer/rust.md`](docs/developer/rust.md#ownership-boundary).
 
 - Keep program-owned counters, IDs, and dispatch state on the root model.
   Mirror external state through construction and events.
@@ -292,7 +298,7 @@ Every workspace package, including the root package, declares
 `[lints] workspace = true`. Release profiles belong in the root manifest;
 keep overflow checks enabled. `tests/allow_policy.rs` checks first-party
 source inputs, and `rust:policy` checks configured policy probes. Read their
-[scope and limitations](docs/rust.md#source-policy-scan) before adding macros,
+[scope and limitations](docs/developer/rust.md#source-policy-scan) before adding macros,
 custom target paths, includes, or symlinks.
 Checker-specific production behavior and synthesized suppression attributes
 are prohibited even when static analysis cannot detect them.
@@ -314,7 +320,7 @@ and their reasons into the handoff.
 Mutation evidence covers the code a pull request changes and, on pushes to
 main, the whole workspace.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
-approval, because the Linux gate compiles them out. Read [mutation operation](docs/rust.md#mutation-testing)
+approval, because the Linux gate compiles them out. Read [mutation operation](docs/developer/rust.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.
 Confirm no run is active before clearing a stale lock.
 

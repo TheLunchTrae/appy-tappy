@@ -1,0 +1,68 @@
+# Troubleshooting
+
+## AppyTappy's log
+
+The background part writes what it does to `runtime.log`, one line for each
+start, stop, change, and problem. To open it, paste
+`%LOCALAPPDATA%\AppyTappy\logs` into File Explorer's address bar. The log
+names each automation that cannot run, and why.
+
+## Windows warns about the installer
+
+AppyTappy is not signed, so Windows warns the first time you run the
+installer. [Install](install.md#install) says what to select.
+
+## I can't find the tray icon
+
+Select the arrow next to the clock that shows hidden icons. If AppyTappy is
+not there, it is not running: you quit it from the menu, or it could not
+start. Start it again as [The tray icon](tray.md#the-menu) describes. If it
+still doesn't appear, check the log.
+
+## An automation doesn't run
+
+Check these in order:
+
+1. **Is it on?** Its switch on the Automations page is on, and **Enabled** is
+   checked in the [tray menu](tray.md#the-menu).
+2. **Can it run?** If it cannot, the Automations page says why under its name.
+3. **Is the application running?** Point at the tray icon: it says
+   **AppyTappy: attached** while one of your applications runs. The tray's
+   **Active automations** lists the automations that run now.
+4. **Does the value read?** Turn on the [overlay](overlay.md) to see what
+   AppyTappy reads. A value reads only while the window is the
+   [size it was made at](values.md#window-size). If the window has a size no
+   value was made at, the log says so.
+5. **Did it already run?** An automation runs once each time its condition
+   becomes true. It runs again only after the condition has stopped being
+   true, and after its wait.
+
+## A number reads wrong
+
+Label more screenshots, so that every digit the number can show appears on at
+least one of them, and check the characters' color. Some text the **Number**
+check cannot read; [Checks](values.md#checks) says what it can't, and what to
+use instead.
+
+## A key press does nothing
+
+- The application's anti-cheat must be **None** on the Applications page. See
+  [Anti-cheat](applications.md#anti-cheat).
+- AppyTappy presses keys only while the watched application's window is in
+  front. The log says when it skipped a press for that reason.
+- Windows drops keys sent to a program that runs as administrator.
+
+## The overlay doesn't show over a game
+
+The game probably runs in exclusive fullscreen, which draws over every other
+window. Switch it to borderless or windowed fullscreen, or use
+**Picture in picture** on another monitor. See
+[Fullscreen](overlay.md#fullscreen).
+
+## Media or volume actions do nothing
+
+- Check that something is playing, and that **One application** names the
+  executable that plays it. A browser or a Microsoft Store app can report
+  another name than its executable; try **Whatever is playing** instead.
+- Volume actions change only the default playback device.
+- The log names each action that failed, and why.
