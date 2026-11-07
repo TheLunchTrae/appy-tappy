@@ -8,13 +8,13 @@
 
 #![forbid(unsafe_code)]
 
-use std::io;
-
 #[cfg(test)]
 mod fake;
 mod pointer;
 mod scan;
 mod value;
+
+use std::io;
 
 pub use pointer::{PointerError, PointerStep, follow_pointer_chain, read_pointer};
 pub use scan::{CANDIDATE_LIMIT, Candidate, FirstScan, NextScan, SNAPSHOT_LIMIT, Scan, ScanError};

@@ -410,9 +410,8 @@ impl Error for ScanError {
 
 #[cfg(test)]
 mod tests {
-    use crate::memory::fake::{FakeMemory, f32_region};
-
     use super::*;
+    use crate::memory::fake::{FakeMemory, f32_region};
 
     fn addresses(scan: &Scan) -> Vec<u64> {
         scan.candidates()

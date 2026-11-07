@@ -127,9 +127,8 @@ impl Error for PointerError {
 
 #[cfg(test)]
 mod tests {
-    use crate::memory::fake::FakeMemory;
-
     use super::*;
+    use crate::memory::fake::FakeMemory;
 
     #[test]
     fn follows_a_pointer_chain_and_reports_each_step() {
