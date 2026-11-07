@@ -17,7 +17,12 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
 appytappy-config = { version = "=0.1.0", path = "../../../crates/config" }
+# Tells the runtime to read the automations again after each save.
+appytappy-platform = { version = "=0.1.0", path = "../../../crates/platform" }
 appytappy-sources = { version = "=0.1.0", path = "../../../crates/sources" }
+# Provides `#[mutants::skip]` for functions no test can reach; it expands to
+# nothing.
+mutants = "0.0.4"
 # Command arguments and replies cross into the web UI as JSON.
 serde = { version = "=1.0.229", features = ["derive"] }
 # The window, the web view, and the bridge between the React UI and Rust.

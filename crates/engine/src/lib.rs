@@ -120,7 +120,9 @@ impl Session {
         for (index, (rule, state)) in self.rules.iter().zip(&mut self.states).enumerate() {
             if let Trigger::Becomes { condition, rearm } = rule.trigger()
                 && !state.armed
-                && !condition.holds(&self.values)
+                // An unknown condition leaves a fired rule as it is, until
+                // the values it needs are read again.
+                && condition.truth(&self.values) == Some(false)
             {
                 state.armed = match rearm {
                     Rearm::WhenFalse => true,
@@ -168,6 +170,13 @@ impl Session {
         }
         self.fire_event_rules(event, at, &mut effects);
         effects
+    }
+
+    /// Forgets every signal's value, as when the values can no longer be
+    /// seen. Each rule keeps its state: a rule that fired stays fired, and
+    /// keeps its cooldown, until the values read next decide its condition.
+    pub fn forget_values(&mut self) {
+        self.values.clear();
     }
 
     /// Ends the session because the app exited: releases every active rule,
@@ -318,6 +327,79 @@ mod tests {
         assert_eq!(
             feed(&mut session, &clock, 9, &[45.0, 91.0]),
             [Effect::Fire(FIRST)]
+        );
+    }
+
+    #[test]
+    fn forgotten_values_keep_each_rule_as_it_was_until_they_are_read_again() {
+        let clock = Clock::new();
+        let lobby = Condition::compare(name("lobby"), Comparison::Equals, Value::Flag(true))
+            .expect("valid");
+        let both = Condition::all(vec![progress(Comparison::AtLeast, 90.0), lobby]).expect("valid");
+        let rule = Rule::new(
+            Trigger::Becomes {
+                condition: both,
+                rearm: Rearm::WhenFalse,
+            },
+            pause(),
+            Duration::from_secs(60),
+            Restore::OnRelease,
+        )
+        .expect("valid");
+        let mut session = start(vec![rule], &clock);
+        session.sample(name("lobby"), Value::Flag(true), clock.at(1));
+        assert_eq!(
+            feed(&mut session, &clock, 2, &[95.0]),
+            [Effect::Fire(FIRST)]
+        );
+        session.forget_values();
+        // One value back is not enough to tell, so nothing is released.
+        assert_eq!(feed(&mut session, &clock, 3, &[95.0]), []);
+        // Both back and still true: it neither releases nor fires again.
+        assert_eq!(
+            session.sample(name("lobby"), Value::Flag(true), clock.at(4)),
+            []
+        );
+        session.forget_values();
+        // A value back that settles the group as false releases it.
+        assert_eq!(
+            feed(&mut session, &clock, 5, &[10.0]),
+            [Effect::Release(FIRST)]
+        );
+    }
+
+    #[test]
+    fn a_forgotten_value_cannot_release_an_any_group() {
+        let clock = Clock::new();
+        let lobby = Condition::compare(name("lobby"), Comparison::Equals, Value::Flag(true))
+            .expect("valid");
+        let either =
+            Condition::any(vec![progress(Comparison::AtLeast, 90.0), lobby]).expect("valid");
+        let rule = Rule::new(
+            Trigger::Becomes {
+                condition: either,
+                rearm: Rearm::WhenFalse,
+            },
+            pause(),
+            Duration::ZERO,
+            Restore::OnRelease,
+        )
+        .expect("valid");
+        let mut session = start(vec![rule], &clock);
+        session.sample(name("lobby"), Value::Flag(false), clock.at(1));
+        assert_eq!(
+            feed(&mut session, &clock, 2, &[95.0]),
+            [Effect::Fire(FIRST)]
+        );
+        session.forget_values();
+        assert_eq!(
+            feed(&mut session, &clock, 3, &[10.0]),
+            [],
+            "the lobby might be true now"
+        );
+        assert_eq!(
+            session.sample(name("lobby"), Value::Flag(false), clock.at(4)),
+            [Effect::Release(FIRST)]
         );
     }
 

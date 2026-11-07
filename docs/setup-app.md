@@ -75,9 +75,13 @@ value, and any number of automations can watch the same one.
    target the condition compares.
 
 A value that an automation watches cannot be deleted; the Values page names
-the automations to change or delete first. The runtime starts running saved
-automations in the next step
-([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)).
+the automations to change or delete first.
+
+The runtime runs every enabled automation that can run, and each save,
+delete, or switch on this page or the Values page tells it to read them
+again at once. An automation that stops running because of the change undoes
+what it changed first. [The runtime](architecture.md#the-runtime) describes
+how it reads them.
 
 ## Window matching
 
@@ -93,8 +97,16 @@ application falls back as its setting says:
   applications whose title changes as they run.
 
 The executable always has to match. The setup app uses the match to show
-which applications are running; the runtime will find applications with the
-same rules ([#6](https://github.com/TheLunchTrae/appy-tappy/issues/6)).
+which applications are running, and the runtime finds each application's
+window with the same rules. A value's region means something only while the
+window has the size it had when the region was drawn. Values can be drawn at
+more than one size, and the runtime reads the ones drawn at the window's
+current size. When the window closes or changes size, the runtime forgets the
+values it read. Each automation stays as it was until the values read next
+show whether its condition still holds, so it neither runs again nor undoes
+what it changed while the window is out of sight.
+When the window has a size no value was drawn at, the runtime reads nothing
+and logs that the window should be resized or the value drawn again.
 
 ## Saved files
 

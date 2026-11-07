@@ -336,6 +336,7 @@ impl<H: Host> Owner<H> {
     }
 
     fn answer(&mut self, request: Request) {
+        let saves = request.saves();
         match request {
             Request::ListWindows(reply) => send(reply, self.window_list()),
             Request::Pick { window, reply } => send(reply, self.pick(window)),
@@ -402,6 +403,9 @@ impl<H: Host> Owner<H> {
                 self.stores()
                     .and_then(|stores| automations::delete(stores, &id)),
             ),
+        }
+        if saves {
+            tell_runtime();
         }
     }
 
@@ -614,6 +618,33 @@ pub(crate) fn run<H: Host>(mut owner: Owner<H>, messages: &Receiver<Message>) ->
         }
     }
     owner.close()
+}
+
+impl Request {
+    /// Whether the request changes the saved applications or automations,
+    /// which the runtime reads.
+    const fn saves(&self) -> bool {
+        matches!(
+            self,
+            Self::SaveValue { .. }
+                | Self::DeleteValue { .. }
+                | Self::SaveAutomation { .. }
+                | Self::SetAutomationEnabled { .. }
+                | Self::DeleteAutomation { .. }
+        )
+    }
+}
+
+/// Asks the runtime to read the saved automations again. A runtime that is
+/// not running reads them when it starts, and one that cannot be reached
+/// keeps what it read, so a failure here changes nothing the user did.
+#[mutants::skip]
+fn tell_runtime() {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the save already happened; the runtime picks it up when it next starts"
+    )]
+    let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
 }
 
 /// Answers a request. The command that asked may have been dropped, such as
@@ -1283,5 +1314,28 @@ mod tests {
         assert!(Host::processes(&unsupported).is_err());
         let handler: FrameHandler = Box::new(|_frame| Duration::ZERO);
         assert!(unsupported.capture(7, handler).is_err());
+    }
+
+    #[test]
+    fn only_requests_that_save_tell_the_runtime() {
+        let saves = [
+            Request::DeleteValue {
+                app: "example".to_owned(),
+                value: "progress".to_owned(),
+                reply: oneshot::channel().0,
+            },
+            Request::SetAutomationEnabled {
+                id: "x".to_owned(),
+                enabled: true,
+                reply: oneshot::channel().0,
+            },
+            Request::DeleteAutomation {
+                id: "x".to_owned(),
+                reply: oneshot::channel().0,
+            },
+        ];
+        assert!(saves.iter().all(Request::saves));
+        assert!(!Request::ListApps(oneshot::channel().0).saves());
+        assert!(!Request::ListAutomations(oneshot::channel().0).saves());
     }
 }
