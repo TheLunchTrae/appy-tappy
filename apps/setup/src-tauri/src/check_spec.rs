@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn the_ui_describes_checks_in_camel_case_json() {
-        // owner.rs's requests parse the other kinds; this is the number.
+        // The owner's requests parse the other kinds; this is the number.
         let json = r#"{"kind":"number","region":{"x":1,"y":2,"width":3,"height":4},
             "ink":{"red":1,"green":2,"blue":3},"tolerance":5,
             "labels":[{"screenshot":0,"text":"12"}]}"#;
