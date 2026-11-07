@@ -520,7 +520,7 @@ mod tests {
                 tolerance: 3,
             },
             CheckDef::Reference {
-                image: "in_menu.png".to_owned(),
+                image: "icon_visible.png".to_owned(),
                 tolerance: 9,
             },
         ];
@@ -655,9 +655,9 @@ mod tests {
     fn value_ids_come_from_the_names_users_type() {
         let cases = [
             ("Progress", "progress"),
-            ("  In menu? ", "in_menu"),
+            ("  Icon visible? ", "icon_visible"),
             ("HP / max HP", "hp_max_hp"),
-            ("2 laps", "value_2_laps"),
+            ("2 steps", "value_2_steps"),
             ("!!!", "value"),
             ("", "value"),
             ("Ünïcode name", "n_code_name"),

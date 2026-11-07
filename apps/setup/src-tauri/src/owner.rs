@@ -939,7 +939,7 @@ mod tests {
         let mut handler = harness.pick();
         let save = |spec| move |reply| Request::SaveValue { spec, reply };
         assert_eq!(
-            harness.ask(save(spec(None, "In menu", REFERENCE))),
+            harness.ask(save(spec(None, "Icon visible", REFERENCE))),
             Err("Take a screenshot first.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
@@ -960,13 +960,13 @@ mod tests {
             Err("Name the value first.".to_owned())
         );
         let saved = harness
-            .ask(save(spec(None, "In menu", REFERENCE)))
+            .ask(save(spec(None, "Icon visible", REFERENCE)))
             .expect("saves a new app");
         assert_eq!(
             saved,
             SavedValue {
                 app: "example".to_owned(),
-                value: "in_menu".to_owned()
+                value: "icon_visible".to_owned()
             }
         );
         harness
@@ -992,7 +992,7 @@ mod tests {
         let file = app.file.as_ref().expect("a good file");
         assert_eq!(file.name, "Example App");
         let ids: Vec<&str> = file.values.iter().map(|value| value.id.as_str()).collect();
-        assert_eq!(ids, ["in_menu", "progress_bar"]);
+        assert_eq!(ids, ["icon_visible", "progress_bar"]);
         assert_eq!(
             file.values[0].screen.window_size,
             SizeDef {
@@ -1001,16 +1001,16 @@ mod tests {
             }
         );
         let folder = root.join("example");
-        assert!(folder.join("in_menu.png").exists());
+        assert!(folder.join("icon_visible.png").exists());
 
         harness
             .ask(|reply| Request::DeleteValue {
                 app: "example".to_owned(),
-                value: "in_menu".to_owned(),
+                value: "icon_visible".to_owned(),
                 reply,
             })
             .expect("removes");
-        assert!(!folder.join("in_menu.png").exists());
+        assert!(!folder.join("icon_visible.png").exists());
         let apps = harness.ask(Request::ListApps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(file.values.len(), 1);

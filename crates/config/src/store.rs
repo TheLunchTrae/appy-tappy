@@ -269,8 +269,8 @@ mod tests {
             }),
             anti_cheat: AntiCheatDef::Unknown,
             values: vec![ValueDef {
-                id: "in_menu".to_owned(),
-                name: "In menu".to_owned(),
+                id: "icon_visible".to_owned(),
+                name: "Icon visible".to_owned(),
                 screen: ScreenDef {
                     window_size: SizeDef {
                         width: 100,
@@ -302,12 +302,16 @@ mod tests {
             .load()
             .expect_err("a file is not a store");
 
-        let saved = file("in_menu.png");
+        let saved = file("icon_visible.png");
         store
-            .save("zeta", &saved, &[("in_menu.png".to_owned(), vec![1, 2, 3])])
+            .save(
+                "zeta",
+                &saved,
+                &[("icon_visible.png".to_owned(), vec![1, 2, 3])],
+            )
             .expect("saves");
         store
-            .save("alpha", &saved, &[("in_menu.png".to_owned(), vec![4])])
+            .save("alpha", &saved, &[("icon_visible.png".to_owned(), vec![4])])
             .expect("saves");
         fs::create_dir_all(store.folder("broken")).expect("create");
         fs::write(store.folder("broken").join(APP_FILE), "{").expect("write");
@@ -325,7 +329,7 @@ mod tests {
                 .is_err_and(|error| error.contains("not valid"))
         );
         assert_eq!(
-            fs::read(store.folder("zeta").join("in_menu.png")).expect("picture"),
+            fs::read(store.folder("zeta").join("icon_visible.png")).expect("picture"),
             [1, 2, 3]
         );
         fs::remove_dir_all(root).expect("clean up");
@@ -335,7 +339,7 @@ mod tests {
     fn save_refuses_bad_ids_pictures_and_files() {
         let root = scratch("refuse");
         let store = AppStore::new(root.clone());
-        let good = file("in_menu.png");
+        let good = file("icon_visible.png");
         let bad_id = store.save("../up", &good, &[]).expect_err("bad id");
         assert_eq!(bad_id.kind(), io::ErrorKind::InvalidInput);
         let bad_picture = store

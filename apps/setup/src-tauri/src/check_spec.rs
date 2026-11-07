@@ -599,15 +599,15 @@ mod tests {
             screenshot: 0,
             tolerance: 7,
         };
-        let saved = to_saved(&reference, &[screenshot()], "in_menu").expect("valid");
+        let saved = to_saved(&reference, &[screenshot()], "icon_visible").expect("valid");
         assert_eq!(
             saved.check,
             CheckDef::Reference {
-                image: "in_menu.png".to_owned(),
+                image: "icon_visible.png".to_owned(),
                 tolerance: 7
             }
         );
-        assert_eq!(saved.pictures[0].0, "in_menu.png");
+        assert_eq!(saved.pictures[0].0, "icon_visible.png");
         assert_eq!((saved.region.x, saved.region.width), (2, 2));
 
         let bar = CheckSpec::BarFill {
