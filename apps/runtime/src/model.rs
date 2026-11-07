@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::mem;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -211,6 +212,18 @@ impl Model {
             return Vec::new();
         };
         let effects = running.session.sample(signal, value, at);
+        acts(id, &running.plan, effects)
+    }
+
+    /// Forgets the values a session's reader can no longer see: undoes what
+    /// its automations changed and starts its rules over, as if no value had
+    /// been read yet. The reader keeps reading for the same session.
+    pub(crate) fn forget(&mut self, id: SessionId) -> Vec<Order> {
+        let Some(running) = self.running.values_mut().find(|running| running.id == id) else {
+            return Vec::new();
+        };
+        let fresh = Session::resume(Arc::clone(&running.plan.rules));
+        let effects = mem::replace(&mut running.session, fresh).stop();
         acts(id, &running.plan, effects)
     }
 
@@ -478,6 +491,25 @@ mod tests {
         let ended = model.apply(exited("a", 7), now);
         assert_eq!(kinds(&ended), ["stop 0 A", "undo 0 Pause A"]);
         assert_eq!(model.active_automations(), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn values_out_of_sight_are_forgotten_and_their_automations_undone() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7), now);
+        let fired = model.sample(SessionId(0), signal(), number(95.0), now);
+        assert_eq!(kinds(&fired), ["run 0 Pause A"]);
+        assert_eq!(kinds(&model.forget(SessionId(0))), ["undo 0 Pause A"]);
+        assert_eq!(model.forget(SessionId(0)), [], "nothing left to undo");
+        assert_eq!(model.forget(SessionId(9)), [], "no such session");
+        let again = model.sample(SessionId(0), signal(), number(95.0), now);
+        assert_eq!(
+            kinds(&again),
+            ["run 0 Pause A"],
+            "the same reading fires again in the fresh rules"
+        );
     }
 
     #[test]

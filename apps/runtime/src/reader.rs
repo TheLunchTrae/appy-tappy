@@ -82,6 +82,13 @@ pub(crate) enum Reading {
         /// What is wrong, as a sentence fragment for the log.
         problem: String,
     },
+    /// The values read so far can no longer be seen: the window closed or
+    /// changed size. Rules on them should forget them rather than hold their
+    /// last readings.
+    Unseen {
+        /// The session.
+        session: SessionId,
+    },
 }
 
 /// What reaches the reader thread.
@@ -278,6 +285,8 @@ struct FrameReader<E> {
     problems: Vec<Option<String>>,
     /// The last problem with a frame as a whole.
     frame_problem: Option<String>,
+    /// Whether it sent a reading since it last sent [`Reading::Unseen`].
+    seen: bool,
     schedule: ReadSchedule,
     events: Sender<E>,
     control: Sender<Control>,
@@ -308,6 +317,7 @@ impl<E: From<Reading>> FrameReader<E> {
             last: vec![None; count],
             problems: vec![None; count],
             frame_problem: None,
+            seen: false,
             schedule: ReadSchedule::new(ReadInterval::DEFAULT),
             events,
             control,
@@ -319,11 +329,17 @@ impl<E: From<Reading>> FrameReader<E> {
         let (window_size, frame) = match frame {
             Ok(frame) => (frame.window_size, Some(frame)),
             Err(error) if error.kind() == io::ErrorKind::NotConnected => {
+                self.unseen();
                 self.tell(Control::Lost);
                 return Duration::ZERO;
             },
             Err(error) => {
-                if let Some(window_size) = OutsideWindow::in_error(&error) {
+                // The region lies outside a window of this reader's own size
+                // only when the saved region does not fit the size it was
+                // drawn at, which is a frame problem like any other.
+                if let Some(window_size) =
+                    OutsideWindow::in_error(&error).filter(|&window_size| window_size != self.size)
+                {
                     (window_size, None)
                 } else {
                     let problem = format!("a frame cannot be read: {error}");
@@ -341,9 +357,12 @@ impl<E: From<Reading>> FrameReader<E> {
             .values
             .iter()
             .any(|value| value.check.window_size == window_size);
-        if window_size != self.size && other_values {
-            self.tell(Control::Resized(window_size));
-            return Duration::ZERO;
+        if window_size != self.size {
+            self.unseen();
+            if other_values {
+                self.tell(Control::Resized(window_size));
+                return Duration::ZERO;
+            }
         }
         let mut changed = false;
         for position in 0..self.plan.values.len() {
@@ -373,9 +392,11 @@ impl<E: From<Reading>> FrameReader<E> {
         // at it. Values drawn at another size than this reader's are read
         // by the reader for that size, so they wait quietly.
         if window_size != self.size {
+            // The message leaves out the window's size, so dragging a
+            // window's corner logs it once rather than once for each size.
             return Some(Err(format!(
-                "the window is {window_size} but {} was drawn when it was {}; resize the \
-                 window or draw the value again",
+                "{} was drawn when the window was {}, and the window is now another size; \
+                 resize the window or draw the value again",
                 value.name, value.check.window_size
             )));
         }
@@ -407,6 +428,7 @@ impl<E: From<Reading>> FrameReader<E> {
             return false;
         }
         *last = Some(reading);
+        self.seen = true;
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed send means the owner stopped this session"
@@ -428,6 +450,22 @@ impl<E: From<Reading>> FrameReader<E> {
         if slot.as_ref() != Some(&problem) {
             *slot = Some(problem.clone());
             self.problem(problem);
+        }
+    }
+
+    /// Says once that the values it read can no longer be seen.
+    /// Every value then reads as new when it is seen again.
+    fn unseen(&mut self) {
+        if self.seen {
+            self.seen = false;
+            self.last.fill(None);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a failed send means the owner stopped this session"
+            )]
+            let _ = self.events.send(E::from(Reading::Unseen {
+                session: self.session,
+            }));
         }
     }
 
@@ -588,7 +626,7 @@ mod tests {
             .try_iter()
             .filter_map(|reading| match reading {
                 Reading::Sample { signal, value, .. } => Some((signal.to_string(), value)),
-                Reading::Problem { .. } => None,
+                Reading::Problem { .. } | Reading::Unseen { .. } => None,
             })
             .collect()
     }
@@ -598,7 +636,7 @@ mod tests {
             .try_iter()
             .filter_map(|reading| match reading {
                 Reading::Problem { problem, .. } => Some(problem),
-                Reading::Sample { .. } => None,
+                Reading::Sample { .. } | Reading::Unseen { .. } => None,
             })
             .collect()
     }
@@ -651,8 +689,8 @@ mod tests {
         assert_eq!(
             problems(&readings),
             [
-                "the window is 640x480 but icon was drawn when it was 800x600; resize the window or \
-             draw the value again"
+                "icon was drawn when the window was 800x600, and the window is now another size; \
+             resize the window or draw the value again"
             ]
         );
         assert_eq!(
@@ -662,6 +700,35 @@ mod tests {
         );
         frames.handle(Ok(frame(&image, WINDOW)));
         assert_eq!(flags(&readings), [("icon".to_owned(), Value::Flag(true))]);
+        frames.handle(outside(SMALL));
+        frames.handle(outside(SMALL));
+        let unseen: Vec<Reading> = readings.try_iter().collect();
+        assert_eq!(
+            unseen,
+            [
+                Reading::Unseen {
+                    session: SessionId(3)
+                },
+                Reading::Problem {
+                    session: SessionId(3),
+                    problem: "icon was drawn when the window was 800x600, and the window is \
+                              now another size; resize the window or draw the value again"
+                        .to_owned()
+                }
+            ],
+            "each is said once"
+        );
+        frames.handle(Ok(frame(&image, WINDOW)));
+        assert_eq!(
+            flags(&readings),
+            [("icon".to_owned(), Value::Flag(true))],
+            "seen again, the same value is sent again"
+        );
+        frames.handle(outside(WINDOW));
+        assert_eq!(
+            problems(&readings),
+            ["a frame cannot be read: the region lies outside the 800x600 window"]
+        );
         frames.handle(Err(io::Error::other("the copy failed")));
         frames.handle(Err(io::Error::other("the copy failed")));
         assert_eq!(
@@ -919,6 +986,13 @@ mod tests {
             "{sample:?}"
         );
         first(outside(SMALL));
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Unseen {
+                session: SessionId(3)
+            }),
+            "the values it read are out of sight"
+        );
         desk.answer(Ok(desktop()));
         let (resized, crop, mut second) = desk.capture();
         assert_eq!(resized, 4);

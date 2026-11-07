@@ -331,7 +331,11 @@ fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     drop(inputs);
     let Crew { jobs, readers, .. } = crew;
     drop(jobs);
-    let read = readers.into_values().try_for_each(Reader::stop);
+    // Every reader is stopped, and the first that stopped badly says how.
+    let read = readers
+        .into_values()
+        .map(Reader::stop)
+        .fold(Ok(()), Result::and);
     let detected = join(detector);
     let acted = join(actor);
     detected
@@ -549,6 +553,18 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
             }
             Step::Carry(Vec::new())
         },
+        Event::Reading(Reading::Unseen { session }) => {
+            if let Some(name) = model.app_name(session) {
+                note(
+                    log,
+                    &format!(
+                        "{name}: its window closed or changed size, so its automations start \
+                         over"
+                    ),
+                );
+            }
+            Step::Carry(model.forget(session))
+        },
         Event::ActionFailed(ActionFailed(message)) => {
             note(log, &message);
             Step::Carry(Vec::new())
@@ -751,10 +767,10 @@ mod tests {
         assert_eq!(loaded_line(&empty), "no saved automation can run");
     }
 
-    #[test]
-    fn orders_that_change_something_get_a_log_line() {
-        let plan = Arc::new(plan::AppPlan {
-            name: "Example App".to_owned(),
+    /// An app plan named `name` whose automations are only names.
+    fn app_plan(name: &str, automations: &[&str]) -> Arc<plan::AppPlan> {
+        Arc::new(plan::AppPlan {
+            name: name.to_owned(),
             window: WindowMatch {
                 title: Pattern::new("*"),
                 class: Pattern::new("*"),
@@ -763,8 +779,51 @@ mod tests {
             },
             values: Vec::new(),
             rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
-            automations: Vec::new(),
-        });
+            automations: automations.iter().map(|&name| name.to_owned()).collect(),
+        })
+    }
+
+    #[test]
+    fn the_log_counts_the_automations_and_names_their_apps() {
+        let mut plan = plan::Plan::default();
+        plan.apps
+            .insert("a".to_owned(), app_plan("Example App", &["Mute"]));
+        assert_eq!(loaded_line(&plan), "1 automation runs for Example App");
+        plan.apps
+            .insert("b".to_owned(), app_plan("Other App", &["Pause", "Play"]));
+        assert_eq!(
+            loaded_line(&plan),
+            "3 automations run for Example App, Other App"
+        );
+    }
+
+    #[test]
+    fn loading_logs_what_cannot_run() {
+        let folder = env::temp_dir().join(format!("appytappy-load-{}", process::id()));
+        fs::create_dir_all(&folder).expect("make the folder");
+        fs::write(folder.join("automations.json"), "not JSON").expect("break the file");
+        let stores = Stores {
+            apps: AppStore::new(folder.join("apps")),
+            automations: AutomationStore::new(folder.join("automations.json")),
+        };
+        let mut log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
+        let plan = load(&stores, &mut log);
+        let written = fs::read_to_string(folder.join("logs").join("runtime.log")).expect("read");
+        fs::remove_dir_all(&folder).expect("clean up");
+        assert_eq!(plan.problems.len(), 1, "{plan:?}");
+        assert!(
+            written.contains("the automations cannot be read: "),
+            "{written:?}"
+        );
+        assert!(
+            written.ends_with("no saved automation can run\n"),
+            "{written:?}"
+        );
+    }
+
+    #[test]
+    fn orders_that_change_something_get_a_log_line() {
+        let plan = app_plan("Example App", &[]);
         let owner = (SessionId(1), appytappy_engine::RuleIndex(0));
         let orders = [
             Order::Read(reader::Job {

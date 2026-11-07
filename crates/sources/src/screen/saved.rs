@@ -43,7 +43,8 @@ impl From<ColorDef> for Rgb {
 ///
 /// # Errors
 ///
-/// Returns a [`SavedError`] when the region is empty, a picture cannot be
+/// Returns a [`SavedError`] when the region is empty or does not fit the
+/// window size it was drawn at, a picture cannot be
 /// read or decoded or is not the region's size, the bar's two colors are the
 /// same, or a number cannot learn from one of its pictures.
 pub fn build(
@@ -61,6 +62,9 @@ pub fn build(
         width: screen.window_size.width,
         height: screen.window_size.height,
     };
+    if !region.fits(window_size) {
+        return Err(SavedError::OutsideWindow { window_size });
+    }
     let mut load = |name: &str| {
         let bytes = picture(name).map_err(|source| SavedError::Missing {
             name: name.to_owned(),
@@ -121,6 +125,11 @@ pub fn build(
 pub enum SavedError {
     /// The region has no width or no height.
     EmptyRegion,
+    /// The region does not fit inside the window size it was drawn at.
+    OutsideWindow {
+        /// The window size it was drawn at.
+        window_size: Size,
+    },
     /// A picture the check names cannot be read.
     Missing {
         /// The picture's file name.
@@ -159,6 +168,10 @@ impl fmt::Display for SavedError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyRegion => formatter.write_str("its region is empty"),
+            Self::OutsideWindow { window_size } => write!(
+                formatter,
+                "its region lies outside the {window_size} window it was drawn on"
+            ),
             Self::Missing { name, .. } => write!(formatter, "its picture {name} cannot be read"),
             Self::Picture { name, .. } => {
                 write!(
@@ -193,7 +206,10 @@ impl Error for SavedError {
             Self::Missing { source, .. } => Some(source),
             Self::Picture { source, .. } => Some(source),
             Self::Learn { source, .. } => Some(source),
-            Self::EmptyRegion | Self::PictureSize { .. } | Self::SameColors => None,
+            Self::EmptyRegion
+            | Self::OutsideWindow { .. }
+            | Self::PictureSize { .. }
+            | Self::SameColors => None,
         }
     }
 }
@@ -396,6 +412,20 @@ mod tests {
         let error = build(&empty, from(&files)).expect_err("empty");
         assert_eq!(error.to_string(), "its region is empty");
         assert!(error.source().is_none());
+        let mut outside = reference("small.png");
+        outside.region.x = 797;
+        let error = build(&outside, from(&files)).expect_err("outside");
+        assert_eq!(
+            error.to_string(),
+            "its region lies outside the 800x600 window it was drawn on"
+        );
+        assert!(error.source().is_none());
+        outside.region.x = 796;
+        let edge = build(&outside, from(&files));
+        assert!(
+            matches!(edge, Err(SavedError::PictureSize { .. })),
+            "touching the edge fits, so only the picture is wrong: {edge:?}"
+        );
         assert_eq!(
             SavedError::SameColors.to_string(),
             "its bar's filled and empty colors are the same"
