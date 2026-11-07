@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { colorAt, decodePicture, hex } from '../src/pixels.ts';
+import { colorAt, decodePicture, hex } from '../src/lib/pixels.ts';
 
 function encoded(width: number, height: number, pixels: readonly number[]): ArrayBuffer {
   const buffer = new ArrayBuffer(8 + pixels.length);

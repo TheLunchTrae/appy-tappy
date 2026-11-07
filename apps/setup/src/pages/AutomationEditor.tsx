@@ -11,7 +11,7 @@ import {
   stopWatching,
   watchValue,
   watchedReading,
-} from './api.ts';
+} from '../lib/api.ts';
 import {
   type ActionDraft,
   type Draft,
@@ -32,9 +32,9 @@ import {
   undoText,
   valueChoices,
   withSource,
-} from './automation.ts';
-import { background, useRepeat } from './repeat.ts';
-import { actionKeys } from './shortcut.ts';
+} from '../lib/automation.ts';
+import { background, useRepeat } from '../lib/repeat.ts';
+import { actionKeys } from '../lib/shortcut.ts';
 
 /** The action menu's choices: each media command, then setting a volume, then pressing keys. */
 type ActionChoice = MediaCommand | 'volume' | 'keys';

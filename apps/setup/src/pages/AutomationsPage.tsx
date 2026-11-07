@@ -1,8 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { type AppSummary, type AutomationSummary, deleteAutomation, errorText, setAutomationEnabled } from './api.ts';
-import { COMPARISON_NAMES, type ValueChoice, actionText, findValue, targetText, valueChoices } from './automation.ts';
-import { background } from './repeat.ts';
+import {
+  type AppSummary,
+  type AutomationSummary,
+  deleteAutomation,
+  errorText,
+  setAutomationEnabled,
+} from '../lib/api.ts';
+import {
+  COMPARISON_NAMES,
+  type ValueChoice,
+  actionText,
+  findValue,
+  targetText,
+  valueChoices,
+} from '../lib/automation.ts';
+import { background } from '../lib/repeat.ts';
 
 interface RowProps {
   readonly summary: AutomationSummary;

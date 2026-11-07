@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { contains, dragCorner, fit, fromCorners, moveRect, toPicture } from '../src/region.ts';
+import { contains, dragCorner, fit, fromCorners, moveRect, toPicture } from '../src/lib/region.ts';
 
 const bounds = { width: 100, height: 50 };
 

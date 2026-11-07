@@ -1,8 +1,8 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 
-import { type AntiCheat, type AppSummary, type OverlayMode, errorText, setAntiCheat, setOverlay } from './api.ts';
-import { ANTI_CHEAT_NAMES, PRIORITY_NAMES } from './describe.ts';
-import { background } from './repeat.ts';
+import { type AntiCheat, type AppSummary, type OverlayMode, errorText, setAntiCheat, setOverlay } from '../lib/api.ts';
+import { ANTI_CHEAT_NAMES, PRIORITY_NAMES } from '../lib/describe.ts';
+import { background } from '../lib/repeat.ts';
 
 /**
  * The anti-cheat menu's choices: not set first, since every application starts there, and none last,

@@ -10,9 +10,9 @@ import {
   listWindows,
   matchWindows,
   pickWindow,
-} from './api.ts';
-import { PRIORITY_NAMES } from './describe.ts';
-import { background } from './repeat.ts';
+} from '../lib/api.ts';
+import { PRIORITY_NAMES } from '../lib/describe.ts';
+import { background } from '../lib/repeat.ts';
 
 /** The window to capture and the application its values belong to. */
 export interface Choice {

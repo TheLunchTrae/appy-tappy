@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './App.tsx';
 import { Overlay } from './Overlay.tsx';
-import { overlayOf } from './overlay.ts';
+import { overlayOf } from './lib/overlay.ts';
 import './styles.css';
 
 /** The overlay this window shows, or null for the main window, such as outside the app while the UI is worked on. */

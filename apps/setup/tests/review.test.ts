@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { RecordedReading } from '../src/api.ts';
-import { clock, entries, keptLabels, seen, startEntry, tileNote } from '../src/review.ts';
+import type { RecordedReading } from '../src/lib/api.ts';
+import { clock, entries, keptLabels, seen, startEntry, tileNote } from '../src/lib/review.ts';
 
 const read = (text: string): RecordedReading => ({ firstMs: 0, seen: 1, text: { kind: 'read', text } });
 const pending: RecordedReading = { firstMs: 0, seen: 1, text: { kind: 'pending' } };

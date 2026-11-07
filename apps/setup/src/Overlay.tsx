@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { type OverlayMode, type OverlayView, errorText, overlayCard, overlayState } from './api.ts';
-import { readingText } from './automation.ts';
-import { background, useRepeat } from './repeat.ts';
+import { type OverlayMode, type OverlayView, errorText, overlayCard, overlayState } from './lib/api.ts';
+import { readingText } from './lib/automation.ts';
+import { background, useRepeat } from './lib/repeat.ts';
 
 /** How long the overlay waits between two polls; its readings change at most about four times a second. */
 const POLL_MS = 150;

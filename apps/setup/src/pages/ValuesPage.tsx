@@ -1,10 +1,10 @@
 import { useState } from 'react';
 
-import { type AppSummary, type AutomationSummary, deleteValue, errorText } from './api.ts';
-import { usedBy } from './automation.ts';
-import { checkSummary } from './describe.ts';
-import { hex } from './pixels.ts';
-import { background } from './repeat.ts';
+import { type AppSummary, type AutomationSummary, deleteValue, errorText } from '../lib/api.ts';
+import { usedBy } from '../lib/automation.ts';
+import { checkSummary } from '../lib/describe.ts';
+import { hex } from '../lib/pixels.ts';
+import { background } from '../lib/repeat.ts';
 
 interface AppRowsProps {
   readonly app: AppSummary;

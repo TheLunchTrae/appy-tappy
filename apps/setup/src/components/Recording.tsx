@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
 
-import type { RecordedReading, RecordingView } from './api.ts';
+import type { RecordedReading, RecordingView } from '../lib/api.ts';
 import { PictureCanvas } from './canvas.tsx';
-import type { Picture } from './pixels.ts';
-import { type ReviewEntry, clock, seen, tileNote } from './review.ts';
+import type { Picture } from '../lib/pixels.ts';
+import { type ReviewEntry, clock, seen, tileNote } from '../lib/review.ts';
 
 /** How many of the newest readings the panel lists while recording. */
 const LISTED = 6;
