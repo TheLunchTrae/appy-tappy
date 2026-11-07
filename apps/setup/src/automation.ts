@@ -7,7 +7,9 @@ import type {
   AutomationSummary,
   CheckDef,
   Comparison,
+  Live,
   MediaCommand,
+  Reading,
   ValueDef,
   WhenDef,
 } from './api.ts';
@@ -62,6 +64,83 @@ export const COMPARISON_NAMES: Readonly<Record<Comparison, string>> = {
   atLeast: 'is at least',
   above: 'is above',
 };
+
+/** The most decimals a reading shows when that is enough to tell it from the target. */
+const READING_DECIMALS = 4;
+
+/**
+ * A number as read, such as `87`, `12.46` or `33.3333`: exact up to four
+ * decimals, and rounded beyond that only while the rounded number still falls
+ * on the same side of `target` as the reading, so it never contradicts
+ * whether a condition holds.
+ */
+function numberText(value: number, target?: number): string {
+  for (let decimals = 0; decimals <= READING_DECIMALS; decimals += 1) {
+    const shown = value.toFixed(decimals);
+    if (Number(shown) === value) {
+      return shown;
+    }
+  }
+  const rounded = value.toFixed(READING_DECIMALS);
+  if (target !== undefined && Math.sign(Number(rounded) - target) !== Math.sign(value - target)) {
+    return String(value);
+  }
+  return rounded;
+}
+
+/** A reading as the UI shows it, such as `87`, `12.46` or `Yes`, never contradicting a comparison with `target`. */
+export function readingText(reading: Reading, target?: number | boolean): string {
+  switch (reading.kind) {
+    case 'number':
+      return numberText(reading.value, typeof target === 'number' ? target : undefined);
+    case 'flag':
+      return reading.value ? 'Yes' : 'No';
+  }
+}
+
+/** A live reading, or an error that stopped one, or null before the first answer arrives. */
+export type LiveState = Live | { readonly kind: 'error'; readonly message: string } | null;
+
+/** A live reading in a sentence, such as `Progress reads 87 now, so the condition is true.` */
+export function liveText(live: LiveState, choice: ValueChoice, when: WhenDef | null): string {
+  const name = choice.value.name;
+  if (live === null) {
+    return `Looking for ${choice.appName}…`;
+  }
+  switch (live.kind) {
+    case 'waiting':
+      return `Waiting for ${choice.appName} to show ${name}…`;
+    case 'error':
+    case 'problem':
+    case 'lost':
+      return live.message;
+    case 'read': {
+      const reads = `${name} reads ${readingText(live.reading, when?.target)} now`;
+      if (live.holds === null) {
+        return `${reads}.`;
+      }
+      return live.holds ? `${reads}, so the condition is true.` : `${reads}, so the condition is not true.`;
+    }
+  }
+}
+
+/**
+ * What a screen reader announces of a live reading: only whether the
+ * condition holds, or what is wrong, so a moving number is not announced
+ * twice a second.
+ */
+export function liveAnnouncement(live: LiveState): string {
+  if (live === null || live.kind === 'waiting') {
+    return '';
+  }
+  if (live.kind === 'read') {
+    if (live.holds === null) {
+      return '';
+    }
+    return live.holds ? 'The condition is true.' : 'The condition is not true.';
+  }
+  return live.message;
+}
 
 /** A target as the condition reads it. */
 export function targetText(target: number | boolean): string {
@@ -200,10 +279,11 @@ const MAX_COOLDOWN_SECONDS = 86_400;
 /** A plain decimal number, such as `90`, `-3` or `12.5`. */
 const DECIMAL = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/u;
 
-/** A number typed into a field, or null when it is not a plain decimal number. */
+/** A number typed into a field, or null when it is not a plain decimal number or too large to hold. */
 function typedNumber(text: string): number | null {
   const trimmed = text.trim();
-  return DECIMAL.test(trimmed) ? Number(trimmed) : null;
+  const number = DECIMAL.test(trimmed) ? Number(trimmed) : Number.NaN;
+  return Number.isFinite(number) ? number : null;
 }
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
@@ -221,6 +301,22 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
   return { kind: 'volume', percent, app };
 }
 
+/** The condition `draft` describes on the value `choice`, or the next thing to fill in. */
+export function buildWhen(draft: Draft, choice: ValueChoice): WhenDef | string {
+  let target: number | boolean = draft.flag;
+  if (choice.kind === 'number') {
+    const number = typedNumber(draft.number);
+    if (number === null) {
+      return `Enter the number ${choice.value.name} is compared with, such as 90 or 12.5.`;
+    }
+    target = number;
+  }
+  if (!COMPARISONS[choice.kind].includes(draft.is)) {
+    return `Pick how ${choice.value.name} is compared.`;
+  }
+  return { app: choice.app, value: choice.value.id, is: draft.is, target };
+}
+
 /** The automation a draft describes, or the next thing to fill in. */
 export type Built =
   | { readonly ok: true; readonly automation: AutomationDef }
@@ -236,16 +332,9 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
   if (choice === null) {
     return { ok: false, next: 'Pick the value to watch.' };
   }
-  let target: number | boolean = draft.flag;
-  if (choice.kind === 'number') {
-    const number = typedNumber(draft.number);
-    if (number === null) {
-      return { ok: false, next: `Enter the number ${choice.value.name} is compared with, such as 90 or 12.5.` };
-    }
-    target = number;
-  }
-  if (!COMPARISONS[choice.kind].includes(draft.is)) {
-    return { ok: false, next: `Pick how ${choice.value.name} is compared.` };
+  const when = buildWhen(draft, choice);
+  if (typeof when === 'string') {
+    return { ok: false, next: when };
   }
   if (draft.actions.length === 0) {
     return { ok: false, next: 'Add an action.' };
@@ -271,7 +360,7 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
       id,
       name,
       enabled: draft.enabled,
-      when: { app: choice.app, value: choice.value.id, is: draft.is, target },
+      when,
       actions,
       undo: draft.undo,
       cooldownMs: Math.round(cooldown * 1000),
