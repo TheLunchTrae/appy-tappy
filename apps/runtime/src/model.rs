@@ -616,4 +616,10 @@ mod tests {
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
         assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
     }
+
+    #[test]
+    fn states_read_as_lowercase_words() {
+        let names = [State::Idle, State::Attached, State::Degraded].map(|state| state.to_string());
+        assert_eq!(names, ["idle", "attached", "degraded"]);
+    }
 }

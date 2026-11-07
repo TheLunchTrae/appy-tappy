@@ -354,6 +354,18 @@ mod tests {
     }
 
     #[test]
+    fn bar_fill_skips_a_dark_border() {
+        let black = Rgb {
+            red: 0,
+            green: 0,
+            blue: 0,
+        };
+        let bar = BarFill::new(GREEN, GRAY).unwrap();
+        let image = row(&[black, black, GREEN, GREEN, GRAY, GRAY, black, black]);
+        assert_eq!(bar.percent(&image), Ok(Number::new(50.0).unwrap()));
+    }
+
+    #[test]
     fn a_bar_needs_two_colors() {
         assert_eq!(BarFill::new(GREEN, GREEN), Err(SameColors));
     }
