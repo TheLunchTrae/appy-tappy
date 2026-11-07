@@ -2,11 +2,12 @@
 
 AppyTappy has two programs that share a set of library crates:
 
-- The **setup app** runs when the user wants to change something. It finds out
-  how to read an application's state, lets the user build rules, and compiles
-  them into one file.
-- The **runtime** runs in the background all the time. It loads that file,
-  watches the applications it names, and runs actions when a rule fires.
+- The **setup app** runs when the user wants to change something. It finds
+  the application's window, lets the user draw values on it, and saves
+  automations that act on those values.
+- The **runtime** runs in the background all the time. It reads what the
+  setup app saved, watches the applications it names, and runs an
+  automation's actions when it fires.
 
 The setup app runs rarely, so it can afford a heavier UI. The runtime is always
 on, so it must stay small. Every design choice below follows from that split.
@@ -18,40 +19,39 @@ on, so it must stay small. Every design choice below follows from that split.
                 setup app (Tauri, runs on demand)
   ┌─────────────────────────────────────────────────────────┐
   │ React UI ── Tauri commands ── owner thread              │
-  │             discovery, scan, preview, compile           │
-  └───────────────┬──────────────────────────▲──────────────┘
-    reads, writes │ writes atomically        │ reads
-  authoring files ▼                          │
-                compiled config          status file
-                  │ watched, revalidated     ▲ writes
-                  ▼                          │
+  │             windows, capture, values, automations       │
+  └───────────────┬──────────────────────────┬──────────────┘
+    reads, writes │                          │ sets after each save
+     saved files  ▼                          ▼
+          applications, automations    Reload event
+                  │ read at start          │
+                  │ and on each reload     │
+                  ▼                        ▼
                 runtime (plain Rust, always on)
   ┌─────────────────────────────────────────────────────────┐
-  │ config watcher ─ ConfigChanged ─┐                       │
+  │ reload watch ─ reload ──────────┐                       │
   │ lifecycle ─ started, exited ────┤                       │
-  │ source workers ─ samples ───────┼─► owner thread:       │
-  │ action worker ─ results ────────┤   root model + engine │
+  │ readers ─ samples, problems ────┼─► owner thread:       │
+  │ action thread ─ failures ───────┤   model + engine      │
   │ tray ─ enable, disable, quit ───┘           │           │
-  │ ◄── action requests, worker start and stop ─┘           │
+  │ ◄── actions, undos, readers started, stopped┘           │
   └─────────────────────────────────────────────────────────┘
 ```
 
-1. The setup app reads and writes **authoring files**: app definitions (how
-   to read an application) and the user's rules.
-2. Its compile step validates them, applies the anti-cheat policy, and writes
-   one **compiled config** that holds only what the runtime needs.
-3. The runtime watches that file, validates it again, and swaps it in. It
-   never reads authoring files.
-4. The runtime writes a **status file**: which applications are attached and the
-   last problem, such as a rejected config. The setup app reads it to show the
-   user what the runtime is doing. A file cannot say whether its writer is
-   still alive, so the setup app checks that the runtime is running through
-   the runtime's single-instance guard instead.
+1. The setup app saves each application, with the values drawn on its
+   window, and each automation as files. [Setup app](setup-app.md#saved-files)
+   describes them.
+2. After each save it sets the named event `Local\AppyTappy.Reload`.
+3. The runtime reads the saved files when it starts and again on each reload,
+   checks them, and logs any automation that cannot run. The rest run.
+4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`. The
+   setup app checks that the runtime is running through the runtime's
+   single-instance guard.
 
-The two programs never talk directly: no sockets, pipes, or shared memory.
-Files carry everything between them. The setup app previews and tests rules
-itself, because it links the same `engine` and `sources` crates that the
-runtime uses.
+Apart from that one event, the two programs share only files: no sockets,
+pipes, or shared memory. A compiled config with a
+status file, described under [Files and handoff](#files-and-handoff), stays
+planned in [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
 
 ## Workspace layout
 

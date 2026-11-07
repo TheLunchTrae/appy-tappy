@@ -238,7 +238,8 @@ fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let (sender, events) = mpsc::channel();
     let mut model = Model::default();
     // Without a desktop the runtime still works; it only has no icon.
-    let tray = Tray::start(sender.clone(), tray::menu(&model))
+    let mut shown = tray::menu(&model);
+    let tray = Tray::start(sender.clone(), shown.clone())
         .inspect_err(|error| note(log, &format!("no tray icon: {error}")))
         .ok();
     // Without the reload event the runtime still runs what it read at start.
@@ -292,31 +293,35 @@ fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         readers: BTreeMap::new(),
     };
     let orders = model.replan(first.apps);
-    carry(orders, &mut crew, &model, log);
+    carry(orders, &mut crew, log);
     for event in &events {
         match handle(&mut model, log, event) {
-            Step::Carry(orders) => carry(orders, &mut crew, &model, log),
+            Step::Carry(orders) => carry(orders, &mut crew, log),
             Step::Reload => {
                 let plan = load(&stores, log);
                 if inputs.send(Input::Watch(plan.watchlist())).is_err() {
                     break;
                 }
                 let orders = model.replan(plan.apps);
-                carry(orders, &mut crew, &model, log);
+                carry(orders, &mut crew, log);
             },
             Step::Stop => break,
         }
-        if let Some(tray) = &tray {
+        // Most events, such as each value read, leave the menu as it was, and
+        // the icon is redrawn only when it changes.
+        let menu = tray::menu(&model);
+        if let Some(tray) = tray.as_ref().filter(|_| menu != shown) {
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a tray that ended reports why when it is stopped"
             )]
-            let _ = tray.show(tray::menu(&model));
+            let _ = tray.show(menu.clone());
         }
+        shown = menu;
     }
     // Undo what the running automations changed before anything stops.
     let orders = model.set_enabled(false);
-    carry(orders, &mut crew, &model, log);
+    carry(orders, &mut crew, log);
     // The tray stops first, so its icon goes before anything else. Dropping
     // the inputs and the jobs ends detection and the actions, so the joins
     // below return; the actions undo what is queued first.
@@ -340,6 +345,7 @@ fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
 /// The operating system's media and audio controls, made on the action
 /// thread.
 #[cfg(windows)]
+#[mutants::skip] // Makes the real controls, checked by hand on Windows.
 fn controls() -> io::Result<appytappy_actions::win::WindowsControls> {
     appytappy_actions::win::WindowsControls::new()
 }
@@ -442,7 +448,7 @@ fn loaded_line(plan: &plan::Plan) -> String {
 /// Carries out `orders`: starts and stops readers and hands actions to the
 /// action thread.
 #[mutants::skip]
-fn carry(orders: Vec<Order>, crew: &mut Crew, model: &Model, log: &mut Log) {
+fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
     for order in orders {
         if let Some(line) = order_line(&order) {
             note(log, &line);
@@ -458,9 +464,8 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, model: &Model, log: &mut Log) {
                     Err(error) => note(log, &format!("{name} cannot be read: {error}")),
                 }
             },
-            Order::StopReading(id) => {
+            Order::StopReading(id, name) => {
                 if let Some(Err(error)) = crew.readers.remove(&id).map(Reader::stop) {
-                    let name = model.app_name(id).unwrap_or("an application");
                     note(log, &format!("{name}'s reader stopped badly: {error}"));
                 }
             },
@@ -479,7 +484,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, model: &Model, log: &mut Log) {
 fn order_line(order: &Order) -> Option<String> {
     match order {
         Order::Read(job) => Some(format!("{}: reading its values", job.plan.name)),
-        Order::StopReading(_) => None,
+        Order::StopReading(..) => None,
         Order::Act(act::Job::Run { automation, .. }) => Some(format!("{automation}: runs")),
         Order::Act(act::Job::Undo { automation, .. }) => Some(format!("{automation}: undone")),
     }
@@ -571,6 +576,7 @@ mod tests {
     use std::process;
 
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::window_match::{MatchPriority, Pattern, WindowMatch};
 
     use super::*;
 
@@ -743,5 +749,57 @@ mod tests {
     fn the_log_says_how_many_automations_run() {
         let empty = plan::Plan::default();
         assert_eq!(loaded_line(&empty), "no saved automation can run");
+    }
+
+    #[test]
+    fn orders_that_change_something_get_a_log_line() {
+        let plan = Arc::new(plan::AppPlan {
+            name: "Example App".to_owned(),
+            window: WindowMatch {
+                title: Pattern::new("*"),
+                class: Pattern::new("*"),
+                executable: Pattern::new("Example.exe"),
+                priority: MatchPriority::Title,
+            },
+            values: Vec::new(),
+            rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
+            automations: Vec::new(),
+        });
+        let owner = (SessionId(1), appytappy_engine::RuleIndex(0));
+        let orders = [
+            Order::Read(reader::Job {
+                session: SessionId(1),
+                plan,
+                executable: "Example.exe".to_owned(),
+            }),
+            Order::StopReading(SessionId(1), "Example App".to_owned()),
+            Order::Act(act::Job::Run {
+                owner,
+                automation: "Mute".to_owned(),
+                actions: Box::new([]),
+                restore: appytappy_config::rule::Restore::OnRelease,
+            }),
+            Order::Act(act::Job::Undo {
+                owner,
+                automation: "Mute".to_owned(),
+            }),
+        ];
+        assert_eq!(
+            orders.each_ref().map(order_line),
+            [
+                Some("Example App: reading its values".to_owned()),
+                None,
+                Some("Mute: runs".to_owned()),
+                Some("Mute: undone".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_thread_that_panics_is_an_error_that_names_it() {
+        join(spawn("calm", || {}).expect("spawn")).expect("no panic");
+        let panicked = spawn("example", || panic!("broke")).expect("spawn");
+        let error = join(panicked).expect_err("it panicked");
+        assert_eq!(error.to_string(), "the example thread panicked: broke");
     }
 }

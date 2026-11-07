@@ -46,7 +46,7 @@ use windows::core::{Interface, factory};
 use super::WindowsSystem;
 use crate::schedule::ReadClock;
 use crate::screen::{
-    Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, Region, Size,
+    Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Region, Size,
 };
 
 /// The frame pool's buffers: one the thread may hold until its next read,
@@ -395,12 +395,7 @@ impl Capturer {
             Crop::Region(region) => Some(region),
         }
         .filter(|region| region.fits(window_size))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("the region lies outside the {window_size} window"),
-            )
-        })?;
+        .ok_or(OutsideWindow { window_size })?;
         let size = region.size();
         let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
         #[expect(unsafe_code, reason = "a Win32 call")]

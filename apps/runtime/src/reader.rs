@@ -1,30 +1,40 @@
 //! Reading one attached application's values from its window.
 //!
 //! Each running session has a reader thread. It finds the application's
-//! window among the attached process's windows with the application's
-//! [`appytappy_config::window_match::WindowMatch`], then captures one region
-//! of it: the smallest rectangle that holds every value's region, so the
-//! capture copies no more pixels than the values need. Windows pushes a frame
-//! only when the window's content changes, so a still window costs nothing,
-//! and the [`ReadSchedule`] backs off while the values hold still. A value is
-//! sent to the owner only when it reads differently from its last read.
+//! window with the application's
+//! [`appytappy_config::window_match::WindowMatch`], among the windows of
+//! every running process whose executable fits it, as the setup app does.
+//! Then it captures one region of the window: the smallest rectangle that
+//! holds the regions of every value drawn at the window's current size, so
+//! the capture copies no more pixels than the values need. Windows pushes a
+//! frame only when the window's content changes, so a still window costs
+//! nothing, and the [`ReadSchedule`] backs off while the values hold still.
+//! A value is sent to the owner only when it reads differently from its last
+//! read.
+//!
+//! A value's region means something only at the window size it was drawn
+//! at. When the window takes another size at which other values were drawn,
+//! the reader captures those instead; a value whose size the window does not
+//! have is not read, and the reader says so once.
 //!
 //! When the window closes, the reader looks for the window again, because
 //! many applications replace their window as they run, such as when they
 //! switch to full screen. While no window fits, it looks again every
 //! [`FIND_AGAIN`].
 
+use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
-use appytappy_sources::screen::{Capture, CaptureSession, Crop, Frame, Region};
+use appytappy_sources::screen::{
+    Capture, CaptureSession, Crop, Frame, OutsideWindow, Region, Size,
+};
 use appytappy_sources::system::System;
 
 use crate::plan::AppPlan;
@@ -45,9 +55,8 @@ pub(crate) struct Job {
     pub(crate) session: SessionId,
     /// The application's values and window.
     pub(crate) plan: Arc<AppPlan>,
-    /// The attached process, whose windows are searched.
-    pub(crate) process: ProcessId,
-    /// The process's executable, such as `Example.exe`.
+    /// The attached process's executable, such as `Example.exe`, for the
+    /// log.
     pub(crate) executable: String,
 }
 
@@ -82,6 +91,9 @@ enum Control {
     Stop,
     /// The captured window closed.
     Lost,
+    /// The window took a size at which other values were drawn, so the
+    /// capture starts again for those.
+    Resized(Size),
 }
 
 /// A running reader thread.
@@ -122,12 +134,7 @@ impl Reader {
             reason = "a failed send means the thread already ended, and the join below says how"
         )]
         let _ = self.control.send(Control::Stop);
-        self.thread.join().map_err(|payload| {
-            io::Error::other(format!(
-                "a reader thread panicked: {}",
-                appytappy_platform::panic_reason(payload.as_ref())
-            ))
-        })
+        crate::join(self.thread)
     }
 }
 
@@ -136,8 +143,8 @@ fn send<E: From<Reading>>(events: &Sender<E>, reading: Reading) -> bool {
     events.send(E::from(reading)).is_ok()
 }
 
-/// The reader thread: finds the window, captures it until it closes or the
-/// session stops, and looks again after it closes.
+/// The reader thread: finds the window, captures it until it closes, takes
+/// another size, or the session stops, and looks again after it closes.
 fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
     system: &S,
     job: &Job,
@@ -145,6 +152,11 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
     lost: &Sender<Control>,
     events: &Sender<E>,
 ) {
+    // The window size whose values the capture reads, until a frame shows
+    // the window has another. A plan always has a value to read.
+    let Some(mut size) = job.plan.values.first().map(|value| value.check.window_size) else {
+        return;
+    };
     // The last problem sent, so each is sent once until it changes.
     let mut reported: Option<String> = None;
     let report = |reported: &mut Option<String>, problem: String| {
@@ -162,7 +174,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
     };
     // Waits before looking again; false once the session stopped.
     let wait = || match control.recv_timeout(FIND_AGAIN) {
-        Ok(Control::Lost) | Err(RecvTimeoutError::Timeout) => true,
+        Ok(Control::Lost | Control::Resized(_)) | Err(RecvTimeoutError::Timeout) => true,
         Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected) => false,
     };
     loop {
@@ -179,37 +191,24 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 continue;
             },
             Err(error) => {
-                if !report(
-                    &mut reported,
-                    format!("its windows cannot be listed: {error}"),
-                ) || !wait()
-                {
+                let problem = format!("its windows cannot be listed: {error}");
+                if !report(&mut reported, problem) || !wait() {
                     return;
                 }
                 continue;
             },
         };
-        let Some(frames) = FrameReader::new(job, events.clone(), lost.clone()) else {
-            // A plan always has a value to read; without one, wait to stop.
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "whatever arrives, there is nothing to read"
-            )]
-            let _ = control.recv();
+        let Some(mut frames) = FrameReader::new(job, size, events.clone(), lost.clone()) else {
             return;
         };
         let crop = Crop::Region(frames.bounds);
         let throttle = ReadInterval::DEFAULT.min();
-        let mut frames = frames;
         let handler = Box::new(move |frame: io::Result<Frame<'_>>| frames.handle(frame));
         let session = match system.start(window, crop, throttle, handler) {
             Ok(session) => session,
             Err(error) => {
-                if !report(
-                    &mut reported,
-                    format!("its window cannot be captured: {error}"),
-                ) || !wait()
-                {
+                let problem = format!("its window cannot be captured: {error}");
+                if !report(&mut reported, problem) || !wait() {
                     return;
                 }
                 continue;
@@ -222,41 +221,57 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         }
         match next {
             Ok(Control::Lost) => {},
+            Ok(Control::Resized(resized)) => size = resized,
             Ok(Control::Stop) | Err(_) => return,
         }
     }
 }
 
-/// The handle of the attached process's window that fits the app best.
+/// The handle of the visible window that fits the app best, among the
+/// windows of every process whose executable fits it.
 fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Option<u64>> {
+    let executables: BTreeMap<_, _> = system
+        .processes()?
+        .into_iter()
+        .filter(|process| job.plan.window.executable.matches(&process.executable))
+        .map(|process| (process.id, process.executable))
+        .collect();
     let windows: Vec<_> = system
         .windows()?
         .into_iter()
-        .filter(|window| window.process == job.process && window.visible)
+        .filter(|window| window.visible)
+        .filter_map(|window| {
+            let executable = executables.get(&window.process)?;
+            Some((window, executable))
+        })
         .collect();
     let ranked = job
         .plan
         .window
-        .rank(windows.iter().map(|window| WindowFacts {
+        .rank(windows.iter().map(|(window, executable)| WindowFacts {
             title: &window.title,
             class: &window.class,
-            executable: &job.executable,
+            executable,
         }));
     Ok(ranked
         .first()
         .and_then(|&position| windows.get(position))
-        .map(|window| window.handle))
+        .map(|(window, _)| window.handle))
 }
 
-/// The capture's frame handler: reads each value from a frame and sends
-/// what changed.
+/// The capture's frame handler: reads each value drawn at one window size
+/// from a frame and sends what changed.
 struct FrameReader<E> {
     session: SessionId,
     plan: Arc<AppPlan>,
-    /// The region the capture copies: the smallest that holds every value.
+    /// The window size whose values it reads.
+    size: Size,
+    /// The region the capture copies: the smallest that holds every value
+    /// drawn at `size`.
     bounds: Region,
-    /// Each value's region within `bounds`.
-    regions: Vec<Region>,
+    /// Each value's region within `bounds`, or `None` for a value drawn at
+    /// another size.
+    regions: Vec<Option<Region>>,
     /// Each value's last reading.
     last: Vec<Option<Value>>,
     /// Each value's last problem.
@@ -265,44 +280,29 @@ struct FrameReader<E> {
     frame_problem: Option<String>,
     schedule: ReadSchedule,
     events: Sender<E>,
-    lost: Sender<Control>,
+    control: Sender<Control>,
 }
 
 impl<E: From<Reading>> FrameReader<E> {
-    /// The handler for `job`, or `None` when it has no value to read.
-    fn new(job: &Job, events: Sender<E>, lost: Sender<Control>) -> Option<Self> {
-        let regions: Vec<Region> = job
+    /// The handler for the values of `job` drawn at `size`, or `None` when
+    /// none was.
+    fn new(job: &Job, size: Size, events: Sender<E>, control: Sender<Control>) -> Option<Self> {
+        let drawn: Vec<Option<Region>> = job
             .plan
             .values
             .iter()
-            .map(|value| value.check.region)
+            .map(|value| (value.check.window_size == size).then_some(value.check.region))
             .collect();
-        let left = regions.iter().map(|region| region.x()).min()?;
-        let top = regions.iter().map(|region| region.y()).min()?;
-        let right = regions.iter().map(|region| region.right()).max()?;
-        let bottom = regions.iter().map(|region| region.bottom()).max()?;
-        let bounds = Region::new(
-            left,
-            top,
-            right.checked_sub(left)?,
-            bottom.checked_sub(top)?,
-        )?;
-        let regions = regions
-            .iter()
-            .map(|region| {
-                let size = region.size();
-                Region::new(
-                    region.x().checked_sub(left)?,
-                    region.y().checked_sub(top)?,
-                    size.width,
-                    size.height,
-                )
-            })
-            .collect::<Option<Vec<_>>>()?;
-        let count = regions.len();
+        let bounds = drawn.iter().flatten().copied().reduce(union)?;
+        let regions = drawn
+            .into_iter()
+            .map(|region| region.and_then(|region| within(region, bounds)))
+            .collect();
+        let count = job.plan.values.len();
         Some(Self {
             session: job.session,
             plan: Arc::clone(&job.plan),
+            size,
             bounds,
             regions,
             last: vec![None; count],
@@ -310,85 +310,48 @@ impl<E: From<Reading>> FrameReader<E> {
             frame_problem: None,
             schedule: ReadSchedule::new(ReadInterval::DEFAULT),
             events,
-            lost,
+            control,
         })
     }
 
     /// Reads `frame` and returns how long to wait before the next one.
     fn handle(&mut self, frame: io::Result<Frame<'_>>) -> Duration {
-        let frame = match frame {
-            Ok(frame) => frame,
+        let (window_size, frame) = match frame {
+            Ok(frame) => (frame.window_size, Some(frame)),
             Err(error) if error.kind() == io::ErrorKind::NotConnected => {
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "a failed send means the reader already stopped"
-                )]
-                let _ = self.lost.send(Control::Lost);
+                self.tell(Control::Lost);
                 return Duration::ZERO;
             },
             Err(error) => {
-                let problem = format!("a frame cannot be read: {error}");
-                if self.frame_problem.as_ref() != Some(&problem) {
-                    self.frame_problem = Some(problem.clone());
-                    self.problem(problem);
+                if let Some(window_size) = OutsideWindow::in_error(&error) {
+                    (window_size, None)
+                } else {
+                    let problem = format!("a frame cannot be read: {error}");
+                    if self.frame_problem.as_ref() != Some(&problem) {
+                        self.frame_problem = Some(problem.clone());
+                        self.problem(problem);
+                    }
+                    return self.schedule.after_read(Activity::Steady);
                 }
-                return self.schedule.after_read(Activity::Steady);
             },
         };
         self.frame_problem = None;
+        let other_values = self
+            .plan
+            .values
+            .iter()
+            .any(|value| value.check.window_size == window_size);
+        if window_size != self.size && other_values {
+            self.tell(Control::Resized(window_size));
+            return Duration::ZERO;
+        }
         let mut changed = false;
-        for (position, value) in self.plan.values.iter().enumerate() {
-            let read = if frame.window_size == value.check.window_size {
-                self.regions
-                    .get(position)
-                    .and_then(|&region| frame.image.crop(region))
-                    .ok_or_else(|| format!("{} is outside the captured frame", value.name))
-                    .and_then(|image| {
-                        value
-                            .check
-                            .check
-                            .read(&image)
-                            .map_err(|error| format!("{} cannot be read: {error}", value.name))
-                    })
-            } else {
-                Err(format!(
-                    "the window is {} but {} was drawn when it was {}; resize the window or \
-                     draw the value again",
-                    frame.window_size, value.name, value.check.window_size
-                ))
-            };
+        for position in 0..self.plan.values.len() {
+            let read = self.read(position, window_size, frame.as_ref());
             match read {
-                Ok(reading) => {
-                    if let Some(slot) = self.problems.get_mut(position) {
-                        *slot = None;
-                    }
-                    let Some(last) = self.last.get_mut(position) else {
-                        continue;
-                    };
-                    if *last != Some(reading) {
-                        *last = Some(reading);
-                        changed = true;
-                        #[expect(
-                            clippy::let_underscore_must_use,
-                            reason = "a failed send means the owner stopped this session"
-                        )]
-                        let _ = self.events.send(E::from(Reading::Sample {
-                            session: self.session,
-                            signal: value.signal.clone(),
-                            value: reading,
-                            at: frame.received,
-                        }));
-                    }
-                },
-                Err(problem) => {
-                    let Some(slot) = self.problems.get_mut(position) else {
-                        continue;
-                    };
-                    if slot.as_ref() != Some(&problem) {
-                        *slot = Some(problem.clone());
-                        self.problem(problem);
-                    }
-                },
+                Some(Ok(reading)) => changed |= self.record(position, reading, frame.as_ref()),
+                Some(Err(problem)) => self.report(position, problem),
+                None => {},
             }
         }
         self.schedule.after_read(if changed {
@@ -396,6 +359,84 @@ impl<E: From<Reading>> FrameReader<E> {
         } else {
             Activity::Steady
         })
+    }
+
+    /// Reads the value at `position`, or says why it cannot be read.
+    fn read(
+        &self,
+        position: usize,
+        window_size: Size,
+        frame: Option<&Frame<'_>>,
+    ) -> Option<Result<Value, String>> {
+        let value = self.plan.values.get(position)?;
+        // A frame of another size reaches here only when no value was drawn
+        // at it. Values drawn at another size than this reader's are read
+        // by the reader for that size, so they wait quietly.
+        if window_size != self.size {
+            return Some(Err(format!(
+                "the window is {window_size} but {} was drawn when it was {}; resize the \
+                 window or draw the value again",
+                value.name, value.check.window_size
+            )));
+        }
+        let region = (*self.regions.get(position)?)?;
+        let image = frame?.image.crop(region)?;
+        Some(
+            value
+                .check
+                .check
+                .read(&image)
+                .map_err(|error| format!("{} cannot be read: {error}", value.name)),
+        )
+    }
+
+    /// Keeps a good reading and sends it when it changed; returns whether it
+    /// did.
+    fn record(&mut self, position: usize, reading: Value, frame: Option<&Frame<'_>>) -> bool {
+        if let Some(slot) = self.problems.get_mut(position) {
+            *slot = None;
+        }
+        let (Some(last), Some(value), Some(frame)) = (
+            self.last.get_mut(position),
+            self.plan.values.get(position),
+            frame,
+        ) else {
+            return false;
+        };
+        if *last == Some(reading) {
+            return false;
+        }
+        *last = Some(reading);
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a failed send means the owner stopped this session"
+        )]
+        let _ = self.events.send(E::from(Reading::Sample {
+            session: self.session,
+            signal: value.signal.clone(),
+            value: reading,
+            at: frame.received,
+        }));
+        true
+    }
+
+    /// Sends a value's problem once until it changes.
+    fn report(&mut self, position: usize, problem: String) {
+        let Some(slot) = self.problems.get_mut(position) else {
+            return;
+        };
+        if slot.as_ref() != Some(&problem) {
+            *slot = Some(problem.clone());
+            self.problem(problem);
+        }
+    }
+
+    fn tell(&self, control: Control) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a failed send means the reader already stopped"
+        )]
+        let _ = self.control.send(control);
     }
 
     fn problem(&self, problem: String) {
@@ -410,16 +451,43 @@ impl<E: From<Reading>> FrameReader<E> {
     }
 }
 
+/// The smallest region that holds both.
+fn union(one: Region, other: Region) -> Region {
+    let left = one.x().min(other.x());
+    let top = one.y().min(other.y());
+    let right = one.right().max(other.right());
+    let bottom = one.bottom().max(other.bottom());
+    Region::new(
+        left,
+        top,
+        right.saturating_sub(left),
+        bottom.saturating_sub(top),
+    )
+    .unwrap_or(one)
+}
+
+/// `region`, measured from the corner of `bounds`.
+fn within(region: Region, bounds: Region) -> Option<Region> {
+    let size = region.size();
+    Region::new(
+        region.x().checked_sub(bounds.x())?,
+        region.y().checked_sub(bounds.y())?,
+        size.width,
+        size.height,
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc::SyncSender;
+    use std::sync::mpsc::{SyncSender, TryRecvError};
 
-    use appytappy_config::anti_cheat::ProcessAccessPermit;
+    use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
     use appytappy_config::rule::Rule;
     use appytappy_config::window_match::{MatchPriority, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{Check, ColorMatch};
+    use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::SavedCheck;
-    use appytappy_sources::screen::{FrameHandler, Image, Size};
+    use appytappy_sources::screen::{FrameHandler, Image};
     use appytappy_sources::system::{
         AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry,
     };
@@ -436,13 +504,25 @@ mod tests {
         width: 800,
         height: 600,
     };
+    const SMALL: Size = Size {
+        width: 640,
+        height: 480,
+    };
+    const PATIENCE: Duration = Duration::from_secs(10);
+    /// Shorter than [`FIND_AGAIN`], so nothing should happen in it.
+    const QUIET: Duration = Duration::from_millis(300);
 
+    /// A 2x2 value that is true while its region is red.
     fn red_at(name: &str, x: u32, y: u32) -> ValuePlan {
+        drawn_at(name, x, y, WINDOW)
+    }
+
+    fn drawn_at(name: &str, x: u32, y: u32, window_size: Size) -> ValuePlan {
         ValuePlan {
             signal: SignalName::new(name).expect("valid"),
             name: name.to_owned(),
             check: SavedCheck {
-                window_size: WINDOW,
+                window_size,
                 region: Region::new(x, y, 2, 2).expect("not empty"),
                 check: Check::Color(ColorMatch {
                     color: RED,
@@ -471,7 +551,6 @@ mod tests {
         Job {
             session: SessionId(3),
             plan: plan(values),
-            process: ProcessId::new(42),
             executable: "Example.exe".to_owned(),
         }
     }
@@ -500,6 +579,10 @@ mod tests {
         }
     }
 
+    fn outside(window_size: Size) -> io::Result<Frame<'static>> {
+        Err(OutsideWindow { window_size }.into())
+    }
+
     fn flags(readings: &Receiver<Reading>) -> Vec<(String, Value)> {
         readings
             .try_iter()
@@ -523,9 +606,9 @@ mod tests {
     #[test]
     fn the_capture_covers_every_value_and_reads_each_from_its_place() {
         let (events, readings) = mpsc::channel::<Reading>();
-        let (lost, _lost) = mpsc::channel();
+        let (control, _control) = mpsc::channel();
         let job = job(vec![red_at("left", 10, 20), red_at("right", 16, 22)]);
-        let mut frames = FrameReader::new(&job, events, lost).expect("values to read");
+        let mut frames = FrameReader::new(&job, WINDOW, events, control).expect("values to read");
         assert_eq!(frames.bounds, Region::new(10, 20, 8, 4).expect("not empty"));
         // Only the left value's square, at the bounds' corner, is red.
         let left_red = frame_image(8, 4, |x, y| x < 2 && y < 2);
@@ -559,22 +642,23 @@ mod tests {
     #[test]
     fn a_window_of_another_size_is_not_read_and_says_so_once() {
         let (events, readings) = mpsc::channel::<Reading>();
-        let (lost, _lost) = mpsc::channel();
+        let (control, told) = mpsc::channel();
         let job = job(vec![red_at("icon", 0, 0)]);
-        let mut frames = FrameReader::new(&job, events, lost).expect("values to read");
+        let mut frames = FrameReader::new(&job, WINDOW, events, control).expect("values to read");
         let image = frame_image(2, 2, |_, _| true);
-        let small = Size {
-            width: 640,
-            height: 480,
-        };
-        frames.handle(Ok(frame(&image, small)));
-        frames.handle(Ok(frame(&image, small)));
+        frames.handle(Ok(frame(&image, SMALL)));
+        frames.handle(outside(SMALL));
         assert_eq!(
             problems(&readings),
             [
-                "the window is 640x480 but icon was drawn when it was 800x600; resize the window \
-              or draw the value again"
+                "the window is 640x480 but icon was drawn when it was 800x600; resize the window or \
+             draw the value again"
             ]
+        );
+        assert_eq!(
+            told.try_recv(),
+            Err(TryRecvError::Empty),
+            "no value fits 640x480"
         );
         frames.handle(Ok(frame(&image, WINDOW)));
         assert_eq!(flags(&readings), [("icon".to_owned(), Value::Flag(true))]);
@@ -587,14 +671,31 @@ mod tests {
     }
 
     #[test]
+    fn values_drawn_at_another_size_are_read_when_the_window_has_it() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, told) = mpsc::channel();
+        let job = job(vec![red_at("large", 0, 0), drawn_at("small", 4, 6, SMALL)]);
+        let mut frames =
+            FrameReader::new(&job, WINDOW, events.clone(), control.clone()).expect("a value");
+        assert_eq!(frames.bounds, Region::new(0, 0, 2, 2).expect("not empty"));
+        let red = frame_image(2, 2, |_, _| true);
+        frames.handle(Ok(frame(&red, WINDOW)));
+        assert_eq!(flags(&readings), [("large".to_owned(), Value::Flag(true))]);
+        assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(frames.handle(outside(SMALL)), Duration::ZERO);
+        assert_eq!(told.try_recv(), Ok(Control::Resized(SMALL)));
+        let small = FrameReader::new(&job, SMALL, events, control).expect("a value");
+        assert_eq!(small.bounds, Region::new(4, 6, 2, 2).expect("not empty"));
+    }
+
+    #[test]
     fn a_value_that_cannot_be_read_says_why() {
         let (events, readings) = mpsc::channel::<Reading>();
-        let (lost, _lost) = mpsc::channel();
+        let (control, _control) = mpsc::channel();
         let mut value = red_at("count", 0, 0);
-        value.check.check =
-            Check::Number(appytappy_sources::screen::digits::DigitReader::new(RED, 10));
+        value.check.check = Check::Number(DigitReader::new(RED, 10));
         let job = job(vec![value]);
-        let mut frames = FrameReader::new(&job, events, lost).expect("values to read");
+        let mut frames = FrameReader::new(&job, WINDOW, events, control).expect("values to read");
         let black = frame_image(2, 2, |_, _| false);
         frames.handle(Ok(frame(&black, WINDOW)));
         frames.handle(Ok(frame(&black, WINDOW)));
@@ -607,25 +708,19 @@ mod tests {
     #[test]
     fn a_closed_window_tells_the_reader_to_look_again() {
         let (events, _readings) = mpsc::channel::<Reading>();
-        let (lost, told) = mpsc::channel();
-        let job = job(vec![red_at("icon", 0, 0)]);
-        let mut frames = FrameReader::new(&job, events, lost).expect("values to read");
+        let (control, told) = mpsc::channel();
+        let icon = job(vec![red_at("icon", 0, 0)]);
+        let mut frames = FrameReader::new(&icon, WINDOW, events, control).expect("values to read");
         let closed = io::Error::new(io::ErrorKind::NotConnected, "the captured window closed");
         assert_eq!(frames.handle(Err(closed)), Duration::ZERO);
         assert_eq!(told.try_recv(), Ok(Control::Lost));
-        assert!(
-            FrameReader::new(
-                &job_without_values(),
-                mpsc::channel::<Reading>().0,
-                mpsc::channel().0
-            )
-            .is_none(),
-            "nothing to read"
+        let nothing = FrameReader::new(
+            &job(Vec::new()),
+            WINDOW,
+            mpsc::channel::<Reading>().0,
+            mpsc::channel().0,
         );
-    }
-
-    fn job_without_values() -> Job {
-        job(Vec::new())
+        assert!(nothing.is_none(), "nothing to read");
     }
 
     /// A capture the fake system started: its window, its crop, and the
@@ -635,9 +730,10 @@ mod tests {
     /// Where the fake system's window list is answered.
     type Answer = SyncSender<io::Result<Vec<WindowEntry>>>;
 
-    /// A system that asks the test for each window list, and whose captures
-    /// hand their handler to the test.
+    /// A system with set processes that asks the test for each window list,
+    /// and whose captures hand their handler to the test.
     struct FakeSystem {
+        processes: Vec<ProcessEntry>,
         lists: Sender<Answer>,
         captures: Sender<Started>,
     }
@@ -645,7 +741,8 @@ mod tests {
     /// The test's side of a [`FakeSystem`].
     struct Desk {
         lists: Receiver<Answer>,
-        started: Receiver<Started>,
+        /// Dropped to make every capture fail.
+        started: Option<Receiver<Started>>,
     }
 
     impl Desk {
@@ -655,21 +752,46 @@ mod tests {
             answer.send(windows).expect("the reader waits");
         }
 
+        /// Whether the reader asks for the window list within `QUIET`.
+        fn asks_soon(&self) -> bool {
+            self.lists.recv_timeout(QUIET).is_ok()
+        }
+
         /// The reader's next capture.
         fn capture(&self) -> Started {
-            self.started.recv_timeout(PATIENCE).expect("a capture")
+            self.started
+                .as_ref()
+                .expect("captures work")
+                .recv_timeout(PATIENCE)
+                .expect("a capture")
         }
     }
 
     impl FakeSystem {
         fn new() -> (Arc<Self>, Desk) {
+            let process = |id, executable: &str| ProcessEntry {
+                id: ProcessId::new(id),
+                parent: ProcessId::new(1),
+                executable: executable.to_owned(),
+                threads: 1,
+            };
+            let processes = vec![
+                process(7, "Other.exe"),
+                process(42, "Example.exe"),
+                process(43, "Example.exe"),
+            ];
             let (lists, requests) = mpsc::channel();
             let (captures, started) = mpsc::channel();
             let desk = Desk {
                 lists: requests,
-                started,
+                started: Some(started),
             };
-            (Arc::new(Self { lists, captures }), desk)
+            let system = Self {
+                processes,
+                lists,
+                captures,
+            };
+            (Arc::new(system), desk)
         }
     }
 
@@ -685,7 +807,7 @@ mod tests {
         type Process = NoProcess;
 
         fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
-            Ok(Vec::new())
+            Ok(self.processes.clone())
         }
 
         fn windows(&self) -> io::Result<Vec<WindowEntry>> {
@@ -720,7 +842,7 @@ mod tests {
         ) -> io::Result<FakeSession> {
             self.captures
                 .send((window, crop, handler))
-                .map_err(|_unheard| io::Error::from(io::ErrorKind::BrokenPipe))?;
+                .map_err(|_unheard| io::Error::other("no capture today"))?;
             Ok(FakeSession)
         }
     }
@@ -741,37 +863,49 @@ mod tests {
         }
     }
 
-    const PATIENCE: Duration = Duration::from_secs(10);
-
-    #[test]
-    fn the_reader_finds_the_best_window_captures_it_and_looks_again_after_it_closes() {
-        let desktop = vec![
+    /// Windows of `Other.exe` and of two `Example.exe` processes; the
+    /// visible main window belongs to the second.
+    fn desktop() -> Vec<WindowEntry> {
+        vec![
             window(1, 7, "Main window", true),
             window(2, 42, "Settings", true),
             window(3, 42, "Main window", false),
-            window(4, 42, "Main window", true),
-        ];
+            window(4, 43, "Main window", true),
+        ]
+    }
+
+    /// Stops `reader` and checks its thread ended, which drops its senders.
+    fn stopped(reader: Reader, readings: &Receiver<Reading>) {
+        reader.stop().expect("stop");
+        let left: Vec<Reading> = readings.try_iter().collect();
+        assert_eq!(left, [], "nothing more was sent");
+        assert_eq!(readings.try_recv(), Err(TryRecvError::Disconnected));
+    }
+
+    #[test]
+    fn the_reader_finds_the_best_window_and_captures_again_after_a_resize_or_a_close() {
         let (system, desk) = FakeSystem::new();
         let (events, readings) = mpsc::channel::<Reading>();
-        let reader = Reader::start(system, job(vec![red_at("icon", 4, 6)]), events).expect("start");
+        let values = vec![red_at("icon", 4, 6), drawn_at("small", 2, 2, SMALL)];
+        let reader = Reader::start(system, job(values), events).expect("start");
         desk.answer(Ok(Vec::new()));
-        let first = readings.recv_timeout(PATIENCE).expect("a problem");
         assert_eq!(
-            first,
-            Reading::Problem {
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Problem {
                 session: SessionId(3),
                 problem: "no window of Example.exe fits Example App's window yet".to_owned()
-            }
+            })
         );
-        desk.answer(Ok(desktop.clone()));
-        let (handle, crop, mut handler) = desk.capture();
-        assert_eq!(handle, 4, "the visible main window of process 42");
+        assert!(!desk.asks_soon(), "it waits before looking again");
+        desk.answer(Ok(desktop()));
+        let (handle, crop, mut first) = desk.capture();
+        assert_eq!(handle, 4, "the visible main window of either Example.exe");
         assert_eq!(
             crop,
             Crop::Region(Region::new(4, 6, 2, 2).expect("not empty"))
         );
         let red = frame_image(2, 2, |_, _| true);
-        handler(Ok(frame(&red, WINDOW)));
+        first(Ok(frame(&red, WINDOW)));
         let sample = readings.recv_timeout(PATIENCE).expect("a sample");
         assert!(
             matches!(
@@ -784,15 +918,26 @@ mod tests {
             ),
             "{sample:?}"
         );
-        handler(Err(io::Error::new(io::ErrorKind::NotConnected, "closed")));
-        desk.answer(Ok(desktop));
+        first(outside(SMALL));
+        desk.answer(Ok(desktop()));
+        let (resized, crop, mut second) = desk.capture();
+        assert_eq!(resized, 4);
+        assert_eq!(
+            crop,
+            Crop::Region(Region::new(2, 2, 2, 2).expect("not empty")),
+            "the value drawn at the new size"
+        );
+        second(Err(io::Error::new(io::ErrorKind::NotConnected, "closed")));
+        desk.answer(Ok(desktop()));
         let (again, _, _) = desk.capture();
         assert_eq!(again, 4, "it looks for the window again");
-        reader.stop().expect("stop");
+        // A real capture drops its handler when it closes.
+        drop((first, second));
+        stopped(reader, &readings);
     }
 
     #[test]
-    fn a_reader_that_cannot_list_windows_says_so_and_stops_on_request() {
+    fn a_reader_that_cannot_list_windows_says_so_once_and_waits() {
         let (system, desk) = FakeSystem::new();
         let (events, readings) = mpsc::channel::<Reading>();
         let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
@@ -804,10 +949,27 @@ mod tests {
                 problem: "its windows cannot be listed: denied".to_owned()
             })
         );
-        reader.stop().expect("stop");
-        assert!(
-            readings.try_iter().next().is_none(),
-            "the problem was sent once"
+        assert!(!desk.asks_soon(), "it waits before looking again");
+        desk.answer(Err(io::Error::other("denied")));
+        stopped(reader, &readings);
+    }
+
+    #[test]
+    fn a_window_that_cannot_be_captured_says_so_once_and_waits() {
+        let (system, mut desk) = FakeSystem::new();
+        drop(desk.started.take());
+        let (events, readings) = mpsc::channel::<Reading>();
+        let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
+        desk.answer(Ok(desktop()));
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Problem {
+                session: SessionId(3),
+                problem: "its window cannot be captured: no capture today".to_owned()
+            })
         );
+        assert!(!desk.asks_soon(), "it waits before looking again");
+        desk.answer(Ok(desktop()));
+        stopped(reader, &readings);
     }
 }

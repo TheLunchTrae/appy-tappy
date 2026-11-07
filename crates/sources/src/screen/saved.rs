@@ -2,8 +2,8 @@
 //!
 //! The setup app saves a value as plain data: the window size it was drawn
 //! at, its region, its check, and the pictures the check learns from. The
-//! runtime and the setup app's live reading both turn that back into a
-//! [`Check`] here, so a value reads the same wherever it is read.
+//! runtime turns that back into a [`Check`] here. Anything else that reads a
+//! saved value should too, so a value reads the same wherever it is read.
 
 use std::error::Error;
 use std::fmt;

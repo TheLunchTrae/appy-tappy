@@ -471,8 +471,11 @@ mod tests {
             "{broken:?}"
         );
         fs::remove_dir_all(&root).expect("clean up");
+        // A file where the store's folder should be. Windows calls a path
+        // through a file missing, which reads as an empty store, so the store
+        // is the file itself.
         fs::write(&root, "a file where the folder should be").expect("block the folder");
-        let blocked = load(&AppStore::new(root.join("apps")), &automations);
+        let blocked = load(&AppStore::new(root.clone()), &automations);
         fs::remove_file(&root).expect("clean up");
         assert!(
             blocked
