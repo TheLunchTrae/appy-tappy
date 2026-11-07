@@ -287,6 +287,9 @@ pub fn request_reload(name: &str) -> io::Result<bool> {
 
 /// The value under the user's `Run` registry key that starts the runtime at
 /// sign-in.
+///
+/// It is the installer's product name too, because Tauri's uninstaller
+/// removes the `Run` value named for the product.
 pub const AUTOSTART_VALUE: &str = "AppyTappy";
 
 /// Makes Windows run `command` when the user signs in, through the `Run`
