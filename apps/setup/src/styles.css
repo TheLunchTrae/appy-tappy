@@ -1090,10 +1090,15 @@ select {
   font-weight: 400;
 }
 
-/* A column header's hint opens toward the table's left, so the last columns' explanations stay on the page. */
-.table th .with-hint > .hint-wrap > .tip {
+/* A hint in a table opens toward the table's left, so explanations near its right edge stay on the page. */
+.table .with-hint > .hint-wrap > .tip {
   left: auto;
   right: 0;
+}
+
+/* A column header's hint keeps the header row its usual height. */
+.table th .hint-btn {
+  margin-block: -6px;
 }
 
 .card > .with-hint + .set-row {

@@ -11,8 +11,9 @@ background part picks up a change within a moment.
   start AppyTappy only when you open it yourself.
 - **Screenshot shortcut.** The key that takes a screenshot while you
   [make a value](Values.md) or a [reference](References.md), `F9` at first.
-  Select **Change** and press the new keys, or Esc to keep the old ones. A
-  letter, a digit, or Space needs Ctrl, Alt, Shift, or Win with it, so the key
+  Select **Change** and press the new keys, or Esc to keep the old ones. F1 to
+  F24, Print Screen, and Pause work alone. Any other key, such as a letter, a
+  digit, Space, or an arrow, needs Ctrl, Alt, Shift, or Win with it, so it
   keeps working everywhere else. **Change shortcut** on the screenshot page
   changes the same setting.
 

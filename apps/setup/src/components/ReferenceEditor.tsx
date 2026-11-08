@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
-import { INK_HINT, LABEL_HINT } from '../lib/hints.ts';
+import { INK_HINT, INK_TOLERANCE_HINT, LABEL_HINT } from '../lib/hints.ts';
 import { CharacterChips } from './CharacterChips.tsx';
 import { Hint } from './Hint.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
@@ -78,6 +78,7 @@ export function ReferenceEditor(props: Props) {
       />
       <ToleranceField
         help="How far a pixel's color may be from the characters' color."
+        hint={INK_TOLERANCE_HINT}
         value={tolerance}
         onChange={props.onTolerance}
       />

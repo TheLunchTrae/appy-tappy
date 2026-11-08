@@ -249,7 +249,7 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
             <th scope="col">Automation</th>
             <th scope="col">When</th>
             <th scope="col">Do, in order</th>
-            <th scope="col">
+            <th scope="col" aria-label="Needs running">
               <span className="with-hint">
                 Needs running
                 <Hint topic="Needs running">{NEEDS_RUNNING_HINT}</Hint>

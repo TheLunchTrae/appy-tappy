@@ -257,13 +257,13 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
             <tr>
               <th scope="col">Application</th>
               <th scope="col">Found by</th>
-              <th scope="col">
+              <th scope="col" aria-label="Anti-cheat">
                 <span className="with-hint">
                   Anti-cheat
                   <Hint topic="Anti-cheat">{ANTI_CHEAT_HINT}</Hint>
                 </span>
               </th>
-              <th scope="col">
+              <th scope="col" aria-label="Overlay">
                 <span className="with-hint">
                   Overlay
                   <Hint topic="Overlay">{OVERLAY_HINT}</Hint>

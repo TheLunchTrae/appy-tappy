@@ -27,8 +27,9 @@ AppyTappy has two parts:
 
 That is all. The background part runs the automation from then on.
 
-A **?** beside a field in AppyTappy Setup explains it. Point at it, or move to it
-with Tab, to read the explanation.
+A **?** beside a field, heading, or column header in AppyTappy Setup explains
+it. Hold the pointer over it, or move to it with Tab, to read the explanation,
+and press Esc to hide it.
 
 ## Pages
 

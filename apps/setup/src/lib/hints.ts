@@ -6,11 +6,11 @@ export const WHEN_HINT =
 
 /** The actions and what media and volume actions change. */
 export const ACTIONS_HINT =
-  'The actions run one after another, from the top. Media and volume actions change whatever is playing or the whole system, unless you pick One application and name its executable, such as Player.exe. A browser can report another name, so Whatever is playing suits one best.';
+  "The actions run one after another, from the top. Media and volume actions change whatever is playing or the whole system, unless you pick One application and name its executable, such as Player.exe. For a browser's media, pick Whatever is playing, since a browser can report another name.";
 
 /** What undo can and cannot put back. */
 export const UNDO_HINT =
-  'Only paused or started media and changed volumes are put back. Pressed keys, opened programs, and sounds stay as they are.';
+  'Skipped tracks, pressed keys, opened programs, and played sounds stay as they are. With undo on, AppyTappy also puts things back when the application closes, when automations are turned off from the tray icon, and when AppyTappy quits.';
 
 /** The wait before an automation can run again. */
 export const COOLDOWN_HINT =
@@ -36,9 +36,13 @@ export const CHECK_HINT =
 export const REGION_HINT =
   "X and Y are the region's top-left corner, counted in pixels from the window's top-left corner. Drawing on a screenshot fills these in; type here to nudge it.";
 
-/** The tolerance's scale, shared by every check that has one. */
+/** The tolerance's scale for a check's colors. */
 export const TOLERANCE_HINT =
-  "From 0, an exact match, up to 255. Raise it if the check misses; lower it if it matches when it shouldn't.";
+  "From 0, an exact match, up to 255, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.";
+
+/** The tolerance's scale for a reference's characters' color. */
+export const INK_TOLERANCE_HINT =
+  'From 0, only the exact color, up to 255, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.';
 
 /** A bar fill's two colors. */
 export const BAR_COLORS_HINT =
@@ -62,7 +66,7 @@ export const READING_HINT =
 
 /** Which shortcuts the screenshot shortcut can be. */
 export const SHORTCUT_HINT =
-  'A letter, digit, or Space needs Ctrl, Alt, Shift, or Win with it, so the key keeps working everywhere else. Change shortcut on the screenshot page changes the same setting.';
+  'F1 to F24, Print Screen, and Pause work alone. Any other key, such as a letter, a digit, Space, or an arrow, needs Ctrl, Alt, Shift, or Win with it, so it keeps working everywhere else. Change shortcut on the screenshot page changes the same setting.';
 
 /** What the runtime trace is for. */
 export const TRACE_HINT =
@@ -70,4 +74,4 @@ export const TRACE_HINT =
 
 /** What marking an application's values as checked does. */
 export const MARK_CHECKED_HINT =
-  'Records the build of the application running now, so the Values page tells you again only when it changes. The application has to be running.';
+  'Records the build of the application running now, so the Values page tells you again only when it changes.';

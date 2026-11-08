@@ -102,10 +102,13 @@ export function ColorField({ label, hint, color, picking, canPick, onPick }: Col
 /** A tolerance, set with the slider or typed in. */
 export function ToleranceField({
   help,
+  hint = TOLERANCE_HINT,
   value,
   onChange,
 }: {
   readonly help: string;
+  /** What the ? beside it explains, which differs where tolerance picks a reference's characters. */
+  readonly hint?: string;
   readonly value: number;
   readonly onChange: (value: number) => void;
 }) {
@@ -114,7 +117,7 @@ export function ToleranceField({
       <span className="name">
         <label htmlFor="tolerance">Tolerance</label>
         <Hint topic="Tolerance" id="hint-tolerance">
-          {TOLERANCE_HINT}
+          {hint}
         </Hint>
       </span>
       <div className="range">
@@ -135,6 +138,7 @@ export function ToleranceField({
           min={0}
           max={MAX_TOLERANCE}
           aria-label="Tolerance, typed"
+          aria-describedby="hint-tolerance"
           value={value}
           onChange={(event) => {
             const typed = Number.parseInt(event.target.value, 10);

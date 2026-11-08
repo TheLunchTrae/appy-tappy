@@ -22,8 +22,9 @@ On the Values page, select **New value**.
    shortcut, `F9` at first. The shortcut works while the other application
    has the keyboard, so you can carry on in it until it shows what you want
    and press `F9` then. To use other keys, select **Change shortcut** and
-   press them, or change it in [Settings](Settings.md). A letter, a digit, or
-   Space needs Ctrl, Alt, Shift, or Win with it, so the key keeps working
+   press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,
+   and Pause work alone. Any other key, such as a letter, a digit, Space, or an
+   arrow, needs Ctrl, Alt, Shift, or Win with it, so it keeps working
    everywhere else.
 3. **Where to read.** Type a **Value name**, such as `Progress`, and choose
    the **Check**, one of the four [checks](#checks) below. On a screenshot,
