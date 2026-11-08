@@ -6,11 +6,14 @@
 //! runtime turns that back into a [`Check`] here. Anything else that reads a
 //! saved value should too, so a value reads the same wherever it is read.
 
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 use std::io;
 
-use appytappy_config::app_file::{CheckDef, ColorDef, ReferenceDef, ScreenDef};
+use appytappy_config::app_file::{
+    CheckDef, ColorDef, MAX_STATES, ReferenceDef, ScreenDef, StateDef,
+};
 use appytappy_config::signal::{InvalidStateName, StateName};
 
 use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
@@ -45,13 +48,18 @@ impl From<ColorDef> for Rgb {
 /// `references`. `picture` returns the bytes of a PNG file the check or its
 /// reference names, such as `status-1.png`.
 ///
+/// This is the one place that decides whether a saved value can be read: the
+/// application's file checks only what the whole file needs, so a value that
+/// breaks a rule here stops only itself.
+///
 /// # Errors
 ///
 /// Returns a [`SavedError`] when the region is empty or does not fit the
 /// window size it was drawn at, a picture cannot be read or decoded or a
-/// state's picture is not the region's size, a state's name is invalid, the
-/// bar's two colors are the same, or a number's reference is missing or cannot learn from one of
-/// its pictures.
+/// state's picture is not the region's size, a state check has no states or
+/// too many, a state's name is invalid or two states share a name or a
+/// picture, the bar's two colors are the same, or a number's reference is
+/// missing or cannot learn from one of its pictures.
 pub fn build(
     screen: &ScreenDef,
     references: &[ReferenceDef],
@@ -93,6 +101,7 @@ pub fn build(
             tolerance: *tolerance,
         }),
         CheckDef::State { states, tolerance } => {
+            check_states(states)?;
             let states = states
                 .iter()
                 .map(|state| {
@@ -110,6 +119,29 @@ pub fn build(
         region,
         check,
     })
+}
+
+/// Checks a state check's states: at least one and at most [`MAX_STATES`],
+/// and no name or picture twice. Names that differ only in case count as the
+/// same, since they read alike.
+fn check_states(states: &[StateDef]) -> Result<(), SavedError> {
+    if states.is_empty() {
+        return Err(SavedError::NoStates);
+    }
+    if states.len() > MAX_STATES {
+        return Err(SavedError::TooManyStates);
+    }
+    let mut names = BTreeSet::new();
+    let mut images = BTreeSet::new();
+    for state in states {
+        if !names.insert(state.name.to_lowercase()) {
+            return Err(SavedError::SameStateName(state.name.clone()));
+        }
+        if !images.insert(state.image.as_str()) {
+            return Err(SavedError::SamePicture(state.image.clone()));
+        }
+    }
+    Ok(())
 }
 
 /// A reader with the characters `reference` learns from its pictures, which
@@ -226,6 +258,14 @@ pub enum SavedError {
     },
     /// The bar's filled and empty colors are the same.
     SameColors,
+    /// A state check has no states.
+    NoStates,
+    /// A state check has more than [`MAX_STATES`] states.
+    TooManyStates,
+    /// Two states have this name, or names that differ only in case.
+    SameStateName(String),
+    /// Two states use this picture.
+    SamePicture(String),
     /// A state's name breaks the naming rules.
     StateName(InvalidStateName),
     /// A number reads with a reference the application does not have.
@@ -268,6 +308,17 @@ impl fmt::Display for SavedError {
             Self::SameColors => {
                 formatter.write_str("its bar's filled and empty colors are the same")
             },
+            Self::NoStates => formatter.write_str("its state check has no state"),
+            Self::TooManyStates => write!(
+                formatter,
+                "its state check has more than {MAX_STATES} states"
+            ),
+            Self::SameStateName(name) => {
+                write!(formatter, "two of its states are named {name:?}")
+            },
+            Self::SamePicture(name) => {
+                write!(formatter, "two of its states use the picture {name}")
+            },
             Self::StateName(error) => write!(formatter, "its {error}"),
             Self::NoReference { id } => {
                 write!(formatter, "its reference {id} is not saved")
@@ -292,6 +343,10 @@ impl Error for SavedError {
             | Self::OutsideWindow { .. }
             | Self::PictureSize { .. }
             | Self::SameColors
+            | Self::NoStates
+            | Self::TooManyStates
+            | Self::SameStateName(_)
+            | Self::SamePicture(_)
             | Self::StateName(_)
             | Self::NoReference { .. } => None,
         }
@@ -620,6 +675,45 @@ mod tests {
         assert_eq!(
             SavedError::SameColors.to_string(),
             "its bar's filled and empty colors are the same"
+        );
+    }
+
+    #[test]
+    fn a_state_check_needs_a_few_states_each_named_and_pictured_once() {
+        let files = pictures(&[("a.png", &solid(4, RED)), ("b.png", &solid(4, GRAY))]);
+        let refused = |states: &[(&str, &str)]| {
+            build(&state_check(states), &[], from(&files))
+                .expect_err("refused")
+                .to_string()
+        };
+        assert_eq!(refused(&[]), "its state check has no state");
+        let many: Vec<(String, String)> = (0..=MAX_STATES)
+            .map(|state| (format!("State {state}"), "a.png".to_owned()))
+            .collect();
+        let many: Vec<(&str, &str)> = many
+            .iter()
+            .map(|(name, image)| (name.as_str(), image.as_str()))
+            .collect();
+        assert_eq!(
+            refused(&many),
+            format!("its state check has more than {MAX_STATES} states")
+        );
+        assert_eq!(
+            refused(&[("Paused", "a.png"), ("paused", "b.png")]),
+            "two of its states are named \"paused\""
+        );
+        assert_eq!(
+            refused(&[("Paused", "a.png"), ("Live", "a.png")]),
+            "two of its states use the picture a.png"
+        );
+        assert!(refused(&[(" ", "a.png")]).starts_with("its state name \" \" is empty"));
+        assert!(
+            build(
+                &state_check(&[("Paused", "a.png"), ("Live", "b.png")]),
+                &[],
+                from(&files)
+            )
+            .is_ok()
         );
     }
 }
