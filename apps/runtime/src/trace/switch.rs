@@ -255,6 +255,7 @@ mod tests {
 
     use super::*;
     use crate::log;
+    use crate::trace::{Record, What};
 
     struct Scratch {
         folder: PathBuf,
@@ -471,6 +472,90 @@ mod tests {
                 .is_some_and(|line| line.contains("the trace cannot start: ")),
             "{lines:?}"
         );
+    }
+
+    /// Waits until `thread` ends, so its writer reads as done stopping.
+    fn ended_thread(thread: std::thread::JoinHandle<()>) -> Stopping {
+        let patience = Instant::now()
+            .checked_add(Duration::from_secs(5))
+            .expect("in range");
+        while !thread.is_finished() {
+            assert!(Instant::now() < patience, "the thread ended");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Stopping::of(thread)
+    }
+
+    #[test]
+    fn the_writer_names_the_rows_of_each_session() {
+        let mut scratch = Scratch::new("names");
+        let (reports, _received) = mpsc::channel::<TraceReport>();
+        let mut switch = Switch::new(scratch.traces());
+        let mut trace = switch
+            .apply(&on(), (Instant::now(), NOW_MS), &reports, &mut scratch.log)
+            .expect("starts");
+        switch.name(
+            SessionId(3),
+            &crate::plan::examples::plan("Example App", 90.0),
+        );
+        trace.record(What::Fired, |record| Record {
+            session: Some(SessionId(3)),
+            item: Some(0),
+            ..record
+        });
+        switch.finish().expect("finish");
+        let file = fs::read_dir(scratch.traces())
+            .expect("list")
+            .next()
+            .expect("a file")
+            .expect("an entry")
+            .path();
+        let text = fs::read_to_string(file).expect("read");
+        assert!(
+            text.contains(",owner,fired,Example App,Pause Example App,"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_writer_done_stopping_is_reaped_at_the_next_look() {
+        let mut scratch = Scratch::new("reap");
+        let (reports, _received) = mpsc::channel::<TraceReport>();
+        let mut switch = Switch::new(scratch.traces());
+        let at = (Instant::now(), NOW_MS);
+        switch
+            .apply(&on(), at, &reports, &mut scratch.log)
+            .expect("starts");
+        switch.apply(&TraceDef::default(), at, &reports, &mut scratch.log);
+        assert_eq!(switch.stopping.len(), 1, "one writer stopping");
+        let patience = Instant::now()
+            .checked_add(Duration::from_secs(5))
+            .expect("in range");
+        while !switch.stopping.iter().all(Stopping::is_finished) {
+            assert!(Instant::now() < patience, "the writer stopped");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(switch.expire(Instant::now(), &mut scratch.log), None);
+        assert!(switch.stopping.is_empty(), "the writer was reaped");
+    }
+
+    #[test]
+    fn a_writer_that_panicked_is_logged_and_fails_the_finish() {
+        let mut scratch = Scratch::new("panicked");
+        let mut switch = Switch::new(scratch.traces());
+        let panics = || std::thread::spawn(|| panic!("the disk caught fire"));
+        switch.stopping.push(ended_thread(panics()));
+        assert_eq!(switch.expire(Instant::now(), &mut scratch.log), None);
+        let lines = scratch.lines();
+        assert!(
+            lines
+                .last()
+                .is_some_and(|line| line.contains("the trace stopped badly: ")
+                    && line.ends_with("the disk caught fire")),
+            "{lines:?}"
+        );
+        switch.stopping.push(ended_thread(panics()));
+        assert!(switch.finish().is_err(), "the finish says it ended badly");
     }
 
     #[test]

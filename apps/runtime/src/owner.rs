@@ -1584,6 +1584,127 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_end_time_counts_from_the_wall_clock() {
+        let mut scratch = Scratch::new("trace-until");
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("after 1970")
+            .as_millis();
+        let until = now_ms.checked_add(60_000).expect("a minute on");
+        scratch.write(
+            "settings.json",
+            &format!(r#"{{"format":1,"trace":{{"on":true,"until":{until}}}}}"#),
+        );
+        let mut model = Model::default();
+        let mut reloads = Reloads::default();
+        let before = Instant::now();
+        let on = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
+        assert!(on.trace.is_some_and(|trace| trace != Trace::OFF));
+        let ends = scratch.tracing.until().expect("an end time");
+        let soonest = before
+            .checked_add(Duration::from_secs(55))
+            .expect("in range");
+        let latest = Instant::now()
+            .checked_add(Duration::from_secs(60))
+            .expect("in range");
+        assert!(
+            soonest < ends && ends <= latest,
+            "the trace ends a minute from now"
+        );
+    }
+
+    #[test]
+    fn a_sample_is_handled_as_a_sample_of_its_frame() {
+        let at = Instant::now();
+        let sample = Event::from(Reading::Sample {
+            session: SessionId(0),
+            signal: plan::examples::signal(),
+            value: plan::examples::number(95.0),
+            at,
+        });
+        assert_eq!((sample.kind(), sample.cause()), ("sample", Some(at)));
+        let problem = Event::from(Reading::Problem {
+            session: SessionId(0),
+            problem: "cannot read".to_owned(),
+        });
+        assert_eq!((problem.kind(), problem.cause()), ("reader", None));
+        assert_eq!((Event::Due.kind(), Event::Due.cause()), ("due", None));
+    }
+
+    #[test]
+    fn a_received_value_is_traced_with_its_place_and_its_frame() {
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            plan::examples::plan("Example App", 90.0),
+        )]));
+        model.apply(
+            Change::Started {
+                app: "a".to_owned(),
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
+            Instant::now(),
+        );
+        let (mut trace, entries) = Trace::for_test(1, &[TraceCategory::Changes]);
+        let at = Instant::now();
+        let value = plan::examples::number(95.0);
+        receive(
+            &mut trace,
+            &model,
+            &Event::from(Reading::Sample {
+                session: SessionId(0),
+                signal: plan::examples::signal(),
+                value: value.clone(),
+                at,
+            }),
+        );
+        receive(&mut trace, &model, &Event::Due);
+        let sent = crate::trace::sent(&entries);
+        let [received] = sent.as_slice() else {
+            panic!("one record for the sample: {sent:?}");
+        };
+        assert_eq!(
+            *received,
+            Record {
+                at: received.at,
+                session: Some(SessionId(0)),
+                item: Some(0),
+                value: Some(value),
+                took: Some(received.at.saturating_duration_since(at)),
+                cause: Some(at),
+                ..Record::now(What::Received)
+            }
+        );
+    }
+
+    #[test]
+    fn a_rule_is_traced_with_its_automation_and_its_frame() {
+        let (mut trace, entries) = Trace::for_test(1, &[TraceCategory::Rules]);
+        let cause = Instant::now();
+        record_rule(
+            &mut trace,
+            What::Held,
+            (SessionId(2), appytappy_engine::RuleIndex(4)),
+            Some(cause),
+        );
+        let sent = crate::trace::sent(&entries);
+        let [held] = sent.as_slice() else {
+            panic!("one record: {sent:?}");
+        };
+        assert_eq!(
+            *held,
+            Record {
+                at: held.at,
+                session: Some(SessionId(2)),
+                item: Some(4),
+                cause: Some(cause),
+                ..Record::now(What::Held)
+            }
+        );
+    }
+
+    #[test]
     fn a_reload_that_cannot_read_the_files_keeps_the_plan_and_tries_again() {
         let mut scratch = Scratch::new("reload");
         let mut model = Model::default();

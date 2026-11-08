@@ -256,6 +256,19 @@ impl Trace {
     }
 }
 
+/// The records that reached `received`, a receiver from [`Trace::for_test`],
+/// in the order they were sent.
+#[cfg(test)]
+pub(crate) fn sent(received: &std::sync::mpsc::Receiver<writer::Entry>) -> Vec<Record> {
+    received
+        .try_iter()
+        .filter_map(|entry| match entry {
+            writer::Entry::Record(record) => Some(record),
+            writer::Entry::Wake => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -268,16 +281,6 @@ mod tests {
         room: usize,
     ) -> (Trace, mpsc::Receiver<writer::Entry>) {
         Trace::with_room(id, categories, room)
-    }
-
-    fn records(received: &mpsc::Receiver<writer::Entry>) -> Vec<Record> {
-        received
-            .try_iter()
-            .filter_map(|entry| match entry {
-                writer::Entry::Record(record) => Some(record),
-                writer::Entry::Wake => None,
-            })
-            .collect()
     }
 
     #[test]
@@ -295,7 +298,7 @@ mod tests {
             item: Some(2),
             ..record
         });
-        let sent = records(&received);
+        let sent = sent(&received);
         assert_eq!(sent.len(), 1);
         assert_eq!((sent[0].what, sent[0].item), (What::Fired, Some(2)));
         assert!(trace.wants(TraceCategory::Rules));
@@ -308,7 +311,7 @@ mod tests {
         for _ in 0..5 {
             trace.record(What::Fired, |record| record);
         }
-        let first = records(&received);
+        let first = sent(&received);
         assert_eq!(
             first
                 .iter()
@@ -317,11 +320,11 @@ mod tests {
             [0, 0]
         );
         trace.record(What::Held, |record| record);
-        let next = records(&received);
+        let next = sent(&received);
         assert_eq!(next.len(), 1);
         assert_eq!((next[0].what, next[0].dropped), (What::Held, 3));
         trace.record(What::Held, |record| record);
-        assert_eq!(records(&received)[0].dropped, 0, "the count starts over");
+        assert_eq!(sent(&received)[0].dropped, 0, "the count starts over");
     }
 
     #[test]
@@ -354,5 +357,19 @@ mod tests {
         assert_eq!(What::Held.category(), TraceCategory::Rules);
         assert_eq!(What::Done.category(), TraceCategory::Actions);
         assert_eq!(What::Reloaded.category(), TraceCategory::Lifecycle);
+    }
+
+    #[test]
+    fn a_category_named_twice_stays_in_the_set() {
+        let twice: Categories = [
+            TraceCategory::Rules,
+            TraceCategory::Actions,
+            TraceCategory::Rules,
+        ]
+        .into_iter()
+        .collect();
+        assert!(twice.contains(TraceCategory::Rules));
+        assert!(twice.contains(TraceCategory::Actions));
+        assert!(!twice.contains(TraceCategory::Readings));
     }
 }

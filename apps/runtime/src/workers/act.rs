@@ -529,6 +529,74 @@ mod tests {
     }
 
     #[test]
+    fn each_job_is_traced_when_it_starts_and_when_it_is_done() {
+        let (trace, entries) = crate::trace::Trace::for_test(
+            1,
+            &[appytappy_config::settings_file::TraceCategory::Actions],
+        );
+        let fired_by = Instant::now();
+        let released_by = fired_by
+            .checked_add(Duration::from_millis(5))
+            .expect("in range");
+        let (jobs, received) = mpsc::channel();
+        jobs.send(Job::Trace(trace)).expect("send");
+        let mut run_job = fire(pause_then_mute());
+        if let Job::Run { cause, .. } = &mut run_job {
+            *cause = Some(fired_by);
+        }
+        jobs.send(run_job).expect("send");
+        jobs.send(Job::Undo {
+            owner: OWNER,
+            automation: AUTOMATION.to_owned(),
+            cause: Some(released_by),
+        })
+        .expect("send");
+        drop(jobs);
+        let (reports, _reported) = mpsc::channel::<ActionReport>();
+        let (commands, _sent) = mpsc::channel();
+        run(once(OnePlayer::new(commands)), &received, &reports);
+        let rows: Vec<_> = crate::trace::sent(&entries)
+            .into_iter()
+            .map(|record| {
+                (
+                    record.what,
+                    record.session,
+                    record.item,
+                    record.took.is_some(),
+                    record.cause,
+                    record.detail,
+                )
+            })
+            .collect();
+        let (session, rule) = (Some(OWNER.0), Some(OWNER.1.0));
+        let (fired, released) = (Some(fired_by), Some(released_by));
+        assert_eq!(
+            rows,
+            [
+                (What::Started, session, rule, false, fired, Detail::None),
+                (
+                    What::Done,
+                    session,
+                    rule,
+                    true,
+                    fired,
+                    Detail::Note("failed")
+                ),
+                (What::Started, session, rule, false, released, Detail::None),
+                (
+                    What::Done,
+                    session,
+                    rule,
+                    true,
+                    released,
+                    Detail::Note("ok")
+                ),
+            ],
+            "the run's second action fails and the undo works"
+        );
+    }
+
+    #[test]
     fn controls_that_cannot_start_are_made_again_after_a_growing_wait() {
         let (commands, sent) = mpsc::channel();
         let mut player = Some(OnePlayer::new(commands));

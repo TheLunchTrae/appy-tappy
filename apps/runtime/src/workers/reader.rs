@@ -1017,6 +1017,49 @@ mod tests {
     }
 
     #[test]
+    fn each_read_and_each_change_is_traced_with_its_value_and_its_frame() {
+        let (events, _readings) = mpsc::channel::<Reading>();
+        let (control, _control) = mpsc::channel();
+        let (trace, entries) =
+            Trace::for_test(1, &[TraceCategory::Readings, TraceCategory::Changes]);
+        let job = Job {
+            trace,
+            ..job(vec![red_at("left", 10, 20), red_at("right", 16, 22)])
+        };
+        let mut frames = FrameReader::new(&job, WINDOW, events, control).expect("values to read");
+        let left_red = frame_image(8, 4, |x, y| x < 2 && y < 2);
+        let arrived = frame(&left_red, WINDOW);
+        let received = arrived.received;
+        frames.handle(Ok(arrived));
+        let rows: Vec<_> = crate::trace::sent(&entries)
+            .into_iter()
+            .map(|record| {
+                (
+                    record.what,
+                    record.session,
+                    record.item,
+                    record.value,
+                    record.took.is_some(),
+                    record.cause,
+                )
+            })
+            .collect();
+        let cause = Some(received);
+        let session = Some(SessionId(3));
+        let (on, off) = (Some(Value::Flag(true)), Some(Value::Flag(false)));
+        assert_eq!(
+            rows,
+            [
+                (What::Read, session, Some(0), on.clone(), true, cause),
+                (What::Changed, session, Some(0), on, false, cause),
+                (What::Read, session, Some(1), off.clone(), true, cause),
+                (What::Changed, session, Some(1), off, false, cause),
+            ],
+            "a read says how long it took; a change does not"
+        );
+    }
+
+    #[test]
     fn a_window_of_another_size_is_not_read_and_says_so_once() {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, told) = mpsc::channel();

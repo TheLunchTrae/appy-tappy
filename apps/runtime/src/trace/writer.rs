@@ -118,6 +118,14 @@ impl Stopping {
     }
 }
 
+#[cfg(test)]
+impl Stopping {
+    /// A stopping writer whose thread is `thread`.
+    pub(super) const fn of(thread: JoinHandle<()>) -> Self {
+        Self(thread)
+    }
+}
+
 impl Writer {
     /// Opens the trace's first file and starts the writer thread, which
     /// reports to `reports`. Returns the writer and the trace handle the
@@ -765,6 +773,90 @@ mod tests {
         };
         let started = record.at;
         assert_eq!(dropped_row(&record, started), "0,trace,dropped,,,12,,,");
+        let folder = folder("dropped");
+        let mut files =
+            Files::open(&options(&folder, 1 << 20, 5), "trace-x", started).expect("open");
+        files.record(&record, &BTreeMap::new()).expect("write");
+        files
+            .record(&Record::now(What::Held), &BTreeMap::new())
+            .expect("write");
+        files.flush().expect("flush");
+        let text = fs::read_to_string(folder.join("trace-x.csv")).expect("read");
+        let events: Vec<&str> = text
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.split(',').nth(2))
+            .collect();
+        assert_eq!(events, ["dropped", "fired", "held"], "{text}");
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn the_writer_flushes_about_once_a_second_rather_than_each_row() {
+        let folder = folder("flush");
+        let (reports, _received) = mpsc::channel::<TraceReport>();
+        let (writer, mut trace) =
+            Writer::start(1, options(&folder, 1 << 20, 5), reports).expect("start");
+        trace.record(What::Queued, |record| record);
+        let path = folder.join(writer.file());
+        let on_disk = || fs::read_to_string(&path).expect("read");
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(on_disk(), "", "a row waits for the next flush");
+        let patience = Instant::now()
+            .checked_add(Duration::from_secs(5))
+            .expect("in range");
+        while on_disk().lines().count() < 3 {
+            assert!(Instant::now() < patience, "the row reached the file");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        writer.stop().expect("stop");
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_stopping_writer_is_finished_once_its_thread_ends() {
+        let (go, wait) = mpsc::channel::<()>();
+        let stopping = Stopping::of(std::thread::spawn(move || {
+            wait.recv().expect("told to end");
+        }));
+        assert!(!stopping.is_finished(), "the thread still waits");
+        go.send(()).expect("send");
+        let patience = Instant::now()
+            .checked_add(Duration::from_secs(5))
+            .expect("in range");
+        while !stopping.0.is_finished() {
+            assert!(Instant::now() < patience, "the thread ended");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(stopping.is_finished());
+        stopping.join().expect("join");
+    }
+
+    #[test]
+    fn a_trace_looks_no_further_than_a_hundred_names() {
+        let folder = folder("hundred");
+        fs::create_dir_all(&folder).expect("make");
+        fs::write(folder.join("trace-x.csv"), "").expect("write");
+        for taken in 2..=100 {
+            fs::write(folder.join(format!("trace-x-{taken}.csv")), "").expect("write");
+        }
+        let options = options(&folder, 1 << 20, 5);
+        let error = Files::open(&options, "trace-x", Instant::now()).expect_err("all taken");
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert!(!folder.join("trace-x-101.csv").exists());
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn only_trace_files_are_deleted_to_keep_the_newest() {
+        let folder = folder("prune");
+        fs::create_dir_all(&folder).expect("make");
+        for name in ["notes.csv", "trace-a.txt", "trace-b.csv"] {
+            fs::write(folder.join(name), "").expect("write");
+        }
+        prune(&folder, 0);
+        assert_eq!(files(&folder), ["notes.csv", "trace-a.txt"]);
+        fs::remove_dir_all(folder).expect("clean up");
     }
 
     #[test]
