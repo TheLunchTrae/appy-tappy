@@ -1,7 +1,7 @@
 //! The investigation tools and the session state they share.
 //!
 //! Tool names are `area_verb`, so later areas slot in beside these:
-//! `definition_*`, `rule_*`, `source_test`, and `config_compile`.
+//! `definition_*`, `rule_*`, and `source_test`.
 //!
 //! The anti-cheat block lives here, not in the agent's instructions. Every
 //! process starts as class `unknown`. `process_attach` opens one only after
