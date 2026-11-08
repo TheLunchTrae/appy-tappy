@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 
 import { errorText } from '../lib/api.ts';
+import { READING_HINT, SHORTCUT_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
+import { Hint } from '../components/Hint.tsx';
 import { NumberSetting } from '../components/NumberSetting.tsx';
 import { RuntimeTrace } from '../components/RuntimeTrace.tsx';
 import {
@@ -100,7 +102,10 @@ function ScreenshotShortcut() {
   return (
     <div className="set-row">
       <div className="what">
-        <span>Screenshot shortcut</span>
+        <span className="with-hint">
+          Screenshot shortcut
+          <Hint topic="Screenshot shortcut">{SHORTCUT_HINT}</Hint>
+        </span>
         <span className="note">Takes a screenshot of the picked window while you make a value or a reference.</span>
         <span className="note" role="status">
           {choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
@@ -174,7 +179,10 @@ export function SettingsPage({ problem }: Props) {
           <ScreenshotShortcut />
         </section>
         <section className="card" aria-labelledby="settings-reading">
-          <h2 id="settings-reading">Reading</h2>
+          <div className="with-hint">
+            <h2 id="settings-reading">Reading</h2>
+            <Hint topic="Reading">{READING_HINT}</Hint>
+          </div>
           <Wait
             which="fastestMs"
             label="Fastest read"

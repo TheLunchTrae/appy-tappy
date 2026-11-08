@@ -2,7 +2,9 @@ import type { ReactNode } from 'react';
 
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
+import { INK_HINT, LABEL_HINT } from '../lib/hints.ts';
 import { CharacterChips } from './CharacterChips.tsx';
+import { Hint } from './Hint.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
 
 interface Props {
@@ -68,6 +70,7 @@ export function ReferenceEditor(props: Props) {
       </div>
       <ColorField
         label="Characters' color"
+        hint={INK_HINT}
         color={ink}
         picking={props.picking}
         canPick={props.canPick}
@@ -79,13 +82,19 @@ export function ReferenceEditor(props: Props) {
         onChange={props.onTolerance}
       />
       <div className="field">
-        <label htmlFor="label-text">What the region shows on this screenshot</label>
+        <span className="name">
+          <label htmlFor="label-text">What the region shows on this screenshot</label>
+          <Hint topic="What the region shows" id="hint-label">
+            {LABEL_HINT}
+          </Hint>
+        </span>
         {selected === null ? (
           <p className="note">Select a screenshot to type what it shows, such as 87%.</p>
         ) : (
           <input
             id="label-text"
             className="input"
+            aria-describedby="hint-label"
             placeholder="87%"
             value={props.label}
             onChange={(event) => {

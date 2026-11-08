@@ -16,6 +16,8 @@ import {
   useSettings,
   withCategory,
 } from '../lib/settings.ts';
+import { TRACE_HINT } from '../lib/hints.ts';
+import { Hint } from './Hint.tsx';
 import { NumberSetting } from './NumberSetting.tsx';
 
 /** Each category's name and what it records. */
@@ -198,7 +200,10 @@ export function RuntimeTrace() {
       <h2 id="settings-trace">Runtime trace</h2>
       <div className="set-row">
         <div className="what">
-          <span id="trace-on">Record a runtime trace</span>
+          <span className="with-hint">
+            <span id="trace-on">Record a runtime trace</span>
+            <Hint topic="Runtime trace">{TRACE_HINT}</Hint>
+          </span>
           <span className="note" id="trace-on-note">
             Writes what the runtime reads and does, with timings, to a file for measuring how fast it responds.
             Recording makes the runtime do a little more work.

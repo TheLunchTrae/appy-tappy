@@ -27,6 +27,9 @@ AppyTappy has two parts:
 
 That is all. The background part runs the automation from then on.
 
+A **?** beside a field in AppyTappy Setup explains it. Point at it, or move to it
+with Tab, to read the explanation.
+
 ## Pages
 
 - [Install, update, and uninstall](user/Install,-update,-and-uninstall.md)

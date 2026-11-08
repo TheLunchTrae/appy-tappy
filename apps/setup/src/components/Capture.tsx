@@ -33,6 +33,8 @@ import { type Point, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
+import { Hint } from './Hint.tsx';
+import { CHECK_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
@@ -617,7 +619,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 />
               </div>
               <div className="field">
-                <span id="check-kind">Check</span>
+                <span className="name">
+                  <span id="check-kind">Check</span>
+                  <Hint topic="Check">{CHECK_HINT}</Hint>
+                </span>
                 <div className="seg" role="group" aria-labelledby="check-kind">
                   {CHECK_KINDS.map((kind) => (
                     <button
