@@ -176,14 +176,20 @@ pub(crate) async fn save_app(
 }
 
 /// Removes an application with its values, unless an automation watches one
-/// of them.
+/// of them, then closes its overlay's window. The removal is done once it
+/// answers `Ok`, which holds why an overlay window could not open or close,
+/// if one could not.
 #[tauri::command]
-pub(crate) async fn remove_app(app: AppHandle, application: String) -> Result<(), String> {
+pub(crate) async fn remove_app(
+    app: AppHandle,
+    application: String,
+) -> Result<Option<String>, String> {
     ask(&app, |reply| Request::RemoveApp {
         app: application,
         reply,
     })
-    .await?
+    .await??;
+    Ok(sync_overlays(app).await.err())
 }
 
 /// Saves a value to the application `spec` names.
@@ -270,18 +276,20 @@ pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), 
 #[tauri::command]
 pub(crate) async fn sync_overlays(app: AppHandle) -> Result<(), String> {
     let wanted = ask(&app, Request::Overlays).await??;
-    overlay::window::sync(&app, &wanted).map_err(|error| error.to_string())
+    overlay::window::sync(&app, &wanted)
 }
 
 /// Turns `application`'s overlay on or off and sets where it shows, then
-/// opens or closes its window to match.
+/// opens or closes its window to match. The setting is saved once it
+/// answers `Ok`, which holds why an overlay window could not open or close,
+/// if one could not.
 #[tauri::command]
 pub(crate) async fn set_overlay(
     app: AppHandle,
     application: String,
     enabled: bool,
     mode: OverlayModeDef,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     ask(&app, |reply| Request::SetOverlay {
         app: application,
         enabled,
@@ -289,7 +297,7 @@ pub(crate) async fn set_overlay(
         reply,
     })
     .await??;
-    sync_overlays(app).await
+    Ok(sync_overlays(app).await.err())
 }
 
 /// What `application`'s overlay shows now.

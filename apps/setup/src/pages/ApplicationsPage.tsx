@@ -179,8 +179,7 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
   const remove = async (app: string): Promise<void> => {
     setBusy(true);
     try {
-      await removeApp(app);
-      setSetError(null);
+      setSetError(await removeApp(app));
       add.current?.focus();
       await onChanged();
     } catch (error: unknown) {
@@ -194,8 +193,7 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
   const changeOverlay = async (app: string, choice: OverlayChoice, kept: OverlayMode): Promise<void> => {
     try {
       // Turning it off keeps the mode, so turning it on again shows it where it was.
-      await (choice === 'off' ? setOverlay(app, false, kept) : setOverlay(app, true, choice));
-      setSetError(null);
+      setSetError(await (choice === 'off' ? setOverlay(app, false, kept) : setOverlay(app, true, choice)));
       await onChanged();
     } catch (error: unknown) {
       setSetError(errorText(error));
