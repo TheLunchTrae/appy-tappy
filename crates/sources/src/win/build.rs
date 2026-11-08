@@ -17,8 +17,8 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use windows::Wdk::System::SystemInformation::{NtQuerySystemInformation, SYSTEM_INFORMATION_CLASS};
 use windows::Win32::Foundation::{
-    ERROR_RESOURCE_DATA_NOT_FOUND, ERROR_RESOURCE_TYPE_NOT_FOUND, HANDLE,
-    STATUS_INFO_LENGTH_MISMATCH, UNICODE_STRING,
+    ERROR_RESOURCE_DATA_NOT_FOUND, ERROR_RESOURCE_LANG_NOT_FOUND, ERROR_RESOURCE_NAME_NOT_FOUND,
+    ERROR_RESOURCE_TYPE_NOT_FOUND, HANDLE, STATUS_INFO_LENGTH_MISMATCH, UNICODE_STRING,
 };
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, QueryDosDeviceW, VS_FIXEDFILEINFO, VerQueryValueW,
@@ -129,12 +129,17 @@ fn file_version(path: &Path) -> io::Result<Option<String>> {
     // Windows says a file has no version resource with one of these, as a
     // Win32 error code or as the HRESULT that wraps one.
     let no_version = |error: io::Error| {
-        let missing = [ERROR_RESOURCE_TYPE_NOT_FOUND, ERROR_RESOURCE_DATA_NOT_FOUND]
-            .iter()
-            .any(|code| {
-                error.raw_os_error() == i32::try_from(code.0).ok()
-                    || error.raw_os_error() == Some(code.to_hresult().0)
-            });
+        let missing = [
+            ERROR_RESOURCE_TYPE_NOT_FOUND,
+            ERROR_RESOURCE_NAME_NOT_FOUND,
+            ERROR_RESOURCE_LANG_NOT_FOUND,
+            ERROR_RESOURCE_DATA_NOT_FOUND,
+        ]
+        .iter()
+        .any(|code| {
+            error.raw_os_error() == i32::try_from(code.0).ok()
+                || error.raw_os_error() == Some(code.to_hresult().0)
+        });
         if missing { Ok(None) } else { Err(error) }
     };
     let name = HSTRING::from(path);

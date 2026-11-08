@@ -249,8 +249,8 @@ checked against, and `at` is when, in seconds since 1970. A build is the
 executable's file version, which is left out when the file has none, its size
 in bytes, and when it was last written, in seconds since 1970; two builds are
 the same only when all three match. The setup app records the running build
-when it saves a value while `checked` is left out, such as the first value, and
-when the user selects **Mark as checked**. It leaves `checked` out again when
+when it saves an application's first value, and when the user selects **Mark
+as checked**. It leaves `checked` out again when
 the last value is deleted or the window match's executable changes, since the
 build was of the values or the executable that are gone. The Values page shows
 `checked`'s version and day, and warns while a different build runs, as does

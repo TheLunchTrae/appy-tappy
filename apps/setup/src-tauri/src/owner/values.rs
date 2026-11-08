@@ -96,6 +96,7 @@ impl<H: Host> Owner<H> {
         let saved = self
             .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
             .map_err(|error| error.to_string())?;
+        let first = file.values.is_empty();
         file.values.push(ValueDef {
             id: id.clone(),
             name: name.to_owned(),
@@ -108,11 +109,10 @@ impl<H: Host> Owner<H> {
                 check: saved.check,
             },
         });
-        // The first value saved is checked against the build that runs
-        // now, as is any value saved while no build is recorded; later ones
-        // leave that to Mark as checked, since one new value says nothing
-        // about the others.
-        if file.checked.is_none() {
+        // The first value is checked against the build that runs now. Later
+        // ones leave that to Mark as checked, since one new value says
+        // nothing about the others.
+        if first {
             file.checked = self.running_build(&file).ok().flatten().map(checked_now);
         }
         self.stores()?
@@ -625,6 +625,21 @@ mod tests {
         );
         assert_eq!(rename(&mut harness, "Other.exe"), Ok("example".to_owned()));
         assert_eq!(checked(&mut harness), None, "another executable drops it");
+        assert_eq!(
+            rename(&mut harness, "Example.exe"),
+            Ok("example".to_owned())
+        );
+        harness
+            .ask(|reply| Request::SaveValue {
+                spec: Box::new(spec("example", "Icon visible", STATE)),
+                reply,
+            })
+            .expect("saves");
+        assert_eq!(
+            checked(&mut harness),
+            None,
+            "a value beside unchecked ones leaves them to Mark as checked"
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

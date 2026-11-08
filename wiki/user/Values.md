@@ -129,8 +129,7 @@ again.
 An update can move what a value reads, so AppyTappy remembers which build of
 the application its values were checked against: the version of its
 executable, such as `1.4.2.0`, its size, and when it was written. It records
-the build that runs when you save a value while none is recorded, such as the
-application's first value. Deleting every value, or changing which executable
+the build that runs when you save the application's first value. Deleting every value, or changing which executable
 the application is, forgets it. The Values page shows it next to the
 application's name, such as **checked against 1.4.2.0 on Nov 8, 2026**.
 
