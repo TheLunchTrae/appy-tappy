@@ -8,7 +8,7 @@
 //! thread, which owns the file. A record carries no text of its own, and a
 //! send never waits: when the writer's buffer is full, the record is dropped
 //! and counted, and the next record that gets through carries the count, so
-//! the file says how many were lost. See `wiki/developer/Trace.md`.
+//! the file says how many were lost. See `wiki/Trace.md`.
 
 pub(crate) mod switch;
 pub(crate) mod writer;

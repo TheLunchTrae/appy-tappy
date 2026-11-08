@@ -26,7 +26,7 @@ mutants = "0.0.4"
 # Reads a recorded reading's text so the user only corrects it: a pure-Rust
 # neural text reader, so it runs the same on every system and needs no
 # operating system OCR. Only its recognition model loads, from the file
-# wiki/developer/Setup-app.md names. Not used by the runtime.
+# wiki/Setup-app.md names. Not used by the runtime.
 ocrs = { version = "=0.13.1", default-features = false, features = ["onnx"] }
 # Loads the text reader's model file, and gives the rectangle of the line
 # it reads.
@@ -43,7 +43,7 @@ tauri = { version = "=2.12.5", features = [] }
 tauri-plugin-global-shortcut = "=2.4.1"
 # Checks GitHub Releases for a newer AppyTappy and installs it when the user
 # agrees, checking the download against the update key. Release builds
-# configure it, as wiki/developer/Installer.md describes. Without zip,
+# configure it, as wiki/Installer.md describes. Without zip,
 # because the update is the installer itself.
 tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # Keeps one copy of the setup app running, so two copies cannot overwrite

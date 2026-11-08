@@ -1,7 +1,7 @@
 //! Rules: when to act on an app's signals.
 //!
 //! These are validated types. The constructors check every invariant, so the
-//! engine never meets a malformed rule. `wiki/developer/Rules.md` explains the model.
+//! engine never meets a malformed rule. `wiki/Rules.md` explains the model.
 
 use std::collections::BTreeMap;
 use std::error::Error;

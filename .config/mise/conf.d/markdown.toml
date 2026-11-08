@@ -72,24 +72,24 @@ run = "bun run standards:check"
 description = "Run the Markdown CI gate plus external link and dependency checks"
 depends = ["md:standards:check", "md:links:deep", "md:audit"]
 
-# wiki/ publishes to the GitHub wiki; wiki/developer/Wiki.md describes how.
-# Neither task publishes: the Wiki workflow pushes what md:wiki builds.
-[tasks."md:wiki"]
-description = "Build the wiki from wiki/ into artifacts/wiki, without publishing it"
-tools = { python = "3.15.1" }
-run = '''
-set -eu
-rm -rf artifacts/wiki
-python -B scripts/wiki.py artifacts/wiki --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
-'''
-
+# wiki/ publishes to the GitHub wiki; wiki/Development.md#wiki says how.
 [tasks."md:wiki:check"]
-description = "Test the wiki build, then build the wiki from wiki/ into a temporary directory"
-tools = { python = "3.15.1" }
+description = "Check that wiki/ is flat and the sidebar links every page"
 run = '''
 set -eu
-python -B -m unittest discover -s scripts -p wiki_test.py
-out=$(mktemp -d)
-trap 'rm -rf "$out"' EXIT
-python -B scripts/wiki.py "$out/wiki" --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
+status=0
+for dir in wiki/*/; do
+  [ -d "$dir" ] || continue
+  echo "$dir: the GitHub wiki has no folders, so wiki/ has none either." >&2
+  status=1
+done
+for page in wiki/*.md; do
+  name=${page#wiki/}
+  case $name in Home.md | _*) continue ;; esac
+  if ! grep -qF "]($name)" wiki/_Sidebar.md; then
+    echo "$page: add a link to it in wiki/_Sidebar.md." >&2
+    status=1
+  fi
+done
+exit "$status"
 '''

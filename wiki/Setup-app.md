@@ -8,8 +8,8 @@ the UI is React and TypeScript in `apps/setup/src`, and the Rust side in
 way.
 
 The user guide owns the pages and flows as the user sees them:
-[Applications](../user/Applications.md), [Values](../user/Values.md),
-[Automations](../user/Automations.md), and [Overlay](../user/Overlay.md).
+[Applications](Applications.md), [Values](Values.md),
+[Automations](Automations.md), and [Overlay](Applications.md#overlay).
 This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
@@ -85,7 +85,7 @@ This page covers what the user guide leaves out.
 
 ## Recording
 
-[Recording readings](../user/References.md#record-readings) samples the frames
+[Recording readings](References.md#record-readings) samples the frames
 the reference editor's preview capture already takes, about 30 a second, in
 the owner thread (`recording.rs`). Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
@@ -145,7 +145,7 @@ it beside the debug build.
 
 ## Window matching
 
-[How AppyTappy finds the window](../user/Applications.md#how-appytappy-finds-the-window)
+[How AppyTappy finds the window](Applications.md#how-appytappy-finds-the-window)
 gives the patterns, the must-match fields, and the fallback. The file stores
 them as `mustMatch`, with a flag for the title and the class, and `fallback`:
 `none` or `executable`. The executable always has to match, because the

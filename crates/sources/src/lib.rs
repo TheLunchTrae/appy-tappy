@@ -5,7 +5,7 @@
 //! [`system::System`] and [`screen::Capture`]; other platforms get
 //! [`system::Unsupported`].
 //!
-//! See `wiki/developer/Architecture.md` for this crate's boundaries.
+//! See `wiki/Architecture.md` for this crate's boundaries.
 
 pub mod build;
 pub mod schedule;

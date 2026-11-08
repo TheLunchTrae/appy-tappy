@@ -1,7 +1,7 @@
 # Installer
 
 AppyTappy ships as one Windows installer that holds both programs.
-[Install](../user/Install,-update,-and-uninstall.md) in the user guide describes
+[Install](Getting-started.md#install) in the user guide describes
 it from the user's side. Tauri's bundler builds it as an NSIS installer from the
 setup app, with the runtime added as a sidecar. Issue
 [#19](https://github.com/TheLunchTrae/appy-tappy/issues/19) tracks packaging.
@@ -32,7 +32,7 @@ runtime's logs.
 
 The installer also holds the setup app's text reader model,
 `models\text-recognition.onnx` beside the setup app, which
-[recording readings](../user/References.md#record-readings) uses
+[recording readings](References.md#record-readings) uses
 ([The text reader](Setup-app.md#the-text-reader)). `mise run
 installer:build` downloads it first with `mise run ocr:model`, which fails when
 the download does not match the hash pinned in
@@ -45,7 +45,7 @@ tasks build the setup app without a built runtime.
 
 The installer and the programs are not code-signed, so Windows SmartScreen
 warns the first time the installer runs;
-[Install](../user/Install,-update,-and-uninstall.md) tells the user what to
+[Install](Getting-started.md#install) tells the user what to
 select.
 
 ## Builds
@@ -112,7 +112,7 @@ steps cannot sign anything.
 AppyTappy Setup checks for a newer release each time it opens, with Tauri's
 updater (`apps/setup/src-tauri/src/updates.rs`). It downloads one when the
 user selects **Update**, and installs it only when they agree, with nothing
-left unsaved. [Update](../user/Install,-update,-and-uninstall.md#update) shows
+left unsaved. [Update](Getting-started.md#update) shows
 what the user sees, and the
 [update notice](State-machines.md#update-notice) maps its states. The runtime
 has no updater, so it stays as small and idle as it is. One installer holds

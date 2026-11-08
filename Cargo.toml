@@ -56,7 +56,7 @@ missing_docs = "deny"
 unexpected_cfgs = "deny"
 unreachable_pub = "deny"
 # `unsafe` is denied, not forbidden, so the Windows adapters in
-# `appytappy-sources` can call Win32 APIs (wiki/developer/Architecture.md#unsafe-code).
+# `appytappy-sources` can call Win32 APIs (wiki/Architecture.md#unsafe-code).
 # Each unsafe block carries a reasoned `#[expect(unsafe_code)]` and a SAFETY
 # comment; every other crate root keeps `#![forbid(unsafe_code)]`.
 unsafe_code = "deny"

@@ -6,7 +6,7 @@
 //! updates the runtime too, and the two always come from the same release.
 //! The installer stops the runtime first, which undoes what its automations
 //! changed, and starts it again afterwards. The updates section of
-//! `wiki/developer/Installer.md` describes the flow and the key that signs
+//! `wiki/Installer.md` describes the flow and the key that signs
 //! each update.
 
 use std::fmt;
