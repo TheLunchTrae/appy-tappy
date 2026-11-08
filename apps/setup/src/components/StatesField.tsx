@@ -6,7 +6,6 @@ import type { Reading } from '../lib/api.ts';
 import {
   type Draft,
   type DraftState,
-  MAX_STATE_NAME_LENGTH,
   MAX_STATES,
   stateOn,
   withoutState,
@@ -64,6 +63,7 @@ interface CardProps {
   readonly matches: boolean;
   readonly number: number;
   readonly onName: (name: string) => void;
+  readonly onClear: () => void;
   readonly onRemove: () => void;
   readonly onShow: () => void;
 }
@@ -103,7 +103,6 @@ function StateCard(props: CardProps) {
           className="input"
           aria-label={`Name of the state from screenshot ${number}`}
           placeholder="Name"
-          maxLength={MAX_STATE_NAME_LENGTH}
           value={state.name}
           onChange={(event) => {
             props.onName(event.target.value);
@@ -121,9 +120,16 @@ function StateCard(props: CardProps) {
         </small>
         {lost ? <small className="warn">Nothing stood out there. Try again, or raise Color match.</small> : null}
       </div>
-      <button type="button" className="btn small" onClick={props.onRemove}>
-        Remove
-      </button>
+      <div className="state-actions">
+        <button type="button" className="btn small" onClick={props.onRemove}>
+          Remove
+        </button>
+        {state.steps.length === 0 ? null : (
+          <button type="button" className="btn small" onClick={props.onClear}>
+            Clear selection
+          </button>
+        )}
+      </div>
     </li>
   );
 }
@@ -155,6 +161,9 @@ export function StatesField({ draft, full, selected, masks, reading, position, o
                 number={position(state.screenshot)}
                 onName={(name) => {
                   onDraft((current) => withStateAt(current, index, (old) => ({ ...old, name })));
+                }}
+                onClear={() => {
+                  onDraft((current) => withStateAt(current, index, (old) => ({ ...old, steps: [] })));
                 }}
                 onRemove={() => {
                   onDraft((current) => withoutState(current, index));

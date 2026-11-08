@@ -534,7 +534,7 @@ fn state_pictures(
             let (picture, mask) = picture_of(screenshots, region, state)?;
             // The mask is the region's, so its size is always the picture's.
             let picture = ImageMatch::new(picture, mask.as_ref(), tolerance)
-                .map_err(|_size| SpecError::NothingSelected)?;
+                .map_err(|_size| SpecError::NothingSelected(state.name.clone()))?;
             Ok((name, picture))
         })
         .collect()
@@ -558,7 +558,7 @@ fn picture_of(
         .map(|selection| {
             selection::select(image, selection)
                 .and_then(|selected| selected.mask_in(region))
-                .ok_or(SpecError::NothingSelected)
+                .ok_or_else(|| SpecError::NothingSelected(state.name.clone()))
         })
         .transpose()?;
     Ok((picture, mask))

@@ -101,6 +101,7 @@ raise it if the selection stops short, and lower it if it spills over.
 Selecting on a screenshot with no state yet adds one for it, so you can name
 it under **How to read it**. Each state keeps its own selection, made on its
 own screenshot, and the region fits around what every state selects.
+**Clear selection** on a state compares its whole region again.
 
 While **Ignore the background** is on, the pixels a state's selection leaves
 out are shaded over its screenshot, and the check skips them. Turn it off to

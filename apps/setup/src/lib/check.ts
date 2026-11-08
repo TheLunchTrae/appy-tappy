@@ -37,9 +37,6 @@ export const DEFAULT_TOLERANCE: Readonly<Record<CheckKind, number>> = {
 /** The most states a state check can tell apart. */
 export const MAX_STATES = 16;
 
-/** The longest a state's name may be, in characters. */
-export const MAX_STATE_NAME_LENGTH = 32;
-
 /** One look of a state check, as the user sets it up. */
 export interface DraftState {
   /** The name it reads as, as typed. */

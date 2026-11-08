@@ -41,6 +41,8 @@ import {
   settingsDiffer,
   toReference,
   withKind,
+  MAX_STATES,
+  stateOn,
   withStateStep,
 } from '../lib/check.ts';
 import { readers } from '../lib/reference.ts';
@@ -387,15 +389,19 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             next.set(state.screenshot, { steps: state.steps, colorMatch, view });
           }
           setSelections(next);
-          const views = states.flatMap((state) => {
-            const view = madeFor(next, state, colorMatch)?.view;
-            return view === undefined || view === null ? [] : [{ steps: state.steps, region: view.region }];
+          const made_ = states.flatMap((state) => {
+            const selection = madeFor(next, state, colorMatch);
+            return selection === null ? [] : [selection];
           });
-          const region = bounding(views.map((view) => view.region));
+          const region = bounding(
+            made_.flatMap((selection) => (selection.view === null ? [] : [selection.view.region])),
+          );
           const last = fitted.current;
-          const fresh = views.some((view) => last?.steps.has(view.steps) !== true);
+          // Steps the region was not fitted to yet refit it even over a hand
+          // edit; a new color match for the same steps refits only an untouched one.
+          const fresh = made_.some((selection) => last?.steps.has(selection.steps) !== true);
           if (region !== null && (last === null || fresh || sameRect(shownRegion.current, last.region))) {
-            fitted.current = { steps: new Set(views.map((view) => view.steps)), region };
+            fitted.current = { steps: new Set(made_.map((selection) => selection.steps)), region };
             const on = made[0]?.state.screenshot ?? null;
             setDraft((latest) => ({ ...latest, region, drawnOn: latest.drawnOn ?? on }));
           }
@@ -432,9 +438,15 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     return { masks, ignored };
   }, [states, selections, colorMatch, draft.ignoreBackground, draft.region, draft.kind, selected]);
   const addStep = (step: SelectStep): void => {
-    if (selected !== null) {
-      setDraft((current) => withStateStep(current, selected, step));
+    if (selected === null) {
+      return;
     }
+    if (stateOn(draft, selected) === -1 && draft.states.length >= MAX_STATES) {
+      setSelectError(`A value can tell apart at most ${MAX_STATES} states. Remove one to select on this screenshot.`);
+      return;
+    }
+    setSelectError(null);
+    setDraft((current) => withStateStep(current, selected, step));
   };
 
   const readNow = useCallback(async (): Promise<void> => {

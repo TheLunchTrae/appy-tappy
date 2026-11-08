@@ -37,8 +37,9 @@ pub(crate) enum SpecError {
     Outside,
     /// The bar's filled and empty colors are the same.
     SameColors,
-    /// A state's selection leaves no pixel of its region to compare.
-    NothingSelected,
+    /// The selection of the state with this name leaves no pixel of its
+    /// region to compare.
+    NothingSelected(String),
     /// A state check has no state.
     NoStates,
     /// A state check has more than [`MAX_STATES`] states.
@@ -98,8 +99,9 @@ impl fmt::Display for SpecError {
             Self::SameColors => {
                 formatter.write_str("Pick a filled color and an empty color that differ.")
             },
-            Self::NothingSelected => formatter.write_str(
-                "Nothing in the region is selected. Select the thing again, or stop ignoring the background.",
+            Self::NothingSelected(name) => write!(
+                formatter,
+                "Nothing in the region is selected for the state {name:?}. Select it again, clear its selection, or stop ignoring the background.",
             ),
             Self::NoStates => formatter.write_str("Add a state from a screenshot."),
             Self::TooManyStates => write!(

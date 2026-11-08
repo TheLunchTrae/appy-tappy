@@ -54,7 +54,7 @@ the same answer on every system, and allocate nothing per read.
   without testing each pixel.
 
 On the fixture screenshots, each check takes 2 to 10 microseconds per read on
-one CPU core; `mise run rust:bench` prints the current numbers.
+one CPU core, and a state check about that much for each of its states; `mise run rust:bench` prints the current numbers.
 
 Windows has its own OCR engine, and `ocrs` is a pure-Rust neural OCR crate.
 The runtime uses neither. Windows OCR would make results depend on the Windows

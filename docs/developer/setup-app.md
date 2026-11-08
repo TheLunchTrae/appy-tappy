@@ -247,7 +247,7 @@ A yes-or-no condition has `"is": "equals"` or `"notEquals"` and a `true` or
 `false` target. A state condition has the same comparisons and a state's name,
 or `"none"`, as its target. A state check is saved with its states in order:
 
-````json
+```json
 {
   "kind": "state",
   "states": [
@@ -287,7 +287,7 @@ The program embeds the UI built into `apps/setup/dist`, so build the UI first:
 ```sh
 mise run ui:build
 cargo run -p appytappy-setup
-````
+```
 
 To work on the UI with live reloading, run the Vite dev server and the program
 without its embedded UI:

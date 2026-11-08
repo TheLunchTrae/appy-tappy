@@ -24,9 +24,7 @@ On the Automations page, select **New automation**. To change one, select
    - A value that reads yes or no: **is** or **is not**, then **Yes** or
      **No**.
    - A value that reads a state: **is** or **is not**, then one of its
-     states or `none`, such as `Status is Paused`. If a state is renamed or
-     removed, an automation that compares with it says so until you pick
-     another.
+     states or `none`, such as `Status is Paused`.
 
    An automation watches one value.
 

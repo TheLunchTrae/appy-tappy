@@ -326,7 +326,7 @@ fn a_selected_image_compares_only_what_was_selected() {
     };
     assert_eq!(
         build(&spec(gray_half), session(&[screenshot()], None)).err(),
-        Some(SpecError::NothingSelected),
+        Some(SpecError::NothingSelected("Shown".to_owned())),
         "a region that holds none of the selection has nothing to compare"
     );
 }
@@ -879,8 +879,8 @@ fn saved_checks_keep_their_settings() {
         "A picture of the region could not be saved."
     );
     assert_eq!(
-        SpecError::NothingSelected.to_string(),
-        "Nothing in the region is selected. Select the thing again, or stop ignoring the background."
+        SpecError::NothingSelected("Live".to_owned()).to_string(),
+        "Nothing in the region is selected for the state \"Live\". Select it again, clear its selection, or stop ignoring the background."
     );
     assert_eq!(
         SpecError::OtherApplication.to_string(),

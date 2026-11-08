@@ -658,7 +658,7 @@ pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
 
 /// The file name of a reference's `number`th sample, such as
 /// `ref-percent_font-3.png`. No value's picture can have it: a value's ID
-/// has no hyphen, and its picture is `{id}.png`.
+/// has no hyphen, and its pictures are `{id}-{n}.png`.
 #[must_use]
 pub fn sample_name(reference: &str, number: usize) -> String {
     format!("ref-{reference}-{number}.png")
@@ -1108,8 +1108,8 @@ mod tests {
         let long = value_id(&"abc".repeat(30));
         assert_eq!(long.len(), MAX_VALUE_ID_LEN);
         assert!(SignalName::new(&long).is_ok());
-        // The picture named after the longest ID still fits.
-        assert!(is_image_name(&format!("{long}.png")));
+        // The last state's picture named after the longest ID still fits.
+        assert!(is_image_name(&format!("{long}-{MAX_STATES}.png")));
     }
 
     #[test]

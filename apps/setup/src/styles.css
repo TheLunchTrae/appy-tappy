@@ -1549,6 +1549,12 @@ select {
   color: var(--muted);
 }
 
+.state-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .state-body small.warn {
   color: var(--warn);
 }
