@@ -27,10 +27,11 @@ An app is named the way Windows reports it, ignoring ASCII case. For media, that
 is the session's app ID: usually the executable name, such as `Player.exe`, for
 a desktop app, unless the app sets its own ID; the package name for a Microsoft
 Store app; or the browser's name. For volume, it is the executable name, such as
-`Player.exe`. Naming an audio session's executable takes the runtime's process
-snapshot from `appytappy-sources`, the one detection reads, which never opens a
+`Player.exe`. Naming an audio session's executable lists the processes through
+`appytappy-sources`, the same snapshot call detection uses, which never opens a
 process, so no action opens a watched application's process. The action worker
-hands it to the controls, so `appytappy-actions` keeps no process code of its own.
+hands that lister to the controls, so `appytappy-actions` keeps no process code
+of its own.
 
 An app can have several sessions at once, such as one per browser tab:
 

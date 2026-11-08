@@ -4,14 +4,14 @@
 //! Media sessions come from the Windows Runtime media transport controls,
 //! which music players and browsers publish without any app-specific API.
 //! Volumes come from Core Audio on the default playback device. Naming an
-//! audio session's app takes the process list the caller hands the controls,
-//! a snapshot that never opens a process, so no action opens a watched app's
-//! process. Key presses go through
-//! `SendInput`, which types into whichever window has the keyboard focus,
-//! after asking which process that window belongs to. A click moves the
-//! cursor with `SetCursorPos` and presses through `SendInput` too, after
-//! `WindowFromPoint` says which top-level window shows there; giving the
-//! focus back goes through `SetForegroundWindow`. Opening a program,
+//! audio session's app takes the process lister the caller hands the
+//! controls, which must not open a process, so no action opens a watched
+//! app's process. Key presses go through `SendInput`, which types into
+//! whichever window has the keyboard focus, after asking which process that
+//! window belongs to. A click moves the cursor with `SetCursorPos` and
+//! presses through `SendInput` too, after `WindowFromPoint` says which
+//! top-level window shows there; giving the focus back goes through
+//! `SetForegroundWindow`. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
 //! Explorer's open, on a short-lived thread of its own, so a slow program
 //! cannot hold up the action worker for longer than 2 seconds; while an open
@@ -157,8 +157,9 @@ impl PartialEq for VolumeKey {
     }
 }
 
-/// Lists the running processes' executable names by process ID, such as
-/// from the system's process snapshot, which opens no process.
+/// Lists the running processes' executable names with their process IDs.
+/// It must not open any process: the controls rely on that so that no
+/// action opens a watched app's process.
 pub type Executables = Box<dyn Fn() -> io::Result<Vec<(ProcessId, String)>>>;
 
 /// The Windows implementation of [`Controls`].
@@ -364,7 +365,8 @@ impl Controls for WindowsControls {
             // processes it still succeeds and names the process that created it.
             let process = unsafe { details.GetProcessId() }?;
             let process = ProcessId::new(process);
-            let Some((_, executable)) = executables.iter().find(|(id, _)| *id == process) else {
+            let Some((_, executable)) = executables.iter().find(|(listed, _)| *listed == process)
+            else {
                 continue;
             };
             let control: ISimpleAudioVolume = details.cast()?;
