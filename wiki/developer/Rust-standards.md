@@ -104,8 +104,10 @@ lane; stage them with `git add -N`. A diff that selects no mutants passes.
 
 `rust:standards:check` runs `rust:mutants:gate`, which picks the lane from
 `MUTANTS_LANE`: `full`, the default, or `diff`. CI runs the `diff` lane
-against the base for pull requests and merge groups, so the quality job fits
-its time limit. Pushes to main and manual runs take the full sweep, split
+for pull requests and merge groups, so the quality job fits its time limit. A
+pull request's base is the first parent of the merge commit CI checks out,
+which is the base branch's current tip; a merge group's base is the queue's
+base commit. Pushes to main and manual runs take the full sweep, split
 into shards across the `quality` and `mutants` jobs:
 `MUTANTS_SHARD=k/n` makes `rust:mutants` run shard `k` of `n`, counted from
 zero, and `.github/workflows/quality.yml` sets the shard count.
