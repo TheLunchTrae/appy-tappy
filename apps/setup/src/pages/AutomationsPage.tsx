@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-import {
-  type AppSummary,
-  type AutomationSummary,
-  deleteAutomation,
-  errorText,
-  setAutomationEnabled,
-} from '../lib/api.ts';
+import type { AppSummary, AutomationSummary } from '../lib/bindings.ts';
+import { deleteAutomation, errorText, setAutomationEnabled } from '../lib/api.ts';
 import {
   COMPARISON_NAMES,
   type ValueChoice,
@@ -15,6 +10,8 @@ import {
   targetText,
   valueChoices,
 } from '../lib/automation.ts';
+import { Hint } from '../components/Hint.tsx';
+import { NEEDS_RUNNING_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 
 interface RowProps {
@@ -247,7 +244,12 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
             <th scope="col">Automation</th>
             <th scope="col">When</th>
             <th scope="col">Do, in order</th>
-            <th scope="col">Needs running</th>
+            <th scope="col" aria-label="Needs running">
+              <span className="with-hint">
+                Needs running
+                <Hint topic="Needs running">{NEEDS_RUNNING_HINT}</Hint>
+              </span>
+            </th>
             <th scope="col">
               <span className="visually-hidden">Edit or delete</span>
             </th>

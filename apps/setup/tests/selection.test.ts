@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+import type { SelectStep } from '../src/lib/bindings.ts';
 import {
-  type SelectStep,
   type Selection,
   combineOf,
   ignoredPixels,

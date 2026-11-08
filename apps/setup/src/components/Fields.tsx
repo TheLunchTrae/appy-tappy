@@ -1,10 +1,13 @@
 // The inspector's fields that values and references share.
 
-import type { Reading } from '../lib/api.ts';
+import type { Reading } from '../lib/bindings.ts';
 import { readingText } from '../lib/automation.ts';
 import type { CheckState } from '../lib/check.ts';
+import { REGION_HINT, TOLERANCE_HINT } from '../lib/hints.ts';
 import { type Color, hex } from '../lib/pixels.ts';
 import type { Rect } from '../lib/region.ts';
+import { Hint } from './Hint.tsx';
+import type { ReactNode } from 'react';
 
 /** The tolerance's highest value, as a color channel's. */
 const MAX_TOLERANCE = 255;
@@ -20,7 +23,10 @@ export function RegionFields({
   const names = { x: 'X', y: 'Y', width: 'Width', height: 'Height' } as const;
   return (
     <div className="field">
-      <span>Region, in the window&apos;s pixels</span>
+      <span className="name">
+        <span>Region, in the window&apos;s pixels</span>
+        <Hint topic="Region">{REGION_HINT}</Hint>
+      </span>
       <div className="grid4">
         {parts.map((part) => (
           <input
@@ -48,16 +54,25 @@ export function RegionFields({
 
 interface ColorProps {
   readonly label: string;
+  /** What the ? beside the label explains, if the label needs explaining. */
+  readonly hint?: ReactNode;
   readonly color: Color | null;
   readonly picking: boolean;
   readonly canPick: boolean;
   readonly onPick: () => void;
 }
 
-export function ColorField({ label, color, picking, canPick, onPick }: ColorProps) {
+export function ColorField({ label, hint, color, picking, canPick, onPick }: ColorProps) {
   return (
     <div className="field">
-      <span>{label}</span>
+      {hint === undefined ? (
+        <span>{label}</span>
+      ) : (
+        <span className="name">
+          <span>{label}</span>
+          <Hint topic={label}>{hint}</Hint>
+        </span>
+      )}
       <div className="colorpick">
         <span className="chip">
           {color === null ? (
@@ -87,22 +102,31 @@ export function ColorField({ label, color, picking, canPick, onPick }: ColorProp
 /** A tolerance, set with the slider or typed in. */
 export function ToleranceField({
   help,
+  hint = TOLERANCE_HINT,
   value,
   onChange,
 }: {
   readonly help: string;
+  /** What the ? beside it explains, which differs where tolerance picks a reference's characters. */
+  readonly hint?: string;
   readonly value: number;
   readonly onChange: (value: number) => void;
 }) {
   return (
     <div className="field">
-      <label htmlFor="tolerance">Tolerance</label>
+      <span className="name">
+        <label htmlFor="tolerance">Tolerance</label>
+        <Hint topic="Tolerance" id="hint-tolerance">
+          {hint}
+        </Hint>
+      </span>
       <div className="range">
         <input
           id="tolerance"
           type="range"
           min={0}
           max={MAX_TOLERANCE}
+          aria-describedby="hint-tolerance"
           value={value}
           onChange={(event) => {
             onChange(Number(event.target.value));
@@ -114,6 +138,7 @@ export function ToleranceField({
           min={0}
           max={MAX_TOLERANCE}
           aria-label="Tolerance, typed"
+          aria-describedby="hint-tolerance"
           value={value}
           onChange={(event) => {
             const typed = Number.parseInt(event.target.value, 10);

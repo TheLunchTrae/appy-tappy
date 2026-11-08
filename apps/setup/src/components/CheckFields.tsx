@@ -2,6 +2,7 @@
 
 import type { Draft } from '../lib/check.ts';
 import { type SelectTool, SELECT_TOOLS, TOOL_NAMES } from '../lib/selection.ts';
+import { BAR_COLORS_HINT } from '../lib/hints.ts';
 import { ColorField, ToleranceField } from './Fields.tsx';
 
 /** Where a picked color goes. */
@@ -105,10 +106,11 @@ interface ColorProps {
 
 /** The fields of a bar fill or a color check, whose colors are picked from a screenshot. */
 export function ColorFields({ draft, picking, canPick, onDraft, onPicking }: ColorProps) {
-  const color = (target: ColorTarget, label: string) => (
+  const color = (target: ColorTarget, label: string, hint?: string) => (
     <ColorField
       key={target}
       label={label}
+      hint={hint}
       color={draft[target]}
       picking={picking === target}
       canPick={canPick}
@@ -120,7 +122,7 @@ export function ColorFields({ draft, picking, canPick, onDraft, onPicking }: Col
   if (draft.kind === 'barFill') {
     return (
       <>
-        {color('filled', 'Filled color')}
+        {color('filled', 'Filled color', BAR_COLORS_HINT)}
         {color('empty', 'Empty color')}
       </>
     );

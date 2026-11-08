@@ -43,6 +43,7 @@ pub const MAX_STATES: usize = 16;
 
 /// One application's authoring file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppFile {
     /// The format version, [`FORMAT`].
@@ -62,10 +63,12 @@ pub struct AppFile {
     /// How the setup app shows the values' live readings on top of the
     /// application, or `None` when it never has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub overlay: Option<OverlayDef>,
     /// The build of the application its values were last checked against,
     /// or `None` before the setup app saved a value of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub checked: Option<CheckedDef>,
 }
 
@@ -76,11 +79,13 @@ pub struct AppFile {
 /// when the running build is another one, and the runtime notes it in its
 /// log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CheckedDef {
     /// The build.
     pub build: BuildDef,
     /// When the user checked them, in seconds since 1970 began in UTC.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub at: u64,
 }
 
@@ -90,22 +95,27 @@ pub struct CheckedDef {
 /// file's size and the time it was written count too: two builds are the
 /// same only when all three match.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BuildDef {
     /// The executable's file version, such as `1.4.2.0`, or `None` when the
     /// file has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub version: Option<String>,
     /// The executable's size in bytes.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub size: u64,
     /// When the executable was last written, in seconds since 1970 began in
     /// UTC.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub modified: u64,
 }
 
 /// How the setup app shows an application's live readings on top of it. The
 /// runtime ignores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OverlayDef {
     /// Whether it shows.
@@ -115,11 +125,13 @@ pub struct OverlayDef {
     /// Where the user last put the picture-in-picture panel, or `None`
     /// before they moved it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub panel: Option<PanelDef>,
 }
 
 /// Where the live readings show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayModeDef {
     /// Over the application's window, following it and letting clicks
@@ -131,6 +143,7 @@ pub enum OverlayModeDef {
 
 /// A picture-in-picture panel's place and size in screen pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PanelDef {
     /// The left edge.
@@ -145,6 +158,7 @@ pub struct PanelDef {
 
 /// How to recognize an application's window: see [`WindowMatch`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WindowDef {
     /// The pattern for the window's title.
@@ -162,6 +176,7 @@ pub struct WindowDef {
 
 /// [`MustMatch`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MustMatchDef {
     /// The title has to match.
@@ -172,6 +187,7 @@ pub struct MustMatchDef {
 
 /// [`WindowMatch::fallback`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum FallbackDef {
     /// No fallback: the application counts as closed.
@@ -221,6 +237,7 @@ impl From<&WindowMatch> for WindowDef {
 
 /// [`AntiCheatClass`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum AntiCheatDef {
     /// [`AntiCheatClass::None`].
@@ -246,6 +263,7 @@ impl From<AntiCheatDef> for AntiCheatClass {
 
 /// One value read from the application's window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ValueDef {
     /// The value's signal name, unique within the file, such as
@@ -263,6 +281,7 @@ pub struct ValueDef {
 /// every value drawn in its font, whatever the size: the reader scales each
 /// character to its line's height.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceDef {
     /// The reference's ID, unique within the file, such as `percent_font`.
@@ -280,6 +299,7 @@ pub struct ReferenceDef {
 
 /// A value read from a region of the window's frame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScreenDef {
     /// The window's size when the region was drawn. A region's pixels mean
@@ -293,6 +313,7 @@ pub struct ScreenDef {
 
 /// A size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct SizeDef {
     /// The width.
@@ -303,6 +324,7 @@ pub struct SizeDef {
 
 /// A rectangle in pixels from the window's top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct RegionDef {
     /// The left edge.
@@ -317,6 +339,7 @@ pub struct RegionDef {
 
 /// A color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct ColorDef {
     /// The red channel.
@@ -329,6 +352,7 @@ pub struct ColorDef {
 
 /// How a value is read from its region.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum CheckDef {
     /// Reads a number with the characters of a reference.
@@ -368,6 +392,7 @@ pub enum CheckDef {
 
 /// One look a state check knows, such as a corner showing `Paused`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct StateDef {
     /// The state's name, which the value reads when the region looks like
@@ -380,6 +405,7 @@ pub struct StateDef {
 
 /// A picture of text in a reference's font and the text it shows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct SampleDef {
     /// The picture's file name.

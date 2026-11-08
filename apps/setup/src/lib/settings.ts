@@ -1,74 +1,25 @@
-// The settings file, as its Rust side defines it, and the context that hands the settings to every page.
+// The settings commands, and the context that hands the settings to every page.
 
 import { invoke } from '@tauri-apps/api/core';
 import { createContext, use } from 'react';
 
-import { DEFAULT_SHORTCUT } from './shortcut.ts';
-
-/** How often the runtime reads a value: as often as `fastestMs` allows while it changes, and at least every `slowestMs`. */
-export interface ReadInterval {
-  readonly fastestMs: number;
-  readonly slowestMs: number;
-}
-
-/** What a runtime trace can record. */
-export type TraceCategory = 'readings' | 'changes' | 'rules' | 'actions' | 'lifecycle';
-
-/** Each category, in the order the page lists them. */
-export const TRACE_CATEGORIES: readonly TraceCategory[] = ['readings', 'changes', 'rules', 'actions', 'lifecycle'];
-
-/** The runtime trace: whether it records, until when, what, and how much disk its files may take. */
-export interface TraceSettings {
-  readonly on: boolean;
-  /** When recording ends, in milliseconds since 1970, or null to record until it is turned off. */
-  readonly until: number | null;
-  readonly record: readonly TraceCategory[];
-  readonly fileLimitMb: number;
-  readonly keepFiles: number;
-}
-
-/** Every setting in the settings file. */
-export interface Settings {
-  readonly format: number;
-  readonly readInterval: ReadInterval;
-  readonly screenshotShortcut: string;
-  readonly trace: TraceSettings;
-}
-
-/** The saved settings, or the defaults and why the file cannot be read. */
-export interface SettingsView {
-  readonly settings: Settings;
-  readonly problem: string | null;
-}
-
-/** The shortest and longest wait between two reads that the runtime takes, in milliseconds. */
-export const FASTEST_READ_MS = 1;
-export const SLOWEST_READ_MS = 10_000;
-
-/** The largest trace file, in megabytes, and the most trace files to keep, that the runtime takes. */
-export const MAX_TRACE_FILE_MB = 1000;
-export const MAX_TRACE_FILES = 100;
-
-/** The settings a new install starts with, as the Rust side defines them. */
-export const DEFAULT_SETTINGS: Settings = {
-  format: 1,
-  readInterval: { fastestMs: 16, slowestMs: 500 },
-  screenshotShortcut: DEFAULT_SHORTCUT,
-  trace: {
-    on: false,
-    until: null,
-    record: ['changes', 'rules', 'actions', 'lifecycle'],
-    fileLimitMb: 50,
-    keepFiles: 5,
-  },
-};
+import {
+  DEFAULT_SETTINGS,
+  LIMITS,
+  type ReadIntervalDef,
+  type SettingsFile,
+  type SettingsView,
+  TRACE_CATEGORIES,
+  type TraceCategory,
+  type TraceDef,
+} from './bindings.ts';
 
 export async function loadSettings(): Promise<SettingsView> {
   return invoke<SettingsView>('settings');
 }
 
 /** Saves every setting; rejects with what to fix. */
-export async function saveSettings(settings: Settings): Promise<void> {
+export async function saveSettings(settings: SettingsFile): Promise<void> {
   await invoke('save_settings', { settings });
 }
 
@@ -101,12 +52,9 @@ export function readWhole(text: string, min: number, max: number): number | null
   return value >= min && value <= max ? value : null;
 }
 
-/**
- * The whole milliseconds `text` names, or null when it is not a whole number from {@link FASTEST_READ_MS} to
- * {@link SLOWEST_READ_MS}.
- */
+/** The whole milliseconds `text` names, or null when it is not a whole number in the range the runtime takes. */
 export function readMs(text: string): number | null {
-  return readWhole(text, FASTEST_READ_MS, SLOWEST_READ_MS);
+  return readWhole(text, LIMITS.fastestReadMs, LIMITS.slowestReadMs);
 }
 
 /** How long a trace records once it is turned on: a number of minutes, or until it is turned off. */
@@ -121,12 +69,12 @@ export function traceEnd(length: TraceLength, now: number): number | null {
  * Whether the trace records at `now`, as the runtime reads `trace`: it is on, and its end time, if it has one, is
  * still to come.
  */
-export function traceRecords(trace: TraceSettings, now: number): boolean {
+export function traceRecords(trace: TraceDef, now: number): boolean {
   return trace.on && (trace.until === null || trace.until > now);
 }
 
 /** `trace` with `category` recorded or not, the categories kept in the page's order. */
-export function withCategory(trace: TraceSettings, category: TraceCategory, on: boolean): TraceSettings {
+export function withCategory(trace: TraceDef, category: TraceCategory, on: boolean): TraceDef {
   const record = TRACE_CATEGORIES.filter((each) => (each === category ? on : trace.record.includes(each)));
   return { ...trace, record };
 }
@@ -135,10 +83,10 @@ export function withCategory(trace: TraceSettings, category: TraceCategory, on: 
  * `interval` with one of its waits set to `ms`, or what to fix: the fastest read cannot wait longer than the slowest.
  */
 export function withWait(
-  interval: ReadInterval,
-  which: keyof ReadInterval,
+  interval: ReadIntervalDef,
+  which: keyof ReadIntervalDef,
   ms: number,
-): { readonly interval: ReadInterval } | { readonly problem: string } {
+): { readonly interval: ReadIntervalDef } | { readonly problem: string } {
   const next = { ...interval, [which]: ms };
   return next.fastestMs > next.slowestMs
     ? { problem: 'The fastest read cannot wait longer than the slowest.' }
@@ -146,11 +94,11 @@ export function withWait(
 }
 
 /** A change to the settings: the new settings, made from the current ones, or what to fix. */
-export type SettingsUpdate = (current: Settings) => Settings | { readonly problem: string };
+export type SettingsUpdate = (current: SettingsFile) => SettingsFile | { readonly problem: string };
 
 /** The settings every page reads, and how a page changes them: it saves, then the new settings show. */
 export interface SettingsHandle {
-  readonly settings: Settings;
+  readonly settings: SettingsFile;
   /**
    * Saves what `update` makes of the saved settings, after the settings have loaded and after every change asked for
    * before it, so no change is made from settings that are out of date. Resolves to what to fix when `update` refuses,
@@ -166,7 +114,7 @@ export const SettingsContext = createContext<SettingsHandle>({
 });
 
 /** Whether two traces' settings are the same. */
-function sameTrace(one: TraceSettings, other: TraceSettings): boolean {
+function sameTrace(one: TraceDef, other: TraceDef): boolean {
   return (
     one.on === other.on &&
     one.until === other.until &&
@@ -178,13 +126,14 @@ function sameTrace(one: TraceSettings, other: TraceSettings): boolean {
 }
 
 /** Whether two settings are the same, so saving one over the other changes nothing. */
-export function sameSettings(one: Settings, other: Settings): boolean {
+export function sameSettings(one: SettingsFile, other: SettingsFile): boolean {
   return (
     one.format === other.format &&
     one.readInterval.fastestMs === other.readInterval.fastestMs &&
     one.readInterval.slowestMs === other.readInterval.slowestMs &&
     one.screenshotShortcut === other.screenshotShortcut &&
-    sameTrace(one.trace, other.trace)
+    sameTrace(one.trace, other.trace) &&
+    one.rememberEnabled === other.rememberEnabled
   );
 }
 

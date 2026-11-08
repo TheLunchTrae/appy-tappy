@@ -1,5 +1,6 @@
 import { type PointerEvent, useEffect, useRef, useState } from 'react';
 
+import type { Combine } from '../lib/bindings.ts';
 import {
   type Corner,
   type Point,
@@ -11,7 +12,7 @@ import {
   moveRect,
   toPicture,
 } from '../lib/region.ts';
-import { type Combine, type SelectTool, combineOf, shade } from '../lib/selection.ts';
+import { type SelectTool, combineOf, shade } from '../lib/selection.ts';
 
 type Drag =
   | { readonly mode: 'draw'; readonly from: Point }

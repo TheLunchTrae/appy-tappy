@@ -45,7 +45,9 @@ on, so it must stay small. Every design choice below follows from that split.
    `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
-4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`.
+4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`, and
+   keeps the tray's last Enabled choice in
+   `%LOCALAPPDATA%\AppyTappy\enabled.txt`.
 
 Apart from that one event, the two programs share only files: no sockets,
 pipes, or shared memory. The runtime reads the same files the setup app saves;
@@ -73,7 +75,7 @@ crates/
 
 | Crate                | Platform | Depends on                                           | Used by        |
 | -------------------- | -------- | ---------------------------------------------------- | -------------- |
-| `appytappy-config`   | any      | `serde`, `serde_json`                                | setup, runtime |
+| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)        | setup, runtime |
 | `appytappy-engine`   | any      | `config`                                             | setup, runtime |
 | `appytappy-sources`  | Windows  | `config`, `windows`                                  | setup, runtime |
 | `appytappy-actions`  | Windows  | `config`, `windows`                                  | runtime        |
@@ -381,8 +383,9 @@ Right-clicking it opens a small menu:
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
   fire, the readers stop, and what the automations changed is undone, but
   detection keeps running, so turning it back on finds the applications
-  already attached. The runtime starts enabled, and the setting is
-  not kept across restarts.
+  already attached. The runtime starts enabled, unless the settings'
+  `rememberEnabled` is true; then it starts as the tray last left it, as
+  [Files and handoff](#files-and-handoff) describes.
 - **Active automations.** A submenu that lists, by name, the automations that
   run now: those of the attached applications, while automations are on. With
   none, it shows a grayed `None`.
@@ -500,13 +503,18 @@ It checks these against their targets:
 - **CPU.** The share of one core over each phase's sample. Task Manager shows
   the share of all cores, which is smaller by the number of cores. Both idle
   phases share one target. Windows charges CPU time in ticks of about 16 ms,
-  so an idle sample runs long enough that its target spans several ticks.
+  so an idle sample runs long enough that its target spans about four ticks.
+  A shared CI machine can still charge a stray tick or two, so a phase whose
+  sample is over its CPU target samples again, up to three samples in all,
+  and the lowest counts. A runtime over the target the whole time fails every
+  sample, though one that is over it only now and then can pass, and the
+  details list each sample.
 
 The script also prints each phase's full working set, commit size, threads,
 and handles, and the CI job shows the table in its run summary. For the trace
 phase it also reports the trace files' size, their rows and rows a second, the
 records the trace dropped, and the memory and CPU the trace added to the
-active phase.
+active phase. The CPU it added compares the two phases' first samples.
 
 ## Sources, rules, and actions
 
@@ -548,8 +556,8 @@ changing.
     [Setup app](Setup-app.md#saved-files) describes each file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
-    describes, the runtime's log in `logs\`, and the
-    [runtime trace](Trace.md)'s files in `traces\`.
+    describes, the runtime's log in `logs\`, the
+    [runtime trace](Trace.md)'s files in `traces\`, and `enabled.txt`.
 - **Writing.** Only the setup app writes the saved files, through
   `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
   file beside the old one, is flushed to disk with `sync_all`, and is renamed
@@ -560,6 +568,20 @@ changing.
   for a moment, so a failed rename is tried again a few times, as
   `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
   setup app shows the error.
+- **The enabled file.** The runtime writes one file of its own,
+  `enabled.txt`, through `EnabledStore` in the same module and in the same
+  way. It holds one line, `on` or `off`: what the user last picked from the
+  tray's Enabled item. The owner writes it on each pick, whatever the
+  settings say, so turning `rememberEnabled` on while the runtime runs
+  remembers the picks that follow. A file that cannot be written is logged,
+  and the pick still applies. The owner reads it once, when the settings
+  first read, even on a retry, and only when they say `rememberEnabled` and
+  the user has not picked from the tray in this run; settings read later
+  leave the state to the tray. Only `off` means disabled: a file that is
+  missing, cannot be read, or holds anything else means enabled. The tray
+  starts before that first read and gets a fresh menu after it, so its check
+  mark shows the state the runtime starts in. Quitting disables automations
+  to undo them, but that is not a pick and writes nothing.
 - **Reloading.** After each save of an application, a value, a reference, an
   anti-cheat class, a checked build, an automation, or the settings that
   works, the setup app sets the named event `Local\AppyTappy.Reload`, and the
@@ -650,8 +672,9 @@ closure that calls one of the owner's methods, with a `tokio::sync::oneshot`
 reply channel, and awaits the reply, so a slow capture or save never freezes
 the window. A new command is a method on the owner, a command in `commands.rs`
 that calls it, its name in `generate_handler!` in `main.rs`, and its call in
-the UI's `api.ts`. The AI-assisted discovery flow belongs to
-[#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
+the UI's `api.ts`, whose types the setup app generates
+([Page types](Setup-app.md#page-types)). The AI-assisted discovery flow
+belongs to [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
 
 How Tauri compares with the alternatives:
 
@@ -756,6 +779,11 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
 
 - **[`serde`](https://serde.rs/).** Converts Rust types to and from data
   formats. Every format crate builds on it.
+- **[`ts-rs`](https://docs.rs/ts-rs).** Writes TypeScript declarations of
+  Rust types from their serde attributes, so the setup app's page cannot
+  drift from the JSON the Rust side sends and reads, which hand-written types
+  did. `appytappy-config` takes it only behind its `ts` feature, which only
+  the setup app's tests turn on, so neither program ships it.
 - **[`serde_json`](https://docs.rs/serde_json).** JSON support for `serde`;
   the encoding of the saved files.
 - **[`windows`](https://github.com/microsoft/windows-rs).** Microsoft's

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { type Reading, errorText, readValue, setCheck } from './api.ts';
+import type { Reading } from './bindings.ts';
+import { errorText, readValue, setCheck } from './api.ts';
 import type { Built, CheckState } from './check.ts';
 import { useRepeat } from './repeat.ts';
 

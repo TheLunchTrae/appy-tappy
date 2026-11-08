@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { RecordedReading } from '../src/lib/api.ts';
+import type { RecordedReading } from '../src/lib/bindings.ts';
 import {
   clock,
   editAll,

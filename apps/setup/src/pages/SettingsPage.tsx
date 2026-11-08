@@ -1,18 +1,13 @@
 import { useEffect, useState } from 'react';
 
+import { LIMITS, type ReadIntervalDef } from '../lib/bindings.ts';
 import { errorText } from '../lib/api.ts';
+import { READING_HINT, SHORTCUT_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
+import { Hint } from '../components/Hint.tsx';
 import { NumberSetting } from '../components/NumberSetting.tsx';
 import { RuntimeTrace } from '../components/RuntimeTrace.tsx';
-import {
-  FASTEST_READ_MS,
-  type ReadInterval,
-  SLOWEST_READ_MS,
-  setStartsWithWindows,
-  startsWithWindows,
-  useSettings,
-  withWait,
-} from '../lib/settings.ts';
+import { setStartsWithWindows, startsWithWindows, useSettings, withWait } from '../lib/settings.ts';
 import { useShortcutChoice } from '../lib/useShortcutChoice.ts';
 
 interface Props {
@@ -94,13 +89,63 @@ function StartWithWindows() {
   );
 }
 
+/** Whether the runtime starts with automations as the tray's Enabled item last left them, or always on. */
+function RememberEnabled() {
+  const { settings, change } = useSettings();
+  const [error, setError] = useState<string | null>(null);
+  const turn = (on: boolean): void => {
+    change((current) => ({ ...current, rememberEnabled: on })).then(
+      (problem) => {
+        setError(problem);
+      },
+      (failure: unknown) => {
+        setError(errorText(failure));
+      },
+    );
+  };
+  return (
+    <div className="set-row">
+      <div className="what">
+        <span className="set-name">
+          <span id="remember-enabled">Remember whether automations are on</span>
+          <Hint topic="Remember whether automations are on" id="remember-enabled-hint">
+            When on, AppyTappy starts with automations on or off as you last set them from the tray.
+          </Hint>
+        </span>
+        <span className="note" id="remember-enabled-note">
+          When off, automations are on each time AppyTappy starts.
+        </span>
+        {error === null ? null : (
+          <span className="warn" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        className="switch"
+        aria-labelledby="remember-enabled"
+        aria-describedby="remember-enabled-note remember-enabled-hint"
+        aria-checked={settings.rememberEnabled}
+        onClick={() => {
+          turn(!settings.rememberEnabled);
+        }}
+      />
+    </div>
+  );
+}
+
 /** The screenshot shortcut, and a button that records a new one from the next key press. */
 function ScreenshotShortcut() {
   const { label, choosing, saveError, toggle, cancel, onKeyDown } = useShortcutChoice();
   return (
     <div className="set-row">
       <div className="what">
-        <span>Screenshot shortcut</span>
+        <span className="with-hint">
+          Screenshot shortcut
+          <Hint topic="Screenshot shortcut">{SHORTCUT_HINT}</Hint>
+        </span>
         <span className="note">Takes a screenshot of the picked window while you make a value or a reference.</span>
         <span className="note" role="status">
           {choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
@@ -128,7 +173,7 @@ function ScreenshotShortcut() {
 }
 
 interface WaitProps {
-  readonly which: keyof ReadInterval;
+  readonly which: keyof ReadIntervalDef;
   readonly label: string;
   readonly note: string;
 }
@@ -143,9 +188,9 @@ function Wait({ which, label, note }: WaitProps) {
       note={note}
       unit="ms"
       saved={settings.readInterval[which]}
-      min={FASTEST_READ_MS}
-      max={SLOWEST_READ_MS}
-      invalid={`${label} must be a whole number of milliseconds from ${FASTEST_READ_MS} to ${SLOWEST_READ_MS}.`}
+      min={LIMITS.fastestReadMs}
+      max={LIMITS.slowestReadMs}
+      invalid={`${label} must be a whole number of milliseconds from ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs}.`}
       update={(current, ms) => {
         const next = withWait(current.readInterval, which, ms);
         return 'problem' in next ? next : { ...current, readInterval: next.interval };
@@ -171,10 +216,14 @@ export function SettingsPage({ problem }: Props) {
         <section className="card" aria-labelledby="settings-general">
           <h2 id="settings-general">General</h2>
           <StartWithWindows />
+          <RememberEnabled />
           <ScreenshotShortcut />
         </section>
         <section className="card" aria-labelledby="settings-reading">
-          <h2 id="settings-reading">Reading</h2>
+          <div className="with-hint">
+            <h2 id="settings-reading">Reading</h2>
+            <Hint topic="Reading">{READING_HINT}</Hint>
+          </div>
           <Wait
             which="fastestMs"
             label="Fastest read"

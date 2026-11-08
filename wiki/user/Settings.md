@@ -9,11 +9,17 @@ background part picks up a change within a moment.
 - **Start AppyTappy when I sign in to Windows.** On, the background part
   starts each time you sign in. The installer turns this on. Turn it off to
   start AppyTappy only when you open it yourself.
+- **Remember whether automations are on.** Off at first, automations are on
+  each time AppyTappy starts. Turn it on to have AppyTappy start with
+  automations on or off as you last left them with **Enabled** in the
+  [tray menu](The-tray-icon.md#the-menu).
 - **Screenshot shortcut.** The key that takes a screenshot while you
   [make a value](Values.md) or a [reference](References.md), `F9` at first.
-  Select **Change** and press the new keys, or Esc to keep the old ones. A
-  letter, a digit, or Space needs Ctrl, Alt, Shift, or Win with it, so the key
-  keeps working everywhere else. **Change shortcut** on the screenshot page
+  Select **Change** and press the new keys, or Esc to keep the old ones. F1 to
+  F24, Print Screen, and Pause work alone. A letter, a digit, Space, an arrow,
+  Insert, Delete, Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or
+  Win with it, so it keeps working everywhere else. Other keys can't be the
+  shortcut. **Change shortcut** on the screenshot page
   changes the same setting.
 
 ## Reading

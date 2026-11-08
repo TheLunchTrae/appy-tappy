@@ -1,6 +1,5 @@
+import type { RecordedLabel, RecordedReading } from './bindings.ts';
 // Reviewing a recording: which readings the user keeps, and what each shows.
-
-import type { RecordedLabel, RecordedReading } from './api.ts';
 
 /** The user's choice for one reading in review. */
 export interface ReviewEntry {
