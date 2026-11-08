@@ -541,6 +541,11 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
 - **[`tauri-plugin-global-shortcut`](https://v2.tauri.app/plugin/global-shortcut/).**
   Tauri's plugin for a key press that works while another window has focus,
   which the setup app uses for its screenshot shortcut.
+- **[`tauri-plugin-single-instance`](https://v2.tauri.app/plugin/single-instance/).**
+  Tauri's plugin that keeps one copy of the setup app running and tells it
+  when another starts, so the second copy can hand over and exit. A named
+  mutex like the runtime's would find the running copy too, but bringing its
+  window forward would also need a message between the two processes.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
   many random inputs to check a property, such as "a compiled config reads back
   to the same value". The standards require it at trust boundaries such as file

@@ -8,7 +8,8 @@ above 90.
 AppyTappy has two parts:
 
 - **AppyTappy Setup** is the program you open from the Start menu. You use it
-  to tell AppyTappy what to watch and what to do.
+  to tell AppyTappy what to watch and what to do. Opening it while it is open
+  brings its window to the front.
 - **The background part** starts when you sign in and shows an icon in the
   taskbar's notification area. It does the watching and runs your
   automations, whether AppyTappy Setup is open or not.

@@ -201,7 +201,8 @@ the whole system's volume.
 
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`) and
 the files (`store.rs`). Each save writes a temporary file and renames it over the old
-one, so a crash never leaves half a file. A file that cannot be read is listed
+one, so a crash never leaves half a file; the next save in that folder removes a
+temporary file that a crash left between the two steps. A file that cannot be read is listed
 with the reason and left alone; an automations file that cannot be read stops
 automations from being saved until it is fixed, rather than being replaced. A new application's anti-cheat class starts
 as `unknown`, which blocks key press actions until the user sets it
@@ -223,6 +224,11 @@ without its embedded UI:
 cd apps/setup && bun run dev
 cargo run -p appytappy-setup --no-default-features
 ```
+
+Only one copy runs at a time, so two copies never save over each other or open
+the same overlays. Tauri's single-instance plugin finds the copy that runs; a
+second copy that starts tells it to bring its window forward and exits before
+it opens a window.
 
 `mise run ui:standards:check` runs the UI's gate: formatting, type-aware lint,
 type check, tests, unused-code check, and the build.
