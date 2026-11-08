@@ -656,6 +656,19 @@ impl AutomationsFile {
         json
     }
 
+    /// The file names of every picture the automations' clicks look for.
+    #[must_use]
+    pub fn images(&self) -> Vec<&str> {
+        self.automations
+            .iter()
+            .flat_map(|automation| &automation.actions)
+            .filter_map(|action| match action {
+                ActionDef::Click { at, .. } => at.image(),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Checks the format version, which decides how the whole file reads.
     ///
     /// # Errors

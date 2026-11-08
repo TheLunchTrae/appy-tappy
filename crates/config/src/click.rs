@@ -208,6 +208,26 @@ impl ClickPicture {
             tolerance,
         })
     }
+
+    /// Checks the click against its picture's size, `width` by `height`:
+    /// the picture has to fit its search area, and the place it presses has
+    /// to lie on it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidClick::LargePicture`] when the picture is wider or
+    /// taller than its search area, or [`InvalidClick::PressOutside`] when
+    /// the place it presses lies outside it.
+    pub const fn fits_picture(&self, width: u32, height: u32) -> Result<(), InvalidClick> {
+        if width > self.search.width || height > self.search.height {
+            return Err(InvalidClick::LargePicture);
+        }
+        let (x, y) = self.press;
+        if x >= width || y >= height {
+            return Err(InvalidClick::PressOutside);
+        }
+        Ok(())
+    }
 }
 
 /// A click could not be used.
@@ -223,6 +243,10 @@ pub enum InvalidClick {
     Area,
     /// The area holds more than [`MAX_SEARCH_PIXELS`].
     LargeArea,
+    /// The picture is wider or taller than the area it is looked for in.
+    LargePicture,
+    /// The place the click presses lies outside its picture.
+    PressOutside,
 }
 
 impl fmt::Display for InvalidClick {
@@ -239,6 +263,8 @@ impl fmt::Display for InvalidClick {
                 "the area a click looks for its picture in can hold at most 160000 pixels, such as \
                  400 by 400"
             },
+            Self::LargePicture => "a click's picture must fit inside the area it is looked for in",
+            Self::PressOutside => "the place a click presses must lie on its picture",
         })
     }
 }
@@ -359,6 +385,18 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_fits_its_area_and_holds_its_press() {
+        let made =
+            ClickPicture::new("button-1.png", (200, 100), area(0, 0, 30, 20), (9, 4), 20).unwrap();
+        assert_eq!(made.fits_picture(30, 20), Ok(()));
+        assert_eq!(made.fits_picture(10, 5), Ok(()));
+        assert_eq!(made.fits_picture(31, 20), Err(InvalidClick::LargePicture));
+        assert_eq!(made.fits_picture(30, 21), Err(InvalidClick::LargePicture));
+        assert_eq!(made.fits_picture(9, 5), Err(InvalidClick::PressOutside));
+        assert_eq!(made.fits_picture(10, 4), Err(InvalidClick::PressOutside));
+    }
+
+    #[test]
     fn a_picture_needs_a_picture_file_name() {
         assert_eq!(
             ClickPicture::new("Button.PNG", (10, 10), area(0, 0, 1, 1), (0, 0), 20),
@@ -373,5 +411,15 @@ mod tests {
         assert!(InvalidClick::Image.to_string().contains(".png"));
         assert!(InvalidClick::Area.to_string().contains("inside the window"));
         assert!(InvalidClick::LargeArea.to_string().contains("160000"));
+        assert!(
+            InvalidClick::LargePicture
+                .to_string()
+                .contains("fit inside")
+        );
+        assert!(
+            InvalidClick::PressOutside
+                .to_string()
+                .contains("on its picture")
+        );
     }
 }

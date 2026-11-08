@@ -338,6 +338,23 @@ tolerance: number, }>;
 export type ClickButtonDef = DeepReadonly<"left" | "right" | "double">;
 
 /**
+ * A click picture just kept, and the size of the window it was taken on.
+ */
+export type ClickPictureView = DeepReadonly<{
+/**
+ * Its file name among the click pictures.
+ */
+image: string,
+/**
+ * The window's width when it was taken.
+ */
+windowWidth: number,
+/**
+ * The window's height when it was taken.
+ */
+windowHeight: number, }>;
+
+/**
  * A color.
  */
 export type ColorDef = DeepReadonly<{
@@ -383,6 +400,24 @@ export type CornerDef = DeepReadonly<"topLeft" | "topRight" | "bottomLeft" | "bo
  * [`WindowMatch::fallback`] as the file spells it.
  */
 export type FallbackDef = DeepReadonly<"none" | "executable">;
+
+/**
+ * Where a click would land in the window, from its top-left corner, and
+ * for a picture how alike the place found is.
+ */
+export type FoundClick = DeepReadonly<{
+/**
+ * Across, in pixels.
+ */
+x: number,
+/**
+ * Down, in pixels.
+ */
+y: number,
+/**
+ * From 0 to 100 percent; `None` for a spot.
+ */
+likeness: number | null, }>;
 
 /**
  * What one screenshot's region shows, typed by the user so a reference
