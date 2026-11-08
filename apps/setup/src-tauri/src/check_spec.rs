@@ -30,7 +30,8 @@ mod error;
 pub(crate) use error::{Cut, SpecError, sentence};
 
 /// A rectangle of the window, in pixels from its top-left corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct RegionSpec {
     pub(crate) x: u32,
     pub(crate) y: u32,
@@ -39,7 +40,8 @@ pub(crate) struct RegionSpec {
 }
 
 /// A color the user picked on a screenshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ColorSpec {
     red: u8,
     green: u8,
@@ -68,7 +70,8 @@ impl From<ColorSpec> for Rgb {
 
 /// What one screenshot's region shows, typed by the user so a reference
 /// learns its characters.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct Label {
     pub(crate) screenshot: usize,
     pub(crate) text: String,
@@ -76,7 +79,8 @@ pub(crate) struct Label {
 
 /// What one recorded reading shows, as the user confirmed it in review, so
 /// a reference learns its characters like a labeled screenshot's.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct RecordedLabel {
     /// The reading's index in the recording.
     pub(crate) reading: usize,
@@ -85,7 +89,8 @@ pub(crate) struct RecordedLabel {
 }
 
 /// A saved reference of a saved application.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ReferenceRef {
     /// The application's ID.
     pub(crate) app: String,
@@ -94,7 +99,8 @@ pub(crate) struct ReferenceRef {
 }
 
 /// A check as the UI describes it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum CheckSpec {
     /// Reads a number with the characters of a saved reference.
@@ -150,7 +156,8 @@ pub(crate) enum CheckSpec {
 }
 
 /// One state of a state check, as the user set it up.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct StateSpec {
     /// The name the value reads when the region looks like this.
     pub(crate) name: String,
@@ -159,7 +166,7 @@ pub(crate) struct StateSpec {
     /// The thing to compare, selected on the screenshot; without one the
     /// whole region is compared.
     #[serde(default)]
-    #[ts(optional)]
+    #[cfg_attr(test, ts(optional))]
     pub(crate) selection: Option<SelectionSpec>,
 }
 

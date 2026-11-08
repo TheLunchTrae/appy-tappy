@@ -16,11 +16,12 @@ use serde::Serialize;
 const DESKTOP_CLASSES: [&str; 3] = ["Progman", "WorkerW", "Shell_TrayWnd"];
 
 /// A window the user can pick.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WindowChoice {
     /// The window's handle, which the capture takes.
-    #[ts(type = "number")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub(crate) handle: u64,
     /// The process that owns it, whose executable's build the setup app
     /// reads. The UI does not need it.
@@ -39,7 +40,8 @@ pub(crate) struct WindowChoice {
 }
 
 /// The windows to offer, with the anti-cheat products running now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WindowList {
     /// The windows the user can pick, sorted by title.
@@ -101,11 +103,12 @@ pub(crate) fn list(
 }
 
 /// A running window that an application's window match takes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WindowFit {
     /// The window's handle.
-    #[ts(type = "number")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub(crate) handle: u64,
     /// Whether it is taken only because no window qualifies.
     pub(crate) fallback: bool,

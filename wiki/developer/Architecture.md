@@ -71,16 +71,16 @@ crates/
   platform/      appytappy-platform: the runtime's Windows host services
 ```
 
-| Crate                | Platform | Depends on                                              | Used by        |
-| -------------------- | -------- | ------------------------------------------------------- | -------------- |
-| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)           | setup, runtime |
-| `appytappy-engine`   | any      | `config`                                                | setup, runtime |
-| `appytappy-sources`  | Windows  | `config`, `windows`                                     | setup, runtime |
-| `appytappy-actions`  | Windows  | `config`, `windows`                                     | runtime        |
-| `appytappy-platform` | Windows  | `windows`                                               | runtime        |
-| `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`              | —              |
-| `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform`    | —              |
-| setup app            | Windows  | `config`, `sources`, `tauri`, `tokio`, `serde`, `ts-rs` | —              |
+| Crate                | Platform | Depends on                                           | Used by        |
+| -------------------- | -------- | ---------------------------------------------------- | -------------- |
+| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)        | setup, runtime |
+| `appytappy-engine`   | any      | `config`                                             | setup, runtime |
+| `appytappy-sources`  | Windows  | `config`, `windows`                                  | setup, runtime |
+| `appytappy-actions`  | Windows  | `config`, `windows`                                  | runtime        |
+| `appytappy-platform` | Windows  | `windows`                                            | runtime        |
+| `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`           | —              |
+| `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform` | —              |
+| setup app            | Windows  | `config`, `sources`, `tauri`, `tokio`, `serde`       | —              |
 
 Each crate's owning issue adds its code and its dependencies. Where issues #6
 and #11 say "the core crate", they mean `appytappy-config` for formats, validation,
@@ -766,7 +766,7 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   Rust types from their serde attributes, so the setup app's page cannot
   drift from the JSON the Rust side sends and reads, which hand-written types
   did. `appytappy-config` takes it only behind its `ts` feature, which only
-  the setup app turns on.
+  the setup app's tests turn on, so neither program ships it.
 - **[`serde_json`](https://docs.rs/serde_json).** JSON support for `serde`;
   the encoding of the saved files.
 - **[`windows`](https://github.com/microsoft/windows-rs).** Microsoft's

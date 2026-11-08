@@ -15,7 +15,8 @@ use crate::stores::Stores;
 
 /// An application's name, how to find its window, and how often that window
 /// changes size, as the editor sends them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AppSpec {
     /// The name the user sees, such as `Example App`.

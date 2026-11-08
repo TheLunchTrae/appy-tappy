@@ -355,9 +355,9 @@ actions until the user sets it
 The page sends and reads the Rust side's own types. `ts-rs` writes their
 TypeScript declarations into `apps/setup/src/lib/bindings.ts` and reads the
 serde attributes, so a field or variant that the Rust side renames, adds, or
-removes shows on the page as a type error. `appytappy-config` derives them
-only behind its `ts` feature, which only the setup app turns on, so the runtime
-builds without `ts-rs`.
+removes shows on the page as a type error. Only the tests derive them: the
+setup app takes `ts-rs`, and turns on `appytappy-config`'s `ts` feature, as
+dev-dependencies, so neither program builds with `ts-rs`.
 
 The test `bindings::bindings_match_the_rust_types` renders the file from the
 types each command takes and answers, and every type they reach, and fails when
@@ -369,20 +369,30 @@ UPDATE_BINDINGS=1 cargo test -p appytappy-setup bindings
 ```
 
 Every generated type is readonly all the way down. A `u64`, such as a window
-handle or a time, reaches the page as a `number` through
-`#[ts(type = "number")]`, and the test fails when a field would become a
-`bigint`, which JSON does not carry. A new command still needs its call in
+handle or a time, reaches the page as a `number`, and the test fails when a
+field would become a `bigint`, which JSON does not carry. The field says so
+with `#[cfg_attr(test, ts(type = "number"))]` in the setup app, or
+`#[cfg_attr(feature = "ts", ts(type = "number"))]` in `appytappy-config`,
+because only those builds derive the types. A new command still needs its call in
 `api.ts`, and a type that it takes or answers and that no other one reaches
 needs a line in the test's list. The page imports the types from
 `bindings.ts` and calls the commands through `api.ts`.
 
 The file also holds what the page checks a draft against before it saves:
-`LIMITS`, such as the longest application name or path and the most states;
-`KEY_NAMES`, the keys a key press action can name; `ACTIONS`, whether each
-kind of action sends input and whether undo can put it back; `NO_STATE`; and
+`LIMITS`, such as the longest app name a media or volume action names, the
+longest path or link, and the most states; `KEY_NAMES`, the keys a key press
+action can name; `ACTIONS`, whether each kind of action sends input and
+whether undo can put it back; `TRACE_CATEGORIES`; `NO_STATE`; and
 `DEFAULT_SETTINGS`. The test reads them from `appytappy-config`, so the page
 and the save agree, and the save still checks everything again. The UI's
 formatting, lint, and unused-type checks skip the generated file.
+
+The page reads a typed path, link, key press, or app name itself, so the user
+sees what to fix as they type. `PARSE_CASES` holds what the Rust parsers make
+of a fixed list of samples, one for each way a parser accepts or refuses, and
+`apps/setup/tests/parse-cases.test.ts` fails when the page reads one
+differently. A parser that gains a rule needs a sample for it in
+`bindings.rs`.
 
 ## Running it
 

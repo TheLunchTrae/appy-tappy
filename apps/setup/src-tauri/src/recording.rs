@@ -29,8 +29,9 @@ use self::ink::{Ink, Line};
 pub(crate) const MAX_READINGS: usize = 200;
 
 /// What the text reader made of a reading.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(rename = "RecordedText")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RecordedText"))]
 #[serde(tag = "kind", content = "text", rename_all = "camelCase")]
 pub(crate) enum Text {
     /// Not read yet.
@@ -285,16 +286,17 @@ fn millis(duration: Duration) -> u64 {
 }
 
 /// A recording as the UI shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecordingView {
     /// Its number in the session.
-    #[ts(type = "number")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub(crate) id: u64,
     /// Whether it still records.
     pub(crate) recording: bool,
     /// How long it has recorded, or recorded in all once stopped.
-    #[ts(type = "number")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub(crate) elapsed_ms: u64,
     /// Whether it holds [`MAX_READINGS`], so it keeps no more.
     pub(crate) full: bool,
@@ -308,8 +310,9 @@ pub(crate) struct RecordingView {
 
 /// What a recording records: the region of a window of one size, and what
 /// counts as ink there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(rename = "RecordingSettings")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RecordingSettings"))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Settings {
     /// The region of the window.
@@ -323,14 +326,16 @@ pub(crate) struct Settings {
 }
 
 /// A window's size as the UI describes one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct SizeView {
     pub(crate) width: u32,
     pub(crate) height: u32,
 }
 
 /// A region as the UI describes one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct RegionView {
     pub(crate) x: u32,
     pub(crate) y: u32,
@@ -339,7 +344,8 @@ pub(crate) struct RegionView {
 }
 
 /// A color as the UI describes one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ColorView {
     pub(crate) red: u8,
     pub(crate) green: u8,
@@ -347,12 +353,13 @@ pub(crate) struct ColorView {
 }
 
 /// One reading as the UI shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(rename = "RecordedReading")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RecordedReading"))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReadingView {
     /// When it first showed, from the start of the recording.
-    #[ts(type = "number")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub(crate) first_ms: u64,
     /// How many frames showed it.
     pub(crate) seen: u32,

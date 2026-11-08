@@ -2,6 +2,7 @@
 // action.
 
 import { KEY_NAMES } from './bindings.ts';
+import { asciiLower, trimmed } from './text.ts';
 
 /** The keys of a key press that a shortcut reads. */
 export interface KeyPress {
@@ -132,11 +133,11 @@ function keyName(name: string): string | null {
   if (/^[A-Za-z0-9]$/u.test(name)) {
     return name.toUpperCase();
   }
-  const function_ = /^f([1-9]\d*)$/iu.exec(name)?.[1];
+  const function_ = /^[Ff]([1-9]\d*)$/u.exec(name)?.[1];
   if (function_ !== undefined) {
     return Number(function_) <= KEY_NAMES.maxFunctionKey ? `F${function_}` : null;
   }
-  return KEY_NAMES.named.find((named) => named.toLowerCase() === name.toLowerCase()) ?? null;
+  return KEY_NAMES.named.find((named) => asciiLower(named) === asciiLower(name)) ?? null;
 }
 
 /**
@@ -147,8 +148,8 @@ function keyName(name: string): string | null {
 export function spellKeys(text: string): string | null {
   const held = new Set<string>();
   let key: string | null = null;
-  for (const part of text.split('+').map((name) => name.trim())) {
-    const modifier = MODIFIERS.find((name) => name.toLowerCase() === part.toLowerCase());
+  for (const part of text.split('+').map(trimmed)) {
+    const modifier = MODIFIERS.find((name) => asciiLower(name) === asciiLower(part));
     if (key !== null || (modifier !== undefined && held.has(modifier))) {
       // The key comes last, and each modifier once.
       return null;

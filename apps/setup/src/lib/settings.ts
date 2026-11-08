@@ -9,12 +9,10 @@ import {
   type ReadIntervalDef,
   type SettingsFile,
   type SettingsView,
+  TRACE_CATEGORIES,
   type TraceCategory,
   type TraceDef,
 } from './bindings.ts';
-
-/** Each category, in the order the page lists them. */
-export const TRACE_CATEGORIES: readonly TraceCategory[] = ['readings', 'changes', 'rules', 'actions', 'lifecycle'];
 
 export async function loadSettings(): Promise<SettingsView> {
   return invoke<SettingsView>('settings');
