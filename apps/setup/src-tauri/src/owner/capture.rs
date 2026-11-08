@@ -120,18 +120,18 @@ impl<H: Host> Owner<H> {
     /// nothing until frames come again, with the failure as its problem.
     pub(super) fn capture_failed(&mut self, failure: CaptureFailure) {
         if let Some(recording) = &mut self.recording {
-            let next = if failure.ended {
-                "Change window to pick it again."
+            let error = check_spec::sentence(&failure.error);
+            if failure.ended {
+                recording.end(
+                    Instant::now(),
+                    format!("Recording stopped: {error} Change window to pick it again."),
+                );
             } else {
-                "Record more once the window shows again."
-            };
-            recording.fail(
-                Instant::now(),
-                format!(
-                    "Recording stopped: {} {next}",
-                    check_spec::sentence(&failure.error)
-                ),
-            );
+                recording.fail(
+                    Instant::now(),
+                    format!("Recording stopped: {error} Record more once the window shows again."),
+                );
+            }
         }
         self.failure = Some(failure);
     }

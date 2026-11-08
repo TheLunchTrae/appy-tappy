@@ -49,28 +49,33 @@ describe('buildSpec', () => {
       ok: true,
       spec: { kind: 'color', region, color: red, tolerance: DEFAULT_TOLERANCE.color },
     });
-    const image = withKind({ ...EMPTY_DRAFT, region }, 'image');
+    const image = withKind({ ...EMPTY_DRAFT, region, drawnOn: 1 }, 'image');
     expect(buildSpec(image, 'example')).toEqual({ ok: false, next: 'Choose the screenshot to compare against.' });
     expect(buildSpec({ ...image, image: 3 }, 'example')).toEqual({
       ok: true,
-      spec: { kind: 'image', region, screenshot: 3, tolerance: DEFAULT_TOLERANCE.image },
+      spec: { kind: 'image', region, drawnOn: 1, screenshot: 3, tolerance: DEFAULT_TOLERANCE.image },
+    });
+    expect(buildSpec({ ...image, image: 3, drawnOn: null }, 'example')).toEqual({
+      ok: false,
+      next: 'Draw a region on a screenshot.',
     });
   });
 
   test('an image check compares only what was selected while it ignores the background', () => {
     const steps = [{ kind: 'click', x: 4, y: 5, combine: 'replace' }] as const;
-    const picture = { ...withKind({ ...EMPTY_DRAFT, region }, 'image'), image: 3, steps, colorMatch: 30 };
+    const picture = { ...withKind({ ...EMPTY_DRAFT, region, drawnOn: 3 }, 'image'), image: 3, steps, colorMatch: 30 };
     expect(buildSpec(picture, 'app')).toEqual({
       ok: true,
       spec: {
         kind: 'image',
         region,
+        drawnOn: 3,
         screenshot: 3,
         tolerance: DEFAULT_TOLERANCE.image,
         selection: { tolerance: 30, steps },
       },
     });
-    const whole = { kind: 'image', region, screenshot: 3, tolerance: DEFAULT_TOLERANCE.image } as const;
+    const whole = { kind: 'image', region, drawnOn: 3, screenshot: 3, tolerance: DEFAULT_TOLERANCE.image } as const;
     expect(buildSpec({ ...picture, ignoreBackground: false }, 'app')).toEqual({ ok: true, spec: whole });
     expect(buildSpec({ ...picture, steps: [] }, 'app')).toEqual({ ok: true, spec: whole });
   });

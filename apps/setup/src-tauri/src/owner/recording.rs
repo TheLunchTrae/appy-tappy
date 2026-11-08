@@ -485,6 +485,34 @@ mod tests {
     }
 
     #[test]
+    fn a_recording_stopped_before_the_window_closed_says_it_cannot_go_on() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255, false)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.ask(Request::StopRecording);
+        harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
+        assert_eq!(
+            harness.recording().expect("kept").problem,
+            None,
+            "a stopped recording can still go on after a passing failure"
+        );
+        harness.deliver(
+            &mut handler,
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the captured window closed",
+            )),
+        );
+        assert_eq!(
+            harness.recording().expect("kept").problem.as_deref(),
+            Some("Recording stopped: The captured window closed. Change window to pick it again.")
+        );
+    }
+
+    #[test]
     fn a_reading_the_text_reader_cannot_take_says_to_type_it() {
         let mut harness = harness(false);
         let mut handler = harness.pick();

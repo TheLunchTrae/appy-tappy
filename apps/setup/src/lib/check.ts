@@ -205,7 +205,10 @@ export function buildSpec(draft: Draft, app: string): Built {
       if (draft.image === null) {
         return missing('Choose the screenshot to compare against.');
       }
-      const spec = { kind: 'image', region, screenshot: draft.image, tolerance } as const;
+      if (draft.drawnOn === null) {
+        return missing('Draw a region on a screenshot.');
+      }
+      const spec = { kind: 'image', region, drawnOn: draft.drawnOn, screenshot: draft.image, tolerance } as const;
       if (!draft.ignoreBackground || draft.steps.length === 0) {
         return { ok: true, spec };
       }

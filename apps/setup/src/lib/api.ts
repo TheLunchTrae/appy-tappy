@@ -150,6 +150,8 @@ export type CheckSpec =
   | {
       readonly kind: 'image';
       readonly region: Rect;
+      /** The screenshot the region was drawn on; the compared screenshot must have its window size. */
+      readonly drawnOn: number;
       readonly screenshot: number;
       readonly tolerance: number;
       /** The thing to compare, selected on the screenshot; without one the whole region is compared. */

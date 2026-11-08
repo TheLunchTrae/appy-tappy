@@ -134,6 +134,10 @@ pub(crate) enum CheckSpec {
     /// Whether the region looks like it does on one screenshot.
     Image {
         region: RegionSpec,
+        /// The screenshot the region was drawn on; the compared screenshot
+        /// must have its window size.
+        #[serde(rename = "drawnOn")]
+        drawn_on: usize,
         screenshot: usize,
         tolerance: u8,
         /// The thing to compare, selected on the screenshot; without one the
@@ -464,11 +468,13 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
             tolerance: *tolerance,
         }),
         CheckSpec::Image {
+            drawn_on,
             screenshot,
             tolerance,
             selection,
             ..
         } => {
+            drawn_size(spec, session, *drawn_on)?;
             let (picture, mask) =
                 picture_of(session.screenshots, region, *screenshot, selection.as_ref())?;
             // The mask is the region's, so its size is always the picture's.
@@ -949,6 +955,7 @@ mod tests {
     fn an_image_is_cut_from_the_named_screenshot_at_the_region() {
         let spec = CheckSpec::Image {
             region: left(),
+            drawn_on: 0,
             screenshot: 0,
             tolerance: 0,
             selection: None,
@@ -967,6 +974,7 @@ mod tests {
         // The click selects the red half, so the gray half is background.
         let spec = |region| CheckSpec::Image {
             region,
+            drawn_on: 0,
             screenshot: 0,
             tolerance: 0,
             selection: Some(SelectionSpec {
@@ -1161,6 +1169,7 @@ mod tests {
             (
                 CheckSpec::Image {
                     region: whole(),
+                    drawn_on: 0,
                     screenshot: 1,
                     tolerance: 0,
                     selection: None,
@@ -1170,6 +1179,7 @@ mod tests {
             (
                 CheckSpec::Image {
                     region: outside,
+                    drawn_on: 0,
                     screenshot: 0,
                     tolerance: 0,
                     selection: None,
@@ -1239,6 +1249,7 @@ mod tests {
         );
         let image = CheckSpec::Image {
             region: left(),
+            drawn_on: 0,
             screenshot: 1,
             tolerance: 0,
             selection: None,
@@ -1253,6 +1264,13 @@ mod tests {
         assert_eq!(
             drawn_size(&image, session(&screenshots, None), 1),
             Ok(small.size())
+        );
+        assert!(
+            matches!(
+                build(&image, session(&screenshots, None)),
+                Err(SpecError::OtherSize { .. })
+            ),
+            "trying the check is refused too"
         );
     }
 
@@ -1522,6 +1540,7 @@ mod tests {
         };
         let image = CheckSpec::Image {
             region,
+            drawn_on: 0,
             screenshot: 0,
             tolerance: 7,
             selection: None,

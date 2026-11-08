@@ -69,10 +69,11 @@ region on: at another size, recording pauses and says to resize the window.
 Every screenshot you label, and the recording, must have that size too, and
 the reference says which one does not. If the window's capture fails for a
 moment, recording stops and says why; select **Record more** once the window
-shows again. If the window closes, nothing more can be recorded from it:
-review and keep the readings you want first, then select **Change window** to
-pick it again, which discards the recording. One recording keeps at most 200
-readings.
+shows again. If the window closes, nothing more can be recorded from it.
+Review and keep the readings you want, then select **Save reference**, which
+still works after the window closed: **Change window** drops everything you
+have not saved. To record more, open the window again and **Edit** the
+reference. One recording keeps at most 200 readings.
 
 If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.

@@ -36,7 +36,7 @@ This page covers what the user guide leaves out.
 - **Capture failures.** A frame error shows in the preview until the next good
   frame of the same capture; only a closed window ends the capture. While a
   failure stands, a screenshot is refused, and a recording stops with the
-  failure as its problem. Once the window closed, no recording starts or goes
+  failure as its problem. Once the window has closed, no recording starts or goes
   on until another window is picked.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
@@ -114,8 +114,9 @@ flagged on the reading that causes it. **Record more** goes on with the stopped
 recording only when the region, color, tolerance, and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
 UI then offers **Use its settings**, which puts the recording's region, color,
-and tolerance back on the draft, drawn on the newest screenshot of the
-recording's window size. Kept readings are lost only on a discard or
+and tolerance back on the draft. The region stays on the screenshot it was
+drawn on when that one has the recording's window size, and otherwise moves to
+the newest screenshot of that size. Kept readings are lost only on a discard or
 when the capture stops, such as on **Change window**. **Back** and Escape
 leave review without keeping, and review's edits stay for the next one.
 

@@ -290,6 +290,14 @@ impl Recording {
         }
     }
 
+    /// Stops recording at `at` for good, as when the window closed, with
+    /// `problem` saying why even if it had stopped already, since it can
+    /// never go on.
+    pub(crate) fn end(&mut self, at: Instant, problem: String) {
+        self.stop(at);
+        self.problem = Some(problem);
+    }
+
     /// Whether it records `region` of a window of `window_size`, with ink
     /// within `tolerance` of `ink`, so going on with it records the same
     /// thing.
