@@ -280,14 +280,16 @@ pub(crate) async fn sync_overlays(app: AppHandle) -> Result<(), String> {
 }
 
 /// Turns `application`'s overlay on or off and sets where it shows, then
-/// opens or closes its window to match.
+/// opens or closes its window to match. The setting is saved once it
+/// answers `Ok`, which holds why an overlay window could not open or close,
+/// if one could not.
 #[tauri::command]
 pub(crate) async fn set_overlay(
     app: AppHandle,
     application: String,
     enabled: bool,
     mode: OverlayModeDef,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     ask(&app, |reply| Request::SetOverlay {
         app: application,
         enabled,
@@ -295,7 +297,7 @@ pub(crate) async fn set_overlay(
         reply,
     })
     .await??;
-    sync_overlays(app).await
+    Ok(sync_overlays(app).await.err())
 }
 
 /// What `application`'s overlay shows now.

@@ -128,11 +128,15 @@ pub(crate) fn sync<R: Runtime>(
     let windows = handle.webview_windows();
     for label in unwanted(windows.keys().map(String::as_str), wanted) {
         if let Some(Err(error)) = windows.get(label).map(WebviewWindow::destroy) {
-            errors.push(format!("An overlay window could not close: {error}."));
+            let which = match parse_label(label) {
+                Some((app, OverlayModeDef::Overlay)) => format!("The overlay of {app}"),
+                Some((app, OverlayModeDef::PictureInPicture)) => format!("The panel of {app}"),
+                None => "An overlay window".to_owned(),
+            };
+            errors.push(format!("{which} could not close: {error}."));
         }
     }
-    // Without the monitors, a panel opens in the middle of the screen
-    // rather than where it was left.
+    // Without the monitors, a panel opens where it was left.
     let areas: Vec<Area> = handle
         .available_monitors()
         .unwrap_or_default()
@@ -186,7 +190,7 @@ fn open<R: Runtime>(
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false);
-    let panel = overlay.panel.filter(|panel| in_reach(*panel, areas));
+    let panel = opens_at(overlay.panel, areas);
     let built = match overlay.mode {
         // Hidden until it lets clicks through, since that change would show
         // it with the focus.
@@ -288,6 +292,14 @@ fn show_without_focus<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()
 #[mutants::skip]
 fn show_without_focus<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     window.show()
+}
+
+/// Where a panel saved at `saved` opens: there when it is in reach on the
+/// monitors' work `areas`, or when the monitors could not be listed, since a
+/// panel moved to the middle would then save over the user's place;
+/// otherwise `None`, the middle of the screen.
+pub(crate) fn opens_at(saved: Option<PanelDef>, areas: &[Area]) -> Option<PanelDef> {
+    saved.filter(|panel| areas.is_empty() || in_reach(*panel, areas))
 }
 
 /// Whether enough of `panel` lies in one of the monitors' work `areas` for
@@ -502,5 +514,14 @@ mod tests {
         assert!(!in_reach(panel(0, 993), &areas));
         assert!(!in_reach(panel(0, -153), &areas));
         assert!(!in_reach(panel(100, 100), &[]));
+        // A panel opens where it was left unless that is out of reach, and
+        // monitors that could not be listed leave it there.
+        assert_eq!(
+            opens_at(Some(panel(100, 100)), &areas),
+            Some(panel(100, 100))
+        );
+        assert_eq!(opens_at(Some(panel(5000, 0)), &areas), None);
+        assert_eq!(opens_at(Some(panel(5000, 0)), &[]), Some(panel(5000, 0)));
+        assert_eq!(opens_at(None, &[]), None);
     }
 }

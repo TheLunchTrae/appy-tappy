@@ -414,9 +414,12 @@ export async function syncOverlays(): Promise<void> {
   await invoke('sync_overlays');
 }
 
-/** Turns an application's overlay on or off and sets where it shows. */
-export async function setOverlay(application: string, enabled: boolean, mode: OverlayMode): Promise<void> {
-  await invoke('set_overlay', { application, enabled, mode });
+/**
+ * Turns an application's overlay on or off and sets where it shows. The setting is saved when this resolves; the
+ * answer is why an overlay window could not open or close, or null.
+ */
+export async function setOverlay(application: string, enabled: boolean, mode: OverlayMode): Promise<string | null> {
+  return invoke<string | null>('set_overlay', { application, enabled, mode });
 }
 
 /** What an application's overlay shows now. */
