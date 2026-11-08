@@ -1111,6 +1111,28 @@ mod tests {
     }
 
     #[test]
+    fn a_value_reads_with_its_check_s_reference_and_each_fix_s_only() {
+        let mut screen = dash().values[0].screen.clone();
+        assert!(screen.reads_with("percent"), "its number check's");
+        assert!(!screen.reads_with("small"));
+        screen.fixes = vec![
+            fix(&[]),
+            FixDef {
+                reference: Some("small".to_owned()),
+                ..fix(&[])
+            },
+        ];
+        assert!(screen.reads_with("small"), "a fix's");
+        assert!(!screen.reads_with("other"));
+        screen.check = states(&[("Paused", "status-1.png")]);
+        screen.fixes.clear();
+        assert!(
+            !screen.reads_with("percent"),
+            "a state check reads with none"
+        );
+    }
+
+    #[test]
     fn a_pin_guess_takes_the_third_the_regions_center_is_in() {
         let window = SizeDef {
             width: 300,
