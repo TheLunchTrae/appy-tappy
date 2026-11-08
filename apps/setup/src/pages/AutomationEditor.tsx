@@ -25,9 +25,11 @@ import {
   valueChoices,
   withSource,
 } from '../lib/automation.ts';
+import { ACTIONS_HINT, COOLDOWN_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
+import { Hint } from '../components/Hint.tsx';
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
 type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
@@ -462,7 +464,10 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
         </div>
 
         <section className="card" aria-labelledby="when-heading">
-          <h2 id="when-heading">When</h2>
+          <div className="with-hint">
+            <h2 id="when-heading">When</h2>
+            <Hint topic="When">{WHEN_HINT}</Hint>
+          </div>
           <div className="when-row">
             <select
               className="input value-select"
@@ -569,7 +574,10 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
         </section>
 
         <section className="card" aria-labelledby="do-heading">
-          <h2 id="do-heading">Do, in order</h2>
+          <div className="with-hint">
+            <h2 id="do-heading">Do, in order</h2>
+            <Hint topic="Actions">{ACTIONS_HINT}</Hint>
+          </div>
           {draft.actions.length === 0 ? (
             <p className="note">Add what AppyTappy does when the condition becomes true.</p>
           ) : null}
@@ -632,19 +640,25 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
 
         <section className="card" aria-labelledby="after-heading">
           <h2 id="after-heading">Afterwards</h2>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              role="switch"
-              className="switch"
-              aria-checked={draft.undo}
-              checked={draft.undo}
-              onChange={(event) => {
-                update({ undo: event.target.checked });
-              }}
-            />
-            Undo these when the condition stops being true
-          </label>
+          <div className="with-hint">
+            <label className="toggle">
+              <input
+                type="checkbox"
+                role="switch"
+                className="switch"
+                aria-checked={draft.undo}
+                checked={draft.undo}
+                aria-describedby="hint-undo"
+                onChange={(event) => {
+                  update({ undo: event.target.checked });
+                }}
+              />
+              Undo these when the condition stops being true
+            </label>
+            <Hint topic="Undo" id="hint-undo">
+              {UNDO_HINT}
+            </Hint>
+          </div>
           <p className="note">
             {draft.undo
               ? (undoWords ?? 'Undo puts back paused or started media and changed volumes.')
@@ -652,10 +666,16 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
             It can run again once the condition has stopped being true.
           </p>
           <div className="field narrow">
-            <label htmlFor="cooldown">Wait before it can run again, in seconds</label>
+            <span className="name">
+              <label htmlFor="cooldown">Wait before it can run again, in seconds</label>
+              <Hint topic="Wait before it can run again" id="hint-cooldown">
+                {COOLDOWN_HINT}
+              </Hint>
+            </span>
             <input
               id="cooldown"
               className="input"
+              aria-describedby="hint-cooldown"
               inputMode="decimal"
               value={draft.cooldown}
               onChange={(event) => {
