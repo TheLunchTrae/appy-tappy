@@ -288,8 +288,6 @@ stateDiagram-v2
 16 ms and 500 ms by default. The reader's job carries them, so a new read
 interval stops the reader and starts it again in the same session, after the
 owner forgets the session's values.
-`Activity::NearThreshold` also resets the wait to the minimum, but the reader
-never reports it, so a value near a rule's threshold backs off like any other.
 After a read that waits 64 ms or more, the capture asks Windows for frames no
 more often than the wait, never below the minimum, so a window whose values
 hold still is copied into the frame pool about twice a second rather than every
