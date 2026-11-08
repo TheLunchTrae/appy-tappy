@@ -16,20 +16,27 @@ Each check reads a cropped region and produces a signal value. All four are
 plain Rust over the region's pixels: they call no operating system API, give
 the same answer on every system, and allocate nothing per read.
 
-- **Number** reads digits, a decimal point, and a minus sign, with a
-  reference of the application's: the characters' color and tolerance, and
-  pictures labeled with the text they show, such as `0123456789.%`, from
-  which it learns each character's shape. Several values read with one
-  reference, and each says whether only the whole part counts: a whole value
-  ends the number at its `.`, so `87.5%` reads as 87 and needs no glyphs
-  after the point. A read finds the ink (pixels near the
-  text color), splits it into characters at blank columns, scales each one to
-  a fixed grid, and picks the closest learned shape. The text line is the
-  band of rows with the most ink, so a stray speck elsewhere in the region
-  does not throw it off. A character it has not learned fails the read rather
-  than being guessed, unless the number has already ended, as in the "HP" of
-  "37% HP". It does not read rotated text, characters that touch, or text on
-  a background that shares the text's color; those need a different check.
+- **Number** reads digits, a decimal point, and a minus sign, with a reference
+  of the application's: the characters' color and tolerance, and pictures
+  labeled with the text they show, such as `0123456789.%`, from which it
+  learns each character's shape. Several values read with one reference, and
+  each says whether only the whole part counts: a whole value ends the number
+  at its `.`, so `87.5%` reads as 87 and needs no glyphs after the point. A
+  number that starts with its point reads as `0.`, so `.5` reads as 0.5 and
+  `-.5` as -0.5, unless letters came first, as in `Lv.5`, which reads as 5; a
+  `.` with no digit after it, as in `...`, is no number. A learned `,` is
+  skipped between groups of three digits, so `1,234,567` reads as 1234567. Any
+  other character ends the number, so `12/50` reads as 12, and so does a `,`
+  that is not followed by exactly three digits, so `12,5` reads as 12 rather
+  than guessing that the `,` is a decimal point. A read finds the ink (pixels
+  near the text color), splits it into characters at blank columns, scales
+  each one to a fixed grid, and picks the closest learned shape. The text line
+  is the band of rows with the most ink, so a stray speck elsewhere in the
+  region does not throw it off. A character it has not learned fails the read
+  rather than being guessed, unless the number has already ended, as in the
+  "HP" of "37% HP". It does not read rotated text, characters that touch, or
+  text on a background that shares the text's color; those need a different
+  check.
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
   filled spot and one empty spot. The check counts the region's pixels closer
   to each color and ignores pixels near neither, such as a border or a label:
