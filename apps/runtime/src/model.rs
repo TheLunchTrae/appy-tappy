@@ -153,10 +153,15 @@ impl Model {
 
     /// The name of the app a session reads, for the log.
     pub(crate) fn app_name(&self, id: SessionId) -> Option<&str> {
+        self.session_plan(id).map(|plan| plan.labels.name.as_str())
+    }
+
+    /// The newest plan of the application that session `id` runs.
+    pub(crate) fn session_plan(&self, id: SessionId) -> Option<&AppPlan> {
         self.running
             .values()
             .find(|running| running.id == id)
-            .map(|running| running.plan.labels.name.as_str())
+            .map(|running| &*running.plan)
     }
 
     /// Applies what detection found at `at`.

@@ -614,6 +614,17 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
             }
             Step::Carry(Vec::new())
         },
+        Event::Reading(Reading::ValueProblem {
+            session,
+            value,
+            problem,
+        }) => {
+            if let Some(plan) = model.session_plan(session) {
+                let (app, value) = (&plan.labels.name, plan.value_name(value));
+                note(log, &format!("{app}: {value} {problem}"));
+            }
+            Step::Carry(Vec::new())
+        },
         Event::Reading(Reading::Unseen { session }) => {
             if let Some(name) = model.app_name(session) {
                 note(
@@ -941,6 +952,54 @@ mod tests {
         );
         assert_eq!(line("unchecked", Ok(checked.clone())), None);
         assert_eq!(line("gone", Ok(checked)), None);
+    }
+
+    #[test]
+    fn a_value_s_problem_is_logged_with_its_newest_name() {
+        let folder = env::temp_dir().join(format!("appytappy-value-names-{}", process::id()));
+        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let named = |app: &str, value: &str| {
+            let mut plan = app_plan(app, &["Pause"]);
+            Arc::get_mut(&mut plan).expect("unshared").labels.values = vec![value.to_owned()];
+            BTreeMap::from([("example".to_owned(), plan)])
+        };
+        let mut model = Model::default();
+        model.replan(named("Example App", "Progress"));
+        let started = Event::from(Change::Started {
+            app: "example".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        let problem = || {
+            Event::from(Reading::ValueProblem {
+                session: SessionId(0),
+                value: 0,
+                problem: "cannot be read: too dark".to_owned(),
+            })
+        };
+        handle(&mut model, &mut log, started);
+        handle(&mut model, &mut log, problem());
+        assert_eq!(model.replan(named("Renamed", "Health")), []);
+        handle(&mut model, &mut log, problem());
+        let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
+        fs::remove_dir_all(&folder).expect("clean up");
+        let problems: Vec<&str> = written
+            .lines()
+            .filter(|line| line.contains("too dark"))
+            .collect();
+        assert_eq!(problems.len(), 2, "{written:?}");
+        assert!(
+            problems.first().is_some_and(
+                |line| line.ends_with("Example App: Progress cannot be read: too dark")
+            ),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .get(1)
+                .is_some_and(|line| line.ends_with("Renamed: Health cannot be read: too dark")),
+            "{problems:?}"
+        );
     }
 
     /// An app plan named `name` whose automations are only names.
