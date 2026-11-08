@@ -166,7 +166,7 @@ Each thread below is a plain `std::thread`, and each channel is a
   that fits best is another process's, it looks every `FIND_AGAIN`, until
   the application exits. The constants are in
   `apps/runtime/src/workers/reader.rs`.
-  Other kinds of source, such as a log tail or a memory read, join them later
+  Other kinds of source, such as a log tail, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
   back what failed. It makes the media and audio controls on its own thread,
@@ -472,8 +472,8 @@ and handles, and the CI job shows the table in its run summary.
 These three parts stay separate so that each one can grow without the others
 changing.
 
-- A **source primitive** reads one kind of state: a memory pointer chain, a
-  screen region, a log file, a local API, or process and window events. It knows
+- A **source primitive** reads one kind of state: a screen region, a log
+  file, a local API, or process and window events. It knows
   nothing about rules. The runtime ships a fixed set; an application is data,
   never code. The v1 set and its Windows APIs belong to
   [#3](https://github.com/TheLunchTrae/appy-tappy/issues/3). [Screen
@@ -548,23 +548,21 @@ changing.
 - **Application versions.** A saved value has one binding for every version of
   its application. `app.json` records the build its values were checked
   against, and both programs warn when another build runs, as [Build
-  detection](#build-detection) describes. Keeping a memory binding per
-  version is not built;
-  [#158](https://github.com/TheLunchTrae/appy-tappy/issues/158) tracks it.
+  detection](#build-detection) describes.
 
 ## Anti-cheat enforcement
 
 AppyTappy must never get a user banned. The policy and its classes belong to
 [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11). For any application
-whose anti-cheat class is not `none`, three things are blocked: memory sources,
-input-injection actions, and anything else that opens the application's process.
-Screen, log, local API, and process and window event sources stay allowed. The
-design enforces the block in four places:
+whose anti-cheat class is not `none`, input-injection actions are blocked. No
+source opens an application's process: screen, log, local API, and process and
+window event sources stay allowed. The design enforces the block in three
+places:
 
 1. The setup app refuses to save or turn on an automation whose actions the
-   application's class blocks. The saved files hold no memory source, so the
-   one blocked item they can hold is a key press action, which
-   `AutomationDef::check_against` refuses unless the class is `none`.
+   application's class blocks. The one blocked item the saved files can hold
+   is a key press action, which `AutomationDef::check_against` refuses unless
+   the class is `none`.
 2. The runtime runs the same check each time it reads the saved files, so an
    automation that a hand edit or a later change to the application's class
    made blocked does not run.
@@ -580,14 +578,10 @@ design enforces the block in four places:
    source has no such split: `saved::build` in `appytappy-sources` takes the
    raw `ScreenDef` and `ReferenceDef` from `app.json` and checks them as it
    builds the check it reads with.
-4. Every path that opens an application's process needs a process-access permit,
-   including the guided memory scan
-   ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any version
-   detection that reads the running process. [Build
-   detection](#build-detection) reads only the executable file, so it needs
-   none. Only `config` issues one, and only
-   for an application of class `none`. The scan runs before any binding exists,
-   so this point, not the first three, is what blocks it.
+
+Nothing in AppyTappy opens another application's process. [Build
+detection](#build-detection) reads only the executable file, and process and
+window discovery read system-wide snapshots.
 
 ## The setup app
 
@@ -601,9 +595,7 @@ same ownership rule as the runtime. One owner thread holds the setup app's
 state, and Tauri keeps only that thread's `Sender`, never state behind a
 `Mutex`. Each command is `async`: it sends a request with a
 `tokio::sync::oneshot` reply channel and awaits the reply, so a slow scan never
-freezes the window. The guided memory scan
-([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) lives with the
-memory source. The AI-assisted discovery flow belongs to
+freezes the window. The AI-assisted discovery flow belongs to
 [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
 
 How Tauri compares with the alternatives:
@@ -665,8 +657,7 @@ once the panel stops moving.
 
 The standards deny `unsafe` code. Win32 and COM calls through the `windows`
 crate are `unsafe`, because Rust cannot check what Windows does with the
-pointers it receives. That covers reading another process's memory, Core
-Audio, window hooks, the tray icon, directory watching, and the Direct3D
+pointers it receives. That covers Core Audio, window hooks, the tray icon, directory watching, and the Direct3D
 interop that screen capture needs. WinRT calls, such as media sessions and the
 screen capture API itself, are safe Rust methods. A `win.rs` module's
 submodules, such as screen capture in `sources/src/win/capture.rs` and the

@@ -818,16 +818,14 @@ fn within(region: Region, bounds: Region) -> Option<Region> {
 mod tests {
     use std::sync::mpsc::{SyncSender, TryRecvError};
 
-    use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
+    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::rule::Rule;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{Check, ColorMatch};
     use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::SavedCheck;
     use appytappy_sources::screen::{FrameHandler, Image};
-    use appytappy_sources::system::{
-        AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry, WindowPlace,
-    };
+    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
 
     use super::*;
     use crate::plan::ValuePlan;
@@ -1338,8 +1336,6 @@ mod tests {
     }
 
     impl System for FakeSystem {
-        type Process = NoProcess;
-
         fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
             Ok(self.processes.clone())
         }
@@ -1376,14 +1372,6 @@ mod tests {
             &self,
             _process: appytappy_config::anti_cheat::ProcessId,
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn open(&self, _: &ProcessAccessPermit) -> io::Result<NoProcess> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
@@ -1684,8 +1672,6 @@ mod tests {
     }
 
     impl System for Still {
-        type Process = NoProcess;
-
         fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
             Ok([42, 43]
                 .into_iter()
@@ -1716,14 +1702,6 @@ mod tests {
                 shown: !self.minimized.contains(&window),
                 front: false,
             }))
-        }
-
-        fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn open(&self, _: &ProcessAccessPermit) -> io::Result<NoProcess> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
         fn executable_build(
