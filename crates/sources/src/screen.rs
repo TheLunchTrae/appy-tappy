@@ -10,6 +10,7 @@
 
 pub mod check;
 pub mod digits;
+pub mod find;
 pub mod mask;
 pub mod saved;
 pub mod select;
