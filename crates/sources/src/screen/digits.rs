@@ -423,9 +423,6 @@ impl NumberText {
             _ => false,
         };
         if !accepted {
-            if character == ',' {
-                self.close_groups();
-            }
             self.ended = self.digits;
             if !self.digits {
                 self.len = 0;
