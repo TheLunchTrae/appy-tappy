@@ -26,7 +26,7 @@ mutants = "0.0.4"
 # Reads a recorded reading's text so the user only corrects it: a pure-Rust
 # neural text reader, so it runs the same on every system and needs no
 # operating system OCR. Only its recognition model loads, from the file
-# docs/developer/setup-app.md names. Not used by the runtime.
+# wiki/developer/Setup-app.md names. Not used by the runtime.
 ocrs = { version = "=0.13.1", default-features = false, features = ["onnx"] }
 # Loads the text reader's model file, and gives the rectangle of the line
 # it reads.

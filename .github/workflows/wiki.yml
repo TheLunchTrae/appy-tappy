@@ -1,16 +1,16 @@
 name: Wiki
 
-# Publishes docs/ to the repository's GitHub wiki, which mirrors it: every
-# wiki page is generated, and a page removed from docs/ leaves the wiki. A
+# Publishes wiki/ to the repository's GitHub wiki, which mirrors it: every
+# wiki page is generated, and a page removed from wiki/ leaves the wiki. A
 # push to main publishes. A manual run on main publishes too; on any other
 # branch it is a dry run that keeps the built wiki in the run's artifacts.
-# docs/developer/wiki.md describes the pages it builds.
+# wiki/developer/Wiki.md describes the pages it builds.
 on:
   push:
     branches:
       - main
     paths:
-      - docs/**
+      - wiki/**
       - scripts/wiki.py
       - .github/workflows/wiki.yml
       - .config/mise/conf.d/markdown.toml
@@ -80,7 +80,7 @@ jobs:
           cd "$wiki"
           git add --all
           if git diff --cached --quiet; then
-            echo "The wiki already matches docs/."
+            echo "The wiki already matches wiki/."
             exit 0
           fi
           git -c user.name='github-actions[bot]' \

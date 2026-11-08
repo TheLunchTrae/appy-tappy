@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the GitHub wiki from docs/.
+"""Build the GitHub wiki from wiki/.
 
-docs/ is the only source of the pages; the wiki is a generated mirror that
-.github/workflows/wiki.yml publishes. docs/developer/wiki.md describes the
-mapping. This script only writes files into an output directory and never
+wiki/ is the only source of the pages; the GitHub wiki is a generated mirror
+that .github/workflows/wiki.yml publishes. wiki/developer/Wiki.md describes
+the mapping. This script only writes files into an output directory and never
 touches the network or the wiki repository.
 
 Usage: wiki.py OUTPUT_DIRECTORY --repo OWNER/NAME [--ref BRANCH]
@@ -18,16 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, unquote
 
-DOCS = PurePosixPath("docs")
-# Each section is a folder of docs/ and a block of the sidebar, in this order.
-# The user guide's README is the wiki's Home page.
-SECTIONS = ("user", "developer")
-HOME = DOCS / "user" / "README.md"
-INDEX = "README.md"
+WIKI = PurePosixPath("wiki")
+SIDEBAR = WIKI / "_Sidebar.md"
+# GitHub's own wiki files, such as the sidebar: no page lists or footers them.
+SPECIAL = re.compile(r"^_")
 # Characters GitHub refuses in a wiki file name, or that break a page's URL.
 UNSAFE_NAME = re.compile(r'[\\/:*?"<>|#%]')
-RESERVED_NAMES = {"_sidebar", "_footer"}
-
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 H1 = re.compile(r"^# +(.+?)(?: +#+)? *$")
 PARAGRAPH_BREAK = re.compile(r"(\n[ \t]*\n)")
@@ -43,24 +39,22 @@ REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^<>\n]*>|
 # What is left of a link that the patterns above do not read, including an
 # HTML link to a relative address, which the build does not rewrite.
 UNREAD_LINK = re.compile(r"\]\(|^ {0,3}\[(?!\^)[^\]\n]+\]:|href=[\"']?(?![\"']?(?:#|[A-Za-z][A-Za-z0-9+.-]*:))", re.M)
-PAGES_SECTION = re.compile(r"^## Pages\n([\s\S]*?)(?=^## |\Z)", re.M)
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 class BuildError(Exception):
-    """A docs page that cannot become a wiki page as written."""
+    """A page in wiki/ that cannot become a wiki page as written."""
 
 
 @dataclass(frozen=True)
 class Page:
     source: PurePosixPath
-    section: str
-    title: str
     name: str
+    title: str | None
 
 
 def build(root: Path, output: Path, repo: str, ref: str) -> None:
-    """Write the wiki for the docs under `root` into the empty or absent `output`."""
+    """Write the wiki for the pages under `root`'s wiki/ into the empty or absent `output`."""
     if output.exists() and any(output.iterdir()):
         raise BuildError(f"{output} is not empty")
     pages, assets = collect(root)
@@ -71,55 +65,66 @@ def build(root: Path, output: Path, repo: str, ref: str) -> None:
         body = render(
             page, text, lambda target, image, page=page: resolve(root, page, target, image, by_source, repo, ref)
         )
-        body += footer(page, repo, ref)
+        if not SPECIAL.match(page.name):
+            body += footer(page, repo, ref)
+        # GitHub's wiki names a page by its file name alone, so pages land at
+        # the top of the wiki repository whatever folder holds them here.
         (output / f"{page.name}.md").write_text(body, encoding="utf-8")
     for asset in assets:
-        destination = output / asset.relative_to(DOCS)
+        destination = output / asset.relative_to(WIKI)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(root / asset, destination)
-    (output / "_Sidebar.md").write_text(sidebar(root, pages, by_source, repo, ref), encoding="utf-8")
+    check_sidebar(root, pages, by_source, repo, ref)
 
 
 def collect(root: Path) -> tuple[list[Page], list[PurePosixPath]]:
-    """The docs pages, in section and file order, and every other file under docs/."""
+    """The wiki pages and every other file under wiki/."""
     pages: list[Page] = []
     assets: list[PurePosixPath] = []
-    for path in sorted((root / DOCS).rglob("*")):
+    seen: dict[str, PurePosixPath] = {}
+    for path in sorted((root / WIKI).rglob("*")):
         if not path.is_file():
             continue
         source = PurePosixPath(path.relative_to(root).as_posix())
         if source.suffix != ".md":
             assets.append(source)
             continue
-        section = source.parts[1] if len(source.parts) > 2 else None
-        if section not in SECTIONS:
-            raise BuildError(f"{source}: a docs page belongs in one of docs/{', docs/'.join(SECTIONS)}")
-        title = heading(source, path.read_text(encoding="utf-8"))
-        pages.append(Page(source, section, title, page_name(source, title)))
-    pages.sort(key=lambda page: SECTIONS.index(page.section))
-    seen: dict[str, PurePosixPath] = {}
-    for page in pages:
-        key = page.name.casefold()
-        if key in RESERVED_NAMES or (key == "home" and page.source != HOME):
-            raise BuildError(f"{page.source}: its title makes the reserved wiki page name {page.name}")
+        name = source.stem
+        if UNSAFE_NAME.search(name) or " " in name:
+            raise BuildError(f"{source}: a wiki file name holds no spaces or any of \\ / : * ? \" < > | # %")
+        if SPECIAL.match(name) and source.parent != WIKI:
+            raise BuildError(f"{source}: GitHub reads {source.name} only at the top of wiki/")
+        key = name.casefold()
         if key in seen:
-            raise BuildError(f"{page.source} and {seen[key]} both make the wiki page {page.name}; retitle one")
-        seen[key] = page.source
+            raise BuildError(f"{source} and {seen[key]} both make the wiki page {name}; rename one")
+        seen[key] = source
+        pages.append(Page(source, name, heading(path.read_text(encoding="utf-8"))))
+    if "home" not in seen:
+        raise BuildError(f"{WIKI}/ has no Home.md, the wiki's first page")
     return pages, assets
 
 
-def heading(source: PurePosixPath, text: str) -> str:
+def heading(text: str) -> str | None:
     for line in outside_fences(text):
         if match := H1.match(line):
             return match.group(1)
-    raise BuildError(f"{source}: no level 1 heading to name its wiki page")
+    return None
 
 
-def page_name(source: PurePosixPath, title: str) -> str:
-    """Home for the user guide's README; otherwise the title, as GitHub names wiki files."""
-    if source == HOME:
-        return "Home"
-    return UNSAFE_NAME.sub("", title).strip().replace(" ", "-")
+def check_sidebar(root: Path, pages: list[Page], by_source: dict, repo: str, ref: str) -> None:
+    """Fail when the sidebar is missing or leaves out a page other than Home."""
+    sidebar = by_source.get(SIDEBAR)
+    if sidebar is None:
+        raise BuildError(f"{SIDEBAR} is missing; it lists every page")
+    text = "".join(chunk for code, chunk in chunks((root / SIDEBAR).read_text(encoding="utf-8")) if not code)
+    linked = set()
+    for match in INLINE_LINK.finditer(text):
+        destination = match.group(1).strip("<>")
+        linked.add(unquote(resolve(root, sidebar, destination, False, by_source, repo, ref).partition("#")[0]))
+    missing = [page.source for page in pages if page.name != "Home" and not SPECIAL.match(page.name)]
+    missing = [str(source) for source in missing if by_source[source].name not in linked]
+    if missing:
+        raise BuildError(f"{SIDEBAR} does not link {', '.join(missing)}")
 
 
 def outside_fences(text: str) -> list[str]:
@@ -227,14 +232,13 @@ def resolve(root: Path, page: Page, target: str, image: bool, by_source: dict, r
         raise BuildError(f"{page.source}: the link {target} leaves the repository")
     resolved_path = PurePosixPath(resolved)
     on_disk = root / resolved_path
-    if on_disk.is_dir() and resolved_path / INDEX in by_source:
-        resolved_path = resolved_path / INDEX
     if resolved_path in by_source:
         return page_link(by_source[resolved_path].name) + anchor
     if not on_disk.exists():
         raise BuildError(f"{page.source}: the link {target} names no file in the repository")
-    if resolved_path.is_relative_to(DOCS) and on_disk.is_file():
-        return quote(resolved_path.relative_to(DOCS).as_posix()) + anchor
+    # Other files under wiki/ are copied to the same place in the wiki.
+    if resolved_path.is_relative_to(WIKI) and on_disk.is_file():
+        return quote(resolved_path.relative_to(WIKI).as_posix()) + anchor
     # GitHub shows an image only from its raw file.
     kind = "tree" if on_disk.is_dir() else "raw" if image else "blob"
     location = "" if resolved == "." else "/" + quote(resolved)
@@ -253,38 +257,8 @@ def footer(page: Page, repo: str, ref: str) -> str:
     )
 
 
-def sidebar(root: Path, pages: list[Page], by_source: dict, repo: str, ref: str) -> str:
-    """Each section's index page, then its other pages in the order its Pages list links them.
-
-    Pages the index's `## Pages` section, or the whole index when it has none,
-    does not link follow in title order.
-    """
-    blocks = []
-    for section in SECTIONS:
-        members = [page for page in pages if page.section == section]
-        index = next((page for page in members if page.source.name == INDEX), None)
-        if index is None:
-            raise BuildError(f"docs/{section} has no {INDEX} to head its sidebar section")
-        linked: list[Page] = []
-        text = "".join(chunk for code, chunk in chunks((root / index.source).read_text(encoding="utf-8")) if not code)
-        if listed := PAGES_SECTION.search(text):
-            text = listed.group(1)
-        names = {page.name: page for page in members}
-        for match in INLINE_LINK.finditer(text):
-            destination = match.group(1).strip("<>")
-            name = unquote(resolve(root, index, destination, False, by_source, repo, ref).partition("#")[0])
-            if (member := names.get(name)) and member is not index and member not in linked:
-                linked.append(member)
-        rest = sorted((page for page in members if page is not index and page not in linked), key=lambda p: p.title)
-        lines = [f"**[{index.title}]({page_link(index.name)})**", ""]
-        lines += [f"- [{page.title}]({page_link(page.name)})" for page in linked + rest]
-        blocks.append("\n".join(lines) + "\n")
-    notice = "<!-- Generated from docs/ by scripts/wiki.py. Edit docs/ in the repository, not this page. -->\n\n"
-    return notice + "\n".join(blocks)
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build the GitHub wiki from docs/ into a directory.")
+    parser = argparse.ArgumentParser(description="Build the GitHub wiki from wiki/ into a directory.")
     parser.add_argument("output", type=Path, help="an empty or absent directory to write the wiki into")
     parser.add_argument("--repo", required=True, help="the GitHub repository, OWNER/NAME, for links to its files")
     parser.add_argument("--ref", default="main", help="the branch that links to repository files name")

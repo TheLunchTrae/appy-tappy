@@ -16,7 +16,7 @@ On the Values page, select **New value**.
    pick its window in the list of open windows; type in the filter to find
    one. Picking a window a saved application finds chooses that application.
    If the application isn't saved yet, select **Add application** to
-   [add it](applications.md#add-change-or-remove-an-application) first. Then
+   [add it](Applications.md#add-change-or-remove-an-application) first. Then
    select **Capture this window**.
 2. **Take screenshots.** Select **Take screenshot**, or press the screenshot
    shortcut, `F9` at first. The shortcut works while the other application
@@ -39,12 +39,12 @@ On the Values page, select **New value**.
 AppyTappy keeps the screenshots until you select **Change window** or leave
 the new value. Before either drops work you have not saved, it asks first:
 select **Keep this window** or **Stay** to carry on, as
-[Leave before you save](README.md#leave-before-you-save) describes.
+[Leave before you save](../Home.md#leave-before-you-save) describes.
 
 ## Checks
 
 - **Number** reads a number, such as `87%` or `-12.5`, with a
-  [reference](references.md): the color and shapes of the application's
+  [reference](References.md): the color and shapes of the application's
   characters. Pick one of the application's references, or select
   **New reference from this region** to make one from the region you drew.
   **Edit** changes the picked one, such as to teach it a digit it does not

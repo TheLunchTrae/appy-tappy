@@ -4,13 +4,13 @@ The setup app is where the user tells AppyTappy what to read from an
 application's window and what to do about it. It is a Tauri v2 program:
 the UI is React and TypeScript in `apps/setup/src`, and the Rust side in
 `apps/setup/src-tauri` holds the capture and the checks.
-[Architecture](architecture.md#the-setup-app) explains why it is built this
+[Architecture](Architecture.md#the-setup-app) explains why it is built this
 way. Issues [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16) and
 [#17](https://github.com/TheLunchTrae/appy-tappy/issues/17) track it.
 
 The user guide owns the pages and flows as the user sees them:
-[Applications](../user/applications.md), [Values](../user/values.md),
-[Automations](../user/automations.md), and [Overlay](../user/overlay.md).
+[Applications](../user/Applications.md), [Values](../user/Values.md),
+[Automations](../user/Automations.md), and [Overlay](../user/Overlay.md).
 This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
@@ -76,17 +76,17 @@ This page covers what the user guide leaves out.
 - **Saving an automation** checks that its value is still saved and that the
   target is the kind the condition compares. A key press action also needs the
   application's anti-cheat class to be `none`
-  ([Key presses](actions.md#key-presses)).
+  ([Key presses](Actions.md#key-presses)).
 - **Reload.** Saving or removing an application, saving or deleting a value,
   a reference or an automation, switching an automation on or off, and
   changing an anti-cheat class set the reload event, so the runtime reads the
   files again at once. Overlay changes do not, since
-  the runtime does not read them. [The runtime](architecture.md#the-runtime)
+  the runtime does not read them. [The runtime](Architecture.md#the-runtime)
   describes how it reads them.
 
 ## Recording
 
-[Recording readings](../user/references.md#record-readings) samples the frames
+[Recording readings](../user/References.md#record-readings) samples the frames
 the reference editor's preview capture already takes, about 30 a second, in
 the owner thread (`recording.rs`). Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
@@ -123,21 +123,21 @@ review without keeping, and review's edits stay for the next one.
 
 ### The text reader
 
-The text reader guesses each new reading's text so review only needs
-corrections (`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs),
-a pure-Rust neural text reader, so it reads the same on every system without
-the operating system's OCR. Only its recognition model loads: the region holds
-one line, so there is no text to find first. It runs on a thread of its own,
-because a read takes tens of milliseconds and the owner answers the UI in
-microseconds, and only for new readings, a few times a recording. It gets each
-reading's ink as black text on white with a margin, whatever the application's
-colors (`recording/ink.rs`). Text for a recording the user discarded or replaced is dropped by the
-recording's number. Only the setup app uses it; the runtime reads numbers with
-the shapes the user's labels and kept readings taught it
-([Screen regions](screen.md#checks)).
+The text reader guesses each new reading's text so review only needs corrections
+(`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs), a
+pure-Rust neural text reader, so it reads the same on every system without the
+operating system's OCR. Only its recognition model loads: the region holds one
+line, so there is no text to find first. It runs on a thread of its own, because
+a read takes tens of milliseconds and the owner answers the UI in microseconds,
+and only for new readings, a few times a recording. It gets each reading's ink
+as black text on white with a margin, whatever the application's colors
+(`recording/ink.rs`). Text for a recording the user discarded or replaced is
+dropped by the recording's number. Only the setup app uses it; the runtime reads
+numbers with the shapes the user's labels and kept readings taught it ([Screen
+regions](Screen-regions.md#checks)).
 
 Its model, `text-recognition.onnx`, is in a `models` folder beside the setup
-app's program, where [the installer](installer.md) puts it. It loads on the
+app's program, where [the installer](Installer.md) puts it. It loads on the
 first reading, so a session that never records never loads it. When it cannot
 load, recording still works and each reading says why, for the user to type
 its text. For a development build, `mise run ocr:model` downloads it, checks
@@ -146,26 +146,26 @@ it beside the debug build.
 
 ## Window matching
 
-[How AppyTappy finds the window](../user/applications.md#how-appytappy-finds-the-window)
-gives the patterns, the must-match fields, and the fallback. The file stores
-them as `mustMatch`, with a flag for the title and the class, and `fallback`:
-`none` or `executable`. The executable always has to match, because the
-runtime attaches to an application by its process's executable. A window
-qualifies when its executable and every required field match. Fallback
-windows count only when no window qualifies. Windows rank by fewer missed
-fields, then by the title matching. On a tie the runtime takes the window
-Windows lists first, usually the front-most, so the setup app marks every
-window that ties for the best fit as a best match.
-The setup app uses the match to show which applications are running, and the
-runtime finds each application's window with the same rules. A value's region
-means something only while the window has the size it had when the region was
-drawn. Values can be drawn at more than one size, and the runtime reads the
-ones drawn at the window's current size. When the window closes or changes
-size, the runtime forgets the values it read. Each automation stays as it was
-until the values read next show whether its condition still holds, so it
-neither runs again nor undoes what it changed while the window is out of sight.
-When the window has a size no value was drawn at, the runtime reads nothing and
-logs that the window should be resized or the value drawn again.
+[How AppyTappy finds the
+window](../user/Applications.md#how-appytappy-finds-the-window) gives the
+patterns, the must-match fields, and the fallback. The file stores them as
+`mustMatch`, with a flag for the title and the class, and `fallback`: `none` or
+`executable`. The executable always has to match, because the runtime attaches
+to an application by its process's executable. A window qualifies when its
+executable and every required field match. Fallback windows count only when no
+window qualifies. Windows rank by fewer missed fields, then by the title
+matching. On a tie the runtime takes the window Windows lists first, usually the
+front-most, so the setup app marks every window that ties for the best fit as a
+best match. The setup app uses the match to show which applications are running,
+and the runtime finds each application's window with the same rules. A value's
+region means something only while the window has the size it had when the region
+was drawn. Values can be drawn at more than one size, and the runtime reads the
+ones drawn at the window's current size. When the window closes or changes size,
+the runtime forgets the values it read. Each automation stays as it was until
+the values read next show whether its condition still holds, so it neither runs
+again nor undoes what it changed while the window is out of sight. When the
+window has a size no value was drawn at, the runtime reads nothing and logs that
+the window should be resized or the value drawn again.
 
 ## Saved files
 
@@ -176,7 +176,7 @@ the region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
 and each state check's pictures, named after its value and the state's
 place, such as `status-1.png`, and transparent where the state's selection
 leaves the background out
-([Saved pictures](screen.md#saved-pictures)).
+([Saved pictures](Screen-regions.md#saved-pictures)).
 
 ```json
 {

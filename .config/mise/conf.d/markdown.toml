@@ -72,10 +72,10 @@ run = "bun run standards:check"
 description = "Run the Markdown CI gate plus external link and dependency checks"
 depends = ["md:standards:check", "md:links:deep", "md:audit"]
 
-# docs/ publishes to the GitHub wiki; docs/developer/wiki.md describes how.
+# wiki/ publishes to the GitHub wiki; wiki/developer/Wiki.md describes how.
 # Neither task publishes: the Wiki workflow pushes what md:wiki builds.
 [tasks."md:wiki"]
-description = "Build the wiki from docs/ into artifacts/wiki, without publishing it"
+description = "Build the wiki from wiki/ into artifacts/wiki, without publishing it"
 tools = { python = "3.15.1" }
 run = '''
 set -eu
@@ -84,7 +84,7 @@ python -B scripts/wiki.py artifacts/wiki --repo "${GITHUB_REPOSITORY:-TheLunchTr
 '''
 
 [tasks."md:wiki:check"]
-description = "Test the wiki build, then build the wiki from docs/ into a temporary directory"
+description = "Test the wiki build, then build the wiki from wiki/ into a temporary directory"
 tools = { python = "3.15.1" }
 run = '''
 set -eu

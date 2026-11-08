@@ -5,9 +5,9 @@
 //! to its exit. Each event goes in as a method call, and the [`Effect`]s that
 //! come out say which rules fired and which were released. The evaluator does
 //! no I/O and reads no clock: every event carries the time it happened.
-//! `docs/developer/rules.md` explains the model.
+//! `wiki/developer/Rules.md` explains the model.
 //!
-//! See `docs/developer/architecture.md` for this crate's boundaries.
+//! See `wiki/developer/Architecture.md` for this crate's boundaries.
 
 #![forbid(unsafe_code)]
 

@@ -3,7 +3,7 @@ name: Release
 # Builds the Windows installer. A pushed v* tag attests where it was built and
 # publishes it as a GitHub release. A manual run on any branch or tag keeps it
 # as a test build in the run's artifacts, without an attestation. Nothing else
-# starts it. docs/developer/installer.md describes the builds.
+# starts it. wiki/developer/Installer.md describes the builds.
 on:
   push:
     tags:

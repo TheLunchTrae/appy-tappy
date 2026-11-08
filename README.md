@@ -15,8 +15,8 @@ to install it and set up your first automation.
 
 ## Develop it
 
-The [developer docs](docs/developer/README.md) explain the architecture, how to
-build and test AppyTappy, and how to get a test build.
+The [developer docs](wiki/developer/Developer-docs.md) explain the architecture,
+how to build and test AppyTappy, and how to get a test build.
 [`AGENTS.md`](AGENTS.md) describes the workflow and rules.
 
 ## License

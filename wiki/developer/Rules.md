@@ -1,7 +1,7 @@
 # Rules
 
 A rule says when AppyTappy acts on an application and which
-[actions](actions.md) it runs. The types live in
+[actions](Actions.md) it runs. The types live in
 `appytappy-config` (`crates/config/src/rule.rs` and
 `crates/config/src/signal.rs`), and the evaluator lives in `appytappy-engine`.
 The authoring and compiled file formats that carry rules belong to

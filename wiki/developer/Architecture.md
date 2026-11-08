@@ -39,7 +39,7 @@ on, so it must stay small. Every design choice below follows from that split.
 ```
 
 1. The setup app saves each application, with the values drawn on its
-   window, and each automation as files. [Setup app](setup-app.md#saved-files)
+   window, and each automation as files. [Setup app](Setup-app.md#saved-files)
    describes them.
 2. After each save it sets the named event `Local\AppyTappy.Reload`.
 3. The runtime reads the saved files when it starts and again on each reload,
@@ -132,26 +132,27 @@ Each thread below is a plain `std::thread`, and each channel is a
 
 - **Owner thread.** Holds the root model: the saved automations it runs, which
   applications are attached, and one engine session per attached application
-  that has automations, which holds its signal values and rule state. It applies each event as a
-  `(state, event) -> (state, effects)` transition. Effects are action requests
-  and orders to start or stop a worker. It also wakes when a cooldown that
-  held back a rule ends, as [Evaluation](rules.md#evaluation) describes.
+  that has automations, which holds its signal values and rule state. It applies
+  each event as a `(state, event) -> (state, effects)` transition. Effects are
+  action requests and orders to start or stop a worker. It also wakes when a
+  cooldown that held back a rule ends, as [Evaluation](Rules.md#evaluation)
+  describes.
 - **Lifecycle.** Reports when a watched application starts and exits. It matches
   processes to applications by the executable name in a process snapshot
   (`CreateToolhelp32Snapshot`), which does not open any process, so it is safe
   for every anti-cheat class. It never waits on a process handle.
   [Lifecycle](#lifecycle) describes when it takes a snapshot.
-- **Readers.** One per attached application that has automations. Each finds
-  the application's window with its [window match](setup-app.md#window-matching),
+- **Readers.** One per attached application that has automations. Each finds the
+  application's window with its [window match](Setup-app.md#window-matching),
   captures the smallest rectangle that covers the values drawn at the window's
-  current size, and reads each value from its own region of each frame. It
-  sends a `Sample` only when a value changes, and reads less often while
-  nothing changes. When the window closes or changes size, it sends `Unseen`,
-  and the owner forgets the application's values, so no rule acts on a value
-  nobody can see. Each rule stays as it was, run or not, until the values read
-  next decide its condition. When the window
-  closes it looks for one again, once a second, until the application exits.
-  Other kinds of source, such as a log tail or a memory read, join them later
+  current size, and reads each value from its own region of each frame. It sends
+  a `Sample` only when a value changes, and reads less often while nothing
+  changes. When the window closes or changes size, it sends `Unseen`, and the
+  owner forgets the application's values, so no rule acts on a value nobody can
+  see. Each rule stays as it was, run or not, until the values read next decide
+  its condition. When the window closes it looks for one again, once a second,
+  until the application exits. Other kinds of source, such as a log tail or a
+  memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
   back what failed. It makes the media and audio controls on its own thread,
@@ -160,7 +161,7 @@ Each thread below is a plain `std::thread`, and each channel is a
   changed, such as the volume before a change, so a release can put it back
   even when several rules changed the same thing. A restore that fails is
   tried again, and controls that cannot be made are made again when a later
-  automation fires (see [Actions](actions.md#when-the-controls-cannot-start)).
+  automation fires (see [Actions](Actions.md#when-the-controls-cannot-start)).
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save, and sends `Reload`. The owner reads the
   saved applications and automations again. An application whose automations
@@ -272,7 +273,7 @@ options. Either command exits without
 starting the runtime and logs its result. The exit code is 0 on success, 1 on
 failure, and 2 for a command line it does not understand, but the runtime is
 a windowed program, so a console does not wait for it: the code shows only to
-an installer or to `start /wait`. The [installer](installer.md) runs
+an installer or to `start /wait`. The [installer](Installer.md) runs
 `--autostart on`, and its uninstaller removes the value itself; the runtime
 never turns autostart on by itself.
 
@@ -289,13 +290,12 @@ cannot be opened, nothing is logged, and running exits with code 1.
 
 ### Tray
 
-[The tray icon](../user/tray.md) in the user guide describes the tray as the
-user sees it. The runtime shows an icon in the taskbar's notification area:
-the setup app's icon, which the runtime's build script also links into its
-program file from `apps/runtime/runtime.rc`. Pointing at it
-shows a tooltip with the state, such as `AppyTappy: idle`, or
-`AppyTappy: disabled` while automations are off. Right-clicking it opens a
-small menu:
+[The tray icon](../user/The-tray-icon.md) in the user guide describes the tray
+as the user sees it. The runtime shows an icon in the taskbar's notification
+area: the setup app's icon, which the runtime's build script also links into its
+program file from `apps/runtime/runtime.rc`. Pointing at it shows a tooltip with
+the state, such as `AppyTappy: idle`, or `AppyTappy: disabled` while automations
+are off. Right-clicking it opens a small menu:
 
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
   fire, the readers stop, and what the automations changed is undone, but
@@ -367,9 +367,9 @@ changing.
   screen region, a log file, a local API, or process and window events. It knows
   nothing about rules. The runtime ships a fixed set; an application is data,
   never code. The v1 set and its Windows APIs belong to
-  [#3](https://github.com/TheLunchTrae/appy-tappy/issues/3).
-  [Screen regions](screen.md) describes the screen region source: its checks
-  are portable Rust, and only capture calls Windows.
+  [#3](https://github.com/TheLunchTrae/appy-tappy/issues/3). [Screen
+  regions](Screen-regions.md) describes the screen region source: its checks are
+  portable Rust, and only capture calls Windows.
 - A **signal** is a named, typed value an application exposes, such as
   `progress`. An app definition binds each signal to a source primitive
   per application version. The format belongs to
@@ -378,10 +378,10 @@ changing.
 - A **rule** says when to act: a trigger on signals or application events, with
   conditions, a cooldown, and re-arming. The engine evaluates rules as a pure
   function with no I/O, so its tests need no application and no Windows.
-  [Rules](rules.md) describes the model.
+  [Rules](Rules.md) describes the model.
 - An **action** is a side effect from a fixed set, such as pausing media or
   setting an app's volume. The engine emits action requests; only the action
-  worker performs them. [Actions](actions.md) describes the v1 set.
+  worker performs them. [Actions](Actions.md) describes the v1 set.
 
 ## Files and handoff
 
@@ -391,7 +391,8 @@ changing.
   - `%APPDATA%\AppyTappy\` holds the authoring files, which are small and can
     roam with the user's profile. Each application has a folder in `apps\`,
     named by its ID, that holds its `app.json` and the pictures its references
-    learned from and its state checks compare against; [Setup app](setup-app.md#saved-files) describes the file.
+    learned from and its state checks compare against; [Setup
+    app](Setup-app.md#saved-files) describes the file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine: the
     compiled config in `compiled\`, the status file, scan caches, and logs in
     `logs\`. The compiled config names install paths and memory layouts that
@@ -486,8 +487,8 @@ because a Linux-only GTK dependency is unmaintained and never ships. The
 setup app's entry point and commands, which only forward to the owner thread,
 are left out of mutation testing. The UI has its own Bun lockfile and `ui:`
 mise tasks, which the gate runs first because the Rust side embeds the built
-UI. The [user guide](../user/README.md) describes the screens, and
-[Setup app](setup-app.md) how they work.
+UI. The [user guide](../Home.md) describes the screens, and
+[Setup app](Setup-app.md) how they work.
 
 The overlay ([#36](https://github.com/TheLunchTrae/appy-tappy/issues/36))
 is more windows of the setup app, one for each application whose overlay is

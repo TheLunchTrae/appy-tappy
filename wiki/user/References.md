@@ -1,7 +1,7 @@
 # References
 
 A reference is how AppyTappy knows an application's characters: their color,
-and the shape of each digit and sign. A [Number](values.md#checks) value reads
+and the shape of each digit and sign. A [Number](Values.md#checks) value reads
 its region with one of its application's references, so several values in the
 same font share one reference, and teaching it a new digit teaches all of
 them.
@@ -16,7 +16,7 @@ the ones it learned from still reads.
 
 Select **New reference** on the References page and pick the application's
 window, or select **New reference from this region** while you
-[make a value](values.md#make-a-value).
+[make a value](Values.md#make-a-value).
 
 1. **Name it,** such as `Percent font`.
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then

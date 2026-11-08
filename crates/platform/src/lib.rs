@@ -8,7 +8,7 @@
 //! platforms get services that fail with [`io::ErrorKind::Unsupported`], so
 //! the portable code that uses them still builds and tests there.
 //!
-//! See `docs/developer/architecture.md` for this crate's boundaries.
+//! See `wiki/developer/Architecture.md` for this crate's boundaries.
 
 use std::any::Any;
 use std::io;

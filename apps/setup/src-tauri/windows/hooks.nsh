@@ -1,7 +1,7 @@
 ; Hooks into the installer that Tauri's bundler builds from
 ; tauri.installer.conf.json. The runtime, appytappy-runtime.exe, runs from
 ; sign-in, so these hooks stop it before its file is replaced or removed, and
-; turn its autostart on. docs/developer/installer.md describes the behavior.
+; turn its autostart on. wiki/developer/Installer.md describes the behavior.
 
 ; Asks the runtime to close: its tray window gets WM_CLOSE, which the runtime
 ; treats like the end of the session, so it undoes what its automations

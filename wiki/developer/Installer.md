@@ -1,10 +1,9 @@
 # Installer
 
 AppyTappy ships as one Windows installer that holds both programs.
-[Install](../user/install.md) in the user guide describes it from the user's
-side. Tauri's
-bundler builds it as an NSIS installer from the setup app, with the runtime
-added as a sidecar. Issue
+[Install](../user/Install,-update,-and-uninstall.md) in the user guide describes
+it from the user's side. Tauri's bundler builds it as an NSIS installer from the
+setup app, with the runtime added as a sidecar. Issue
 [#19](https://github.com/TheLunchTrae/appy-tappy/issues/19) tracks packaging.
 
 ## What it does
@@ -15,7 +14,7 @@ added as a sidecar. Issue
 - **Adds AppyTappy to the Start menu**, which opens the setup app. The
   finish page can open it too.
 - **Starts the runtime** and turns on its
-  [autostart](architecture.md#lifecycle) with
+  [autostart](Architecture.md#lifecycle) with
   `appytappy-runtime.exe --autostart on`, so it runs at every sign-in. The
   runtime it starts is not elevated, even when the installer is.
 - **Stops a running runtime first** when it installs over an earlier version,
@@ -33,8 +32,8 @@ runtime's logs.
 
 The installer also holds the setup app's text reader model,
 `models\text-recognition.onnx` beside the setup app, which
-[recording readings](../user/references.md#record-readings) uses
-([The text reader](setup-app.md#the-text-reader)). `mise run
+[recording readings](../user/References.md#record-readings) uses
+([The text reader](Setup-app.md#the-text-reader)). `mise run
 installer:build` downloads it first with `mise run ocr:model`, which fails when
 the download does not match the hash pinned in
 `.config/mise/conf.d/installer.toml`.
@@ -44,9 +43,10 @@ to Tauri's installer. `apps/setup/src-tauri/tauri.installer.conf.json` turns
 bundling on and adds the sidecar for installer builds only, so the other Rust
 tasks build the setup app without a built runtime.
 
-The installer and the programs are not signed, so Windows SmartScreen warns
-the first time the installer runs; [Install](../user/install.md) tells the user
-what to select.
+The installer and the programs are not signed, so Windows SmartScreen warns the
+first time the installer runs;
+[Install](../user/Install,-update,-and-uninstall.md) tells the user what to
+select.
 
 ## Builds
 

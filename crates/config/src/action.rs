@@ -1,6 +1,6 @@
 //! Actions: the side effects a rule runs when it fires.
 //!
-//! These are validated types; `docs/developer/actions.md` explains the v1 set.
+//! These are validated types; `wiki/developer/Actions.md` explains the v1 set.
 
 use std::error::Error;
 use std::fmt;
