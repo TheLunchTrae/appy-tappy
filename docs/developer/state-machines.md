@@ -263,26 +263,29 @@ stateDiagram-v2
     [*] --> Empty
     Empty --> Sign: minus
     Empty --> Whole: digit
+    Empty --> Lead: point
     Empty --> Empty: any other character
     Sign --> Whole: digit
     Sign --> Empty: any other character, the sign is dropped
-    Whole --> Whole: digit
+    Lead --> Fraction: digit, read as 0 and the point
+    Lead --> Empty: any other character, the point is dropped
+    Whole --> Whole: digit, or a comma between groups of three
     Whole --> Fraction: the first point
     Fraction --> Fraction: digit
-    Whole --> Ended: any other character
+    Whole --> Ended: any other character, or a point for a whole number
     Fraction --> Ended: any other character
     Ended --> Ended: anything
 ```
 
 Before a digit, a character that does not fit starts the number over. After a
 digit, it ends the number, and the rest of the region is ignored, so `12/50`
-reads as 12 once `/` is learned. A region with more than 24 characters (`MAX_CHARACTERS`) is a read
-error.
-
-Open problems:
-
-- [#99](https://github.com/TheLunchTrae/appy-tappy/issues/99): `1,234` reads as 1,
-  and `.5` reads as 5, both without an error.
+reads as 12 once `/` is learned. A `,` is skipped when it separates groups of
+three digits before the point, so `1,234` reads as 1234. When the digits after
+a `,` are not a group of three, as in `12,5`, the number ends at the `,` and
+reads as 12. A `.` before any digit reads as `0.`, so `.5` reads as 0.5, unless
+a letter came before it, as in `Lv.5`. A value set to **Whole number only**
+ends the number at its point, so `87.5%` reads as 87. A region with more than
+24 characters (`MAX_CHARACTERS`) is a read error.
 
 ### Rule state
 
@@ -430,23 +433,22 @@ stateDiagram-v2
     Flow --> Saving: Save
     Saving --> Page: saved, the page that lists it opens
     Saving --> Flow: the save fails, the flow shows why
-    Flow --> Page: a tab is clicked
-    Saving --> Page: a tab is clicked, and the save goes on
+    Flow --> Page: a tab is clicked with nothing unsaved
+    Flow --> Asking: a tab is clicked with unsaved work
+    Asking --> Page: the user agrees to lose the work
+    Asking --> Flow: the user stays
+    Saving --> Saving: a tab waits until the save ends
     Flow --> Flow: Add application in the value flow opens the application flow
 ```
 
 The unsaved work of a flow, such as its screenshots and recording, lives in the
-flow's components and in the owner thread. Leaving the value flow, by a tab or
-by **Add application**, unmounts it and stops its capture, which clears its
-screenshots and recording. **Change window** unmounts only the capture view: the
-capture and the recording keep running until the next pick, or until the value
-flow closes.
-
-Open problems:
-
-- [#89](https://github.com/TheLunchTrae/appy-tappy/issues/89): a tab click or
-  **Change window** throws the flow's work away without asking, and a save that
-  finishes late can move the user to another page.
+flow's components and in the owner thread. Each flow reports what leaving it
+would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
+ask before they drop unsaved work. While a save runs, they wait. A save closes
+its flow only while that flow is still open (`saved` in `App.tsx`), so a save
+that finishes after the user moved on leaves the next flow alone. Leaving the
+value flow unmounts it and stops its capture, which clears its screenshots and
+recording.
 
 ### Capture slot
 
@@ -514,8 +516,9 @@ stateDiagram-v2
 - A crop whose characters are new is kept and sent to the text reader. A
   recording keeps at most 200 readings (`MAX_READINGS`).
 - **Record more** needs the same region, ink, tolerance, and window size.
-- Saving a value takes the window size from the screenshot it names, and builds
-  the check from the labeled screenshots and the recording.
+- Saving a value takes the window size from the screenshot it names. A number
+  value reads with one of the application's references, and saving a
+  reference teaches it from its labeled screenshots and the recording.
 
 Open problems:
 
