@@ -203,9 +203,14 @@ as the capture's `Layout` places them, and those rows land in a buffer that is
 reused for every frame. When the window closes, the capture tells its handler
 and stops. It does the same when it can no longer produce frames: when the
 graphics device is lost, such as after a driver reset or update, and when it
-cannot follow the window to a new size. A lost device can stop frames
-altogether, so while no frame comes, the capture checks its device every
-`DEVICE_CHECK` (`crates/sources/src/win/capture.rs`).
+cannot follow the window to a new size. A closed window and a lost device stop
+frames rather than fail them, so every `HEALTH_CHECK`, 2 seconds, whatever
+arrives meanwhile, the capture checks that its window is still there and still
+belongs to the process that owned it at the start, and that its device still
+works (`crates/sources/src/win/capture.rs`). It does not use the capture item's
+own Closed event, which would say sooner that the window closed: registering a
+handler for it left a thread handle, events and thread pool waits open after
+every capture, even once the handler was removed.
 
 Each frame carries the time since the system composed it. The benchmark uses
 that to report capture-to-decision latency on a live window:
@@ -215,4 +220,10 @@ APPYTAPPY_BENCH_WINDOW="Example App" APPYTAPPY_BENCH_REGION="0,0,200,20" mise ru
 ```
 
 The capture asks Windows to drop the yellow border that marks a captured
-window. Windows versions without that option keep the border.
+window, and each capture asks for leave to drop it. Windows versions without
+that option keep the border. A capture that stops, or fails partway through
+starting, flushes its Direct3D device, which destroys what it released, and
+closes the device too. Each capture's thread joins the Windows
+Runtime's multithreaded apartment while it runs and leaves it once it has
+released everything, so Windows cleans up the thread's calls before the thread
+ends.
