@@ -134,6 +134,11 @@ version-numbered names.
   algorithms. `docs/developer/` holds the architecture, contracts, and
   decisions, and links to the user guide for what the user sees rather than
   repeating it. A change to what the user sees updates the user guide.
+- `docs/` publishes to the GitHub wiki on each push to `main`. Edit `docs/`,
+  never the wiki, and link between pages with relative `.md` links. A page's
+  level 1 heading names its wiki page;
+  [`docs/developer/wiki.md`](docs/developer/wiki.md) says what else the build
+  requires.
 - Record owner decisions on one current developer page and replace a decision
   when it changes.
 - Follow the

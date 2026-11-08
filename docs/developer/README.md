@@ -50,3 +50,5 @@ To get an installer of a branch without a release, use one of these:
   runtime, the setup app, and the MCP server, and where each can fail.
 - [Rust standards](rust.md): how the Rust checks work, mutation testing, and
   their limits.
+- [Wiki](wiki.md): how `docs/` publishes to the GitHub wiki, and what that
+  means for writing pages.

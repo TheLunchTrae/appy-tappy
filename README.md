@@ -10,8 +10,8 @@ app's volume.
 
 Download the installer from the
 [latest release](https://github.com/TheLunchTrae/appy-tappy/releases/latest).
-The [user guide](docs/user/README.md) explains how to install it and set up
-your first automation.
+The [user guide](https://github.com/TheLunchTrae/appy-tappy/wiki) explains how
+to install it and set up your first automation.
 
 ## Develop it
 

@@ -1,0 +1,89 @@
+name: Wiki
+
+# Publishes docs/ to the repository's GitHub wiki, which mirrors it: every
+# wiki page is generated, and a page removed from docs/ leaves the wiki. A
+# push to main publishes. A manual run on main publishes too; on any other
+# branch it is a dry run that keeps the built wiki in the run's artifacts.
+# docs/developer/wiki.md describes the pages it builds.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/**
+      - scripts/wiki.py
+      - .github/workflows/wiki.yml
+      - .config/mise/conf.d/markdown.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Runs queue rather than race, so the wiki ends at the newest main.
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  wiki:
+    name: wiki
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      # The token pushes to the wiki repository, which this scope covers.
+      contents: write
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # md:wiki installs the Python it names when it runs.
+      - name: Install mise
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          version: '2026.10.19'
+          install: false
+          cache: true
+      - name: Build the wiki
+        run: mise run md:wiki
+      - name: Keep the dry run's wiki
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wiki
+          path: artifacts/wiki/
+          if-no-files-found: error
+          retention-days: 3
+      # The wiki repository exists only after someone saves a first page in
+      # the wiki, so a missing one fails the run with the steps to fix it.
+      - name: Publish the wiki
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $auth"
+          remote="https://github.com/$GITHUB_REPOSITORY.wiki.git"
+          wiki="$RUNNER_TEMP/wiki"
+          if ! git clone --quiet --depth 1 "$remote" "$wiki"; then
+            echo "::error title=No wiki repository::$remote could not be cloned. Turn on Wikis in the repository's settings, save any first page in the wiki, then run this workflow again."
+            exit 1
+          fi
+          find "$wiki" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R artifacts/wiki/. "$wiki/"
+          cd "$wiki"
+          git add --all
+          if git diff --cached --quiet; then
+            echo "The wiki already matches docs/."
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --quiet --message "Sync from ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          git push --quiet origin HEAD
+          echo "Published the wiki from $GITHUB_SHA."
