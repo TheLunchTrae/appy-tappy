@@ -440,7 +440,7 @@ the top of the script.
 
 The script gives the runtime scratch app data folders that hold one
 application with three values, two color checks and a bar fill, and an
-automation on each. It runs the runtime through three phases:
+automation on each. It runs the runtime through four phases:
 
 1. **Idle.** The application is not running.
 2. **Active.** A probe program the script compiles shows the application's
@@ -449,7 +449,22 @@ automation on each. It runs the runtime through three phases:
    fires once, which shows the reads work; its action targets a program that
    does not exist, so it changes nothing. The phase fails if any value cannot
    be read.
-3. **Idle after.** The probe has exited and the runtime has detached.
+3. **Steady.** The probe starts again and keeps repainting every 16 ms, but
+   only a strip below the values, so the window changes while its values hold
+   still. The runtime's reads back off to their slowest, and its capture asks
+   Windows for frames only that often. Most of what that saves is the
+   compositor's work, which this script does not measure; the runtime's own
+   CPU and memory share the active targets.
+4. **Idle after.** The probe has exited and the runtime has detached.
+
+Before the last phase, a settle check measures nothing but has to pass. The
+probe starts once more with its values dim gray and repaints the strip for
+eight seconds after its window shows, so the capture asks for a frame only every
+half second. Then it turns the values silver in one last repaint and draws
+nothing more. The check fails if the runtime never reads that change, as
+happens if Windows drops a frame drawn inside the interval. It also fails if
+the change comes less than two seconds after the runtime attached, since it
+would then test nothing.
 
 It checks these against their targets:
 
@@ -460,8 +475,8 @@ It checks these against their targets:
   the Universal C runtime to the copy in Windows.
 - **Memory.** The private working set at the end of each phase, which Task
   Manager's Details tab shows as Memory. It leaves out the pages of Windows
-  DLLs that every program shares. Idle has its own target; active and idle
-  after share a larger one.
+  DLLs that every program shares. Idle has its own target; active, steady and
+  idle after share a larger one.
 - **CPU.** The share of one core over each phase's sample. Task Manager shows
   the share of all cores, which is smaller by the number of cores. Both idle
   phases share one target. Windows charges CPU time in ticks of about 16 ms,

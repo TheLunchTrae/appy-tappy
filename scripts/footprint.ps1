@@ -5,11 +5,14 @@
 #
 # The runtime gets scratch LOCALAPPDATA and APPDATA folders holding one
 # application, a window this script opens, and three automations that watch
-# it. One automation fires once, which proves the runtime reads the window;
-# its action sets the volume of a program that does not exist, so it changes
-# nothing. The runtime runs idle while the window is closed, active while it
-# is open and repainting every 16 ms the way a game does, and idle again once
-# it closes.
+# it. One automation fires once each time the window opens, which proves the
+# runtime reads the window; its action sets the volume of a program that does
+# not exist, so it changes nothing. The runtime runs idle while the window is
+# closed, active while it is open and repainting every 16 ms the way a game
+# does, steady while the window still repaints but only outside the values,
+# and idle again once it closes. Between the steady and idle phases, a settle
+# check opens the window once more, changes a value once and then stops
+# drawing, and fails unless the runtime sees that change.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -74,10 +77,11 @@ $script:process = $null
 $probe = $null
 $peak = $null
 
-function Wait-Log([string]$Line, [int]$Seconds) {
+# Waits until the runtime's log holds `Line` at least `Count` times.
+function Wait-Log([string]$Line, [int]$Seconds, [int]$Count = 1) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch -Quiet -Pattern $Line)) { return }
+        if ((Test-Path $log) -and @(Select-String -Path $log -SimpleMatch -Pattern $Line).Count -ge $Count) { return }
         if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) before its log said '$Line'" }
         Start-Sleep -Milliseconds 250
     }
@@ -132,7 +136,8 @@ try {
     }
     $nothing = @(@{ kind = 'volume'; percent = 50; app = 'AppyTappyFootprintNoSuchProgram.exe' })
     # The probe alternates silver and dim gray, so `light` fires on the first
-    # silver frame and its hour-long cooldown keeps it from firing again. The
+    # silver frame and its hour-long cooldown keeps it from firing again until
+    # the window opens anew, which starts the cooldown over. The
     # bar reads full or empty, a share of at most 100, and the green check
     # never holds.
     $automations = @{
@@ -149,7 +154,12 @@ try {
     # The probe: a program of its own, so no other process shares its
     # executable's name, that shows a borderless 400 by 300 window and repaints
     # it every 16 ms. It is DPI aware, so its size is in physical pixels at any
-    # display scale.
+    # display scale. Given `steady`, it keeps the values' part silver and
+    # repaints only a strip below them, so the window changes while its
+    # values hold still. Given `settle`, it does the same with the values'
+    # part dim gray for eight seconds from when the window shows, long enough
+    # for the capture to ask for few frames, then in one repaint turns that
+    # part silver, stops the strip and draws nothing more.
     $probeExe = Join-Path $scratch $ProbeExecutable
     Add-Type -OutputType WindowsApplication -OutputAssembly $probeExe -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System.Drawing;
@@ -171,9 +181,25 @@ public static class Probe {
             ClientSize = new Size(400, 300),
         };
         var colors = new[] { Color.Silver, Color.DimGray };
+        var mode = arguments.Length > 1 ? arguments[1] : "";
+        var steady = mode == "steady" || mode == "settle";
+        var settle = mode == "settle";
+        var strip = new Panel { Location = new Point(0, 200), Size = new Size(400, 100) };
+        form.Controls.Add(strip);
+        form.BackColor = settle ? Color.DimGray : Color.Silver;
         var frame = 0;
+        var shown = new System.Diagnostics.Stopwatch();
+        form.Shown += (sender, shownEvent) => shown.Start();
         var timer = new Timer { Interval = 16 };
-        timer.Tick += (sender, tick) => { frame = 1 - frame; form.BackColor = colors[frame]; };
+        timer.Tick += (sender, tick) => {
+            if (settle && shown.ElapsedMilliseconds >= 8000) {
+                form.BackColor = Color.Silver;
+                timer.Stop();
+                return;
+            }
+            frame = 1 - frame;
+            if (steady) { strip.BackColor = colors[frame]; } else { form.BackColor = colors[frame]; strip.BackColor = colors[frame]; }
+        };
         timer.Start();
         Application.Run(form);
     }
@@ -193,7 +219,7 @@ public static class Probe {
 
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
     $null = $probe.Handle
-    Wait-Log 'attached' 30
+    Wait-Log '): attached' 30
     Wait-Log 'Light: runs' 30
     Measure-Phase 'Active' $ActiveSample $ActiveMemoryLimit $ActiveCpuLimit
     # Every value has to read without a problem, or the active sample
@@ -204,7 +230,44 @@ public static class Probe {
     Stop-Process -Id $probe.Id
     $probe.WaitForExit()
     $probe = $null
-    Wait-Log 'detached' 10
+    Wait-Log '): detached' 10
+
+    $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"", 'steady' -PassThru
+    $null = $probe.Handle
+    Wait-Log '): attached' 30 2
+    # The new attach starts the cooldown over, so `light` firing again shows
+    # the reader reads this window too.
+    Wait-Log 'Light: runs' 30 2
+    Measure-Phase 'Steady' $ActiveSample $ActiveMemoryLimit $ActiveCpuLimit
+    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured', 'capture ended badly'
+    if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
+
+    Stop-Process -Id $probe.Id
+    $probe.WaitForExit()
+    $probe = $null
+    Wait-Log '): detached' 10 2
+
+    # Settle: `light` turns true in the probe's last repaint, while the
+    # capture asks for a frame only every half second. If Windows drops that
+    # repaint rather than delivering it once the interval passes, it is never
+    # read. The check first makes sure the repaint comes at least two seconds
+    # after the runtime attached, or it would test nothing.
+    $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"", 'settle' -PassThru
+    $null = $probe.Handle
+    Wait-Log '): attached' 30 3
+    Start-Sleep -Seconds 2
+    if (@(Select-String -Path $log -SimpleMatch -Pattern 'Light: runs').Count -ge 3) {
+        throw 'the settle probe turned silver before the runtime had read it for two seconds, so the settle check would test nothing'
+    }
+    try { Wait-Log 'Light: runs' 20 3 }
+    catch { throw "the settle check failed, so a change drawn while the capture asked for few frames may be lost: $($_.Exception.Message)" }
+    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured', 'capture ended badly'
+    if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
+    Stop-Process -Id $probe.Id
+    $probe.WaitForExit()
+    $probe = $null
+    Wait-Log '): detached' 10 3
+
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
 }
 catch {

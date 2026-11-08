@@ -67,7 +67,8 @@ pub trait Capture {
     /// Starts capturing `window`, a handle from [`crate::system::System::windows`],
     /// and calls `handler` with `crop` of new frames. Where the system
     /// supports it, it also asks the system for at most one frame every
-    /// `throttle`, which saves the system's own work as well as ours.
+    /// `throttle`, or every wait the handler last returned when that is
+    /// longer, which saves the system's own work as well as ours.
     ///
     /// # Errors
     ///
