@@ -23,7 +23,7 @@ use tokio::sync::oneshot;
 
 use crate::commands::Bridge;
 use crate::overlay::{OverlayWindow, Place};
-use crate::owner::{Message, Request};
+use crate::owner::{Message, Run};
 
 /// The label of the setup app's main window.
 const MAIN: &str = "main";
@@ -333,11 +333,9 @@ fn follow_while_open<R: Runtime>(window: &WebviewWindow<R>, app: &str, messages:
             return;
         }
         let (reply, answer) = oneshot::channel();
-        let request = Request::OverlayPlace {
-            app: app.to_owned(),
-            reply,
-        };
-        if messages.send(Message::Request(request)).is_err() {
+        let app = app.to_owned();
+        let run = Run::new(reply, move |owner| owner.overlay_place(&app));
+        if messages.send(Message::Run(run)).is_err() {
             return;
         }
         let Ok(place) = answer.blocking_recv() else {
@@ -423,16 +421,14 @@ pub(crate) fn on_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         WindowEvent::Destroyed if label == MAIN => window.app_handle().exit(0),
         WindowEvent::Destroyed => {
             if let Some((app, mode)) = parse_label(label) {
-                let (reply, _answer) = oneshot::channel();
+                let app = app.to_owned();
                 #[expect(
                     clippy::let_underscore_must_use,
                     reason = "a failed send means the owner stopped, and its captures with it"
                 )]
-                let _ = bridge.0.send(Message::Request(Request::CloseOverlay {
-                    app: app.to_owned(),
-                    mode,
-                    reply,
-                }));
+                let _ = bridge.0.send(Message::Run(Run::unanswered(move |owner| {
+                    owner.close_overlay(&app, mode);
+                })));
             }
         },
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => {

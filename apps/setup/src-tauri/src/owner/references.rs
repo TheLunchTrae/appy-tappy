@@ -9,9 +9,9 @@ use appytappy_sources::screen::Image;
 
 use crate::check_spec::{self, ReferenceRef, SavedReference, Session};
 
-use super::Owner;
 use super::host::Host;
 use super::messages::{ReferenceSaveSpec, SavedReferenceId};
+use super::{Changed, Owner};
 
 impl<H: Host> Owner<H> {
     /// Hands `work` the session's screenshots, recording and saved
@@ -60,10 +60,16 @@ impl<H: Host> Owner<H> {
 
     /// Saves the reference `spec` teaches to its application, and says
     /// where it went.
-    pub(super) fn save_reference(
-        &self,
+    pub(crate) fn save_reference(
+        &mut self,
         spec: &ReferenceSaveSpec,
     ) -> Result<SavedReferenceId, String> {
+        let saved = self.save_reference_files(spec);
+        self.after(Changed::Values, saved)
+    }
+
+    /// Saves the reference `spec` teaches, without telling anyone.
+    fn save_reference_files(&self, spec: &ReferenceSaveSpec) -> Result<SavedReferenceId, String> {
         let name = spec.reference_name.trim();
         if name.is_empty() {
             return Err("Name the reference first.".to_owned());
@@ -119,7 +125,14 @@ impl<H: Host> Owner<H> {
 
     /// Removes the reference `reference` of the application `app` and its
     /// pictures, unless a value reads with it.
-    pub(super) fn delete_reference(&self, app: &str, reference: &str) -> Result<(), String> {
+    pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
+        let deleted = self.delete_reference_files(app, reference);
+        self.after(Changed::Values, deleted)
+    }
+
+    /// Removes the reference `reference` and its pictures, without telling
+    /// anyone.
+    fn delete_reference_files(&self, app: &str, reference: &str) -> Result<(), String> {
         let store = &self.stores()?.apps;
         let mut file = self.stores()?.app_file(app)?;
         let Some(saved) = file.reference(reference) else {
@@ -167,9 +180,9 @@ fn and_list(names: &[&str]) -> String {
 mod tests {
     use appytappy_config::app_file::CheckDef;
 
-    use crate::owner::messages::{Request, SavedValue};
+    use crate::owner::messages::SavedValue;
     use crate::owner::test_support::{
-        add_example_app, frame_image, harness_with, scratch_store, spec,
+        FakeHost, add_example_app, frame_image, harness_with, scratch_store, spec,
     };
 
     use super::*;
@@ -177,12 +190,12 @@ mod tests {
     /// A reference named `name` to save to the application `app`, teaching
     /// that the red square on screenshot 0 is a 1. With `editing`, the
     /// application and ID of a saved reference, it adds to that reference.
-    fn reference(app: &str, name: &str, editing: Option<(&str, &str)>) -> Box<ReferenceSaveSpec> {
+    fn reference(app: &str, name: &str, editing: Option<(&str, &str)>) -> ReferenceSaveSpec {
         let editing = editing.map_or_else(
             || "null".to_owned(),
             |(owner, id)| format!(r#"{{"app":"{owner}","id":"{id}"}}"#),
         );
-        Box::new(ReferenceSaveSpec {
+        ReferenceSaveSpec {
             app: app.to_owned(),
             reference_name: name.to_owned(),
             check: serde_json::from_str(&format!(
@@ -191,7 +204,7 @@ mod tests {
                     "tolerance":0,"labels":[{{"screenshot":0,"text":"1"}}]}}"#
             ))
             .expect("valid JSON"),
-        })
+        }
     }
 
     const NUMBER: &str = r#"{"kind":"number","region":{"x":0,"y":0,"width":2,"height":2},
@@ -205,15 +218,11 @@ mod tests {
         add_example_app(&mut harness);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        let save = |spec| move |reply| Request::SaveReference { spec, reply };
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let save = |spec| move |owner: &mut Owner<FakeHost>| owner.save_reference(&spec);
         let delete = |reference: &str| {
             let reference = reference.to_owned();
-            move |reply| Request::DeleteReference {
-                app: "example".to_owned(),
-                reference,
-                reply,
-            }
+            move |owner: &mut Owner<FakeHost>| owner.delete_reference("example", &reference)
         };
         assert_eq!(
             harness.ask(save(reference("example", " ", None))),
@@ -308,7 +317,7 @@ mod tests {
             Ok(()),
             "an unused reference goes"
         );
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         let saved = file.reference("digits").expect("saved");
         assert_eq!(saved.name, "Red digits");
@@ -321,16 +330,13 @@ mod tests {
 
         // A number value reads with it, and keeps it until the value goes.
         assert_eq!(
-            harness.ask(|reply| Request::SaveValue {
-                spec: Box::new(spec("example", "Progress", NUMBER)),
-                reply
-            }),
+            harness.ask(|owner| owner.save(&spec("example", "Progress", NUMBER))),
             Ok(SavedValue {
                 app: "example".to_owned(),
                 value: "progress".to_owned()
             })
         );
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(
             file.values[0].screen.check,
@@ -340,37 +346,26 @@ mod tests {
             }
         );
         harness
-            .ask(|reply| Request::SaveValue {
-                spec: Box::new(spec("example", "Best", NUMBER)),
-                reply,
-            })
+            .ask(|owner| owner.save(&spec("example", "Best", NUMBER)))
             .expect("a second value");
         assert_eq!(
             harness.ask(delete("digits")),
             Err("Progress and Best read with Red digits. Change or remove them first.".to_owned())
         );
         harness
-            .ask(|reply| Request::DeleteValue {
-                app: "example".to_owned(),
-                value: "best".to_owned(),
-                reply,
-            })
+            .ask(|owner| owner.delete("example", "best"))
             .expect("removes the second value");
         assert_eq!(
             harness.ask(delete("digits")),
             Err("Progress reads with Red digits. Change or remove it first.".to_owned())
         );
         harness
-            .ask(|reply| Request::DeleteValue {
-                app: "example".to_owned(),
-                value: "progress".to_owned(),
-                reply,
-            })
+            .ask(|owner| owner.delete("example", "progress"))
             .expect("removes the value");
         assert_eq!(harness.ask(delete("digits")), Ok(()));
         assert_eq!(harness.ask(delete("digits")), Ok(()), "already gone");
         assert!(!folder.join("ref-digits-1.png").exists());
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(
             file.references
@@ -390,20 +385,15 @@ mod tests {
         add_example_app(&mut harness);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness
-            .ask(|reply| Request::SaveReference {
-                spec: reference("example", "Digits", None),
-                reply,
-            })
+            .ask(|owner| owner.save_reference(&reference("example", "Digits", None)))
             .expect("saves");
         std::fs::remove_file(root.join("apps").join("example").join("ref-digits-1.png"))
             .expect("remove the picture");
         assert_eq!(
-            harness.ask(|reply| Request::SetCheck {
-                spec: serde_json::from_str(NUMBER).expect("valid JSON"),
-                reply
-            }),
+            harness
+                .ask(|owner| owner.set_check(&serde_json::from_str(NUMBER).expect("valid JSON"))),
             Err(
                 "The reference Digits is missing its picture ref-digits-1.png. Remove the values \
                  that read with it, then delete the reference and make it again."
