@@ -345,6 +345,16 @@ impl appytappy_actions::Controls for NoControls {
     fn hold(&mut self, _time: std::time::Duration) {
         match self.0 {}
     }
+
+    #[mutants::skip]
+    fn open(&mut self, _target: &appytappy_config::action::OpenTarget) -> io::Result<()> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn play_sound(&mut self, _file: &std::path::Path) -> io::Result<bool> {
+        match self.0 {}
+    }
 }
 
 /// Waits for the next event, or, when an automation is `due`, until then at

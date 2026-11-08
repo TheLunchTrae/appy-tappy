@@ -5,9 +5,7 @@ application's window and what to do about it. It is a Tauri v2 program:
 the UI is React and TypeScript in `apps/setup/src`, and the Rust side in
 `apps/setup/src-tauri` holds the capture and the checks.
 [Architecture](Architecture.md#the-setup-app) explains why it is built this
-way. Launching a program, opening a file or URL, and playing a sound are
-actions it does not offer yet;
-[#30](https://github.com/TheLunchTrae/appy-tappy/issues/30) tracks them.
+way.
 
 The user guide owns the pages and flows as the user sees them:
 [Applications](../user/Applications.md), [Values](../user/Values.md),

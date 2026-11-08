@@ -183,6 +183,9 @@ pub(crate) fn save(
                     *name = name.trim().to_owned();
                 }
             },
+            ActionDef::Open { target: text } | ActionDef::Sound { file: text } => {
+                *text = text.trim().to_owned();
+            },
             // The file keeps the keys in one spelling, such as Ctrl+Shift+M.
             ActionDef::Keys { keys } => {
                 if let Ok(chord) = KeyChord::parse(keys) {

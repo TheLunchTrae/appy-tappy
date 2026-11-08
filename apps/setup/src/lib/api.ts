@@ -315,7 +315,11 @@ export type MediaCommand = 'play' | 'pause' | 'next' | 'previous';
 export type ActionDef =
   | { readonly kind: 'media'; readonly command: MediaCommand; readonly app: string | null }
   | { readonly kind: 'volume'; readonly percent: number; readonly app: string | null }
-  | { readonly kind: 'keys'; readonly keys: string };
+  | { readonly kind: 'keys'; readonly keys: string }
+  /** Opens a program or file by its full path, or an `http` or `https` link. */
+  | { readonly kind: 'open'; readonly target: string }
+  /** Plays a WAV file by its full path. */
+  | { readonly kind: 'sound'; readonly file: string };
 
 /** What a condition compares a value with. */
 export type Target = number | boolean | string;
