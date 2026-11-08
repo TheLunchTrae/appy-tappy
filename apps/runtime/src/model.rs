@@ -228,6 +228,27 @@ impl Model {
         acts(id, &running.plan, &running.watched, effects)
     }
 
+    /// When a running automation that its cooldown held back is next due,
+    /// across every app. See [`Model::recheck`].
+    pub(crate) fn next_due(&self) -> Option<Instant> {
+        self.running
+            .values()
+            .filter_map(|running| running.session.next_due())
+            .min()
+    }
+
+    /// Fires, at `at`, the automations whose cooldown held them back while
+    /// their condition held, and whose cooldown has passed.
+    pub(crate) fn recheck(&mut self, at: Instant) -> Vec<Order> {
+        self.running
+            .values_mut()
+            .flat_map(|running| {
+                let effects = running.session.recheck(at);
+                acts(running.id, &running.plan, &running.watched, effects)
+            })
+            .collect()
+    }
+
     /// Forgets the values a session's reader can no longer see. Each rule
     /// keeps its state, so an automation that ran stays run, and nothing
     /// fires or is undone until the values read next decide its condition.
@@ -574,6 +595,50 @@ mod tests {
         );
         let released = model.sample(SessionId(0), flag, Value::Flag(false), now);
         assert_eq!(kinds(&released), ["undo 0 Pause A"]);
+    }
+
+    #[test]
+    fn an_automation_held_back_by_its_cooldown_runs_once_it_passes() {
+        let condition =
+            Condition::compare(signal(), Comparison::AtLeast, number(90.0)).expect("valid");
+        let rule = Rule::new(
+            Trigger::Becomes {
+                condition,
+                rearm: Rearm::WhenFalse,
+            },
+            pause(),
+            Duration::from_secs(10),
+            Restore::Never,
+        )
+        .expect("valid");
+        let base = plan("A", 90.0);
+        let a = Arc::new(AppPlan {
+            name: base.name.clone(),
+            window: base.window.clone(),
+            values: Vec::new(),
+            rules: Arc::from(vec![rule]),
+            automations: base.automations.clone(),
+        });
+        let mut model = Model::default();
+        let now = Instant::now();
+        let later = |seconds| {
+            now.checked_add(Duration::from_secs(seconds))
+                .expect("a test time fits in an Instant")
+        };
+        model.replan(plans(&[("a", &a), ("b", &plan("B", 90.0))]));
+        model.apply(started("a", 7), now);
+        model.apply(started("b", 8), now);
+        assert_eq!(model.next_due(), None);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        model.sample(SessionId(0), signal(), number(10.0), later(1));
+        assert_eq!(
+            model.sample(SessionId(0), signal(), number(95.0), later(2)),
+            []
+        );
+        assert_eq!(model.next_due(), Some(later(10)));
+        assert_eq!(model.recheck(later(9)), []);
+        assert_eq!(kinds(&model.recheck(later(10))), ["run 0 Pause A"]);
+        assert_eq!(model.next_due(), None);
     }
 
     #[test]

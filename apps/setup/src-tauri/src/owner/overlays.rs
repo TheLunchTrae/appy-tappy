@@ -318,6 +318,25 @@ mod tests {
     }
 
     #[test]
+    fn removing_an_application_stops_its_overlay_and_leaves_no_window_wanted() {
+        let (mut harness, root) = with_saved_bar("overlay-removed");
+        harness
+            .ask(set_overlay(true, OverlayModeDef::PictureInPicture))
+            .expect("saves");
+        drop(overlay_capture(&mut harness));
+        harness
+            .ask(|reply| Request::RemoveApp {
+                app: "example".to_owned(),
+                reply,
+            })
+            .expect("removes");
+        assert_eq!(harness.closed.try_recv(), Ok(7), "its capture stops");
+        // The window sync that follows the removal closes the panel.
+        assert_eq!(harness.ask(Request::Overlays), Ok(Vec::new()));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn an_overlay_reads_the_values_drawn_at_the_windows_size_and_says_why_others_cannot() {
         let (mut harness, root) = with_saved_bar("overlay-sizes");
         change_app_file(&harness, |file| {

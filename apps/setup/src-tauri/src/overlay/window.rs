@@ -109,27 +109,37 @@ pub(crate) fn unwanted<'a>(
 }
 
 /// Opens a window for each overlay in `wanted` that has none, and closes
-/// the overlay windows nothing wants any more.
+/// the overlay windows nothing wants any more. One window that cannot be
+/// opened or closed does not stop the others.
 ///
 /// It needs a running app, so no unit test can reach it; the choice of
 /// windows to close is [`unwanted`]'s.
 ///
 /// # Errors
 ///
-/// Returns Tauri's error when a window cannot be opened or closed.
+/// Returns Tauri's error for each window that could not be opened or
+/// closed, one sentence each.
 #[mutants::skip]
 pub(crate) fn sync<R: Runtime>(
     handle: &AppHandle<R>,
     wanted: &[OverlayWindow],
-) -> tauri::Result<()> {
+) -> Result<(), String> {
+    let mut errors = Vec::new();
     let windows = handle.webview_windows();
     for label in unwanted(windows.keys().map(String::as_str), wanted) {
-        if let Some(window) = windows.get(label) {
-            window.destroy()?;
+        if let Some(Err(error)) = windows.get(label).map(WebviewWindow::destroy) {
+            let which = match parse_label(label) {
+                Some((app, OverlayModeDef::Overlay)) => format!("The overlay of {app}"),
+                Some((app, OverlayModeDef::PictureInPicture)) => format!("The panel of {app}"),
+                None => "An overlay window".to_owned(),
+            };
+            errors.push(format!("{which} could not close: {error}."));
         }
     }
+    // Without the monitors, a panel opens where it was left.
     let areas: Vec<Area> = handle
-        .available_monitors()?
+        .available_monitors()
+        .unwrap_or_default()
         .iter()
         .map(|monitor| {
             let area = monitor.work_area();
@@ -143,11 +153,20 @@ pub(crate) fn sync<R: Runtime>(
         .collect();
     for overlay in wanted {
         let label = label(&overlay.app, overlay.mode);
-        if handle.get_webview_window(&label).is_none() {
-            open(handle, &label, overlay, &areas)?;
+        if handle.get_webview_window(&label).is_none()
+            && let Err(error) = open(handle, &label, overlay, &areas)
+        {
+            errors.push(format!(
+                "{}'s overlay could not open: {error}.",
+                overlay.name
+            ));
         }
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join(" "))
+    }
 }
 
 /// Opens `overlay`'s window, labeled `label`. It needs a running app, so no
@@ -171,7 +190,7 @@ fn open<R: Runtime>(
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false);
-    let panel = overlay.panel.filter(|panel| in_reach(*panel, areas));
+    let panel = opens_at(overlay.panel, areas);
     let built = match overlay.mode {
         // Hidden until it lets clicks through, since that change would show
         // it with the focus.
@@ -275,6 +294,14 @@ fn show_without_focus<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()
     window.show()
 }
 
+/// Where a panel saved at `saved` opens: there when it is in reach on the
+/// monitors' work `areas`, or when the monitors could not be listed, since a
+/// panel moved to the middle would then save over the user's place;
+/// otherwise `None`, the middle of the screen.
+pub(crate) fn opens_at(saved: Option<PanelDef>, areas: &[Area]) -> Option<PanelDef> {
+    saved.filter(|panel| areas.is_empty() || in_reach(*panel, areas))
+}
+
 /// Whether enough of `panel` lies in one of the monitors' work `areas` for
 /// the user to grab it, so a panel left on a monitor that was unplugged, or
 /// under the taskbar, opens where the user can reach it.
@@ -367,6 +394,22 @@ fn follow<R: Runtime>(window: &WebviewWindow<R>, place: Option<Place>) -> tauri:
         window.set_size(size)?;
     }
     Ok(())
+}
+
+/// Shows the main window in front of the others, restored if it was
+/// minimized, as when the user starts the setup app while it runs.
+#[mutants::skip]
+pub(crate) fn bring_forward<R: Runtime>(handle: &AppHandle<R>) {
+    if let Some(window) = handle.get_webview_window(MAIN) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a window that cannot come forward stays where it was, as before the user tried"
+        )]
+        let _ = window
+            .unminimize()
+            .and_then(|()| window.show())
+            .and_then(|()| window.set_focus());
+    }
 }
 
 /// Reacts to a window's `event`: a moved or resized panel's place is kept,
@@ -487,5 +530,14 @@ mod tests {
         assert!(!in_reach(panel(0, 993), &areas));
         assert!(!in_reach(panel(0, -153), &areas));
         assert!(!in_reach(panel(100, 100), &[]));
+        // A panel opens where it was left unless that is out of reach, and
+        // monitors that could not be listed leave it there.
+        assert_eq!(
+            opens_at(Some(panel(100, 100)), &areas),
+            Some(panel(100, 100))
+        );
+        assert_eq!(opens_at(Some(panel(5000, 0)), &areas), None);
+        assert_eq!(opens_at(Some(panel(5000, 0)), &[]), Some(panel(5000, 0)));
+        assert_eq!(opens_at(None, &[]), None);
     }
 }

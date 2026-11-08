@@ -18,6 +18,9 @@ pub(crate) struct Log {
     file: File,
     size: u64,
     limit: u64,
+    /// Makes opening the new file fail, for a test.
+    #[cfg(test)]
+    fail_open: bool,
 }
 
 fn open_append(path: &Path) -> io::Result<File> {
@@ -39,6 +42,8 @@ impl Log {
             file,
             size,
             limit,
+            #[cfg(test)]
+            fail_open: false,
         })
     }
 
@@ -57,13 +62,38 @@ impl Log {
         };
         let length = u64::try_from(line.len()).unwrap_or(u64::MAX);
         if self.size != 0 && self.size.saturating_add(length) > self.limit {
-            fs::rename(&self.path, &self.old)?;
-            self.file = open_append(&self.path)?;
-            self.size = 0;
+            self.rotate();
         }
         self.file.write_all(line.as_bytes())?;
         self.size = self.size.saturating_add(length);
         Ok(())
+    }
+
+    /// Moves the file to the old name and starts a new one. A step that
+    /// fails, such as a move while another program holds the file, leaves
+    /// the log writing where it did, past its limit, and the next line tries
+    /// again, because the log is the runtime's only output. A move that finds
+    /// no file, because it was deleted or already moved by a try whose open
+    /// failed, goes on to the open, so the old file is never moved twice.
+    fn rotate(&mut self) {
+        if let Err(error) = fs::rename(&self.path, &self.old)
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            return;
+        }
+        if let Ok(file) = self.open_new() {
+            self.size = file.metadata().map_or(0, |metadata| metadata.len());
+            self.file = file;
+        }
+    }
+
+    /// Opens the new file at the log's path.
+    fn open_new(&self) -> io::Result<File> {
+        #[cfg(test)]
+        if self.fail_open {
+            return Err(io::Error::other("injected"));
+        }
+        open_append(&self.path)
     }
 }
 
@@ -143,6 +173,68 @@ mod tests {
         log.write(None, "third").expect("write");
         assert_eq!(read(&folder.0.join("runtime.old.log")), "second\n");
         assert_eq!(read(&folder.0.join("runtime.log")), "third\n");
+    }
+
+    #[test]
+    fn a_log_that_cannot_move_keeps_every_line() {
+        let folder = Folder::new("stuck");
+        let mut log = Log::open(&folder.0, 10).expect("open");
+        log.write(None, "first").expect("write");
+        // A folder that is not empty in the old file's place stops the move.
+        let blocker = folder.0.join("runtime.old.log");
+        fs::create_dir(&blocker).expect("block the move");
+        fs::write(blocker.join("held"), "").expect("fill the folder");
+        log.write(None, "second").expect("still written");
+        log.write(None, "third").expect("still written");
+        assert_eq!(
+            read(&folder.0.join("runtime.log")),
+            "first\nsecond\nthird\n"
+        );
+        fs::remove_dir_all(&blocker).expect("unblock the move");
+        // Short enough to fit under the limit if a failed move had reset the
+        // size, so only a log that still counts every line moves it here.
+        log.write(None, "4th").expect("write");
+        assert_eq!(
+            read(&blocker),
+            "first\nsecond\nthird\n",
+            "the next line moves it"
+        );
+        assert_eq!(read(&folder.0.join("runtime.log")), "4th\n");
+    }
+
+    #[test]
+    fn a_new_file_that_cannot_open_keeps_the_moved_one_until_it_can() {
+        let folder = Folder::new("reopen-fails");
+        let mut log = Log::open(&folder.0, 10).expect("open");
+        log.write(None, "first").expect("write");
+        log.fail_open = true;
+        log.write(None, "second")
+            .expect("written to the moved file");
+        log.write(None, "third").expect("written to the moved file");
+        assert_eq!(
+            read(&folder.0.join("runtime.old.log")),
+            "first\nsecond\nthird\n"
+        );
+        assert!(!folder.0.join("runtime.log").exists());
+        log.fail_open = false;
+        log.write(None, "fourth").expect("write");
+        assert_eq!(
+            read(&folder.0.join("runtime.old.log")),
+            "first\nsecond\nthird\n",
+            "the moved file is not moved again"
+        );
+        assert_eq!(read(&folder.0.join("runtime.log")), "fourth\n");
+    }
+
+    #[test]
+    fn a_log_deleted_while_open_starts_a_new_file() {
+        let folder = Folder::new("deleted");
+        let mut log = Log::open(&folder.0, 10).expect("open");
+        log.write(None, "first").expect("write");
+        fs::remove_file(folder.0.join("runtime.log")).expect("delete the log");
+        log.write(None, "second").expect("write");
+        assert_eq!(read(&folder.0.join("runtime.log")), "second\n");
+        assert!(!folder.0.join("runtime.old.log").exists());
     }
 
     #[test]

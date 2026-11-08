@@ -4,13 +4,16 @@
 //! and name a value by its application's ID and the value's ID. Saving one
 //! checks it against the saved applications, so it never names a value that
 //! is not there or compares a value with the wrong kind of target. A value
-//! that later goes away shows as a problem on the automation that used it.
+//! that later goes away shows as a problem on the automation that used it,
+//! and so does an automation that breaks a rule on its own, such as after a
+//! hand edit; either can still be turned off and deleted.
 
 use appytappy_config::action::KeyChord;
 use appytappy_config::app_file::AppFile;
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
 };
+use appytappy_config::signal::SignalName;
 use appytappy_config::store::StoredApp;
 use serde::Serialize;
 
@@ -40,12 +43,55 @@ fn sentence(problem: &str) -> String {
     text
 }
 
-/// Loads the automations, saying what went wrong for the user.
+/// Loads the automations, saying what went wrong for the user. Each one
+/// has an ID that no other one has, as [`unique_ids`] makes them.
 fn load(stores: &Stores) -> Result<AutomationsFile, String> {
+    let mut file = load_as_saved(stores)?;
+    unique_ids(&mut file);
+    Ok(file)
+}
+
+/// Loads the automations as the file holds them, saying what went wrong for
+/// the user.
+fn load_as_saved(stores: &Stores) -> Result<AutomationsFile, String> {
     stores
         .automations
         .load()
         .map_err(|error| sentence(&format!("AppyTappy cannot read your automations: {error}")))
+}
+
+/// Gives a new ID, made from its name, to each automation whose ID a hand
+/// edit made invalid or gave to an automation before it, so the page, which
+/// goes by ID, can tell every automation apart. Only the first of those
+/// sharing an ID keeps it, so the same file always gets the same IDs, and
+/// the next save writes them.
+fn unique_ids(file: &mut AutomationsFile) {
+    let mut taken: Vec<String> = file
+        .automations
+        .iter()
+        .map(|automation| automation.id.clone())
+        .collect();
+    let mut kept: Vec<String> = Vec::with_capacity(taken.len());
+    for automation in &mut file.automations {
+        if SignalName::new(&automation.id).is_err() || kept.contains(&automation.id) {
+            let names: Vec<&str> = taken.iter().map(String::as_str).collect();
+            automation.id = new_automation_id(&automation.name, &names);
+            taken.push(automation.id.clone());
+        }
+        kept.push(automation.id.clone());
+    }
+}
+
+/// Whether `automation`'s ID, as `file` holds it, cannot be used: it breaks
+/// the ID rules or another automation has it too.
+fn bad_id(file: &AutomationsFile, automation: &AutomationDef) -> bool {
+    SignalName::new(&automation.id).is_err()
+        || file
+            .automations
+            .iter()
+            .filter(|other| other.id == automation.id)
+            .nth(1)
+            .is_some()
 }
 
 /// Loads the applications, saying what went wrong for the user.
@@ -53,9 +99,22 @@ fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
     stores.apps.load().map_err(|error| error.to_string())
 }
 
+/// What stops `automation`, one of `file`'s, from running with the
+/// applications in `apps`, if anything: a rule it breaks on its own, such as
+/// after a hand edit, or a change to its application since it was saved.
+fn problem(
+    file: &AutomationsFile,
+    automation: &AutomationDef,
+    apps: &[StoredApp],
+) -> Option<String> {
+    file.problem(automation)
+        .map(|problem| sentence(&problem))
+        .or_else(|| app_problem(automation, apps))
+}
+
 /// What stops `automation` from running with the applications in `apps`, if
 /// anything.
-fn problem(automation: &AutomationDef, apps: &[StoredApp]) -> Option<String> {
+fn app_problem(automation: &AutomationDef, apps: &[StoredApp]) -> Option<String> {
     if let Some(broken) = apps
         .iter()
         .find(|app| app.id == automation.when.app && app.file.is_err())
@@ -77,19 +136,30 @@ fn good(apps: &[StoredApp]) -> impl Iterator<Item = (&str, &AppFile)> {
         .filter_map(|app| app.file.as_ref().ok().map(|file| (app.id.as_str(), file)))
 }
 
-/// Every automation, with what stops each one from running.
+/// The problem of an automation whose ID cannot be used as saved, for every
+/// automation that shares the ID as well as one whose ID breaks the rules.
+const HAND_EDITED_ID: &str =
+    "Another automation has the same ID, or its ID was changed by hand. Save it to fix that.";
+
+/// Every automation, with what stops each one from running. One whose ID
+/// cannot be used as saved says so, since the runtime skips it until a save
+/// writes the ID [`load`] gave it.
 pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
-    let file = load(stores)?;
+    let saved = load_as_saved(stores)?;
+    let mut file = saved.clone();
+    unique_ids(&mut file);
     let apps = apps(stores)?;
-    Ok(file
+    Ok(saved
         .automations
-        .into_iter()
-        .map(|automation| {
-            let problem = problem(&automation, &apps);
-            AutomationSummary {
-                automation,
-                problem,
-            }
+        .iter()
+        .zip(&file.automations)
+        .map(|(as_saved, automation)| AutomationSummary {
+            automation: automation.clone(),
+            problem: if bad_id(&saved, as_saved) {
+                Some(HAND_EDITED_ID.to_owned())
+            } else {
+                problem(&file, automation, &apps)
+            },
         })
         .collect())
 }
@@ -123,7 +193,7 @@ pub(crate) fn save(
     }
     draft.validate().map_err(|problem| sentence(&problem))?;
     let apps = apps(stores)?;
-    if let Some(problem) = problem(&draft, &apps) {
+    if let Some(problem) = app_problem(&draft, &apps) {
         return Err(problem);
     }
     let mut file = load(stores)?;
@@ -167,18 +237,25 @@ pub(crate) fn save(
 /// off until it is fixed.
 pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<(), String> {
     let mut file = load(stores)?;
-    let automation = file
+    let position = file
         .automations
-        .iter_mut()
-        .find(|automation| automation.id == id)
+        .iter()
+        .position(|automation| automation.id == id)
         .ok_or_else(|| "That automation is no longer saved.".to_owned())?;
-    if enabled && let Some(problem) = problem(automation, &apps(stores)?) {
-        return Err(format!(
-            "{} cannot run until it is fixed. {problem}",
-            automation.name
-        ));
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`position` was just found in this list, which has not changed"
+    )]
+    {
+        let automation = &file.automations[position];
+        if enabled && let Some(problem) = problem(&file, automation, &apps(stores)?) {
+            return Err(format!(
+                "{} cannot run until it is fixed. {problem}",
+                automation.name
+            ));
+        }
+        file.automations[position].enabled = enabled;
     }
-    automation.enabled = enabled;
     stores
         .automations
         .save(&file)
@@ -238,7 +315,7 @@ fn unused<'file>(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::{env, fs, process};
 
     use appytappy_config::app_file::{
@@ -246,7 +323,7 @@ mod tests {
         WindowDef,
     };
     use appytappy_config::automation_file::{
-        ActionDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
+        ActionDef, ComparisonDef, FORMAT as AUTOMATIONS_FORMAT, MediaCommandDef, TargetDef, WhenDef,
     };
     use appytappy_config::store::{AppStore, AutomationStore};
     use appytappy_config::window_match::WindowFacts;
@@ -453,6 +530,121 @@ mod tests {
             list(&stores).expect("lists")[0].problem.as_deref(),
             Some("Its application's app.json, in the example folder, cannot be read.")
         );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_broken_automation_is_listed_and_can_be_deleted() {
+        let (stores, folder) = stores("broken");
+        save(&stores, None, draft("Pause music")).expect("saves");
+        let mut file = stores.automations.load().expect("loads");
+        let mut broken = draft("Broken");
+        broken.id = "broken".to_owned();
+        broken.actions.clear();
+        file.automations.push(broken);
+        // A hand edit, which the setup app's own save refuses.
+        fs::write(folder.join("automations.json"), file.to_json()).expect("writes");
+        let problems: Vec<Option<String>> = list(&stores)
+            .expect("one broken automation leaves the list readable")
+            .into_iter()
+            .map(|summary| summary.problem)
+            .collect();
+        assert_eq!(problems, [None, Some("Add an action.".to_owned())]);
+        set_enabled(&stores, "pause_music", false).expect("the others still change");
+        set_enabled(&stores, "broken", false).expect("turns off");
+        assert_eq!(
+            set_enabled(&stores, "broken", true),
+            Err("Broken cannot run until it is fixed. Add an action.".to_owned())
+        );
+        delete(&stores, "broken").expect("removes");
+        assert_eq!(ids(&stores), ["pause_music"]);
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    /// Writes `automations` as the whole file, as a hand edit could.
+    fn hand_edit(folder: &Path, automations: Vec<AutomationDef>) {
+        let file = AutomationsFile {
+            format: AUTOMATIONS_FORMAT,
+            automations,
+        };
+        fs::write(folder.join("automations.json"), file.to_json()).expect("writes");
+    }
+
+    fn with_id(name: &str, id: &str) -> AutomationDef {
+        let mut automation = draft(name);
+        id.clone_into(&mut automation.id);
+        automation
+    }
+
+    #[test]
+    fn automations_sharing_an_id_are_listed_apart_and_fixed_by_a_save() {
+        let (stores, folder) = stores("shared-id");
+        hand_edit(
+            &folder,
+            vec![
+                with_id("Pause music", "pause_music"),
+                with_id("Lower volume", "pause_music"),
+                with_id("Skip ahead", "Skip ahead"),
+            ],
+        );
+        assert_eq!(ids(&stores), ["pause_music", "lower_volume", "skip_ahead"]);
+        let hand = Some(HAND_EDITED_ID.to_owned());
+        let problems: Vec<Option<String>> = list(&stores)
+            .expect("lists")
+            .into_iter()
+            .map(|summary| summary.problem)
+            .collect();
+        assert_eq!(problems, [hand.clone(), hand.clone(), hand]);
+        let mut edited = draft("Lower volume");
+        edited.cooldown_ms = 5000;
+        assert_eq!(
+            save(&stores, Some("lower_volume"), edited.clone()),
+            Ok("lower_volume".to_owned())
+        );
+        let saved = stores.automations.load().expect("loads");
+        assert_eq!(
+            saved.automations.first(),
+            Some(&with_id("Pause music", "pause_music")),
+            "the other automation with that ID is unchanged"
+        );
+        edited.id = "lower_volume".to_owned();
+        assert_eq!(saved.automations.get(1), Some(&edited));
+        let problems: Vec<Option<String>> = list(&stores)
+            .expect("lists")
+            .into_iter()
+            .map(|summary| summary.problem)
+            .collect();
+        assert_eq!(problems, [None, None, None], "the save wrote every new ID");
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn deleting_one_of_two_sharing_an_id_keeps_the_other() {
+        let (stores, folder) = stores("shared-id-delete");
+        hand_edit(
+            &folder,
+            vec![
+                with_id("Pause music", "pause_music"),
+                with_id("Lower volume", "pause_music"),
+            ],
+        );
+        delete(&stores, "lower_volume").expect("removes");
+        assert_eq!(ids(&stores), ["pause_music"]);
+        hand_edit(
+            &folder,
+            vec![
+                with_id("Pause music", "pause_music"),
+                with_id("Lower volume", "pause_music"),
+            ],
+        );
+        delete(&stores, "pause_music").expect("removes");
+        let names: Vec<String> = list(&stores)
+            .expect("lists")
+            .into_iter()
+            .map(|summary| summary.automation.name)
+            .collect();
+        assert_eq!(names, ["Lower volume"]);
+        set_enabled(&stores, "lower_volume", false).expect("turns off");
         fs::remove_dir_all(folder).expect("clean up");
     }
 

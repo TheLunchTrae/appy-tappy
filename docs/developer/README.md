@@ -48,5 +48,7 @@ To get an installer of a branch without a release, use one of these:
   workflow.
 - [MCP investigation server](mcp.md): the local server an AI agent uses to
   find how an application exposes a value.
+- [State machines](state-machines.md): the implicit state machines in the
+  runtime, the setup app, and the MCP server, and where each can fail.
 - [Rust standards](rust.md): how the Rust checks work, mutation testing, and
   their limits.

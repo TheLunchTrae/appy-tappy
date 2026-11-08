@@ -51,7 +51,10 @@ pub enum TrayEvent {
     /// The user picked the [`MenuItem::Action`] with this id.
     Picked(NonZeroU16),
     /// Windows asked the program to close, as `taskkill` without `/F`, an
-    /// installer that replaces the program, or signing out does.
+    /// installer that replaces the program, or signing out does. When the
+    /// session ends, the tray holds it until [`Tray::stop`], for at most 10
+    /// seconds and only as long as Windows waits, so the owner stops the
+    /// tray only once it has undone what it changed.
     CloseRequested,
     /// The tray stopped before [`Tray::stop`] for this reason, and its icon
     /// is gone.
@@ -96,7 +99,8 @@ impl Tray {
         self.0.show(menu)
     }
 
-    /// Removes the icon, ends the thread, and waits for it.
+    /// Lets the end of the session go on if the tray holds it, then
+    /// removes the icon, ends the thread, and waits for it.
     ///
     /// # Errors
     ///

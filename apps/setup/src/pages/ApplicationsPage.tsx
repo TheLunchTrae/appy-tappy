@@ -26,13 +26,15 @@ interface AntiCheatCellProps {
   readonly confirming: boolean;
   readonly onConfirm: (confirming: boolean) => void;
   readonly onSet: (antiCheat: AntiCheat) => void;
+  /** Whether a change is saving, which locks the question's answers. */
+  readonly busy: boolean;
 }
 
 /**
  * An application's anti-cheat, picked from a menu. None lets automations
  * press keys into it, so picking None asks first, in the menu's place.
  */
-function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCheatCellProps) {
+function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: AntiCheatCellProps) {
   const { control, refs } = useQuestion<HTMLSelectElement>(confirming);
   if (confirming) {
     return (
@@ -41,6 +43,7 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCh
         label={`Set ${name}'s anti-cheat to None?`}
         keepLabel={`Keep ${ANTI_CHEAT_NAMES[antiCheat]}`}
         actLabel="Set to None"
+        busy={busy}
         onKeep={() => {
           onConfirm(false);
         }}
@@ -164,8 +167,11 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
   // A removed application's row goes, so focus moves to Add application.
   const add = useRef<HTMLButtonElement>(null);
   const [setError, setSetError] = useState<string | null>(null);
+  // The application whose anti-cheat is saving.
+  const [settingAntiCheat, setSettingAntiCheat] = useState<string | null>(null);
 
   const set = async (app: string, antiCheat: AntiCheat): Promise<void> => {
+    setSettingAntiCheat(app);
     try {
       await setAntiCheat(app, antiCheat);
       setSetError(null);
@@ -173,14 +179,15 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
       await onChanged();
     } catch (error: unknown) {
       setSetError(errorText(error));
+    } finally {
+      setSettingAntiCheat(null);
     }
   };
 
   const remove = async (app: string): Promise<void> => {
     setBusy(true);
     try {
-      await removeApp(app);
-      setSetError(null);
+      setSetError(await removeApp(app));
       add.current?.focus();
       await onChanged();
     } catch (error: unknown) {
@@ -194,8 +201,7 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
   const changeOverlay = async (app: string, choice: OverlayChoice, kept: OverlayMode): Promise<void> => {
     try {
       // Turning it off keeps the mode, so turning it on again shows it where it was.
-      await (choice === 'off' ? setOverlay(app, false, kept) : setOverlay(app, true, choice));
-      setSetError(null);
+      setSetError(await (choice === 'off' ? setOverlay(app, false, kept) : setOverlay(app, true, choice)));
       await onChanged();
     } catch (error: unknown) {
       setSetError(errorText(error));
@@ -293,6 +299,7 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
                       onSet={(antiCheat) => {
                         background(set(app.id, antiCheat));
                       }}
+                      busy={settingAntiCheat === app.id}
                     />
                   </td>
                   <td>
