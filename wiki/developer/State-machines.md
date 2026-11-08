@@ -665,7 +665,8 @@ second copy over to the first, which brings its window forward
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
 one. Each save reads the file, changes it, and writes it back. After a save
-that works, `Owner::after` tells who reads what it changed:
+that works, `Owner::tell` tells who reads what it changed, through
+`Owner::after` for a save:
 
 - **The runtime and the overlays:** an application, its values, or the
   references they read with.
