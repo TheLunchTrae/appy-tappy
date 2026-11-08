@@ -266,8 +266,10 @@ stateDiagram-v2
     Empty --> Lead: point
     Empty --> Empty: any other character
     Sign --> Whole: digit
+    Sign --> Lead: point
     Sign --> Empty: any other character, the sign is dropped
     Lead --> Fraction: digit, read as 0 and the point
+    Lead --> Ended: digit for a whole number, read as 0
     Lead --> Empty: any other character, the point is dropped
     Whole --> Whole: digit, or a comma between groups of three
     Whole --> Fraction: the first point
@@ -282,8 +284,8 @@ digit, it ends the number, and the rest of the region is ignored, so `12/50`
 reads as 12 once `/` is learned. A `,` is skipped when it separates groups of
 three digits before the point, so `1,234` reads as 1234. When the digits after
 a `,` are not a group of three, as in `12,5`, the number ends at the `,` and
-reads as 12. A `.` before any digit reads as `0.`, so `.5` reads as 0.5, unless
-a letter came before it, as in `Lv.5`. A value set to **Whole number only**
+reads as 12. A `.` before any digit reads as `0.`, so `.5` reads as 0.5 (or 0 for
+a whole number) and `-.5` as -0.5, unless a letter came before it, as in `Lv.5`. A value set to **Whole number only**
 ends the number at its point, so `87.5%` reads as 87. A region with more than
 24 characters (`MAX_CHARACTERS`) is a read error.
 
@@ -422,8 +424,8 @@ Open problems:
 ### Pages and flows
 
 The React side (`apps/setup/src/App.tsx`) has two pieces of state: `page`, the
-tab shown, and `flow`, the value, automation, or application being made or
-edited. A flow covers the page while it is open.
+tab shown, and `flow`, the value, reference, automation, or application being
+made or edited. A flow covers the page while it is open.
 
 ```mermaid
 stateDiagram-v2
@@ -437,17 +439,17 @@ stateDiagram-v2
     Flow --> Asking: a tab is clicked with unsaved work
     Asking --> Page: the user agrees to lose the work
     Asking --> Flow: the user stays
-    Saving --> Saving: a tab waits until the save ends
-    Flow --> Flow: Add application in the value flow opens the application flow
+    Saving --> Saving: the tabs are disabled until the save ends
+    Flow --> Flow: Add application in the value or reference flow opens the application flow
 ```
 
 The unsaved work of a flow, such as its screenshots and recording, lives in the
 flow's components and in the owner thread. Each flow reports what leaving it
 would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
-ask before they drop unsaved work. While a save runs, they wait. A save closes
+ask before they drop unsaved work. While a save runs, both are disabled. A save closes
 its flow only while that flow is still open (`saved` in `App.tsx`), so a save
 that finishes after the user moved on leaves the next flow alone. Leaving the
-value flow unmounts it and stops its capture, which clears its screenshots and
+value or reference flow unmounts it and stops its capture, which clears its screenshots and
 recording.
 
 ### Capture slot
@@ -507,8 +509,8 @@ stateDiagram-v2
     Recording --> Stopped: Stop
     Stopped --> Recording: Record more, with the same settings
     Stopped --> Recording: Record with other settings starts a new recording
-    Recording --> None: Discard, a window is picked, or the value flow closes
-    Stopped --> None: Discard, a window is picked, or the value flow closes
+    Recording --> None: Discard, a window is picked, or the flow closes
+    Stopped --> None: Discard, a window is picked, or the flow closes
 ```
 
 - Each frame is cropped to the region. A crop of another window size sets the
