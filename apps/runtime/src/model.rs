@@ -455,6 +455,7 @@ fn acts(
                         automation: plan.labels.automations.get(rule.0)?.clone(),
                         watched: watched.clone(),
                         actions: fired.actions().into(),
+                        clicks: Arc::clone(&plan.runs.clicks),
                         restore: fired.restore(),
                         cause,
                     }
@@ -600,6 +601,7 @@ mod tests {
                 window: base.runs.window.clone(),
                 values: Vec::new(),
                 rules: Arc::from(vec![rule]),
+                clicks: Arc::default(),
             },
         });
         let mut model = Model::default();
@@ -648,6 +650,7 @@ mod tests {
                 window: base.runs.window.clone(),
                 values: Vec::new(),
                 rules: Arc::from(vec![rule]),
+                clicks: Arc::default(),
             },
         });
         let mut model = Model::default();
@@ -697,6 +700,7 @@ mod tests {
                     executable: "Example.exe".to_owned(),
                 },
                 actions: pause(),
+                clicks: Arc::default(),
                 restore: Restore::OnRelease,
                 cause: Some(now),
             })]

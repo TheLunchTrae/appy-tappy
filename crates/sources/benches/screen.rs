@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::check::{BarFill, ColorMatch, ImageMatch};
 use appytappy_sources::screen::digits::DigitReader;
+use appytappy_sources::screen::find::PictureSearch;
 use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::{Image, Region};
 use appytappy_sources::system::Rgb;
@@ -101,6 +102,23 @@ fn main() -> BenchResult {
     report(&mut out, "image, 120x50", || picture.matches(&panel))?;
     report(&mut out, "image, 120x50, every other pixel", || {
         masked.matches(&panel)
+    })?;
+    // A click's default search area is its picture's box widened by 50
+    // pixels each way, and the picture sits near the area's far corner, so
+    // most places are tried before the match.
+    let search_area = first
+        .crop(Region::new(70, 40, 180, 120).ok_or_else(missing)?)
+        .ok_or_else(missing)?;
+    let button = PictureSearch::new(
+        first
+            .crop(Region::new(195, 135, 40, 20).ok_or_else(missing)?)
+            .ok_or_else(missing)?,
+        None,
+        20,
+    )
+    .map_err(io::Error::other)?;
+    report(&mut out, "find a 40x20 picture in 180x120", || {
+        button.find(&search_area)
     })?;
     let mut schedule = ReadSchedule::new(ReadInterval::DEFAULT);
     report(&mut out, "read schedule step", || {
