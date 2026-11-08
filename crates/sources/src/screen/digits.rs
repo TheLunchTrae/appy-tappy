@@ -47,6 +47,10 @@ const MAX_NUMBER_LEN: usize = 24;
 /// A character's shape: one `u32` of cells per grid row.
 type Shape = [u32; 16];
 
+/// The shapes of an image's characters, from [`DigitReader::shapes`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shapes(Vec<Shape>);
+
 /// One learned character and its shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Glyph {
@@ -170,10 +174,40 @@ impl DigitReader {
         number.parse().ok_or(ReadError::NoNumber)
     }
 
-    fn is_ink(&self, [blue, green, red, _]: [u8; 4]) -> bool {
+    /// Whether `pixel`, as `[blue, green, red, unused]` like
+    /// [`Image::pixels`] holds it, is ink: each of its red, green, and blue
+    /// within the tolerance of the text color.
+    #[must_use]
+    pub fn is_ink(&self, [blue, green, red, _]: [u8; 4]) -> bool {
         blue.abs_diff(self.ink.blue) <= self.tolerance
             && green.abs_diff(self.ink.green) <= self.tolerance
             && red.abs_diff(self.ink.red) <= self.tolerance
+    }
+
+    /// The shapes of the characters in `image`, left to right, as a read
+    /// samples them. Two images with equal shapes teach a reader the same
+    /// glyphs and read the same, so one adds nothing the other does not.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadError::NoInk`] when the image has no ink, and
+    /// [`ReadError::TooManyCharacters`] when it has more characters than a
+    /// read takes.
+    pub fn shapes(&self, image: &Image) -> Result<Shapes, ReadError> {
+        let mut spans = [Span::default(); MAX_CHARACTERS];
+        let (line, count) = self
+            .segment(image, &mut spans)
+            .map_err(|failure| match failure {
+                Segmentation::NoInk => ReadError::NoInk,
+                Segmentation::TooMany => ReadError::TooManyCharacters,
+            })?;
+        Ok(Shapes(
+            spans
+                .iter()
+                .take(count)
+                .map(|span| self.shape(image, line, *span))
+                .collect(),
+        ))
     }
 
     fn is_ink_at(&self, image: &Image, x: u32, y: u32) -> bool {
@@ -652,6 +686,25 @@ mod tests {
         let mut above = vec!["#....", "....."];
         above.extend(TWELVE);
         assert_eq!(reader.read(&draw(&above)), Ok(Number::new(12.0).unwrap()));
+    }
+
+    #[test]
+    fn shapes_tell_characters_apart_but_not_their_size() {
+        let reader = DigitReader::new(WHITE, 0);
+        let twelve = reader.shapes(&draw(&TWELVE)).unwrap();
+        assert_eq!(twelve.0.len(), 2);
+        let mut noisy = TWELVE.to_vec();
+        noisy.extend([".....", "....#"]);
+        assert_eq!(reader.shapes(&draw(&noisy)), Ok(twelve.clone()));
+        let mut seventeen = TWELVE;
+        seventeen[3] = "#...#";
+        assert_ne!(reader.shapes(&draw(&seventeen)), Ok(twelve));
+        assert_eq!(reader.shapes(&draw(&["..."])), Err(ReadError::NoInk));
+        let crowded = "#.".repeat(MAX_CHARACTERS + 1);
+        assert_eq!(
+            reader.shapes(&draw(&[crowded.as_str()])),
+            Err(ReadError::TooManyCharacters)
+        );
     }
 
     #[test]

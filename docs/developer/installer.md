@@ -31,6 +31,14 @@ step. Its **Delete the application data** box also removes the
 saved applications, values, and automations in `%APPDATA%\AppyTappy` and the
 runtime's logs.
 
+The installer also holds the setup app's text reader model,
+`models\text-recognition.onnx` beside the setup app, which
+[recording a number](../user/values.md#record-a-number) uses
+([The text reader](setup-app.md#the-text-reader)). `mise run
+installer:build` downloads it first with `mise run ocr:model`, which fails when
+the download does not match the hash pinned in
+`.config/mise/conf.d/installer.toml`.
+
 The hooks in `apps/setup/src-tauri/windows/hooks.nsh` add the runtime's steps
 to Tauri's installer. `apps/setup/src-tauri/tauri.installer.conf.json` turns
 bundling on and adds the sidecar for installer builds only, so the other Rust

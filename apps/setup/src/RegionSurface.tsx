@@ -29,6 +29,8 @@ interface Props {
   /** The size the picture shows at. */
   readonly shown: Size;
   readonly region: Rect | null;
+  /** Whether the region is being recorded. */
+  readonly recording?: boolean;
   readonly label: string;
   /** Whether the user may draw on it, which they may only on a screenshot. */
   readonly editable: boolean;
@@ -39,7 +41,17 @@ interface Props {
 }
 
 /** The region over a picture, drawn and adjusted with the pointer. */
-export function RegionSurface({ size, shown, region, label, editable, picking, onRegion, onPick }: Props) {
+export function RegionSurface({
+  size,
+  shown,
+  region,
+  recording = false,
+  label,
+  editable,
+  picking,
+  onRegion,
+  onPick,
+}: Props) {
   const drag = useRef<Drag | null>(null);
 
   const at = (event: PointerEvent<HTMLDivElement>): Point => {
@@ -107,7 +119,7 @@ export function RegionSurface({ size, shown, region, label, editable, picking, o
     <div className={classes} onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
       {region === null ? null : (
         <div
-          className="marquee"
+          className={recording ? 'marquee recording' : 'marquee'}
           style={{
             left: region.x * scale,
             top: region.y * scale,

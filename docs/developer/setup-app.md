@@ -39,6 +39,63 @@ This page covers what the user guide leaves out.
   the runtime does not read them. [The runtime](architecture.md#the-runtime)
   describes how it reads them.
 
+## Recording
+
+[Recording a number](../user/values.md#record-a-number) samples the frames the
+value editor's preview capture already takes, about 30 a second, in the owner
+thread (`recording.rs`). Each frame is cut to the region and reduced to the
+shapes the number check reads: `DigitReader::shapes` finds the ink, splits it
+into characters, and scales each to the grid the check compares. A crop whose
+shapes equal a kept reading's is another sighting of that reading, because it
+would teach the check nothing new. A blended edge seldom changes a grid
+cell, and when it does the reading is kept twice, which costs a tile in review
+and teaches no wrong shape. One stroke of a different character changes a
+shape however long the number. The
+shapes ignore size, so a counter drawn larger is the same reading. Every kept
+reading is compared, not only the latest, so a value that comes back is not
+kept twice. A crop with no ink is skipped, and so
+is a frame of another size than the screenshot the region was drawn on. One
+recording keeps at most 200 readings.
+
+Kept readings are named by index in the spec the UI sends, so their pixels
+never cross into the UI except as thumbnails. A number check learns the
+labeled screenshots first and then the kept readings, and saves both as its
+samples. Review sends the check it would build and asks which kept readings
+it could not learn. The owner learns them as the check would, labeled
+screenshots first and then the readings in order, with the check's own
+characters' color and tolerance, and leaves out each reading that fails, so a
+conflict such as one shape typed as `l` in one reading and `1` in another is
+flagged on the reading that causes it. **Record more** goes on with the stopped
+recording only when the region, color, tolerance, and window size are the
+ones it was recorded with, and otherwise says so rather than start over. The
+UI then offers **Use its settings**, which puts the recording's region, color,
+and tolerance back on the draft. Kept readings are lost only on a discard or
+when the capture stops, such as on **Change window**. **Back** and Escape
+leave review without keeping, and review's edits stay for the next one.
+
+### The text reader
+
+The text reader guesses each new reading's text so review only needs
+corrections (`ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs),
+a pure-Rust neural text reader, so it reads the same on every system without
+the operating system's OCR. Only its recognition model loads: the region holds
+one line, so there is no text to find first. It runs on a thread of its own,
+because a read takes tens of milliseconds and the owner answers the UI in
+microseconds, and only for new readings, a few times a recording. It gets each
+reading's ink as black text on white with a margin, whatever the application's
+colors. Text for a recording the user discarded or replaced is dropped by the
+recording's number. Only the setup app uses it; the runtime reads numbers with
+the shapes the user's labels and kept readings taught it
+([Screen regions](screen.md#checks)).
+
+Its model, `text-recognition.onnx`, is in a `models` folder beside the setup
+app's program, where [the installer](installer.md) puts it. It loads on the
+first reading, so a session that never records never loads it. When it cannot
+load, recording still works and each reading says why, for the user to type
+its text. For a development build, `mise run ocr:model` downloads it, checks
+it against the hash pinned in `.config/mise/conf.d/installer.toml`, and copies
+it beside the debug build.
+
 ## Window matching
 
 [How AppyTappy finds the window](../user/applications.md#how-appytappy-finds-the-window)
@@ -60,7 +117,8 @@ logs that the window should be resized or the value drawn again.
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures its values need: a number check's labeled screenshots,
-cropped to the region, and a picture check's reference.
+cropped to the region, then its kept recorded readings, and a picture
+check's reference.
 
 ```json
 {

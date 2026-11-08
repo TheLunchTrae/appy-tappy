@@ -15,13 +15,15 @@ use appytappy_sources::screen::{Image, Region};
 use appytappy_sources::system::Rgb;
 use serde::Deserialize;
 
+use crate::recording::Recording;
+
 /// A rectangle of the window, in pixels from its top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub(crate) struct RegionSpec {
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
+    pub(crate) x: u32,
+    pub(crate) y: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 /// A color the user picked on a screenshot.
@@ -60,6 +62,16 @@ pub(crate) struct Label {
     text: String,
 }
 
+/// What one recorded reading shows, as the user confirmed it in review, so
+/// the number check learns its characters like a labeled screenshot's.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub(crate) struct RecordedLabel {
+    /// The reading's index in the recording.
+    pub(crate) reading: usize,
+    /// What it shows.
+    pub(crate) text: String,
+}
+
 /// A check as the UI describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -70,6 +82,9 @@ pub(crate) enum CheckSpec {
         ink: ColorSpec,
         tolerance: u8,
         labels: Vec<Label>,
+        /// Readings of the session's recording, which must be of `region`.
+        #[serde(default)]
+        recorded: Vec<RecordedLabel>,
     },
     /// Measures how full a bar is from a filled and an empty color.
     #[serde(rename_all = "camelCase")]
@@ -116,7 +131,7 @@ pub(crate) struct SavedCheck {
 /// Turns `spec` into the saved form for the value `id`, cutting its pictures
 /// from the session's `screenshots` at the region. Pictures are named after
 /// the value: `id.png` for a reference, `id-1.png` onward for a number's
-/// samples.
+/// samples, its labeled screenshots first and then its recorded readings.
 ///
 /// # Errors
 ///
@@ -126,9 +141,10 @@ pub(crate) struct SavedCheck {
 pub(crate) fn to_saved(
     spec: &CheckSpec,
     screenshots: &[Image],
+    recording: Option<&Recording>,
     id: &str,
 ) -> Result<SavedCheck, SpecError> {
-    let built = build(spec, screenshots)?;
+    let built = build(spec, screenshots, recording)?;
     let picture = |screenshot: usize| {
         screenshots
             .get(screenshot)
@@ -143,15 +159,27 @@ pub(crate) fn to_saved(
             ink,
             tolerance,
             labels,
+            recorded,
             ..
         } => {
             let mut samples = Vec::new();
-            for (number, label) in (1_u32..).zip(labels) {
+            let shown = labels
+                .iter()
+                .map(|label| Ok((picture(label.screenshot)?, &label.text)))
+                .chain(recorded.iter().map(|label| {
+                    let image = recorded_image(recording, built.region, label.reading)?;
+                    Ok((
+                        image.encode_png().map_err(|_encode| SpecError::Picture)?,
+                        &label.text,
+                    ))
+                }));
+            for (number, shown) in (1_u32..).zip(shown) {
+                let (png, text) = shown?;
                 let image = format!("{id}-{number}.png");
-                pictures.push((image.clone(), picture(label.screenshot)?));
+                pictures.push((image.clone(), png));
                 samples.push(SampleDef {
                     image,
-                    text: label.text.clone(),
+                    text: text.clone(),
                 });
             }
             CheckDef::Number {
@@ -196,14 +224,19 @@ pub(crate) fn to_saved(
     })
 }
 
-/// Builds the check `spec` describes from the session's `screenshots`.
+/// Builds the check `spec` describes from the session's `screenshots` and
+/// `recording`.
 ///
 /// # Errors
 ///
 /// Returns a [`SpecError`] that tells the user what to fix: an empty region,
-/// a region or screenshot that does not exist, two bar colors that are the
-/// same, or a number label the check cannot learn from.
-pub(crate) fn build(spec: &CheckSpec, screenshots: &[Image]) -> Result<RegionCheck, SpecError> {
+/// a region, screenshot, or recorded reading that does not exist, two bar
+/// colors that are the same, or a number label the check cannot learn from.
+pub(crate) fn build(
+    spec: &CheckSpec,
+    screenshots: &[Image],
+    recording: Option<&Recording>,
+) -> Result<RegionCheck, SpecError> {
     let region = match spec {
         CheckSpec::Number { region, .. }
         | CheckSpec::BarFill { region, .. }
@@ -225,19 +258,19 @@ pub(crate) fn build(spec: &CheckSpec, screenshots: &[Image]) -> Result<RegionChe
             ink,
             tolerance,
             labels,
+            recorded,
             ..
         } => {
-            if labels.is_empty() {
+            if labels.is_empty() && recorded.is_empty() {
                 return Err(SpecError::NoLabels);
             }
-            let mut reader = DigitReader::new((*ink).into(), *tolerance);
-            for label in labels {
-                reader
-                    .learn(&crop(label.screenshot)?, &label.text)
-                    .map_err(|source| SpecError::Learn {
-                        text: label.text.clone(),
-                        source,
-                    })?;
+            let mut reader = labeled_reader(*ink, *tolerance, labels, &crop)?;
+            for label in recorded {
+                learn(
+                    &mut reader,
+                    recorded_image(recording, region, label.reading)?,
+                    &label.text,
+                )?;
             }
             Check::Number(reader)
         },
@@ -263,6 +296,110 @@ pub(crate) fn build(spec: &CheckSpec, screenshots: &[Image]) -> Result<RegionChe
     Ok(RegionCheck { region, check })
 }
 
+/// Why a number check built from `spec` could not learn each of its
+/// recorded readings: `None` for one it learns. It learns the labeled
+/// screenshots first and then the readings in order, as [`build`] does,
+/// but leaves out each reading it cannot learn, so the ones after it are
+/// judged on the ones that worked. Review flags the readings this finds,
+/// so the check built from the kept ones learns them all. Any other check
+/// has no recorded readings.
+pub(crate) fn recorded_problems(
+    spec: &CheckSpec,
+    screenshots: &[Image],
+    recording: Option<&Recording>,
+) -> Result<Vec<Option<String>>, SpecError> {
+    let CheckSpec::Number {
+        region,
+        ink,
+        tolerance,
+        labels,
+        recorded,
+    } = spec
+    else {
+        return Ok(Vec::new());
+    };
+    let region = Region::new(region.x, region.y, region.width, region.height)
+        .ok_or(SpecError::EmptyRegion)?;
+    let crop = |screenshot: usize| {
+        screenshots
+            .get(screenshot)
+            .ok_or(SpecError::NoScreenshot)?
+            .crop(region)
+            .ok_or(SpecError::Outside)
+    };
+    let mut reader = labeled_reader(*ink, *tolerance, labels, &crop)?;
+    Ok(recorded
+        .iter()
+        .map(|label| {
+            let image = match recorded_image(recording, region, label.reading) {
+                Ok(image) => image,
+                Err(error) => return Some(error.to_string()),
+            };
+            let mut trial = reader.clone();
+            match trial.learn(image, &label.text) {
+                Ok(()) => {
+                    reader = trial;
+                    None
+                },
+                Err(error) => Some(sentence(&error.to_string())),
+            }
+        })
+        .collect())
+}
+
+/// A number check's reader with the characters of `ink`, having learned
+/// what `labels` say their screenshots show, cut by `crop`.
+fn labeled_reader(
+    ink: ColorSpec,
+    tolerance: u8,
+    labels: &[Label],
+    crop: &impl Fn(usize) -> Result<Image, SpecError>,
+) -> Result<DigitReader, SpecError> {
+    let mut reader = DigitReader::new(ink.into(), tolerance);
+    for label in labels {
+        learn(&mut reader, &crop(label.screenshot)?, &label.text)?;
+    }
+    Ok(reader)
+}
+
+/// Teaches `reader` that `image` shows `text`.
+fn learn(reader: &mut DigitReader, image: &Image, text: &str) -> Result<(), SpecError> {
+    reader
+        .learn(image, text)
+        .map_err(|source| SpecError::Learn {
+            text: text.to_owned(),
+            source,
+        })
+}
+
+/// `text` as a sentence: capitalized, with a full stop.
+pub(crate) fn sentence(text: &str) -> String {
+    let mut characters = text.chars();
+    characters.next().map_or_else(String::new, |first| {
+        format!("{}{}.", first.to_uppercase(), characters.as_str())
+    })
+}
+
+/// The pixels of reading `reading` of `recording`, which must be of
+/// `region`. The check relearns them with its own characters' color and
+/// tolerance, like the labeled screenshots, so they need not match the
+/// recording's.
+fn recorded_image(
+    recording: Option<&Recording>,
+    region: Region,
+    reading: usize,
+) -> Result<&Image, SpecError> {
+    let recording = recording.ok_or(SpecError::NoRecording)?;
+    if recording.region != region {
+        return Err(SpecError::RecordedElsewhere);
+    }
+    recording
+        .readings()
+        .get(reading)
+        .map(|kept| &kept.image)
+        .ok_or(SpecError::NoRecording)
+}
+
 /// A check the UI described cannot be built.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SpecError {
@@ -274,8 +411,14 @@ pub(crate) enum SpecError {
     Outside,
     /// The bar's filled and empty colors are the same.
     SameColors,
-    /// A number check has no labeled screenshot to learn from.
+    /// A number check has no labeled screenshot or kept reading to learn
+    /// from.
     NoLabels,
+    /// A recorded reading the check names is not in this session's
+    /// recording.
+    NoRecording,
+    /// The region is not the one the session's recording recorded.
+    RecordedElsewhere,
     /// A picture could not be encoded as PNG.
     Picture,
     /// A number check could not learn from a label.
@@ -300,9 +443,15 @@ impl fmt::Display for SpecError {
             Self::SameColors => {
                 formatter.write_str("Pick a filled color and an empty color that differ.")
             },
-            Self::NoLabels => {
-                formatter.write_str("Type what the region shows on at least one screenshot.")
+            Self::NoLabels => formatter.write_str(
+                "Type what the region shows on at least one screenshot, or keep a recorded reading.",
+            ),
+            Self::NoRecording => {
+                formatter.write_str("That recording is gone. Record the region again.")
             },
+            Self::RecordedElsewhere => formatter.write_str(
+                "The region changed since it was recorded. Put it back, or record it again.",
+            ),
             Self::Picture => formatter.write_str("A picture of the region could not be saved."),
             Self::Learn { text, source } => {
                 write!(formatter, "Could not learn from \"{text}\": {source}")
@@ -363,6 +512,12 @@ mod tests {
     }
 
     #[test]
+    fn a_problem_reads_as_a_sentence_of_its_own() {
+        assert_eq!(sentence("a character was given"), "A character was given.");
+        assert_eq!(sentence(""), "");
+    }
+
+    #[test]
     fn a_bar_fill_reads_the_share_of_filled_pixels() {
         // Two red columns and one gray column, so a swap of the filled and
         // empty colors reads a third instead of two thirds.
@@ -376,7 +531,7 @@ mod tests {
             filled: RED,
             empty: GRAY,
         };
-        let built = build(&spec, &[]).expect("valid bar");
+        let built = build(&spec, &[], None).expect("valid bar");
         assert_eq!(built.region, Region::new(0, 0, 3, 2).expect("not empty"));
         let bar = screenshot().crop(built.region).expect("inside");
         let value = built.check.read(&bar).expect("readable");
@@ -399,7 +554,7 @@ mod tests {
             screenshot: 0,
             tolerance: 0,
         };
-        let built = build(&spec, &[screenshot()]).expect("valid reference");
+        let built = build(&spec, &[screenshot()], None).expect("valid reference");
         let red_square = screenshot().crop(built.region).expect("inside");
         let gray_square = screenshot()
             .crop(Region::new(2, 0, 2, 2).expect("not empty"))
@@ -415,7 +570,7 @@ mod tests {
             color: RED,
             tolerance: 10,
         };
-        let built = build(&spec, &[]).expect("valid color");
+        let built = build(&spec, &[], None).expect("valid color");
         let red_square = screenshot()
             .crop(Region::new(0, 0, 2, 2).expect("not empty"))
             .expect("inside");
@@ -476,12 +631,17 @@ mod tests {
                     ink: RED,
                     tolerance: 0,
                     labels: Vec::new(),
+                    recorded: Vec::new(),
                 },
                 SpecError::NoLabels,
             ),
         ];
         for (spec, expected) in cases {
-            assert_eq!(build(&spec, &[screenshot()]), Err(expected), "{spec:?}");
+            assert_eq!(
+                build(&spec, &[screenshot()], None),
+                Err(expected),
+                "{spec:?}"
+            );
         }
     }
 
@@ -495,8 +655,9 @@ mod tests {
                 screenshot: 0,
                 text: "12".to_owned(),
             }],
+            recorded: Vec::new(),
         };
-        let error = build(&spec, &[screenshot()]).expect_err("one blob, two characters");
+        let error = build(&spec, &[screenshot()], None).expect_err("one blob, two characters");
         assert!(matches!(&error, SpecError::Learn { text, .. } if text == "12"));
         assert!(
             error
@@ -532,6 +693,7 @@ mod tests {
                     screenshot: 0,
                     text: "12".to_owned(),
                 }],
+                recorded: Vec::new(),
             }
         );
     }
@@ -551,8 +713,9 @@ mod tests {
                 screenshot: 0,
                 text: "1".to_owned(),
             }],
+            recorded: Vec::new(),
         };
-        let saved = to_saved(&spec, &[screenshot()], "progress").expect("valid number");
+        let saved = to_saved(&spec, &[screenshot()], None, "progress").expect("valid number");
         assert_eq!(
             saved.region,
             RegionDef {
@@ -597,6 +760,70 @@ mod tests {
     }
 
     #[test]
+    fn recorded_readings_are_learned_and_saved_after_the_labels() {
+        let now = std::time::Instant::now();
+        let region = Region::new(0, 0, 4, 2).expect("not empty");
+        let mut recording = Recording::new(1, region, (RED.into(), 0), screenshot().size(), now);
+        recording.offer(&screenshot(), now).expect("a reading");
+        let number = |labels, recorded| CheckSpec::Number {
+            region: whole(),
+            ink: RED,
+            tolerance: 0,
+            labels,
+            recorded,
+        };
+        let recorded = |reading| {
+            vec![RecordedLabel {
+                reading,
+                text: "1".to_owned(),
+            }]
+        };
+        let labels = vec![Label {
+            screenshot: 0,
+            text: "1".to_owned(),
+        }];
+        let spec = number(labels, recorded(0));
+        let saved =
+            to_saved(&spec, &[screenshot()], Some(&recording), "progress").expect("valid number");
+        let CheckDef::Number { samples, .. } = &saved.check else {
+            panic!("a number: {:?}", saved.check);
+        };
+        let images: Vec<&str> = samples.iter().map(|sample| sample.image.as_str()).collect();
+        assert_eq!(images, ["progress-1.png", "progress-2.png"]);
+        let picture = Image::decode_png(&saved.pictures[1].1).expect("a PNG");
+        assert_eq!(picture.size(), recording.readings()[0].image.size());
+
+        let only_recorded = number(Vec::new(), recorded(0));
+        assert!(build(&only_recorded, &[], Some(&recording)).is_ok());
+        assert_eq!(
+            build(&only_recorded, &[], None),
+            Err(SpecError::NoRecording)
+        );
+        assert_eq!(
+            build(&number(Vec::new(), recorded(1)), &[], Some(&recording)),
+            Err(SpecError::NoRecording)
+        );
+        let moved = CheckSpec::Number {
+            region: RegionSpec {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            },
+            ink: RED,
+            tolerance: 0,
+            labels: Vec::new(),
+            recorded: recorded(0),
+        };
+        let error = build(&moved, &[], Some(&recording)).expect_err("another region");
+        assert_eq!(error, SpecError::RecordedElsewhere);
+        assert_eq!(
+            error.to_string(),
+            "The region changed since it was recorded. Put it back, or record it again."
+        );
+    }
+
+    #[test]
     fn saved_checks_keep_their_settings() {
         let region = RegionSpec {
             x: 2,
@@ -609,7 +836,7 @@ mod tests {
             screenshot: 0,
             tolerance: 7,
         };
-        let saved = to_saved(&reference, &[screenshot()], "icon_visible").expect("valid");
+        let saved = to_saved(&reference, &[screenshot()], None, "icon_visible").expect("valid");
         assert_eq!(
             saved.check,
             CheckDef::Reference {
@@ -625,7 +852,7 @@ mod tests {
             filled: RED,
             empty: GRAY,
         };
-        let saved = to_saved(&bar, &[], "bar").expect("valid");
+        let saved = to_saved(&bar, &[], None, "bar").expect("valid");
         assert_eq!(
             saved.check,
             CheckDef::BarFill {
@@ -641,14 +868,14 @@ mod tests {
             tolerance: 4,
         };
         assert_eq!(
-            to_saved(&color, &[], "color").expect("valid").check,
+            to_saved(&color, &[], None, "color").expect("valid").check,
             CheckDef::Color {
                 color: GRAY.into(),
                 tolerance: 4
             }
         );
         assert_eq!(
-            to_saved(&bar, &[], "bar").map(|saved| saved.region),
+            to_saved(&bar, &[], None, "bar").map(|saved| saved.region),
             Ok(RegionDef {
                 x: 2,
                 y: 0,

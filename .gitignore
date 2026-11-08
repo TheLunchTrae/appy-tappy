@@ -48,6 +48,8 @@ node_modules/
 /apps/setup/src-tauri/gen/
 # The runtime that `mise run installer:build` copies in for the installer.
 /apps/setup/src-tauri/binaries/
+# The text reader model that `mise run ocr:model` downloads for the installer.
+/apps/setup/src-tauri/models/
 /out/
 /sbom/
 

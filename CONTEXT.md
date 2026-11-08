@@ -35,6 +35,9 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
 - **Release.** End a fired rule's effect: it re-armed, the opposite focus
   event happened, or the session ended. A rule that restores undoes its
   paired actions then.
+- **Recording.** A setup-app capture of one number region over time that
+  keeps each different reading once, for the user to review and label. Kept
+  readings teach the number check like labeled screenshots.
 - **Rule.** A trigger, the actions to run when it fires, a cooldown, and
   whether those actions restore.
 - **Runtime.** The always-on background program.
