@@ -35,6 +35,10 @@ impl<H: Host> Owner<H> {
         }
     }
 
+    /// Records `region` of the picked window, drawn on `screenshot`,
+    /// keeping each reading it shows. With `more`, goes on with the stopped
+    /// recording, which must be of the same region, ink, and window size;
+    /// otherwise starts a new one in place of any recording.
     pub(crate) fn start_recording(
         &mut self,
         region: RegionSpec,
@@ -130,7 +134,8 @@ impl<H: Host> Owner<H> {
     }
 
     /// For each recorded reading, why `spec` reads it wrong, or `None` when
-    /// it reads it right.
+    /// it reads it right; an error when the labeled screenshots cannot be
+    /// learned.
     pub(crate) fn review_problems(&self, spec: &CheckSpec) -> Result<Vec<Option<String>>, String> {
         self.with_session(|session| check_spec::recorded_problems(spec, session))
             .map_err(|error| error.to_string())

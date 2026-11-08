@@ -51,6 +51,10 @@ fn watch_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Mess
 }
 
 impl<H: Host> Owner<H> {
+    /// Captures the region of the saved value `value` on the window of the
+    /// application `app`, for the automation editor, and answers the
+    /// watch's number. Like [`Owner::pick`], it drops the previous window's
+    /// capture, screenshots and check.
     pub(crate) fn watch(&mut self, app: &str, value: &str) -> Result<u64, String> {
         let stores = self.stores()?;
         let file = stores.app_file(app)?;
@@ -86,6 +90,8 @@ impl<H: Host> Owner<H> {
         Ok(watch)
     }
 
+    /// What the watched value reads on the newest frame, and whether `when`
+    /// holds for it; an error once the watch was stopped or replaced.
     pub(crate) fn watched_reading(
         &self,
         watch: u64,

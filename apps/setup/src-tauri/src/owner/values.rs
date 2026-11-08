@@ -23,6 +23,7 @@ impl<H: Host> Owner<H> {
         self.stores.as_ref().map_err(Clone::clone)
     }
 
+    /// The saved applications.
     pub(crate) fn apps(&mut self) -> Result<Vec<AppSummary>, String> {
         let stored = self
             .stores()?
@@ -71,6 +72,7 @@ impl<H: Host> Owner<H> {
             .collect())
     }
 
+    /// Saves a value and answers where it was saved, or what to fix.
     pub(crate) fn save(&mut self, spec: &SaveSpec) -> Result<SavedValue, String> {
         let saved = self.save_value(spec);
         self.after(Changed::Values, saved)
@@ -201,11 +203,13 @@ impl<H: Host> Owner<H> {
     /// automation uses it.
     pub(crate) fn delete(&mut self, app: &str, value: &str) -> Result<(), String> {
         let deleted = self.delete_value(app, value);
-        self.after(Changed::Values, deleted)
+        let file = self.after(Changed::Values, deleted)?;
+        self.prune(app, &file)
     }
 
-    /// Deletes the value, without telling anyone.
-    fn delete_value(&self, app: &str, value: &str) -> Result<(), String> {
+    /// Deletes the value from the application's file, without telling
+    /// anyone, and answers the file as saved.
+    fn delete_value(&self, app: &str, value: &str) -> Result<AppFile, String> {
         let stores = self.stores()?;
         let store = &stores.apps;
         let mut file = stores.app_file(app)?;
@@ -220,7 +224,17 @@ impl<H: Host> Owner<H> {
         }
         store
             .save(app, &file, &[])
-            .and_then(|()| store.prune(app, &file))
+            .map_err(|error| error.to_string())?;
+        Ok(file)
+    }
+
+    /// Removes the pictures of the application `app` that `file` no longer
+    /// names. The runtime and the overlays read nothing from them, so a
+    /// removal that fails changes nothing they read.
+    pub(super) fn prune(&self, app: &str, file: &AppFile) -> Result<(), String> {
+        self.stores()?
+            .apps
+            .prune(app, file)
             .map_err(|error| error.to_string())
     }
 
@@ -254,10 +268,15 @@ impl<H: Host> Owner<H> {
 
     /// Removes the application `app`, its values and their pictures.
     pub(crate) fn remove_app(&mut self, app: &str) -> Result<(), String> {
+        self.stores()
+            .and_then(|stores| applications::check_removable(stores, app))?;
         let removed = self
             .stores()
-            .and_then(|stores| applications::remove(stores, app));
-        self.after(Changed::Values, removed)
+            .and_then(|stores| stores.apps.remove(app).map_err(|error| error.to_string()));
+        // A removal that failed partway may have removed some of the
+        // application's files, so they are read again either way.
+        self.tell(Changed::Values);
+        removed
     }
 }
 
@@ -381,17 +400,21 @@ mod tests {
             "cooldownMs": 1500
         }))
         .expect("the UI's spelling");
+        let _saved_before = harness.reloads();
         let id = harness
             .ask(|owner| owner.save_automation(None, automation))
             .expect("saves");
         assert_eq!(id, "pause_music");
+        assert_eq!(harness.reloads(), 1, "the runtime reads the automations");
         assert_eq!(
             harness.ask(|owner| owner.delete("example", "icon_visible")),
             Err("Pause music uses Icon visible. Change or delete it first.".to_owned())
         );
+        assert_eq!(harness.reloads(), 0, "a delete that failed tells no one");
         harness
             .ask(|owner| owner.set_automation_enabled(&id.clone(), false))
             .expect("turns off");
+        assert_eq!(harness.reloads(), 1);
         let listed = harness
             .ask(|owner| owner.list_automations())
             .expect("lists");
@@ -408,6 +431,7 @@ mod tests {
         harness
             .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
+        assert_eq!(harness.reloads(), 1);
         assert_eq!(
             harness.ask(|owner| owner.list_automations()),
             Ok(Vec::new())
@@ -561,7 +585,9 @@ mod tests {
             "a later value leaves the checked build alone"
         );
         let mark = |harness: &mut Harness, app: &str| harness.ask(|owner| owner.mark_checked(app));
+        let _saved_before = harness.reloads();
         assert_eq!(mark(&mut harness, "example"), Ok(()));
+        assert_eq!(harness.reloads(), 1, "the runtime reads the checked build");
         assert_eq!(
             checked(&mut harness).map(|checked| checked.build),
             Some(updated.clone())

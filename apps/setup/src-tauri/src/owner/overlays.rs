@@ -9,6 +9,7 @@ use super::host::Host;
 use super::{Changed, Owner};
 
 impl<H: Host> Owner<H> {
+    /// The overlays that are on, for their windows to open.
     pub(crate) fn overlay_windows(&self) -> Result<Vec<OverlayWindow>, String> {
         let loaded = self
             .stores()?
@@ -58,7 +59,8 @@ impl<H: Host> Owner<H> {
         self.overlays.place(&self.host, app)
     }
 
-    /// Shows `card` on the overlay of the application `app`.
+    /// Keeps the size the page measured for the card of the application
+    /// `app`'s overlay, which placing its window uses.
     pub(crate) fn overlay_card(&mut self, app: &str, card: Card) {
         self.overlays.card(app, card);
     }
@@ -347,10 +349,12 @@ mod tests {
             .ask(set_overlay(true, OverlayModeDef::PictureInPicture))
             .expect("saves");
         drop(overlay_capture(&mut harness));
+        let _saved_before = harness.reloads();
         harness
             .ask(|owner| owner.remove_app("example"))
             .expect("removes");
         assert_eq!(harness.closed.try_recv(), Ok(7), "its capture stops");
+        assert_eq!(harness.reloads(), 1, "the runtime reads the applications");
         // The window sync that follows the removal closes the panel.
         assert_eq!(harness.ask(|owner| owner.overlay_windows()), Ok(Vec::new()));
         std::fs::remove_dir_all(root).expect("clean up");
