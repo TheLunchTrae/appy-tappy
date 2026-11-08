@@ -5,7 +5,7 @@ A rule says when AppyTappy acts on an application and which
 `appytappy-config` (`crates/config/src/rule.rs` and
 `crates/config/src/signal.rs`), and the evaluator lives in `appytappy-engine`.
 The setup app's automations file holds a subset of this model, and
-[Saved files](setup-app.md#saved-files) describes it. Each enabled automation
+[Saved files](Setup-app.md#saved-files) describes it. Each enabled automation
 that passes the setup app's and the runtime's checks becomes one rule: a
 Becomes trigger on one comparison that re-arms when false, a cooldown, and
 restore on release or never. The file has no all or any groups, no Changes or
