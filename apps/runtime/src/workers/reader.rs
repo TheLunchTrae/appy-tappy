@@ -50,7 +50,7 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::{
-    Capture, CaptureSession, Crop, Frame, OutsideWindow, Region, Size,
+    Capture, CaptureSession, Crop, Frame, Layout, OutsideWindow, Size,
 };
 use appytappy_sources::system::{System, best_windows, read_window, shows};
 
@@ -329,7 +329,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
             return;
         };
         frames.carry(&recovery);
-        let crop = Crop::Region(frames.bounds);
+        let crop = Crop::Layout(frames.layout.clone());
         let throttle = ReadInterval::DEFAULT.min();
         let handler = Box::new(move |frame: io::Result<Frame<'_>>| frames.handle(frame));
         let session = match system.start(window, crop, throttle, handler) {
@@ -531,12 +531,9 @@ struct FrameReader<E> {
     plan: Arc<AppPlan>,
     /// The window size whose values it reads.
     size: Size,
-    /// The region the capture copies: the smallest that holds every value
-    /// drawn at `size`.
-    bounds: Region,
-    /// Each value's region within `bounds`, or `None` for a value drawn at
-    /// another size.
-    regions: Vec<Option<Region>>,
+    /// What the capture copies: each value drawn at `size`, packed, and
+    /// where each value then sits in the frame's image.
+    layout: Layout,
     /// Each value's last reading.
     last: Vec<Option<Value>>,
     /// Each value's last problem.
@@ -563,25 +560,19 @@ impl<E: From<Reading>> FrameReader<E> {
     /// The handler for the values of `job` drawn at `size`, or `None` when
     /// none was.
     fn new(job: &Job, size: Size, events: Sender<E>, control: Sender<Control>) -> Option<Self> {
-        let drawn: Vec<Option<Region>> = job
-            .plan
-            .runs
-            .values
-            .iter()
-            .map(|value| (value.check.window_size == size).then_some(value.check.region))
-            .collect();
-        let bounds = drawn.iter().flatten().copied().reduce(union)?;
-        let regions = drawn
-            .into_iter()
-            .map(|region| region.and_then(|region| within(region, bounds)))
-            .collect();
+        let layout = Layout::new(
+            job.plan
+                .runs
+                .values
+                .iter()
+                .map(|value| (value.check.window_size == size).then_some(value.check.region)),
+        )?;
         let count = job.plan.runs.values.len();
         Some(Self {
             session: job.session,
             plan: Arc::clone(&job.plan),
             size,
-            bounds,
-            regions,
+            layout,
             last: vec![None; count],
             problems: vec![None; count],
             frame_problem: None,
@@ -699,7 +690,7 @@ impl<E: From<Reading>> FrameReader<E> {
                 value.check.window_size
             )));
         }
-        let region = (*self.regions.get(position)?)?;
+        let region = self.layout.packed(position)?;
         let image = frame?.image.crop(region)?;
         Some(
             value
@@ -808,32 +799,6 @@ fn frame_problem(error: &str) -> String {
     format!("a frame cannot be read: {error}")
 }
 
-/// The smallest region that holds both.
-fn union(one: Region, other: Region) -> Region {
-    let left = one.x().min(other.x());
-    let top = one.y().min(other.y());
-    let right = one.right().max(other.right());
-    let bottom = one.bottom().max(other.bottom());
-    Region::new(
-        left,
-        top,
-        right.saturating_sub(left),
-        bottom.saturating_sub(top),
-    )
-    .unwrap_or(one)
-}
-
-/// `region`, measured from the corner of `bounds`.
-fn within(region: Region, bounds: Region) -> Option<Region> {
-    let size = region.size();
-    Region::new(
-        region.x().checked_sub(bounds.x())?,
-        region.y().checked_sub(bounds.y())?,
-        size.width,
-        size.height,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc::{SyncSender, TryRecvError};
@@ -844,7 +809,7 @@ mod tests {
     use appytappy_sources::screen::check::{Check, ColorMatch};
     use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::SavedCheck;
-    use appytappy_sources::screen::{FrameHandler, Image};
+    use appytappy_sources::screen::{FrameHandler, Image, Placement, Region};
     use appytappy_sources::system::{
         AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry, WindowPlace,
     };
@@ -979,14 +944,30 @@ mod tests {
     }
 
     #[test]
-    fn the_capture_covers_every_value_and_reads_each_from_its_place() {
+    fn the_capture_packs_every_value_and_reads_each_from_its_place() {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, _control) = mpsc::channel();
         let job = job(vec![red_at("left", 10, 20), red_at("right", 16, 22)]);
         let mut frames = FrameReader::new(&job, WINDOW, events, control).expect("values to read");
-        assert_eq!(frames.bounds, Region::new(10, 20, 8, 4).expect("not empty"));
-        // Only the left value's square, at the bounds' corner, is red.
-        let left_red = frame_image(8, 4, |x, y| x < 2 && y < 2);
+        let region = |x, y| Region::new(x, y, 2, 2).expect("not empty");
+        assert_eq!(
+            frames.layout.copies(),
+            [
+                Placement {
+                    from: region(10, 20),
+                    x: 0,
+                    y: 0
+                },
+                Placement {
+                    from: region(16, 22),
+                    x: 0,
+                    y: 2
+                },
+            ],
+            "the two squares are stacked, not the 8x4 box around them"
+        );
+        // Only the left value's square, at the top of the packed image, is red.
+        let left_red = frame_image(2, 4, |_, y| y < 2);
         let wait = frames.handle(Ok(frame(&left_red, WINDOW)));
         assert_eq!(
             wait,
@@ -1003,7 +984,7 @@ mod tests {
         let steady = frames.handle(Ok(frame(&left_red, WINDOW)));
         assert!(steady > wait, "a steady read backs off");
         assert_eq!(flags(&readings), [], "nothing changed, so nothing is sent");
-        let right_red = frame_image(8, 4, |x, y| x >= 6 && y >= 2);
+        let right_red = frame_image(2, 4, |_, y| y >= 2);
         frames.handle(Ok(frame(&right_red, WINDOW)));
         assert_eq!(
             flags(&readings),
@@ -1082,7 +1063,18 @@ mod tests {
         let job = job(vec![red_at("large", 0, 0), drawn_at("small", 4, 6, SMALL)]);
         let mut frames =
             FrameReader::new(&job, WINDOW, events.clone(), control.clone()).expect("a value");
-        assert_eq!(frames.bounds, Region::new(0, 0, 2, 2).expect("not empty"));
+        let copied = |frames: &FrameReader<Reading>| {
+            frames
+                .layout
+                .copies()
+                .iter()
+                .map(|copy| copy.from)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            copied(&frames),
+            [Region::new(0, 0, 2, 2).expect("not empty")]
+        );
         let red = frame_image(2, 2, |_, _| true);
         frames.handle(Ok(frame(&red, WINDOW)));
         assert_eq!(flags(&readings), [("large".to_owned(), Value::Flag(true))]);
@@ -1090,7 +1082,10 @@ mod tests {
         assert_eq!(frames.handle(outside(SMALL)), Duration::ZERO);
         assert_eq!(told.try_recv(), Ok(Control::Resized(SMALL)));
         let small = FrameReader::new(&job, SMALL, events, control).expect("a value");
-        assert_eq!(small.bounds, Region::new(4, 6, 2, 2).expect("not empty"));
+        assert_eq!(
+            copied(&small),
+            [Region::new(4, 6, 2, 2).expect("not empty")]
+        );
     }
 
     #[test]
@@ -1504,10 +1499,11 @@ mod tests {
         desk.answer(Ok(desktop()));
         let (handle, crop, mut first) = desk.capture();
         assert_eq!(handle, 4, "the visible main window of either Example.exe");
-        assert_eq!(
-            crop,
-            Crop::Region(Region::new(4, 6, 2, 2).expect("not empty"))
-        );
+        let copied = |crop: &Crop| match crop {
+            Crop::Layout(layout) => layout.copies().iter().map(|copy| copy.from).collect(),
+            Crop::Whole => Vec::new(),
+        };
+        assert_eq!(copied(&crop), [Region::new(4, 6, 2, 2).expect("not empty")]);
         let red = frame_image(2, 2, |_, _| true);
         first(Ok(frame(&red, WINDOW)));
         let sample = readings.recv_timeout(PATIENCE).expect("a sample");
@@ -1534,8 +1530,8 @@ mod tests {
         let (resized, crop, mut second) = desk.capture();
         assert_eq!(resized, 4);
         assert_eq!(
-            crop,
-            Crop::Region(Region::new(2, 2, 2, 2).expect("not empty")),
+            copied(&crop),
+            [Region::new(2, 2, 2, 2).expect("not empty")],
             "the value drawn at the new size"
         );
         second(Err(io::Error::new(io::ErrorKind::NotConnected, "closed")));

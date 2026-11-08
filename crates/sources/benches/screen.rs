@@ -162,7 +162,7 @@ mod live {
     use std::sync::mpsc;
 
     use appytappy_sources::HostSystem;
-    use appytappy_sources::screen::{Capture, CaptureSession, Crop};
+    use appytappy_sources::screen::{Capture, CaptureSession, Crop, Layout};
     use appytappy_sources::system::System;
 
     use super::{
@@ -195,7 +195,7 @@ mod live {
         let mut schedule = ReadSchedule::new(interval);
         let session = system.start(
             window.handle,
-            Crop::Region(region),
+            Crop::Layout(Layout::one(region)),
             interval.min(),
             Box::new(move |frame| {
                 let sample = frame.map(|frame| {

@@ -145,8 +145,11 @@ Each thread below is a plain `std::thread`, and each channel is a
   [Lifecycle](#lifecycle) describes when it takes a snapshot.
 - **Readers.** One per attached application that has automations. Each finds the
   application's window with its [window match](Setup-app.md#window-matching),
-  captures the smallest rectangle that covers the values drawn at the window's
-  current size, and reads each value from its own region of each frame. It
+  copies only the regions of the values drawn at the window's current size,
+  packed one under another, and reads each value from its place in that
+  packed image. A `Layout` in `appytappy-sources::screen` says where each
+  region goes, and copies the one rectangle around them instead when that is
+  smaller, such as for values that overlap. It
   sends a `Sample` only when a value changes, and reads less often while
   nothing changes. When the window closes or changes size, it sends `Unseen`,
   and the owner forgets the application's values, so no rule acts on a value
@@ -641,8 +644,8 @@ The overlay ([#36](https://github.com/TheLunchTrae/appy-tappy/issues/36))
 is more windows of the setup app, one for each application whose overlay is
 on, so nothing is hooked or injected into the application. Each window loads
 the same UI, which renders only the readings when its label names an
-application. The owner thread keeps one capture for each overlay, of the
-smallest region that holds the values drawn at the window's current size, and
+application. The owner thread keeps one capture for each overlay, which copies the values drawn
+at the window's current size with the same `Layout` as a reader, and
 the capture thread reads them from each frame, so only the readings cross to
 the owner. The window over the application is transparent, lets clicks
 through, and cannot take the focus. Tauri's window library activates a window

@@ -6,8 +6,8 @@
 //! every Direct3D and capture call. The system's own threads fill the frame
 //! pool on the same Direct3D device, so the device is set to serialize its
 //! calls. Between reads the thread keeps only the newest frame and copies
-//! nothing; when the handler's wait ends, the GPU copies just the region into
-//! a small CPU-readable texture, and the thread copies those rows into a
+//! nothing; when the handler's wait ends, the GPU copies just the values'
+//! regions into a small CPU-readable texture, as the crop's layout packs them, and the thread copies those rows into a
 //! reused buffer.
 //!
 //! A capture that can no longer produce frames ends the way a closed window
@@ -54,7 +54,8 @@ use windows::core::{Interface, factory};
 use super::WindowsSystem;
 use crate::schedule::ReadClock;
 use crate::screen::{
-    Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Region, Size,
+    Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
+    Region, Size,
 };
 
 /// The frame pool's buffers: one the thread may hold until its next read,
@@ -206,7 +207,7 @@ fn run(
         reason = "a send fails only when `start` stopped waiting, and nobody is left to tell"
     )]
     let _ = ready.send(Ok(()));
-    capture.handle_frames(crop, &mut handler, events);
+    capture.handle_frames(&crop, &mut handler, events);
     capture.stop();
 }
 
@@ -297,7 +298,7 @@ impl Capturer {
     /// Waits for frames and hands the newest to `handler` whenever its last
     /// wait has ended, until the session stops or the capture ends; an
     /// ending reaches the handler as a [`io::ErrorKind::NotConnected`] error.
-    fn handle_frames(&mut self, crop: Crop, handler: &mut FrameHandler, events: &Receiver<Event>) {
+    fn handle_frames(&mut self, crop: &Crop, handler: &mut FrameHandler, events: &Receiver<Event>) {
         let mut held: Option<Held> = None;
         let mut clock = ReadClock::new(Instant::now());
         loop {
@@ -365,7 +366,7 @@ impl Capturer {
 
     /// Copies `crop` of one frame and passes it to `handler`, returning the
     /// handler's wait, or `None` when the capture ended.
-    fn read(&mut self, held: Held, crop: Crop, handler: &mut FrameHandler) -> Option<Duration> {
+    fn read(&mut self, held: Held, crop: &Crop, handler: &mut FrameHandler) -> Option<Duration> {
         let copied = self.copy(&held.frame, crop);
         close(&held.frame);
         match copied {
@@ -409,7 +410,7 @@ impl Capturer {
 
     /// Copies `crop` of `frame` into the buffer and returns the window's
     /// size, or `None` when the frame had to be dropped for a resize.
-    fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: Crop) -> io::Result<Option<Size>> {
+    fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: &Crop) -> io::Result<Option<Size>> {
         let content = frame.ContentSize()?;
         if content != self.pool_size {
             self.pool
@@ -431,42 +432,50 @@ impl Capturer {
             width: u32::try_from(content.Width).unwrap_or_default(),
             height: u32::try_from(content.Height).unwrap_or_default(),
         };
-        let region = match crop {
-            Crop::Whole => Region::whole(window_size),
-            Crop::Region(region) => Some(region),
+        let whole;
+        let (size, placements) = match crop {
+            Crop::Whole => {
+                whole = Region::whole(window_size).map(|from| Placement { from, x: 0, y: 0 });
+                (window_size, whole.as_slice())
+            },
+            Crop::Layout(layout) if layout.fits(window_size) => (layout.size(), layout.copies()),
+            Crop::Layout(_) => return Err(OutsideWindow { window_size }.into()),
+        };
+        if placements.is_empty() {
+            return Err(OutsideWindow { window_size }.into());
         }
-        .filter(|region| region.fits(window_size))
-        .ok_or(OutsideWindow { window_size })?;
-        let size = region.size();
         let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `access` wraps the frame's live surface; the call returns a
         // new reference to its texture.
         let source: ID3D11Texture2D = unsafe { access.GetInterface() }?;
         let staging = self.staging(size)?;
-        let area = D3D11_BOX {
-            left: region.x(),
-            top: region.y(),
-            front: 0,
-            right: region.right(),
-            bottom: region.bottom(),
-            back: 1,
-        };
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: both textures are live and BGRA; `area` lies inside the
-        // source, which `fits` checked, and matches the staging texture's size.
-        unsafe {
-            self.context.CopySubresourceRegion(
-                &staging,
-                0,
-                0,
-                0,
-                0,
-                &source,
-                0,
-                Some(&raw const area),
-            );
-        };
+        for placement in placements {
+            let area = D3D11_BOX {
+                left: placement.from.x(),
+                top: placement.from.y(),
+                front: 0,
+                right: placement.from.right(),
+                bottom: placement.from.bottom(),
+                back: 1,
+            };
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: both textures are live and BGRA; `area` lies inside the
+            // source, which `fits` checked, and the layout placed it inside
+            // the staging texture, which has the layout's size.
+            unsafe {
+                self.context.CopySubresourceRegion(
+                    &staging,
+                    0,
+                    placement.x,
+                    placement.y,
+                    0,
+                    &source,
+                    0,
+                    Some(&raw const area),
+                );
+            };
+        }
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `staging` is a live CPU-readable texture and `mapped` a live
@@ -516,7 +525,7 @@ impl Capturer {
     }
 
     /// The staging texture for `size`, made once and remade only when the
-    /// region's size changes.
+    /// packed image's size changes.
     fn staging(&mut self, size: Size) -> windows::core::Result<ID3D11Texture2D> {
         if let Some((cached, texture)) = &self.staging
             && *cached == size
@@ -645,7 +654,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::*;
-    use crate::screen::Region;
+    use crate::screen::{Layout, Region};
     use crate::system::System;
 
     /// Captures a visible window on the desktop of whoever runs it. It is
@@ -669,7 +678,7 @@ mod tests {
         let session = system
             .start(
                 window.handle,
-                Crop::Region(Region::new(0, 0, 32, 16).unwrap()),
+                Crop::Layout(Layout::one(Region::new(0, 0, 32, 16).unwrap())),
                 Duration::ZERO,
                 Box::new(move |frame| {
                     let frame = frame.unwrap();
