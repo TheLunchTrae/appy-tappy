@@ -100,6 +100,24 @@ describe('buildSpec', () => {
       spec: { kind: 'reference', region, screenshot: 3, tolerance: DEFAULT_TOLERANCE.reference },
     });
   });
+
+  test('a picture check compares only what was selected while it ignores the background', () => {
+    const steps = [{ kind: 'click', x: 4, y: 5, combine: 'replace' }] as const;
+    const picture = { ...withKind({ ...EMPTY_DRAFT, region }, 'reference'), reference: 3, steps, colorMatch: 30 };
+    expect(buildSpec(picture)).toEqual({
+      ok: true,
+      spec: {
+        kind: 'reference',
+        region,
+        screenshot: 3,
+        tolerance: DEFAULT_TOLERANCE.reference,
+        selection: { tolerance: 30, steps },
+      },
+    });
+    const whole = { kind: 'reference', region, screenshot: 3, tolerance: DEFAULT_TOLERANCE.reference } as const;
+    expect(buildSpec({ ...picture, ignoreBackground: false })).toEqual({ ok: true, spec: whole });
+    expect(buildSpec({ ...picture, steps: [] })).toEqual({ ok: true, spec: whole });
+  });
 });
 
 test('withKind keeps the region and colors and resets the tolerance', () => {

@@ -11,14 +11,16 @@ use std::fmt;
 use appytappy_config::app_file::{CheckDef, ColorDef, RegionDef, SampleDef};
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ReferenceMatch};
 use appytappy_sources::screen::digits::{DigitReader, LearnError};
+use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::{Image, Region};
 use appytappy_sources::system::Rgb;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::recording::Recording;
+use crate::selection::{self, SelectionSpec};
 
 /// A rectangle of the window, in pixels from its top-left corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct RegionSpec {
     pub(crate) x: u32,
     pub(crate) y: u32,
@@ -104,6 +106,10 @@ pub(crate) enum CheckSpec {
         region: RegionSpec,
         screenshot: usize,
         tolerance: u8,
+        /// The thing to compare, selected on the screenshot; without one the
+        /// whole region is compared.
+        #[serde(default)]
+        selection: Option<SelectionSpec>,
     },
 }
 
@@ -201,10 +207,17 @@ pub(crate) fn to_saved(
         CheckSpec::Reference {
             screenshot,
             tolerance,
+            selection,
             ..
         } => {
             let image = format!("{id}.png");
-            pictures.push((image.clone(), picture(*screenshot)?));
+            let (reference, mask) =
+                reference(screenshots, built.region, *screenshot, selection.as_ref())?;
+            let png = match &mask {
+                Some(mask) => reference.encode_png_masked(mask),
+                None => reference.encode_png(),
+            };
+            pictures.push((image.clone(), png.map_err(|_encode| SpecError::Picture)?));
             CheckDef::Reference {
                 image,
                 tolerance: *tolerance,
@@ -287,13 +300,40 @@ pub(crate) fn build(
         CheckSpec::Reference {
             screenshot,
             tolerance,
+            selection,
             ..
-        } => Check::Reference(ReferenceMatch {
-            reference: crop(*screenshot)?,
-            tolerance: *tolerance,
-        }),
+        } => {
+            let (reference, mask) =
+                reference(screenshots, region, *screenshot, selection.as_ref())?;
+            // The mask is the region's, so its size is always the picture's.
+            Check::Reference(
+                ReferenceMatch::new(reference, mask.as_ref(), *tolerance)
+                    .map_err(|_size| SpecError::NothingSelected)?,
+            )
+        },
     };
     Ok(RegionCheck { region, check })
+}
+
+/// The picture a picture check compares against: `region` of the screenshot
+/// at `screenshot`, and with a `selection` the mask of the pixels of
+/// `region` it selects on that screenshot.
+fn reference(
+    screenshots: &[Image],
+    region: Region,
+    screenshot: usize,
+    selection: Option<&SelectionSpec>,
+) -> Result<(Image, Option<Mask>), SpecError> {
+    let image = screenshots.get(screenshot).ok_or(SpecError::NoScreenshot)?;
+    let picture = image.crop(region).ok_or(SpecError::Outside)?;
+    let mask = selection
+        .map(|selection| {
+            selection::select(image, selection)
+                .and_then(|selected| selected.mask_in(region))
+                .ok_or(SpecError::NothingSelected)
+        })
+        .transpose()?;
+    Ok((picture, mask))
 }
 
 /// Why a number check built from `spec` could not learn each of its
@@ -411,6 +451,8 @@ pub(crate) enum SpecError {
     Outside,
     /// The bar's filled and empty colors are the same.
     SameColors,
+    /// A picture check's selection leaves no pixel of its region to compare.
+    NothingSelected,
     /// A number check has no labeled screenshot or kept reading to learn
     /// from.
     NoLabels,
@@ -443,6 +485,9 @@ impl fmt::Display for SpecError {
             Self::SameColors => {
                 formatter.write_str("Pick a filled color and an empty color that differ.")
             },
+            Self::NothingSelected => formatter.write_str(
+                "Nothing in the region is selected. Select the thing again, or stop ignoring the background.",
+            ),
             Self::NoLabels => formatter.write_str(
                 "Type what the region shows on at least one screenshot, or keep a recorded reading.",
             ),
@@ -553,6 +598,7 @@ mod tests {
             region: left,
             screenshot: 0,
             tolerance: 0,
+            selection: None,
         };
         let built = build(&spec, &[screenshot()], None).expect("valid reference");
         let red_square = screenshot().crop(built.region).expect("inside");
@@ -561,6 +607,65 @@ mod tests {
             .expect("inside");
         assert_eq!(built.check.read(&red_square), Ok(Value::Flag(true)));
         assert_eq!(built.check.read(&gray_square), Ok(Value::Flag(false)));
+    }
+
+    #[test]
+    fn a_selected_reference_compares_only_what_was_selected() {
+        // The click selects the red half, so the gray half is background.
+        let spec = |region| CheckSpec::Reference {
+            region,
+            screenshot: 0,
+            tolerance: 0,
+            selection: Some(SelectionSpec {
+                tolerance: 10,
+                steps: vec![selection::SelectStep::Click {
+                    x: 0,
+                    y: 0,
+                    combine: selection::Combine::Replace,
+                }],
+            }),
+        };
+        let built = build(&spec(whole()), &[screenshot()], None).expect("valid reference");
+        let repaint = |columns: std::ops::Range<usize>, color: [u8; 4]| {
+            let mut pixels = screenshot().pixels().to_vec();
+            for (index, pixel) in pixels.iter_mut().enumerate() {
+                if columns.contains(&(index % 4)) {
+                    *pixel = color;
+                }
+            }
+            Image::new(screenshot().size(), pixels.concat()).expect("matching length")
+        };
+        let blue = [255, 0, 0, 0];
+        assert_eq!(
+            built.check.read(&repaint(2..4, blue)),
+            Ok(Value::Flag(true)),
+            "a new background still matches"
+        );
+        assert_eq!(
+            built.check.read(&repaint(0..2, blue)),
+            Ok(Value::Flag(false))
+        );
+
+        let saved = to_saved(&spec(whole()), &[screenshot()], None, "icon").expect("valid");
+        let (picture, mask) =
+            Image::decode_png_masked(&saved.pictures[0].1).expect("a PNG with a mask");
+        assert_eq!(picture.size(), screenshot().size());
+        assert_eq!(
+            mask.expect("the background is left out").kept(),
+            [true, true, false, false, true, true, false, false]
+        );
+
+        let gray_half = RegionSpec {
+            x: 2,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        assert_eq!(
+            build(&spec(gray_half), &[screenshot()], None).err(),
+            Some(SpecError::NothingSelected),
+            "a region that holds none of the selection has nothing to compare"
+        );
     }
 
     #[test]
@@ -614,6 +719,7 @@ mod tests {
                     region: whole(),
                     screenshot: 1,
                     tolerance: 0,
+                    selection: None,
                 },
                 SpecError::NoScreenshot,
             ),
@@ -622,6 +728,7 @@ mod tests {
                     region: outside,
                     screenshot: 0,
                     tolerance: 0,
+                    selection: None,
                 },
                 SpecError::Outside,
             ),
@@ -835,6 +942,7 @@ mod tests {
             region,
             screenshot: 0,
             tolerance: 7,
+            selection: None,
         };
         let saved = to_saved(&reference, &[screenshot()], None, "icon_visible").expect("valid");
         assert_eq!(
@@ -886,6 +994,10 @@ mod tests {
         assert_eq!(
             SpecError::Picture.to_string(),
             "A picture of the region could not be saved."
+        );
+        assert_eq!(
+            SpecError::NothingSelected.to_string(),
+            "Nothing in the region is selected. Select the thing again, or stop ignoring the background."
         );
     }
 }

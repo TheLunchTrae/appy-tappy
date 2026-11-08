@@ -13,6 +13,7 @@ import {
   reviewProblems,
   saveValue,
   screenshot,
+  select,
   setCheck,
   startRecording,
   stopRecording,
@@ -34,8 +35,18 @@ import type { Choice } from './Picker.tsx';
 import { type Color, type Picture, colorAt, hex } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { type ReviewEntry, clock, entries, keptLabels } from '../lib/review.ts';
-import { type Point, type Rect, type Size, fit } from '../lib/region.ts';
+import { type Point, type Rect, type Size, fit, sameRect } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
+import {
+  type SelectStep,
+  type SelectTool,
+  type SelectionView,
+  SELECT_TOOLS,
+  TOOL_NAMES,
+  ignoredPixels,
+  keptCount,
+  withStep,
+} from '../lib/selection.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { accelerator, shortcutLabel } from '../lib/shortcut.ts';
 import { useSize } from '../lib/size.ts';
@@ -72,6 +83,16 @@ const RECORDING_PAUSE_MS = 250;
 const CROP_WIDTH = 480;
 /** How long review waits after the last edit before it asks which readings the check cannot learn. */
 const REVIEW_DELAY_MS = 200;
+/** How long a selection waits after the last change before it is made, so a dragged slider asks once. */
+const SELECT_DELAY_MS = 80;
+
+/** How each selection tool is used, shown under the tools. */
+const TOOL_HELP: Readonly<Record<SelectTool, string | null>> = {
+  box: null,
+  snap: 'Drag a rough box around the thing. It shrinks to fit, and the plain background around and between its parts is left out. Shift+drag adds a part; Alt+drag removes one.',
+  click:
+    'Click the thing. The selection spreads over similar colors and fills any holes. Shift+click adds a part; Alt+click removes one.',
+};
 
 function viewHint(
   recording: boolean,
@@ -80,6 +101,7 @@ function viewHint(
   picking: boolean,
   liveError: string | null,
   shortcut: string,
+  tool: SelectTool,
 ): string {
   if (recording && selected === null) {
     return 'Recording. Use the application; each different reading is kept.';
@@ -94,6 +116,12 @@ function viewHint(
   }
   if (picking) {
     return 'Click the color to pick it.';
+  }
+  if (tool === 'snap') {
+    return 'Drag a rough box around the thing to snap to it.';
+  }
+  if (tool === 'click') {
+    return 'Click the thing to select it.';
   }
   return 'Drag to draw a region. Drag inside it to move it, or drag a corner to resize it.';
 }
@@ -132,6 +160,82 @@ function RegionFields({
         ))}
       </div>
     </div>
+  );
+}
+
+function SelectFields({
+  tool,
+  colorMatch,
+  canSelect,
+  onTool,
+  onColorMatch,
+}: {
+  readonly tool: SelectTool;
+  readonly colorMatch: number;
+  readonly canSelect: boolean;
+  readonly onTool: (tool: SelectTool) => void;
+  readonly onColorMatch: (value: number) => void;
+}) {
+  const help = TOOL_HELP[tool];
+  const set = (value: number): void => {
+    if (Number.isInteger(value) && value >= 0 && value <= 255) {
+      onColorMatch(value);
+    }
+  };
+  return (
+    <>
+      <div className="field">
+        <span id="select-tool">Select with</span>
+        <div className="seg" role="group" aria-labelledby="select-tool">
+          {SELECT_TOOLS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={tool === option}
+              onClick={() => {
+                onTool(option);
+              }}
+            >
+              {TOOL_NAMES[option].name}
+              <small>{TOOL_NAMES[option].hint}</small>
+            </button>
+          ))}
+        </div>
+        {help === null ? null : <span className="note">{canSelect ? help : `Select a screenshot first. ${help}`}</span>}
+      </div>
+      {tool === 'box' ? null : (
+        <div className="field">
+          <label htmlFor="color-match">Color match</label>
+          <div className="range">
+            <input
+              id="color-match"
+              type="range"
+              min={0}
+              max={255}
+              value={colorMatch}
+              onChange={(event) => {
+                set(Number(event.target.value));
+              }}
+            />
+            <input
+              className="input"
+              type="number"
+              min={0}
+              max={255}
+              aria-label="Color match"
+              value={colorMatch}
+              onChange={(event) => {
+                set(Number.parseInt(event.target.value, 10));
+              }}
+            />
+          </div>
+          <span className="note">
+            How close a color must be to count as the same. Raise it if the selection stops short; lower it if it spills
+            over.
+          </span>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -244,8 +348,17 @@ function ReadingBox({
   }
 }
 
+/** What the picture check's selection leaves of the region. */
+interface Masking {
+  /** Whether the last steps selected anything. */
+  readonly found: boolean;
+  /** How many of the region's pixels are compared, or null without a selection. */
+  readonly kept: number | null;
+}
+
 interface KindProps {
   readonly draft: Draft;
+  readonly masking: Masking;
   readonly picking: ColorTarget | null;
   readonly canPick: boolean;
   readonly selected: number | null;
@@ -254,7 +367,7 @@ interface KindProps {
   readonly onPicking: (target: ColorTarget | null) => void;
 }
 
-function KindFields({ draft, picking, canPick, selected, position, onDraft, onPicking }: KindProps) {
+function KindFields({ draft, masking, picking, canPick, selected, position, onDraft, onPicking }: KindProps) {
   const color = (target: ColorTarget, label: string) => (
     <ColorField
       key={target}
@@ -335,13 +448,45 @@ function KindFields({ draft, picking, canPick, selected, position, onDraft, onPi
                 className="btn small"
                 disabled={selected === null}
                 onClick={() => {
-                  onDraft((current) => ({ ...current, reference: selected }));
+                  // Steps taken on another screenshot would select something
+                  // else on this one, so the selection starts over.
+                  onDraft((current) =>
+                    current.reference === selected ? current : { ...current, reference: selected, steps: [] },
+                  );
                 }}
               >
                 Use this one
               </button>
             </div>
           </div>
+          {draft.steps.length === 0 ? null : (
+            <div className="field">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="switch"
+                  aria-checked={draft.ignoreBackground}
+                  checked={draft.ignoreBackground}
+                  onChange={(event) => {
+                    const ignoreBackground = event.target.checked;
+                    onDraft((current) => ({ ...current, ignoreBackground }));
+                  }}
+                />
+                Ignore the background
+              </label>
+              {masking.found ? (
+                <span className="note">
+                  {draft.ignoreBackground && masking.kept !== null && draft.region !== null
+                    ? `${masking.kept.toLocaleString()} of ${(draft.region.width * draft.region.height).toLocaleString()} pixels compared. `
+                    : null}
+                  Shaded pixels are skipped, so the picture still matches when what is behind it changes.
+                </span>
+              ) : (
+                <span className="note warn">Nothing stood out there. Try again, or raise Color match.</span>
+              )}
+            </div>
+          )}
           {tolerance}
         </>
       );
@@ -364,6 +509,13 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   const [shotError, setShotError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [picking, setPicking] = useState<ColorTarget | null>(null);
+  const [tool, setTool] = useState<SelectTool>('box');
+  // The selection the steps last made, for the steps it was made from.
+  const [selection, setSelection] = useState<{
+    readonly steps: readonly SelectStep[];
+    readonly view: SelectionView | null;
+  } | null>(null);
+  const [selectError, setSelectError] = useState<string | null>(null);
   const [valueName, setValueName] = useState('');
   const [checkState, setCheckState] = useState<CheckState>({ kind: 'idle' });
   const [reading, setReading] = useState<Reading | null>(null);
@@ -480,6 +632,69 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       clearTimeout(timer);
     };
   }, [built]);
+
+  // Makes the selection the steps describe on the screenshot the picture is
+  // compared against, and fits the region to it.
+  const { reference, colorMatch, steps } = draft;
+  // The box the region was last fitted to, and the steps it came from, so a
+  // new color match refits a region the user has not changed by hand.
+  const fitted = useRef<{ readonly steps: readonly SelectStep[]; readonly region: Rect } | null>(null);
+  const shownRegion = useRef(draft.region);
+  shownRegion.current = draft.region;
+  useEffect(() => {
+    if (reference === null || steps.length === 0) {
+      setSelection(null);
+      return undefined;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      select(reference, { tolerance: colorMatch, steps })
+        .then((view) => {
+          if (!current) {
+            return;
+          }
+          setSelectError(null);
+          setSelection({ steps, view });
+          const last = fitted.current;
+          const untouched = last === null || last.steps !== steps || sameRect(shownRegion.current, last.region);
+          if (view !== null && untouched) {
+            fitted.current = { steps, region: view.region };
+            setDraft((latest) => ({ ...latest, region: view.region }));
+          }
+        })
+        .catch((error: unknown) => {
+          if (current) {
+            setSelectError(errorText(error));
+          }
+        });
+    }, SELECT_DELAY_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [reference, colorMatch, steps]);
+  const selecting = draft.kind === 'reference' ? tool : 'box';
+  const madeView = selection?.steps === steps ? selection.view : null;
+  const ignored = useMemo(
+    () =>
+      draft.kind === 'reference' && draft.ignoreBackground && madeView !== null && draft.region !== null
+        ? ignoredPixels(madeView, draft.region)
+        : null,
+    [draft.kind, draft.ignoreBackground, madeView, draft.region],
+  );
+  const masking = {
+    found: selection === null || selection.steps !== steps || selection.view !== null,
+    kept: ignored === null ? null : keptCount(ignored),
+  };
+  const addStep = (step: SelectStep): void => {
+    if (selected === null) {
+      return;
+    }
+    setDraft((current) => {
+      const steps = withStep(current.steps, current.reference, selected, step);
+      return steps === null ? current : { ...current, steps, reference: selected };
+    });
+  };
 
   const readNow = useCallback(async (): Promise<void> => {
     try {
@@ -953,10 +1168,18 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
                 label={valueName.trim() === '' ? 'Region' : valueName.trim()}
                 editable={shownPicture !== null}
                 picking={picking !== null}
+                tool={selecting}
+                ignored={ignored}
                 onRegion={(region) => {
                   setDraft((current) => ({ ...current, region }));
                 }}
                 onPick={pick}
+                onSnap={(rough, combine) => {
+                  addStep({ kind: 'snap', region: rough, combine });
+                }}
+                onSelectAt={(point, combine) => {
+                  addStep({ kind: 'click', x: point.x, y: point.y, combine });
+                }}
               />
             )}
           </div>
@@ -968,6 +1191,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
               picking !== null,
               liveError,
               shortcutLabel(shortcut),
+              selecting,
             )}
           </p>
         </div>
@@ -1046,6 +1270,21 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
             ))}
           </div>
         </div>
+        {draft.kind === 'reference' ? (
+          <SelectFields
+            tool={tool}
+            colorMatch={draft.colorMatch}
+            canSelect={shownPicture !== null}
+            onTool={(next) => {
+              setTool(next);
+              setPicking(null);
+            }}
+            onColorMatch={(value) => {
+              setDraft((current) => ({ ...current, colorMatch: value }));
+            }}
+          />
+        ) : null}
+        {selectError === null ? null : <p className="warn">{selectError}</p>}
         <RegionFields
           region={draft.region}
           onRegion={(region) => {
@@ -1054,6 +1293,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
         />
         <KindFields
           draft={draft}
+          masking={masking}
           picking={picking}
           canPick={shownPicture !== null}
           selected={selected}

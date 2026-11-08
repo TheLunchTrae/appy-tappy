@@ -29,6 +29,18 @@ This page covers what the user guide leaves out.
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
+- **Selection.** A picture check's selection travels as the steps the user
+  took: snap boxes and clicks, each replacing, adding to, or taking from the
+  selection, with one color match for all of them (`selection.rs`). The owner
+  replays them on the screenshot the check compares against, both to answer
+  the UI's `select` command and to build and save the check, so moving the
+  slider remakes the selection from the same steps. A new step fits the region
+  to the selection, and so does the slider while the region is as it was last
+  fitted; a region changed by hand stays. Steps on one screenshot mean nothing
+  on another, so a step on another screenshot, or **Use this one**, starts the
+  selection over, and taking away from nothing is ignored. The UI gets the
+  selection's box and its runs of selected pixels, and shades the rest of the
+  region itself.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to
@@ -132,7 +144,8 @@ Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures its values need: a number check's labeled screenshots,
 cropped to the region, then its kept recorded readings, and a picture
-check's reference.
+check's reference, transparent where its selection leaves the background out
+([Reference images](screen.md#reference-images)).
 
 ```json
 {

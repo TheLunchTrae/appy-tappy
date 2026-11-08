@@ -5,7 +5,8 @@ as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
 `screen/image.rs` holds images and regions, `screen/capture.rs` the capture
-trait, `screen/check.rs` and `screen/digits.rs` the checks, `screen/saved.rs`
+trait, `screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
+`screen/select.rs` a picture check's mask and selection, `screen/saved.rs`
 the saved checks, and `schedule.rs` the read interval.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
 
@@ -33,7 +34,11 @@ the same answer on every system, and allocate nothing per read.
 - **Color** is yes when the region's average color is within a tolerance of a
   chosen color.
 - **Matches reference** is yes when the region looks like a saved picture of
-  it, within a tolerance per color channel on average.
+  it, within a tolerance per color channel on average. A mask can leave
+  pixels out: the average is then over the kept pixels only, so a changing
+  background behind the thing does not count. The mask becomes runs of kept
+  pixel indexes once, when the check loads, so a read walks the runs without
+  testing each pixel.
 
 On the fixture screenshots, each check takes 2 to 10 microseconds per read on
 one CPU core; `mise run rust:bench` prints the current numbers.
@@ -51,8 +56,31 @@ read
 ## Reference images
 
 A matches-reference check stores its picture as a PNG file. AppyTappy reads
-any PNG, converting it to 8-bit color and ignoring alpha, and refuses images
-over 8192 pixels on a side. It writes 8-bit RGB.
+any PNG, converting it to 8-bit color, and refuses images over 8192 pixels on
+a side. Alpha is the mask: a pixel at least half opaque is compared, and a
+more transparent one is left out. A picture with no transparent pixel is
+compared whole, and one with no opaque pixel is refused. AppyTappy writes
+8-bit RGB, or RGBA with the left-out pixels fully transparent when a mask
+leaves any out.
+
+## Selection
+
+`screen::select` finds the thing to compare on a screenshot, without a model:
+
+- **Snap** takes a rough box drawn around the thing. The colors along the
+  box's edge are the background, the first 256 different ones. Every pixel
+  within the tolerance of a background color is left out, wherever it is, so
+  background showing inside the thing is left out too; each color in the box
+  is compared with the background once. The selection is the rest, trimmed
+  to its box.
+- **Grow** takes a point. It floods out to the pixels beside it, left, right,
+  up, and down, whose colors are within the tolerance of the point's color,
+  then fills the holes: unselected pixels that cannot reach the edge of the
+  box through other unselected pixels.
+
+Colors are alike when each channel is within the tolerance, as for the color
+check. Selections combine with union and difference, and `mask_in` gives the
+mask of any region, as after the user adjusts the box by hand.
 
 ## Read interval
 

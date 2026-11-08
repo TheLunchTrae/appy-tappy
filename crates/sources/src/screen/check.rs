@@ -6,10 +6,12 @@
 
 use std::error::Error;
 use std::fmt;
+use std::ops::Range;
 
 use appytappy_config::signal::{Number, Value};
 
 use super::digits::{DigitReader, ReadError};
+use super::mask::{Mask, MaskError};
 use super::{Image, Size};
 use crate::system::Rgb;
 
@@ -157,17 +159,53 @@ impl ColorMatch {
 
 /// Whether a region looks like a reference image of the same region, such as
 /// a results screen appearing.
+///
+/// A [`Mask`] limits the comparison to the pixels of the thing itself, so a
+/// changing background behind it does not count. The runs of compared pixels
+/// are worked out once, when the check is made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceMatch {
-    /// The region as the setup screenshot showed it.
-    pub reference: Image,
-    /// How far, on average, each pixel's red, green, and blue may be from the
-    /// reference's.
-    pub tolerance: u8,
+    reference: Image,
+    spans: Box<[Range<usize>]>,
+    tolerance: u8,
 }
 
 impl ReferenceMatch {
-    /// Whether `image` is within the tolerance of the reference.
+    /// A check that compares a region with `reference`, the region as a
+    /// setup screenshot showed it. It compares only the pixels `mask` keeps,
+    /// or every pixel without one. `tolerance` is how far, on average, each
+    /// compared pixel's red, green, and blue may be from the reference's.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MaskError::SizeMismatch`] when the mask's size differs from
+    /// the reference's.
+    pub fn new(reference: Image, mask: Option<&Mask>, tolerance: u8) -> Result<Self, MaskError> {
+        let spans = match mask {
+            Some(mask) if mask.size() != reference.size() => {
+                return Err(MaskError::SizeMismatch {
+                    image: reference.size(),
+                    mask: mask.size(),
+                });
+            },
+            Some(mask) => mask.spans(),
+            None => std::iter::once(0..reference.pixels().len()).collect(),
+        };
+        Ok(Self {
+            reference,
+            spans: spans.into_boxed_slice(),
+            tolerance,
+        })
+    }
+
+    /// The region as the setup screenshot showed it.
+    #[must_use]
+    pub const fn reference(&self) -> &Image {
+        &self.reference
+    }
+
+    /// Whether `image` is within the tolerance of the reference over the
+    /// compared pixels.
     ///
     /// # Errors
     ///
@@ -182,12 +220,20 @@ impl ReferenceMatch {
         }
         let mut difference = 0_u64;
         let mut channels = 0_u64;
-        for (pixel, expected) in image.pixels().iter().zip(self.reference.pixels()) {
-            for (&found, &wanted) in pixel.iter().zip(expected).take(3) {
-                // At most 3 * 8192² channels of 255 each, far below u64::MAX.
-                difference = difference.wrapping_add(u64::from(found.abs_diff(wanted)));
+        for span in &self.spans {
+            let found = image.pixels().get(span.clone()).unwrap_or_default();
+            let wanted = self
+                .reference
+                .pixels()
+                .get(span.clone())
+                .unwrap_or_default();
+            for (pixel, expected) in found.iter().zip(wanted) {
+                for (&found, &wanted) in pixel.iter().zip(expected).take(3) {
+                    // At most 3 * 8192² channels of 255 each, far below u64::MAX.
+                    difference = difference.wrapping_add(u64::from(found.abs_diff(wanted)));
+                }
+                channels = channels.wrapping_add(3);
             }
-            channels = channels.wrapping_add(3);
         }
         Ok(difference <= channels.saturating_mul(u64::from(self.tolerance)))
     }
@@ -406,10 +452,7 @@ mod tests {
     #[test]
     fn reference_match_averages_the_difference_over_every_channel() {
         let reference = row(&[GRAY, GRAY]);
-        let check = ReferenceMatch {
-            reference,
-            tolerance: 4,
-        };
+        let check = ReferenceMatch::new(reference, None, 4).unwrap();
         // One channel of one pixel off by 24 averages to 4 over 6 channels.
         let close = row(&[GRAY, Rgb { red: 79, ..GRAY }]);
         let far = row(&[GRAY, Rgb { red: 80, ..GRAY }]);
@@ -440,10 +483,50 @@ mod tests {
         let mut bgra = reference.as_bgra().to_vec();
         bgra[3] = 0;
         let other = Image::new(reference.size(), bgra).unwrap();
-        let check = ReferenceMatch {
-            reference,
-            tolerance: 0,
-        };
+        let check = ReferenceMatch::new(reference, None, 0).unwrap();
         assert_eq!(check.matches(&other), Ok(true));
+    }
+
+    #[test]
+    fn reference_match_compares_only_the_pixels_its_mask_keeps() {
+        let reference = row(&[WHITE, GREEN, GREEN, WHITE]);
+        let size = reference.size();
+        let mask = Mask::new(size, vec![false, true, true, false]).unwrap();
+        let check = ReferenceMatch::new(reference.clone(), Some(&mask), 4).unwrap();
+        // The background on both ends changed completely; the thing did not.
+        assert_eq!(check.matches(&row(&[GRAY, GREEN, GREEN, GRAY])), Ok(true));
+        // One kept channel off by 24 averages to 4 over the 6 kept channels.
+        let close = row(&[GRAY, GREEN, Rgb { red: 64, ..GREEN }, GRAY]);
+        let far = row(&[WHITE, GREEN, Rgb { red: 65, ..GREEN }, WHITE]);
+        assert_eq!(check.matches(&close), Ok(true));
+        assert_eq!(check.matches(&far), Ok(false));
+        let unmasked = ReferenceMatch::new(reference.clone(), None, 4).unwrap();
+        assert_eq!(
+            unmasked.matches(&row(&[GRAY, GREEN, GREEN, GRAY])),
+            Ok(false)
+        );
+        assert_eq!(check.reference(), &reference);
+    }
+
+    #[test]
+    fn reference_match_refuses_a_mask_of_another_size() {
+        let mask = Mask::new(
+            Size {
+                width: 3,
+                height: 1,
+            },
+            vec![true; 3],
+        )
+        .unwrap();
+        assert_eq!(
+            ReferenceMatch::new(solid(2, GRAY), Some(&mask), 0),
+            Err(MaskError::SizeMismatch {
+                image: Size {
+                    width: 2,
+                    height: 1
+                },
+                mask: mask.size(),
+            })
+        );
     }
 }

@@ -6,6 +6,7 @@ use std::fmt;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 
+use super::mask::{self, Mask, MaskError};
 use crate::system::Rgb;
 
 /// The widest or tallest image a PNG may hold, in pixels.
@@ -16,6 +17,9 @@ const MAX_PNG_BYTES: usize = 256 << 20;
 
 /// Bytes per pixel in an [`Image`]: blue, green, red, and an unused byte.
 const BYTES_PER_PIXEL: usize = 4;
+
+/// The least alpha a PNG pixel needs to be kept by its mask: half opaque.
+const HALF_OPAQUE: u8 = 128;
 
 /// A width and a height in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +229,29 @@ impl Image {
     /// Returns [`ImageError::Decode`] for a malformed file, and
     /// [`ImageError::TooLarge`] for an image wider or taller than 8192 pixels.
     pub fn decode_png(bytes: &[u8]) -> Result<Self, ImageError> {
+        Self::decode(bytes).map(|(image, _alpha)| image)
+    }
+
+    /// Decodes a PNG file as [`Image::decode_png`] does, with the pixels its
+    /// alpha leaves out: a pixel less than half opaque is not kept. The mask
+    /// is `None` when the file keeps every pixel.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors [`Image::decode_png`] does, and
+    /// [`ImageError::Mask`] when no pixel is at least half opaque.
+    pub fn decode_png_masked(bytes: &[u8]) -> Result<(Self, Option<Mask>), ImageError> {
+        let (image, alpha) = Self::decode(bytes)?;
+        let kept: Vec<bool> = alpha.iter().map(|&alpha| alpha >= HALF_OPAQUE).collect();
+        if !kept.contains(&false) {
+            return Ok((image, None));
+        }
+        let mask = Mask::new(image.size, kept).map_err(ImageError::Mask)?;
+        Ok((image, Some(mask)))
+    }
+
+    /// Decodes a PNG file into an image and each pixel's alpha.
+    fn decode(bytes: &[u8]) -> Result<(Self, Vec<u8>), ImageError> {
         let mut decoder = png::Decoder::new_with_limits(
             Cursor::new(bytes),
             png::Limits {
@@ -256,6 +283,7 @@ impl Image {
             png::ColorType::Rgba => 4,
         };
         let mut bgra = Vec::with_capacity(size.bytes().ok_or(ImageError::TooLarge { size })?);
+        let mut alpha = Vec::with_capacity(mask::pixels(size).unwrap_or_default());
         let width = usize::try_from(size.width)
             .ok()
             .ok_or(ImageError::TooLarge { size })?;
@@ -263,15 +291,18 @@ impl Image {
         for row in scanlines.chunks_exact(info.line_size) {
             let row = row.get(..pixels_per_row).ok_or(ImageError::Unsupported)?;
             for pixel in row.chunks_exact(channels) {
-                let (red, green, blue) = match *pixel {
-                    [gray] | [gray, _] => (gray, gray, gray),
-                    [red, green, blue] | [red, green, blue, _] => (red, green, blue),
+                let (red, green, blue, opacity) = match *pixel {
+                    [gray] => (gray, gray, gray, u8::MAX),
+                    [gray, opacity] => (gray, gray, gray, opacity),
+                    [red, green, blue] => (red, green, blue, u8::MAX),
+                    [red, green, blue, opacity] => (red, green, blue, opacity),
                     _ => return Err(ImageError::Unsupported),
                 };
                 bgra.extend_from_slice(&[blue, green, red, u8::MAX]);
+                alpha.push(opacity);
             }
         }
-        Self::new(size, bgra)
+        Ok((Self::new(size, bgra)?, alpha))
     }
 
     /// Encodes the image as an 8-bit RGB PNG file.
@@ -284,12 +315,42 @@ impl Image {
         for &[blue, green, red, _] in self.pixels() {
             rgb.extend_from_slice(&[red, green, blue]);
         }
+        self.encode(png::ColorType::Rgb, &rgb)
+    }
+
+    /// Encodes the image as an 8-bit RGBA PNG file whose pixels outside
+    /// `mask` are transparent, which [`Image::decode_png_masked`] reads back
+    /// as the same mask. A full mask writes an RGB file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImageError::Mask`] when the mask's size differs from the
+    /// image's, and [`ImageError::Encode`] when the encoder fails.
+    pub fn encode_png_masked(&self, mask: &Mask) -> Result<Vec<u8>, ImageError> {
+        if mask.size() != self.size {
+            return Err(ImageError::Mask(MaskError::SizeMismatch {
+                image: self.size,
+                mask: mask.size(),
+            }));
+        }
+        if mask.is_full() {
+            return self.encode_png();
+        }
+        let mut rgba = Vec::with_capacity(self.bgra.len());
+        for (&[blue, green, red, _], &kept) in self.pixels().iter().zip(mask.kept()) {
+            rgba.extend_from_slice(&[red, green, blue, if kept { u8::MAX } else { 0 }]);
+        }
+        self.encode(png::ColorType::Rgba, &rgba)
+    }
+
+    /// Writes `data`, rows of the image in `color` channels, as a PNG file.
+    fn encode(&self, color: png::ColorType, data: &[u8]) -> Result<Vec<u8>, ImageError> {
         let mut file = Vec::new();
         let mut encoder = png::Encoder::new(&mut file, self.size.width, self.size.height);
-        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_color(color);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().map_err(ImageError::Encode)?;
-        writer.write_image_data(&rgb).map_err(ImageError::Encode)?;
+        writer.write_image_data(data).map_err(ImageError::Encode)?;
         writer.finish().map_err(ImageError::Encode)?;
         Ok(file)
     }
@@ -389,6 +450,8 @@ pub enum ImageError {
     Decode(png::DecodingError),
     /// The PNG encoder failed.
     Encode(png::EncodingError),
+    /// The mask did not fit the image, or the file kept no pixel.
+    Mask(MaskError),
 }
 
 impl fmt::Display for ImageError {
@@ -405,6 +468,7 @@ impl fmt::Display for ImageError {
             Self::Unsupported => formatter.write_str("the PNG file uses an unsupported layout"),
             Self::Decode(_) => formatter.write_str("the PNG file could not be decoded"),
             Self::Encode(_) => formatter.write_str("the image could not be encoded as PNG"),
+            Self::Mask(error) => error.fmt(formatter),
         }
     }
 }
@@ -578,6 +642,65 @@ mod tests {
         writer.finish().unwrap();
         let decoded = Image::decode_png(&file).unwrap();
         assert_eq!(decoded.as_bgra(), [10, 10, 10, 255, 200, 200, 200, 255]);
+        let (masked, mask) = Image::decode_png_masked(&file).unwrap();
+        assert_eq!(masked, decoded);
+        assert_eq!(mask.unwrap().kept(), [false, true]);
+    }
+
+    fn rgba_png(alpha: [u8; 3]) -> Vec<u8> {
+        let mut file = Vec::new();
+        let mut encoder = png::Encoder::new(&mut file, 3, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let [first, second, third] = alpha;
+        writer
+            .write_image_data(&[1, 2, 3, first, 4, 5, 6, second, 7, 8, 9, third])
+            .unwrap();
+        writer.finish().unwrap();
+        file
+    }
+
+    #[test]
+    fn a_pixel_at_least_half_opaque_is_kept() {
+        let (picture, mask) = Image::decode_png_masked(&rgba_png([127, 128, 255])).unwrap();
+        assert_eq!(picture, image(3, 1, &[[1, 2, 3], [4, 5, 6], [7, 8, 9]]));
+        assert_eq!(mask.unwrap().kept(), [false, true, true]);
+        let (_, opaque) = Image::decode_png_masked(&rgba_png([128, 200, 255])).unwrap();
+        assert_eq!(opaque, None);
+        assert!(matches!(
+            Image::decode_png_masked(&rgba_png([0, 10, 127])),
+            Err(ImageError::Mask(MaskError::Empty))
+        ));
+        assert_eq!(Image::decode_png_masked(&gray_png(2, 2)).unwrap().1, None);
+    }
+
+    #[test]
+    fn a_masked_png_is_transparent_outside_its_mask() {
+        let picture = image(3, 1, &[[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
+        let mask = Mask::new(picture.size(), vec![true, false, true]).unwrap();
+        let file = picture.encode_png_masked(&mask).unwrap();
+        assert_eq!(
+            Image::decode_png_masked(&file).unwrap(),
+            (picture.clone(), Some(mask))
+        );
+        let full = Mask::new(picture.size(), vec![true; 3]).unwrap();
+        assert_eq!(
+            picture.encode_png_masked(&full).unwrap(),
+            picture.encode_png().unwrap()
+        );
+        let other = Mask::new(
+            Size {
+                width: 1,
+                height: 1,
+            },
+            vec![true],
+        )
+        .unwrap();
+        assert!(matches!(
+            picture.encode_png_masked(&other),
+            Err(ImageError::Mask(MaskError::SizeMismatch { .. }))
+        ));
     }
 
     fn gray_png(width: u32, height: u32) -> Vec<u8> {
@@ -789,10 +912,8 @@ mod tests {
                 color: second.pixel(105, 115).unwrap(),
                 tolerance: 40,
             });
-            let unchanged = Check::Reference(ReferenceMatch {
-                reference: first.crop(panel).unwrap(),
-                tolerance: 8,
-            });
+            let unchanged =
+                Check::Reference(ReferenceMatch::new(first.crop(panel).unwrap(), None, 8).unwrap());
             let strip = Region::new(100, 110, 120, 12).unwrap();
             assert_eq!(read(&gold, &first, strip), Value::Flag(false));
             assert_eq!(read(&gold, &second, strip), Value::Flag(true));
@@ -814,6 +935,20 @@ mod tests {
         fn png_round_trips(picture in any_image()) {
             let decoded = Image::decode_png(&picture.encode_png().unwrap()).unwrap();
             prop_assert_eq!(decoded, picture);
+        }
+
+        #[test]
+        fn masked_png_round_trips(picture in any_image(), seed in any::<u64>()) {
+            let count = picture.pixels().len();
+            let mut kept: Vec<bool> = (0..count).map(|index| (seed >> (index % 64)) & 1 == 1).collect();
+            if let Some(first) = kept.first_mut() {
+                *first = true;
+            }
+            let mask = Mask::new(picture.size(), kept).unwrap();
+            let file = picture.encode_png_masked(&mask).unwrap();
+            let (decoded, read) = Image::decode_png_masked(&file).unwrap();
+            prop_assert_eq!(decoded, picture);
+            prop_assert_eq!(read.unwrap_or_else(|| mask.clone()), mask);
         }
     }
 }

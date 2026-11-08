@@ -16,6 +16,7 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, FrameRead, OverlayView, OverlayWindow, Place};
 use crate::recording::{RecordingView, Text};
+use crate::selection::{SelectionSpec, SelectionView};
 use crate::window_list::{WindowFit, WindowList};
 
 /// Where a request's answer goes.
@@ -154,6 +155,16 @@ pub(crate) enum Request {
         max_width: u32,
         /// The pixels, or `None` for an index that does not exist.
         reply: Reply<Option<Vec<u8>>>,
+    },
+    /// What `selection`'s steps select on a screenshot.
+    Select {
+        /// The screenshot's index.
+        screenshot: usize,
+        /// The steps the user took on it.
+        selection: SelectionSpec,
+        /// The selection, or `None` when the steps leave nothing selected;
+        /// an error for a screenshot that does not exist.
+        reply: Reply<Result<Option<SelectionView>, String>>,
     },
     /// Sets up the check the live reading uses.
     SetCheck {

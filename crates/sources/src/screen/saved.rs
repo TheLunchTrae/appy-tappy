@@ -65,12 +65,19 @@ pub fn build(
     if !region.fits(window_size) {
         return Err(SavedError::OutsideWindow { window_size });
     }
-    let mut load = |name: &str| {
+    // Only a reference picture's transparent pixels mean anything; a digit
+    // sample is read as it looks.
+    let mut load = |name: &str, masked: bool| {
         let bytes = picture(name).map_err(|source| SavedError::Missing {
             name: name.to_owned(),
             source,
         })?;
-        let image = Image::decode_png(&bytes).map_err(|source| SavedError::Picture {
+        let decoded = if masked {
+            Image::decode_png_masked(&bytes)
+        } else {
+            Image::decode_png(&bytes).map(|image| (image, None))
+        };
+        let (image, mask) = decoded.map_err(|source| SavedError::Picture {
             name: name.to_owned(),
             source,
         })?;
@@ -81,7 +88,7 @@ pub fn build(
                 expected: region.size(),
             });
         }
-        Ok(image)
+        Ok((image, mask))
     };
     let check = match &screen.check {
         CheckDef::Number {
@@ -92,7 +99,7 @@ pub fn build(
             let mut reader = DigitReader::new((*ink).into(), *tolerance);
             for sample in samples {
                 reader
-                    .learn(&load(&sample.image)?, &sample.text)
+                    .learn(&load(&sample.image, false)?.0, &sample.text)
                     .map_err(|source| SavedError::Learn {
                         name: sample.image.clone(),
                         source,
@@ -108,10 +115,18 @@ pub fn build(
             color: (*color).into(),
             tolerance: *tolerance,
         }),
-        CheckDef::Reference { image, tolerance } => Check::Reference(ReferenceMatch {
-            reference: load(image)?,
-            tolerance: *tolerance,
-        }),
+        CheckDef::Reference { image, tolerance } => {
+            let (reference, mask) = load(image, true)?;
+            // The mask came from the same file, so its size always fits.
+            let check =
+                ReferenceMatch::new(reference, mask.as_ref(), *tolerance).map_err(|error| {
+                    SavedError::Picture {
+                        name: image.clone(),
+                        source: ImageError::Mask(error),
+                    }
+                })?;
+            Check::Reference(check)
+        },
     };
     Ok(SavedCheck {
         window_size,
@@ -222,6 +237,7 @@ mod tests {
     use appytappy_config::signal::{Number, Value};
 
     use super::*;
+    use crate::screen::mask::Mask;
 
     const RED: ColorDef = ColorDef {
         red: 255,
@@ -264,6 +280,25 @@ mod tests {
             .collect()
     }
 
+    /// `image` as a PNG file whose every pixel is fully transparent.
+    fn transparent(image: &Image) -> Vec<u8> {
+        let size = image.size();
+        let rgba: Vec<u8> = image
+            .pixels()
+            .iter()
+            .flat_map(|&[blue, green, red, _alpha]| [red, green, blue, 0])
+            .collect();
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, size.width, size.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .and_then(|mut writer| writer.write_image_data(&rgba))
+            .expect("encodes");
+        bytes
+    }
+
     fn from(files: &BTreeMap<String, Vec<u8>>) -> impl FnMut(&str) -> io::Result<Vec<u8>> {
         |name| {
             files
@@ -292,6 +327,32 @@ mod tests {
         );
         assert_eq!(built.region, Region::new(10, 20, 4, 2).expect("not empty"));
         assert_eq!(built.check.read(&solid(4, RED)), Ok(Value::Flag(true)));
+        assert_eq!(built.check.read(&solid(4, GRAY)), Ok(Value::Flag(false)));
+    }
+
+    #[test]
+    fn a_reference_ignores_its_pictures_transparent_pixels() {
+        let icon = solid(4, RED);
+        // Only the left half of each row belongs to the icon.
+        let mask = Mask::new(icon.size(), [true, true, false, false].repeat(2)).unwrap();
+        let mut files = BTreeMap::new();
+        files.insert(
+            "icon.png".to_owned(),
+            icon.encode_png_masked(&mask).unwrap(),
+        );
+        let built = build(
+            &screen(CheckDef::Reference {
+                image: "icon.png".to_owned(),
+                tolerance: 0,
+            }),
+            from(&files),
+        )
+        .expect("builds");
+        let red = [RED.blue, RED.green, RED.red, u8::MAX];
+        let gray = [GRAY.blue, GRAY.green, GRAY.red, u8::MAX];
+        let row = [red, red, gray, gray].concat();
+        let changed = Image::new(icon.size(), [row.clone(), row].concat()).unwrap();
+        assert_eq!(built.check.read(&changed), Ok(Value::Flag(true)));
         assert_eq!(built.check.read(&solid(4, GRAY)), Ok(Value::Flag(false)));
     }
 
@@ -357,7 +418,7 @@ mod tests {
                 text: "11".to_owned(),
             }],
         };
-        let built = build(&screen(number), from(&files)).expect("builds");
+        let built = build(&screen(number.clone()), from(&files)).expect("builds");
         assert_eq!(
             built.check.read(&picture),
             Ok(Value::Number(Number::new(11.0).expect("finite")))
@@ -370,6 +431,16 @@ mod tests {
                 text: "1".to_owned(),
             }],
         };
+        // A sample's transparency means nothing, even when every pixel is
+        // transparent.
+        let clear = transparent(&picture);
+        let mut clear_files = BTreeMap::new();
+        clear_files.insert("count-1.png".to_owned(), clear);
+        let from_clear = build(&screen(number), from(&clear_files)).expect("builds");
+        assert_eq!(
+            from_clear.check.read(&picture),
+            Ok(Value::Number(Number::new(11.0).expect("finite")))
+        );
         let error = build(&screen(wrong), from(&files)).expect_err("two characters, not one");
         assert_eq!(
             error.to_string(),

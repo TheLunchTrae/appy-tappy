@@ -33,6 +33,7 @@ use crate::check_spec::{self, RegionCheck};
 use crate::overlay::Overlays;
 use crate::pixels;
 use crate::recording::{Recording, ocr};
+use crate::selection::{self, SelectionView};
 use crate::stores::Stores;
 use crate::window_list;
 
@@ -241,6 +242,21 @@ impl<H: Host> Owner<H> {
                 self.screenshots
                     .get(index)
                     .map(|image| pixels::rgba(image, max_width)),
+            ),
+            Request::Select {
+                screenshot,
+                selection,
+                reply,
+            } => send(
+                reply,
+                self.screenshots
+                    .get(screenshot)
+                    .map(|image| {
+                        selection::select(image, &selection)
+                            .as_ref()
+                            .map(SelectionView::from)
+                    })
+                    .ok_or_else(|| check_spec::SpecError::NoScreenshot.to_string()),
             ),
             Request::SetCheck { spec, reply } => send(
                 reply,

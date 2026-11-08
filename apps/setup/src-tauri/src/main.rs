@@ -15,6 +15,7 @@ mod overlay;
 mod owner;
 mod pixels;
 mod recording;
+mod selection;
 mod stores;
 mod window_list;
 
@@ -80,6 +81,7 @@ fn main() -> ExitCode {
             commands::stop_capture,
             commands::take_screenshot,
             commands::screenshot,
+            commands::select,
             commands::set_check,
             commands::read_value,
             commands::start_recording,

@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { type Color, type Picture, decodePicture } from './pixels.ts';
 import type { Rect } from './region.ts';
+import type { SelectionSpec, SelectionView } from './selection.ts';
 
 /** A window the user can pick. */
 export interface WindowChoice {
@@ -126,7 +127,14 @@ export type CheckSpec =
     }
   | { readonly kind: 'barFill'; readonly region: Rect; readonly filled: Color; readonly empty: Color }
   | { readonly kind: 'color'; readonly region: Rect; readonly color: Color; readonly tolerance: number }
-  | { readonly kind: 'reference'; readonly region: Rect; readonly screenshot: number; readonly tolerance: number };
+  | {
+      readonly kind: 'reference';
+      readonly region: Rect;
+      readonly screenshot: number;
+      readonly tolerance: number;
+      /** The thing to compare, selected on the screenshot; without one the whole region is compared. */
+      readonly selection?: SelectionSpec;
+    };
 
 /** What a recorded reading shows, as the user confirmed it in review. */
 export interface RecordedLabel {
@@ -295,6 +303,11 @@ export async function takeScreenshot(): Promise<number> {
 /** A screenshot at most `maxWidth` wide, or null for an unknown index. */
 export async function screenshot(index: number, maxWidth: number): Promise<Picture | null> {
   return decodePicture(await invoke<ArrayBuffer>('screenshot', { index, maxWidth }));
+}
+
+/** What `selection`'s steps select on screenshot `index`, or null when they leave nothing selected. */
+export async function select(index: number, selection: SelectionSpec): Promise<SelectionView | null> {
+  return invoke<SelectionView | null>('select', { screenshot: index, selection });
 }
 
 export async function setCheck(spec: CheckSpec): Promise<void> {

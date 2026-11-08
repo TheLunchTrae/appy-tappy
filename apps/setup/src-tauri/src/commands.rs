@@ -21,6 +21,7 @@ use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{self, Card, OverlayView};
 use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
 use crate::recording::RecordingView;
+use crate::selection::{SelectionSpec, SelectionView};
 use crate::window_list::{WindowFit, WindowList};
 
 /// The UI's way to the owner thread.
@@ -92,6 +93,22 @@ pub(crate) async fn screenshot(
     })
     .await
     .map(pixels)
+}
+
+/// What the steps in `selection` select on the screenshot `screenshot`;
+/// `None` when they leave nothing selected.
+#[tauri::command]
+pub(crate) async fn select(
+    app: AppHandle,
+    screenshot: usize,
+    selection: SelectionSpec,
+) -> Result<Option<SelectionView>, String> {
+    ask(&app, |reply| Request::Select {
+        screenshot,
+        selection,
+        reply,
+    })
+    .await?
 }
 
 /// Sets up the check the live reading uses.

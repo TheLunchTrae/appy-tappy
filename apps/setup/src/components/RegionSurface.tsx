@@ -1,4 +1,4 @@
-import { type PointerEvent, useRef } from 'react';
+import { type PointerEvent, useEffect, useRef, useState } from 'react';
 
 import {
   type Corner,
@@ -11,9 +11,11 @@ import {
   moveRect,
   toPicture,
 } from '../lib/region.ts';
+import { type Combine, type SelectTool, combineOf, shade } from '../lib/selection.ts';
 
 type Drag =
   | { readonly mode: 'draw'; readonly from: Point }
+  | { readonly mode: 'rough'; readonly from: Point; readonly combine: Combine }
   | { readonly mode: 'move'; readonly from: Point; readonly rect: Rect }
   | { readonly mode: 'corner'; readonly corner: Corner };
 
@@ -36,8 +38,30 @@ interface Props {
   readonly editable: boolean;
   /** Whether a click picks a color instead of drawing. */
   readonly picking: boolean;
+  /** How a drag or a click marks the region; the box is drawn by hand unless one is given. */
+  readonly tool?: SelectTool;
+  /** Which pixels of the region a selection leaves out, row by row, to shade them. */
+  readonly ignored?: Uint8Array | null;
   readonly onRegion: (region: Rect) => void;
   readonly onPick: (point: Point) => void;
+  /** Called with the rough box dragged with the snap tool. */
+  readonly onSnap?: (rough: Rect, combine: Combine) => void;
+  /** Called with the pixel clicked with the click tool. */
+  readonly onSelectAt?: (point: Point, combine: Combine) => void;
+}
+
+/** The pixels a selection leaves out of a `width`-wide region, shaded over it. */
+function Shade({ ignored, width }: { readonly ignored: Uint8Array; readonly width: number }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const height = width > 0 ? ignored.length / width : 0;
+  useEffect(() => {
+    const context = canvas.current?.getContext('2d');
+    if (context === null || context === undefined || width === 0 || !Number.isInteger(height) || height === 0) {
+      return;
+    }
+    context.putImageData(new ImageData(shade(ignored, width), width, height), 0, 0);
+  }, [ignored, width, height]);
+  return <canvas ref={canvas} className="shade" width={width} height={height} aria-hidden="true" />;
 }
 
 /** The region over a picture, drawn and adjusted with the pointer. */
@@ -49,10 +73,16 @@ export function RegionSurface({
   label,
   editable,
   picking,
+  tool = 'box',
+  ignored = null,
   onRegion,
   onPick,
+  onSnap,
+  onSelectAt,
 }: Props) {
   const drag = useRef<Drag | null>(null);
+  // The rough box being dragged with the snap tool, until it is let go.
+  const [rough, setRough] = useState<Rect | null>(null);
 
   const at = (event: PointerEvent<HTMLDivElement>): Point => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -72,7 +102,15 @@ export function RegionSurface({
       onPick({ x: Math.floor(point.x), y: Math.floor(point.y) });
       return;
     }
+    if (tool === 'click') {
+      onSelectAt?.({ x: Math.floor(point.x), y: Math.floor(point.y) }, combineOf(event));
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (tool === 'snap') {
+      drag.current = { mode: 'rough', from: point, combine: combineOf(event) };
+      return;
+    }
     const corner = event.target instanceof HTMLElement ? event.target.dataset['corner'] : undefined;
     if (region !== null && isCorner(corner)) {
       drag.current = { mode: 'corner', corner };
@@ -97,6 +135,9 @@ export function RegionSurface({
         }
         break;
       }
+      case 'rough':
+        setRough(fromCorners(current.from, point, size));
+        break;
       case 'move':
         onRegion(moveRect(current.rect, point.x - current.from.x, point.y - current.from.y, size));
         break;
@@ -108,26 +149,50 @@ export function RegionSurface({
     }
   };
 
-  const end = (): void => {
+  const end = (event: PointerEvent<HTMLDivElement>): void => {
+    const current = drag.current;
     drag.current = null;
+    setRough(null);
+    if (current?.mode === 'rough') {
+      // Taken from where the pointer was let go, since the last move may not
+      // have been drawn yet.
+      const box = fromCorners(current.from, at(event), size);
+      if (box !== null) {
+        onSnap?.(box, current.combine);
+      }
+    }
   };
 
   const scale = size.width > 0 ? shown.width / size.width : 0;
-  const classes = ['surface', picking ? 'picking' : null, editable ? null : 'still'].filter(Boolean).join(' ');
+  const classes = [
+    'surface',
+    picking ? 'picking' : null,
+    editable ? null : 'still',
+    tool === 'click' ? 'clicking' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const place = (rect: Rect) => ({
+    left: rect.x * scale,
+    top: rect.y * scale,
+    width: rect.width * scale,
+    height: rect.height * scale,
+  });
+  const cancel = (): void => {
+    drag.current = null;
+    setRough(null);
+  };
 
   return (
-    <div className={classes} onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+    <div className={classes} onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={cancel}>
+      {region === null || ignored === null || ignored.length !== region.width * region.height ? null : (
+        <div className="shade-box" style={place(region)}>
+          <Shade ignored={ignored} width={region.width} />
+        </div>
+      )}
       {region === null ? null : (
-        <div
-          className={recording ? 'marquee recording' : 'marquee'}
-          style={{
-            left: region.x * scale,
-            top: region.y * scale,
-            width: region.width * scale,
-            height: region.height * scale,
-          }}
-        >
-          {editable
+        <div className={recording ? 'marquee recording' : 'marquee'} style={place(region)}>
+          {editable && tool === 'box'
             ? CORNERS.map((corner) => <span key={corner} className={`corner ${corner}`} data-corner={corner} />)
             : null}
           <span className="tag">
@@ -135,6 +200,7 @@ export function RegionSurface({
           </span>
         </div>
       )}
+      {rough === null ? null : <div className="rough" style={place(rough)} />}
     </div>
   );
 }
