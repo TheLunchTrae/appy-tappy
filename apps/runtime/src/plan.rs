@@ -61,12 +61,12 @@ pub(crate) struct ValuePlan {
 }
 
 impl Plan {
-    /// The apps detection watches: each one's executable pattern.
+    /// The apps detection watches: each one's window match.
     pub(crate) fn watchlist(&self) -> Watchlist {
         Watchlist::new(
             self.apps
                 .iter()
-                .map(|(id, app)| (id.clone(), app.window.executable.clone())),
+                .map(|(id, app)| (id.clone(), app.window.clone())),
         )
     }
 }
@@ -367,7 +367,7 @@ mod tests {
         );
         assert_eq!(
             plan.watchlist(),
-            Watchlist::new([("example".to_owned(), Pattern::new("Example*.exe"))])
+            Watchlist::new([("example".to_owned(), example.window.clone())])
         );
     }
 

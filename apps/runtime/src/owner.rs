@@ -139,7 +139,13 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let detect = Arc::clone(&system);
     let changes = sender.clone();
     let detector = spawn("lifecycle", move || {
-        lifecycle::run(lifecycle, &input_events, &changes, || detect.processes());
+        lifecycle::run(
+            lifecycle,
+            &input_events,
+            &changes,
+            || detect.processes(),
+            || detect.windows(),
+        );
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed send means the owner already stopped, which is what this tells it"

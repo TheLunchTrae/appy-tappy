@@ -225,10 +225,11 @@ impl System for Unsupported {
 
 /// The handle of the visible window that `window` fits best.
 ///
-/// Only windows of a process whose executable `window` fits count, and ties
-/// go to the window listed first. The runtime and the setup app both find an
-/// application's window this way, so the setup app reads the window the
-/// runtime would.
+/// Only windows of a process whose executable `window` fits count. Ties go
+/// to the process with the lowest ID, then to the window listed first, so
+/// two copies of an application are told apart the same way each time. The
+/// runtime and the setup app both find an application's window this way,
+/// so the setup app reads the window the runtime would.
 #[must_use]
 pub fn best_window(
     window: &WindowMatch,
@@ -240,8 +241,9 @@ pub fn best_window(
         .map(|entry| entry.handle)
 }
 
-/// The visible windows that `window` fits best, all with the same fit, in
-/// the order they are listed; [`best_window`] takes the first.
+/// The visible windows that `window` fits best, all with the same fit, by
+/// process ID and then in the order they are listed; [`best_window`] takes
+/// the first.
 ///
 /// Only windows of a process whose executable `window` fits count.
 #[must_use]
@@ -275,12 +277,15 @@ pub fn best_windows(
         .take_while(|&(_, fit)| Some(fit) == best)
         .map(|(position, _)| position)
         .collect();
-    candidates
+    let mut best: Vec<WindowEntry> = candidates
         .into_iter()
         .enumerate()
         .filter(|(position, _)| tied.binary_search(position).is_ok())
         .map(|(_, (entry, _))| entry)
-        .collect()
+        .collect();
+    // A stable sort keeps the listed order within a process.
+    best.sort_by_key(|entry| entry.process);
+    best
 }
 
 #[cfg(test)]
@@ -321,7 +326,13 @@ mod tests {
             class: "ExampleWindow",
             executable: "Example.exe",
         });
-        let processes = || vec![process(1, "Example.exe"), process(2, "Other.exe")];
+        let processes = || {
+            vec![
+                process(1, "Example.exe"),
+                process(2, "Other.exe"),
+                process(3, "Example.exe"),
+            ]
+        };
         let best = |windows| best_window(&example, processes(), windows);
         assert_eq!(best(vec![window(5, 1, "Example App", false)]), None);
         assert_eq!(best(vec![window(5, 2, "Example App", true)]), None);
@@ -341,6 +352,7 @@ mod tests {
             processes(),
             vec![
                 window(5, 1, "Launcher", true),
+                window(9, 3, "Example App", true),
                 window(6, 1, "Example App", true),
                 window(7, 2, "Example App", true),
                 window(8, 1, "Example App", true),
@@ -348,8 +360,8 @@ mod tests {
         );
         assert_eq!(
             tied.iter().map(|entry| entry.handle).collect::<Vec<_>>(),
-            [6, 8],
-            "every window with the best fit, in listed order"
+            [6, 8, 9],
+            "every window with the best fit, by process and then in listed order"
         );
     }
 
