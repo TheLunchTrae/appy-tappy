@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
+# A template that `mise run winget:manifest` fills in
+# (wiki/developer/Installer.md#winget).
+PackageIdentifier: TheLunchTrae.AppyTappy
+PackageVersion: {{version}}
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.10.0

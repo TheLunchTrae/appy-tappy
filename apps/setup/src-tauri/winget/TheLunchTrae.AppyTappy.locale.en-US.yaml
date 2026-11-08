@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+# A template that `mise run winget:manifest` fills in
+# (wiki/developer/Installer.md#winget).
+PackageIdentifier: TheLunchTrae.AppyTappy
+PackageVersion: {{version}}
+PackageLocale: en-US
+Publisher: Trae Stevens
+PublisherUrl: https://github.com/TheLunchTrae
+PublisherSupportUrl: https://github.com/TheLunchTrae/appy-tappy/issues
+PackageName: AppyTappy
+PackageUrl: https://github.com/TheLunchTrae/appy-tappy
+License: GPL-3.0-only
+LicenseUrl: https://github.com/TheLunchTrae/appy-tappy/blob/main/LICENSE
+Copyright: Copyright (C) 2026 Trae Stevens
+ShortDescription: Runs automations when an application's window reaches a state.
+Description: >-
+  AppyTappy watches a region of another application's window, such as a number or an icon, and runs automations
+  when it reaches a state you set up. It runs in the background from the tray, and AppyTappy Setup is where you set
+  up what it reads and what it does.
+Tags:
+  - automation
+  - tray
+ReleaseNotesUrl: https://github.com/TheLunchTrae/appy-tappy/releases/tag/v{{version}}
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0
