@@ -10,7 +10,7 @@
 //! after asking which process that window belongs to. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
 //! Explorer's open, on a short-lived thread of its own, so a slow program
-//! cannot hold up the action worker for longer than [`OPEN_TIMEOUT`]. A sound
+//! cannot hold up the action worker for longer than 2 seconds. A sound
 //! plays through `PlaySoundW`, which returns once the sound starts.
 //!
 //! The media session manager may not be ready yet, such as right after
