@@ -45,13 +45,13 @@ parts fit.
 - **Saved files.** The files the setup app saves: each application's
   `app.json` with its pictures, and `automations.json`. The runtime reads them
   when it starts and again each time the setup app saves an application, a
-  value, or an automation; saving only an overlay's settings does not tell
-  it. `appytappy-config` calls each one an authoring file.
+  value, a reference, an anti-cheat class, or an automation; saving only an
+  overlay's settings does not tell it. `appytappy-config` calls each one an authoring file.
 - **Session.** One run of an application, from its start to its exit, or until
   the runtime stops it for a pause or a config change. Rule state resets with
   each session.
 - **Setup app.** The program the user opens to discover signals, build rules,
-  and save them.
+  and save its files.
 - **Signal.** A named, typed value an application exposes, such as `progress`
   or `icon_visible`.
 - **Source primitive.** One kind of state reader the runtime ships: memory

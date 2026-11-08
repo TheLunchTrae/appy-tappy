@@ -8,8 +8,8 @@
 //! The file is JSON, so a person can read it and a text diff shows a change.
 //!
 //! [`AppFile::parse`] checks everything in the file alone that the setup app
-//! or a person could get wrong. The pictures it names are read and checked
-//! only when a screen source is built from a value.
+//! or a person could get wrong. It does not read the pictures the file
+//! names; whatever uses them reads and checks them.
 
 use std::collections::BTreeSet;
 use std::error::Error;

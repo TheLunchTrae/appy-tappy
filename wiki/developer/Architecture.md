@@ -21,7 +21,7 @@ on, so it must stay small. Every design choice below follows from that split.
   │ React UI ── Tauri commands ── owner thread              │
   │             windows, capture, values, automations       │
   └───────────────┬──────────────────────────┬──────────────┘
-    reads, writes │                          │ sets after each save
+    reads, writes │                          │ sets after saves the runtime uses
      saved files  ▼                          ▼
           applications, automations    Reload event
                   │ read at start          │
@@ -41,7 +41,8 @@ on, so it must stay small. Every design choice below follows from that split.
 1. The setup app saves each application, with the values drawn on its
    window, and each automation as files. [Setup app](Setup-app.md#saved-files)
    describes them.
-2. After each save it sets the named event `Local\AppyTappy.Reload`.
+2. After each save that changes what the runtime runs, it sets the named event
+   `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
 4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`.
@@ -163,7 +164,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   tried again, and controls that cannot be made are made again when a later
   automation fires (see [Actions](Actions.md#when-the-controls-cannot-start)).
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
-  the setup app sets after each save, and sends `Reload`. The owner reads the
+  the setup app sets after each save that changes what the runtime runs, and
+  sends `Reload`. The owner reads the
   saved applications and automations again. An application whose automations
   did not change keeps running untouched; one whose automations changed starts
   over, undoing what they changed first. An automation that cannot run, such
@@ -457,7 +459,9 @@ design enforces the block in four places:
 3. For rules and actions, parsing and validation produce different types.
    Reading `automations.json` gives `AutomationDef` and `ActionDef`, which the
    engine and the action worker do not accept; only `AutomationDef::to_rule`
-   in `config` turns them into a `Rule` and its `Action`s. `Rule` has private
+   and `ActionDef::to_action` in `config` turn them into a `Rule` and its
+   `Action`s, and `check_against` uses `ActionDef::to_action` to find a key
+   press. `Rule` has private
    fields, an action's values such as a key chord or a volume level are types
    that only their checked constructors make, and neither has `Deserialize` or
    `Default`, so code that skips validation does not compile. The screen
@@ -617,5 +621,5 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   its window forward would also need a message between the two processes.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
   many random inputs to check a property. `appytappy-sources` uses it to check
-  that a picture written as a PNG file reads back the same. The standards
+  that a picture encoded as PNG decodes back the same. The standards
   require it at trust boundaries such as file formats.
