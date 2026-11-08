@@ -6,8 +6,9 @@
 //! Volumes come from Core Audio on the default playback device. Naming an
 //! audio session's app takes the process lister the caller hands the
 //! controls, which must not open a process, so no action opens a watched
-//! app's process. Key presses go through `SendInput`, which types into whichever window has the keyboard focus,
-//! after asking which process that window belongs to. Opening a program,
+//! app's process. Key presses go through `SendInput`, which types into
+//! whichever window has the keyboard focus, after asking which process that
+//! window belongs to. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
 //! Explorer's open, on a short-lived thread of its own, so a slow program
 //! cannot hold up the action worker for longer than 2 seconds; while an open
