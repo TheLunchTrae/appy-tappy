@@ -45,7 +45,9 @@ on, so it must stay small. Every design choice below follows from that split.
    `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
-4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`.
+4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`, and
+   keeps the tray's last Enabled choice in
+   `%LOCALAPPDATA%\AppyTappy\enabled.txt`.
 
 Apart from that one event, the two programs share only files: no sockets,
 pipes, or shared memory. The runtime reads the same files the setup app saves;
@@ -73,7 +75,7 @@ crates/
 
 | Crate                | Platform | Depends on                                           | Used by        |
 | -------------------- | -------- | ---------------------------------------------------- | -------------- |
-| `appytappy-config`   | any      | `serde`, `serde_json`                                | setup, runtime |
+| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)        | setup, runtime |
 | `appytappy-engine`   | any      | `config`                                             | setup, runtime |
 | `appytappy-sources`  | Windows  | `config`, `windows`                                  | setup, runtime |
 | `appytappy-actions`  | Windows  | `config`, `windows`                                  | runtime        |
@@ -380,8 +382,9 @@ Right-clicking it opens a small menu:
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
   fire, the readers stop, and what the automations changed is undone, but
   detection keeps running, so turning it back on finds the applications
-  already attached. The runtime starts enabled, and the setting is
-  not kept across restarts.
+  already attached. The runtime starts enabled, unless the settings'
+  `rememberEnabled` is true; then it starts as the tray last left it, as
+  [Files and handoff](#files-and-handoff) describes.
 - **Active automations.** A submenu that lists, by name, the automations that
   run now: those of the attached applications, while automations are on. With
   none, it shows a grayed `None`.
@@ -530,9 +533,10 @@ changing.
   [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6). The runtime and
   the setup app tell which build of an application runs, as [Build
   detection](#build-detection) describes.
-- A **rule** says when to act: a trigger on signals or application events, with
-  conditions, a cooldown, and re-arming. The engine evaluates rules as a pure
-  function with no I/O, so its tests need no application and no Windows.
+- A **rule** says when to act: a condition on signals that fires it when it
+  starts to hold, actions, a cooldown, and whether to restore. The engine
+  evaluates rules as a pure function with no I/O, so its tests need no
+  application and no Windows.
   [Rules](Rules.md) describes the model.
 - An **action** is a side effect from a fixed set, such as pausing media or
   setting an app's volume. The engine emits action requests; only the action
@@ -551,8 +555,8 @@ changing.
     [Setup app](Setup-app.md#saved-files) describes each file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
-    describes, the runtime's log in `logs\`, and the
-    [runtime trace](Trace.md)'s files in `traces\`.
+    describes, the runtime's log in `logs\`, the
+    [runtime trace](Trace.md)'s files in `traces\`, and `enabled.txt`.
 - **Writing.** Only the setup app writes the saved files, through
   `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
   file beside the old one, is flushed to disk with `sync_all`, and is renamed
@@ -563,6 +567,20 @@ changing.
   for a moment, so a failed rename is tried again a few times, as
   `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
   setup app shows the error.
+- **The enabled file.** The runtime writes one file of its own,
+  `enabled.txt`, through `EnabledStore` in the same module and in the same
+  way. It holds one line, `on` or `off`: what the user last picked from the
+  tray's Enabled item. The owner writes it on each pick, whatever the
+  settings say, so turning `rememberEnabled` on while the runtime runs
+  remembers the picks that follow. A file that cannot be written is logged,
+  and the pick still applies. The owner reads it once, when the settings
+  first read, even on a retry, and only when they say `rememberEnabled` and
+  the user has not picked from the tray in this run; settings read later
+  leave the state to the tray. Only `off` means disabled: a file that is
+  missing, cannot be read, or holds anything else means enabled. The tray
+  starts before that first read and gets a fresh menu after it, so its check
+  mark shows the state the runtime starts in. Quitting disables automations
+  to undo them, but that is not a pick and writes nothing.
 - **Reloading.** After each save of an application, a value, a reference, an
   anti-cheat class, a checked build, an automation, or the settings that
   works, the setup app sets the named event `Local\AppyTappy.Reload`, and the
@@ -574,15 +592,17 @@ changing.
   panel also write `app.json`, but they do not set the event, because the
   runtime does not use the overlay. A runtime that is not running reads the
   files when it starts, so the setup app ignores a failure to set the event.
-- **Reading.** The runtime reads the files with the same `config` code the
-  setup app uses, and checks everything again before use, because the files
-  are outside its control and a person can edit them by hand. Each `app.json`
-  must parse and pass `AppFile::parse`'s checks, each automation must pass
-  `AutomationsFile::problem` on its own and `AutomationDef::check_against`
-  against the saved applications, and each value it watches must build a
-  check from its pictures. `apps/runtime/src/plan.rs` turns what passes into
-  the plan the runtime runs, in memory; nothing it builds is written to disk.
-  An automation that fails a check is logged and left out, and the rest run.
+- **Reading.** The runtime reads the files with the same `config` code the setup
+  app uses, and checks everything again before use, because the files are
+  outside its control and a person can edit them by hand. Each `app.json` must
+  parse and pass `AppFile::parse`'s checks, which cover the file as a whole,
+  each automation must pass `AutomationDef::compile` against the saved
+  applications, and each value it watches must pass `saved::build` with its
+  pictures. Saving a value in the setup app calls `saved::build`, and saving an
+  automation calls `compile` and builds the value it watches, so what saves is
+  what runs. `apps/runtime/src/plan.rs` turns what passes into the plan the
+  runtime runs, in memory; nothing it builds is written to disk. An automation
+  or a value that fails a check is logged and left out, and the rest run.
 - **Format.** `app.json`, `automations.json`, and `settings.json` each carry a
   `format` number, and the `FORMAT` constant in `app_file.rs`,
   `automation_file.rs`, and `settings_file.rs` sets the one version this build
@@ -612,23 +632,25 @@ design enforces the block in three places:
 
 1. The setup app refuses to save or turn on an automation whose actions the
    application's class blocks. The one blocked item the saved files can hold
-   is a key press action, which `AutomationDef::check_against` refuses unless
-   the class is `none`.
+   is a key press action, which `AutomationDef::compile` refuses unless the
+   class is `none`.
 2. The runtime runs the same check each time it reads the saved files, so an
    automation that a hand edit or a later change to the application's class
    made blocked does not run.
 3. For rules and actions, parsing and validation produce different types.
    Reading `automations.json` gives `AutomationDef` and `ActionDef`, which the
-   engine and the action worker do not accept; only `AutomationDef::to_rule`
+   engine and the action worker do not accept; only `AutomationDef::compile`
    and `ActionDef::to_action` in `config` turn them into a `Rule` and its
-   `Action`s, and `check_against` uses `ActionDef::to_action` to find a key
-   press. `Rule` has private
+   `Action`s, and `compile` reads the rule's actions to find a key press.
+   `Rule` has private
    fields, an action's values such as a key chord or a volume level are types
    that only their checked constructors make, and neither has `Deserialize` or
    `Default`, so code that skips validation does not compile. The screen
    source has no such split: `saved::build` in `appytappy-sources` takes the
    raw `ScreenDef` and `ReferenceDef` from `app.json` and checks them as it
-   builds the check it reads with.
+   builds the check it reads with. It is the one owner of the rules for a
+   readable value, such as a state check's states, so one value that breaks
+   them stops only itself.
 
 Nothing in AppyTappy opens another application's process. [Build
 detection](#build-detection) reads only the executable file, and process and
@@ -649,8 +671,9 @@ closure that calls one of the owner's methods, with a `tokio::sync::oneshot`
 reply channel, and awaits the reply, so a slow capture or save never freezes
 the window. A new command is a method on the owner, a command in `commands.rs`
 that calls it, its name in `generate_handler!` in `main.rs`, and its call in
-the UI's `api.ts`. The AI-assisted discovery flow belongs to
-[#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
+the UI's `api.ts`, whose types the setup app generates
+([Page types](Setup-app.md#page-types)). The AI-assisted discovery flow
+belongs to [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
 
 How Tauri compares with the alternatives:
 
@@ -755,6 +778,11 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
 
 - **[`serde`](https://serde.rs/).** Converts Rust types to and from data
   formats. Every format crate builds on it.
+- **[`ts-rs`](https://docs.rs/ts-rs).** Writes TypeScript declarations of
+  Rust types from their serde attributes, so the setup app's page cannot
+  drift from the JSON the Rust side sends and reads, which hand-written types
+  did. `appytappy-config` takes it only behind its `ts` feature, which only
+  the setup app's tests turn on, so neither program ships it.
 - **[`serde_json`](https://docs.rs/serde_json).** JSON support for `serde`;
   the encoding of the saved files.
 - **[`windows`](https://github.com/microsoft/windows-rs).** Microsoft's

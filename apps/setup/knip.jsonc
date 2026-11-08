@@ -3,4 +3,7 @@
   "entry": ["src/main.tsx", "tests/**/*.test.ts"],
   "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts"],
   "includeEntryExports": true,
+  // The setup app's bindings test writes every type its commands reach, so
+  // some are only parts of others.
+  "ignoreIssues": { "src/lib/bindings.ts": ["types"] },
 }

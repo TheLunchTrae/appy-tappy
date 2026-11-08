@@ -1,16 +1,11 @@
 import { useRef, useState } from 'react';
 
+import type { AntiCheatDef, AppSummary, OverlayModeDef } from '../lib/bindings.ts';
 import { Question, useQuestion } from '../components/Question.tsx';
-import {
-  type AntiCheat,
-  type AppSummary,
-  type OverlayMode,
-  errorText,
-  removeApp,
-  setAntiCheat,
-  setOverlay,
-} from '../lib/api.ts';
+import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
+import { Hint } from '../components/Hint.tsx';
 import { ANTI_CHEAT_NAMES } from '../lib/describe.ts';
+import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
 
@@ -18,14 +13,14 @@ import { background } from '../lib/repeat.ts';
  * The anti-cheat menu's choices: not set first, since every application starts there, and none last,
  * so stepping through the menu with the arrow keys reaches every other choice before the one that asks.
  */
-const ANTI_CHEAT_CHOICES: readonly AntiCheat[] = ['unknown', 'userMode', 'kernelLevel', 'none'];
+const ANTI_CHEAT_CHOICES: readonly AntiCheatDef[] = ['unknown', 'userMode', 'kernelLevel', 'none'];
 
 interface AntiCheatCellProps {
   readonly name: string;
-  readonly antiCheat: AntiCheat;
+  readonly antiCheat: AntiCheatDef;
   readonly confirming: boolean;
   readonly onConfirm: (confirming: boolean) => void;
-  readonly onSet: (antiCheat: AntiCheat) => void;
+  readonly onSet: (antiCheat: AntiCheatDef) => void;
   /** Whether a change is saving, which locks the question's answers. */
   readonly busy: boolean;
 }
@@ -81,7 +76,7 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: 
 }
 
 /** The overlay menu's choices: off, or one of the two places the readings show. */
-type OverlayChoice = 'off' | OverlayMode;
+type OverlayChoice = 'off' | OverlayModeDef;
 
 const OVERLAY_NAMES: Readonly<Record<OverlayChoice, string>> = {
   off: 'Off',
@@ -92,7 +87,9 @@ const OVERLAY_NAMES: Readonly<Record<OverlayChoice, string>> = {
 const OVERLAY_CHOICES: readonly OverlayChoice[] = ['off', 'overlay', 'pictureInPicture'];
 
 /** The overlay menu's choice for a saved overlay setting. */
-function overlayChoice(overlay: { readonly enabled: boolean; readonly mode: OverlayMode } | undefined): OverlayChoice {
+function overlayChoice(
+  overlay: { readonly enabled: boolean; readonly mode: OverlayModeDef } | undefined,
+): OverlayChoice {
   return overlay?.enabled === true ? overlay.mode : 'off';
 }
 
@@ -170,7 +167,7 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
   // The application whose anti-cheat is saving.
   const [settingAntiCheat, setSettingAntiCheat] = useState<string | null>(null);
 
-  const set = async (app: string, antiCheat: AntiCheat): Promise<void> => {
+  const set = async (app: string, antiCheat: AntiCheatDef): Promise<void> => {
     setSettingAntiCheat(app);
     try {
       await setAntiCheat(app, antiCheat);
@@ -198,7 +195,7 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
     }
   };
 
-  const changeOverlay = async (app: string, choice: OverlayChoice, kept: OverlayMode): Promise<void> => {
+  const changeOverlay = async (app: string, choice: OverlayChoice, kept: OverlayModeDef): Promise<void> => {
     try {
       // Turning it off keeps the mode, so turning it on again shows it where it was.
       setSetError(await (choice === 'off' ? setOverlay(app, false, kept) : setOverlay(app, true, choice)));
@@ -255,8 +252,18 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
             <tr>
               <th scope="col">Application</th>
               <th scope="col">Found by</th>
-              <th scope="col">Anti-cheat</th>
-              <th scope="col">Overlay</th>
+              <th scope="col" aria-label="Anti-cheat">
+                <span className="with-hint">
+                  Anti-cheat
+                  <Hint topic="Anti-cheat">{ANTI_CHEAT_HINT}</Hint>
+                </span>
+              </th>
+              <th scope="col" aria-label="Overlay">
+                <span className="with-hint">
+                  Overlay
+                  <Hint topic="Overlay">{OVERLAY_HINT}</Hint>
+                </span>
+              </th>
               <th scope="col">Running</th>
               <th scope="col">
                 <span className="visually-hidden">Change</span>

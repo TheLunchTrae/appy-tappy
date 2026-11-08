@@ -55,19 +55,25 @@ stateDiagram-v2
 ```
 
 - **Starting.** The window events hook starts first, and the runtime exits if
-  it cannot. Then the tray and the reload watch start. Each of those two is
-  optional: the runtime logs why it cannot make one and runs without it. Then
-  the saved files are read, and the lifecycle and action threads start. If
-  either cannot start, the runtime stops what it started and exits with the
-  error. A first read that fails starts with an empty plan and reads again, as
+  it cannot. Then the tray and the reload watch start, and the saved files are
+  read. The tray gets a fresh menu after that read, so its check mark shows
+  whether automations start enabled. The reload watch and the tray are
+  optional: the runtime logs why it cannot make one and runs without it. A
+  pick from the tray during the first read waits for the owner and applies
+  after it. Then the lifecycle and action threads start. If either cannot
+  start, the runtime stops what it started and exits with the error. A first
+  read that fails starts with an empty plan and reads again, as
   [Reload watch](#reload-watch) describes.
-- **Running.** Each event becomes a `Step`: `Carry` some orders, `Reload` the
-  saved files, or `Stop`. The owner waits for its next event only until the
-  first of two times (`wake`): when a rule that its cooldown held back is due,
-  and when it reads the saved files again after a read failed. Either time
-  sends it `Due`, whose step rechecks the held rules and, once the retry is
-  due, reads the saved files again. With neither, it waits with no limit.
-  After each step the tray gets a fresh menu if it changed.
+- **Running.** Each event becomes a `Step`: `Carry` some orders, `Picked`
+  when the user picked Enable or Disable from the tray, which carries its
+  orders too and sets `picked` (see [Reload watch](#reload-watch)), `Reload`
+  the saved files, `TraceFailed`, or `Stop`. The owner waits for its next
+  event only until the first of two times (`wake`): when a rule that its
+  cooldown held back is due, and when it reads the saved files again after a
+  read failed. Either time sends it `Due`, whose step rechecks the held rules
+  and, once the retry is due, reads the saved files again. With neither, it
+  waits with no limit. After each step the tray gets a fresh menu if it
+  changed.
 - **Undoing.** `model.set_enabled(false)` stops every running application and
   queues the undo of what its automations changed. The owner then drops the
   job sender and joins the action thread, which runs the queued undos before
@@ -142,7 +148,9 @@ The model (`apps/runtime/src/model.rs`) has no run state type. An application's
 automations run while all of these hold:
 
 - It is in `attached`: detection found its process.
-- `enabled` is true: automations are on in the tray.
+- `enabled` is true: automations are on in the tray. It starts true, or as
+  the tray last left it when the settings remember that, as
+  [Files and handoff](Architecture.md#files-and-handoff) describes.
 - The plan has automations for it.
 
 When they all hold, the application has an entry in `running`, with its engine
@@ -161,13 +169,12 @@ stateDiagram-v2
     Attached --> Detached: Exited
 ```
 
-- **Running to Attached or Detached.** The engine session is stopped or ended,
+- **Running to Attached or Detached.** The engine session is stopped,
   which releases every rule that restores. The reader is stopped.
 - **A reload that changes what it runs.** `replan` compares each plan's
   `Runs`: its window match, its values' checks and its rules. When they
   differ, the application stops, which undoes what its automations changed,
-  and starts again with `Start::Resume`. A resumed session fires no `Started`
-  rules, because those already ran.
+  and starts again in a new session.
 - **A reload that changes only names.** When only the plan's `Labels` differ,
   its names or the build its values were checked against, the session keeps running
   and takes the new plan, so the log and the tray use the new names. The
@@ -332,9 +339,7 @@ ends the number at its point, so `87.5%` reads as 87. A region with more than
 ### Rule state
 
 Each rule in an engine session (`crates/engine/src/lib.rs`) has a `RuleState`
-of three fields: `armed`, `active`, and `last_fired`. Saved automations make
-`Becomes` rules that re-arm when their condition is false, so this is the
-machine that saved automations use.
+of three fields: `armed`, `active`, and `last_fired`.
 
 ```mermaid
 stateDiagram-v2
@@ -352,12 +357,10 @@ stateDiagram-v2
 - **Held** is not a field: it is a rule that is `armed`, whose condition holds
   on the values the session has, and whose cooldown from `last_fired` has not
   passed.
-- A rule whose re-arm is `Never` is released when its condition turns false but
-  stays disarmed for the rest of the session.
 - In one sample, releases run before fires, so a restore never undoes a change
   another rule makes on the same value.
-- A session that ends or stops releases every active rule. One that ends
-  because the application exited then fires the `Exited` rules.
+- A session that stops, because the application exited or its automations
+  stop running, releases every active rule.
 - The engine runs when a sample of any of the session's values arrives, and
   at the end of a held rule's cooldown. A value that holds still sends no
   sample, so `Session::next_due` gives the earliest time a held rule's
@@ -468,23 +471,32 @@ and sends `Reload` each time the setup app sets it. Several saves before the
 reload watch wakes become one reload. `read_saved` reads the settings first,
 gives the model their read interval, and starts, keeps, or stops the trace as
 [Runtime trace](#runtime-trace) describes, so the readers that `replan` starts
-read at the new interval and record to the new trace. It then reads the saved applications and automations; when they read,
-the owner sends detection the new watchlist and `replan` switches to their
-plan. Last, `restart_readers` starts over the readers the plan kept running at
-the old interval or with the old trace, so no reader starts twice. When either read fails, such as
-while another program holds a file, the owner keeps what it has (the plan, or
-the settings, or the defaults when they never read) and reads the files that
+read at the new interval and record to the new trace. It then reads the saved
+applications and automations; when they read, the owner sends detection the
+new watchlist and `replan` switches to their plan. Last, `restart_readers`
+starts over the readers the plan kept running at the old interval or with the
+old trace, so no reader starts twice. When either read fails, such as while
+another program holds a file, the owner keeps what it has (the plan, or the
+settings, or the defaults when they never read) and reads the files that
 failed again, and only those. Its state is `Reloads`: `retry`, an optional
 `Retry` with a time and the tries left; `failing`, which files the try reads;
-and `had` and `had_settings`, whether each read has worked yet.
+`had` and `had_settings`, whether each read has worked yet; and `picked`,
+whether the user picked Enable or Disable from the tray in this run.
+
+The first settings read that works, even on a retry late in the run, applies
+the remembered state when `rememberEnabled` is on: automations become enabled
+or disabled as the tray last left them, as `enabled.txt` keeps it. That read
+applies nothing once the user picked from the tray in this run, so it never
+reverses a pick. Settings read after the first that worked apply no remembered
+state either, whatever `rememberEnabled` says.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Current: the first read works
+    [*] --> Current: the first read works and applies any remembered state
     [*] --> Retrying: the first read fails, so nothing runs, or the settings are the defaults
     Current --> Current: a save, and the read works
     Current --> Retrying: a save, and the read fails, so the plan keeps running
-    Retrying --> Current: a save or a try reads the files
+    Retrying --> Current: a save or a try reads; a pick beats remembered state
     Retrying --> Retrying: a try fails with tries left, or a save starts the tries over
     Retrying --> Waiting: the fifth try fails
     Waiting --> Current: a save, and the read works

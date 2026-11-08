@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { type AppSummary, type WindowChoice, type WindowList, errorText, listWindows, pickWindow } from '../lib/api.ts';
+import type { AppSummary, WindowChoice, WindowList } from '../lib/bindings.ts';
+import { errorText, listWindows, pickWindow } from '../lib/api.ts';
 import { pickedStatus } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
 import { WindowsPanel, useWindowFits } from './WindowsPanel.tsx';

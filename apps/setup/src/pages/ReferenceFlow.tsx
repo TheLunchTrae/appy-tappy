@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
-import { type AppSummary, type ReferenceDef, stopCapture } from '../lib/api.ts';
+import type { AppSummary, ReferenceDef } from '../lib/bindings.ts';
+import { stopCapture } from '../lib/api.ts';
 import { Capture, type CaptureMode } from '../components/Capture.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
 import { background } from '../lib/repeat.ts';

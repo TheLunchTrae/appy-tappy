@@ -1,4 +1,4 @@
-//! Rules: when to act on an app's signals and events.
+//! Rules: when to act on an app's signals.
 //!
 //! These are validated types. The constructors check every invariant, so the
 //! engine never meets a malformed rule. `wiki/developer/Rules.md` explains the model.
@@ -192,91 +192,33 @@ fn compares(current: &Value, comparison: Comparison, expected: &Value) -> bool {
     })
 }
 
-/// Something that happens to an app as a whole.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppEvent {
-    /// The app started; its first window appeared.
-    Started,
-    /// The app exited.
-    Exited,
-    /// An app window gained the keyboard focus.
-    Focused,
-    /// The app's windows lost the keyboard focus.
-    Unfocused,
-}
-
-/// When a [`Trigger::Becomes`] rule may fire again after it fired.
-///
-/// A rule re-arms only while its own condition does not hold, so it never
-/// fires twice for one stretch of holding. Re-arming also releases it.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Rearm {
-    /// Once its condition stops holding.
-    WhenFalse,
-    /// Once its condition stops holding and this other condition holds, such
-    /// as a progress value falling back near zero. A value that wavers
-    /// around the trigger's threshold then neither fires the rule again nor
-    /// releases it.
-    When(Condition),
-    /// Not until the app starts again: once per app session. The rule is
-    /// released when its condition stops holding.
-    Never,
-}
-
-/// What makes a rule fire.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Trigger {
-    /// Fires when `condition` starts to hold, including on the first values
-    /// that make it hold.
-    Becomes {
-        /// The condition to watch.
-        condition: Condition,
-        /// When the rule may fire again.
-        rearm: Rearm,
-    },
-    /// Fires when a new value of `signal` differs from its last value. The
-    /// first value an app session reads is not a change.
-    Changes {
-        /// The signal to watch.
-        signal: SignalName,
-        /// A condition that must also hold, if any.
-        guard: Option<Condition>,
-    },
-    /// Fires when `event` happens.
-    On {
-        /// The event to watch.
-        event: AppEvent,
-        /// A condition that must also hold, if any. A
-        /// [`AppEvent::Started`] trigger takes none, because no signal has
-        /// a value yet.
-        guard: Option<Condition>,
-    },
-}
-
 /// Whether a rule's paired actions restore what they changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Restore {
     /// The changes stay.
     Never,
-    /// The changes are undone when the rule is released: when a
-    /// [`Trigger::Becomes`] rule re-arms (see [`Rearm`]), when the opposite
-    /// focus event of a focus trigger happens, or when the session ends.
+    /// The changes are undone when the rule is released: when its
+    /// condition stops holding, or when the session ends.
     OnRelease,
 }
 
-/// When to act and what to do: a trigger, the actions to run in order, a
+/// When to act and what to do: a condition, the actions to run in order, a
 /// cooldown, and whether to restore.
+///
+/// A rule fires when its condition starts to hold, including on the first
+/// values that make it hold, and may fire again once the condition has
+/// stopped holding, so it fires once for each stretch of holding.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rule {
-    trigger: Trigger,
+    condition: Condition,
     actions: Box<[Action]>,
     cooldown: Duration,
     restore: Restore,
 }
 
 impl Rule {
-    /// Builds a rule that runs `actions` in order when it fires. After it
-    /// fires, it cannot fire again until `cooldown` has passed.
+    /// Builds a rule that runs `actions` in order when `condition` starts to
+    /// hold. After it fires, it cannot fire again until `cooldown` has passed.
     ///
     /// # Errors
     ///
@@ -284,16 +226,8 @@ impl Rule {
     /// - [`RuleError::NothingToRestore`] when `restore` is
     ///   [`Restore::OnRelease`] and no action changes anything that can be put
     ///   back, such as a rule that only skips tracks.
-    /// - [`RuleError::NothingToRelease`] when `restore` is
-    ///   [`Restore::OnRelease`] for a trigger that is never released: a
-    ///   [`Trigger::Changes`] trigger or an [`AppEvent::Exited`] trigger.
-    /// - [`RuleError::GuardNeverHolds`] for a guard on a
-    ///   [`AppEvent::Started`] trigger, because no signal has a value then.
-    /// - [`RuleError::CooldownDropsFocus`] for a focus trigger that restores
-    ///   and has a cooldown: a focus event during the cooldown is lost, so the
-    ///   rule would stay released while the focus says it should be active.
     pub fn new(
-        trigger: Trigger,
+        condition: Condition,
         actions: Box<[Action]>,
         cooldown: Duration,
         restore: Restore,
@@ -301,38 +235,21 @@ impl Rule {
         if actions.is_empty() {
             return Err(RuleError::NoActions);
         }
-        let restores = restore == Restore::OnRelease;
-        if restores && !actions.iter().any(Action::restorable) {
+        if restore == Restore::OnRelease && !actions.iter().any(Action::restorable) {
             return Err(RuleError::NothingToRestore);
         }
-        match &trigger {
-            Trigger::Changes { .. }
-            | Trigger::On {
-                event: AppEvent::Exited,
-                ..
-            } if restores => return Err(RuleError::NothingToRelease),
-            Trigger::On {
-                event: AppEvent::Started,
-                guard: Some(_),
-            } => return Err(RuleError::GuardNeverHolds),
-            Trigger::On {
-                event: AppEvent::Focused | AppEvent::Unfocused,
-                ..
-            } if restores && !cooldown.is_zero() => return Err(RuleError::CooldownDropsFocus),
-            Trigger::Becomes { .. } | Trigger::Changes { .. } | Trigger::On { .. } => {},
-        }
         Ok(Self {
-            trigger,
+            condition,
             actions,
             cooldown,
             restore,
         })
     }
 
-    /// What makes the rule fire.
+    /// The condition whose start of holding fires the rule.
     #[must_use]
-    pub const fn trigger(&self) -> &Trigger {
-        &self.trigger
+    pub const fn condition(&self) -> &Condition {
+        &self.condition
     }
 
     /// The actions to run, in order, when the rule fires.
@@ -368,13 +285,6 @@ pub enum RuleError {
     NoActions,
     /// The rule restores on release, but none of its actions can be undone.
     NothingToRestore,
-    /// The rule restores on release, but its trigger is never released.
-    NothingToRelease,
-    /// A start trigger had a guard, which can never hold.
-    GuardNeverHolds,
-    /// A focus trigger that restores had a cooldown, which would lose focus
-    /// events.
-    CooldownDropsFocus,
 }
 
 impl fmt::Display for RuleError {
@@ -393,14 +303,6 @@ impl fmt::Display for RuleError {
             Self::NoActions => formatter.write_str("a rule needs an action"),
             Self::NothingToRestore => formatter.write_str(
                 "none of this rule's actions can be undone, so it cannot restore what it changed",
-            ),
-            Self::NothingToRelease => formatter.write_str(
-                "this trigger is never released, so its rule cannot restore what it changed",
-            ),
-            Self::GuardNeverHolds => formatter
-                .write_str("a start trigger cannot have a guard, because no signal has a value yet"),
-            Self::CooldownDropsFocus => formatter.write_str(
-                "a focus rule that restores cannot have a cooldown, because it would lose focus events",
             ),
         }
     }
@@ -619,93 +521,28 @@ mod tests {
     }
 
     #[test]
-    fn only_released_triggers_restore() {
-        let becomes = Trigger::Becomes {
-            condition: progress(Comparison::AtLeast, 90.0),
-            rearm: Rearm::WhenFalse,
-        };
-        let changes = Trigger::Changes {
-            signal: name("progress"),
-            guard: None,
-        };
-        let on = |event| Trigger::On { event, guard: None };
-        for trigger in [
-            becomes,
-            on(AppEvent::Started),
-            on(AppEvent::Focused),
-            on(AppEvent::Unfocused),
-        ] {
-            assert!(Rule::new(trigger, pause(), Duration::ZERO, Restore::OnRelease).is_ok());
-        }
-        let guard = Some(progress(Comparison::AtLeast, 0.0));
-        assert_eq!(
-            Rule::new(
-                Trigger::On {
-                    event: AppEvent::Started,
-                    guard: guard.clone()
-                },
-                pause(),
-                Duration::ZERO,
-                Restore::Never
-            ),
-            Err(RuleError::GuardNeverHolds)
-        );
-        assert!(
-            Rule::new(
-                Trigger::On {
-                    event: AppEvent::Exited,
-                    guard
-                },
-                pause(),
-                Duration::ZERO,
-                Restore::Never
-            )
-            .is_ok()
-        );
-        let second = Duration::from_secs(1);
-        for event in [AppEvent::Focused, AppEvent::Unfocused] {
-            assert_eq!(
-                Rule::new(on(event), pause(), second, Restore::OnRelease),
-                Err(RuleError::CooldownDropsFocus)
-            );
-            assert!(Rule::new(on(event), pause(), second, Restore::Never).is_ok());
-        }
-        assert!(Rule::new(on(AppEvent::Started), pause(), second, Restore::OnRelease).is_ok());
-        for trigger in [changes, on(AppEvent::Exited)] {
-            assert_eq!(
-                Rule::new(trigger.clone(), pause(), Duration::ZERO, Restore::OnRelease),
-                Err(RuleError::NothingToRelease)
-            );
-            assert!(Rule::new(trigger, pause(), Duration::ZERO, Restore::Never).is_ok());
-        }
-    }
-
-    #[test]
     fn a_rule_needs_actions_and_something_to_restore() {
-        let trigger = || Trigger::On {
-            event: AppEvent::Focused,
-            guard: None,
-        };
+        let condition = || progress(Comparison::AtLeast, 90.0);
         assert_eq!(
-            Rule::new(trigger(), Box::new([]), Duration::ZERO, Restore::Never),
+            Rule::new(condition(), Box::new([]), Duration::ZERO, Restore::Never),
             Err(RuleError::NoActions)
         );
         for command in [MediaCommand::Next, MediaCommand::Previous] {
             assert_eq!(
                 Rule::new(
-                    trigger(),
+                    condition(),
                     media(command),
                     Duration::ZERO,
                     Restore::OnRelease
                 ),
                 Err(RuleError::NothingToRestore)
             );
-            assert!(Rule::new(trigger(), media(command), Duration::ZERO, Restore::Never).is_ok());
+            assert!(Rule::new(condition(), media(command), Duration::ZERO, Restore::Never).is_ok());
         }
         let mut actions = media(MediaCommand::Next).into_vec();
         actions.extend(pause());
         let rule = Rule::new(
-            trigger(),
+            condition(),
             actions.clone().into(),
             Duration::ZERO,
             Restore::OnRelease,

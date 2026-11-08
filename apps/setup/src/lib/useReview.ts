@@ -2,7 +2,8 @@
 
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type RecordedLabel, type RecordingView, type ReferenceRef, errorText, reviewProblems } from './api.ts';
+import type { RecordedLabel, RecordingView, ReferenceRef } from './bindings.ts';
+import { errorText, reviewProblems } from './api.ts';
 import { type Draft, reviewSpec } from './check.ts';
 import { type ReviewEntry, editAll, entries, flaggedReadings, keepBlocked, keptLabels } from './review.ts';
 

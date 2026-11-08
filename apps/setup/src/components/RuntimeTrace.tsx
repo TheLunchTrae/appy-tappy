@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react';
 
+import { LIMITS, type SettingsFile, TRACE_CATEGORIES, type TraceCategory } from '../lib/bindings.ts';
 import { errorText } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
 import {
-  MAX_TRACE_FILE_MB,
-  MAX_TRACE_FILES,
-  type Settings,
-  TRACE_CATEGORIES,
-  type TraceCategory,
   type TraceLength,
   openTraceFolder,
   traceEnd,
@@ -16,6 +12,8 @@ import {
   useSettings,
   withCategory,
 } from '../lib/settings.ts';
+import { TRACE_HINT } from '../lib/hints.ts';
+import { Hint } from './Hint.tsx';
 import { NumberSetting } from './NumberSetting.tsx';
 
 /** Each category's name and what it records. */
@@ -170,7 +168,7 @@ export function RuntimeTrace() {
   const recording = traceRecords(trace, now);
   const [length, setLength] = useState<TraceLength>(() => firstLength(trace.on, trace.until));
   const [error, setError] = useState<string | null>(null);
-  const save = (update: (current: Settings) => Settings | { readonly problem: string }): void => {
+  const save = (update: (current: SettingsFile) => SettingsFile | { readonly problem: string }): void => {
     change(update).then(
       (problem) => {
         setError(problem);
@@ -198,7 +196,10 @@ export function RuntimeTrace() {
       <h2 id="settings-trace">Runtime trace</h2>
       <div className="set-row">
         <div className="what">
-          <span id="trace-on">Record a runtime trace</span>
+          <span className="with-hint">
+            <span id="trace-on">Record a runtime trace</span>
+            <Hint topic="Runtime trace">{TRACE_HINT}</Hint>
+          </span>
           <span className="note" id="trace-on-note">
             Writes what the runtime reads and does, with timings, to a file for measuring how fast it responds.
             Recording makes the runtime do a little more work.
@@ -294,8 +295,8 @@ export function RuntimeTrace() {
         unit="MB"
         saved={trace.fileLimitMb}
         min={1}
-        max={MAX_TRACE_FILE_MB}
-        invalid={`A trace file must hold between 1 and ${MAX_TRACE_FILE_MB} MB.`}
+        max={LIMITS.maxTraceFileMb}
+        invalid={`A trace file must hold between 1 and ${LIMITS.maxTraceFileMb} MB.`}
         update={(current, fileLimitMb) => ({ ...current, trace: { ...current.trace, fileLimitMb } })}
       />
       <NumberSetting
@@ -305,8 +306,8 @@ export function RuntimeTrace() {
         unit="files"
         saved={trace.keepFiles}
         min={1}
-        max={MAX_TRACE_FILES}
-        invalid={`Keep between 1 and ${MAX_TRACE_FILES} trace files.`}
+        max={LIMITS.maxTraceFiles}
+        invalid={`Keep between 1 and ${LIMITS.maxTraceFiles} trace files.`}
         update={(current, keepFiles) => ({ ...current, trace: { ...current.trace, keepFiles } })}
       />
       <TraceFolder />

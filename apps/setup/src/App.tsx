@@ -4,11 +4,10 @@ import {
   type AppSummary,
   type AutomationDef,
   type AutomationSummary,
-  errorText,
-  listApps,
-  listAutomations,
-  syncOverlays,
-} from './lib/api.ts';
+  DEFAULT_SETTINGS,
+  type SettingsFile,
+} from './lib/bindings.ts';
+import { errorText, listApps, listAutomations, syncOverlays } from './lib/api.ts';
 import { Question, useQuestion } from './components/Question.tsx';
 import { UpdateNotice } from './components/UpdateNotice.tsx';
 import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
@@ -22,8 +21,6 @@ import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
 import {
-  DEFAULT_SETTINGS,
-  type Settings,
   SettingsContext,
   type SettingsHandle,
   type SettingsUpdate,
@@ -82,10 +79,10 @@ export function App() {
   const [automations, setAutomations] = useState<readonly AutomationSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<SettingsFile>(DEFAULT_SETTINGS);
   const [settingsProblem, setSettingsProblem] = useState<string | null>(null);
   // The saved settings as the last save left them, and the changes still to run, one after another, after the load.
-  const savedSettings = useRef<Settings>(DEFAULT_SETTINGS);
+  const savedSettings = useRef<SettingsFile>(DEFAULT_SETTINGS);
   const [settingsLoad] = useState(() => Promise.withResolvers<undefined>());
   const settingsQueue = useRef<Promise<unknown>>(settingsLoad.promise);
   useEffect(() => {

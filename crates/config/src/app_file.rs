@@ -7,9 +7,10 @@
 //! folder.
 //! The file is JSON, so a person can read it and a text diff shows a change.
 //!
-//! [`AppFile::parse`] checks everything in the file alone that the setup app
-//! or a person could get wrong. It does not read the pictures the file
-//! names; whatever uses them reads and checks them.
+//! [`AppFile::parse`] checks the rules for the file as a whole: names, IDs,
+//! picture file names, and references. Whether each value can be read is up
+//! to `saved::build` in `appytappy-sources`, which reads the pictures the
+//! file names, so a value that cannot be read stops only itself.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -42,6 +43,7 @@ pub const MAX_STATES: usize = 16;
 
 /// One application's authoring file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppFile {
     /// The format version, [`FORMAT`].
@@ -61,10 +63,12 @@ pub struct AppFile {
     /// How the setup app shows the values' live readings on top of the
     /// application, or `None` when it never has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub overlay: Option<OverlayDef>,
     /// The build of the application its values were last checked against,
     /// or `None` before the setup app saved a value of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub checked: Option<CheckedDef>,
 }
 
@@ -75,11 +79,13 @@ pub struct AppFile {
 /// when the running build is another one, and the runtime notes it in its
 /// log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CheckedDef {
     /// The build.
     pub build: BuildDef,
     /// When the user checked them, in seconds since 1970 began in UTC.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub at: u64,
 }
 
@@ -89,22 +95,27 @@ pub struct CheckedDef {
 /// file's size and the time it was written count too: two builds are the
 /// same only when all three match.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BuildDef {
     /// The executable's file version, such as `1.4.2.0`, or `None` when the
     /// file has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub version: Option<String>,
     /// The executable's size in bytes.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub size: u64,
     /// When the executable was last written, in seconds since 1970 began in
     /// UTC.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub modified: u64,
 }
 
 /// How the setup app shows an application's live readings on top of it. The
 /// runtime ignores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OverlayDef {
     /// Whether it shows.
@@ -114,11 +125,13 @@ pub struct OverlayDef {
     /// Where the user last put the picture-in-picture panel, or `None`
     /// before they moved it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub panel: Option<PanelDef>,
 }
 
 /// Where the live readings show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayModeDef {
     /// Over the application's window, following it and letting clicks
@@ -130,6 +143,7 @@ pub enum OverlayModeDef {
 
 /// A picture-in-picture panel's place and size in screen pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PanelDef {
     /// The left edge.
@@ -144,6 +158,7 @@ pub struct PanelDef {
 
 /// How to recognize an application's window: see [`WindowMatch`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WindowDef {
     /// The pattern for the window's title.
@@ -161,6 +176,7 @@ pub struct WindowDef {
 
 /// [`MustMatch`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MustMatchDef {
     /// The title has to match.
@@ -171,6 +187,7 @@ pub struct MustMatchDef {
 
 /// [`WindowMatch::fallback`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum FallbackDef {
     /// No fallback: the application counts as closed.
@@ -220,6 +237,7 @@ impl From<&WindowMatch> for WindowDef {
 
 /// [`AntiCheatClass`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum AntiCheatDef {
     /// [`AntiCheatClass::None`].
@@ -245,6 +263,7 @@ impl From<AntiCheatDef> for AntiCheatClass {
 
 /// One value read from the application's window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ValueDef {
     /// The value's signal name, unique within the file, such as
@@ -262,6 +281,7 @@ pub struct ValueDef {
 /// every value drawn in its font, whatever the size: the reader scales each
 /// character to its line's height.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceDef {
     /// The reference's ID, unique within the file, such as `percent_font`.
@@ -279,6 +299,7 @@ pub struct ReferenceDef {
 
 /// A value read from a region of the window's frame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScreenDef {
     /// The window's size when the region was drawn. A region's pixels mean
@@ -292,6 +313,7 @@ pub struct ScreenDef {
 
 /// A size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct SizeDef {
     /// The width.
@@ -302,6 +324,7 @@ pub struct SizeDef {
 
 /// A rectangle in pixels from the window's top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct RegionDef {
     /// The left edge.
@@ -316,6 +339,7 @@ pub struct RegionDef {
 
 /// A color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct ColorDef {
     /// The red channel.
@@ -328,6 +352,7 @@ pub struct ColorDef {
 
 /// How a value is read from its region.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum CheckDef {
     /// Reads a number with the characters of a reference.
@@ -367,6 +392,7 @@ pub enum CheckDef {
 
 /// One look a state check knows, such as a corner showing `Paused`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct StateDef {
     /// The state's name, which the value reads when the region looks like
@@ -379,6 +405,7 @@ pub struct StateDef {
 
 /// A picture of text in a reference's font and the text it shows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct SampleDef {
     /// The picture's file name.
@@ -478,10 +505,12 @@ impl AppFile {
         self.references.iter().find(|reference| reference.id == id)
     }
 
-    /// Checks the rules JSON alone cannot: the format version, a name for
-    /// the application and each value and reference, valid and unique IDs, regions inside their window,
-    /// picture file names, at least one sample for a reference, and a
-    /// reference for each number.
+    /// Checks the rules JSON alone cannot, for the file as a whole: the
+    /// format version, a name for the application and each value and
+    /// reference, valid and unique IDs, picture file names, and at least one
+    /// sample for a reference. Whether a value's check can be read is up to
+    /// `appytappy-sources`' `saved::build`, so a value that cannot be read
+    /// stops only itself.
     ///
     /// # Errors
     ///
@@ -512,8 +541,7 @@ impl AppFile {
                     "another value has the same ID".to_owned(),
                 ));
             }
-            check_value(self, value)
-                .map_err(|problem| AppFileError::Value(value.id.clone(), problem))?;
+            check_value(value).map_err(|problem| AppFileError::Value(value.id.clone(), problem))?;
         }
         Ok(())
     }
@@ -533,63 +561,18 @@ fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
         .try_for_each(|sample| check_image(&sample.image))
 }
 
-/// Checks one value's rules in `file`, answering the problem as a sentence.
-fn check_value(file: &AppFile, value: &ValueDef) -> Result<(), String> {
+/// Checks one value's part of the file's rules, answering the problem as a
+/// sentence: a name, and picture names the folder can hold.
+fn check_value(value: &ValueDef) -> Result<(), String> {
     if value.name.trim().is_empty() {
         return Err("it has no name".to_owned());
     }
-    let ScreenDef {
-        window_size,
-        region,
-        check,
-    } = &value.screen;
-    let inside = |start: u32, length: u32, limit: u32| {
-        length > 0 && start.checked_add(length).is_some_and(|end| end <= limit)
-    };
-    if !inside(region.x, region.width, window_size.width)
-        || !inside(region.y, region.height, window_size.height)
-    {
-        return Err("its region is empty or reaches past the window".to_owned());
-    }
-    if let CheckDef::Number { reference, .. } = check
-        && file.reference(reference).is_none()
-    {
-        return Err(format!(
-            "its number check reads with reference {reference:?}, which the file does not have"
-        ));
-    }
-    if let CheckDef::State { states, .. } = check {
-        check_states(states)?;
-    }
-    Ok(())
-}
-
-/// Checks a state check's states: at least one and at most [`MAX_STATES`],
-/// each with a valid name and picture, and no name or picture twice. Names
-/// that differ only in case count as the same, since they read alike.
-fn check_states(states: &[StateDef]) -> Result<(), String> {
-    if states.is_empty() {
-        return Err("its state check has no state".to_owned());
-    }
-    if states.len() > MAX_STATES {
-        return Err(format!("its state check has more than {MAX_STATES} states"));
-    }
-    let mut names = BTreeSet::new();
-    let mut images = BTreeSet::new();
-    for state in states {
-        StateName::new(&state.name).map_err(|error| error.to_string())?;
-        if !names.insert(state.name.to_lowercase()) {
-            return Err(format!("two of its states are named {:?}", state.name));
-        }
-        check_image(&state.image)?;
-        if !images.insert(state.image.as_str()) {
-            return Err(format!(
-                "two of its states use the picture {:?}",
-                state.image
-            ));
-        }
-    }
-    Ok(())
+    value
+        .screen
+        .check
+        .states()
+        .iter()
+        .try_for_each(|state| check_image(&state.image))
 }
 
 /// Checks that `image` is a picture name the folder can hold.
@@ -1005,19 +988,8 @@ mod tests {
         twice.values.push(twice.values[0].clone());
         let mut no_value_name = dash();
         no_value_name.values[0].name = String::new();
-        let mut outside = dash();
-        outside.values[0].screen.region.x = 1900;
-        let mut empty_region = dash();
-        empty_region.values[0].screen.region.height = 0;
-        let mut taller = dash();
-        taller.values[0].screen.region.y = 1050;
         let mut no_samples = dash();
         no_samples.references[0].samples.clear();
-        let mut unknown = dash();
-        unknown.values[0].screen.check = CheckDef::Number {
-            reference: "digits".to_owned(),
-            whole: false,
-        };
         let mut bad_reference = dash();
         bad_reference.references[0].id = "Percent".to_owned();
         let mut two_references = dash();
@@ -1034,30 +1006,6 @@ mod tests {
             file
         };
         let escape = with(states(&[("Paused", "../app.png")]));
-        let no_states = with(states(&[]));
-        let many: Vec<(String, String)> = (0..=MAX_STATES)
-            .map(|state| (format!("State {state}"), format!("progress-{state}.png")))
-            .collect();
-        let many: Vec<(&str, &str)> = many
-            .iter()
-            .map(|(name, image)| (name.as_str(), image.as_str()))
-            .collect();
-        let too_many = with(states(&many));
-        let most = with(states(many.get(..MAX_STATES).expect("one too many")));
-        assert!(
-            AppFile::parse(&most.to_json()).is_ok(),
-            "a check can have {MAX_STATES} states"
-        );
-        let unnamed_state = with(states(&[(" ", "progress-1.png")]));
-        let none_state = with(states(&[("None", "progress-1.png")]));
-        let same_name = with(states(&[
-            ("Paused", "progress-1.png"),
-            ("paused", "progress-2.png"),
-        ]));
-        let same_picture = with(states(&[
-            ("Paused", "progress-1.png"),
-            ("Live", "progress-1.png"),
-        ]));
         let cases = [
             (
                 format,
@@ -1068,21 +1016,8 @@ mod tests {
             (twice, "value \"progress\": another value has the same ID"),
             (no_value_name, "value \"progress\": it has no name"),
             (
-                outside,
-                "value \"progress\": its region is empty or reaches past",
-            ),
-            (empty_region, "value \"progress\": its region is empty"),
-            (
-                taller,
-                "value \"progress\": its region is empty or reaches past",
-            ),
-            (
                 no_samples,
                 "reference \"percent\": it has no sample to learn from",
-            ),
-            (
-                unknown,
-                "value \"progress\": its number check reads with reference \"digits\", which",
             ),
             (bad_reference, "reference \"Percent\": signal name"),
             (
@@ -1095,35 +1030,17 @@ mod tests {
                 "reference \"percent\": picture \"../1.png\" must be",
             ),
             (escape, "value \"progress\": picture \"../app.png\" must be"),
-            (
-                no_states,
-                "value \"progress\": its state check has no state",
-            ),
-            (
-                too_many,
-                "value \"progress\": its state check has more than 16 states",
-            ),
-            (
-                unnamed_state,
-                "value \"progress\": state name \" \" is empty",
-            ),
-            (
-                none_state,
-                "value \"progress\": state name \"None\" is \"none\"",
-            ),
-            (
-                same_name,
-                "value \"progress\": two of its states are named \"paused\"",
-            ),
-            (
-                same_picture,
-                "value \"progress\": two of its states use the picture \"progress-1.png\"",
-            ),
         ];
         for (file, message) in cases {
             let error = AppFile::parse(&file.to_json()).expect_err(message);
             assert!(error.to_string().starts_with(message), "{error}");
         }
+        // Whether a value's check can be read is for `saved::build` to say, so
+        // a value that cannot be read leaves the rest of the file usable.
+        let mut unreadable = dash();
+        unreadable.values[0].screen.region.height = 0;
+        unreadable.values[0].screen.check = states(&[]);
+        assert!(AppFile::parse(&unreadable.to_json()).is_ok());
         let error = AppFile::parse("{\"format\": 1}").expect_err("missing fields");
         assert!(error.to_string().starts_with("the file is not valid: "));
         let mut json = dash().to_json();

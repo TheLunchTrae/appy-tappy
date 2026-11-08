@@ -290,25 +290,74 @@ An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
-`settings_file.rs`) and
-the files (`store.rs`). Each save writes a temporary file and renames it over
-the old one, so a crash never leaves half a file; a later save in that folder
-removes a temporary file that a crash left between the two steps, once it is ten
-minutes old. A file that cannot be read is listed with the reason and left
-alone; an automations file that cannot be read as a whole, such as one with
-another format version, is not replaced: until it is fixed, the setup app saves
-no automations, removes no application, and deletes no value, because it checks
-that file to see whether an automation still uses the application or value. One
-automation that breaks a rule on its own, such as after a hand edit, is kept in
-the file and listed with its problem, and nothing runs it; the user can turn it
-off or delete it, and the others keep working. An ID that a hand edit made
-invalid, or gave to more than one automation, is listed as a problem on each of
-them. When the setup app reads the file, it gives a new ID, made from the name,
-to each automation whose ID is invalid or held by one before it, the same way
-each time, so every row can be edited or deleted on its own; the next save
-writes the new IDs. A new application's anti-cheat class starts as `unknown`,
-which blocks key press actions until the user sets it
+`settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
+file and renames it over the old one, so a crash never leaves half a file; a
+later save in that folder removes a temporary file that a crash left between the
+two steps, once it is ten minutes old. A file that cannot be read is listed with
+the reason and left alone; an automations file that cannot be read as a whole,
+such as one with another format version, is not replaced: until it is fixed, the
+setup app saves no automations, removes no application, and deletes no value,
+because it checks that file to see whether an automation still uses the
+application or value. One automation that breaks a rule on its own, such as
+after a hand edit, is kept in the file and listed with its problem, and nothing
+runs it; the user can turn it off or delete it, and the others keep working.
+Saving an automation, turning one on, and listing them all ask
+`AutomationDef::compile` and build the value it watches with `saved::build`, the
+same checks the runtime makes. An automation's ID is the setup app's own key:
+the runtime does not read it, so an ID that a hand edit made invalid, or gave to
+more than one automation, stops nothing. When the setup app reads the file, it
+gives a new ID, made from the name, to each automation whose ID is invalid or
+held by one before it, the same way each time, so every row can be edited or
+deleted on its own; the next save writes the new IDs. Saving a value reads it
+back with `saved::build`, from its new pictures and those already saved, as the
+runtime will, and refuses it if the runtime could not read it. A new
+application's anti-cheat class starts as `unknown`, which blocks key press
+actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+
+## Page types
+
+The page sends and reads the Rust side's own types. `ts-rs` writes their
+TypeScript declarations into `apps/setup/src/lib/bindings.ts` and reads the
+serde attributes, so a field or variant that the Rust side renames, adds, or
+removes shows on the page as a type error. Only the tests derive them: the
+setup app takes `ts-rs`, and turns on `appytappy-config`'s `ts` feature, as
+dev-dependencies, so neither program builds with `ts-rs`.
+
+The test `bindings::bindings_match_the_rust_types` renders the file from the
+types each command takes and answers, and every type they reach, and fails when
+the checked-in file differs. After a change to one of those types, write the
+file again and commit it:
+
+```sh
+UPDATE_BINDINGS=1 cargo test -p appytappy-setup bindings
+```
+
+Every generated type is readonly all the way down. A `u64`, such as a window
+handle or a time, reaches the page as a `number`, and the test fails when a
+field would become a `bigint`, which JSON does not carry. The field says so
+with `#[cfg_attr(test, ts(type = "number"))]` in the setup app, or
+`#[cfg_attr(feature = "ts", ts(type = "number"))]` in `appytappy-config`,
+because only those builds derive the types. A new command still needs its call in
+`api.ts`, and a type that it takes or answers and that no other one reaches
+needs a line in the test's list. The page imports the types from
+`bindings.ts` and calls the commands through `api.ts`.
+
+The file also holds what the page checks a draft against before it saves:
+`LIMITS`, such as the longest app name a media or volume action names, the
+longest path or link, and the most states; `KEY_NAMES`, the keys a key press
+action can name; `ACTIONS`, whether each kind of action sends input and
+whether undo can put it back; `TRACE_CATEGORIES`; `NO_STATE`; and
+`DEFAULT_SETTINGS`. The test reads them from `appytappy-config`, so the page
+and the save agree, and the save still checks everything again. The UI's
+formatting, lint, and unused-type checks skip the generated file.
+
+The page reads a typed path, link, key press, or app name itself, so the user
+sees what to fix as they type. `PARSE_CASES` holds what the Rust parsers make
+of a fixed list of samples, one for each way a parser accepts or refuses, and
+`apps/setup/tests/parse-cases.test.ts` fails when the page reads one
+differently. A parser that gains a rule needs a sample for it in
+`bindings.rs`.
 
 ## Running it
 
