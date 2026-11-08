@@ -2,17 +2,20 @@
 //! and telling the interface what it reads.
 //!
 //! The capture copies only the value's region as it reads at one window
-//! size. A frame of another size places the value there once, and the
-//! capture starts again for its region there, so the watch reads the value
-//! at each size as the runtime does.
+//! size. Once frames show another size, and no other, for a quarter of a
+//! second, the value is placed there once, and the capture starts again for
+//! its region there, so the watch reads the value at each size as the
+//! runtime does, and a drag across many sizes starts it again only once.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
+use std::time::Instant;
 
 use appytappy_config::automation_file::WhenDef;
 use appytappy_config::signal::SignalName;
 use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
+use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Region, Size};
 use appytappy_sources::system::best_window;
 
@@ -42,6 +45,8 @@ pub(super) struct Watched {
     /// The region the capture copies: the value's at the last size it read
     /// at.
     copying: Region,
+    /// The window size frames show, settled at `placed`'s.
+    settle: Settle,
     /// What the newest frame showed, or `None` before one arrived.
     pub(super) seen: Option<Seen>,
     /// Why the capture stopped, once it has.
@@ -105,56 +110,69 @@ impl<H: Host> Owner<H> {
             check,
             placed,
             copying: region,
+            settle: Settle::new(size),
             seen: None,
             failure: None,
         });
         Ok(watch)
     }
 
-    /// Keeps what a frame of the watched value's window showed. A frame of
-    /// another size than the value is placed at places it there, and when
-    /// it reads there at another region, starts the capture again for that
-    /// region, keeping the watch's number.
+    /// Keeps what a frame of the watched value's window showed. Once frames
+    /// settle at another size than the value is placed at, it places the
+    /// value there, and when it reads there at another region, starts the
+    /// capture again for that region, keeping the watch's number.
     pub(super) fn watch_seen(&mut self, seen: Seen) {
-        let Some(mut watched) = self.watched.take() else {
+        let now = self.host.now();
+        let Some(watched) = self.watched.as_mut() else {
             return;
         };
         let size = match &seen {
             Seen::Region { window_size, .. } | Seen::Outside(window_size) => *window_size,
         };
-        if size == watched.placed.0 {
-            watched.seen = Some(seen);
-            self.watched = Some(watched);
-            return;
-        }
-        watched.placed = (size, watched.check.at(size));
+        watched.settle.saw(size, now);
         watched.seen = Some(seen);
-        if let Ok(at) = &watched.placed.1
-            && at.region != watched.copying
-        {
-            watched.seen = None;
-            watched.copying = at.region;
-            // Starting again drops the old capture's frames, which are of the
-            // old region.
-            if let Err(error) = self.start(
-                watched.window,
-                Crop::Layout(Layout::one(at.region)),
-                WATCH_INTERVAL,
-                watch_message,
-            ) {
-                watched.failure = Some(error);
+        self.settle_watch(now);
+    }
+
+    /// Places the watched value at the size its frames settled at by `now`,
+    /// once they have, and starts the capture again when the value reads
+    /// there at another region than the one copied.
+    fn settle_watch(&mut self, now: Instant) {
+        let Some(mut watched) = self.watched.take() else {
+            return;
+        };
+        if let Some(size) = watched.settle.settled(now) {
+            watched.placed = (size, watched.check.at(size));
+            if let Ok(at) = &watched.placed.1
+                && at.region != watched.copying
+            {
+                watched.seen = None;
+                watched.copying = at.region;
+                // Starting again drops the old capture's frames, which are of
+                // the old region.
+                if let Err(error) = self.start(
+                    watched.window,
+                    Crop::Layout(Layout::one(at.region)),
+                    WATCH_INTERVAL,
+                    watch_message,
+                ) {
+                    watched.failure = Some(error);
+                }
             }
         }
         self.watched = Some(watched);
     }
 
     /// What the watched value reads on the newest frame, and whether `when`
-    /// holds for it; an error once the watch was stopped or replaced.
+    /// holds for it; an error once the watch was stopped or replaced. A
+    /// window size that settled since the last frame places the value there
+    /// first, so a window that stopped drawing is placed too.
     pub(crate) fn watched_reading(
-        &self,
+        &mut self,
         watch: u64,
         when: Option<&WhenDef>,
     ) -> Result<Live, String> {
+        self.settle_watch(self.host.now());
         let watched = self
             .watched
             .as_ref()
@@ -241,6 +259,8 @@ mod tests {
     use appytappy_config::app_file::WindowDef;
     use appytappy_config::automation_file::{ComparisonDef, TargetDef};
     use appytappy_sources::screen::{FrameHandler, Image, Region};
+
+    use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::CheckSpec;
     use crate::owner::messages::Reading;
@@ -359,6 +379,12 @@ mod tests {
             height: 2,
         };
         harness.deliver_at(&mut handler, Ok((wider, &frame_image())), WATCH_INTERVAL);
+        assert_eq!(
+            harness.ask(watched(watch, None)),
+            Ok(Live::Waiting),
+            "until the size settles"
+        );
+        harness.wait(SETTLE);
         assert_eq!(harness.ask(watched(watch, None)), read(None));
         assert!(harness.closed.try_recv().is_err(), "the capture goes on");
         let narrower = Size {
@@ -373,6 +399,7 @@ mod tests {
             .into()),
             WATCH_INTERVAL,
         );
+        harness.wait(SETTLE);
         assert_eq!(
             harness.ask(watched(watch, None)),
             Ok(Live::Problem {
@@ -384,6 +411,7 @@ mod tests {
         );
         let white = Image::new(WINDOW, vec![255; 32]).expect("matching length");
         harness.deliver_at(&mut handler, Ok((WINDOW, &white)), WATCH_INTERVAL);
+        harness.wait(SETTLE);
         let Ok(Live::Problem { message }) = harness.ask(watched(watch, None)) else {
             panic!("a bar of neither color cannot be read");
         };
@@ -423,8 +451,24 @@ mod tests {
         };
         let red = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
         harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        assert!(harness.closed.try_recv().is_err(), "not settled yet");
+        // A drag passes another size, which starts the wait again; the
+        // editor's poll places the value once it settled, with no frame.
+        harness.wait(SETTLE / 2);
+        let between = Size {
+            width: 6,
+            height: 3,
+        };
+        harness.deliver_at(&mut handler, Ok((between, &red)), WATCH_INTERVAL);
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.wait(SETTLE / 2);
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
+        assert!(harness.closed.try_recv().is_err(), "the wait started again");
+        harness.wait(SETTLE);
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
         assert_eq!(harness.closed.try_recv(), Ok(7));
         let started = harness.handlers.try_recv().expect("capture started again");
+        assert!(harness.handlers.try_recv().is_err(), "once");
         assert_eq!(
             started.crop,
             Crop::Layout(Layout::one(Region::new(0, 0, 8, 4).expect("not empty")))
@@ -449,6 +493,8 @@ mod tests {
         file.size_changes = appytappy_config::app_file::SizeChangesDef::Rarely;
         stores.apps.save("example", &file, &[]).expect("saves");
         let (watch, mut handler) = watch_bar(&mut harness);
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.wait(SETTLE);
         harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
         assert!(
             harness.handlers.try_recv().is_err(),

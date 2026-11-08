@@ -145,8 +145,10 @@ shows each value's size and side under **Region**, such as
 
 While the application runs, the Values page adds a column for the window's
 size now, such as **At 3440 × 1440 now**, with what each value reads there.
-A value that reads wrong, shows **Matches no state** or **Doesn't read**, or
-isn't read at that size has **Fix at this size** beside it:
+A value that shows **Matches no state** or **Doesn't read**, or isn't read
+at that size, has **Fix at this size** beside it. At the size a value was
+first drawn at, edit the value instead. **Matches no state** isn't always
+wrong: the region may show none of the states right now.
 
 1. Pick the application's window. AppyTappy takes a screenshot of it at its
    size now, with the region where the value would be read there: it
@@ -154,6 +156,7 @@ isn't read at that size has **Fix at this size** beside it:
 2. Move the region onto the value, then select **Next: how to read it**.
 3. For a **State** check, take a screenshot of each of its states at this
    size and add them in the same order; each takes the next state's name.
+   The fix compares with the first drawing's tolerance.
    For a **Number** check, **Read with** keeps the reference the value reads
    with at every size, or **Learn a reference at this size** teaches a new
    one from this size's screenshots. A **Bar fill** or **Color** check keeps
@@ -165,10 +168,13 @@ At that size AppyTappy then reads the fix exactly, instead of scaling. The
 can have up to 8 fixes. Fixing it again at the same size replaces the fix,
 and **Remove fix** beside a reading made with one removes it.
 
-While the window is closed or at a size where no value reads, AppyTappy reads
-nothing. Automations neither run nor undo their changes until it can read
-again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once for
-each size which values it doesn't read there, and why.
+While you resize the window, AppyTappy waits until the window keeps one size
+for a quarter of a second before it reads at that size. While the window is
+being resized, is closed or is at a size where no value reads, AppyTappy
+reads nothing. Automations neither run nor undo their changes until it can
+read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once
+which values it doesn't read at the window's size and why, and says it again
+only when the reason changes.
 
 ## When an application updates
 

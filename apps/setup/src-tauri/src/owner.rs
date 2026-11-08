@@ -202,7 +202,7 @@ impl<H: Host> Owner<H> {
                     clippy::let_underscore_must_use,
                     reason = "the capture already failed, and the overlay shows why"
                 )]
-                let _ = overlays.read(&app, generation, read);
+                let _ = overlays.read(&app, generation, read, self.host.now());
             },
             Message::PanelPlaced { app, panel } => self.overlays.placed(&app, panel),
             Message::Shutdown => return ControlFlow::Break(()),

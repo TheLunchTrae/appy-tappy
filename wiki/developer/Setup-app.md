@@ -221,7 +221,11 @@ the fix's number, such as `status-2-1.png`.
       "screen": {
         "windowSize": { "width": 1920, "height": 1080 },
         "region": { "x": 1146, "y": 14, "width": 74, "height": 38 },
-        "check": { "kind": "number", "reference": "percent_font", "whole": true },
+        "check": {
+          "kind": "number",
+          "reference": "percent_font",
+          "whole": true
+        },
         "pin": "topRight",
         "fixes": [
           {

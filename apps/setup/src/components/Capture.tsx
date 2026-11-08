@@ -867,6 +867,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   position={position}
                   onDraft={setDraft}
                   onShow={setSelected}
+                  fix={fixing !== null}
                 />
               ) : (
                 <ColorFields

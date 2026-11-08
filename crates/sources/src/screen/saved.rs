@@ -1256,6 +1256,36 @@ mod tests {
     }
 
     #[test]
+    fn a_value_may_have_as_many_fixes_as_the_most_and_no_more() {
+        let mut screen = screen(CheckDef::Color {
+            color: RED,
+            tolerance: 10,
+        });
+        let fixes = |count: usize| -> Vec<FixDef> {
+            (0..count)
+                .map(|n| {
+                    fix_at(
+                        1000 + u32::try_from(n).expect("small"),
+                        500,
+                        (0, 0, 1, 1),
+                        &[],
+                    )
+                })
+                .collect()
+        };
+        screen.fixes = fixes(MAX_FIXES);
+        let built = build(&screen, &[], OFTEN, from(&BTreeMap::new())).expect("builds");
+        assert_eq!(built.fixes.len(), MAX_FIXES);
+        screen.fixes = fixes(MAX_FIXES + 1);
+        assert_eq!(
+            build(&screen, &[], OFTEN, from(&BTreeMap::new()))
+                .expect_err("one too many")
+                .to_string(),
+            format!("it has more than {MAX_FIXES} fixes")
+        );
+    }
+
+    #[test]
     fn fixes_that_do_not_suit_the_value_say_what_is_wrong() {
         let (states, files) = red_or_gray();
         let refused = |change: &dyn Fn(&mut ScreenDef)| {

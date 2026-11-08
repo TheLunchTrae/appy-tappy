@@ -141,6 +141,7 @@ mod tests {
     use std::io;
 
     use appytappy_config::app_file::{AppFile, SizeChangesDef, SizeDef};
+    use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{Crop, FrameHandler, Image, OutsideWindow, Region, Size};
 
     use crate::overlay::{
@@ -192,6 +193,7 @@ mod tests {
                 height: WINDOW.height,
             }),
             values: vec![ValueView {
+                id: "progress_bar".to_owned(),
                 name: "Progress bar".to_owned(),
                 reading,
                 problem: problem.map(str::to_owned),
@@ -301,6 +303,17 @@ mod tests {
             height: 2,
         };
         harness.deliver_at(&mut handler, Ok((wider, &frame_image())), OVERLAY_INTERVAL);
+        let mut settling = bar_view(over, None, None);
+        settling.window_size = Some(SizeDef {
+            width: 6,
+            height: 2,
+        });
+        assert_eq!(
+            harness.ask(overlay_state),
+            Ok(settling),
+            "nothing is read until the size settles"
+        );
+        harness.wait(SETTLE);
         let resized = |width| {
             let mut view = bar_view(
                 over,
@@ -325,6 +338,8 @@ mod tests {
             .into()),
             OVERLAY_INTERVAL,
         );
+        harness.ask(overlay_state).expect("shows");
+        harness.wait(SETTLE);
         assert_eq!(harness.ask(overlay_state), resized(3));
         assert!(harness.closed.try_recv().is_err(), "the capture goes on");
         let white = Image::new(WINDOW, vec![255; 32]).expect("matching length");
@@ -464,13 +479,16 @@ mod tests {
             "{problem:?}"
         );
 
-        // At 8x4 the capture starts again with the small value's region.
+        // At 8x4 the capture starts again with the small value's region,
+        // once the size settled.
         let large = Size {
             width: 8,
             height: 4,
         };
         harness.deliver_at(&mut handler, Ok((large, &frame_image())), OVERLAY_INTERVAL);
-        assert_eq!(harness.closed.try_recv(), Ok(7));
+        harness.ask(overlay_state).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "not settled yet");
+        harness.wait(SETTLE);
         let mut handler =
             overlay_capture_of(&mut harness, Region::new(4, 2, 4, 2).expect("not empty"));
         harness.deliver_at(&mut handler, Ok((large, &frame_image())), OVERLAY_INTERVAL);
@@ -500,9 +518,24 @@ mod tests {
         };
         let red = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
         harness.deliver_at(&mut handler, Ok((large, &red)), OVERLAY_INTERVAL);
-        assert_eq!(harness.closed.try_recv(), Ok(7));
         harness.ask(live).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "not settled yet");
+        // A drag passes another size first, which starts the wait again.
+        let between = Size {
+            width: 6,
+            height: 3,
+        };
+        harness.wait(SETTLE / 2);
+        harness.deliver_at(&mut handler, Ok((between, &red)), OVERLAY_INTERVAL);
+        harness.deliver_at(&mut handler, Ok((large, &red)), OVERLAY_INTERVAL);
+        harness.wait(SETTLE / 2);
+        harness.ask(live).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "the wait started again");
+        harness.wait(SETTLE);
+        harness.ask(live).expect("shows");
+        assert_eq!(harness.closed.try_recv(), Ok(7), "one restart");
         let started = harness.handlers.try_recv().expect("capture started again");
+        assert!(harness.handlers.try_recv().is_err(), "only one");
         let copied = match &started.crop {
             Crop::Layout(layout) => layout.copies().iter().map(|copy| copy.from).collect(),
             Crop::Whole => Vec::new(),
@@ -542,6 +575,7 @@ mod tests {
             message: Some("no windows here".to_owned()),
             window_size: None,
             values: vec![ValueView {
+                id: "progress_bar".to_owned(),
                 name: "Progress bar".to_owned(),
                 reading: None,
                 problem: None,

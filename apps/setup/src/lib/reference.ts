@@ -28,10 +28,14 @@ export function referenceCharacters(reference: ReferenceDef): readonly string[] 
   return knownCharacters(reference.samples.map((sample) => sample.text));
 }
 
-/** The names of `file`'s values that read with the reference `id`. */
+/** The names of `file`'s values that read with the reference `id`, in their check or in a fix. */
 export function readers(file: AppFile, id: string): readonly string[] {
   return file.values
-    .filter((value) => value.screen.check.kind === 'number' && value.screen.check.reference === id)
+    .filter(
+      ({ screen }) =>
+        (screen.check.kind === 'number' && screen.check.reference === id) ||
+        screen.fixes.some((fix) => fix.reference === id),
+    )
     .map((value) => value.name);
 }
 

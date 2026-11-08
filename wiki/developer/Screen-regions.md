@@ -95,8 +95,11 @@ its values read at a size they were not drawn at.
   its region's center is in, across and down, and the setup app guesses the
   same way. Since the factor follows the height, the pin down the window
   changes only how the region rounds; across a wider or narrower window it
-  moves the region. A region that scales outside the window, or to nothing,
-  does not read there.
+  moves the region. Each of the region's edges is placed and rounded, a
+  half away from zero, and its width and height are the distance between
+  them, at least 1 pixel, so a region that touches the side it is pinned to
+  still touches it. A region that scales outside the window does not read
+  there.
 - **Rarely** reads each value only at the sizes it was drawn at, so nothing
   is guessed.
 
@@ -122,9 +125,18 @@ sharp edges stay sharp. A mask keeps a pixel when at least half the pixels
 it covers are kept, and its color averages only those, so a left-out
 background does not tint the thing's edge. A picture redrawn to no pixel
 to compare does not read. Redrawing costs one pass over each picture, so
-the runtime and the setup app resolve a size once, when the window takes
-it, and read every frame at that size with the result; a frame costs what
-it did before.
+the runtime and the setup app resolve a size once, after the window has
+settled at it, and read every frame at that size with the result; a frame
+costs what it did before.
+
+A window dragged by its corner passes many sizes. The runtime and the setup
+app read nothing at a new size until frames have shown it, and no other,
+for `SETTLE` (250 ms, `screen::settle`). Then they resolve it, and start the
+capture again at the regions there when some value reads, once for each
+settled size. Until a size settles, its values are unseen, so no rule acts
+on them. Why a value does not read at a size leaves the size out, so the
+log says it once for each reason, not once for each size the window
+passes.
 
 State pictures are named after the value and the state's place, such as
 `status-1.png`, and a fix's after the value, the fix's number, and the

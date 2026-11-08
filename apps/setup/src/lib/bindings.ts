@@ -1007,6 +1007,10 @@ screen: ScreenDef, }>;
  */
 export type ValueView = DeepReadonly<{
 /**
+ * The value's ID.
+ */
+id: string,
+/**
  * The value's name.
  */
 name: string,

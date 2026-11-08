@@ -2,7 +2,7 @@
 //! and a capture of one window, so the tests can stand in for it.
 
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
@@ -59,6 +59,10 @@ pub(crate) trait Host: 'static {
         handler: FrameHandler,
     ) -> io::Result<Self::Session>;
 
+    /// The time now. The tests set it, to settle a window size without
+    /// waiting.
+    fn now(&self) -> Instant;
+
     /// Asks the runtime to read the saved files again. A runtime that is not
     /// running reads them when it starts, and one that cannot be reached
     /// keeps what it read, so the save stands either way.
@@ -95,6 +99,10 @@ impl<T: System + Capture + 'static> Host for T {
     }
 
     #[mutants::skip] // Sets a named Windows event, which no test can observe.
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
     fn reload_runtime(&self) {
         #[expect(
             clippy::let_underscore_must_use,

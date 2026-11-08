@@ -14,6 +14,7 @@ pub mod mask;
 pub mod saved;
 pub mod scale;
 pub mod select;
+pub mod settle;
 
 mod capture;
 mod image;

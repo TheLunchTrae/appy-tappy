@@ -18,12 +18,17 @@
 //! A value is sent to the owner only when it reads differently from its last
 //! read.
 //!
-//! Each time the window takes another size, the reader resolves where each
-//! value reads at it once, with `SavedValue::at`: the value's drawing at
-//! that size, or its first drawing scaled to it while its application's
-//! window changes size often. When some value reads at the new size, the
-//! capture starts again for them; a value that does not read at the size is
-//! not read, and the reader says so once for each size.
+//! When frames show the window at another size, the reader reads nothing
+//! until the size settles: frames show it, and no other, for
+//! [`SETTLE`](appytappy_sources::screen::settle::SETTLE), so dragging a
+//! window's corner neither starts a capture again for each size it passes
+//! nor redraws state pictures for each. The
+//! reader then resolves where each value reads at the settled size once,
+//! with `SavedValue::at`: the value's drawing at that size, or its first
+//! drawing scaled to it while its application's window changes size often.
+//! When some value reads there, the capture starts again for them, once; a
+//! value that does not read there is not read, and the reader says why once
+//! until the reason changes.
 //!
 //! When the capture ends, the reader looks for the window again, because
 //! many applications replace their window as they run, such as when they
@@ -53,6 +58,7 @@ use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::saved::{AtSize, Unread};
+use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{
     Capture, CaptureSession, Crop, Frame, Layout, OutsideWindow, Size,
 };
@@ -153,9 +159,16 @@ enum Control {
     /// The capture ended, such as when the window closed, and this says
     /// why, for the log.
     Lost(String),
-    /// The window took a size at which some values read, placed here, so
-    /// the capture starts again for those.
-    Resized(Placed),
+    /// Frames show the window at `size`, which is not the size the
+    /// capture reads at, or back at that size. The reader acts on it once
+    /// it settles. Each value's last problem comes along, so a capture
+    /// started for the new size does not say them again.
+    Resizing {
+        /// The size frames show.
+        size: Size,
+        /// Each value's last problem.
+        problems: Vec<Option<String>>,
+    },
     /// [`RESTART_AFTER`] frames in a row failed, the last with this error,
     /// so the capture starts again after a wait.
     Failing(String),
@@ -289,6 +302,9 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         return;
     };
     let mut placed = Placed::new(&job.plan, first);
+    // Each value's last problem, carried to the capture started for a new
+    // size.
+    let mut carried: Vec<Option<String>> = Vec::new();
     // The last problem sent, so each is sent once until it changes.
     let mut reported: Option<String> = None;
     let report = |reported: &mut Option<String>, problem: String| {
@@ -336,11 +352,15 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 continue;
             },
         };
-        let Some(mut frames) = FrameReader::new(job, placed.clone(), events.clone(), lost.clone())
+        // Tells the capture's handler where values read at a settled size
+        // where none reads, so it says why each does not.
+        let (settled, resolved) = mpsc::channel();
+        let Some(mut frames) =
+            FrameReader::new(job, placed.clone(), events.clone(), lost.clone(), resolved)
         else {
             return;
         };
-        frames.carry(&recovery);
+        frames.carry(&recovery, std::mem::take(&mut carried));
         let crop = Crop::Layout(frames.layout.clone());
         let throttle = job.interval.min();
         let handler = Box::new(move |frame: io::Result<Frame<'_>>| frames.handle(frame));
@@ -355,7 +375,18 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
             },
         };
         reported = None;
-        let next = watch(system, job, window, check, control, &mut recovery);
+        let next = watch(
+            system,
+            Watching {
+                job,
+                window,
+                check,
+                reads_at: placed.size,
+                settled: &settled,
+            },
+            control,
+            &mut recovery,
+        );
         if let Err(error) = session.close() {
             report(&mut reported, format!("its capture ended badly: {error}"));
         }
@@ -374,7 +405,10 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                     return;
                 }
             },
-            Ok(Ended::Resized(resized)) => placed = resized,
+            Ok(Ended::Resized(resized, problems)) => {
+                placed = resized;
+                carried = problems;
+            },
             Ok(Ended::Lost(problem)) => {
                 let (pause_for, new) = recovery.failed(problem.clone(), None);
                 if (new && !report(&mut reported, problem)) || !pause(control, pause_for) {
@@ -405,7 +439,7 @@ fn stopped_meanwhile(control: &Receiver<Control>, recovery: &mut Recovery) -> bo
         match left {
             Control::Stop => stopped = true,
             Control::Recovered => recovery.recovered(),
-            Control::Lost(_) | Control::Resized(_) | Control::Failing(_) => {},
+            Control::Lost(_) | Control::Resizing { .. } | Control::Failing(_) => {},
         }
     }
     stopped
@@ -434,37 +468,93 @@ enum Ended {
     Stop,
     /// See [`Control::Lost`].
     Lost(String),
-    /// See [`Control::Resized`].
-    Resized(Placed),
+    /// The window settled at a size where some values read, placed here,
+    /// with each value's last problem, so the capture starts again for
+    /// them.
+    Resized(Placed, Vec<Option<String>>),
     /// See [`Control::Failing`].
     Failing(String),
 }
 
-/// Waits while `window` is captured, checking it every `check`, and returns
-/// what ended the capture, or why the reader should look for the window
-/// again.
-fn watch<S: System>(
-    system: &S,
-    job: &Job,
+/// What [`watch`] watches.
+struct Watching<'job> {
+    job: &'job Job,
+    /// The captured window, checked every `check`.
     window: u64,
     check: Duration,
+    /// The window size the capture reads at.
+    reads_at: Size,
+    /// Where the capture's handler learns where values read at a settled
+    /// size where none reads.
+    settled: &'job Sender<Placed>,
+}
+
+/// Waits while a window is captured, checking it every `check`, and
+/// returns what ended the capture, or why the reader should look for the
+/// window again. A size that frames show is acted on once it settles.
+fn watch<S: System>(
+    system: &S,
+    watching: Watching<'_>,
     control: &Receiver<Control>,
     recovery: &mut Recovery,
 ) -> Result<Ended, String> {
+    let Watching {
+        job,
+        window,
+        check,
+        reads_at,
+        settled,
+    } = watching;
+    let mut settle = Settle::new(reads_at);
+    let mut carried = Vec::new();
+    let mut next_check = Instant::now().checked_add(check);
     loop {
-        match control.recv_timeout(check) {
+        let now = Instant::now();
+        let to_check = next_check.map_or(check, |next| next.saturating_duration_since(now));
+        let wait = settle.left(now).map_or(to_check, |left| left.min(to_check));
+        match control.recv_timeout(wait) {
             Ok(Control::Recovered) => recovery.recovered(),
             Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected) => return Ok(Ended::Stop),
             Ok(Control::Lost(problem)) => return Ok(Ended::Lost(problem)),
-            Ok(Control::Resized(placed)) => return Ok(Ended::Resized(placed)),
+            Ok(Control::Resizing { size, problems }) => {
+                settle.saw(size, Instant::now());
+                carried = problems;
+            },
             Ok(Control::Failing(error)) => return Ok(Ended::Failing(error)),
             Err(RecvTimeoutError::Timeout) => {
-                if let Some(problem) = moved_on(system, job, window) {
-                    return Err(problem);
+                let now = Instant::now();
+                if let Some(other) = settled_elsewhere(&mut settle, now, &job.plan, reads_at) {
+                    if other.reads() {
+                        return Ok(Ended::Resized(other, carried));
+                    }
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "a failed send means the capture already ended"
+                    )]
+                    let _ = settled.send(other);
+                }
+                if next_check.is_none_or(|next| now >= next) {
+                    next_check = now.checked_add(check);
+                    if let Some(problem) = moved_on(system, job, window) {
+                        return Err(problem);
+                    }
                 }
             },
         }
     }
+}
+
+/// Where the values of `plan` read at the size `settle` settled at by
+/// `now`, once it has, unless that is `reads_at`, where the capture already
+/// reads them. Each settled size is resolved once.
+fn settled_elsewhere(
+    settle: &mut Settle,
+    now: Instant,
+    plan: &AppPlan,
+    reads_at: Size,
+) -> Option<Placed> {
+    let size = settle.settled(now)?;
+    (size != reads_at).then(|| Placed::new(plan, size))
 }
 
 /// What the reader found to capture.
@@ -567,15 +657,15 @@ impl Placed {
     }
 }
 
-/// Why a value is not read on a window of `size`, as a sentence fragment
-/// that follows the value's name. It names the size, so the log says it once
-/// for each size.
-fn not_read(size: Size, unread: Unread) -> String {
+/// Why a value is not read at the window's size, as a sentence fragment
+/// that follows the value's name. It leaves the size out, so the log says
+/// it once for each reason, not once for each size a window passes.
+fn not_read(unread: Unread) -> String {
     let advice = match unread {
         Unread::NotDrawn => "resize the window, or fix the value at this size in AppyTappy Setup",
         Unread::Outside | Unread::TooSmall => "fix the value at this size in AppyTappy Setup",
     };
-    format!("is not read at {size}: {unread}; {advice}")
+    format!("is not read at the window's size now: {unread}; {advice}")
 }
 
 /// The capture's frame handler: reads each value that reads at one window
@@ -585,9 +675,14 @@ struct FrameReader<E> {
     plan: Arc<AppPlan>,
     /// Where each value reads at the window size it reads.
     placed: Placed,
-    /// Where each value is not read at the last other size frames showed,
-    /// where none reads, so a window held at that size resolves it once.
+    /// Where each value is not read at the last settled size where none
+    /// reads, as the reader resolved it, so the handler says why.
     elsewhere: Option<Placed>,
+    /// Where the reader sends `elsewhere`.
+    resolved: Receiver<Placed>,
+    /// The other size it last told the reader frames show, until frames
+    /// show the size it reads at again.
+    told: Option<Size>,
     /// What the capture copies: each value that reads at `placed`'s size,
     /// packed, and where each value then sits in the frame's image.
     layout: Layout,
@@ -617,8 +712,15 @@ struct FrameReader<E> {
 
 impl<E: From<Reading>> FrameReader<E> {
     /// The handler for the values of `job` as `placed` places them, or
-    /// `None` when none reads.
-    fn new(job: &Job, placed: Placed, events: Sender<E>, control: Sender<Control>) -> Option<Self> {
+    /// `None` when none reads. `resolved` brings where values read at a
+    /// settled size where none does.
+    fn new(
+        job: &Job,
+        placed: Placed,
+        events: Sender<E>,
+        control: Sender<Control>,
+        resolved: Receiver<Placed>,
+    ) -> Option<Self> {
         let layout = Layout::new(
             placed
                 .values
@@ -631,6 +733,8 @@ impl<E: From<Reading>> FrameReader<E> {
             plan: Arc::clone(&job.plan),
             placed,
             elsewhere: None,
+            resolved,
+            told: None,
             layout,
             last: vec![None; count],
             problems: vec![None; count],
@@ -683,19 +787,33 @@ impl<E: From<Reading>> FrameReader<E> {
             self.restarted = false;
             self.tell(Control::Recovered);
         }
-        if window_size != self.placed.size {
+        if window_size == self.placed.size {
+            if self.told.take().is_some() {
+                self.tell(Control::Resizing {
+                    size: window_size,
+                    problems: Vec::new(),
+                });
+            }
+        } else {
+            // Nothing is read at another size until the reader saw it
+            // settle, and it reads only why each value is not read there.
             self.unseen();
+            if self.told != Some(window_size) {
+                self.told = Some(window_size);
+                self.tell(Control::Resizing {
+                    size: window_size,
+                    problems: self.problems.clone(),
+                });
+            }
+            if let Some(resolved) = self.resolved.try_iter().last() {
+                self.elsewhere = Some(resolved);
+            }
             if self
                 .elsewhere
                 .as_ref()
                 .is_none_or(|elsewhere| elsewhere.size != window_size)
             {
-                let other = Placed::new(&self.plan, window_size);
-                if other.reads() {
-                    self.tell(Control::Resized(other));
-                    return Duration::ZERO;
-                }
-                self.elsewhere = Some(other);
+                return Duration::ZERO;
             }
         }
         let mut changed = false;
@@ -730,10 +848,14 @@ impl<E: From<Reading>> FrameReader<E> {
     }
 
     /// Notes whether the reader started this capture again after the last
-    /// one failed, and the frame error it logged already.
-    fn carry(&mut self, recovery: &Recovery) {
+    /// one failed, the frame error it logged already, and each value's last
+    /// problem, which a capture started for a new size carries.
+    fn carry(&mut self, recovery: &Recovery, problems: Vec<Option<String>>) {
         self.restarted = recovery.problem.is_some();
         self.frame_problem = recovery.frame_error.as_deref().map(frame_problem);
+        if problems.len() == self.problems.len() {
+            self.problems = problems;
+        }
     }
 
     /// Says once that frames cannot be read, until another problem or a
@@ -755,8 +877,8 @@ impl<E: From<Reading>> FrameReader<E> {
         frame: Option<&Frame<'_>>,
     ) -> Option<Result<Value, String>> {
         let value = self.plan.runs.values.get(position)?;
-        // A frame of another size reaches here only when no value reads at
-        // it, so `elsewhere` holds why each does not.
+        // A frame of another size reaches here only once the reader found
+        // no value reads at it, so `elsewhere` holds why each does not.
         let placed = if window_size == self.placed.size {
             &self.placed
         } else {
@@ -767,7 +889,7 @@ impl<E: From<Reading>> FrameReader<E> {
         let at = match placed.values.get(position)? {
             Ok(at) if window_size == self.placed.size => at,
             Ok(_) => return None,
-            Err(unread) => return Some(Err(not_read(window_size, *unread))),
+            Err(unread) => return Some(Err(not_read(*unread))),
         };
         let region = self.layout.packed(position)?;
         let image = frame?.image.crop(region)?;
@@ -857,10 +979,7 @@ impl<E: From<Reading>> FrameReader<E> {
     /// Tells the reader `control`; once that ends the capture, it reads no
     /// more frames.
     fn tell(&mut self, control: Control) {
-        if matches!(
-            control,
-            Control::Lost(_) | Control::Resized(_) | Control::Failing(_)
-        ) {
+        if matches!(control, Control::Lost(_) | Control::Failing(_)) {
             self.ended = true;
         }
         #[expect(
@@ -897,6 +1016,7 @@ mod tests {
     use appytappy_sources::screen::check::{Check, ColorMatch};
     use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::{SavedCheck, SavedFix, SavedValue};
+    use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{FrameHandler, Image, Placement, Region};
     use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
 
@@ -965,7 +1085,21 @@ mod tests {
         events: Sender<Reading>,
         control: Sender<Control>,
     ) -> Option<FrameReader<Reading>> {
-        FrameReader::new(job, Placed::new(&job.plan, size), events, control)
+        frames_with(job, size, events, control).map(|(frames, _)| frames)
+    }
+
+    /// The frame handler for `job`'s values placed at `size`, and where the
+    /// reader tells it where values read at a settled size where none does.
+    fn frames_with(
+        job: &Job,
+        size: Size,
+        events: Sender<Reading>,
+        control: Sender<Control>,
+    ) -> Option<(FrameReader<Reading>, Sender<Placed>)> {
+        let (settled, resolved) = mpsc::channel();
+        let frames =
+            FrameReader::new(job, Placed::new(&job.plan, size), events, control, resolved)?;
+        Some((frames, settled))
     }
 
     fn plan(values: Vec<ValuePlan>) -> Arc<AppPlan> {
@@ -1153,50 +1287,61 @@ mod tests {
         );
     }
 
+    /// Why a value drawn only at other sizes is not read, as it is sent.
+    const NOT_DRAWN: &str = "is not read at the window's size now: it is read only at the window \
+                             sizes it was drawn at; resize the window, or fix the value at this \
+                             size in AppyTappy Setup";
+
+    /// Why a value that scales past the window is not read, as it is sent.
+    const OUTSIDE: &str = "is not read at the window's size now: scaled to this window size, its \
+                           region reaches outside the window; fix the value at this size in \
+                           AppyTappy Setup";
+
     #[test]
-    fn a_window_of_another_size_is_not_read_and_says_so_once() {
+    fn a_window_of_another_size_is_read_only_once_it_settled_and_says_why_once() {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, told) = mpsc::channel();
         let job = job(vec![red_at("icon", 0, 0)]);
-        let mut frames = frames_at(&job, WINDOW, events, control).expect("values to read");
+        let (mut frames, settled) =
+            frames_with(&job, WINDOW, events, control).expect("values to read");
         let image = frame_image(2, 2, |_, _| true);
-        frames.handle(Ok(frame(&image, SMALL)));
-        frames.handle(outside(SMALL));
-        assert_eq!(
-            problems(&readings),
-            [
-                "value 0 is not read at 640x480: it is read only at the window sizes it was \
-                 drawn at; resize the window, or fix the value at this size in AppyTappy Setup"
-            ]
-        );
-        assert_eq!(
-            told.try_recv(),
-            Err(TryRecvError::Empty),
-            "no value fits 640x480"
-        );
         frames.handle(Ok(frame(&image, WINDOW)));
         assert_eq!(flags(&readings), [("icon".to_owned(), Value::Flag(true))]);
+        assert_eq!(frames.handle(Ok(frame(&image, SMALL))), Duration::ZERO);
         frames.handle(outside(SMALL));
-        frames.handle(outside(SMALL));
-        let unseen: Vec<Reading> = readings.try_iter().collect();
+        frames.handle(Ok(frame(&image, SMALL)));
         assert_eq!(
-            unseen,
-            [
-                Reading::Unseen {
-                    session: SessionId(3)
-                },
-                Reading::ValueProblem {
-                    session: SessionId(3),
-                    value: 0,
-                    problem: "is not read at 640x480: it is read only at the window sizes \
-                              it was drawn at; resize the window, or fix the value at this size \
-                              in AppyTappy Setup"
-                        .to_owned()
-                }
-            ],
-            "each is said once"
+            told.try_iter().collect::<Vec<_>>(),
+            [Control::Resizing {
+                size: SMALL,
+                problems: vec![None]
+            }],
+            "the reader is told once"
         );
+        assert_eq!(
+            readings.try_iter().collect::<Vec<_>>(),
+            [Reading::Unseen {
+                session: SessionId(3)
+            }],
+            "nothing is read before the size settles"
+        );
+        // The reader found that nothing reads at the settled size.
+        settled
+            .send(Placed::new(&job.plan, SMALL))
+            .expect("the handler listens");
+        frames.handle(outside(SMALL));
+        frames.handle(Ok(frame(&image, SMALL)));
+        assert_eq!(problems(&readings), [format!("value 0 {NOT_DRAWN}")]);
+        assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
         frames.handle(Ok(frame(&image, WINDOW)));
+        assert_eq!(
+            told.try_iter().collect::<Vec<_>>(),
+            [Control::Resizing {
+                size: WINDOW,
+                problems: Vec::new()
+            }],
+            "back at its own size, the reader is told"
+        );
         assert_eq!(
             flags(&readings),
             [("icon".to_owned(), Value::Flag(true))],
@@ -1213,6 +1358,41 @@ mod tests {
             problems(&readings),
             ["a frame cannot be read: the copy failed"]
         );
+    }
+
+    #[test]
+    fn a_size_settles_once_and_is_resolved_once_unless_the_capture_reads_at_it() {
+        let job = job(vec![red_at("large", 0, 0), drawn_at("small", 4, 6, SMALL)]);
+        let start = Instant::now();
+        let later = start.checked_add(SETTLE).expect("in range");
+        let mut settle = Settle::new(WINDOW);
+        settle.saw(SMALL, start);
+        assert_eq!(
+            settled_elsewhere(&mut settle, start, &job.plan, WINDOW),
+            None,
+            "not settled yet"
+        );
+        assert_eq!(
+            settled_elsewhere(&mut settle, later, &job.plan, WINDOW),
+            Some(Placed::new(&job.plan, SMALL))
+        );
+        assert_eq!(
+            settled_elsewhere(&mut settle, later, &job.plan, WINDOW),
+            None,
+            "resolved once"
+        );
+        settle.saw(WINDOW, later);
+        assert_eq!(
+            settled_elsewhere(
+                &mut settle,
+                later.checked_add(SETTLE).expect("in range"),
+                &job.plan,
+                WINDOW
+            ),
+            None,
+            "back at the size the capture reads at"
+        );
+        assert_eq!(settle.at(), WINDOW);
     }
 
     #[test]
@@ -1240,13 +1420,34 @@ mod tests {
         assert_eq!(frames.handle(outside(SMALL)), Duration::ZERO);
         assert_eq!(
             told.try_recv(),
-            Ok(Control::Resized(Placed::new(&job.plan, SMALL)))
+            Ok(Control::Resizing {
+                size: SMALL,
+                problems: vec![None, Some(NOT_DRAWN.to_owned())]
+            })
         );
-        let small = frames_at(&job, SMALL, events, control).expect("a value");
+        readings.try_iter().for_each(drop);
+        // Once SMALL settles, the capture for it carries those problems, so
+        // the value drawn only at the old size says nothing new.
+        let mut small = frames_at(&job, SMALL, events, control).expect("a value");
         assert_eq!(
             copied(&small),
             [Region::new(4, 6, 2, 2).expect("not empty")]
         );
+        small.carry(&Recovery::new(), vec![Some(NOT_DRAWN.to_owned()), None]);
+        small.handle(Ok(frame(&red, SMALL)));
+        assert_eq!(problems(&readings), Vec::<String>::new());
+        let mut fresh =
+            frames_at(&job, SMALL, mpsc::channel().0, mpsc::channel().0).expect("a value");
+        fresh.carry(&Recovery::new(), vec![None]);
+        assert_eq!(
+            fresh.problems,
+            [None, None],
+            "a list for other values is left out"
+        );
+        let (said, heard) = mpsc::channel::<Reading>();
+        let mut uncarried = frames_at(&job, SMALL, said, mpsc::channel().0).expect("a value");
+        uncarried.handle(Ok(frame(&red, SMALL)));
+        assert_eq!(problems(&heard), [format!("value 0 {NOT_DRAWN}")]);
     }
 
     #[test]
@@ -1269,10 +1470,16 @@ mod tests {
         let red = frame_image(16, 16, |_, _| true);
         frames.handle(Ok(frame(&red, SMALL)));
         let placed = Placed::new(&job.plan, SMALL);
-        assert_eq!(told.try_recv(), Ok(Control::Resized(placed.clone())));
-        // 4 by 0.8 is 3.2 and 6 by 0.8 is 4.8, so it is read 3 across and 5
-        // down; the fix is read exactly where it was drawn.
-        let small = FrameReader::new(&job, placed, events, control).expect("values");
+        assert!(placed.reads());
+        assert!(matches!(
+            told.try_recv(),
+            Ok(Control::Resizing { size: SMALL, .. })
+        ));
+        // Its edges at 4 and 6 across scale to 3.2 and 4.8, so 3 to 5, and
+        // at 6 and 8 down to 4.8 and 6.4, so 5 to 6: one row. The fix is
+        // read exactly where it was drawn.
+        let small =
+            FrameReader::new(&job, placed, events, control, mpsc::channel().1).expect("values");
         assert_eq!(
             small
                 .layout
@@ -1281,7 +1488,7 @@ mod tests {
                 .map(|copy| copy.from)
                 .collect::<Vec<_>>(),
             [
-                Region::new(3, 5, 2, 2).expect("not empty"),
+                Region::new(3, 5, 2, 1).expect("not empty"),
                 Region::new(10, 12, 2, 2).expect("not empty"),
                 Region::new(638, 0, 2, 2).expect("not empty"),
             ]
@@ -1290,12 +1497,12 @@ mod tests {
     }
 
     #[test]
-    fn a_size_where_nothing_reads_is_resolved_once_and_said_once() {
+    fn a_size_where_nothing_reads_is_said_once_the_reader_resolved_it() {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, told) = mpsc::channel();
         // Pinned left at the right edge, it scales past a narrower window.
         let job = job(vec![scaling("edge", 798, 0, WINDOW, SizeChangesDef::Often)]);
-        let mut frames = frames_at(&job, WINDOW, events, control).expect("values");
+        let (mut frames, settled) = frames_with(&job, WINDOW, events, control).expect("values");
         let narrow = Size {
             width: 400,
             height: 600,
@@ -1303,19 +1510,28 @@ mod tests {
         let red = frame_image(2, 2, |_, _| true);
         frames.handle(Ok(frame(&red, narrow)));
         frames.handle(Ok(frame(&red, narrow)));
-        assert_eq!(told.try_recv(), Err(TryRecvError::Empty), "nothing reads");
-        assert_eq!(
-            frames.elsewhere.as_ref().map(|placed| placed.size),
-            Some(narrow),
-            "kept for the frames that follow"
-        );
-        assert_eq!(
-            problems(&readings),
-            [
-                "value 0 is not read at 400x600: scaled to this window size, its region \
-                 reaches outside the window; fix the value at this size in AppyTappy Setup"
-            ]
-        );
+        assert_eq!(told.try_iter().count(), 1, "told once");
+        assert_eq!(problems(&readings), Vec::<String>::new(), "not settled yet");
+        let placed = Placed::new(&job.plan, narrow);
+        assert!(!placed.reads());
+        settled.send(placed.clone()).expect("the handler listens");
+        frames.handle(Ok(frame(&red, narrow)));
+        frames.handle(Ok(frame(&red, narrow)));
+        assert_eq!(frames.elsewhere, Some(placed));
+        assert_eq!(problems(&readings), [format!("value 0 {OUTSIDE}")]);
+        // Narrower still, it is not read for the same reason: the reader is
+        // told, and the log says nothing new.
+        let narrower = Size {
+            width: 300,
+            height: 600,
+        };
+        frames.handle(Ok(frame(&red, narrower)));
+        assert_eq!(told.try_iter().count(), 1);
+        settled
+            .send(Placed::new(&job.plan, narrower))
+            .expect("the handler listens");
+        frames.handle(Ok(frame(&red, narrower)));
+        assert_eq!(problems(&readings), Vec::<String>::new(), "said once");
     }
 
     #[test]
@@ -1422,7 +1638,12 @@ mod tests {
         let values = || vec![red_at("icon", 0, 0), drawn_at("small", 0, 0, SMALL)];
         let red = frame_image(2, 2, |_, _| true);
         let closed = || Err(io::Error::new(io::ErrorKind::NotConnected, "closed"));
-        for ending in [closed(), outside(SMALL)] {
+        // Another size does not end it: the reader ends it once the size
+        // settled.
+        for ending in [
+            closed(),
+            Err(io::Error::new(io::ErrorKind::NotConnected, "lost")),
+        ] {
             let job = job(values());
             let mut frames =
                 frames_at(&job, WINDOW, events.clone(), control.clone()).expect("values to read");
@@ -1448,7 +1669,7 @@ mod tests {
             "the capture starts again".to_owned(),
             Some("the copy failed".to_owned()),
         );
-        frames.carry(&recovery);
+        frames.carry(&recovery, Vec::new());
         frames.handle(Err(io::Error::other("the copy failed")));
         assert_eq!(problems(&readings), Vec::<String>::new(), "logged already");
         let red = frame_image(2, 2, |_, _| true);
@@ -1744,10 +1965,7 @@ mod tests {
             Ok(Reading::ValueProblem {
                 session: SessionId(3),
                 value: 1,
-                problem: "is not read at 800x600: it is read only at the window sizes it was \
-                          drawn at; resize the window, or fix the value at this size in \
-                          AppyTappy Setup"
-                    .to_owned()
+                problem: NOT_DRAWN.to_owned()
             }),
             "a value drawn only at another size says so once"
         );
@@ -1780,6 +1998,52 @@ mod tests {
         assert_eq!(again, 4, "it looks for the window again");
         // A real capture drops its handler when it closes.
         drop((first, second));
+        stopped(reader, desk, &readings);
+    }
+
+    #[test]
+    fn a_settled_size_where_nothing_reads_keeps_the_capture_and_says_why() {
+        let (system, desk) = FakeSystem::new();
+        let (events, readings) = mpsc::channel::<Reading>();
+        // Pinned left at the right edge, it scales past a narrower window.
+        let edge = scaling("edge", 798, 0, WINDOW, SizeChangesDef::Often);
+        let reader = Reader::start(system, job(vec![edge]), events).expect("start");
+        desk.answer(Ok(desktop()));
+        let (_, _, mut first) = desk.capture();
+        let red = frame_image(2, 2, |_, _| true);
+        first(Ok(frame(&red, WINDOW)));
+        assert!(matches!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Sample { .. })
+        ));
+        let narrow = Size {
+            width: 400,
+            height: 600,
+        };
+        first(Ok(frame(&red, narrow)));
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Unseen {
+                session: SessionId(3)
+            })
+        );
+        // Once the size settles, the reader tells the handler, whose next
+        // frame says why the value is not read.
+        let said = (0..60).find_map(|_| {
+            thread::sleep(Duration::from_millis(50));
+            first(Ok(frame(&red, narrow)));
+            readings.try_recv().ok()
+        });
+        assert_eq!(
+            said,
+            Some(Reading::ValueProblem {
+                session: SessionId(3),
+                value: 0,
+                problem: OUTSIDE.to_owned()
+            })
+        );
+        assert!(!desk.asks_soon(), "the capture goes on");
+        drop(first);
         stopped(reader, desk, &readings);
     }
 
@@ -2126,7 +2390,10 @@ mod tests {
         recovery.failed("closed".to_owned(), None);
         for left in [
             lost(),
-            Control::Resized(Placed::new(&job(Vec::new()).plan, SMALL)),
+            Control::Resizing {
+                size: SMALL,
+                problems: Vec::new(),
+            },
             Control::Failing("x".to_owned()),
         ] {
             control.send(left).expect("send");

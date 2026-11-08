@@ -25,7 +25,7 @@ test("referenceCharacters reads a reference's samples", () => {
   ).toEqual(['0', '1', '9', '%']);
 });
 
-test('readers names the number values that read with a reference', () => {
+test('readers names the number values that read with a reference, in a check or a fix', () => {
   const screen = { windowSize: { width: 10, height: 10 }, region: { x: 0, y: 0, width: 1, height: 1 }, fixes: [] };
   const file: AppFile = {
     format: 2,
@@ -46,7 +46,15 @@ test('readers names the number values that read with a reference', () => {
         name: 'Progress',
         screen: { ...screen, check: { kind: 'number', reference: 'percent', whole: true } },
       },
-      { id: 'b', name: 'Lives', screen: { ...screen, check: { kind: 'number', reference: 'digits', whole: false } } },
+      {
+        id: 'b',
+        name: 'Lives',
+        screen: {
+          ...screen,
+          check: { kind: 'number', reference: 'digits', whole: false },
+          fixes: [{ windowSize: { width: 20, height: 20 }, region: screen.region, images: [], reference: 'percent' }],
+        },
+      },
       { id: 'c', name: 'Icon', screen: { ...screen, check: { kind: 'color', color: white, tolerance: 0 } } },
       {
         id: 'd',
@@ -55,7 +63,8 @@ test('readers names the number values that read with a reference', () => {
       },
     ],
   };
-  expect(readers(file, 'percent')).toEqual(['Progress', 'Best run']);
+  expect(readers(file, 'percent')).toEqual(['Progress', 'Lives', 'Best run']);
+  expect(readers(file, 'digits')).toEqual(['Lives']);
   expect(readers(file, 'none')).toEqual([]);
 });
 

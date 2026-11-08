@@ -8,7 +8,9 @@
 //! right keeps `(W − x) · f` from the right edge, and one pinned to the
 //! center keeps `(x − W / 2) · f` from the middle; the same holds down the
 //! window for top, middle and bottom. Each edge rounds to the nearest whole
-//! pixel, halves away from zero.
+//! pixel, halves away from zero, and the region's size is the distance
+//! between its rounded edges, so a region touching the window's edge still
+//! touches it.
 
 use appytappy_config::app_file::{Along, PinDef};
 
@@ -23,20 +25,18 @@ pub fn scaled(region: Region, drawn: Size, now: Size, pin: PinDef) -> Option<Reg
         new: i128::from(now.height),
         old: i128::from(drawn.height),
     };
-    let width = factor.of(i128::from(region.size().width))?;
-    let height = factor.of(i128::from(region.size().height))?;
-    let x = place(
+    let (x, width) = span(
         pin.horizontal(),
-        i128::from(region.x()),
-        i128::from(drawn.width),
-        i128::from(now.width),
+        region.x(),
+        region.size().width,
+        (drawn.width, now.width),
         factor,
     )?;
-    let y = place(
+    let (y, height) = span(
         pin.vertical(),
-        i128::from(region.y()),
-        i128::from(drawn.height),
-        i128::from(now.height),
+        region.y(),
+        region.size().height,
+        (drawn.height, now.height),
         factor,
     )?;
     let scaled = Region::new(
@@ -46,6 +46,24 @@ pub fn scaled(region: Region, drawn: Size, now: Size, pin: PinDef) -> Option<Reg
         u32::try_from(height).ok()?,
     )?;
     scaled.fits(now).then_some(scaled)
+}
+
+/// Where a span from `start` that is `length` long, along a side that was
+/// `sides.0` long and is now `sides.1`, starts and how long it is. Both its
+/// edges are placed and rounded, and its length is their difference, at
+/// least 1, so a span that touches its side's end still touches it.
+fn span(
+    along: Along,
+    start: u32,
+    length: u32,
+    sides: (u32, u32),
+    factor: Factor,
+) -> Option<(i128, i128)> {
+    let (side, new_side) = (i128::from(sides.0), i128::from(sides.1));
+    let first = place(along, i128::from(start), side, new_side, factor)?;
+    let end = i128::from(start).checked_add(i128::from(length))?;
+    let last = place(along, end, side, new_side, factor)?;
+    Some((first, last.checked_sub(first)?.max(1)))
 }
 
 /// A scale factor, `new / old`.
@@ -129,27 +147,28 @@ mod tests {
 
     #[test]
     fn each_pin_keeps_its_scaled_distance_from_its_side() {
-        // Wider and taller by a third: f is 4 / 3, so the region is 133 by
-        // 53, and 80 from the top whichever way it is pinned down, since f
+        // Wider and taller by a third: f is 4 / 3. Its edges round to 53
+        // and 187 across, so it is 134 wide, and 80 to 133 down, so 53
+        // high; it is 80 from the top whichever way it is pinned down, since f
         // follows the height.
         let larger = Size {
             width: 3440,
             height: 1440,
         };
         let expected = [
-            (PinDef::TopLeft, region(53, 80, 133, 53)),
+            (PinDef::TopLeft, region(53, 80, 134, 53)),
             // 1720 + (40 − 960) · 4 / 3 = 493.33.
-            (PinDef::TopCenter, region(493, 80, 133, 53)),
+            (PinDef::TopCenter, region(493, 80, 134, 53)),
             // 3440 − 1880 · 4 / 3 = 933.33.
-            (PinDef::TopRight, region(933, 80, 133, 53)),
+            (PinDef::TopRight, region(933, 80, 134, 53)),
             // 720 + (60 − 540) · 4 / 3 = 80.
-            (PinDef::MiddleLeft, region(53, 80, 133, 53)),
-            (PinDef::Center, region(493, 80, 133, 53)),
-            (PinDef::MiddleRight, region(933, 80, 133, 53)),
+            (PinDef::MiddleLeft, region(53, 80, 134, 53)),
+            (PinDef::Center, region(493, 80, 134, 53)),
+            (PinDef::MiddleRight, region(933, 80, 134, 53)),
             // 1440 − 1020 · 4 / 3 = 80.
-            (PinDef::BottomLeft, region(53, 80, 133, 53)),
-            (PinDef::BottomCenter, region(493, 80, 133, 53)),
-            (PinDef::BottomRight, region(933, 80, 133, 53)),
+            (PinDef::BottomLeft, region(53, 80, 134, 53)),
+            (PinDef::BottomCenter, region(493, 80, 134, 53)),
+            (PinDef::BottomRight, region(933, 80, 134, 53)),
         ];
         for (pin, region) in expected {
             assert_eq!(at(pin, larger), Some(region), "{pin:?}");
@@ -207,20 +226,53 @@ mod tests {
     }
 
     #[test]
+    fn a_region_touching_its_pinned_edge_still_touches_it_at_a_half_pixel() {
+        let half = Size {
+            width: 960,
+            height: 540,
+        };
+        // Its left edge is 133.5 from the right edge, which rounds to 134,
+        // and so would its 133.5 width, which would end 1 pixel outside.
+        let right = region(1653, 0, 267, 41);
+        assert_eq!(
+            scaled(right, DRAWN, half, PinDef::TopRight),
+            Some(region(827, 0, 133, 21))
+        );
+        // The same down the window, pinned to the bottom.
+        let bottom = region(0, 1013, 41, 67);
+        assert_eq!(
+            scaled(bottom, DRAWN, half, PinDef::BottomLeft),
+            Some(region(0, 507, 21, 33))
+        );
+        // A span whose edges round together keeps a pixel.
+        assert_eq!(
+            span(
+                Along::Start,
+                0,
+                1,
+                (1080, 54),
+                Factor { new: 54, old: 1080 }
+            ),
+            Some((0, 1))
+        );
+    }
+
+    #[test]
     fn a_region_that_scales_to_nothing_or_past_an_edge_is_not_read() {
         let flat = Size {
             width: 1920,
             height: 0,
         };
         assert_eq!(at(PinDef::TopLeft, flat), None);
-        // A 1 pixel line at a twentieth of the height rounds to no rows.
+        // A 1 pixel line at a twentieth of the height keeps one row and
+        // one column.
         let small = Size {
             width: 1920,
             height: 54,
         };
         assert_eq!(
             scaled(region(0, 0, 10, 1), DRAWN, small, PinDef::TopLeft),
-            None
+            Some(region(0, 0, 1, 1))
         );
         // Touching the right edge fits; one more pixel does not.
         let edge = region(1820, 0, 100, 40);

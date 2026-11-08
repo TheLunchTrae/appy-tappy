@@ -151,7 +151,7 @@ Each thread below is a plain `std::thread`, and each channel is a
   size, packed one under another, and reads each value from its place in
   that packed image. Where each value reads at a size, drawn there, fixed
   there, or scaled from its first drawing, is resolved once each time the
-  window takes the size
+  window settles at the size, after it showed that size alone for 250 ms
   ([Window sizes](Screen-regions.md#window-sizes)). A `Layout` in
   `appytappy-sources::screen` says where each region goes, and copies the one
   rectangle around them instead when that is smaller, such as for values

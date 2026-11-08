@@ -137,16 +137,20 @@ export function placement(screen: ScreenDef, sizeChanges: SizeChangesDef, size: 
   return sizeChanges === 'often' ? 'scaled' : 'notDrawn';
 }
 
-/** What a value's cell in the Values page's column for the window's size now shows. */
+/** Where a value that reads on a window of some size reads from: its first drawing, its fix there, or scaled. */
+export type ReadFrom = Exclude<Placement, 'notDrawn'>;
+
+/** What a value's cell in the Values page's column for the window's size now shows. Each but `waiting` and
+ * `notDrawn` says where it reads from, since a fix at this size can only be made where it was not first drawn. */
 export type NowCell =
-  /** Its reading, and whether a fix at this size reads it. */
-  | { readonly kind: 'reading'; readonly text: string; readonly fixed: boolean }
+  /** Its reading. */
+  | { readonly kind: 'reading'; readonly text: string; readonly from: ReadFrom }
   /** No frame has been read yet. */
   | { readonly kind: 'waiting' }
   /** A state check whose region looks like none of its states. */
-  | { readonly kind: 'noState'; readonly fixed: boolean }
+  | { readonly kind: 'noState'; readonly from: ReadFrom }
   /** It cannot be read at this size, and why. */
-  | { readonly kind: 'unread'; readonly problem: string; readonly fixed: boolean }
+  | { readonly kind: 'unread'; readonly problem: string; readonly from: ReadFrom }
   /** It is read only at sizes it was drawn at, and this is not one. */
   | { readonly kind: 'notDrawn' };
 
@@ -161,13 +165,27 @@ export function nowCell(
   reading: { readonly text: string; readonly noState: boolean } | null,
   problem: string | null,
 ): NowCell {
-  const placed = placement(screen, sizeChanges, size);
-  if (placed === 'notDrawn') {
+  const from = placement(screen, sizeChanges, size);
+  if (from === 'notDrawn') {
     return { kind: 'notDrawn' };
   }
-  const fixed = placed === 'fixed';
   if (reading !== null) {
-    return reading.noState ? { kind: 'noState', fixed } : { kind: 'reading', text: reading.text, fixed };
+    return reading.noState ? { kind: 'noState', from } : { kind: 'reading', text: reading.text, from };
   }
-  return problem === null ? { kind: 'waiting' } : { kind: 'unread', problem, fixed };
+  return problem === null ? { kind: 'waiting' } : { kind: 'unread', problem, from };
+}
+
+/** Whether the cell offers Fix at this size: for a value that is not drawn here, matches no state or does not read,
+ * at a size other than the one it was first drawn at. There, editing the value draws it again instead. */
+export function offersFix(cell: NowCell): boolean {
+  switch (cell.kind) {
+    case 'reading':
+    case 'waiting':
+      return false;
+    case 'notDrawn':
+      return true;
+    case 'noState':
+    case 'unread':
+      return cell.from !== 'drawn';
+  }
 }

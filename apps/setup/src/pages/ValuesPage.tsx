@@ -21,6 +21,7 @@ import {
   NOW_HINT,
   type NowCell,
   nowCell,
+  offersFix,
   REMOVE_FIX_HINT,
   regionText,
   sameSize,
@@ -68,24 +69,25 @@ interface NowProps {
   readonly onRemoveFix: () => void;
 }
 
-/** A value's reading at the window's size now, or why it has none, with a way to fix it at that size. */
+/** A value's reading at the window's size now, or why it has none, with a way to fix it at that size. A state
+ * check that matches none of its states may be right, so it shows as a note, not a warning. */
 function NowCellView({ value, cell, size, onFix, onRemoveFix }: NowProps) {
-  const fine = cell.kind === 'reading' || cell.kind === 'waiting';
-  const fixed = cell.kind !== 'notDrawn' && cell.kind !== 'waiting' && cell.fixed;
+  const tone = { reading: undefined, waiting: undefined, noState: 'note', unread: 'warn', notDrawn: 'warn' }[cell.kind];
+  const fixed = cell.kind !== 'notDrawn' && cell.kind !== 'waiting' && cell.from === 'fixed';
   return (
     <span className="now">
-      <span className={fine ? undefined : 'warn'} title={cell.kind === 'unread' ? cell.problem : undefined}>
+      <span className={tone} title={cell.kind === 'unread' ? cell.problem : undefined}>
         {nowText(cell, size)}
       </span>
       {fixed ? <small className="note">fixed at this size</small> : null}
-      {fine ? null : (
+      {offersFix(cell) ? (
         <>
           <button type="button" className="btn small" onClick={onFix}>
             Fix at this size<span className="visually-hidden"> for {value.name}</span>
           </button>
           <Hint topic="Fix at this size">{FIX_HINT}</Hint>
         </>
-      )}
+      ) : null}
       {fixed ? (
         <>
           <button type="button" className="btn small" onClick={onRemoveFix}>
@@ -179,10 +181,10 @@ function AppRows({
           )}
         </td>
       </tr>
-      {app.file.values.map((value, position) => {
+      {app.file.values.map((value) => {
         const summary = checkSummary(value.screen.check, file.references);
         const key = `${app.id}/${value.id}`;
-        const read = view?.values[position];
+        const read = view?.values.find((shown) => shown.id === value.id);
         const cell =
           size === null ? null : nowCell(value.screen, file.sizeChanges, size, readingOf(read), read?.problem ?? null);
         return (

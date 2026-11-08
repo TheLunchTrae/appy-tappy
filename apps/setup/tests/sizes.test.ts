@@ -1,7 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ScreenDef } from '../src/lib/bindings.ts';
-import { fixAt, guessPin, nowCell, pinOf, placement, regionText, sameSize } from '../src/lib/sizes.ts';
+import {
+  fixAt,
+  guessPin,
+  type NowCell,
+  nowCell,
+  offersFix,
+  pinOf,
+  placement,
+  type ReadFrom,
+  regionText,
+  sameSize,
+} from '../src/lib/sizes.ts';
 
 const window = { width: 1920, height: 1080 };
 const larger = { width: 3440, height: 1440 };
@@ -65,23 +76,37 @@ describe('placement', () => {
 describe('nowCell', () => {
   const reading = { text: '50', noState: false };
 
-  test('shows the reading, and whether a fix reads it', () => {
-    expect(nowCell(fixed, 'often', window, reading, null)).toEqual({ kind: 'reading', text: '50', fixed: false });
-    expect(nowCell(fixed, 'often', larger, reading, null)).toEqual({ kind: 'reading', text: '50', fixed: true });
+  test('shows the reading, and where it reads from', () => {
+    expect(nowCell(fixed, 'often', window, reading, null)).toEqual({ kind: 'reading', text: '50', from: 'drawn' });
+    expect(nowCell(fixed, 'often', larger, reading, null)).toEqual({ kind: 'reading', text: '50', from: 'fixed' });
   });
 
   test('says why there is no reading', () => {
     expect(nowCell(screen, 'often', window, null, null)).toEqual({ kind: 'waiting' });
     expect(nowCell(screen, 'often', larger, { text: 'none', noState: true }, null)).toEqual({
       kind: 'noState',
-      fixed: false,
+      from: 'scaled',
     });
     expect(nowCell(fixed, 'often', larger, null, 'Cannot read.')).toEqual({
       kind: 'unread',
       problem: 'Cannot read.',
-      fixed: true,
+      from: 'fixed',
     });
     // Read only at its drawn sizes, it says so whatever the window read.
     expect(nowCell(screen, 'rarely', larger, reading, 'Not read.')).toEqual({ kind: 'notDrawn' });
+  });
+});
+
+describe('offersFix', () => {
+  test('offers a fix where a value does not read, except at the size it was first drawn at', () => {
+    const unread = (from: ReadFrom): NowCell => ({ kind: 'unread', problem: 'Cannot read.', from });
+    expect(offersFix(unread('scaled'))).toBe(true);
+    expect(offersFix(unread('fixed'))).toBe(true);
+    expect(offersFix(unread('drawn'))).toBe(false);
+    expect(offersFix({ kind: 'noState', from: 'scaled' })).toBe(true);
+    expect(offersFix({ kind: 'noState', from: 'drawn' })).toBe(false);
+    expect(offersFix({ kind: 'notDrawn' })).toBe(true);
+    expect(offersFix({ kind: 'reading', text: '50', from: 'scaled' })).toBe(false);
+    expect(offersFix({ kind: 'waiting' })).toBe(false);
   });
 });

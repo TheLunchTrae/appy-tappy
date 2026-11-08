@@ -359,6 +359,18 @@ impl ScreenDef {
             .unwrap_or_else(|| PinDef::guess(self.region, self.window_size))
     }
 
+    /// Whether the value reads with the reference `id`, in its number check
+    /// or in any fix.
+    #[must_use]
+    pub fn reads_with(&self, id: &str) -> bool {
+        let checked = matches!(&self.check, CheckDef::Number { reference, .. } if reference == id);
+        checked
+            || self
+                .fixes
+                .iter()
+                .any(|fix| fix.reference.as_deref() == Some(id))
+    }
+
     /// The file names of the value's pictures: its state check's, then each
     /// fix's.
     pub fn images(&self) -> impl Iterator<Item = &str> {
