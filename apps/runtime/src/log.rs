@@ -196,13 +196,15 @@ mod tests {
             "first\nsecond\nthird\n"
         );
         fs::remove_dir_all(&blocker).expect("unblock the move");
-        log.write(None, "fourth").expect("write");
+        // Short enough to fit under the limit if a failed move had reset the
+        // size, so only a log that still counts every line moves it here.
+        log.write(None, "4th").expect("write");
         assert_eq!(
             read(&blocker),
             "first\nsecond\nthird\n",
             "the next line moves it"
         );
-        assert_eq!(read(&folder.0.join("runtime.log")), "fourth\n");
+        assert_eq!(read(&folder.0.join("runtime.log")), "4th\n");
     }
 
     #[test]
