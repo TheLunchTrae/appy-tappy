@@ -153,6 +153,9 @@ describe('words', () => {
     expect(actionText({ kind: 'volume', percent: 20, app: null })).toBe('Volume · system 20%');
     expect(actionText({ kind: 'volume', percent: 0, app: 'Player.exe' })).toBe('Volume · Player.exe 0%');
     expect(actionText({ kind: 'keys', keys: 'Ctrl+Shift+M' })).toBe('Press Ctrl+Shift+M');
+    expect(actionText({ kind: 'open', target: 'https://example.com' })).toBe('Open https://example.com');
+    expect(actionText({ kind: 'sound', file: 'C:\\Sounds\\Ding.wav' })).toBe('Play Ding.wav');
+    expect(actionText({ kind: 'sound', file: 'C:/Sounds/Ding.wav' })).toBe('Play Ding.wav');
   });
 
   test('undo says what it puts back, and skips cannot be undone', () => {
@@ -162,6 +165,8 @@ describe('words', () => {
     expect(undoable({ kind: 'media', command: 'previous', app: null })).toBe(false);
     expect(undoable({ kind: 'volume', percent: 5, app: null })).toBe(true);
     expect(undoable({ kind: 'keys', keys: 'M' })).toBe(false);
+    expect(undoable({ kind: 'open', target: 'https://example.com' })).toBe(false);
+    expect(undoable({ kind: 'sound', file: 'C:\\Ding.wav' })).toBe(false);
     expect(undoText(pauseMusic.actions)).toBe('Paused media plays again and each volume goes back to where it was.');
     expect(undoText([{ kind: 'media', command: 'play', app: null }])).toBe('Started media pauses again.');
     expect(
@@ -336,6 +341,129 @@ describe('key presses', () => {
     expect(undone([{ kind: 'media', command: 'next', app: null }, ...pressKeys.actions])).toEqual({
       ok: false,
       next: 'Turn off undo: a skipped track cannot be unskipped, and pressed keys cannot be unpressed.',
+    });
+  });
+});
+
+describe('opening and sounds', () => {
+  const openAndPlay: AutomationDef = {
+    ...pauseMusic,
+    actions: [
+      { kind: 'open', target: 'C:\\Tools\\Timer.exe' },
+      { kind: 'sound', file: 'C:\\Sounds\\Ding.wav' },
+    ],
+    undo: false,
+  };
+
+  test('round-trip through the editor, whatever the anti-cheat', () => {
+    const draft = toDraft(openAndPlay);
+    expect(draft.actions.map((action) => [action.kind, action.opens, action.sound, action.target, action.app])).toEqual(
+      [
+        ['open', 'C:\\Tools\\Timer.exe', '', 'default', ''],
+        ['sound', '', 'C:\\Sounds\\Ding.wav', 'default', ''],
+      ],
+    );
+    expect(buildAutomation(draft, choices, 'pause_music')).toEqual({ ok: true, automation: openAndPlay });
+  });
+
+  test('need a full path or a web link, as typed or copied as a path', () => {
+    const typed = (kind: 'open' | 'sound', text: string): ReturnType<typeof buildAutomation> =>
+      buildAutomation(
+        { ...toDraft(openAndPlay), actions: [{ ...newAction(1, kind), opens: text, sound: text }] },
+        choices,
+        'pause_music',
+      );
+    const opens = (target: string): ReturnType<typeof buildAutomation> => ({
+      ok: true,
+      automation: { ...openAndPlay, actions: [{ kind: 'open', target }] },
+    });
+    expect(typed('open', ' "C:\\Program Files\\Timer\\Timer.exe" ')).toEqual(
+      opens('C:\\Program Files\\Timer\\Timer.exe'),
+    );
+    expect(typed('open', 'd:/notes.txt')).toEqual(opens('d:/notes.txt'));
+    expect(typed('open', ' HTTPS://example.com/timer ')).toEqual(opens('HTTPS://example.com/timer'));
+    expect(typed('open', ' "" ')).toEqual({
+      ok: false,
+      next: "Enter what action 1 opens: a program's full path, such as C:\\Tools\\Timer.exe, or a web link.",
+    });
+    for (const target of [
+      'Timer.exe',
+      'C:Timer.exe',
+      'ftp://example.com',
+      'search-ms:query=x',
+      '\\\\server\\share\\run.bat',
+      'https://',
+      'https://a b',
+    ]) {
+      expect(typed('open', target)).toEqual({
+        ok: false,
+        next: 'Action 1 opens a program or file by its full path, such as C:\\Tools\\Timer.exe, or a link that starts with http:// or https://.',
+      });
+    }
+    expect(typed('sound', '"C:\\Sounds\\Ding.WAV"')).toEqual({
+      ok: true,
+      automation: { ...openAndPlay, actions: [{ kind: 'sound', file: 'C:\\Sounds\\Ding.WAV' }] },
+    });
+    expect(typed('sound', '  ')).toEqual({
+      ok: false,
+      next: 'Enter the full path of the WAV file action 1 plays, such as C:\\Sounds\\Ding.wav.',
+    });
+    for (const file of ['Ding.wav', 'C:\\Sounds\\Ding.mp3', 'https://example.com/ding.wav', '\\\\server\\ding.wav']) {
+      expect(typed('sound', file)).toEqual({
+        ok: false,
+        next: 'Action 1 plays a WAV file by its full path, such as C:\\Sounds\\Ding.wav.',
+      });
+    }
+  });
+
+  test('refuse a path or link the runtime would not save', () => {
+    const typed = (kind: 'open' | 'sound', text: string): ReturnType<typeof buildAutomation> =>
+      buildAutomation(
+        { ...toDraft(openAndPlay), actions: [{ ...newAction(1, kind), opens: text, sound: text }] },
+        choices,
+        'pause_music',
+      );
+    const longest = `https://${'a'.repeat(2040)}`;
+    expect(typed('open', longest)).toEqual({
+      ok: true,
+      automation: { ...openAndPlay, actions: [{ kind: 'open', target: longest }] },
+    });
+    expect(typed('open', `${longest}a`)).toEqual({
+      ok: false,
+      next: 'The path or link in action 1 is too long to save. Shorten it.',
+    });
+    for (const kind of ['open', 'sound'] as const) {
+      expect(typed(kind, 'C:\\Sounds\tDing.wav')).toEqual({
+        ok: false,
+        next: 'The path or link in action 1 has a tab or line break in it. Remove it.',
+      });
+    }
+  });
+
+  test('cannot be undone', () => {
+    expect(buildAutomation({ ...toDraft(openAndPlay), undo: true }, choices, 'pause_music')).toEqual({
+      ok: false,
+      next: 'Turn off undo: what opened stays open, and a played sound cannot be unplayed.',
+    });
+    expect(
+      buildAutomation(
+        {
+          ...toDraft({
+            ...openAndPlay,
+            actions: [
+              { kind: 'media', command: 'next', app: null },
+              { kind: 'keys', keys: 'M' },
+              ...openAndPlay.actions,
+            ],
+          }),
+          undo: true,
+        },
+        choices,
+        'pause_music',
+      ),
+    ).toEqual({
+      ok: false,
+      next: 'Turn off undo: a skipped track cannot be unskipped, pressed keys cannot be unpressed, what opened stays open, and a played sound cannot be unplayed.',
     });
   });
 });

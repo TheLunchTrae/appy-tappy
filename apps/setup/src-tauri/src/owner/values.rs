@@ -348,6 +348,44 @@ mod tests {
             "lowering it again is allowed too"
         );
 
+        // Opening and playing a sound are saved without the spaces around
+        // what they name.
+        let open_and_play: AutomationDef = serde_json::from_value(serde_json::json!({
+            "id": "",
+            "name": "Open and play",
+            "enabled": true,
+            "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": "Shown"},
+            "actions": [
+                {"kind": "open", "target": " https://example.com "},
+                {"kind": "sound", "file": " C:\\Ding.wav "}
+            ],
+            "undo": false,
+            "cooldownMs": 0
+        }))
+        .expect("the UI's spelling");
+        let id = harness
+            .ask(|reply| Request::SaveAutomation {
+                existing: None,
+                automation: Box::new(open_and_play),
+                reply,
+            })
+            .expect("saves");
+        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        assert_eq!(
+            listed[0].automation.actions,
+            [
+                ActionDef::Open {
+                    target: "https://example.com".to_owned()
+                },
+                ActionDef::Sound {
+                    file: r"C:\Ding.wav".to_owned()
+                }
+            ]
+        );
+        harness
+            .ask(|reply| Request::DeleteAutomation { id, reply })
+            .expect("removes");
+
         harness
             .ask(|reply| Request::DeleteValue {
                 app: "example".to_owned(),

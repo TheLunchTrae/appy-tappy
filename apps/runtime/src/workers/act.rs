@@ -281,12 +281,13 @@ fn given_up(retried: Result<(), ActionError>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::mpsc;
     use std::time::Duration;
 
     use appytappy_actions::{MEDIA_RETRY, MediaSession, Stroke, Volume};
     use appytappy_config::action::{
-        MediaCommand, MediaTarget, Modifier, VolumeLevel, VolumeTarget,
+        MediaCommand, MediaTarget, Modifier, OpenTarget, VolumeLevel, VolumeTarget,
     };
     use appytappy_config::anti_cheat::ProcessId;
 
@@ -373,6 +374,14 @@ mod tests {
         }
 
         fn hold(&mut self, _time: Duration) {}
+
+        fn open(&mut self, _target: &OpenTarget) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn play_sound(&mut self, _file: &Path) -> io::Result<bool> {
+            Ok(true)
+        }
     }
 
     const OWNER: Owner = (SessionId(1), RuleIndex(0));
