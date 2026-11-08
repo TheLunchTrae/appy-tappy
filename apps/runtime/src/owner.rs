@@ -915,7 +915,7 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
                 note(log, &line);
             }
             let before = model.state();
-            let orders = model.apply(change, Instant::now());
+            let orders = model.apply(change);
             let after = model.state();
             if after != before {
                 note(log, &format!("state: {after}"));
@@ -1557,14 +1557,11 @@ mod tests {
             "a".to_owned(),
             app_plan("Example App", &["Mute"]),
         )]));
-        let orders = model.apply(
-            Change::Started {
-                app: "a".to_owned(),
-                process: ProcessId::new(7),
-                executable: "Example.exe".to_owned(),
-            },
-            Instant::now(),
-        );
+        let orders = model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
         assert!(matches!(orders.first(), Some(Order::Read(_))));
         let mut reloads = Reloads::default();
         assert_eq!(
@@ -1583,14 +1580,11 @@ mod tests {
             "a".to_owned(),
             app_plan("Example App", &["Mute"]),
         )]));
-        model.apply(
-            Change::Started {
-                app: "a".to_owned(),
-                process: ProcessId::new(7),
-                executable: "Example.exe".to_owned(),
-            },
-            Instant::now(),
-        );
+        model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
         let mut reloads = Reloads::default();
         let on = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
         let trace = on.trace.expect("the trace starts");
@@ -1631,14 +1625,11 @@ mod tests {
             "a".to_owned(),
             app_plan("Example App", &["Mute"]),
         )]));
-        model.apply(
-            Change::Started {
-                app: "a".to_owned(),
-                process: ProcessId::new(7),
-                executable: "Example.exe".to_owned(),
-            },
-            Instant::now(),
-        );
+        model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
         let mut reloads = Reloads::default();
         let on = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
         assert!(on.trace.is_some_and(|trace| trace != Trace::OFF));
@@ -1724,14 +1715,11 @@ mod tests {
             "a".to_owned(),
             plan::examples::plan("Example App", 90.0),
         )]));
-        model.apply(
-            Change::Started {
-                app: "a".to_owned(),
-                process: ProcessId::new(7),
-                executable: "Example.exe".to_owned(),
-            },
-            Instant::now(),
-        );
+        model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
         let (mut trace, entries) = Trace::for_test(1, &[TraceCategory::Changes]);
         let at = Instant::now();
         let value = plan::examples::number(95.0);
@@ -1798,14 +1786,11 @@ mod tests {
             "a".to_owned(),
             app_plan("Example App", &["Mute"]),
         )]));
-        model.apply(
-            Change::Started {
-                app: "a".to_owned(),
-                process: ProcessId::new(7),
-                executable: "Example.exe".to_owned(),
-            },
-            Instant::now(),
-        );
+        model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
         scratch.write("automations.json", "not JSON");
         let mut reloads = Reloads {
             had: Had::Plan,

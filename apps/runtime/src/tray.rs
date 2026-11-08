@@ -91,8 +91,6 @@ pub(crate) fn command(id: NonZeroU16) -> Option<Command> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use appytappy_config::anti_cheat::ProcessId;
 
     use super::*;
@@ -129,14 +127,11 @@ mod tests {
     #[test]
     fn the_tooltip_shows_the_state_unless_disabled() {
         let mut model = Model::default();
-        model.apply(
-            Change::Started {
-                app: "example".to_owned(),
-                process: ProcessId::new(1),
-                executable: "Example.exe".to_owned(),
-            },
-            Instant::now(),
-        );
+        model.apply(Change::Started {
+            app: "example".to_owned(),
+            process: ProcessId::new(1),
+            executable: "Example.exe".to_owned(),
+        });
         assert_eq!(menu(&model).tooltip, "AppyTappy: attached");
         model.set_enabled(false);
         let disabled = menu(&model);

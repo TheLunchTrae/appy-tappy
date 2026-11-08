@@ -526,9 +526,10 @@ changing.
   [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6). The runtime and
   the setup app tell which build of an application runs, as [Build
   detection](#build-detection) describes.
-- A **rule** says when to act: a trigger on signals or application events, with
-  conditions, a cooldown, and re-arming. The engine evaluates rules as a pure
-  function with no I/O, so its tests need no application and no Windows.
+- A **rule** says when to act: a condition on signals that fires it when it
+  starts to hold, actions, a cooldown, and whether to restore. The engine
+  evaluates rules as a pure function with no I/O, so its tests need no
+  application and no Windows.
   [Rules](Rules.md) describes the model.
 - An **action** is a side effect from a fixed set, such as pausing media or
   setting an app's volume. The engine emits action requests; only the action
