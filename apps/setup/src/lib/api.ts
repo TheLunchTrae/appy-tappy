@@ -64,7 +64,14 @@ export type CheckDef =
   | { readonly kind: 'number'; readonly reference: string; readonly whole: boolean }
   | { readonly kind: 'barFill'; readonly filled: Color; readonly empty: Color }
   | { readonly kind: 'color'; readonly color: Color; readonly tolerance: number }
-  | { readonly kind: 'image'; readonly image: string; readonly tolerance: number };
+  /** Which of `states` the region shows, each a name and the file name of its picture. */
+  | { readonly kind: 'state'; readonly states: readonly StateDef[]; readonly tolerance: number };
+
+/** One look a state check knows: its name, and its picture's file name. */
+interface StateDef {
+  readonly name: string;
+  readonly image: string;
+}
 
 /** How an application's characters look: their color, and the pictures they were learned from. */
 export interface ReferenceDef {
@@ -148,15 +155,21 @@ export type CheckSpec =
   | { readonly kind: 'barFill'; readonly region: Rect; readonly filled: Color; readonly empty: Color }
   | { readonly kind: 'color'; readonly region: Rect; readonly color: Color; readonly tolerance: number }
   | {
-      readonly kind: 'image';
+      readonly kind: 'state';
       readonly region: Rect;
-      /** The screenshot the region was drawn on; the compared screenshot must have its window size. */
+      /** The screenshot the region was drawn on; every state's screenshot must have its window size. */
       readonly drawnOn: number;
-      readonly screenshot: number;
+      readonly states: readonly StateSpec[];
       readonly tolerance: number;
-      /** The thing to compare, selected on the screenshot; without one the whole region is compared. */
-      readonly selection?: SelectionSpec;
     };
+
+/** One state of a state check, taken from a screenshot. */
+export interface StateSpec {
+  readonly name: string;
+  readonly screenshot: number;
+  /** The thing to compare, selected on the screenshot; without one the whole region is compared. */
+  readonly selection?: SelectionSpec;
+}
 
 /** What a recorded reading shows, as the user confirmed it in review. */
 export interface RecordedLabel {
@@ -211,7 +224,9 @@ export interface RecordingSettings {
 /** What a check read. */
 export type Reading =
   | { readonly kind: 'number'; readonly value: number }
-  | { readonly kind: 'flag'; readonly value: boolean };
+  | { readonly kind: 'flag'; readonly value: boolean }
+  /** A state's name, or `none` when the region shows none of them. */
+  | { readonly kind: 'state'; readonly value: string };
 
 /** What an application's overlay shows now. */
 export interface OverlayView {
@@ -280,6 +295,9 @@ export type ActionDef =
   | { readonly kind: 'volume'; readonly percent: number; readonly app: string | null }
   | { readonly kind: 'keys'; readonly keys: string };
 
+/** What a condition compares a value with. */
+export type Target = number | boolean | string;
+
 /** The condition on one saved value that makes an automation run. */
 export interface WhenDef {
   /** The application's ID. */
@@ -287,8 +305,11 @@ export interface WhenDef {
   /** The value's ID. */
   readonly value: string;
   readonly is: Comparison;
-  /** A number for a value that reads a number; true or false for one that reads yes or no. */
-  readonly target: number | boolean;
+  /**
+   * A number for a value that reads a number; true or false for one that reads yes or no; a state's name, or
+   * `none`, for one that reads a state.
+   */
+  readonly target: Target;
 }
 
 /** A saved automation, as the automations file spells it. */

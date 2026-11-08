@@ -3,6 +3,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
 /// The longest signal name, in bytes.
 const MAX_NAME_LEN: usize = 64;
@@ -77,13 +78,95 @@ impl Number {
     }
 }
 
+/// The longest state name, in characters.
+pub const MAX_STATE_NAME_LEN: usize = 32;
+
+/// What a state check reads when the region looks like none of its states.
+pub const NO_STATE: &str = "none";
+
+/// The name of a state a state check reads, such as `Paused`, or
+/// [`NO_STATE`] when the region looks like none of them.
+///
+/// A name the user gives is not empty, has no space at either end and no
+/// control character, is at most [`MAX_STATE_NAME_LEN`] characters, and is
+/// not [`NO_STATE`] in any case. Cloning one shares the text, so reading the
+/// same state again allocates nothing.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StateName(Arc<str>);
+
+impl StateName {
+    /// Validates `name`, a state's name as the user gave it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidStateName`] naming the rule `name` breaks.
+    pub fn new(name: &str) -> Result<Self, InvalidStateName> {
+        let problem = if name.trim().is_empty() {
+            Some("is empty")
+        } else if name.trim() != name {
+            Some("starts or ends with a space")
+        } else if name.chars().any(char::is_control) {
+            Some("has a control character")
+        } else if name.chars().count() > MAX_STATE_NAME_LEN {
+            Some("is longer than 32 characters")
+        } else if name.eq_ignore_ascii_case(NO_STATE) {
+            Some("is \"none\", which stands for no state")
+        } else {
+            None
+        };
+        match problem {
+            None => Ok(Self(name.into())),
+            Some(problem) => Err(InvalidStateName {
+                name: name.into(),
+                problem,
+            }),
+        }
+    }
+
+    /// The name [`NO_STATE`], read when the region looks like none of the
+    /// states.
+    #[must_use]
+    pub fn none() -> Self {
+        Self(NO_STATE.into())
+    }
+
+    /// The name's text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for StateName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+/// A state name broke the naming rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidStateName {
+    name: Box<str>,
+    problem: &'static str,
+}
+
+impl fmt::Display for InvalidStateName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "state name {:?} {}", self.name, self.problem)
+    }
+}
+
+impl Error for InvalidStateName {}
+
 /// A value of a signal, as a source read it or a rule names it.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// A number, such as a score or how full a bar is.
     Number(Number),
-    /// A yes-or-no value, such as whether an icon is visible.
+    /// A yes-or-no value, such as whether a color is showing.
     Flag(bool),
+    /// Which of a few named looks the region shows, such as `Paused`.
+    State(StateName),
 }
 
 #[cfg(test)]
@@ -118,6 +201,35 @@ mod tests {
         }
         let error = SignalName::new("Level").expect_err("uppercase");
         assert!(error.to_string().contains("\"Level\""));
+    }
+
+    #[test]
+    fn state_names_follow_the_naming_rules() {
+        let longest = "é".repeat(MAX_STATE_NAME_LEN);
+        let too_long = "a".repeat(MAX_STATE_NAME_LEN.checked_add(1).expect("small"));
+        for valid in ["Paused", "a", "Game over", "Nonever", longest.as_str()] {
+            assert_eq!(
+                StateName::new(valid).map(|name| name.to_string()),
+                Ok(valid.to_owned()),
+                "{valid:?}"
+            );
+        }
+        for (invalid, problem) in [
+            ("", "is empty"),
+            ("  ", "is empty"),
+            (" Paused", "starts or ends"),
+            ("Paused ", "starts or ends"),
+            ("Pau\tsed", "control"),
+            (too_long.as_str(), "longer than 32"),
+            ("none", "stands for no state"),
+            ("NONE", "stands for no state"),
+        ] {
+            let error = StateName::new(invalid).expect_err(invalid);
+            assert!(error.to_string().contains(problem), "{invalid:?}: {error}");
+            assert!(error.to_string().contains(&format!("{invalid:?}")));
+        }
+        assert_eq!(StateName::none().as_str(), NO_STATE);
+        assert_eq!(StateName::none().to_string(), "none");
     }
 
     #[test]

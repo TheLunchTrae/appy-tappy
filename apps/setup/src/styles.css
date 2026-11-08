@@ -1493,6 +1493,72 @@ select {
   color: var(--on-capture);
 }
 
+/* A state check's states */
+.states {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.state {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--base);
+}
+
+.state[aria-current='true'] {
+  border-color: var(--capture);
+}
+
+.state[data-matches='true'] {
+  border-color: var(--holds);
+}
+
+.state-thumb {
+  display: grid;
+  place-items: center;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.state-thumb canvas {
+  max-width: 100%;
+  max-height: 56px;
+  image-rendering: pixelated;
+}
+
+.state-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.state-body small {
+  color: var(--muted);
+}
+
+.state-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.state-body small.warn {
+  color: var(--warn);
+}
+
 /* References */
 .refs {
   display: flex;

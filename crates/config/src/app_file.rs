@@ -2,7 +2,7 @@
 //! the values AppyTappy reads from it.
 //!
 //! The setup app writes one `app.json` per application, in a folder of its
-//! own that also holds the pictures its references learn from and its image
+//! own that also holds the pictures its references learn from and its state
 //! checks compare against. Each names its pictures by file name within that
 //! folder.
 //! The file is JSON, so a person can read it and a text diff shows a change.
@@ -17,7 +17,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::anti_cheat::AntiCheatClass;
-use crate::signal::SignalName;
+use crate::signal::{SignalName, StateName};
 use crate::window_match::{MustMatch, Pattern, WindowFacts, WindowMatch};
 
 /// The format version this build writes and reads.
@@ -26,15 +26,18 @@ pub const FORMAT: u32 = 1;
 /// The longest picture file name, in bytes.
 const MAX_IMAGE_NAME_LEN: usize = 64;
 
-/// The longest ID [`value_id`] makes, in bytes. It leaves room for a
-/// picture named after the value, such as `{id}.png` for an image check,
-/// within [`MAX_IMAGE_NAME_LEN`].
+/// The longest ID [`value_id`] makes, in bytes. It leaves room for the
+/// pictures named after the value, such as `{id}-16.png` for a state
+/// check's sixteenth state, within [`MAX_IMAGE_NAME_LEN`].
 const MAX_VALUE_ID_LEN: usize = 48;
 
 /// The longest ID [`reference_id`] makes, in bytes. It leaves room for the
 /// pictures named after the reference, such as `ref-{id}-12.png` for its
 /// twelfth sample, within [`MAX_IMAGE_NAME_LEN`].
 const MAX_REFERENCE_ID_LEN: usize = 40;
+
+/// The most states a state check may have.
+pub const MAX_STATES: usize = 16;
 
 /// One application's authoring file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,13 +315,27 @@ pub enum CheckDef {
         /// How far the average may stray from it.
         tolerance: u8,
     },
-    /// Whether the region looks like a picture of it.
-    Image {
-        /// The picture's file name.
-        image: String,
-        /// How far the region may stray from it.
+    /// Which of a few named looks the region shows, or none.
+    State {
+        /// The looks, in the order the setup app lists them. A tie goes to
+        /// the earlier state.
+        states: Vec<StateDef>,
+        /// How far, on average, the region's red, green, and blue may stray
+        /// from a state's picture for it to count.
         tolerance: u8,
     },
+}
+
+/// One look a state check knows, such as a corner showing `Paused`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StateDef {
+    /// The state's name, which the value reads when the region looks like
+    /// it. [`StateName::new`] says which names are allowed.
+    pub name: String,
+    /// The file name of the region's picture in this state. Its transparent
+    /// pixels are the background, which the check ignores.
+    pub image: String,
 }
 
 /// A picture of text in a reference's font and the text it shows.
@@ -332,21 +349,44 @@ pub struct SampleDef {
 }
 
 impl CheckDef {
-    /// Whether the check reads a number, as a number or bar fill check does,
-    /// rather than yes or no.
+    /// The kind of value the check reads.
     #[must_use]
-    pub const fn reads_number(&self) -> bool {
-        matches!(self, Self::Number { .. } | Self::BarFill { .. })
-    }
-
-    /// The file name of the picture this check compares against, if any.
-    #[must_use]
-    pub fn image(&self) -> Option<&str> {
+    pub const fn reads(&self) -> ValueKind {
         match self {
-            Self::Image { image, .. } => Some(image),
-            Self::Number { .. } | Self::BarFill { .. } | Self::Color { .. } => None,
+            Self::Number { .. } | Self::BarFill { .. } => ValueKind::Number,
+            Self::Color { .. } => ValueKind::Flag,
+            Self::State { .. } => ValueKind::State,
         }
     }
+
+    /// The states this check tells apart; none for a check of another kind.
+    #[must_use]
+    pub fn states(&self) -> &[StateDef] {
+        match self {
+            Self::State { states, .. } => states,
+            Self::Number { .. } | Self::BarFill { .. } | Self::Color { .. } => &[],
+        }
+    }
+
+    /// Whether the check reads the state `name`: one of its states, or
+    /// [`crate::signal::NO_STATE`], which every state check can read.
+    #[must_use]
+    pub fn reads_state(&self, name: &str) -> bool {
+        matches!(self, Self::State { .. })
+            && (name == StateName::none().as_str()
+                || self.states().iter().any(|state| state.name == name))
+    }
+}
+
+/// The kind of value a check reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueKind {
+    /// A number, as a number or bar fill check reads.
+    Number,
+    /// Yes or no, as a color check reads.
+    Flag,
+    /// A state's name, as a state check reads.
+    State,
 }
 
 impl AppFile {
@@ -376,17 +416,20 @@ impl AppFile {
     }
 
     /// The file names of every picture the file names: its references'
-    /// samples and its image checks' pictures.
+    /// samples and its state checks' pictures.
     #[must_use]
     pub fn images(&self) -> Vec<&str> {
         self.references
             .iter()
             .flat_map(|reference| reference.samples.iter().map(|sample| sample.image.as_str()))
-            .chain(
-                self.values
+            .chain(self.values.iter().flat_map(|value| {
+                value
+                    .screen
+                    .check
+                    .states()
                     .iter()
-                    .filter_map(|value| value.screen.check.image()),
-            )
+                    .map(|state| state.image.as_str())
+            }))
             .collect()
     }
 
@@ -476,7 +519,38 @@ fn check_value(file: &AppFile, value: &ValueDef) -> Result<(), String> {
             "its number check reads with reference {reference:?}, which the file does not have"
         ));
     }
-    check.image().map_or(Ok(()), check_image)
+    if let CheckDef::State { states, .. } = check {
+        check_states(states)?;
+    }
+    Ok(())
+}
+
+/// Checks a state check's states: at least one and at most [`MAX_STATES`],
+/// each with a valid name and picture, and no name or picture twice. Names
+/// that differ only in case count as the same, since they read alike.
+fn check_states(states: &[StateDef]) -> Result<(), String> {
+    if states.is_empty() {
+        return Err("its state check has no state".to_owned());
+    }
+    if states.len() > MAX_STATES {
+        return Err(format!("its state check has more than {MAX_STATES} states"));
+    }
+    let mut names = BTreeSet::new();
+    let mut images = BTreeSet::new();
+    for state in states {
+        StateName::new(&state.name).map_err(|error| error.to_string())?;
+        if !names.insert(state.name.to_lowercase()) {
+            return Err(format!("two of its states are named {:?}", state.name));
+        }
+        check_image(&state.image)?;
+        if !images.insert(state.image.as_str()) {
+            return Err(format!(
+                "two of its states use the picture {:?}",
+                state.image
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Checks that `image` is a picture name the folder can hold.
@@ -584,7 +658,7 @@ pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
 
 /// The file name of a reference's `number`th sample, such as
 /// `ref-percent_font-3.png`. No value's picture can have it: a value's ID
-/// has no hyphen, and its picture is `{id}.png`.
+/// has no hyphen, and its pictures are `{id}-{n}.png`.
 #[must_use]
 pub fn sample_name(reference: &str, number: usize) -> String {
     format!("ref-{reference}-{number}.png")
@@ -631,6 +705,19 @@ mod tests {
         green: 0,
         blue: 0,
     };
+
+    fn states(states: &[(&str, &str)]) -> CheckDef {
+        CheckDef::State {
+            states: states
+                .iter()
+                .map(|(name, image)| StateDef {
+                    name: (*name).to_owned(),
+                    image: (*image).to_owned(),
+                })
+                .collect(),
+            tolerance: 9,
+        }
+    }
 
     fn dash() -> AppFile {
         AppFile {
@@ -710,23 +797,52 @@ mod tests {
     }
 
     #[test]
-    fn the_file_names_its_references_samples_and_its_image_checks_pictures() {
+    fn the_file_names_its_references_samples_and_its_state_checks_pictures() {
         let mut file = dash();
-        let mut icon = file.values[0].clone();
-        icon.id = "icon".to_owned();
-        icon.screen.check = CheckDef::Image {
-            image: "icon.png".to_owned(),
-            tolerance: 9,
-        };
-        file.values.push(icon);
-        assert_eq!(file.images(), ["ref-percent-1.png", "icon.png"]);
+        let mut status = file.values[0].clone();
+        status.id = "status".to_owned();
+        status.screen.check = states(&[("Paused", "status-1.png"), ("Live", "status-2.png")]);
+        file.values.push(status);
+        assert_eq!(
+            file.images(),
+            ["ref-percent-1.png", "status-1.png", "status-2.png"]
+        );
         assert_eq!(
             file.reference("percent")
                 .map(|reference| reference.tolerance),
             Some(40)
         );
         assert!(file.reference("progress").is_none());
-        assert_eq!(file.values[0].screen.check.image(), None);
+        assert_eq!(file.values[0].screen.check.states(), []);
+    }
+
+    #[test]
+    fn checks_say_what_they_read() {
+        let file = dash();
+        assert_eq!(file.values[0].screen.check.reads(), ValueKind::Number);
+        let bar = CheckDef::BarFill {
+            filled: RED,
+            empty: RED,
+        };
+        assert_eq!(bar.reads(), ValueKind::Number);
+        let color = CheckDef::Color {
+            color: RED,
+            tolerance: 3,
+        };
+        assert_eq!(color.reads(), ValueKind::Flag);
+        let status = states(&[("Paused", "status-1.png"), ("Live", "status-2.png")]);
+        assert_eq!(status.reads(), ValueKind::State);
+        for (name, read) in [
+            ("Paused", true),
+            ("Live", true),
+            ("none", true),
+            ("paused", false),
+            ("Dead", false),
+        ] {
+            assert_eq!(status.reads_state(name), read, "{name}");
+        }
+        assert!(!color.reads_state("none"));
+        assert!(!file.values[0].screen.check.reads_state("none"));
     }
 
     #[test]
@@ -763,10 +879,7 @@ mod tests {
                 color: RED,
                 tolerance: 3,
             },
-            CheckDef::Image {
-                image: "icon_visible.png".to_owned(),
-                tolerance: 9,
-            },
+            states(&[("Paused", "status-1.png"), ("Live", "status-2.png")]),
             CheckDef::Number {
                 reference: "percent".to_owned(),
                 whole: false,
@@ -854,11 +967,36 @@ mod tests {
         unnamed_reference.references[0].name = "  ".to_owned();
         let mut sample_escape = dash();
         sample_escape.references[0].samples[0].image = "../1.png".to_owned();
-        let mut escape = dash();
-        escape.values[0].screen.check = CheckDef::Image {
-            image: "../app.png".to_owned(),
-            tolerance: 0,
+        let with = |check: CheckDef| {
+            let mut file = dash();
+            file.values[0].screen.check = check;
+            file
         };
+        let escape = with(states(&[("Paused", "../app.png")]));
+        let no_states = with(states(&[]));
+        let many: Vec<(String, String)> = (0..=MAX_STATES)
+            .map(|state| (format!("State {state}"), format!("progress-{state}.png")))
+            .collect();
+        let many: Vec<(&str, &str)> = many
+            .iter()
+            .map(|(name, image)| (name.as_str(), image.as_str()))
+            .collect();
+        let too_many = with(states(&many));
+        let most = with(states(many.get(..MAX_STATES).expect("one too many")));
+        assert!(
+            AppFile::parse(&most.to_json()).is_ok(),
+            "a check can have {MAX_STATES} states"
+        );
+        let unnamed_state = with(states(&[(" ", "progress-1.png")]));
+        let none_state = with(states(&[("None", "progress-1.png")]));
+        let same_name = with(states(&[
+            ("Paused", "progress-1.png"),
+            ("paused", "progress-2.png"),
+        ]));
+        let same_picture = with(states(&[
+            ("Paused", "progress-1.png"),
+            ("Live", "progress-1.png"),
+        ]));
         let cases = [
             (
                 format,
@@ -896,6 +1034,30 @@ mod tests {
                 "reference \"percent\": picture \"../1.png\" must be",
             ),
             (escape, "value \"progress\": picture \"../app.png\" must be"),
+            (
+                no_states,
+                "value \"progress\": its state check has no state",
+            ),
+            (
+                too_many,
+                "value \"progress\": its state check has more than 16 states",
+            ),
+            (
+                unnamed_state,
+                "value \"progress\": state name \" \" is empty",
+            ),
+            (
+                none_state,
+                "value \"progress\": state name \"None\" is \"none\"",
+            ),
+            (
+                same_name,
+                "value \"progress\": two of its states are named \"paused\"",
+            ),
+            (
+                same_picture,
+                "value \"progress\": two of its states use the picture \"progress-1.png\"",
+            ),
         ];
         for (file, message) in cases {
             let error = AppFile::parse(&file.to_json()).expect_err(message);
@@ -951,8 +1113,8 @@ mod tests {
         let long = value_id(&"abc".repeat(30));
         assert_eq!(long.len(), MAX_VALUE_ID_LEN);
         assert!(SignalName::new(&long).is_ok());
-        // The picture named after the longest ID still fits.
-        assert!(is_image_name(&format!("{long}.png")));
+        // The last state's picture named after the longest ID still fits.
+        assert!(is_image_name(&format!("{long}-{MAX_STATES}.png")));
     }
 
     #[test]

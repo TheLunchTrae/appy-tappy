@@ -1,12 +1,20 @@
 // The check the user is setting up, and when it is complete enough to try.
 
-import type { CharactersSpec, CheckSpec, RecordedLabel, RecordingSettings, ReferenceDef, ReferenceRef } from './api.ts';
+import type {
+  CharactersSpec,
+  CheckSpec,
+  RecordedLabel,
+  RecordingSettings,
+  ReferenceDef,
+  ReferenceRef,
+  StateSpec,
+} from './api.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
-import { DEFAULT_COLOR_MATCH, type SelectStep } from './selection.ts';
+import { DEFAULT_COLOR_MATCH, type SelectStep, withStep } from './selection.ts';
 
 /** The kinds of check, in the order the capture screen offers them. */
-export const CHECK_KINDS = ['number', 'barFill', 'color', 'image'] as const;
+export const CHECK_KINDS = ['number', 'barFill', 'color', 'state'] as const;
 
 export type CheckKind = (typeof CHECK_KINDS)[number];
 
@@ -15,7 +23,7 @@ export const KIND_NAMES: Readonly<Record<CheckKind, string>> = {
   number: 'Number',
   barFill: 'Bar fill',
   color: 'Color',
-  image: 'Image',
+  state: 'State',
 };
 
 /** The tolerance each kind starts with; a number's is its new reference's. */
@@ -23,8 +31,21 @@ export const DEFAULT_TOLERANCE: Readonly<Record<CheckKind, number>> = {
   number: 40,
   barFill: 0,
   color: 24,
-  image: 16,
+  state: 16,
 };
+
+/** The most states a state check can tell apart. */
+export const MAX_STATES = 16;
+
+/** One look of a state check, as the user sets it up. */
+export interface DraftState {
+  /** The name it reads as, as typed. */
+  readonly name: string;
+  /** The screenshot it is taken from. Each state has its own. */
+  readonly screenshot: number;
+  /** How the user selected the thing on its screenshot; none compares the whole region. */
+  readonly steps: readonly SelectStep[];
+}
 
 /** Everything the capture screen collects for a check or a reference, complete or not. */
 export interface Draft {
@@ -42,13 +63,11 @@ export interface Draft {
   readonly filled: Color | null;
   readonly empty: Color | null;
   readonly color: Color | null;
-  /** The screenshot an image check compares against. */
-  readonly image: number | null;
-  /** How the user selected the thing an image check looks for, on its screenshot. */
-  readonly steps: readonly SelectStep[];
+  /** A state check's looks, in the order they are listed. */
+  readonly states: readonly DraftState[];
   /** How far a color may be from another and still count as alike, while selecting. */
   readonly colorMatch: number;
-  /** Whether an image check compares only the selected pixels. */
+  /** Whether a state check compares only the selected pixels of each state. */
   readonly ignoreBackground: boolean;
   /** The ID of the reference a number check reads with. */
   readonly reference: string | null;
@@ -67,9 +86,8 @@ export const EMPTY_DRAFT: Draft = {
   filled: null,
   empty: null,
   color: null,
-  image: null,
+  states: [],
   reference: null,
-  steps: [],
   colorMatch: DEFAULT_COLOR_MATCH,
   ignoreBackground: true,
   whole: false,
@@ -201,20 +219,80 @@ export function buildSpec(draft: Draft, app: string): Built {
       }
       return { ok: true, spec: { kind: 'color', region, color: draft.color, tolerance } };
     }
-    case 'image': {
-      if (draft.image === null) {
-        return missing('Choose the screenshot to compare against.');
+    case 'state': {
+      if (draft.states.length === 0) {
+        return missing('Add a state from a screenshot that shows it.');
       }
       if (draft.drawnOn === null) {
         return missing('Draw a region on a screenshot.');
       }
-      const spec = { kind: 'image', region, drawnOn: draft.drawnOn, screenshot: draft.image, tolerance } as const;
-      if (!draft.ignoreBackground || draft.steps.length === 0) {
-        return { ok: true, spec };
+      if (draft.states.some((state) => state.name.trim() === '')) {
+        return missing('Name each state.');
       }
-      return { ok: true, spec: { ...spec, selection: { tolerance: draft.colorMatch, steps: draft.steps } } };
+      const states = draft.states.map((state): StateSpec => {
+        const spec = { name: state.name.trim(), screenshot: state.screenshot };
+        return draft.ignoreBackground && state.steps.length > 0
+          ? { ...spec, selection: { tolerance: draft.colorMatch, steps: state.steps } }
+          : spec;
+      });
+      return { ok: true, spec: { kind: 'state', region, drawnOn: draft.drawnOn, states, tolerance } };
     }
   }
+}
+
+/** The position of the state taken from `screenshot` in `draft`, or -1 when none is. */
+export function stateOn(draft: Draft, screenshot: number | null): number {
+  return draft.states.findIndex((state) => state.screenshot === screenshot);
+}
+
+/** The first of `State 1`, `State 2`, … that no state of `draft` is named. */
+function nextStateName(draft: Draft): string {
+  const taken = new Set(draft.states.map((state) => state.name.trim().toLowerCase()));
+  let number = draft.states.length + 1;
+  while (taken.has(`state ${number}`)) {
+    number += 1;
+  }
+  return `State ${number}`;
+}
+
+/**
+ * `draft` with a new state taken from `screenshot`, comparing the whole region until something is selected on it;
+ * unchanged when a state already comes from that screenshot or the check has as many states as it can hold.
+ */
+export function withState(draft: Draft, screenshot: number): Draft {
+  if (stateOn(draft, screenshot) !== -1 || draft.states.length >= MAX_STATES) {
+    return draft;
+  }
+  return { ...draft, states: [...draft.states, { name: nextStateName(draft), screenshot, steps: [] }] };
+}
+
+/**
+ * `draft` after the selection step `step` on `screenshot`: the step goes to the state taken from it, or to a new
+ * state of that screenshot. Unchanged when the step does nothing, such as taking away from no selection.
+ */
+export function withStateStep(draft: Draft, screenshot: number, step: SelectStep): Draft {
+  const added = withState(draft, screenshot);
+  const index = stateOn(added, screenshot);
+  const state = added.states[index];
+  if (state === undefined) {
+    return draft;
+  }
+  const steps = withStep(state.steps, screenshot, screenshot, step);
+  if (steps === null) {
+    return draft;
+  }
+  return { ...added, states: added.states.with(index, { ...state, steps }) };
+}
+
+/** `draft` with the state at `index` changed by `update`. */
+export function withStateAt(draft: Draft, index: number, update: (state: DraftState) => DraftState): Draft {
+  const state = draft.states[index];
+  return state === undefined ? draft : { ...draft, states: draft.states.with(index, update(state)) };
+}
+
+/** `draft` without the state at `index`. */
+export function withoutState(draft: Draft, index: number): Draft {
+  return { ...draft, states: draft.states.filter((_, position) => position !== index) };
 }
 
 /**

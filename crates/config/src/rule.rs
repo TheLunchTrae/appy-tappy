@@ -32,7 +32,8 @@ pub enum Comparison {
 }
 
 impl Comparison {
-    /// Whether the comparison needs an order, which flags do not have.
+    /// Whether the comparison needs an order, which flags and states do not
+    /// have.
     const fn is_ordered(self) -> bool {
         matches!(
             self,
@@ -65,15 +66,15 @@ impl Condition {
     ///
     /// # Errors
     ///
-    /// Returns [`RuleError::OrderedFlag`] when an ordered comparison, such as
-    /// [`Comparison::Above`], meets a flag.
+    /// Returns [`RuleError::Unordered`] when an ordered comparison, such as
+    /// [`Comparison::Above`], meets a flag or a state.
     pub fn compare(
         signal: SignalName,
         comparison: Comparison,
         value: Value,
     ) -> Result<Self, RuleError> {
-        if comparison.is_ordered() && matches!(value, Value::Flag(_)) {
-            return Err(RuleError::OrderedFlag(signal));
+        if comparison.is_ordered() && !matches!(value, Value::Number(_)) {
+            return Err(RuleError::Unordered(signal));
         }
         Ok(Self(Test::Compare {
             signal,
@@ -145,7 +146,7 @@ impl Condition {
                 value,
             } => values
                 .get(signal)
-                .map(|current| compares(*current, *comparison, *value)),
+                .map(|current| compares(current, *comparison, value)),
             Test::All(conditions) => decide(conditions, values, false),
             Test::Any(conditions) => decide(conditions, values, true),
         }
@@ -170,11 +171,16 @@ fn decide(
     (!unknown).then_some(!settles)
 }
 
-fn compares(current: Value, comparison: Comparison, expected: Value) -> bool {
+fn compares(current: &Value, comparison: Comparison, expected: &Value) -> bool {
     let order = match (current, expected) {
-        (Value::Number(current), Value::Number(expected)) => current.partial_cmp(&expected),
-        (Value::Flag(current), Value::Flag(expected)) => Some(current.cmp(&expected)),
-        (Value::Number(_), Value::Flag(_)) | (Value::Flag(_), Value::Number(_)) => None,
+        (Value::Number(current), Value::Number(expected)) => current.partial_cmp(expected),
+        (Value::Flag(current), Value::Flag(expected)) => Some(current.cmp(expected)),
+        // States have no order; `Condition::compare` allows only equality, so
+        // the order stands for whether they are the same.
+        (Value::State(current), Value::State(expected)) => Some(current.cmp(expected)),
+        (Value::Number(_), Value::Flag(_) | Value::State(_))
+        | (Value::Flag(_), Value::Number(_) | Value::State(_))
+        | (Value::State(_), Value::Number(_) | Value::Flag(_)) => None,
     };
     order.is_some_and(|order| match comparison {
         Comparison::Below => order.is_lt(),
@@ -351,9 +357,9 @@ impl Rule {
 /// A rule or condition broke an invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleError {
-    /// An ordered comparison, such as "above", named a flag value for this
-    /// signal.
-    OrderedFlag(SignalName),
+    /// An ordered comparison, such as "above", named a flag or state value
+    /// for this signal, which has no order.
+    Unordered(SignalName),
     /// An "all" or "any" group had no conditions.
     EmptyGroup,
     /// Conditions nested more deeply than the limit.
@@ -374,9 +380,10 @@ pub enum RuleError {
 impl fmt::Display for RuleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::OrderedFlag(signal) => write!(
+            Self::Unordered(signal) => write!(
                 formatter,
-                "a comparison on {signal} orders a yes-or-no value; use equals or not equals"
+                "a comparison on {signal} orders a yes-or-no value or a state; use equals or not \
+                 equals"
             ),
             Self::EmptyGroup => formatter.write_str("an all or any group needs a condition"),
             Self::TooDeep => write!(
@@ -403,7 +410,7 @@ impl Error for RuleError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::signal::Number;
+    use crate::signal::{Number, StateName};
 
     use super::*;
     use crate::action::{MediaCommand, MediaTarget};
@@ -430,7 +437,7 @@ mod tests {
     fn values(entries: &[(&str, Value)]) -> BTreeMap<SignalName, Value> {
         entries
             .iter()
-            .map(|(signal, value)| (name(signal), *value))
+            .map(|(signal, value)| (name(signal), value.clone()))
             .collect()
     }
 
@@ -466,13 +473,61 @@ mod tests {
         assert!(!icon_visible.holds(&values(&[("icon_visible", Value::Flag(false))])));
         assert_eq!(
             Condition::compare(name("icon_visible"), Comparison::Above, Value::Flag(false)),
-            Err(RuleError::OrderedFlag(name("icon_visible")))
+            Err(RuleError::Unordered(name("icon_visible")))
         );
         assert!(
-            RuleError::OrderedFlag(name("icon_visible"))
+            RuleError::Unordered(name("icon_visible"))
                 .to_string()
                 .contains("icon_visible")
         );
+    }
+
+    #[test]
+    fn states_compare_by_equality() {
+        let state = |name: &str| Value::State(StateName::new(name).expect("valid"));
+        let paused =
+            Condition::compare(name("status"), Comparison::Equals, state("Paused")).expect("valid");
+        let not_paused = Condition::compare(name("status"), Comparison::NotEquals, state("Paused"))
+            .expect("valid");
+        let none = Condition::compare(
+            name("status"),
+            Comparison::Equals,
+            Value::State(StateName::none()),
+        )
+        .expect("valid");
+        for (current, is_paused, is_none) in [
+            (state("Paused"), true, false),
+            (state("Live"), false, false),
+            (Value::State(StateName::none()), false, true),
+        ] {
+            let current = values(&[("status", current)]);
+            assert_eq!(paused.holds(&current), is_paused);
+            assert_eq!(not_paused.holds(&current), !is_paused);
+            assert_eq!(none.holds(&current), is_none);
+        }
+        // A state never equals a number or a flag, whatever the comparison.
+        for other in [number(1.0), Value::Flag(true)] {
+            assert!(!paused.holds(&values(&[("status", other.clone())])));
+            assert!(!not_paused.holds(&values(&[("status", other)])));
+        }
+        let progress_is_paused =
+            Condition::compare(name("progress"), Comparison::Equals, state("Paused"))
+                .expect("valid");
+        assert!(!progress_is_paused.holds(&values(&[("progress", number(1.0))])));
+        let visible = Condition::compare(name("visible"), Comparison::NotEquals, Value::Flag(true))
+            .expect("valid");
+        assert!(!visible.holds(&values(&[("visible", state("Paused"))])));
+        for ordered in [
+            Comparison::Below,
+            Comparison::AtMost,
+            Comparison::AtLeast,
+            Comparison::Above,
+        ] {
+            assert_eq!(
+                Condition::compare(name("status"), ordered, state("Paused")),
+                Err(RuleError::Unordered(name("status")))
+            );
+        }
     }
 
     #[test]

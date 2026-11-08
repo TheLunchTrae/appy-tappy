@@ -6,7 +6,7 @@ app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
 `screen/image.rs` holds images and regions, `screen/capture.rs` the capture
 trait, `screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
-`screen/select.rs` a picture check's mask and selection, `screen/saved.rs`
+`screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
 the saved checks, and `schedule.rs` the read interval.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
 
@@ -44,14 +44,18 @@ the same answer on every system, and allocate nothing per read.
   nearer one.
 - **Color** is yes when the region's average color is within a tolerance of a
   chosen color.
-- **Image** is yes when the region looks like a saved picture of it, within
-  a tolerance per color channel on average. A mask can leave pixels out: the
-  average is then over the kept pixels only, so a changing background behind
-  the thing does not count. The mask becomes runs of kept pixel indexes once,
-  when the check loads, so a read walks the runs without testing each pixel.
+- **State** reads as the name of the saved picture the region looks most
+  like, among those within a tolerance per color channel on average, or
+  `none` when no picture is within it. The closest picture wins by its
+  average difference, and a tie goes to the earlier state. A picture's mask
+  can leave pixels out: its average is then over its kept pixels only, so a
+  changing background behind the thing does not count. Each mask becomes runs
+  of kept pixel indexes once, when the check loads, so a read walks the runs
+  without testing each pixel.
 
 On the fixture screenshots, each check takes 2 to 10 microseconds per read on
-one CPU core; `mise run rust:bench` prints the current numbers.
+one CPU core, and a state check about that much for each of its states;
+`mise run rust:bench` prints the current numbers.
 
 Windows has its own OCR engine, and `ocrs` is a pure-Rust neural OCR crate.
 The runtime uses neither. Windows OCR would make results depend on the Windows
@@ -65,10 +69,10 @@ read
 
 ## Saved pictures
 
-A reference's samples and an image check's picture are PNG files. AppyTappy
+A reference's samples and a state check's pictures are PNG files. AppyTappy
 reads any PNG, converting it to 8-bit color, and refuses images over 8192
-pixels on a side. A sample is read as it looks, ignoring alpha. In an image
-check's picture, alpha is the mask: a pixel at least half opaque is compared,
+pixels on a side. A sample is read as it looks, ignoring alpha. In a state
+picture, alpha is the mask: a pixel at least half opaque is compared,
 and a more transparent one is left out. A picture with no transparent pixel is
 compared whole, and one with no opaque pixel is refused. AppyTappy writes
 8-bit RGB, or RGBA with the left-out pixels fully transparent when a mask

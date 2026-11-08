@@ -363,7 +363,8 @@ mod tests {
 
     use super::*;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, FORMAT, RegionDef, ScreenDef, SizeDef, ValueDef, WindowDef,
+        AntiCheatDef, CheckDef, FORMAT, RegionDef, ScreenDef, SizeDef, StateDef, ValueDef,
+        WindowDef,
     };
     use crate::window_match::WindowFacts;
 
@@ -403,8 +404,11 @@ mod tests {
                         width: 10,
                         height: 10,
                     },
-                    check: CheckDef::Image {
-                        image: reference.to_owned(),
+                    check: CheckDef::State {
+                        states: vec![StateDef {
+                            name: "Shown".to_owned(),
+                            image: reference.to_owned(),
+                        }],
                         tolerance: 0,
                     },
                 },

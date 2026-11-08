@@ -136,7 +136,7 @@ mod tests {
 
     use crate::owner::messages::Request;
     use crate::owner::test_support::{
-        BAR, Harness, IMAGE, add_example_app, frame_image, harness, harness_with, scratch_store,
+        BAR, Harness, STATE, add_example_app, frame_image, harness, harness_with, scratch_store,
         spec,
     };
 
@@ -156,7 +156,7 @@ mod tests {
             }
         };
         assert_eq!(
-            harness.ask(save(spec("example", "Icon visible", IMAGE))),
+            harness.ask(save(spec("example", "Icon visible", STATE))),
             Err("Take a screenshot first.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
@@ -174,22 +174,22 @@ mod tests {
         harness.deliver(&mut handler, Ok(&shrunk));
         assert_eq!(harness.ask(Request::Screenshot), Ok(1));
         assert_eq!(
-            harness.ask(save(spec("example", "  ", IMAGE))),
+            harness.ask(save(spec("example", "  ", STATE))),
             Err("Name the value first.".to_owned())
         );
-        let mut elsewhere = spec("example", "Icon visible", IMAGE);
+        let mut elsewhere = spec("example", "Icon visible", STATE);
         elsewhere.screenshot = 1;
         assert_eq!(
             harness.ask(save(elsewhere)),
             Err(
-                "Screenshot 1, which the image is compared against, is 4x2, but the region was \
-                 drawn on screenshot 2, which is 2x1. Compare against a screenshot of that size."
+                "Screenshot 1, which a state is taken from, is 4x2, but the region was drawn on \
+                 screenshot 2, which is 2x1. Take that state from a screenshot of that size."
                     .to_owned()
             ),
             "a value is saved at one window size"
         );
         let saved = harness
-            .ask(save(spec("example", "Icon visible", IMAGE)))
+            .ask(save(spec("example", "Icon visible", STATE)))
             .expect("saves a new app");
         assert_eq!(
             saved,
@@ -230,13 +230,13 @@ mod tests {
             }
         );
         let folder = apps_root.join("example");
-        assert!(folder.join("icon_visible.png").exists());
+        assert!(folder.join("icon_visible-1.png").exists());
 
         let automation: AutomationDef = serde_json::from_value(serde_json::json!({
             "id": "",
             "name": "Pause music",
             "enabled": true,
-            "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": true},
+            "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": "Shown"},
             "actions": [
                 {"kind": "media", "command": "pause", "app": " Player.exe "},
                 {"kind": "volume", "percent": 20, "app": null}
@@ -289,7 +289,7 @@ mod tests {
             "id": "",
             "name": "Press keys",
             "enabled": true,
-            "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": true},
+            "when": {"app": "example", "value": "icon_visible", "is": "equals", "target": "Shown"},
             "actions": [{"kind": "keys", "keys": " shift + ctrl + m "}],
             "undo": false,
             "cooldownMs": 0
@@ -355,7 +355,7 @@ mod tests {
                 reply,
             })
             .expect("removes");
-        assert!(!folder.join("icon_visible.png").exists());
+        assert!(!folder.join("icon_visible-1.png").exists());
         let apps = harness.ask(Request::ListApps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(file.values.len(), 1);

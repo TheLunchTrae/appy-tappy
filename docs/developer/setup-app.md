@@ -47,16 +47,16 @@ This page covers what the user guide leaves out.
   the tabs, **Change window**, the questions' answers, and **Discard** or
   **Cancel** wait. A save closes its flow only while that flow is still open,
   so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
-- **Selection.** An image check's selection travels as the steps the user
+- **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner
-  replays them on the screenshot the check compares against, both to answer
-  the UI's `select` command and to build and save the check, so moving the
-  slider remakes the selection from the same steps. A new step fits the region
-  to the selection, and so does the slider while the region is as it was last
-  fitted; a region changed by hand stays. Steps on one screenshot mean nothing
-  on another, so a step on another screenshot, or **Use this one**, starts the
-  selection over, and taking away from nothing is ignored. The UI gets the
+  replays a state's steps on the screenshot the state is taken from, both to
+  answer the UI's `select` command and to build and save the check, so moving
+  the slider remakes every selection from the same steps. A new step fits the
+  region around what every state selects, and so does the slider while the
+  region is as it was last fitted; a region changed by hand stays. A step on a
+  screenshot with no state adds a state for it, and taking away from nothing
+  is ignored. The UI gets the
   selection's box and its runs of selected pixels, and shades the rest of the
   region itself.
 - **Live reading.** The value editor and the automation editor read the
@@ -173,8 +173,9 @@ Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures it needs: each reference's labeled screenshots, cropped to
 the region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
-and each image check's picture, named after its value and transparent where
-its selection leaves the background out
+and each state check's pictures, named after its value and the state's
+place, such as `status-1.png`, and transparent where the state's selection
+leaves the background out
 ([Saved pictures](screen.md#saved-pictures)).
 
 ```json
@@ -243,8 +244,22 @@ its `panel` holds its place and size in screen pixels, as `x`, `y`, `width`,
 and `height`.
 
 A yes-or-no condition has `"is": "equals"` or `"notEquals"` and a `true` or
-`false` target. An action's `app` is `null` for whatever is playing, or for
-the whole system's volume.
+`false` target. A state condition has the same comparisons and a state's name,
+or `"none"`, as its target. A state check is saved with its states in order:
+
+```json
+{
+  "kind": "state",
+  "states": [
+    { "name": "Paused", "image": "status-1.png" },
+    { "name": "Live", "image": "status-2.png" }
+  ],
+  "tolerance": 16
+}
+```
+
+An action's `app` is `null` for whatever is playing, or for the whole system's
+volume.
 
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`) and
 the files (`store.rs`). Each save writes a temporary file and renames it over the old

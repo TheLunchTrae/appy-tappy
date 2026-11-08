@@ -12,6 +12,8 @@ import {
   liveText,
   newAction,
   readingText,
+  readsState,
+  readsText,
   targetText,
   toDraft,
   undoable,
@@ -38,6 +40,14 @@ function value(id: string, name: string, check: CheckDef): ValueDef {
 
 const progress = value('progress', 'Progress', { kind: 'number', reference: 'percent', whole: false });
 const iconVisible = value('icon_visible', 'Icon visible', { kind: 'color', color: white, tolerance: 10 });
+const status = value('status', 'Status', {
+  kind: 'state',
+  states: [
+    { name: 'Paused', image: 'status-1.png' },
+    { name: 'Live', image: 'status-2.png' },
+  ],
+  tolerance: 16,
+});
 
 const apps: readonly AppSummary[] = [
   {
@@ -53,7 +63,7 @@ const apps: readonly AppSummary[] = [
         fallback: 'none',
       },
       antiCheat: 'unknown',
-      values: [progress, iconVisible],
+      values: [progress, iconVisible, status],
       references: [],
     },
     error: null,
@@ -78,17 +88,42 @@ const pauseMusic: AutomationDef = {
 };
 
 describe('values', () => {
-  test('number and bar fill checks read numbers; color and image checks read yes or no', () => {
+  test('number and bar fill checks read numbers, color checks yes or no, and state checks a state', () => {
     expect(valueKind({ kind: 'number', reference: 'percent', whole: true })).toBe('number');
     expect(valueKind({ kind: 'barFill', filled: white, empty: white })).toBe('number');
     expect(valueKind({ kind: 'color', color: white, tolerance: 0 })).toBe('flag');
-    expect(valueKind({ kind: 'image', image: 'a.png', tolerance: 0 })).toBe('flag');
+    expect(valueKind({ kind: 'state', states: [{ name: 'Paused', image: 'a.png' }], tolerance: 0 })).toBe('state');
+  });
+
+  test('a value says what it reads', () => {
+    const [number, flag, state] = choices;
+    if (number === undefined || flag === undefined || state === undefined) {
+      throw new Error('values exist');
+    }
+    expect(readsText(number)).toBe('Progress reads a number.');
+    expect(readsText(flag)).toBe('Icon visible reads yes or no.');
+    expect(readsText(state)).toBe('Status reads a state: Paused, Live, or none.');
+    expect(readsText({ ...state, states: ['Paused'] })).toBe('Status reads a state: Paused or none.');
+  });
+
+  test('a state check reads its own states and none', () => {
+    const state = findValue(choices, { app: 'example', value: 'status' });
+    const flag = findValue(choices, { app: 'example', value: 'icon_visible' });
+    if (state === null || flag === null) {
+      throw new Error('values exist');
+    }
+    expect(state.states).toEqual(['Paused', 'Live']);
+    expect(readsState(state, 'Live')).toBe(true);
+    expect(readsState(state, 'none')).toBe(true);
+    expect(readsState(state, 'live')).toBe(false);
+    expect(readsState(flag, 'none')).toBe(false);
   });
 
   test('only readable applications offer their values', () => {
     expect(choices.map((choice) => [choice.app, choice.appName, choice.value.id, choice.kind])).toEqual([
       ['example', 'Example App', 'progress', 'number'],
       ['example', 'Example App', 'icon_visible', 'flag'],
+      ['example', 'Example App', 'status', 'state'],
     ]);
     expect(findValue(choices, { app: 'example', value: 'icon_visible' })?.value).toBe(iconVisible);
     expect(findValue(choices, { app: 'other', value: 'progress' })).toBeNull();
@@ -334,6 +369,27 @@ describe('buildWhen', () => {
     });
     expect(buildWhen(draft, icon)).toBe('Pick how Icon visible is compared.');
   });
+
+  test('a state value compares with one of its states, or none', () => {
+    const state = findValue(choices, { app: 'example', value: 'status' });
+    if (state === null) {
+      throw new Error('values exist');
+    }
+    const draft = withSource({ ...EMPTY_DRAFT, is: 'atLeast' }, state);
+    expect(draft.is).toBe('equals');
+    expect(draft.state).toBe('Paused');
+    expect(buildWhen(draft, state)).toEqual({ app: 'example', value: 'status', is: 'equals', target: 'Paused' });
+    expect(buildWhen({ ...draft, state: 'none', is: 'notEquals' }, state)).toEqual({
+      app: 'example',
+      value: 'status',
+      is: 'notEquals',
+      target: 'none',
+    });
+    expect(buildWhen({ ...draft, state: 'Gone' }, state)).toBe('Pick the state Status is compared with.');
+    expect(buildWhen({ ...draft, is: 'above' }, state)).toBe('Pick how Status is compared.');
+    expect(withSource({ ...draft, state: 'Live' }, state).state).toBe('Live');
+    expect(withSource({ ...draft, state: 'Gone' }, state).state).toBe('Paused');
+  });
 });
 
 describe('readingText', () => {
@@ -344,6 +400,8 @@ describe('readingText', () => {
     expect(readingText({ kind: 'number', value: 100 / 3 })).toBe('33.3333');
     expect(readingText({ kind: 'flag', value: true })).toBe('Yes');
     expect(readingText({ kind: 'flag', value: false }, true)).toBe('No');
+    expect(readingText({ kind: 'state', value: 'Paused' })).toBe('Paused');
+    expect(targetText('none')).toBe('none');
   });
 
   test('never rounds a number onto or across the target it is compared with', () => {

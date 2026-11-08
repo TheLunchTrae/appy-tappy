@@ -129,7 +129,7 @@ impl<H: Host> Owner<H> {
             .and_then(|when| {
                 let signal = SignalName::new(&when.value).ok()?;
                 let condition = when.condition(signal.clone()).ok()?;
-                Some(condition.holds(&BTreeMap::from([(signal, value)])))
+                Some(condition.holds(&BTreeMap::from([(signal, value.clone())])))
             });
         Ok(Live::Read {
             reading: value.into(),
@@ -147,7 +147,7 @@ mod tests {
     use crate::check_spec::CheckSpec;
     use crate::owner::messages::{Reading, Reply, Request};
     use crate::owner::test_support::{
-        Harness, IMAGE, WINDOW, add_example_app, frame_image, harness_with, scratch_store, spec,
+        Harness, STATE, WINDOW, add_example_app, frame_image, harness_with, scratch_store, spec,
         with_saved_bar,
     };
 
@@ -372,10 +372,10 @@ mod tests {
             }
         };
         harness
-            .ask(save(spec("example", "Icon visible", IMAGE)))
+            .ask(save(spec("example", "Icon visible", STATE)))
             .expect("saves");
         let folder = apps.folder("example");
-        let picture = folder.join("icon_visible.png");
+        let picture = folder.join("icon_visible-1.png");
         let bytes = std::fs::read(&picture).expect("saved picture");
         std::fs::remove_file(&picture).expect("remove");
         let missing = harness

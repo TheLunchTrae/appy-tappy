@@ -20,6 +20,7 @@ import {
   COMPARISON_NAMES,
   EMPTY_DRAFT,
   MEDIA_NAMES,
+  NO_STATE,
   type ValueChoice,
   buildAutomation,
   buildWhen,
@@ -28,6 +29,8 @@ import {
   liveAnnouncement,
   liveText,
   newAction,
+  readsState,
+  readsText,
   toDraft,
   undoText,
   valueChoices,
@@ -482,7 +485,27 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
                 </option>
               ))}
             </select>
-            {choice?.kind === 'flag' ? (
+            {choice?.kind === 'state' ? (
+              <select
+                className="input"
+                aria-label="State"
+                value={draft.state}
+                onChange={(event) => {
+                  update({ state: event.target.value });
+                }}
+              >
+                {readsState(choice, draft.state) ? null : (
+                  <option value={draft.state} disabled>
+                    {draft.state === '' ? 'Pick a state' : `${draft.state} (no longer read)`}
+                  </option>
+                )}
+                {[...choice.states, NO_STATE].map((state) => (
+                  <option key={state} value={state}>
+                    {state}
+                  </option>
+                ))}
+              </select>
+            ) : choice?.kind === 'flag' ? (
               <div className="seg" role="group" aria-label="Yes or no">
                 {[true, false].map((flag) => (
                   <button
@@ -517,7 +540,7 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
           <p className="note">
             {runningApp === null || runningApp === undefined
               ? 'One value for now. Conditions that combine several values come later.'
-              : `Runs while ${runningApp.file?.name ?? runningApp.id} is open. ${choice?.kind === 'flag' ? `${choice.value.name} reads yes or no.` : `${choice?.value.name ?? 'The value'} reads a number.`}`}
+              : `Runs while ${runningApp.file?.name ?? runningApp.id} is open. ${choice === null ? 'The value reads a number.' : readsText(choice)}`}
           </p>
         </section>
 

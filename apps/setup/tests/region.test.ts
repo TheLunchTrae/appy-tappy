@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { contains, dragCorner, fit, fromCorners, moveRect, sameRect, toPicture } from '../src/lib/region.ts';
+import { bounding, contains, dragCorner, fit, fromCorners, moveRect, sameRect, toPicture } from '../src/lib/region.ts';
 
 const bounds = { width: 100, height: 50 };
 
@@ -89,4 +89,20 @@ test('sameRect compares every side, and two missing rectangles are the same', ()
   expect(sameRect(rect, null)).toBe(false);
   expect(sameRect(null, rect)).toBe(false);
   expect(sameRect(null, null)).toBe(true);
+});
+
+describe('bounding', () => {
+  test('holds every rectangle', () => {
+    expect(
+      bounding([
+        { x: 10, y: 5, width: 4, height: 2 },
+        { x: 2, y: 6, width: 3, height: 8 },
+      ]),
+    ).toEqual({ x: 2, y: 5, width: 12, height: 9 });
+    expect(bounding([{ x: 1, y: 2, width: 3, height: 4 }])).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+  });
+
+  test('is null with no rectangle', () => {
+    expect(bounding([])).toBeNull();
+  });
 });

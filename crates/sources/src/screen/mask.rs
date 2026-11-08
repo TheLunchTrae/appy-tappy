@@ -1,6 +1,6 @@
-//! Which pixels of a region an image check compares.
+//! Which pixels of a region a state check compares.
 //!
-//! A mask leaves out the background behind the thing an image check looks
+//! A mask leaves out the background behind the thing a state check looks
 //! for, so the check still matches when that background changes. The setup
 //! app makes one when the user selects the thing with
 //! [`select`](super::select), and saves it as the transparent pixels of the

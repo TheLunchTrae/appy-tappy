@@ -24,9 +24,9 @@ use crate::action::{
     Action, AppName, KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
 };
 use crate::anti_cheat::{AntiCheatClass, allows_input};
-use crate::app_file::{AppFile, id_from_name};
+use crate::app_file::{AppFile, ValueKind, id_from_name};
 use crate::rule::{Comparison, Condition, Rearm, Restore, Rule, RuleError, Trigger};
-use crate::signal::{Number, SignalName, Value};
+use crate::signal::{NO_STATE, Number, SignalName, StateName, Value};
 
 /// The format version this build writes and reads.
 pub const FORMAT: u32 = 1;
@@ -103,18 +103,27 @@ impl WhenDef {
     /// # Errors
     ///
     /// Returns the problem as a sentence the setup app can show: a target
-    /// that is not a finite number, or a yes-or-no target compared by order.
+    /// that is not a finite number or a valid state name, or a yes-or-no or
+    /// state target compared by order.
     pub fn condition(&self, signal: SignalName) -> Result<Condition, String> {
-        let target = match self.target {
+        let target = match &self.target {
             TargetDef::Number(number) => Value::Number(
-                Number::new(number)
+                Number::new(*number)
                     .ok_or_else(|| "the number to compare with is not finite".to_owned())?,
             ),
-            TargetDef::Flag(flag) => Value::Flag(flag),
+            TargetDef::Flag(flag) => Value::Flag(*flag),
+            TargetDef::State(name) if name == NO_STATE => Value::State(StateName::none()),
+            TargetDef::State(name) => {
+                Value::State(StateName::new(name).map_err(|error| error.to_string())?)
+            },
         };
-        Condition::compare(signal, self.is.into(), target).map_err(|_ordered| {
-            "a yes-or-no value can only be compared with \"is\" or \"is not\"".to_owned()
-        })
+        let kind = if matches!(target, Value::State(_)) {
+            "a state"
+        } else {
+            "a yes-or-no value"
+        };
+        Condition::compare(signal, self.is.into(), target)
+            .map_err(|_ordered| format!("{kind} can only be compared with \"is\" or \"is not\""))
     }
 }
 
@@ -149,14 +158,17 @@ impl From<ComparisonDef> for Comparison {
     }
 }
 
-/// What a value is compared with: a number, or yes or no.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// What a value is compared with: a number, yes or no, or a state's name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TargetDef {
     /// A number, for a value a number or bar fill check reads.
     Number(f64),
-    /// Yes or no, for a value a color or image check reads.
+    /// Yes or no, for a value a color check reads.
     Flag(bool),
+    /// The name of a state, or [`NO_STATE`], for a value a state check
+    /// reads.
+    State(String),
 }
 
 /// [`MediaCommand`] as the file spells it.
@@ -348,15 +360,25 @@ impl AutomationDef {
                 app.name
             ));
         }
-        let numeric = value.screen.check.reads_number();
-        match (numeric, self.when.target) {
-            (true, TargetDef::Number(_)) | (false, TargetDef::Flag(_)) => Ok(()),
-            (true, TargetDef::Flag(_)) => Err(format!(
+        let check = &value.screen.check;
+        match (check.reads(), &self.when.target) {
+            (ValueKind::Number, TargetDef::Number(_)) | (ValueKind::Flag, TargetDef::Flag(_)) => {
+                Ok(())
+            },
+            (ValueKind::State, TargetDef::State(name)) if check.reads_state(name) => Ok(()),
+            (ValueKind::State, TargetDef::State(name)) => {
+                Err(format!("{} has no state named {name:?}", value.name))
+            },
+            (ValueKind::Number, TargetDef::Flag(_) | TargetDef::State(_)) => Err(format!(
                 "{} reads a number, so compare it with a number",
                 value.name
             )),
-            (false, TargetDef::Number(_)) => Err(format!(
+            (ValueKind::Flag, TargetDef::Number(_) | TargetDef::State(_)) => Err(format!(
                 "{} reads yes or no, so compare it with yes or no",
+                value.name
+            )),
+            (ValueKind::State, TargetDef::Number(_) | TargetDef::Flag(_)) => Err(format!(
+                "{} reads a state, so compare it with one of its states",
                 value.name
             )),
         }
@@ -494,7 +516,7 @@ mod tests {
     use super::*;
     use crate::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, ReferenceDef, RegionDef, SampleDef,
-        ScreenDef, SizeDef, ValueDef, WindowDef, sample_name,
+        ScreenDef, SizeDef, StateDef, ValueDef, WindowDef, sample_name,
     };
     use crate::window_match::WindowFacts;
 
@@ -564,10 +586,17 @@ mod tests {
                     },
                 ),
                 value(
-                    "score_shown",
-                    "Score shown",
-                    CheckDef::Image {
-                        image: "score_shown.png".to_owned(),
+                    "status",
+                    "Status",
+                    CheckDef::State {
+                        states: ["Paused", "Live"]
+                            .iter()
+                            .zip(1_u8..)
+                            .map(|(name, number)| StateDef {
+                                name: (*name).to_owned(),
+                                image: format!("status-{number}.png"),
+                            })
+                            .collect(),
                         tolerance: 10,
                     },
                 ),
@@ -635,12 +664,18 @@ mod tests {
         flag.when.target = TargetDef::Flag(true);
         flag.enabled = false;
         flag.cooldown_ms = 1500;
-        let written = file(vec![pause_music(), flag]);
+        let mut state = pause_music();
+        state.id = "paused".to_owned();
+        state.when.value = "status".to_owned();
+        state.when.is = ComparisonDef::Equals;
+        state.when.target = TargetDef::State("Paused".to_owned());
+        let written = file(vec![pause_music(), flag, state]);
         let json = written.to_json();
         assert!(json.ends_with("}\n"));
         assert!(json.contains("\"is\": \"atLeast\""));
         assert!(json.contains("\"target\": 90.0"));
         assert!(json.contains("\"target\": true"));
+        assert!(json.contains("\"target\": \"Paused\""));
         assert!(json.contains("\"cooldownMs\": 1500"));
         assert!(json.contains("\"kind\": \"volume\""));
         assert_eq!(AutomationsFile::parse(&json), Ok(written));
@@ -768,6 +803,21 @@ mod tests {
         let mut infinite = pause_music();
         infinite.when.target = TargetDef::Number(f64::INFINITY);
         assert!(problem(infinite).contains("not finite"));
+
+        let mut ordered_state = pause_music();
+        ordered_state.when.target = TargetDef::State("Paused".to_owned());
+        assert_eq!(
+            problem(ordered_state),
+            "a state can only be compared with \"is\" or \"is not\""
+        );
+        let mut bad_state = pause_music();
+        bad_state.when.is = ComparisonDef::Equals;
+        bad_state.when.target = TargetDef::State(" Paused".to_owned());
+        assert!(problem(bad_state).contains("starts or ends with a space"));
+        let mut no_state = pause_music();
+        no_state.when.is = ComparisonDef::NotEquals;
+        no_state.when.target = TargetDef::State("none".to_owned());
+        assert_eq!(no_state.validate(), Ok(()));
 
         let mut loud = pause_music();
         loud.actions = vec![ActionDef::Volume {
@@ -962,17 +1012,43 @@ mod tests {
             Err("Health reads a number, so compare it with a number".to_owned())
         );
 
-        for flag in ["icon_visible", "score_shown"] {
-            let mut shown = pause_music();
-            shown.when.value = flag.to_owned();
-            shown.when.target = TargetDef::Flag(true);
-            assert_eq!(shown.check_against(apps()), Ok(()), "{flag}");
-            shown.when.target = TargetDef::Number(1.0);
-            assert!(
-                shown
-                    .check_against(apps())
-                    .is_err_and(|error| error.ends_with("compare it with yes or no")),
-                "{flag}"
+        let mut shown = pause_music();
+        shown.when.value = "icon_visible".to_owned();
+        shown.when.target = TargetDef::Flag(true);
+        assert_eq!(shown.check_against(apps()), Ok(()));
+        for target in [
+            TargetDef::Number(1.0),
+            TargetDef::State("Paused".to_owned()),
+        ] {
+            shown.when.target = target;
+            assert_eq!(
+                shown.check_against(apps()),
+                Err("Icon visible reads yes or no, so compare it with yes or no".to_owned())
+            );
+        }
+        bar.when.target = TargetDef::State("Paused".to_owned());
+        assert!(
+            bar.check_against(apps())
+                .is_err_and(|error| error.ends_with("compare it with a number"))
+        );
+
+        let mut status = pause_music();
+        status.when.value = "status".to_owned();
+        status.when.is = ComparisonDef::Equals;
+        for known in ["Paused", "Live", "none"] {
+            status.when.target = TargetDef::State(known.to_owned());
+            assert_eq!(status.check_against(apps()), Ok(()), "{known}");
+        }
+        status.when.target = TargetDef::State("Dead".to_owned());
+        assert_eq!(
+            status.check_against(apps()),
+            Err("Status has no state named \"Dead\"".to_owned())
+        );
+        for target in [TargetDef::Number(1.0), TargetDef::Flag(true)] {
+            status.when.target = target;
+            assert_eq!(
+                status.check_against(apps()),
+                Err("Status reads a state, so compare it with one of its states".to_owned())
             );
         }
 

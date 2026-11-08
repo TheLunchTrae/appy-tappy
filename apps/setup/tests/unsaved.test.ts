@@ -5,7 +5,7 @@ import { held, onLeave, sameContent } from '../src/lib/unsaved.ts';
 
 describe('sameContent', () => {
   test('compares what objects hold, not which objects they are', () => {
-    expect(sameContent({ ...EMPTY_DRAFT, labels: new Map(), steps: [] }, EMPTY_DRAFT)).toBe(true);
+    expect(sameContent({ ...EMPTY_DRAFT, labels: new Map(), states: [] }, EMPTY_DRAFT)).toBe(true);
     expect(
       sameContent(
         { name: 'A', window: { title: 'T', mustMatch: { title: true } } },

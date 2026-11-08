@@ -23,6 +23,8 @@ On the Automations page, select **New automation**. To change one, select
      **is at most**, **is below**, **is**, or **is not** a number you type.
    - A value that reads yes or no: **is** or **is not**, then **Yes** or
      **No**.
+   - A value that reads a state: **is** or **is not**, then one of its
+     states or `none`, such as `Status is Paused`.
 
    An automation watches one value.
 
