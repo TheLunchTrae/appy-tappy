@@ -11,6 +11,7 @@ use std::convert::Infallible;
 use std::io;
 
 use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
+use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::{WindowFacts, WindowMatch};
 
 use crate::memory::ProcessMemory;
@@ -119,6 +120,15 @@ pub trait System {
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
+    /// The build of `process`'s executable, read from the file without
+    /// opening the process: see [`crate::build`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error, such as for a process that
+    /// exited or a file it cannot read.
+    fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef>;
+
     /// Asks the user, outside the agent's reach, whether `process` may be
     /// read. `anti_cheat` names anti-cheat products that are running.
     ///
@@ -203,6 +213,10 @@ impl System for Unsupported {
     }
 
     fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
+        unsupported()
+    }
+
+    fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
         unsupported()
     }
 
@@ -491,11 +505,12 @@ mod tests {
             system.processes().map(drop),
             system.windows().map(drop),
             system.window_place(7).map(drop),
+            system.executable_build(entry.id).map(drop),
             system.ask_memory_access(&entry, &[]).map(drop),
             system.open(&permit).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 6]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 7]);
     }
 }

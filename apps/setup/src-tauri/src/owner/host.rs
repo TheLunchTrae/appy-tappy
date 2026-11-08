@@ -4,6 +4,8 @@
 use std::io;
 use std::time::Duration;
 
+use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::app_file::BuildDef;
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
 use appytappy_sources::system::{ProcessEntry, System, WindowEntry, WindowPlace};
 
@@ -33,6 +35,13 @@ pub(crate) trait Host {
     ///
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
+
+    /// The build of `process`'s executable, read without opening it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef>;
 
     /// Starts capturing `crop` of `window`, calling `handler` with frames at
     /// most every `interval`.
@@ -64,6 +73,10 @@ impl<T: System + Capture> Host for T {
         System::window_place(self, window)
     }
 
+    fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
+        System::executable_build(self, process)
+    }
+
     fn capture(
         &self,
         window: u64,
@@ -87,6 +100,7 @@ mod tests {
         assert!(Host::windows(&unsupported).is_err());
         assert!(Host::processes(&unsupported).is_err());
         assert!(Host::window_place(&unsupported, 7).is_err());
+        assert!(Host::executable_build(&unsupported, ProcessId::new(7)).is_err());
         let handler: FrameHandler = Box::new(|_frame| Duration::ZERO);
         assert!(Host::capture(&unsupported, 7, Crop::Whole, PREVIEW_INTERVAL, handler).is_err());
     }

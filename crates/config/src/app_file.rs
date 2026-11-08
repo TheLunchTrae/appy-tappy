@@ -62,6 +62,44 @@ pub struct AppFile {
     /// application, or `None` when it never has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlay: Option<OverlayDef>,
+    /// The build of the application its values were last checked against,
+    /// or `None` before the setup app saved a value of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked: Option<CheckedDef>,
+}
+
+/// The build of an application that its values were checked against, and
+/// when.
+///
+/// An update can move or restyle what a value reads, so the setup app warns
+/// when the running build is another one, and the runtime notes it in its
+/// log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CheckedDef {
+    /// The build.
+    pub build: BuildDef,
+    /// When the user checked them, in seconds since 1970 began in UTC.
+    pub at: u64,
+}
+
+/// One build of an application, as its executable file tells it apart.
+///
+/// Many applications keep the same file version across updates, so the
+/// file's size and the time it was written count too: two builds are the
+/// same only when all three match.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BuildDef {
+    /// The executable's file version, such as `1.4.2.0`, or `None` when the
+    /// file has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The executable's size in bytes.
+    pub size: u64,
+    /// When the executable was last written, in seconds since 1970 began in
+    /// UTC.
+    pub modified: u64,
 }
 
 /// How the setup app shows an application's live readings on top of it. The
@@ -731,6 +769,7 @@ mod tests {
             }),
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
+            checked: None,
             values: vec![ValueDef {
                 id: "progress".to_owned(),
                 name: "Progress".to_owned(),
@@ -863,6 +902,27 @@ mod tests {
         let json = file.to_json();
         assert!(json.contains("\"mode\": \"pictureInPicture\""));
         assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn the_checked_build_is_left_out_until_recorded_and_round_trips() {
+        let mut file = dash();
+        assert!(!file.to_json().contains("checked"));
+        file.checked = Some(CheckedDef {
+            build: BuildDef {
+                version: None,
+                size: 4_096,
+                modified: 1_762_500_000,
+            },
+            at: 1_762_588_800,
+        });
+        let json = file.to_json();
+        assert!(!json.contains("version"));
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        if let Some(checked) = &mut file.checked {
+            checked.build.version = Some("1.4.2.0".to_owned());
+        }
+        assert_eq!(AppFile::parse(&file.to_json()), Ok(file));
     }
 
     #[test]
