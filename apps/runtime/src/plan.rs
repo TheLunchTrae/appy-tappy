@@ -63,6 +63,27 @@ pub(crate) struct ValuePlan {
     pub(crate) check: SavedCheck,
 }
 
+impl AppPlan {
+    /// Whether the application runs the same under `other`: everything but
+    /// the build its values were checked against, which only the log reads,
+    /// so marking values as checked restarts nothing.
+    pub(crate) fn runs_as(&self, other: &Self) -> bool {
+        let Self {
+            name,
+            window,
+            values,
+            rules,
+            automations,
+            checked: _,
+        } = self;
+        *name == other.name
+            && *window == other.window
+            && *values == other.values
+            && *rules == other.rules
+            && *automations == other.automations
+    }
+}
+
 impl Plan {
     /// The apps detection watches: each one's window match.
     pub(crate) fn watchlist(&self) -> Watchlist {

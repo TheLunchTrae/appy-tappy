@@ -221,7 +221,7 @@ impl Model {
         let changed: Vec<String> = self
             .running
             .iter()
-            .filter(|(app, running)| plan.get(*app).is_none_or(|new| **new != *running.plan))
+            .filter(|(app, running)| plan.get(*app).is_none_or(|new| !new.runs_as(&running.plan)))
             .map(|(app, _)| app.clone())
             .collect();
         let mut orders: Vec<Order> = changed
@@ -390,6 +390,7 @@ mod tests {
 
     use appytappy_config::action::{Action, MediaCommand, MediaTarget};
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::app_file::BuildDef;
     use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
     use appytappy_config::signal::Number;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
@@ -742,6 +743,26 @@ mod tests {
         assert_eq!(model.active_automations(), ["Pause B"]);
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
         assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
+    }
+
+    #[test]
+    fn a_new_checked_build_restarts_nothing_but_is_what_the_log_reads() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        assert_eq!(kinds(&model.apply(started("a", 7), now)), ["read 0 A"]);
+        let mut checked = plan("A", 90.0);
+        let build = BuildDef {
+            version: Some("1.0.0.0".to_owned()),
+            size: 1,
+            modified: 2,
+        };
+        Arc::get_mut(&mut checked).expect("unshared").checked = Some(build.clone());
+        assert_eq!(model.replan(plans(&[("a", &checked)])), []);
+        assert_eq!(
+            model.plan("a").and_then(|plan| plan.checked.as_ref()),
+            Some(&build)
+        );
     }
 
     #[test]
