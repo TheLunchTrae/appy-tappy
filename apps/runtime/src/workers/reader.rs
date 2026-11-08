@@ -736,7 +736,10 @@ mod tests {
         let (events, readings) = mpsc::channel::<Reading>();
         let (control, _control) = mpsc::channel();
         let mut value = red_at("count", 0, 0);
-        value.check.check = Check::Number(DigitReader::new(RED, 10));
+        value.check.check = Check::Number {
+            reader: DigitReader::new(RED, 10),
+            whole: false,
+        };
         let job = job(vec![value]);
         let mut frames = FrameReader::new(&job, WINDOW, events, control).expect("values to read");
         let black = frame_image(2, 2, |_, _| false);

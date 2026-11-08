@@ -34,7 +34,8 @@ function AppRows({ app, automations, confirming, onConfirm, onDelete }: AppRowsP
       </tr>
     );
   }
-  if (app.file.values.length === 0) {
+  const { file } = app;
+  if (file.values.length === 0) {
     return null;
   }
   return (
@@ -49,7 +50,7 @@ function AppRows({ app, automations, confirming, onConfirm, onDelete }: AppRowsP
         </td>
       </tr>
       {app.file.values.map((value) => {
-        const summary = checkSummary(value.screen.check);
+        const summary = checkSummary(value.screen.check, file.references);
         const key = `${app.id}/${value.id}`;
         const { region, windowSize } = value.screen;
         return (

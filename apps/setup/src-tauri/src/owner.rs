@@ -15,6 +15,7 @@ mod host;
 mod messages;
 mod overlays;
 mod recording;
+mod references;
 #[cfg(test)]
 mod test_support;
 mod values;
@@ -39,7 +40,8 @@ use crate::window_list;
 
 pub(crate) use self::host::Host;
 pub(crate) use self::messages::{
-    AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue,
+    AppSummary, Live, Message, Reading, ReferenceSaveSpec, Reply, Request, SaveSpec,
+    SavedReferenceId, SavedValue,
 };
 use self::watch::Watched;
 
@@ -260,7 +262,7 @@ impl<H: Host> Owner<H> {
             ),
             Request::SetCheck { spec, reply } => send(
                 reply,
-                check_spec::build(&spec, &self.screenshots, self.recording.as_ref())
+                self.with_session(|session| check_spec::build(&spec, session))
                     .map(|check| self.check = Some(check))
                     .map_err(|error| error.to_string()),
             ),
@@ -309,7 +311,7 @@ impl<H: Host> Owner<H> {
             ),
             Request::ReviewProblems { spec, reply } => send(
                 reply,
-                check_spec::recorded_problems(&spec, &self.screenshots, self.recording.as_ref())
+                self.with_session(|session| check_spec::recorded_problems(&spec, session))
                     .map_err(|error| error.to_string()),
             ),
             Request::WatchValue { app, value, reply } => send(reply, self.watch(&app, &value)),
@@ -343,6 +345,12 @@ impl<H: Host> Owner<H> {
                     .and_then(|stores| applications::remove(stores, &app)),
             ),
             Request::SaveValue { spec, reply } => send(reply, self.save(&spec)),
+            Request::SaveReference { spec, reply } => send(reply, self.save_reference(&spec)),
+            Request::DeleteReference {
+                app,
+                reference,
+                reply,
+            } => send(reply, self.delete_reference(&app, &reference)),
             Request::DeleteValue { app, value, reply } => {
                 send(reply, self.delete(&app, &value));
             },

@@ -145,14 +145,20 @@ impl DigitReader {
     }
 
     /// Reads the first number in `image`: an optional `-`, digits, and an
-    /// optional `.` with more digits. Other learned characters, such as `%`,
-    /// separate numbers.
+    /// optional `.` with more digits. A number that starts with its `.`
+    /// reads as `0.`, so `-.5` reads as -0.5, unless letters came before,
+    /// so `Lv.5` reads as 5; a `.` with no digit after it is no number. A
+    /// `,` between groups of three digits is skipped, so `1,234` reads as
+    /// 1234; any other `,`, and other learned characters such as `%` or
+    /// `/`, separate numbers, so `12,5` and `12/50` read as 12. With
+    /// `whole`, the number ends at the `.`, so the digits after it are
+    /// ignored and need no glyphs: `87.5%` reads as 87.
     ///
     /// # Errors
     ///
     /// Returns a [`ReadError`] when the image has no ink, too many
     /// characters, a character that matches no learned glyph, or no digits.
-    pub fn read(&self, image: &Image) -> Result<Number, ReadError> {
+    pub fn read(&self, image: &Image, whole: bool) -> Result<Number, ReadError> {
         let mut spans = [Span::default(); MAX_CHARACTERS];
         let (line, count) = self
             .segment(image, &mut spans)
@@ -160,7 +166,10 @@ impl DigitReader {
                 Segmentation::NoInk => ReadError::NoInk,
                 Segmentation::TooMany => ReadError::TooManyCharacters,
             })?;
-        let mut number = NumberText::default();
+        let mut number = NumberText {
+            point: Point::for_whole(whole),
+            ..NumberText::default()
+        };
         for (position, span) in spans.iter().take(count).enumerate() {
             let shape = self.shape(image, line, *span);
             match self.best_match(&shape) {
@@ -348,8 +357,45 @@ struct NumberText {
     text: [u8; MAX_NUMBER_LEN],
     len: usize,
     digits: bool,
-    point: bool,
     ended: bool,
+    point: Point,
+    lead: Lead,
+    /// The length of `text` at the last `,` between digit groups, while
+    /// the digits after it may still turn out not to be a group of three.
+    group: Option<usize>,
+    /// The digits since the number started or since its last `,`.
+    run: usize,
+}
+
+/// What came before a number's first digit, for a `.` there.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Lead {
+    /// Nothing that changes how a `.` reads.
+    #[default]
+    Plain,
+    /// A `.`, as in `.5`: the number reads as `0.` if a digit follows, and
+    /// the `.` is skipped otherwise.
+    Point,
+    /// A letter, such as the `v` of `Lv.5`, so a `.` is not the number's.
+    Letter,
+}
+
+/// What a `.` after the digits does to a number being read.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Point {
+    /// It starts the number's fraction.
+    #[default]
+    Starts,
+    /// The fraction has started, so another `.` is not part of the number.
+    Taken,
+    /// It ends the number: the value reads whole numbers only.
+    Ends,
+}
+
+impl Point {
+    const fn for_whole(whole: bool) -> Self {
+        if whole { Self::Ends } else { Self::Starts }
+    }
 }
 
 impl NumberText {
@@ -357,22 +403,57 @@ impl NumberText {
         if self.ended {
             return;
         }
+        if self.lead == Lead::Point && !character.is_ascii_digit() {
+            // The `.` started no number, so it is skipped like any other
+            // character before one, as in `...`.
+            self.lead = Lead::Plain;
+            self.len = 0;
+        }
+        if character != ',' && !character.is_ascii_digit() && !self.close_groups() {
+            self.ended = true;
+            return;
+        }
         let accepted = match character {
             '0'..='9' => {
+                if self.lead == Lead::Point {
+                    self.lead = Lead::Plain;
+                    self.push('0');
+                    self.push('.');
+                    if self.ended {
+                        return;
+                    }
+                }
                 self.digits = true;
+                self.run = self.run.saturating_add(1);
                 true
             },
             '-' => self.len == 0,
-            '.' if self.digits && !self.point => {
-                self.point = true;
+            // A number may start with its point, such as `.5`, which reads
+            // as `0.5` once its digit comes.
+            '.' if !self.digits && self.lead == Lead::Plain => {
+                self.lead = Lead::Point;
+                return;
+            },
+            '.' if self.digits && self.point == Point::Starts => {
+                self.point = Point::Taken;
                 true
             },
+            ',' if self.starts_group() => {
+                self.group = Some(self.len);
+                self.run = 0;
+                return;
+            },
+            // Any other character, or a `.` once the fraction is taken or
+            // for a whole number, ends the number after its digits.
             _ => false,
         };
         if !accepted {
             self.ended = self.digits;
             if !self.digits {
                 self.len = 0;
+                if character.is_alphabetic() {
+                    self.lead = Lead::Letter;
+                }
             }
             return;
         }
@@ -388,11 +469,41 @@ impl NumberText {
         }
     }
 
+    /// Whether a `,` here separates digit groups, as in `1,234`: it comes
+    /// after one to three digits, or after a whole group of three, and
+    /// before the point.
+    fn starts_group(&self) -> bool {
+        let group_before = match self.group {
+            Some(_) => self.run == 3,
+            None => (1..=3).contains(&self.run),
+        };
+        self.digits && self.point != Point::Taken && group_before
+    }
+
+    /// Where the number ends when the digits after its last `,` are not a
+    /// group of three, as in `12,5`: at that `,`.
+    fn short_group(&self) -> Option<usize> {
+        self.group.filter(|_| self.run != 3)
+    }
+
+    /// Ends the digit groups before a character that is not a digit or a
+    /// `,`. When the last group is short, the number ends at its `,` and
+    /// this returns false.
+    fn close_groups(&mut self) -> bool {
+        let short = self.short_group();
+        self.group = None;
+        if let Some(start) = short {
+            self.len = start;
+        }
+        short.is_none()
+    }
+
     fn parse(&self) -> Option<Number> {
         if !self.digits {
             return None;
         }
-        let text = std::str::from_utf8(self.text.get(..self.len)?).ok()?;
+        let len = self.short_group().unwrap_or(self.len);
+        let text = std::str::from_utf8(self.text.get(..len)?).ok()?;
         Number::new(text.trim_end_matches('.').parse().ok()?)
     }
 }
@@ -567,7 +678,14 @@ mod tests {
     }
 
     fn text(characters: &str) -> NumberText {
-        let mut number = NumberText::default();
+        number_text(characters, false)
+    }
+
+    fn number_text(characters: &str, whole: bool) -> NumberText {
+        let mut number = NumberText {
+            point: Point::for_whole(whole),
+            ..NumberText::default()
+        };
         characters
             .chars()
             .for_each(|character| number.push(character));
@@ -581,10 +699,10 @@ mod tests {
         assert_eq!(parsed("90.5%"), Number::new(90.5));
         assert_eq!(parsed("-12"), Number::new(-12.0));
         assert_eq!(parsed("%12/50"), Number::new(12.0));
+        assert_eq!(parsed("12/50"), Number::new(12.0));
         assert_eq!(parsed("1.2.3"), Number::new(1.2));
         assert_eq!(parsed("7."), Number::new(7.0));
         assert_eq!(parsed("-%5"), Number::new(5.0));
-        assert_eq!(parsed(".5"), Number::new(5.0));
         assert_eq!(parsed("%-"), None);
         assert_eq!(parsed("1-2"), Number::new(1.0));
         let longest = "9".repeat(MAX_NUMBER_LEN);
@@ -592,6 +710,103 @@ mod tests {
             parsed(&"9".repeat(MAX_NUMBER_LEN + 4)),
             Number::new(longest.parse().unwrap())
         );
+    }
+
+    #[test]
+    fn a_number_that_starts_with_its_point_reads_as_zero_point() {
+        let parsed = |characters| text(characters).parse();
+        assert_eq!(parsed(".5"), Number::new(0.5));
+        assert_eq!(parsed("-.5"), Number::new(-0.5));
+        assert_eq!(parsed(".25%"), Number::new(0.25));
+        assert_eq!(parsed("-.5.5"), Number::new(-0.5));
+        assert_eq!(parsed("$.50"), Number::new(0.5));
+        assert_eq!(parsed("+.5"), Number::new(0.5));
+        // After letters, such as those of a level label, a `.` is not the
+        // number's.
+        assert_eq!(parsed("x.5"), Number::new(5.0));
+        assert_eq!(parsed("-x.5"), Number::new(5.0));
+        assert_eq!(parsed("Lv.5"), Number::new(5.0));
+        // A point with no digit after it is no number, such as a loading
+        // ellipsis.
+        for characters in [".", "...", "-.--", ".%", "-."] {
+            assert_eq!(parsed(characters), None, "{characters}");
+        }
+        assert_eq!(parsed(".%5"), Number::new(5.0));
+    }
+
+    #[test]
+    fn a_comma_is_skipped_only_between_groups_of_three_digits() {
+        let parsed = |characters| text(characters).parse();
+        assert_eq!(parsed("1,234"), Number::new(1234.0));
+        assert_eq!(parsed("-12,345.5%"), Number::new(-12345.5));
+        assert_eq!(parsed("1,234,567"), Number::new(1_234_567.0));
+        assert_eq!(parsed("999,000/1,000"), Number::new(999_000.0));
+        // Anything else ends the number at the comma.
+        assert_eq!(parsed("12,5"), Number::new(12.0));
+        assert_eq!(parsed("12,5%"), Number::new(12.0));
+        assert_eq!(parsed("1,2345"), Number::new(1.0));
+        assert_eq!(parsed("1,234,56"), Number::new(1234.0));
+        assert_eq!(parsed("1,23,456"), Number::new(1.0));
+        assert_eq!(parsed("1234,567"), Number::new(1234.0));
+        assert_eq!(parsed("1,"), Number::new(1.0));
+        assert_eq!(parsed("1,,234"), Number::new(1.0));
+        assert_eq!(parsed("1,.5"), Number::new(1.0));
+        assert_eq!(parsed("1.5,000"), Number::new(1.5));
+        assert_eq!(parsed(",5"), Number::new(5.0));
+        let whole = |characters| number_text(characters, true).parse();
+        assert_eq!(whole("1,234.5"), Number::new(1234.0));
+        assert_eq!(whole("1,23.5"), Number::new(1.0));
+    }
+
+    #[test]
+    fn a_whole_number_ends_at_its_point() {
+        let whole = |characters| number_text(characters, true).parse();
+        assert_eq!(whole("90.5%"), Number::new(90.0));
+        assert_eq!(whole("-7.9"), Number::new(-7.0));
+        assert_eq!(whole("12"), Number::new(12.0));
+        assert_eq!(whole(".5"), Number::new(0.0));
+        assert_eq!(whole("-.5"), Number::new(-0.0));
+        assert!(number_text("3.", true).ended);
+        assert!(!number_text("3.", false).ended);
+    }
+
+    /// `rows` drawn `scale` times larger.
+    fn scaled(rows: &[&str], scale: usize) -> Vec<String> {
+        rows.iter()
+            .flat_map(|row| {
+                let wide: String = row
+                    .chars()
+                    .flat_map(|cell| std::iter::repeat_n(cell, scale))
+                    .collect();
+                std::iter::repeat_n(wide, scale)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn characters_learned_at_one_size_read_at_another() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&TWELVE), "12").unwrap();
+        let big = scaled(&TWELVE, 3);
+        let rows: Vec<&str> = big.iter().map(String::as_str).collect();
+        assert_eq!(
+            reader.read(&draw(&rows), false),
+            Ok(Number::new(12.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn a_whole_read_ignores_the_digits_after_the_point() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        // "1" and a "." that sits at the baseline.
+        reader.learn(&draw(&["#..", "#..", "#.#"]), "1.").unwrap();
+        // "1.", then a character never learned.
+        let fraction = draw(&["#...#.#", "#...###", "#.#.#.#"]);
+        assert_eq!(
+            reader.read(&fraction, false),
+            Err(ReadError::UnknownCharacter { position: 2 })
+        );
+        assert_eq!(reader.read(&fraction, true), Ok(Number::new(1.0).unwrap()));
     }
 
     #[test]
@@ -614,7 +829,10 @@ mod tests {
             "#...#.#..",
             "###.#.###",
         ]);
-        assert_eq!(reader.read(&swapped), Ok(Number::new(212.0).unwrap()));
+        assert_eq!(
+            reader.read(&swapped, false),
+            Ok(Number::new(212.0).unwrap())
+        );
     }
 
     #[test]
@@ -649,17 +867,17 @@ mod tests {
             .learn(&draw(&["#.###", "#.#.#", "#.###"]), "1%")
             .unwrap();
         assert_eq!(
-            reader.read(&draw(&["###", "#.#", "###"])),
+            reader.read(&draw(&["###", "#.#", "###"]), false),
             Err(ReadError::NoNumber)
         );
         assert_eq!(
-            reader.read(&draw(&["#.#.#", "#...#", "#.###"])),
+            reader.read(&draw(&["#.#.#", "#...#", "#.###"]), false),
             Err(ReadError::UnknownCharacter { position: 1 })
         );
-        assert_eq!(reader.read(&draw(&["..."])), Err(ReadError::NoInk));
+        assert_eq!(reader.read(&draw(&["..."]), false), Err(ReadError::NoInk));
         let crowded = "#.".repeat(MAX_CHARACTERS + 1);
         assert_eq!(
-            reader.read(&draw(&[crowded.as_str()])),
+            reader.read(&draw(&[crowded.as_str()]), false),
             Err(ReadError::TooManyCharacters)
         );
     }
@@ -672,7 +890,7 @@ mod tests {
             .unwrap();
         // "1%" and then a character never learned.
         let labeled = draw(&["#.###.#.#", "#.#.#.###", "#.###.#.#"]);
-        assert_eq!(reader.read(&labeled), Ok(Number::new(1.0).unwrap()));
+        assert_eq!(reader.read(&labeled, false), Ok(Number::new(1.0).unwrap()));
     }
 
     #[test]
@@ -681,11 +899,17 @@ mod tests {
         reader.learn(&draw(&TWELVE), "12").unwrap();
         let mut noisy = TWELVE.to_vec();
         noisy.extend([".....", "....#"]);
-        assert_eq!(reader.read(&draw(&noisy)), Ok(Number::new(12.0).unwrap()));
+        assert_eq!(
+            reader.read(&draw(&noisy), false),
+            Ok(Number::new(12.0).unwrap())
+        );
         // Of two runs of inked rows, the one with more ink is the line.
         let mut above = vec!["#....", "....."];
         above.extend(TWELVE);
-        assert_eq!(reader.read(&draw(&above)), Ok(Number::new(12.0).unwrap()));
+        assert_eq!(
+            reader.read(&draw(&above), false),
+            Ok(Number::new(12.0).unwrap())
+        );
     }
 
     #[test]
@@ -767,7 +991,10 @@ mod tests {
         // Sixteen ink pixels, as many as "12", in one unlearned block.
         let mut tied = TWELVE.to_vec();
         tied.extend([".....", "#####", "#####", "#####", "#...."]);
-        assert_eq!(reader.read(&draw(&tied)), Ok(Number::new(12.0).unwrap()));
+        assert_eq!(
+            reader.read(&draw(&tied), false),
+            Ok(Number::new(12.0).unwrap())
+        );
     }
 
     #[test]

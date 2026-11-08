@@ -3,14 +3,19 @@ import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState }
 import { type ShortcutEvent, register, unregister } from '@tauri-apps/plugin-global-shortcut';
 
 import {
+  type AppFile,
   type Reading,
   type RecordingView,
+  type ReferenceDef,
+  type ReferenceRef,
   discardRecording,
   errorText,
   readValue,
   recordedReading,
   recordingState,
   reviewProblems,
+  listApps,
+  saveReference,
   saveValue,
   screenshot,
   select,
@@ -19,20 +24,28 @@ import {
   stopRecording,
   takeScreenshot,
 } from '../lib/api.ts';
-import { readingText } from '../lib/automation.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
+  type Built,
   type CheckKind,
   type Draft,
+  buildCharacters,
   buildSpec,
   CHECK_KINDS,
   EMPTY_DRAFT,
+  fromReference,
   KIND_NAMES,
   reviewSpec,
+  toReference,
   withKind,
 } from '../lib/check.ts';
+import { readers } from '../lib/reference.ts';
+import { type CheckState, ColorField, ReadingBox, RegionFields, ToleranceField } from './Fields.tsx';
+import { Question, useQuestion } from './Question.tsx';
+import { ReferenceEditor } from './ReferenceEditor.tsx';
+import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
-import { type Color, type Picture, colorAt, hex } from '../lib/pixels.ts';
+import { type Picture, colorAt } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { type ReviewEntry, clock, entries, keptLabels } from '../lib/review.ts';
 import { type Point, type Rect, type Size, fit, sameRect } from '../lib/region.ts';
@@ -51,6 +64,7 @@ import { background, useRepeat } from '../lib/repeat.ts';
 import { accelerator, shortcutLabel } from '../lib/shortcut.ts';
 import { useSize } from '../lib/size.ts';
 import { loadShortcut, saveShortcut } from '../lib/storage.ts';
+import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 
 /** A screenshot taken this session. */
 interface Shot {
@@ -61,12 +75,6 @@ interface Shot {
 
 /** Where a picked color goes. */
 type ColorTarget = 'ink' | 'filled' | 'empty' | 'color';
-
-type CheckState =
-  | { readonly kind: 'idle' }
-  | { readonly kind: 'pending' }
-  | { readonly kind: 'set' }
-  | { readonly kind: 'error'; readonly message: string };
 
 const THUMB_WIDTH = 224;
 /** Wide enough for any window, so a screenshot arrives at its own pixels. */
@@ -124,43 +132,6 @@ function viewHint(
     return 'Click the thing to select it.';
   }
   return 'Drag to draw a region. Drag inside it to move it, or drag a corner to resize it.';
-}
-
-function RegionFields({
-  region,
-  onRegion,
-}: {
-  readonly region: Rect | null;
-  readonly onRegion: (region: Rect) => void;
-}) {
-  const parts = ['x', 'y', 'width', 'height'] as const;
-  const names = { x: 'X', y: 'Y', width: 'Width', height: 'Height' } as const;
-  return (
-    <div className="field">
-      <span>Region, in the window&apos;s pixels</span>
-      <div className="grid4">
-        {parts.map((part) => (
-          <input
-            key={part}
-            className="input"
-            type="number"
-            min={part === 'width' || part === 'height' ? 1 : 0}
-            aria-label={names[part]}
-            title={names[part]}
-            disabled={region === null}
-            value={region?.[part] ?? ''}
-            onChange={(event) => {
-              const value = Number.parseInt(event.target.value, 10);
-              const low = part === 'width' || part === 'height' ? 1 : 0;
-              if (region !== null && Number.isInteger(value) && value >= low) {
-                onRegion({ ...region, [part]: value });
-              }
-            }}
-          />
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function SelectFields({
@@ -239,116 +210,14 @@ function SelectFields({
   );
 }
 
-interface ColorProps {
-  readonly label: string;
-  readonly color: Color | null;
-  readonly picking: boolean;
-  readonly canPick: boolean;
-  readonly onPick: () => void;
-}
-
-function ColorField({ label, color, picking, canPick, onPick }: ColorProps) {
-  return (
-    <div className="field">
-      <span>{label}</span>
-      <div className="colorpick">
-        <span className="chip">
-          {color === null ? (
-            'Not picked'
-          ) : (
-            <>
-              <span className="swatch" style={{ background: hex(color) }} />
-              {hex(color)}
-            </>
-          )}
-        </span>
-        <button
-          type="button"
-          className="btn small"
-          aria-pressed={picking}
-          disabled={!canPick}
-          title={canPick ? undefined : 'Select a screenshot first'}
-          onClick={onPick}
-        >
-          {picking ? 'Cancel' : 'Pick'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const TOLERANCE_HELP: Readonly<Record<CheckKind, string>> = {
-  number: "How far a pixel's color may be from the characters' color.",
+  number: '',
   barFill: '',
   color: "How far the region's average color may be.",
-  reference: 'How far, on average, the region may differ from the screenshot.',
+  image: 'How far, on average, the region may differ from the screenshot.',
 };
 
-function ToleranceField({
-  kind,
-  value,
-  onChange,
-}: {
-  readonly kind: CheckKind;
-  readonly value: number;
-  readonly onChange: (value: number) => void;
-}) {
-  return (
-    <div className="field">
-      <label htmlFor="tolerance">Tolerance</label>
-      <div className="range">
-        <input
-          id="tolerance"
-          type="range"
-          min={0}
-          max={255}
-          value={value}
-          onChange={(event) => {
-            onChange(Number(event.target.value));
-          }}
-        />
-        <output htmlFor="tolerance">{value}</output>
-      </div>
-      <span className="note">{TOLERANCE_HELP[kind]}</span>
-    </div>
-  );
-}
-
-function ReadingBox({
-  built,
-  state,
-  reading,
-}: {
-  readonly built: string | null;
-  readonly state: CheckState;
-  readonly reading: Reading | null;
-}) {
-  if (built !== null) {
-    return <p className="reading note">{built}</p>;
-  }
-  switch (state.kind) {
-    case 'idle':
-    case 'pending':
-      return <p className="reading note">Trying the check…</p>;
-    case 'error':
-      return <p className="reading warn">{state.message}</p>;
-    case 'set':
-      return (
-        <p className="reading" aria-live="polite">
-          {reading === null ? (
-            <small>Waiting for a frame…</small>
-          ) : (
-            <>
-              <strong>{readingText(reading)}</strong>
-              <small>on the live window</small>
-            </>
-          )}
-        </p>
-      );
-  }
-}
-
-/** What the picture check's selection leaves of the region. */
+/** What the image check's selection leaves of the region. */
 interface Masking {
   /** Whether the last steps selected anything. */
   readonly found: boolean;
@@ -367,6 +236,7 @@ interface KindProps {
   readonly onPicking: (target: ColorTarget | null) => void;
 }
 
+/** The fields of a check that is not a number, which reads with a reference instead. */
 function KindFields({ draft, masking, picking, canPick, selected, position, onDraft, onPicking }: KindProps) {
   const color = (target: ColorTarget, label: string) => (
     <ColorField
@@ -382,7 +252,7 @@ function KindFields({ draft, masking, picking, canPick, selected, position, onDr
   );
   const tolerance = (
     <ToleranceField
-      kind={draft.kind}
+      help={TOLERANCE_HELP[draft.kind]}
       value={draft.tolerance}
       onChange={(value) => {
         onDraft((current) => ({ ...current, tolerance: value }));
@@ -390,36 +260,8 @@ function KindFields({ draft, masking, picking, canPick, selected, position, onDr
     />
   );
   switch (draft.kind) {
-    case 'number': {
-      const labeled = [...draft.labels.values()].filter((text) => text.trim() !== '').length;
-      return (
-        <>
-          {color('ink', "Characters' color")}
-          {tolerance}
-          <div className="field">
-            <label htmlFor="label-text">What the region shows on this screenshot</label>
-            {selected === null ? (
-              <p className="note">Select a screenshot to type what it shows, such as 87%.</p>
-            ) : (
-              <input
-                id="label-text"
-                className="input"
-                placeholder="87%"
-                value={draft.labels.get(selected) ?? ''}
-                onChange={(event) => {
-                  const text = event.target.value;
-                  onDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
-                }}
-              />
-            )}
-            <span className="note">
-              {labeled === 1 ? 'Labeled on 1 screenshot.' : `Labeled on ${labeled} screenshots.`} Label screenshots that
-              show every digit it should know.
-            </span>
-          </div>
-        </>
-      );
-    }
+    case 'number':
+      return null;
     case 'barFill':
       return (
         <>
@@ -434,14 +276,14 @@ function KindFields({ draft, masking, picking, canPick, selected, position, onDr
           {tolerance}
         </>
       );
-    case 'reference':
+    case 'image':
       return (
         <>
           <div className="field">
             <span>Compare against</span>
             <div className="colorpick">
               <span className="chip">
-                {draft.reference === null ? 'No screenshot chosen' : `Screenshot ${position(draft.reference)}`}
+                {draft.image === null ? 'No screenshot chosen' : `Screenshot ${position(draft.image)}`}
               </span>
               <button
                 type="button"
@@ -451,7 +293,7 @@ function KindFields({ draft, masking, picking, canPick, selected, position, onDr
                   // Steps taken on another screenshot would select something
                   // else on this one, so the selection starts over.
                   onDraft((current) =>
-                    current.reference === selected ? current : { ...current, reference: selected, steps: [] },
+                    current.image === selected ? current : { ...current, image: selected, steps: [] },
                   );
                 }}
               >
@@ -493,21 +335,60 @@ function KindFields({ draft, masking, picking, canPick, selected, position, onDr
   }
 }
 
+/** What the capture screen makes: a value, or a reference, new or saved, on the References page. */
+export type CaptureMode =
+  | { readonly kind: 'value' }
+  | { readonly kind: 'reference'; readonly existing: ReferenceDef | null };
+
+/** The reference being made or changed, and its name as typed. */
+interface Editing {
+  readonly existing: ReferenceDef | null;
+  readonly name: string;
+  /** The value's region when the editor opened from a value, to put back when it closes. */
+  readonly valueRegion: Rect | null;
+}
+
+/** The value's two steps: where it shows, then how to read it. */
+type Step = 'where' | 'how';
+
 interface Props {
   readonly choice: Choice;
+  readonly mode: CaptureMode;
   readonly onCancel: () => void;
   readonly onChangeWindow: () => void;
   readonly onSaved: () => void;
+  /** Hears what leaving the capture would lose. */
+  readonly onHeld: (held: Held) => void;
 }
 
-export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
+export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHeld }: Props) {
+  // What the capture shows before the user does anything, which leaving it loses nothing of.
+  const [start] = useState(() => {
+    const editing: Editing | null =
+      mode.kind === 'reference'
+        ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: null }
+        : null;
+    return {
+      screenshots: 0,
+      recording: false,
+      valueName: '',
+      editing,
+      draft: editing === null ? EMPTY_DRAFT : toReference(EMPTY_DRAFT, editing.existing),
+    };
+  });
   const [shots, setShots] = useState<readonly Shot[]>([]);
   const [full, setFull] = useState<ReadonlyMap<number, Picture>>(new Map());
   const [selected, setSelected] = useState<number | null>(null);
   const [liveSize, setLiveSize] = useState<Size | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [shotError, setShotError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<Draft>(start.draft);
+  // The saved application the value or reference belongs to.
+  const appId = choice.app;
+  const [file, setFile] = useState<AppFile | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>('where');
+  const [editing, setEditing] = useState<Editing | null>(start.editing);
   const [picking, setPicking] = useState<ColorTarget | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   // The selection the steps last made, for the steps it was made from.
@@ -516,7 +397,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     readonly view: SelectionView | null;
   } | null>(null);
   const [selectError, setSelectError] = useState<string | null>(null);
-  const [valueName, setValueName] = useState('');
+  const [valueName, setValueName] = useState(start.valueName);
   const [checkState, setCheckState] = useState<CheckState>({ kind: 'idle' });
   const [reading, setReading] = useState<Reading | null>(null);
   const [saving, setSaving] = useState(false);
@@ -544,6 +425,42 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     id: -1,
     pictures: new Map(),
   });
+
+  const holds = held(saving, start, {
+    screenshots: shots.length,
+    recording: recording !== null,
+    valueName,
+    editing,
+    draft,
+  });
+  useReportHeld(onHeld, holds);
+  const [leavingWindow, setLeavingWindow] = useState(false);
+  const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
+  // A recording samples the window until it stops, so leaving the capture stops it.
+  useEffect(
+    () => () => {
+      background(stopRecording());
+    },
+    [],
+  );
+
+  // The application's saved file, for its references and the values that read with them.
+  const loadFile = useCallback(async (app: string | null): Promise<void> => {
+    if (app === null) {
+      setFile(null);
+      return;
+    }
+    try {
+      const found = (await listApps()).find((summary) => summary.id === app);
+      setFile(found?.file ?? null);
+      setFileError(found === undefined || found.file !== null ? null : found.error);
+    } catch (error: unknown) {
+      setFileError(errorText(error));
+    }
+  }, []);
+  useEffect(() => {
+    background(loadFile(choice.app));
+  }, [loadFile, choice.app]);
 
   const view = useRef<HTMLDivElement>(null);
   const space = useSize(view);
@@ -605,7 +522,17 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     };
   }, [shortcut, changingShortcut]);
 
-  const built = useMemo(() => buildSpec(draft), [draft]);
+  // The saved reference the editor adds to, or null for a new one or while no editor is open.
+  const existingId = editing?.existing?.id ?? null;
+  const editingRef = useMemo(
+    (): ReferenceRef | null => (existingId === null ? null : { app: appId, id: existingId }),
+    [existingId, appId],
+  );
+  const isEditing = editing !== null;
+  const built: Built = useMemo(
+    () => (isEditing ? buildCharacters(draft, editingRef) : buildSpec(draft, appId)),
+    [isEditing, draft, editingRef, appId],
+  );
   useEffect(() => {
     if (!built.ok) {
       setCheckState({ kind: 'idle' });
@@ -635,20 +562,20 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
 
   // Makes the selection the steps describe on the screenshot the picture is
   // compared against, and fits the region to it.
-  const { reference, colorMatch, steps } = draft;
+  const { image, colorMatch, steps } = draft;
   // The box the region was last fitted to, and the steps it came from, so a
   // new color match refits a region the user has not changed by hand.
   const fitted = useRef<{ readonly steps: readonly SelectStep[]; readonly region: Rect } | null>(null);
   const shownRegion = useRef(draft.region);
   shownRegion.current = draft.region;
   useEffect(() => {
-    if (reference === null || steps.length === 0) {
+    if (image === null || steps.length === 0) {
       setSelection(null);
       return undefined;
     }
     let current = true;
     const timer = setTimeout(() => {
-      select(reference, { tolerance: colorMatch, steps })
+      select(image, { tolerance: colorMatch, steps })
         .then((view) => {
           if (!current) {
             return;
@@ -672,12 +599,12 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       current = false;
       clearTimeout(timer);
     };
-  }, [reference, colorMatch, steps]);
-  const selecting = draft.kind === 'reference' ? tool : 'box';
+  }, [image, colorMatch, steps]);
+  const selecting = draft.kind === 'image' ? tool : 'box';
   const madeView = selection?.steps === steps ? selection.view : null;
   const ignored = useMemo(
     () =>
-      draft.kind === 'reference' && draft.ignoreBackground && madeView !== null && draft.region !== null
+      draft.kind === 'image' && draft.ignoreBackground && madeView !== null && draft.region !== null
         ? ignoredPixels(madeView, draft.region)
         : null,
     [draft.kind, draft.ignoreBackground, madeView, draft.region],
@@ -691,8 +618,8 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       return;
     }
     setDraft((current) => {
-      const steps = withStep(current.steps, current.reference, selected, step);
-      return steps === null ? current : { ...current, steps, reference: selected };
+      const steps = withStep(current.steps, current.image, selected, step);
+      return steps === null ? current : { ...current, steps, image: selected };
     });
   };
 
@@ -758,7 +685,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     [recording, edits, draft.recorded],
   );
   const keeping = useMemo(() => keptLabels(reviewEntries), [reviewEntries]);
-  const toReview = useMemo(() => reviewSpec(draft, keeping), [draft, keeping]);
+  const toReview = useMemo(() => reviewSpec(draft, keeping, editingRef), [draft, keeping, editingRef]);
   const reviewKey = toReview === null ? '' : JSON.stringify(toReview);
   // The effect below runs when the spec's contents change, not on each new
   // object with the same contents, so it reads the spec through a ref.
@@ -878,7 +805,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
   };
 
   const recordBlocked = ((): string | null => {
-    if (draft.kind !== 'number') {
+    if (editing === null) {
       return null;
     }
     if (draft.region === null || drawnOn === null) {
@@ -1004,6 +931,53 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     });
   };
 
+  // Opens the reference editor on `existing`, or on a new reference read
+  // from the value's region.
+  const openEditor = (existing: ReferenceDef | null): void => {
+    setEditing({ existing, name: existing?.name ?? '', valueRegion: draft.region });
+    setDraft((current) => toReference(current, existing));
+    setPicking(null);
+    setSaveError(null);
+  };
+
+  // Leaves the reference editor for the value, forgetting its labels and
+  // recording and putting the value's region back.
+  const closeEditor = (): void => {
+    if (recording !== null) {
+      background(discard());
+    }
+    const valueRegion = editing?.valueRegion ?? null;
+    setEditing(null);
+    setPicking(null);
+    setDraft((current) => fromReference(current, valueRegion));
+  };
+
+  const saveRef = async (): Promise<void> => {
+    if (editing === null || !built.ok || built.spec.kind !== 'characters') {
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await saveReference({
+        app: appId,
+        referenceName: editing.name.trim(),
+        check: built.spec,
+      });
+      setSaveError(null);
+      if (mode.kind === 'reference') {
+        onSaved();
+        return;
+      }
+      await loadFile(saved.app);
+      closeEditor();
+      setDraft((current) => ({ ...current, kind: 'number', reference: saved.reference }));
+    } catch (error: unknown) {
+      setSaveError(errorText(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const keptProblem = keeping.some((label) => flagged.has(label.reading));
   const keepBlocked = keptProblem
     ? 'Fix or leave out the flagged readings to keep them.'
@@ -1012,6 +986,10 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       : 'Checking the readings…';
 
   const canSave = valueName.trim().length > 0 && built.ok && drawnOn !== null && checkState.kind === 'set' && !saving;
+  const canSaveRef =
+    editing !== null && editing.name.trim().length > 0 && built.ok && checkState.kind === 'set' && !saving;
+  const whereDone = valueName.trim().length > 0 && draft.region !== null;
+  const editedName = editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim();
   const position = (index: number): number => shots.findIndex((shot) => shot.index === index) + 1;
 
   return (
@@ -1019,14 +997,14 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
       <section className="stage" aria-label="Capture">
         <div className="bar">
           <span className="crumb">
+            {mode.kind === 'reference' ? 'References' : 'Values'}
+            {mode.kind === 'value' && editing !== null ? ' / New value' : ''} /{' '}
             {reviewing ? (
               <>
-                Values / New value / <b>Review recording</b>
+                {editedName} / <b>Review recording</b>
               </>
             ) : (
-              <>
-                Values / <b>New value</b>
-              </>
+              <b>{editing === null ? 'New value' : editedName}</b>
             )}
           </span>
           {recording?.recording === true ? (
@@ -1093,9 +1071,37 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
             </div>
           ) : (
             <div className="end">
-              <button type="button" className="btn" onClick={onChangeWindow}>
-                Change window
-              </button>
+              {leavingWindow ? (
+                <Question
+                  refs={leaveQuestion.refs}
+                  label="Change window?"
+                  keepLabel="Keep this window"
+                  actLabel="Change window"
+                  busy={saving}
+                  onKeep={() => {
+                    setLeavingWindow(false);
+                  }}
+                  onAct={onChangeWindow}
+                >
+                  Change window? The screenshots, everything set up on them, and any recording are lost.
+                </Question>
+              ) : (
+                <button
+                  ref={leaveQuestion.control}
+                  type="button"
+                  className="btn"
+                  disabled={saving}
+                  onClick={() => {
+                    if (holds === 'unsaved') {
+                      setLeavingWindow(true);
+                    } else {
+                      onChangeWindow();
+                    }
+                  }}
+                >
+                  Change window
+                </button>
+              )}
               <button
                 type="button"
                 className="btn small"
@@ -1165,7 +1171,7 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
                 shown={shown}
                 region={draft.region}
                 recording={recording?.recording === true && selected === null}
-                label={valueName.trim() === '' ? 'Region' : valueName.trim()}
+                label={editing !== null ? editedName : valueName.trim() === '' ? 'Region' : valueName.trim()}
                 editable={shownPicture !== null}
                 picking={picking !== null}
                 tool={selecting}
@@ -1227,129 +1233,265 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
             </button>
           ))}
           <span className="note">
-            Screenshots last until you change the window. A number check learns from each screenshot you label.
+            Screenshots last until you change the window.
+            {editing === null ? '' : ' A reference learns from each screenshot you label.'}
           </span>
         </div>
       </section>
-      <aside className="inspector" aria-label="Value">
-        <div className="field">
-          <label htmlFor="value-name">Value name</label>
-          <input
-            id="value-name"
-            className="input"
-            placeholder="Progress"
-            value={valueName}
-            onChange={(event) => {
-              setValueName(event.target.value);
-            }}
-          />
-        </div>
-        <div className="field">
-          <span id="check-kind">Check</span>
-          <div className="seg" role="group" aria-labelledby="check-kind">
-            {CHECK_KINDS.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                aria-pressed={draft.kind === kind}
-                onClick={() => {
-                  setDraft((current) => withKind(current, kind));
-                  setPicking(null);
-                  if (kind !== 'number') {
-                    // Recording and review belong to a number check, so
-                    // leaving it stops recording and closes review.
-                    setReviewing(false);
-                    if (recording?.recording === true) {
-                      background(stop(false));
-                    }
-                  }
-                }}
-              >
-                {KIND_NAMES[kind]}
-              </button>
-            ))}
+      {editing === null ? (
+        <aside className="inspector" aria-label="Value">
+          <div className="stepper" role="group" aria-label="Steps">
+            <button
+              type="button"
+              className="step-tab"
+              aria-current={step === 'where' ? 'step' : undefined}
+              onClick={() => {
+                setStep('where');
+              }}
+            >
+              <span className={whereDone && step !== 'where' ? 'num done' : 'num'}>
+                {whereDone && step !== 'where' ? '✓' : '1'}
+              </span>
+              Where to read
+            </button>
+            <button
+              type="button"
+              className="step-tab"
+              aria-current={step === 'how' ? 'step' : undefined}
+              onClick={() => {
+                setStep('how');
+              }}
+            >
+              <span className="num">2</span>
+              How to read it
+            </button>
           </div>
-        </div>
-        {draft.kind === 'reference' ? (
-          <SelectFields
-            tool={tool}
-            colorMatch={draft.colorMatch}
-            canSelect={shownPicture !== null}
-            onTool={(next) => {
-              setTool(next);
-              setPicking(null);
-            }}
-            onColorMatch={(value) => {
-              setDraft((current) => ({ ...current, colorMatch: value }));
-            }}
-          />
-        ) : null}
-        {selectError === null ? null : <p className="warn">{selectError}</p>}
-        <RegionFields
-          region={draft.region}
-          onRegion={(region) => {
-            setDraft((current) => ({ ...current, region }));
-          }}
-        />
-        <KindFields
-          draft={draft}
-          masking={masking}
-          picking={picking}
-          canPick={shownPicture !== null}
-          selected={selected}
-          position={position}
-          onDraft={setDraft}
-          onPicking={setPicking}
-        />
-        {draft.kind === 'number' ? (
-          <RecordPanel
-            view={recording}
-            reviewing={reviewing}
-            kept={draft.recorded.size}
-            keeping={keeping.length}
-            blocked={recordBlocked}
+          {step === 'where' ? (
+            <>
+              <div className="field">
+                <label htmlFor="value-name">Value name</label>
+                <input
+                  id="value-name"
+                  className="input"
+                  placeholder="Progress"
+                  value={valueName}
+                  onChange={(event) => {
+                    setValueName(event.target.value);
+                  }}
+                />
+              </div>
+              <div className="field">
+                <span id="check-kind">Check</span>
+                <div className="seg" role="group" aria-labelledby="check-kind">
+                  {CHECK_KINDS.map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      aria-pressed={draft.kind === kind}
+                      onClick={() => {
+                        setDraft((current) => withKind(current, kind));
+                        setPicking(null);
+                      }}
+                    >
+                      {KIND_NAMES[kind]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {draft.kind === 'image' ? (
+                <SelectFields
+                  tool={tool}
+                  colorMatch={draft.colorMatch}
+                  canSelect={shownPicture !== null}
+                  onTool={(next) => {
+                    setTool(next);
+                    setPicking(null);
+                  }}
+                  onColorMatch={(value) => {
+                    setDraft((current) => ({ ...current, colorMatch: value }));
+                  }}
+                />
+              ) : null}
+              {selectError === null ? null : <p className="warn">{selectError}</p>}
+              <RegionFields
+                region={draft.region}
+                onRegion={(region) => {
+                  setDraft((current) => ({ ...current, region }));
+                }}
+              />
+              <p className="note">
+                Draw the region where the value shows, on any screenshot of {choice.name}. Only where it is matters
+                here; how to read it comes next.
+              </p>
+              <div className="sep" />
+              <div className="actions">
+                <button type="button" className="btn" disabled={saving} onClick={onCancel}>
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => {
+                    setStep('how');
+                  }}
+                >
+                  Next: how to read it
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {draft.kind === 'number' ? (
+                <ReferencePicker
+                  appName={choice.name}
+                  file={file}
+                  selected={draft.reference}
+                  hasRegion={draft.region !== null}
+                  whole={draft.whole}
+                  onSelect={(reference) => {
+                    setDraft((current) => ({ ...current, reference }));
+                  }}
+                  onEdit={(id) => {
+                    openEditor(file?.references.find((reference) => reference.id === id) ?? null);
+                  }}
+                  onNew={() => {
+                    openEditor(null);
+                  }}
+                  onWhole={(whole) => {
+                    setDraft((current) => ({ ...current, whole }));
+                  }}
+                />
+              ) : (
+                <KindFields
+                  draft={draft}
+                  masking={masking}
+                  picking={picking}
+                  canPick={shownPicture !== null}
+                  selected={selected}
+                  position={position}
+                  onDraft={setDraft}
+                  onPicking={setPicking}
+                />
+              )}
+              {fileError === null ? null : <p className="warn">{fileError}</p>}
+              <ReadingBox built={built.ok ? null : built.next} state={checkState} reading={reading} />
+              <div className="sep" />
+              {saveError === null ? null : <p className="warn">{saveError}</p>}
+              <p className="note">Saved values show on the Values page, under {choice.name}.</p>
+              <div className="actions">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setStep('where');
+                  }}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={!canSave}
+                  onClick={() => {
+                    background(save());
+                  }}
+                >
+                  Save value
+                </button>
+              </div>
+            </>
+          )}
+        </aside>
+      ) : (
+        <aside className="inspector" aria-label="Reference">
+          <ReferenceEditor
+            name={editing.name}
             appName={choice.name}
-            crops={pictures}
-            error={recordError}
-            onStart={() => {
-              background(record(false));
+            ink={draft.ink}
+            tolerance={draft.tolerance}
+            picking={picking === 'ink'}
+            canPick={shownPicture !== null}
+            selected={selected}
+            label={selected === null ? '' : (draft.labels.get(selected) ?? '')}
+            saved={editing.existing?.samples.map((sample) => sample.text) ?? []}
+            labeled={[...draft.labels.values()].filter((text) => text.trim() !== '')}
+            recorded={[...draft.recorded.values()]}
+            readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
+            onName={(name) => {
+              setEditing((current) => (current === null ? null : { ...current, name }));
             }}
-            onMore={() => {
-              background(record(true));
+            onPick={() => {
+              setPicking(picking === 'ink' ? null : 'ink');
             }}
-            onStop={() => {
-              background(stop(true));
+            onTolerance={(tolerance) => {
+              setDraft((current) => ({ ...current, tolerance }));
             }}
-            onDiscard={() => {
-              background(discard());
+            onLabel={(text) => {
+              if (selected !== null) {
+                setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
+              }
             }}
-            onReview={() => {
-              setReviewing(true);
-            }}
-            settingsChanged={settingsChanged}
-            onUseSettings={useSettings}
+            record={
+              <RecordPanel
+                view={recording}
+                reviewing={reviewing}
+                kept={draft.recorded.size}
+                keeping={keeping.length}
+                blocked={recordBlocked}
+                appName={choice.name}
+                crops={pictures}
+                error={recordError}
+                onStart={() => {
+                  background(record(false));
+                }}
+                onMore={() => {
+                  background(record(true));
+                }}
+                onStop={() => {
+                  background(stop(true));
+                }}
+                onDiscard={() => {
+                  background(discard());
+                }}
+                onReview={() => {
+                  setReviewing(true);
+                }}
+                settingsChanged={settingsChanged}
+                onUseSettings={useSettings}
+              />
+            }
           />
-        ) : null}
-        <ReadingBox built={built.ok ? null : built.next} state={checkState} reading={reading} />
-        <div className="sep" />
-        {saveError === null ? null : <p className="warn">{saveError}</p>}
-        <p className="note">Saved values show on the Values page, under {choice.name}.</p>
-        <div className="actions">
-          <button type="button" className="btn" onClick={onCancel}>
-            Discard
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!canSave}
-            onClick={() => {
-              background(save());
-            }}
-          >
-            Save value
-          </button>
-        </div>
-      </aside>
+          <ReadingBox built={built.ok ? null : built.next} state={checkState} reading={reading} />
+          <div className="sep" />
+          {saveError === null ? null : <p className="warn">{saveError}</p>}
+          <div className="actions">
+            <button
+              type="button"
+              className="btn"
+              disabled={saving}
+              onClick={() => {
+                if (mode.kind === 'reference') {
+                  onCancel();
+                } else {
+                  closeEditor();
+                }
+              }}
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!canSaveRef}
+              onClick={() => {
+                background(saveRef());
+              }}
+            >
+              Save reference
+            </button>
+          </div>
+        </aside>
+      )}
     </main>
   );
 }

@@ -39,8 +39,9 @@ Check these in order:
 
 ## A number reads wrong
 
-Label more screenshots, so that every digit the number can show appears on at
-least one of them, and check the characters' color. Some text the **Number**
+[Edit its reference](references.md#make-a-reference) and label more
+screenshots, or record more readings, so that every digit the number can show
+appears on at least one of them, and check the characters' color. Some text the **Number**
 check cannot read; [Checks](values.md#checks) says what it can't, and what to
 use instead.
 

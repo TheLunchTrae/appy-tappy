@@ -390,8 +390,8 @@ changing.
   names folders after the app's bundle identifier.
   - `%APPDATA%\AppyTappy\` holds the authoring files, which are small and can
     roam with the user's profile. Each application has a folder in `apps\`,
-    named by its ID, that holds its `app.json` and the pictures its values
-    learned from; [Setup app](setup-app.md#saved-files) describes the file.
+    named by its ID, that holds its `app.json` and the pictures its references
+    learned from and its image checks compare against; [Setup app](setup-app.md#saved-files) describes the file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine: the
     compiled config in `compiled\`, the status file, scan caches, and logs in
     `logs\`. The compiled config names install paths and memory layouts that
@@ -572,7 +572,7 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   directly, with no extra crates. Screen capture does too, rather than through
   the `windows-capture` crate, which adds its own thread pool and locks.
 - **[`png`](https://docs.rs/png).** Reads and writes the PNG files that hold
-  a screen check's reference picture.
+  a reference's samples and an image check's picture.
 - **[`tauri`](https://v2.tauri.app/).** The setup app framework: a Rust
   backend with a web frontend shown in WebView2.
 - **[`tokio`](https://tokio.rs/).** The async runtime Tauri runs on. The setup

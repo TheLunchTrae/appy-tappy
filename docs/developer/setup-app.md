@@ -29,7 +29,16 @@ This page covers what the user guide leaves out.
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
-- **Selection.** A picture check's selection travels as the steps the user
+- **Leaving a flow.** Each flow reports what leaving it would lose
+  (`lib/unsaved.ts`): nothing while what it shows has the same content as
+  what it started with, unsaved work otherwise, or a save under way. A
+  capture counts its screenshots and recording too, since only the session
+  has them. The page tabs, the page already shown included, ask before they
+  drop unsaved work, and **Change window** asks the same. While a save runs,
+  the tabs, **Change window**, the questions' answers, and **Discard** or
+  **Cancel** wait. A save closes its flow only while that flow is still open,
+  so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
+- **Selection.** An image check's selection travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner
   replays them on the screenshot the check compares against, both to answer
@@ -45,25 +54,33 @@ This page covers what the user guide leaves out.
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to
   four decimals unless more are needed to compare them with the target.
+- **References.** A number value names a reference of its own application
+  by ID, and saving refuses one of another application. The reference editor
+  sends the characters it teaches as a `characters` check, which names the
+  saved reference it adds to, if any; the owner learns that reference's saved
+  pictures first, so trying an edit reads as the saved reference will. A
+  reference belongs to a saved application. It keeps its ID when renamed, and
+  a new one named like a renamed one's old name gets that ID with a number.
+  One that a value reads with cannot be deleted.
 - **Key recording.** **Record** takes the next keys pressed, Tab included,
   and records a letter as the keyboard layout types it.
 - **Saving an automation** checks that its value is still saved and that the
   target is the kind the condition compares. A key press action also needs the
   application's anti-cheat class to be `none`
   ([Key presses](actions.md#key-presses)).
-- **Reload.** Saving or removing an application, saving or deleting a value
-  or an automation, switching an automation on or off, and changing an
-  anti-cheat class set the reload event, so the runtime reads the files again
-  at once. Overlay changes do not, since
+- **Reload.** Saving or removing an application, saving or deleting a value,
+  a reference or an automation, switching an automation on or off, and
+  changing an anti-cheat class set the reload event, so the runtime reads the
+  files again at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](architecture.md#the-runtime)
   describes how it reads them.
 
 ## Recording
 
-[Recording a number](../user/values.md#record-a-number) samples the frames the
-value editor's preview capture already takes, about 30 a second, in the owner
-thread (`recording.rs`). Each frame is cut to the region and reduced to the
-shapes the number check reads: `DigitReader::shapes` finds the ink, splits it
+[Recording readings](../user/references.md#record-readings) samples the frames
+the reference editor's preview capture already takes, about 30 a second, in
+the owner thread (`recording.rs`). Each frame is cut to the region and reduced
+to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
 into characters, and scales each to the grid the check compares. A crop whose
 shapes equal a kept reading's is another sighting of that reading, because it
 would teach the check nothing new. A blended edge seldom changes a grid
@@ -77,11 +94,11 @@ is a frame of another size than the screenshot the region was drawn on. One
 recording keeps at most 200 readings.
 
 Kept readings are named by index in the spec the UI sends, so their pixels
-never cross into the UI except as thumbnails. A number check learns the
-labeled screenshots first and then the kept readings, and saves both as its
-samples. Review sends the check it would build and asks which kept readings
-it could not learn. The owner learns them as the check would, labeled
-screenshots first and then the readings in order, with the check's own
+never cross into the UI except as thumbnails. A reference learns its saved
+pictures first, then the labeled screenshots, then the kept readings, and
+saves the new ones as samples after its old ones. Review sends the characters
+it would save and asks which kept readings it could not learn. The owner
+learns them as saving would, in that order, with the reference's own
 characters' color and tolerance, and leaves out each reading that fails, so a
 conflict such as one shape typed as `l` in one reading and `1` in another is
 flagged on the reading that causes it. **Record more** goes on with the stopped
@@ -142,10 +159,11 @@ logs that the window should be resized or the value drawn again.
 
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
-and the pictures its values need: a number check's labeled screenshots,
-cropped to the region, then its kept recorded readings, and a picture
-check's reference, transparent where its selection leaves the background out
-([Reference images](screen.md#reference-images)).
+and the pictures it needs: each reference's labeled screenshots, cropped to
+the region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
+and each image check's picture, named after its value and transparent where
+its selection leaves the background out
+([Saved pictures](screen.md#saved-pictures)).
 
 ```json
 {
@@ -167,13 +185,17 @@ check's reference, transparent where its selection leaves the background out
       "screen": {
         "windowSize": { "width": 1920, "height": 1080 },
         "region": { "x": 1146, "y": 14, "width": 74, "height": 38 },
-        "check": {
-          "kind": "number",
-          "ink": { "red": 255, "green": 255, "blue": 255 },
-          "tolerance": 40,
-          "samples": [{ "image": "progress-1.png", "text": "87%" }]
-        }
+        "check": { "kind": "number", "reference": "percent_font", "whole": true }
       }
+    }
+  ],
+  "references": [
+    {
+      "id": "percent_font",
+      "name": "Percent font",
+      "ink": { "red": 255, "green": 255, "blue": 255 },
+      "tolerance": 40,
+      "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }]
     }
   ]
 }

@@ -846,7 +846,7 @@ mod tests {
         use appytappy_config::signal::{Number, Value};
 
         use super::*;
-        use crate::screen::check::{BarFill, Check, ColorMatch, ReferenceMatch};
+        use crate::screen::check::{BarFill, Check, ColorMatch, ImageMatch};
         use crate::screen::digits::DigitReader;
 
         const WHITE: Rgb = Rgb {
@@ -892,8 +892,11 @@ mod tests {
                 Image::decode_png(include_bytes!("../../tests/fixtures/digits.png")).unwrap();
             let mut reader = DigitReader::new(WHITE, 60);
             reader.learn(&glyphs, "0123456789.%").unwrap();
-            let check = Check::Number(reader);
             let counter = Region::new(120, 38, 100, 28).unwrap();
+            let check = Check::Number {
+                reader: reader.clone(),
+                whole: false,
+            };
             assert_eq!(
                 read(&check, &first, counter),
                 Value::Number(Number::new(37.0).unwrap())
@@ -902,10 +905,18 @@ mod tests {
                 read(&check, &second, counter),
                 Value::Number(Number::new(90.5).unwrap())
             );
+            let whole = Check::Number {
+                reader,
+                whole: true,
+            };
+            assert_eq!(
+                read(&whole, &second, counter),
+                Value::Number(Number::new(90.0).unwrap())
+            );
         }
 
         #[test]
-        fn color_and_reference_see_the_panel_change() {
+        fn color_and_image_see_the_panel_change() {
             let [first, second] = screenshots();
             let panel = Region::new(100, 110, 120, 50).unwrap();
             let gold = Check::Color(ColorMatch {
@@ -913,7 +924,7 @@ mod tests {
                 tolerance: 40,
             });
             let unchanged =
-                Check::Reference(ReferenceMatch::new(first.crop(panel).unwrap(), None, 8).unwrap());
+                Check::Image(ImageMatch::new(first.crop(panel).unwrap(), None, 8).unwrap());
             let strip = Region::new(100, 110, 120, 12).unwrap();
             assert_eq!(read(&gold, &first, strip), Value::Flag(false));
             assert_eq!(read(&gold, &second, strip), Value::Flag(true));

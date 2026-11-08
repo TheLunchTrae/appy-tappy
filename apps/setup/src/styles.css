@@ -11,6 +11,8 @@
   --holds: #5bc48a;
   --warn: #e8845b;
   --live: #e05555;
+  /* The dark tile a reference's characters sit on, so any ink color shows. */
+  --glyph: #14171c;
   color-scheme: dark;
   font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
@@ -77,6 +79,24 @@ select {
   color: var(--muted);
   font-size: 14px;
   cursor: pointer;
+}
+
+.tab:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* A question in the nav or the capture bar keeps to one line beside the controls. */
+.nav .confirm-none,
+.bar .confirm-none {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  max-width: none;
+}
+
+.nav .confirm-none {
+  margin-left: auto;
 }
 
 .tab[aria-current='page'] {
@@ -769,7 +789,7 @@ select {
 
 .switch[aria-disabled='true'] {
   cursor: progress;
-  opacity: 0.6;
+  opacity: 0.45;
 }
 
 .switch:checked,
@@ -1424,4 +1444,127 @@ select {
 .view[hidden],
 .strip[hidden] {
   display: none;
+}
+
+/* Value steps */
+.stepper {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.step-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.step-tab[aria-current='step'] {
+  border-color: var(--capture);
+  color: var(--text);
+}
+
+.step-tab .num {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--raise);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.step-tab[aria-current='step'] .num {
+  background: var(--capture);
+  color: var(--on-capture);
+}
+
+.step-tab .num.done {
+  background: var(--holds);
+  color: var(--on-capture);
+}
+
+/* References */
+.refs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ref {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ref[aria-pressed='true'] {
+  border-color: var(--capture);
+}
+
+.ref-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ref-head small {
+  color: var(--muted);
+}
+
+.glyphs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--glyph);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.glyphs.large .glyph {
+  min-width: 36px;
+  height: 40px;
+  font-size: 22px;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.field > label.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.range .input {
+  flex: none;
+  width: 72px;
 }

@@ -353,7 +353,7 @@ mod tests {
             icon.id = "icon".to_owned();
             icon.name = "Icon".to_owned();
             icon.screen.check = serde_json::from_value(serde_json::json!({
-                "kind": "reference",
+                "kind": "image",
                 "image": "missing.png",
                 "tolerance": 0
             }))

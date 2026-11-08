@@ -247,7 +247,7 @@ mod tests {
                 .map(|(reading, text)| format!(r#"{{"reading":{reading},"text":"{text}"}}"#))
                 .collect();
             let spec: CheckSpec = serde_json::from_str(&format!(
-                r#"{{"kind":"number","region":{{"x":0,"y":0,"width":4,"height":2}},
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[{labels}],
                     "recorded":[{}]}}"#,
                 recorded.join(",")
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(labeled[1], None);
         let number = |reading| -> CheckSpec {
             serde_json::from_str(&format!(
-                r#"{{"kind":"number","region":{{"x":0,"y":0,"width":4,"height":2}},
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[],
                     "recorded":[{{"reading":{reading},"text":"1"}}]}}"#
             ))

@@ -1,22 +1,30 @@
 // How saved settings read on the Values and Applications pages.
 
-import type { AntiCheat, CheckDef } from './api.ts';
+import type { AntiCheat, CheckDef, ReferenceDef } from './api.ts';
 import type { Color } from './pixels.ts';
 
-/** A saved check, in a few words. */
-export function checkSummary(check: CheckDef): { readonly name: string; readonly colors: readonly Color[] } {
+/** A saved check, in a few words, with its application's `references`. */
+export function checkSummary(
+  check: CheckDef,
+  references: readonly ReferenceDef[],
+): { readonly name: string; readonly colors: readonly Color[] } {
   switch (check.kind) {
-    case 'number':
+    case 'number': {
+      const reference = references.find((saved) => saved.id === check.reference);
+      if (reference === undefined) {
+        return { name: 'Number, its reference is missing', colors: [] };
+      }
       return {
-        name: `Number, learned from ${check.samples.length} ${check.samples.length === 1 ? 'picture' : 'pictures'}`,
-        colors: [check.ink],
+        name: `Number, read with ${reference.name}${check.whole ? ', whole only' : ''}`,
+        colors: [reference.ink],
       };
+    }
     case 'barFill':
       return { name: 'Bar fill', colors: [check.filled, check.empty] };
     case 'color':
       return { name: 'Color', colors: [check.color] };
-    case 'reference':
-      return { name: 'Picture', colors: [] };
+    case 'image':
+      return { name: 'Image', colors: [] };
   }
 }
 

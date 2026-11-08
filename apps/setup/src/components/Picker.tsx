@@ -16,6 +16,10 @@ export interface Choice {
 
 interface Props {
   readonly apps: readonly AppSummary[];
+  /** The page's heading, such as New value. */
+  readonly heading: string;
+  /** A saved application's ID to keep the choice to, such as a reference's own, or null to let the user choose. */
+  readonly lockedApp: string | null;
   readonly initial: Choice | null;
   readonly onCancel: () => void;
   readonly onPick: (choice: Choice) => void;
@@ -23,13 +27,13 @@ interface Props {
   readonly onAddApplication: () => void;
 }
 
-export function Picker({ apps, initial, onCancel, onPick, onAddApplication }: Props) {
+export function Picker({ apps, heading, lockedApp, initial, onCancel, onPick, onAddApplication }: Props) {
   const saved = useMemo(() => apps.filter((app) => app.file !== null), [apps]);
   const [list, setList] = useState<WindowList | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [listed, setListed] = useState(0);
   const [selected, setSelected] = useState<WindowChoice | null>(initial?.window ?? null);
-  const [target, setTarget] = useState<string | null>(initial?.app ?? saved[0]?.id ?? null);
+  const [target, setTarget] = useState<string | null>(initial?.app ?? lockedApp ?? saved[0]?.id ?? null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -54,7 +58,7 @@ export function Picker({ apps, initial, onCancel, onPick, onAddApplication }: Pr
     setPickError(null);
     // A window a saved application already finds picks that application.
     const owner = saved.find((each) => each.windows.includes(window.handle));
-    if (owner !== undefined) {
+    if (owner !== undefined && lockedApp === null) {
       setTarget(owner.id);
     }
   };
@@ -85,7 +89,7 @@ export function Picker({ apps, initial, onCancel, onPick, onAddApplication }: Pr
   return (
     <main className="page">
       <div className="page-head">
-        <h1>New value</h1>
+        <h1>{heading}</h1>
         <span className="lead">Pick the application, then the window that shows what to read.</span>
         <div className="end">
           <button
@@ -116,13 +120,16 @@ export function Picker({ apps, initial, onCancel, onPick, onAddApplication }: Pr
         <aside className="side" aria-label="Application">
           <h2>Application</h2>
           {saved.length === 0 ? (
-            <p className="note">Values belong to an application. Add the application first, then come back here.</p>
+            <p className="note">
+              Values and references belong to an application. Add the application first, then come back here.
+            </p>
           ) : (
             <div className="field">
-              <label htmlFor="target">Save values to</label>
+              <label htmlFor="target">Save to</label>
               <select
                 id="target"
                 className="input"
+                disabled={lockedApp !== null}
                 value={target ?? ''}
                 onChange={(event) => {
                   setTarget(event.target.value);
@@ -136,9 +143,11 @@ export function Picker({ apps, initial, onCancel, onPick, onAddApplication }: Pr
               </select>
             </div>
           )}
-          <button type="button" className="btn" onClick={onAddApplication}>
-            Add application
-          </button>
+          {lockedApp === null ? (
+            <button type="button" className="btn" onClick={onAddApplication}>
+              Add application
+            </button>
+          ) : null}
           {app === null ? null : selected === null ? (
             <p className="note">Pick the window that shows what to read.</p>
           ) : (

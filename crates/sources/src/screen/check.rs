@@ -19,13 +19,18 @@ use crate::system::Rgb;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Check {
     /// Reads a number, such as `37` from `37%`.
-    Number(DigitReader),
+    Number {
+        /// The reader with the reference's characters.
+        reader: DigitReader,
+        /// Whether only the whole part counts, so `37.5%` reads as 37.
+        whole: bool,
+    },
     /// Measures how full a bar is, from 0 to 100.
     BarFill(BarFill),
     /// Whether the region's average color is near a color.
     Color(ColorMatch),
-    /// Whether the region looks like a reference image.
-    Reference(ReferenceMatch),
+    /// Whether the region looks like a saved picture of it.
+    Image(ImageMatch),
 }
 
 impl Check {
@@ -37,13 +42,13 @@ impl Check {
     /// can read, such as no recognizable digits.
     pub fn read(&self, image: &Image) -> Result<Value, CheckError> {
         match self {
-            Self::Number(reader) => reader
-                .read(image)
+            Self::Number { reader, whole } => reader
+                .read(image, *whole)
                 .map(Value::Number)
                 .map_err(CheckError::Number),
             Self::BarFill(bar) => bar.percent(image).map(Value::Number),
             Self::Color(color) => Ok(Value::Flag(color.matches(image))),
-            Self::Reference(reference) => reference.matches(image).map(Value::Flag),
+            Self::Image(picture) => picture.matches(image).map(Value::Flag),
         }
     }
 }
@@ -157,42 +162,42 @@ impl ColorMatch {
     }
 }
 
-/// Whether a region looks like a reference image of the same region, such as
+/// Whether a region looks like a saved picture of the same region, such as
 /// a results screen appearing.
 ///
 /// A [`Mask`] limits the comparison to the pixels of the thing itself, so a
 /// changing background behind it does not count. The runs of compared pixels
 /// are worked out once, when the check is made.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReferenceMatch {
-    reference: Image,
+pub struct ImageMatch {
+    picture: Image,
     spans: Box<[Range<usize>]>,
     tolerance: u8,
 }
 
-impl ReferenceMatch {
-    /// A check that compares a region with `reference`, the region as a
+impl ImageMatch {
+    /// A check that compares a region with `picture`, the region as a
     /// setup screenshot showed it. It compares only the pixels `mask` keeps,
     /// or every pixel without one. `tolerance` is how far, on average, each
-    /// compared pixel's red, green, and blue may be from the reference's.
+    /// compared pixel's red, green, and blue may be from the picture's.
     ///
     /// # Errors
     ///
     /// Returns [`MaskError::SizeMismatch`] when the mask's size differs from
-    /// the reference's.
-    pub fn new(reference: Image, mask: Option<&Mask>, tolerance: u8) -> Result<Self, MaskError> {
+    /// the picture's.
+    pub fn new(picture: Image, mask: Option<&Mask>, tolerance: u8) -> Result<Self, MaskError> {
         let spans = match mask {
-            Some(mask) if mask.size() != reference.size() => {
+            Some(mask) if mask.size() != picture.size() => {
                 return Err(MaskError::SizeMismatch {
-                    image: reference.size(),
+                    image: picture.size(),
                     mask: mask.size(),
                 });
             },
             Some(mask) => mask.spans(),
-            None => std::iter::once(0..reference.pixels().len()).collect(),
+            None => std::iter::once(0..picture.pixels().len()).collect(),
         };
         Ok(Self {
-            reference,
+            picture,
             spans: spans.into_boxed_slice(),
             tolerance,
         })
@@ -200,21 +205,21 @@ impl ReferenceMatch {
 
     /// The region as the setup screenshot showed it.
     #[must_use]
-    pub const fn reference(&self) -> &Image {
-        &self.reference
+    pub const fn picture(&self) -> &Image {
+        &self.picture
     }
 
-    /// Whether `image` is within the tolerance of the reference over the
+    /// Whether `image` is within the tolerance of the picture over the
     /// compared pixels.
     ///
     /// # Errors
     ///
     /// Returns [`CheckError::SizeMismatch`] when the sizes differ, which
-    /// means the region changed after the reference was taken.
+    /// means the region changed after the picture was taken.
     pub fn matches(&self, image: &Image) -> Result<bool, CheckError> {
-        if image.size() != self.reference.size() {
+        if image.size() != self.picture.size() {
             return Err(CheckError::SizeMismatch {
-                expected: self.reference.size(),
+                expected: self.picture.size(),
                 found: image.size(),
             });
         }
@@ -222,11 +227,7 @@ impl ReferenceMatch {
         let mut channels = 0_u64;
         for span in &self.spans {
             let found = image.pixels().get(span.clone()).unwrap_or_default();
-            let wanted = self
-                .reference
-                .pixels()
-                .get(span.clone())
-                .unwrap_or_default();
+            let wanted = self.picture.pixels().get(span.clone()).unwrap_or_default();
             for (pixel, expected) in found.iter().zip(wanted) {
                 for (&found, &wanted) in pixel.iter().zip(expected).take(3) {
                     // At most 3 * 8192² channels of 255 each, far below u64::MAX.
@@ -244,9 +245,9 @@ impl ReferenceMatch {
 pub enum CheckError {
     /// No pixel was near the bar's filled or empty color.
     NoBar,
-    /// The region's size differs from the reference image's.
+    /// The region's size differs from the saved picture's.
     SizeMismatch {
-        /// The reference image's size.
+        /// The saved picture's size.
         expected: Size,
         /// The region's size.
         found: Size,
@@ -262,7 +263,7 @@ impl fmt::Display for CheckError {
                 .write_str("no pixel in the region is near the bar's filled or empty color"),
             Self::SizeMismatch { expected, found } => write!(
                 formatter,
-                "the region is {found} but its reference image is {expected}"
+                "the region is {found} but its saved picture is {expected}"
             ),
             Self::Number(_) => formatter.write_str("the region's number could not be read"),
         }
@@ -305,7 +306,7 @@ mod tests {
         };
         assert_eq!(
             mismatch.to_string(),
-            "the region is 3x1 but its reference image is 2x1"
+            "the region is 3x1 but its saved picture is 2x1"
         );
         assert!(mismatch.source().is_none());
         let number = CheckError::Number(ReadError::NoNumber);
@@ -450,16 +451,16 @@ mod tests {
     }
 
     #[test]
-    fn reference_match_averages_the_difference_over_every_channel() {
-        let reference = row(&[GRAY, GRAY]);
-        let check = ReferenceMatch::new(reference, None, 4).unwrap();
+    fn image_match_averages_the_difference_over_every_channel() {
+        let picture = row(&[GRAY, GRAY]);
+        let check = ImageMatch::new(picture, None, 4).unwrap();
         // One channel of one pixel off by 24 averages to 4 over 6 channels.
         let close = row(&[GRAY, Rgb { red: 79, ..GRAY }]);
         let far = row(&[GRAY, Rgb { red: 80, ..GRAY }]);
         assert_eq!(check.matches(&close), Ok(true));
         assert_eq!(check.matches(&far), Ok(false));
         assert_eq!(
-            Check::Reference(check.clone()).read(&far),
+            Check::Image(check.clone()).read(&far),
             Ok(Value::Flag(false))
         );
         assert_eq!(
@@ -478,21 +479,21 @@ mod tests {
     }
 
     #[test]
-    fn reference_match_ignores_the_unused_byte() {
-        let reference = solid(2, GRAY);
-        let mut bgra = reference.as_bgra().to_vec();
+    fn image_match_ignores_the_unused_byte() {
+        let picture = solid(2, GRAY);
+        let mut bgra = picture.as_bgra().to_vec();
         bgra[3] = 0;
-        let other = Image::new(reference.size(), bgra).unwrap();
-        let check = ReferenceMatch::new(reference, None, 0).unwrap();
+        let other = Image::new(picture.size(), bgra).unwrap();
+        let check = ImageMatch::new(picture, None, 0).unwrap();
         assert_eq!(check.matches(&other), Ok(true));
     }
 
     #[test]
-    fn reference_match_compares_only_the_pixels_its_mask_keeps() {
-        let reference = row(&[WHITE, GREEN, GREEN, WHITE]);
-        let size = reference.size();
+    fn image_match_compares_only_the_pixels_its_mask_keeps() {
+        let picture = row(&[WHITE, GREEN, GREEN, WHITE]);
+        let size = picture.size();
         let mask = Mask::new(size, vec![false, true, true, false]).unwrap();
-        let check = ReferenceMatch::new(reference.clone(), Some(&mask), 4).unwrap();
+        let check = ImageMatch::new(picture.clone(), Some(&mask), 4).unwrap();
         // The background on both ends changed completely; the thing did not.
         assert_eq!(check.matches(&row(&[GRAY, GREEN, GREEN, GRAY])), Ok(true));
         // One kept channel off by 24 averages to 4 over the 6 kept channels.
@@ -500,16 +501,16 @@ mod tests {
         let far = row(&[WHITE, GREEN, Rgb { red: 65, ..GREEN }, WHITE]);
         assert_eq!(check.matches(&close), Ok(true));
         assert_eq!(check.matches(&far), Ok(false));
-        let unmasked = ReferenceMatch::new(reference.clone(), None, 4).unwrap();
+        let unmasked = ImageMatch::new(picture.clone(), None, 4).unwrap();
         assert_eq!(
             unmasked.matches(&row(&[GRAY, GREEN, GREEN, GRAY])),
             Ok(false)
         );
-        assert_eq!(check.reference(), &reference);
+        assert_eq!(check.picture(), &picture);
     }
 
     #[test]
-    fn reference_match_refuses_a_mask_of_another_size() {
+    fn image_match_refuses_a_mask_of_another_size() {
         let mask = Mask::new(
             Size {
                 width: 3,
@@ -519,7 +520,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            ReferenceMatch::new(solid(2, GRAY), Some(&mask), 0),
+            ImageMatch::new(solid(2, GRAY), Some(&mask), 0),
             Err(MaskError::SizeMismatch {
                 image: Size {
                     width: 2,

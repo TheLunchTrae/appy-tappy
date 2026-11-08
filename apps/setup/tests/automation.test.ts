@@ -36,12 +36,7 @@ function value(id: string, name: string, check: CheckDef): ValueDef {
   };
 }
 
-const progress = value('progress', 'Progress', {
-  kind: 'number',
-  ink: white,
-  tolerance: 10,
-  samples: [{ image: 'progress-1.png', text: '12%' }],
-});
+const progress = value('progress', 'Progress', { kind: 'number', reference: 'percent', whole: false });
 const iconVisible = value('icon_visible', 'Icon visible', { kind: 'color', color: white, tolerance: 10 });
 
 const apps: readonly AppSummary[] = [
@@ -59,6 +54,7 @@ const apps: readonly AppSummary[] = [
       },
       antiCheat: 'unknown',
       values: [progress, iconVisible],
+      references: [],
     },
     error: null,
     windows: [7],
@@ -82,11 +78,11 @@ const pauseMusic: AutomationDef = {
 };
 
 describe('values', () => {
-  test('number and bar fill checks read numbers; color and picture checks read yes or no', () => {
-    expect(valueKind({ kind: 'number', ink: white, tolerance: 0, samples: [] })).toBe('number');
+  test('number and bar fill checks read numbers; color and image checks read yes or no', () => {
+    expect(valueKind({ kind: 'number', reference: 'percent', whole: true })).toBe('number');
     expect(valueKind({ kind: 'barFill', filled: white, empty: white })).toBe('number');
     expect(valueKind({ kind: 'color', color: white, tolerance: 0 })).toBe('flag');
-    expect(valueKind({ kind: 'reference', image: 'a.png', tolerance: 0 })).toBe('flag');
+    expect(valueKind({ kind: 'image', image: 'a.png', tolerance: 0 })).toBe('flag');
   });
 
   test('only readable applications offer their values', () => {
@@ -167,10 +163,11 @@ describe('buildAutomation', () => {
     expect(next(named)).toBe('Pick the value to watch.');
     expect(next({ ...named, source: { app: 'example', value: 'gone' } })).toBe('Pick the value to watch.');
     const watching = { ...named, source: { app: 'example', value: 'progress' } };
-    for (const number of ['', 'ninety', '0x5A', '1e2', '12,5', 'Infinity']) {
+    for (const number of ['', 'ninety', '0x5A', '1e2', '12,5', '1,23', '1234,567', ',500', '1,234,5', 'Infinity']) {
       expect(next({ ...watching, number })).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
     }
     expect(next({ ...watching, number: '-.5' })).toBe('ok');
+    expect(next({ ...watching, number: '-1,234.5' })).toBe('ok');
     const complete = { ...watching, number: ' 90 ' };
     expect(next(complete)).toBe('ok');
     expect(next({ ...complete, actions: [] })).toBe('Add an action.');
@@ -321,6 +318,12 @@ describe('buildWhen', () => {
       value: 'progress',
       is: 'atLeast',
       target: 90,
+    });
+    expect(buildWhen({ ...draft, number: '-1,234.5' }, number)).toEqual({
+      app: 'example',
+      value: 'progress',
+      is: 'atLeast',
+      target: -1234.5,
     });
     expect(buildWhen(draft, number)).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
     expect(buildWhen({ ...draft, flag: false, is: 'notEquals' }, icon)).toEqual({

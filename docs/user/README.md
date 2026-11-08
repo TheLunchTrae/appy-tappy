@@ -36,6 +36,8 @@ That is all. The background part runs the automation from then on.
   window, and the anti-cheat setting.
 - [Values](values.md): what AppyTappy reads from a window, and the four ways
   it can read it.
+- [References](references.md): how AppyTappy knows an application's
+  characters, which its number values read with.
 - [Automations](automations.md): what to do, and when.
 - [Overlay](overlay.md): see your values as AppyTappy reads them, over the
   window or in a small panel.
@@ -43,3 +45,12 @@ That is all. The background part runs the automation from then on.
 
 In this guide, an **application** is any program with a window that you want
 AppyTappy to watch: a game, a media player, a browser, or anything else.
+
+## Leave before you save
+
+While you make or change an application, a value, a reference, or an
+automation, selecting a page, even the one it opened from, first asks whether
+to leave without saving when you have changed something, because what you have
+not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
+save is still under way, the pages, **Leave**, **Change window**, and
+**Discard** or **Cancel** wait for it to finish.

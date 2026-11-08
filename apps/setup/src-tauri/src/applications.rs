@@ -94,6 +94,7 @@ pub(crate) fn save(
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             values: Vec::new(),
+            references: Vec::new(),
         };
         (new_app_id(&spec.window.executable, &taken), file)
     };

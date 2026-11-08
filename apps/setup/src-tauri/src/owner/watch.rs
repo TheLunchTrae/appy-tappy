@@ -60,8 +60,10 @@ impl<H: Host> Owner<H> {
             .find(|saved| saved.id == value)
             .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
         let folder = stores.apps.folder(app);
-        let check = saved::build(&saved.screen, |name| fs::read(folder.join(name)))
-            .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
+        let check = saved::build(&saved.screen, &file.references, |name| {
+            fs::read(folder.join(name))
+        })
+        .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
         let processes = self.host.processes().map_err(|error| error.to_string())?;
         let windows = self.host.windows().map_err(|error| error.to_string())?;
         let window = best_window(&file.window.to_match(), processes, windows)
@@ -145,8 +147,8 @@ mod tests {
     use crate::check_spec::CheckSpec;
     use crate::owner::messages::{Reading, Reply, Request};
     use crate::owner::test_support::{
-        Harness, REFERENCE, WINDOW, add_example_app, frame_image, harness_with, scratch_store,
-        spec, with_saved_bar,
+        Harness, IMAGE, WINDOW, add_example_app, frame_image, harness_with, scratch_store, spec,
+        with_saved_bar,
     };
 
     use super::*;
@@ -370,7 +372,7 @@ mod tests {
             }
         };
         harness
-            .ask(save(spec("example", "Icon visible", REFERENCE)))
+            .ask(save(spec("example", "Icon visible", IMAGE)))
             .expect("saves");
         let folder = apps.folder("example");
         let picture = folder.join("icon_visible.png");

@@ -29,6 +29,7 @@ import {
   withMustMatch,
 } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
+import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { WindowsPanel, useWindowFits } from '../components/WindowsPanel.tsx';
 
 interface Props {
@@ -36,10 +37,12 @@ interface Props {
   readonly existing: AppSummary | null;
   readonly onCancel: () => void;
   readonly onSaved: () => void;
+  /** Hears what leaving the editor would lose. */
+  readonly onHeld: (held: Held) => void;
 }
 
 /** Adding an application, or changing one's name and how its window is found. */
-export function ApplicationEditor({ existing, onCancel, onSaved }: Props) {
+export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props) {
   const saved = existing?.file ?? null;
   const [list, setList] = useState<WindowList | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved }: Props) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { fits, error: fitError } = useWindowFits(window, listed);
+  useReportHeld(onHeld, held(busy, { name: saved?.name ?? '', window: saved?.window ?? null }, { name, window }));
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -226,7 +230,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved }: Props) {
             </p>
           )}
           <div className="actions">
-            <button type="button" className="btn" onClick={onCancel}>
+            <button type="button" className="btn" disabled={busy} onClick={onCancel}>
               Cancel
             </button>
             <button

@@ -292,7 +292,7 @@ pub(super) fn add_example_app(harness: &mut Harness) {
     assert_eq!(saved, Ok("example".to_owned()));
 }
 
-pub(super) const REFERENCE: &str = r#"{"kind":"reference","region":{"x":0,"y":0,"width":2,"height":2},
+pub(super) const IMAGE: &str = r#"{"kind":"image","region":{"x":0,"y":0,"width":2,"height":2},
     "screenshot":0,"tolerance":0}"#;
 
 pub(super) const BAR: &str = r#"{"kind":"barFill","region":{"x":0,"y":0,"width":4,"height":2},

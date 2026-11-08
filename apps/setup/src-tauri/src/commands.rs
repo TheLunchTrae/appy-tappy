@@ -19,7 +19,10 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{self, Card, OverlayView};
-use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
+use crate::owner::{
+    AppSummary, Live, Message, Reading, ReferenceSaveSpec, Reply, Request, SaveSpec,
+    SavedReferenceId, SavedValue,
+};
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::window_list::{WindowFit, WindowList};
@@ -214,6 +217,31 @@ pub(crate) async fn remove_app(
 pub(crate) async fn save_value(app: AppHandle, spec: SaveSpec) -> Result<SavedValue, String> {
     let spec = Box::new(spec);
     ask(&app, |reply| Request::SaveValue { spec, reply }).await?
+}
+
+/// Saves a reference, replacing the saved one it names.
+#[tauri::command]
+pub(crate) async fn save_reference(
+    app: AppHandle,
+    spec: ReferenceSaveSpec,
+) -> Result<SavedReferenceId, String> {
+    let spec = Box::new(spec);
+    ask(&app, |reply| Request::SaveReference { spec, reply }).await?
+}
+
+/// Removes a saved reference, unless a value reads with it.
+#[tauri::command]
+pub(crate) async fn delete_reference(
+    app: AppHandle,
+    application: String,
+    reference: String,
+) -> Result<(), String> {
+    ask(&app, |reply| Request::DeleteReference {
+        app: application,
+        reference,
+        reply,
+    })
+    .await?
 }
 
 /// Removes a saved value.

@@ -18,7 +18,7 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
-use appytappy_sources::screen::check::{BarFill, ColorMatch, ReferenceMatch};
+use appytappy_sources::screen::check::{BarFill, ColorMatch, ImageMatch};
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::{Image, Region};
@@ -75,7 +75,7 @@ fn main() -> BenchResult {
         color: second.pixel(105, 115).ok_or_else(missing)?,
         tolerance: 40,
     };
-    let reference = ReferenceMatch::new(first.crop(panel_region).ok_or_else(missing)?, None, 8)
+    let picture = ImageMatch::new(first.crop(panel_region).ok_or_else(missing)?, None, 8)
         .map_err(io::Error::other)?;
     // Every other pixel kept: the most runs a mask can break the region into.
     let alternate = Mask::new(
@@ -85,7 +85,7 @@ fn main() -> BenchResult {
             .collect(),
     )
     .map_err(io::Error::other)?;
-    let masked = ReferenceMatch::new(
+    let masked = ImageMatch::new(
         first.crop(panel_region).ok_or_else(missing)?,
         Some(&alternate),
         8,
@@ -96,10 +96,10 @@ fn main() -> BenchResult {
         first.crop(bar_region)
     })?;
     report(&mut out, "bar fill, 202x12", || fill.percent(&bar))?;
-    report(&mut out, "number, 100x28", || reader.read(&counter))?;
+    report(&mut out, "number, 100x28", || reader.read(&counter, false))?;
     report(&mut out, "color, 120x50", || gold.matches(&panel))?;
-    report(&mut out, "reference, 120x50", || reference.matches(&panel))?;
-    report(&mut out, "reference, 120x50, every other pixel", || {
+    report(&mut out, "image, 120x50", || picture.matches(&panel))?;
+    report(&mut out, "image, 120x50, every other pixel", || {
         masked.matches(&panel)
     })?;
     let mut schedule = ReadSchedule::new(ReadInterval::DEFAULT);
