@@ -31,14 +31,12 @@ Linux and is the required gate. `windows` runs `rust:lint`, `rust:doc`, and
 manual runs. `footprint` runs `rust:footprint` on Windows, and `mutants` shares
 the full mutation sweep with `quality` on pushes to main and manual runs.
 
-- Inline mise tasks are POSIX `sh`. On a Windows workstation, run mise from
-  Git Bash and set this in the global mise config
-  (`~/.config/mise/config.toml`), because mise ignores it in project config:
-
-  ```toml
-  [settings]
-  windows_default_inline_shell_args = "sh -c -o errexit"
-  ```
+- Inline mise tasks are POSIX `sh`. `[task_config] shell` in
+  `.config/mise/config.toml` runs them with `sh` on every platform, so a
+  Windows workstation needs no global mise setting, only `sh` on `PATH`: run
+  mise from Git Bash. The project shell would also run a file task on Windows,
+  so a file task that is not `sh` names its interpreter with a `# MISE shell`
+  line, as `hygiene` does.
 
 - `rust:policy` and the mutation tasks need `setsid`, which Windows and macOS
   lack, so `standards:check` runs on Linux: in CI or WSL. The root package's

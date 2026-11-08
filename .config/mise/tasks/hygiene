@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # MISE description="Print the tree's size and fail on repository hygiene violations"
+# MISE shell="python3"
 # MISE tools={python="3.15.1"}
 """Check the tree as it would be committed: tracked and new, non-ignored files.
 

@@ -145,15 +145,17 @@ always come from the same release and read the same file formats.
 
 The update key is a key pair for Tauri's updater only. It is not a Windows
 code-signing certificate and does not change the SmartScreen warning. The
-release workflow reads three repository settings:
+release workflow reads three settings:
 
 - **`UPDATER_PUBLIC_KEY`**, a repository variable: the key's public half. The
-  installer job builds it into the setup app.
+  installer job builds it into the setup app, and the sign job's condition
+  reads it, so it stays at repository level.
 - **`TAURI_SIGNING_PRIVATE_KEY`** and **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`**,
-  repository secrets: the key's private half and its password. Only the sign
-  job gets them. It runs `mise run update:sign`, which signs the installer,
-  fails if the signature does not match `UPDATER_PUBLIC_KEY`, and writes
-  `latest.json`. The release job publishes it beside the installer.
+  secrets of the `update-signing` environment: the key's private half and its
+  password. Only the sign job names that environment, so only it gets them. It
+  runs `mise run update:sign`, which signs the installer, fails if the
+  signature does not match `UPDATER_PUBLIC_KEY`, and writes `latest.json`. The
+  release job publishes it beside the installer.
 
 Without `UPDATER_PUBLIC_KEY`, the sign job is skipped, the release has no
 `latest.json`, and the release run warns about it. That release becomes the
@@ -169,13 +171,46 @@ password, and keep both files and the password somewhere safe:
 bun run tauri signer generate -w ~/.tauri/appytappy-update.key
 ```
 
-Then, in the repository's **Settings**, under **Secrets and variables** and
-**Actions**, add the contents of `appytappy-update.key` as the
-`TAURI_SIGNING_PRIVATE_KEY` secret, the password as the
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret, and the contents of
-`appytappy-update.key.pub` as the `UPDATER_PUBLIC_KEY` variable. Losing the
-private half or its password means installed copies cannot take another
-update; a new key needs every user to install one release by hand.
+Then, in the repository's **Settings**:
+
+1. Under **Environments**, create `update-signing`. Give it no required
+   reviewers, turn off admin bypass, and limit its deployments to the tag
+   pattern `v*`, with no branches. Add the contents of `appytappy-update.key`
+   as its `TAURI_SIGNING_PRIVATE_KEY` secret and the password as its
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret.
+2. Under **Secrets and variables** and **Actions**, add the contents of
+   `appytappy-update.key.pub` as the `UPDATER_PUBLIC_KEY` repository variable.
+   Keep no repository-level copy of either secret.
+
+Losing the private half or its password means installed copies cannot take
+another update; a new key needs every user to install one release by hand.
+
+#### What guards the key
+
+The environment's tag limit is the main guard: a run reaches the secrets only
+from a `v*` tag, so a branch, a pull request or a manual run of any workflow
+cannot. These repository settings, set by hand, decide who can make such a
+tag and which workflows run:
+
+- **Tag rulesets.** "Tags: Restrict creation" blocks every tag outside `v*`,
+  "Release tags: Restrict creation" blocks `v*` tags for everyone but
+  repository admins, and "Tags: Restrict updates and deletion" stops anyone
+  from moving or deleting a tag once it exists.
+- **Actions settings.** The default workflow token can only read, workflows
+  cannot approve or create pull requests, and a pull request from any outside
+  contributor waits for approval before its workflows run.
+- **Actions policies.** "Release: Restrict runs" and "Wiki: Restrict runs" let
+  only the repository owner start `release.yml` and `wiki.yml`, by a push or a
+  manual run. "Quality: Restrict events" lets `quality.yml` run only on pull
+  requests, pushes, the merge queue and manual runs. "Other workflows: Restrict
+  runs" covers every other workflow file, which only the owner can start, and
+  only by hand.
+
+A new workflow file falls under "Other workflows: Restrict runs", so it runs
+automatically only once it has a policy of its own and is left out of that
+one. Tags cannot be deleted, so a test tag would stay for good: the first run
+that signs is the real `v0.1.0` release. A manual run of the release workflow
+still builds a test installer, and skips the sign and release jobs.
 
 ## winget
 
