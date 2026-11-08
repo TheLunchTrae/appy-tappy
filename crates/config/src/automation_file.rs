@@ -26,7 +26,7 @@ use crate::action::{
 };
 use crate::anti_cheat::{AntiCheatClass, allows_input};
 use crate::app_file::{AppFile, ValueKind, id_from_name};
-use crate::rule::{Comparison, Condition, Rearm, Restore, Rule, RuleError, Trigger};
+use crate::rule::{Comparison, Condition, Restore, Rule, RuleError};
 use crate::signal::{NO_STATE, Number, SignalName, StateName, Value};
 
 /// The format version this build writes and reads.
@@ -315,10 +315,7 @@ impl AutomationDef {
             Restore::Never
         };
         Rule::new(
-            Trigger::Becomes {
-                condition,
-                rearm: Rearm::WhenFalse,
-            },
+            condition,
             actions,
             Duration::from_millis(self.cooldown_ms.into()),
             restore,
@@ -725,10 +722,7 @@ mod tests {
     #[test]
     fn an_automation_becomes_a_rule_that_runs_when_its_condition_starts_to_hold() {
         let rule = pause_music().to_rule(progress()).expect("valid");
-        let Trigger::Becomes { condition, rearm } = rule.trigger() else {
-            panic!("a becomes trigger");
-        };
-        assert_eq!(rearm, &Rearm::WhenFalse);
+        let condition = rule.condition();
         // The rule reads the signal it was given, not the value's bare ID.
         let signal = progress();
         let reading = |raw| {

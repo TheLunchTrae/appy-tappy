@@ -161,13 +161,12 @@ stateDiagram-v2
     Attached --> Detached: Exited
 ```
 
-- **Running to Attached or Detached.** The engine session is stopped or ended,
+- **Running to Attached or Detached.** The engine session is stopped,
   which releases every rule that restores. The reader is stopped.
 - **A reload that changes what it runs.** `replan` compares each plan's
   `Runs`: its window match, its values' checks and its rules. When they
   differ, the application stops, which undoes what its automations changed,
-  and starts again with `Start::Resume`. A resumed session fires no `Started`
-  rules, because those already ran.
+  and starts again in a new session.
 - **A reload that changes only names.** When only the plan's `Labels` differ,
   its names or the build its values were checked against, the session keeps running
   and takes the new plan, so the log and the tray use the new names. The
@@ -332,9 +331,7 @@ ends the number at its point, so `87.5%` reads as 87. A region with more than
 ### Rule state
 
 Each rule in an engine session (`crates/engine/src/lib.rs`) has a `RuleState`
-of three fields: `armed`, `active`, and `last_fired`. Saved automations make
-`Becomes` rules that re-arm when their condition is false, so this is the
-machine that saved automations use.
+of three fields: `armed`, `active`, and `last_fired`.
 
 ```mermaid
 stateDiagram-v2
@@ -352,12 +349,10 @@ stateDiagram-v2
 - **Held** is not a field: it is a rule that is `armed`, whose condition holds
   on the values the session has, and whose cooldown from `last_fired` has not
   passed.
-- A rule whose re-arm is `Never` is released when its condition turns false but
-  stays disarmed for the rest of the session.
 - In one sample, releases run before fires, so a restore never undoes a change
   another rule makes on the same value.
-- A session that ends or stops releases every active rule. One that ends
-  because the application exited then fires the `Exited` rules.
+- A session that stops, because the application exited or its automations
+  stop running, releases every active rule.
 - The engine runs when a sample of any of the session's values arrives, and
   at the end of a held rule's cooldown. A value that holds still sends no
   sample, so `Session::next_due` gives the earliest time a held rule's
