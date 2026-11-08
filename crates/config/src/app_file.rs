@@ -982,6 +982,11 @@ mod tests {
             .map(|(name, image)| (name.as_str(), image.as_str()))
             .collect();
         let too_many = with(states(&many));
+        let most = with(states(many.get(..MAX_STATES).expect("one too many")));
+        assert!(
+            AppFile::parse(&most.to_json()).is_ok(),
+            "a check can have {MAX_STATES} states"
+        );
         let unnamed_state = with(states(&[(" ", "progress-1.png")]));
         let none_state = with(states(&[("None", "progress-1.png")]));
         let same_name = with(states(&[
