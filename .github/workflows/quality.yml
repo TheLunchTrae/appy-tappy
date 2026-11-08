@@ -141,10 +141,6 @@ jobs:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       CARGO_INCREMENTAL: '0'
-      # Inline tasks are POSIX sh. mise reads this setting only from the
-      # environment or global config, so CI sets it here; AGENTS.md gives the
-      # same setting for Windows workstations.
-      MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
       # Tasks would otherwise install every tool, not only install_args.
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
@@ -215,7 +211,6 @@ jobs:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       CARGO_INCREMENTAL: '0'
-      MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
       - name: Check out repository
