@@ -181,6 +181,7 @@ impl Lifecycle {
             }
             kept
         });
+        self.owned.retain(|app, _| self.running.contains_key(app));
         self.watchlist = watchlist;
         if !self.watchlist.is_empty() {
             self.scan_at = Some(now);
@@ -794,6 +795,31 @@ mod tests {
             lifecycle.scan(copies(), only_42, all_shown, later(gone, OWNER_GRACE)),
             [exited(40), started(42)],
             "after the grace, the copy that owns the window takes over"
+        );
+    }
+
+    #[test]
+    fn an_app_watched_again_forgets_which_process_owned_its_window() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(example_app(), now);
+        let both = || Ok(vec![entry(40, "Example.exe"), entry(42, "Example.exe")]);
+        let app_window = || Ok(vec![window(6, 42, "Example App", true)]);
+        let hidden = || Ok(vec![window(6, 42, "Example App", false)]);
+        assert_eq!(
+            lifecycle.scan(both(), app_window, all_shown, now),
+            [started(42)]
+        );
+        assert_eq!(lifecycle.watch(watching(&[]), now), [exited(42)]);
+        lifecycle.watch(example_app(), now);
+        assert_eq!(
+            lifecycle.scan(both(), hidden, all_shown, now),
+            [started(40)],
+            "while no window fits, the lowest ID"
+        );
+        assert_eq!(
+            lifecycle.scan(both(), app_window, all_shown, now),
+            [exited(40), started(42)],
+            "process 40 never owned the window, so it gets no grace"
         );
     }
 }

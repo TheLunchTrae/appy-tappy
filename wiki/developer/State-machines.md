@@ -125,8 +125,13 @@ window is relevant only while a watched application runs. More events while
 two delays are `SETTLE` and `RESCAN`.
 
 Each snapshot ends the session of an application whose process is gone, and
-starts one for an application that runs without one. A new watchlist ends the
-session of each application it drops or whose executable pattern it changes.
+starts one for an application that runs without one. When several processes
+fit one application, the session follows the process that owns the window its
+reader reads, and a process that owned one keeps the session for
+`OWNER_GRACE` after it owns none; [Lifecycle](architecture.md#lifecycle) gives
+the rule. A new watchlist ends the session of each application it drops or
+whose executable pattern it changes, and forgets which process owned its
+window.
 
 ### Per-application run state
 
@@ -165,8 +170,6 @@ Open problems:
 
 - [#92](https://github.com/TheLunchTrae/appy-tappy/issues/92): a store-level read
   error, or one invalid automation, makes the next plan empty.
-- [#96](https://github.com/TheLunchTrae/appy-tappy/issues/96): the session follows
-  one process while the reader can read another copy's window.
 
 ### Reader thread
 
@@ -178,7 +181,7 @@ before the next one.
 ```mermaid
 stateDiagram-v2
     [*] --> Finding
-    Finding --> Waiting: no window fits, it is minimized, or windows cannot be listed
+    Finding --> Waiting: no window fits, it is minimized or another process's, or windows cannot be listed
     Finding --> Waiting: the capture cannot start
     Waiting --> Finding: FIND_AGAIN passes
     Finding --> Capturing: the capture starts
@@ -195,8 +198,11 @@ stateDiagram-v2
 ```
 
 - **Finding.** `find_window` lists the processes and windows, takes the windows
-  that fit best with `best_windows`, and picks the first of them that shows. It
-  looks across every process whose executable fits the pattern.
+  that fit best with `best_windows`, and picks one with `read_window` for the
+  session's process (`Job::process`), as detection does: one of that process's
+  windows when it owns one, and otherwise the first that shows. It captures the
+  window only when it is that process's, and otherwise waits for the session
+  to follow the other process.
 - **Capturing.** `watch` waits on `control` for at most `CHECK_AGAIN` at a time.
   The capture's frame handler runs on another thread and sends `Lost`,
   `Resized`, `Failing`, or `Recovered` back to this one. On each timeout,
@@ -213,11 +219,6 @@ stateDiagram-v2
   resets both.
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
-
-Open problems:
-
-- [#96](https://github.com/TheLunchTrae/appy-tappy/issues/96): `Job` carries no
-  process ID, so the reader can pick another copy's window.
 
 ### Frame handler
 
