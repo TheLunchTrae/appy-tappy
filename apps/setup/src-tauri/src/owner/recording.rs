@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use appytappy_sources::screen::{Image, Region};
 
-use crate::check_spec::{ColorSpec, RegionSpec};
+use crate::check_spec::{self, ColorSpec, RegionSpec};
 use crate::ocr;
 use crate::recording::{Recording, Text};
 
@@ -45,6 +45,14 @@ impl<H: Host> Owner<H> {
     ) -> Result<(), String> {
         if self.session.is_none() {
             return Err("Pick a window to record.".to_owned());
+        }
+        // A closed window sends no more frames, so a recording would count
+        // up with nothing in it.
+        if let Some(failure) = self.failure.as_ref().filter(|failure| failure.ended) {
+            return Err(format!(
+                "{} Change window to pick it again.",
+                check_spec::sentence(&failure.error)
+            ));
         }
         let region = Region::new(region.x, region.y, region.width, region.height)
             .ok_or_else(|| "Draw the region to record first.".to_owned())?;
@@ -444,6 +452,36 @@ mod tests {
         let going = harness.recording().expect("the same recording");
         assert!(going.recording);
         assert_eq!(going.problem, None, "going on clears why it stopped");
+    }
+
+    #[test]
+    fn a_closed_window_records_nothing_more() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255, false)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.deliver(
+            &mut handler,
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the captured window closed",
+            )),
+        );
+        let closed = "The captured window closed. Change window to pick it again.";
+        for more in [true, false] {
+            assert_eq!(
+                harness.ask(start_recording(255, more)),
+                Err(closed.to_owned())
+            );
+        }
+        let stopped = harness.recording().expect("kept for review");
+        assert!(!stopped.recording);
+        assert_eq!(
+            stopped.problem.as_deref(),
+            Some("Recording stopped: The captured window closed. Change window to pick it again.")
+        );
     }
 
     #[test]

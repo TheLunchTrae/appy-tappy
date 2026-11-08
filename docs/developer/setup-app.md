@@ -29,14 +29,15 @@ This page covers what the user guide leaves out.
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
   a labeled screenshot, a recording, or a compared screenshot of another
-  window size, and names which (`check_spec::drawn_size`).
-- **Capture failures.** A frame error shows in the preview until the next good
-  frame of the same capture; only a closed window ends the capture. While a
-  failure stands, a screenshot is refused, and a recording stops with the
-  failure as its problem. The screenshot
+  window size, and names which (`check_spec::drawn_size`). The screenshot
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
+- **Capture failures.** A frame error shows in the preview until the next good
+  frame of the same capture; only a closed window ends the capture. While a
+  failure stands, a screenshot is refused, and a recording stops with the
+  failure as its problem. Once the window closed, no recording starts or goes
+  on until another window is picked.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A

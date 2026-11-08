@@ -745,9 +745,14 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     setLiveError(errorText(error));
   }, []);
 
-  // The region shows over the screenshot shown, or the newest one while the
-  // live view is shown, at the same pixels of the window.
-  const shownOn = selected !== null && full.has(selected) ? selected : (shots.at(-1)?.index ?? null);
+  // The region shows over the screenshot shown. While the live view is shown,
+  // it keeps the size of the screenshot it was drawn on, or else the newest.
+  const shownOn =
+    selected !== null && full.has(selected)
+      ? selected
+      : draft.drawnOn !== null && full.has(draft.drawnOn)
+        ? draft.drawnOn
+        : (shots.at(-1)?.index ?? null);
   const native = shownOn === null ? undefined : full.get(shownOn);
   // The window size the region's pixels refer to.
   const drawnPicture = draft.drawnOn === null ? undefined : full.get(draft.drawnOn);
@@ -925,11 +930,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       return;
     }
     // The region goes back on a screenshot of the size it was recorded at.
-    const sizes = [...full].map(([index, picture]) => [index, picture] as const);
     const sameSize =
       drawnSize?.width === settings.windowSize.width && drawnSize.height === settings.windowSize.height
         ? draft.drawnOn
-        : newestOfSize(sizes, settings.windowSize);
+        : newestOfSize([...full], settings.windowSize);
     setDraft((current) => ({
       ...current,
       region: settings.region,
