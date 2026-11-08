@@ -116,9 +116,10 @@ ones it was recorded with, and otherwise says so rather than start over. The
 UI then offers **Use its settings**, which puts the recording's region, color,
 and tolerance back on the draft. The region stays on the screenshot it was
 drawn on when that one has the recording's window size, and otherwise moves to
-the newest screenshot of that size. Kept readings are lost only on a discard or
-when the capture stops, such as on **Change window**. **Back** and Escape
-leave review without keeping, and review's edits stay for the next one.
+the newest screenshot of that size. Kept readings are lost only on a discard,
+when another window is picked, or when the flow is left, such as on **Change
+window**; a closed window keeps them for review. **Back** and Escape leave
+review without keeping, and review's edits stay for the next one.
 
 ### The text reader
 

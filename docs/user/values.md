@@ -103,7 +103,7 @@ A value reads only while the window is the size it was on the screenshot you
 drew the region on. If you use the window at more than one size, make a value
 at each size, with an automation for each; AppyTappy reads the values made at
 the window's current size. An **Image** check compares against a screenshot
-of that same size, and saving says so if it is not.
+of that same size, and trying or saving it says so if it is not.
 
 While the window is closed or at a size no value was made at, AppyTappy reads
 nothing. Automations neither run nor undo their changes until it can read
