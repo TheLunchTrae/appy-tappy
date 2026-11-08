@@ -32,12 +32,25 @@ Installing does three things:
 
 ## Update
 
-Run the installer of the newer version. It closes AppyTappy's background part
-first, which normally undoes what your automations changed, such as a lowered
-volume. If the background part doesn't close within about 10 seconds, the
-installer ends it, and those changes stay. The new one starts when the
-installer finishes. Your applications, values, and automations stay as they
-are.
+When a newer version is out, AppyTappy Setup says so when it opens, at the end
+of its tabs, such as **AppyTappy 0.2.0 is available.**
+
+1. Select **Update**.
+2. Select **Update** again to agree, or **Not now** to keep working.
+
+AppyTappy Setup downloads the update, closes, and installs it. AppyTappy's
+background part closes first, which normally undoes what your automations
+changed, such as a lowered volume. Both start again when the update finishes,
+and your applications, values, and automations stay as they are. If the update
+fails, the notice says why, and **Try again** starts it again.
+
+**Update** waits while you have unsaved work, such as a new value, so save it
+or leave it first.
+
+You can also update by running the installer of the newer version from the
+[latest release](https://github.com/TheLunchTrae/appy-tappy/releases/latest).
+It closes the background part the same way. If the background part doesn't
+close within about 10 seconds, the installer ends it, and those changes stay.
 
 ## Uninstall
 

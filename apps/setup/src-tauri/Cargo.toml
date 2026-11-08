@@ -38,6 +38,11 @@ serde = { version = "=1.0.229", features = ["derive"] }
 tauri = { version = "=2.12.5", features = [] }
 # The screenshot hotkey, which works while the other application has the keyboard focus.
 tauri-plugin-global-shortcut = "=2.4.1"
+# Checks GitHub Releases for a newer AppyTappy and installs it when the user
+# agrees, checking the download against the update key. Release builds
+# configure it, as wiki/developer/Installer.md describes. Without zip,
+# because the update is the installer itself.
+tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # Keeps one copy of the setup app running, so two copies cannot overwrite
 # each other's saves, and brings its window forward when another starts.
 tauri-plugin-single-instance = "=2.5.5"

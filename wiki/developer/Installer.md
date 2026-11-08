@@ -43,8 +43,8 @@ to Tauri's installer. `apps/setup/src-tauri/tauri.installer.conf.json` turns
 bundling on and adds the sidecar for installer builds only, so the other Rust
 tasks build the setup app without a built runtime.
 
-The installer and the programs are not signed, so Windows SmartScreen warns the
-first time the installer runs;
+The installer and the programs are not code-signed, so Windows SmartScreen
+warns the first time the installer runs;
 [Install](../user/Install,-update,-and-uninstall.md) tells the user what to
 select.
 
@@ -106,3 +106,91 @@ release in particular, and
 reject an attestation that any other workflow might add later. The attesting
 job alone gets the `id-token` and `attestations` permissions, so the build
 steps cannot sign anything.
+
+## Updates
+
+AppyTappy Setup checks for a newer release each time it opens, with Tauri's
+updater (`apps/setup/src-tauri/src/updates.rs`), and installs one only when the
+user agrees. [Update](../user/Install,-update,-and-uninstall.md#update) shows
+what the user sees. The runtime has no updater, so it stays as small and idle
+as it is. One installer holds both programs, so the setup app's update updates
+the runtime too, and the two always come from the same release and read the
+same file formats.
+
+- **Check.** The updater reads `latest.json` from the newest GitHub release.
+  It names the release's version, its installer's address, and the installer's
+  signature. A test build of a version counts as older than its release.
+- **Install.** The updater downloads the installer and checks its signature
+  against the update key's public half, which the setup app carries. It also
+  requires the version inside the signature to be the one `latest.json` names
+  (`requireSignedVersion`), so an altered `latest.json` cannot offer an older
+  release as a newer one. Then it runs the installer in passive mode, which
+  shows only its progress, and exits. The installer stops the runtime as
+  [What it does](#what-it-does) describes, installs, starts the runtime, and
+  opens the setup app again.
+- **Builds.** `apps/setup/src-tauri/tauri.updater.conf.json` holds the
+  updater's settings. `mise run installer:build` adds them, with the public
+  key from the `UPDATER_PUBLIC_KEY` environment variable, only when that
+  variable is set. A build without it has no updater and never checks.
+
+### The update key
+
+The update key is a key pair for Tauri's updater only. It is not a Windows
+code-signing certificate and does not change the SmartScreen warning. The
+release workflow reads three repository settings:
+
+- **`UPDATER_PUBLIC_KEY`**, a repository variable: the key's public half. The
+  installer job builds it into the setup app.
+- **`TAURI_SIGNING_PRIVATE_KEY`** and **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`**,
+  repository secrets: the key's private half and its password. Only the sign
+  job gets them. It runs `mise run update:sign`, which signs the installer,
+  fails if the signature does not match `UPDATER_PUBLIC_KEY`, and writes
+  `latest.json`. The release job publishes it beside the installer.
+
+Without `UPDATER_PUBLIC_KEY`, the sign job is skipped, the release has no
+`latest.json`, and the release run warns about it. A copy installed from such
+a release never checks for updates, so its user installs the next release by
+hand once.
+
+To set the key up, generate it once on your own PC from `apps/setup`, with a
+password, and keep both files and the password somewhere safe:
+
+```sh
+bun run tauri signer generate -w ~/.tauri/appytappy-update.key
+```
+
+Then, in the repository's **Settings**, under **Secrets and variables** and
+**Actions**, add the contents of `appytappy-update.key` as the
+`TAURI_SIGNING_PRIVATE_KEY` secret, the password as the
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret, and the contents of
+`appytappy-update.key.pub` as the `UPDATER_PUBLIC_KEY` variable. Losing the
+private half or its password means installed copies cannot take another
+update; a new key needs every user to install one release by hand.
+
+## winget
+
+`apps/setup/src-tauri/winget/` holds templates of the
+[winget](https://learn.microsoft.com/windows/package-manager/) manifests for the
+package `TheLunchTrae.AppyTappy`. Once a release is published, write its
+manifests with its version:
+
+```sh
+WINGET_VERSION=0.1.0 mise run winget:manifest
+```
+
+The task downloads the release's installer for its SHA-256 and writes the
+manifests to `artifacts/winget/0.1.0/`. To submit them, check them with
+`winget validate --manifest artifacts/winget/0.1.0` on Windows, then open a
+pull request that adds them to
+[winget-pkgs](https://github.com/microsoft/winget-pkgs) under
+`manifests/t/TheLunchTrae/AppyTappy/0.1.0/`, for example with
+`wingetcreate submit artifacts/winget/0.1.0`. winget's moderators review each
+pull request, so a release reaches winget some time after GitHub.
+
+The release workflow does not submit to winget. Submitting from it would need
+a personal token with write access to a fork of winget-pkgs and a submission
+tool that the workflow downloads, for a step that runs once per release.
+
+AppyTappy is not in the Microsoft Store: the Store takes either a code-signed
+installer, which AppyTappy skips, or an MSIX package, which Tauri does not
+build and whose sandbox would change how the runtime starts at sign-in.

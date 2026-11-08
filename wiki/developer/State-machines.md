@@ -525,6 +525,30 @@ that finishes after the user moved on leaves the next flow alone. Leaving the
 value or reference flow unmounts it and stops its capture, which clears its screenshots and
 recording.
 
+### Update notice
+
+The update notice at the end of the tabs (`apps/setup/src/lib/update.ts`,
+drawn by `apps/setup/src/components/UpdateNotice.tsx`) offers a newer release.
+It checks once, when the main window mounts, and shows nothing until a check
+finds one.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Offered: the check finds a newer release
+    None --> [*]: the check finds none or fails
+    Offered --> Asking: Update
+    Asking --> Offered: Not now, Escape, or work starts in a flow
+    Asking --> Installing: Update
+    Installing --> Offered: the download or its signature check fails, the notice shows why
+    Installing --> [*]: the installer starts and AppyTappy Setup exits
+```
+
+**Update** is disabled while a flow holds unsaved work or saves, since the
+update closes AppyTappy Setup. While the question to leave a flow has the
+nav's place, the notice is hidden and keeps its state. An event that does not
+fit the state, such as a late check during the download, changes nothing.
+
 ### Capture slot
 
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one

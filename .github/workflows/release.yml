@@ -1,9 +1,10 @@
 name: Release
 
-# Builds the Windows installer. A pushed v* tag attests where it was built and
-# publishes it as a GitHub release. A manual run on any branch or tag keeps it
-# as a test build in the run's artifacts, without an attestation. Nothing else
-# starts it. wiki/developer/Installer.md describes the builds.
+# Builds the Windows installer. A pushed v* tag signs it for the updater,
+# attests where it was built, and publishes it as a GitHub release. A manual
+# run on any branch or tag keeps it as a test build in the run's artifacts,
+# without an attestation. Nothing else starts it. wiki/developer/Installer.md
+# describes the builds and the update key.
 on:
   push:
     tags:
@@ -44,6 +45,9 @@ jobs:
       - name: Build the installer
         env:
           INSTALLER_TAG: ${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name || '' }}
+          # The update key's public half. The setup app checks for updates only
+          # when the build has it.
+          UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
         run: mise run installer:build
       # Unzipped, so the run's artifact downloads as the installer itself,
       # named for its version.
@@ -56,10 +60,71 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Signs the installer for the updater and writes latest.json, which the
+  # setup app reads to find a newer release. Only this job gets the update
+  # key's private half, so nothing that builds the installer can read it. A
+  # repository without the update key skips it, and the release then carries
+  # no latest.json.
+  sign:
+    name: sign
+    needs: installer
+    if: github.event_name == 'push' && github.ref_type == 'tag' && vars.UPDATER_PUBLIC_KEY != ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    outputs:
+      artifact-id: ${{ steps.keep.outputs.artifact-id }}
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_TASK_RUN_AUTO_INSTALL: 'false'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned tools
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          version: '2026.10.19'
+          install: true
+          install_args: bun
+          cache: true
+      - name: Fetch the installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.installer.outputs.artifact-id }}
+          path: installer
+      # Apart from the signing step, so no install script sees the key.
+      - name: Install the setup app's tools
+        run: mise run ui:install
+      - name: Sign the update
+        env:
+          INSTALLER_TAG: ${{ github.ref_name }}
+          UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -eu
+          for installer in installer/*-setup.exe; do
+            UPDATE_INSTALLER=$installer mise run update:sign
+          done
+      - name: Keep latest.json
+        id: keep
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: installer/latest.json
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     name: release
-    needs: installer
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [installer, sign]
+    # Runs after a skipped sign job too, for a repository without the update
+    # key, but not after a failed one.
+    if: >-
+      always() && github.event_name == 'push' && github.ref_type == 'tag' &&
+      needs.installer.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -74,6 +139,15 @@ jobs:
         with:
           artifact-ids: ${{ needs.installer.outputs.artifact-id }}
           path: installer
+      - name: Fetch latest.json
+        if: needs.sign.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign.outputs.artifact-id }}
+          path: update
+      - name: Warn about the missing update key
+        if: needs.sign.result == 'skipped'
+        run: echo "::warning::The repository has no UPDATER_PUBLIC_KEY variable, so this release's setup app does not check for updates and the release has no latest.json."
       # Records the workflow, commit, and tag that built the installer, so
       # `gh attestation verify` can check a download against this repository.
       - name: Attest the installer
@@ -85,4 +159,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" installer/*-setup.exe --title "AppyTappy $TAG" --generate-notes --verify-tag
+        run: |
+          set -eu
+          set -- installer/*-setup.exe
+          [ ! -f update/latest.json ] || set -- "$@" update/latest.json
+          gh release create "$TAG" "$@" --title "AppyTappy $TAG" --generate-notes --verify-tag
