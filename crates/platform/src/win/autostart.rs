@@ -8,7 +8,7 @@ use std::os::windows::ffi::OsStrExt;
 
 use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 use windows::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW,
+    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
 use windows::core::HSTRING;
 
@@ -52,11 +52,32 @@ pub(crate) fn disable_autostart(value: &str) -> io::Result<()> {
     status.ok().map_err(io::Error::from)
 }
 
+pub(crate) fn autostart_enabled(value: &str) -> io::Result<bool> {
+    let mut bytes = 0_u32;
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the key and value names are null-terminated wide strings that
+    // outlive the call, which asks only for the data's size and writes it to
+    // `bytes`.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            &HSTRING::from(RUN_KEY),
+            &HSTRING::from(value),
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            Some(&raw mut bytes),
+        )
+    };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(false);
+    }
+    status.ok().map(|()| true).map_err(io::Error::from)
+}
+
 #[cfg(test)]
 mod tests {
     use std::process;
-
-    use windows::Win32::System::Registry::{RRF_RT_REG_SZ, RegGetValueW};
 
     use super::*;
 
@@ -90,11 +111,14 @@ mod tests {
     fn autostart_writes_the_command_and_removes_it() {
         let value = format!("AppyTappyTest{}", process::id());
         let command = r#""C:\Program Files\AppyTappy\appytappy-runtime.exe""#;
+        assert!(!autostart_enabled(&value).expect("read"));
         enable_autostart(&value, OsStr::new(command)).expect("enable");
         let expected: Vec<u16> = command.encode_utf16().collect();
         assert_eq!(run_value(&value), Some(expected));
+        assert!(autostart_enabled(&value).expect("read"));
         disable_autostart(&value).expect("disable");
         assert_eq!(run_value(&value), None);
+        assert!(!autostart_enabled(&value).expect("read"));
         disable_autostart(&value).expect("an absent value is not an error");
     }
 }

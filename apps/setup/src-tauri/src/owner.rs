@@ -26,6 +26,7 @@ use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
+use appytappy_config::settings_file::SettingsFile;
 use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::applications;
@@ -35,6 +36,7 @@ use crate::overlay::Overlays;
 use crate::pixels;
 use crate::recording::{Recording, ocr};
 use crate::selection::{self, SelectionView};
+use crate::settings::{self, SettingsView};
 use crate::stores::Stores;
 use crate::window_list;
 
@@ -383,6 +385,25 @@ impl<H: Host> Owner<H> {
                 self.stores()
                     .and_then(|stores| automations::delete(stores, &id)),
             ),
+            Request::Settings(reply) => send(
+                reply,
+                match self.stores() {
+                    Ok(stores) => settings::load(stores),
+                    Err(problem) => SettingsView {
+                        settings: SettingsFile::default(),
+                        problem: Some(problem),
+                    },
+                },
+            ),
+            Request::SaveSettings { settings, reply } => send(
+                reply,
+                self.stores()
+                    .and_then(|stores| settings::save(stores, &settings)),
+            ),
+            Request::StartsWithWindows(reply) => send(reply, settings::starts_with_windows()),
+            Request::SetStartsWithWindows { on, reply } => {
+                send(reply, settings::set_starts_with_windows(on));
+            },
             Request::Overlays(reply) => send(reply, self.overlay_windows()),
             Request::SetOverlay {
                 app,

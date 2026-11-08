@@ -9,9 +9,11 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::paths::Locations;
-use appytappy_config::store::{AppStore, AutomationStore};
+use appytappy_config::settings_file::ReadIntervalDef;
+use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, WindowWatch};
 use appytappy_sources::HostSystem;
+use appytappy_sources::schedule::ReadInterval;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
@@ -31,7 +33,7 @@ enum Event {
     Tray(TrayEvent),
     /// Detection stopped because its input ended.
     DetectionEnded,
-    /// The setup app saved, so the automations are read again.
+    /// The setup app saved, so the settings and automations are read again.
     Reload,
     /// A reader read a value or met a problem.
     Reading(Reading),
@@ -84,10 +86,11 @@ enum Step {
     Stop,
 }
 
-/// Where the saved applications and automations are.
+/// Where the saved applications, automations, and settings are.
 struct Stores {
     apps: AppStore,
     automations: AutomationStore,
+    settings: SettingsStore,
 }
 
 /// The threads and handles the owner carries orders out with.
@@ -107,6 +110,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let stores = Stores {
         apps: AppStore::new(locations.apps()),
         automations: AutomationStore::new(locations.automations()),
+        settings: SettingsStore::new(locations.settings()),
     };
     // The host system sets the process's DPI awareness, which Windows
     // requires before any window exists, so it comes before the tray window.
@@ -115,6 +119,8 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let windows = WindowWatch::start(inputs.clone())?;
     let (sender, events) = mpsc::channel();
     let mut model = Model::default();
+    // No reader runs yet, so the settings change no reader here.
+    drop(read_settings(&stores.settings, log, &mut model));
     // Without a desktop the runtime still works; it only has no icon.
     let mut shown = tray::menu(&model);
     let tray = Tray::start(sender.clone(), shown.clone())
@@ -196,6 +202,11 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 retry.is_some_and(|retry| retry.due(Instant::now()))
             },
             Step::Reload => {
+                carry(
+                    read_settings(&stores.settings, log, &mut model),
+                    &mut crew,
+                    log,
+                );
                 // A save starts the tries over.
                 retry = None;
                 true
@@ -487,6 +498,44 @@ fn failed(
     retry
 }
 
+/// Reads the settings and gives `model` the ones the runtime uses, returning
+/// the orders that carry them out. Settings that cannot be read are logged,
+/// and the runtime keeps the ones it has until the next save.
+fn read_settings(store: &SettingsStore, log: &mut Log, model: &mut Model) -> Vec<Order> {
+    match store.load() {
+        Ok(settings) => {
+            let interval = read_interval(settings.read_interval);
+            if interval != model.interval() {
+                note(log, &interval_line(interval));
+            }
+            model.set_interval(interval)
+        },
+        Err(error) => {
+            note(
+                log,
+                &format!("the settings cannot be read, so the runtime keeps its settings: {error}"),
+            );
+            Vec::new()
+        },
+    }
+}
+
+/// The read interval `saved` asks for. A saved file is checked, so its
+/// fastest read is never slower than its slowest; were it, the default
+/// stands in.
+fn read_interval(saved: ReadIntervalDef) -> ReadInterval {
+    ReadInterval::new(saved.fastest(), saved.slowest()).unwrap_or_default()
+}
+
+/// The log line for a new read interval.
+fn interval_line(interval: ReadInterval) -> String {
+    format!(
+        "values are read every {} to {} ms",
+        interval.min().as_millis(),
+        interval.max().as_millis()
+    )
+}
+
 /// The log line that says what the runtime runs.
 fn loaded_line(plan: &plan::Plan) -> String {
     let automations: usize = plan.apps.values().map(|app| app.automations.len()).sum();
@@ -586,7 +635,7 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
         Event::Reload => {
             note(
                 log,
-                "the setup app saved, so the automations are read again",
+                "the setup app saved, so the settings and automations are read again",
             );
             Step::Reload
         },
@@ -736,7 +785,7 @@ mod tests {
             "automations disabled",
             "the tray icon stopped: its window was destroyed",
             "automations enabled",
-            "the setup app saved, so the automations are read again",
+            "the setup app saved, so the settings and automations are read again",
             "quit from the tray",
             "Windows asked the runtime to close",
         ];
@@ -839,12 +888,52 @@ mod tests {
     }
 
     #[test]
+    fn settings_set_the_read_interval_and_unreadable_ones_are_kept() {
+        let folder = env::temp_dir().join(format!("appytappy-settings-{}", process::id()));
+        fs::create_dir_all(&folder).expect("make the folder");
+        let store = SettingsStore::new(folder.join("settings.json"));
+        let mut log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
+        let mut model = Model::default();
+        assert_eq!(read_settings(&store, &mut log, &mut model), []);
+        assert_eq!(
+            model.interval(),
+            ReadInterval::DEFAULT,
+            "no file is the defaults"
+        );
+        fs::write(
+            folder.join("settings.json"),
+            r#"{"format":1,"readInterval":{"fastestMs":40,"slowestMs":2000}}"#,
+        )
+        .expect("write");
+        assert_eq!(read_settings(&store, &mut log, &mut model), []);
+        let slower = ReadInterval::new(Duration::from_millis(40), Duration::from_secs(2));
+        assert_eq!(Some(model.interval()), slower);
+        fs::write(folder.join("settings.json"), "not JSON").expect("break the file");
+        assert_eq!(read_settings(&store, &mut log, &mut model), []);
+        assert_eq!(Some(model.interval()), slower, "the settings are kept");
+        let written =
+            fs::read_to_string(folder.join("logs").join("runtime.log")).expect("read the log");
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(lines.len(), 2, "{written:?}");
+        assert!(
+            lines[0].ends_with("values are read every 40 to 2000 ms"),
+            "{written:?}"
+        );
+        assert!(
+            lines[1].contains("the settings cannot be read, so the runtime keeps its settings: "),
+            "{written:?}"
+        );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
     fn a_reload_that_cannot_read_the_files_keeps_the_plan_and_tries_again() {
         let folder = env::temp_dir().join(format!("appytappy-reload-{}", process::id()));
         fs::create_dir_all(&folder).expect("make the folder");
         let stores = Stores {
             apps: AppStore::new(folder.join("apps")),
             automations: AutomationStore::new(folder.join("automations.json")),
+            settings: SettingsStore::new(folder.join("settings.json")),
         };
         let mut log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
         let mut model = Model::default();
@@ -975,6 +1064,7 @@ mod tests {
                 plan,
                 process: appytappy_config::anti_cheat::ProcessId::new(1),
                 executable: "Example.exe".to_owned(),
+                interval: ReadInterval::DEFAULT,
             }),
             Order::StopReading(SessionId(1), "Example App".to_owned()),
             Order::Act(act::Job::Run {

@@ -11,6 +11,7 @@ use std::sync::mpsc::Sender;
 
 use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
+use appytappy_config::settings_file::SettingsFile;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
@@ -25,6 +26,7 @@ use crate::owner::{
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
+use crate::settings::SettingsView;
 use crate::window_list::{WindowFit, WindowList};
 
 /// The UI's way to the owner thread.
@@ -441,4 +443,32 @@ pub(crate) async fn review_problems(
     spec: CheckSpec,
 ) -> Result<Vec<Option<String>>, String> {
     ask(&app, |reply| Request::ReviewProblems { spec, reply }).await?
+}
+
+/// The saved settings, or the defaults and why the file cannot be read.
+#[tauri::command]
+pub(crate) async fn settings(app: AppHandle) -> Result<SettingsView, String> {
+    ask(&app, Request::Settings).await
+}
+
+/// Saves every setting, or says what to fix.
+#[tauri::command]
+pub(crate) async fn save_settings(app: AppHandle, settings: SettingsFile) -> Result<(), String> {
+    ask(&app, |reply| Request::SaveSettings {
+        settings: Box::new(settings),
+        reply,
+    })
+    .await?
+}
+
+/// Whether the runtime starts when the user signs in to Windows.
+#[tauri::command]
+pub(crate) async fn starts_with_windows(app: AppHandle) -> Result<bool, String> {
+    ask(&app, Request::StartsWithWindows).await?
+}
+
+/// Makes the runtime start when the user signs in to Windows, or not.
+#[tauri::command]
+pub(crate) async fn set_starts_with_windows(app: AppHandle, on: bool) -> Result<(), String> {
+    ask(&app, |reply| Request::SetStartsWithWindows { on, reply }).await?
 }

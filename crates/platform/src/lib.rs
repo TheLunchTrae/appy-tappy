@@ -30,7 +30,7 @@ mod reload;
 mod tray;
 mod window_watch;
 
-pub use autostart::{AUTOSTART_VALUE, disable_autostart, enable_autostart};
+pub use autostart::{AUTOSTART_VALUE, autostart_enabled, disable_autostart, enable_autostart};
 pub use clock::LocalTime;
 pub use instance::InstanceGuard;
 pub use reload::{RELOAD, ReloadRequest, ReloadWatch, request_reload};

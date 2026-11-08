@@ -78,6 +78,12 @@ impl Locations {
     pub fn automations(&self) -> PathBuf {
         self.roaming.join("automations.json")
     }
+
+    /// The file that holds AppyTappy's settings.
+    #[must_use]
+    pub fn settings(&self) -> PathBuf {
+        self.roaming.join("settings.json")
+    }
 }
 
 /// An app data folder is unknown; it names the environment variable.
@@ -112,6 +118,10 @@ mod tests {
         assert_eq!(
             locations.automations(),
             roaming.join("AppyTappy").join("automations.json")
+        );
+        assert_eq!(
+            locations.settings(),
+            roaming.join("AppyTappy").join("settings.json")
         );
     }
 

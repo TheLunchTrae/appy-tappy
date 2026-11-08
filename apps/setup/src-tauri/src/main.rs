@@ -16,6 +16,7 @@ mod owner;
 mod pixels;
 mod recording;
 mod selection;
+mod settings;
 mod stores;
 mod window_list;
 
@@ -25,7 +26,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use appytappy_config::paths::Locations;
-use appytappy_config::store::{AppStore, AutomationStore};
+use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_sources::HostSystem;
 
 use crate::commands::Bridge;
@@ -42,6 +43,7 @@ fn main() -> ExitCode {
         .map(|locations| Stores {
             apps: AppStore::new(locations.apps()),
             automations: AutomationStore::new(locations.automations()),
+            settings: SettingsStore::new(locations.settings()),
         })
         .map_err(|error| format!("AppyTappy cannot find where to keep your values: {error}."));
     // The text reader reads recorded readings on a thread of its own, and
@@ -110,6 +112,10 @@ fn main() -> ExitCode {
             commands::set_overlay,
             commands::overlay_state,
             commands::overlay_card,
+            commands::settings,
+            commands::save_settings,
+            commands::starts_with_windows,
+            commands::set_starts_with_windows,
         ])
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));

@@ -1,8 +1,8 @@
 //! Where the setup app keeps what the user saves: the applications' folders
-//! and the automations' file.
+//! the automations' file, and the settings file.
 
 use appytappy_config::app_file::AppFile;
-use appytappy_config::store::{AppStore, AutomationStore};
+use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 
 /// Where the authoring files live.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,6 +11,8 @@ pub(crate) struct Stores {
     pub(crate) apps: AppStore,
     /// The automations' file.
     pub(crate) automations: AutomationStore,
+    /// The settings file.
+    pub(crate) settings: SettingsStore,
 }
 
 impl Stores {

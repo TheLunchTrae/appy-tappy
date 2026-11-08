@@ -268,8 +268,9 @@ stateDiagram-v2
     Slow --> Fast: a value changed
 ```
 
-The reader always uses `ReadInterval::DEFAULT`, so **Fast** is 16 ms and
-**Slow** is 500 ms.
+**Fast** and **Slow** are the fastest and slowest reads from the settings,
+16 ms and 500 ms by default. The reader's job carries them, so a new read
+interval stops the reader and starts it again in the same session.
 `Activity::NearThreshold` also resets the wait to the minimum, but the reader
 never reports it, so a value near a rule's threshold backs off like any other.
 
@@ -445,8 +446,9 @@ while the menu is open, but it still calls the procedure, so neither is lost.
 
 The reload watch waits on the auto-reset named event `Local\AppyTappy.Reload`
 and sends `Reload` each time the setup app sets it. Several saves before the
-reload watch wakes become one reload. The owner then reads the saved files
-(`reread`). When they read, it sends detection the new watchlist and calls
+reload watch wakes become one reload. The owner first reads the settings
+(`read_settings`), keeping the ones it has when they cannot be read, and then
+the saved files (`reread`). When they read, it sends detection the new watchlist and calls
 `replan`. When they cannot be read as a whole, such as while another program
 holds a file, the owner keeps the plan it has and reads them again. Its state
 is `retry`, an optional `Retry` with a time and the tries left, and `had`,

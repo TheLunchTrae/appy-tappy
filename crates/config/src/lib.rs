@@ -11,6 +11,7 @@ pub mod app_file;
 pub mod automation_file;
 pub mod paths;
 pub mod rule;
+pub mod settings_file;
 pub mod signal;
 pub mod store;
 pub mod window_match;

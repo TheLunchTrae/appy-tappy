@@ -21,7 +21,7 @@ mod reload;
 mod tray;
 mod window_watch;
 
-pub(crate) use autostart::{disable_autostart, enable_autostart};
+pub(crate) use autostart::{autostart_enabled, disable_autostart, enable_autostart};
 pub(crate) use clock::local_time;
 pub(crate) use instance::InstanceGuard;
 pub(crate) use reload::{ReloadWatch, request_reload};

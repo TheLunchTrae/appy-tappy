@@ -17,6 +17,7 @@ use appytappy_actions::Watched;
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_engine::{Effect, Session};
+use appytappy_sources::schedule::ReadInterval;
 
 use crate::lifecycle::Change;
 use crate::plan::AppPlan;
@@ -93,6 +94,8 @@ pub(crate) struct Model {
     plan: BTreeMap<String, Arc<AppPlan>>,
     /// The apps whose automations run now, by app ID.
     running: BTreeMap<String, Running>,
+    /// How often readers read, from the settings.
+    interval: ReadInterval,
     /// The next session's ID.
     next: u64,
 }
@@ -106,6 +109,7 @@ impl Default for Model {
             actions_can_run: true,
             plan: BTreeMap::new(),
             running: BTreeMap::new(),
+            interval: ReadInterval::DEFAULT,
             next: 0,
         }
     }
@@ -228,6 +232,36 @@ impl Model {
         orders
     }
 
+    /// How often readers read.
+    pub(crate) const fn interval(&self) -> ReadInterval {
+        self.interval
+    }
+
+    /// Sets how often readers read. Each running app's reader starts over
+    /// with the new interval, in the same session, so its automations keep
+    /// their state and nothing is undone.
+    pub(crate) fn set_interval(&mut self, interval: ReadInterval) -> Vec<Order> {
+        if interval == self.interval {
+            return Vec::new();
+        }
+        self.interval = interval;
+        self.running
+            .values()
+            .flat_map(|running| {
+                [
+                    Order::StopReading(running.id, running.plan.name.clone()),
+                    Order::Read(reader::Job {
+                        session: running.id,
+                        plan: Arc::clone(&running.plan),
+                        process: running.watched.process,
+                        executable: running.watched.executable.clone(),
+                        interval,
+                    }),
+                ]
+            })
+            .collect()
+    }
+
     /// Records a value a session's reader read at `at`. A reading from a
     /// session that ended is dropped.
     pub(crate) fn sample(
@@ -295,6 +329,7 @@ impl Model {
             plan: Arc::clone(plan),
             process: attached.process,
             executable: attached.executable.clone(),
+            interval: self.interval,
         })];
         let watched = Watched {
             process: attached.process,
@@ -731,6 +766,40 @@ mod tests {
         assert_eq!(model.active_automations(), ["Pause B"]);
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
         assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
+    }
+
+    #[test]
+    fn a_new_read_interval_restarts_each_reader_in_its_session() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
+        model.apply(started("a", 7), now);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        assert_eq!(
+            model.set_interval(ReadInterval::DEFAULT),
+            [],
+            "the same interval changes nothing"
+        );
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        let orders = model.set_interval(slower);
+        assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"], "b is not running");
+        let Some(Order::Read(job)) = orders.last() else {
+            panic!("a read order");
+        };
+        assert_eq!(job.interval, slower);
+        assert_eq!(
+            model.active_automations(),
+            ["Pause A"],
+            "the automation stays run"
+        );
+        let Some(Order::Read(job)) = model.apply(started("b", 8), now).first().cloned() else {
+            panic!("b is read");
+        };
+        assert_eq!(
+            job.interval, slower,
+            "a new reader reads at the new interval"
+        );
     }
 
     #[test]

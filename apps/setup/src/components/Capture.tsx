@@ -62,7 +62,7 @@ import { type Masking, StatesField } from './StatesField.tsx';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { accelerator, shortcutLabel } from '../lib/shortcut.ts';
 import { useSize } from '../lib/size.ts';
-import { loadShortcut, saveShortcut } from '../lib/storage.ts';
+import { useSettings as useAppSettings } from '../lib/settings.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 
 /** A screenshot taken this session. */
@@ -199,7 +199,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const [reading, setReading] = useState<Reading | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [shortcut, setShortcut] = useState(loadShortcut);
+  const appSettings = useAppSettings();
+  const shortcut = appSettings.settings.screenshotShortcut;
   const [changingShortcut, setChangingShortcut] = useState(false);
   const [shortcutError, setShortcutError] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingView | null>(null);
@@ -637,9 +638,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     }
     const next = accelerator(event);
     if (next !== null) {
-      setShortcut(next);
-      saveShortcut(next);
       setChangingShortcut(false);
+      appSettings.change({ ...appSettings.settings, screenshotShortcut: next }).catch((error: unknown) => {
+        setShortcutError(errorText(error));
+      });
     }
   };
 

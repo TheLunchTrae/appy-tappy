@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use appytappy_config::app_file::{AntiCheatDef, AppFile, OverlayModeDef, PanelDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
+use appytappy_config::settings_file::SettingsFile;
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Image, Size};
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, FrameRead, OverlayView, OverlayWindow, Place};
 use crate::recording::{RecordingView, Text};
 use crate::selection::{SelectionSpec, SelectionView};
+use crate::settings::SettingsView;
 use crate::window_list::{WindowFit, WindowList};
 
 /// Where a request's answer goes.
@@ -430,6 +432,24 @@ pub(crate) enum Request {
         /// Answered once it stopped.
         reply: Reply<()>,
     },
+    /// The saved settings.
+    Settings(Reply<SettingsView>),
+    /// Saves the settings.
+    SaveSettings {
+        /// Every setting.
+        settings: Box<SettingsFile>,
+        /// Answered once they are saved, or with what to fix.
+        reply: Reply<Result<(), String>>,
+    },
+    /// Whether the runtime starts when the user signs in to Windows.
+    StartsWithWindows(Reply<Result<bool, String>>),
+    /// Makes the runtime start when the user signs in to Windows, or not.
+    SetStartsWithWindows {
+        /// Whether it starts.
+        on: bool,
+        /// Answered once Windows has it.
+        reply: Reply<Result<(), String>>,
+    },
 }
 
 /// What reaches the owner thread.
@@ -494,8 +514,8 @@ pub(crate) enum Message {
 }
 
 impl Request {
-    /// Whether the request changes the saved applications or automations,
-    /// which the runtime reads.
+    /// Whether the request changes the saved applications, automations, or
+    /// settings, which the runtime reads.
     pub(super) const fn saves(&self) -> bool {
         matches!(
             self,
@@ -509,6 +529,7 @@ impl Request {
                 | Self::SaveAutomation { .. }
                 | Self::SetAutomationEnabled { .. }
                 | Self::DeleteAutomation { .. }
+                | Self::SaveSettings { .. }
         )
     }
 
@@ -593,8 +614,21 @@ mod tests {
                 app: "example".to_owned(),
                 reply: oneshot::channel().0,
             },
+            Request::SaveSettings {
+                settings: Box::default(),
+                reply: oneshot::channel().0,
+            },
         ];
         assert!(saves.iter().all(Request::saves));
+        assert!(!Request::Settings(oneshot::channel().0).saves());
+        assert!(
+            !Request::SetStartsWithWindows {
+                on: true,
+                reply: oneshot::channel().0,
+            }
+            .saves(),
+            "the runtime does not read the registry"
+        );
         assert!(!Request::ListApps(oneshot::channel().0).saves());
         assert!(!Request::ListAutomations(oneshot::channel().0).saves());
     }
