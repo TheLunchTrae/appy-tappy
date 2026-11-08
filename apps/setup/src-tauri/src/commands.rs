@@ -176,14 +176,15 @@ pub(crate) async fn save_app(
 }
 
 /// Removes an application with its values, unless an automation watches one
-/// of them.
+/// of them, then closes its overlay's window.
 #[tauri::command]
 pub(crate) async fn remove_app(app: AppHandle, application: String) -> Result<(), String> {
     ask(&app, |reply| Request::RemoveApp {
         app: application,
         reply,
     })
-    .await?
+    .await??;
+    sync_overlays(app).await
 }
 
 /// Saves a value to the application `spec` names.
@@ -270,7 +271,7 @@ pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), 
 #[tauri::command]
 pub(crate) async fn sync_overlays(app: AppHandle) -> Result<(), String> {
     let wanted = ask(&app, Request::Overlays).await??;
-    overlay::window::sync(&app, &wanted).map_err(|error| error.to_string())
+    overlay::window::sync(&app, &wanted)
 }
 
 /// Turns `application`'s overlay on or off and sets where it shows, then

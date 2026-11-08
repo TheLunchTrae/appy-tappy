@@ -109,27 +109,33 @@ pub(crate) fn unwanted<'a>(
 }
 
 /// Opens a window for each overlay in `wanted` that has none, and closes
-/// the overlay windows nothing wants any more.
+/// the overlay windows nothing wants any more. One window that cannot be
+/// opened or closed does not stop the others.
 ///
 /// It needs a running app, so no unit test can reach it; the choice of
 /// windows to close is [`unwanted`]'s.
 ///
 /// # Errors
 ///
-/// Returns Tauri's error when a window cannot be opened or closed.
+/// Returns Tauri's error for each window that could not be opened or
+/// closed, one sentence each.
 #[mutants::skip]
 pub(crate) fn sync<R: Runtime>(
     handle: &AppHandle<R>,
     wanted: &[OverlayWindow],
-) -> tauri::Result<()> {
+) -> Result<(), String> {
+    let mut errors = Vec::new();
     let windows = handle.webview_windows();
     for label in unwanted(windows.keys().map(String::as_str), wanted) {
-        if let Some(window) = windows.get(label) {
-            window.destroy()?;
+        if let Some(Err(error)) = windows.get(label).map(WebviewWindow::destroy) {
+            errors.push(format!("An overlay window could not close: {error}."));
         }
     }
+    // Without the monitors, a panel opens in the middle of the screen
+    // rather than where it was left.
     let areas: Vec<Area> = handle
-        .available_monitors()?
+        .available_monitors()
+        .unwrap_or_default()
         .iter()
         .map(|monitor| {
             let area = monitor.work_area();
@@ -143,11 +149,20 @@ pub(crate) fn sync<R: Runtime>(
         .collect();
     for overlay in wanted {
         let label = label(&overlay.app, overlay.mode);
-        if handle.get_webview_window(&label).is_none() {
-            open(handle, &label, overlay, &areas)?;
+        if handle.get_webview_window(&label).is_none()
+            && let Err(error) = open(handle, &label, overlay, &areas)
+        {
+            errors.push(format!(
+                "{}'s overlay could not open: {error}.",
+                overlay.name
+            ));
         }
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join(" "))
+    }
 }
 
 /// Opens `overlay`'s window, labeled `label`. It needs a running app, so no

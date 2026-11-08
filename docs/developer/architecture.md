@@ -471,7 +471,10 @@ screen otherwise. Moving it never shows it again, so a page that the webview
 throttles cannot hold its place back; the page's own polls still open the
 overlay, start its capture and restart it after a change. `sources` answers where
 one window is with a few calls about that window alone, so following it costs
-no listing of every window. The picture-in-picture panel reports where it was
+no listing of every window. The windows are matched to the overlays that are on
+when the main window opens, after an overlay changes and after an application
+is removed; a window that cannot open or close is reported and does not stop
+the others. The picture-in-picture panel reports where it was
 moved, and the owner saves that once the panel stops moving.
 
 ## Unsafe code
