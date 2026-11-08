@@ -49,6 +49,7 @@ AppyTappy to watch: a game, a media player, a browser, or anything else.
 
 While you make or change an application, a value, a reference, or an
 automation, selecting a page, even the one it opened from, first asks whether
-to leave without saving, because what you have not saved is lost. Select
-**Stay** to carry on, or **Leave** to drop it. While a save is still under way,
-the pages, **Leave**, and **Discard** or **Cancel** wait for it to finish.
+to leave without saving when you have changed something, because what you have
+not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
+save is still under way, the pages, **Leave**, **Change window**, and
+**Discard** or **Cancel** wait for it to finish.
