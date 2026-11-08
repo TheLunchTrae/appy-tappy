@@ -491,9 +491,10 @@ would then test nothing.
 After the last phase, a handle check also measures nothing but has to pass.
 The probe opens and closes three more times, the runtime attaching and
 detaching each time, and 30 seconds after the last detach the runtime may hold
-at most 8 more handles than it did just after the third detach. The first
-attaches load libraries and set up thread pools once, which is why the check
-starts from the third detach. A capture that left its handles behind added
+at most 8 more handles than it did at the end of the idle after phase, a
+minute after the third detach, when that capture has finished closing. The
+first attaches load libraries and set up thread pools once, which is why the
+check starts there. A capture that left its handles behind added
 about 10 a cycle, while a clean one adds one or two, mostly idle thread pool
 workers that Windows ends later; the script's comment gives the numbers. When
 the check fails, the details count the runtime's handles by type, such as

@@ -45,12 +45,13 @@ $ActiveSample = 30
 # The handle check: attach and detach cycles after the idle after phase,
 # and how long the runtime then waits before its handles are counted. The
 # first attaches load libraries and set up thread pools once, so the check
-# compares with the count just after the third detach. A capture that left
+# compares with the count the idle after phase ends on, a minute after the
+# third detach, once that capture has been torn down. A capture that left
 # its handles behind added about 10 a cycle. A clean one added 1 or 2 over
 # six cycles counted two minutes later, and about 1 a cycle counted at once,
 # while Windows still keeps idle thread pool workers. So 3 cycles and at most
-# 8 more handles than after the third detach tell the two apart with room on
-# both sides.
+# 8 more handles than at the end of the idle after phase tell the two apart
+# with room on both sides.
 $MoreCycles = 3
 $HandleWait = 30
 $HandleGrowthLimit = 8
@@ -490,15 +491,18 @@ public static class Probe {
     $probe = $null
     Wait-Log '): detached' 10 3
 
-    $script:process.Refresh()
-    $afterThird = $script:process.HandleCount
-    $typesAfterThird = Get-HandleTypes
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
     # The stopped trace's writer has long finished its file by now.
     Measure-Trace
+    # The handle check's starting count, read after the idle sample, when the
+    # third capture's teardown has long finished: read sooner, a capture still
+    # closing could raise it enough to hide a leak.
+    $script:process.Refresh()
+    $afterThird = $script:process.HandleCount
+    $typesAfterThird = Get-HandleTypes
 
     # The handle check: more attach and detach cycles, then the count after
-    # a wait, against the count just after the third detach.
+    # a wait, against the count at the end of the idle after phase.
     for ($cycle = 4; $cycle -lt 4 + $MoreCycles; $cycle++) {
         $reads = Measure-Log 'reading its values'
         $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
@@ -515,9 +519,9 @@ public static class Probe {
     $script:process.Refresh()
     $afterMore = $script:process.HandleCount
     $within = $afterMore -le $afterThird + $HandleGrowthLimit
-    Add-Row "Handles $HandleWait s after $MoreCycles more detaches" "$afterMore, $afterThird after the third detach" "$($afterThird + $HandleGrowthLimit)" $within
+    Add-Row "Handles $HandleWait s after $MoreCycles more detaches" "$afterMore, $afterThird after the idle after phase" "$($afterThird + $HandleGrowthLimit)" $within
     if (-not $within) {
-        $script:details += "Handles by type after the third detach: $typesAfterThird"
+        $script:details += "Handles by type after the idle after phase: $typesAfterThird"
         $script:details += "Handles by type $HandleWait s after the last detach: $(Get-HandleTypes)"
     }
 }
