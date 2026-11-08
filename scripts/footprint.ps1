@@ -198,7 +198,7 @@ public static class Probe {
     Measure-Phase 'Active' $ActiveSample $ActiveMemoryLimit $ActiveCpuLimit
     # Every value has to read without a problem, or the active sample
     # measured the error path instead of the reads.
-    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured'
+    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured', 'capture ended badly'
     if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
 
     Stop-Process -Id $probe.Id
