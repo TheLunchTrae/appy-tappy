@@ -169,7 +169,7 @@ stateDiagram-v2
   and starts again with `Start::Resume`. A resumed session fires no `Started`
   rules, because those already ran.
 - **A reload that changes only names.** When only the plan's `Labels` differ,
-  such as a renamed value or a new checked build, the session keeps running
+  its names or the build its values were checked against, the session keeps running
   and takes the new plan, so the log and the tray use the new names. The
   reader sends a value's problem by its position, and the owner logs it with
   the value's newest name.
