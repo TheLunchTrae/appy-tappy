@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 
 use appytappy_config::app_file::{
     CheckDef, ColorDef, MAX_STATES, ReferenceDef, RegionDef, SampleDef, StateDef, sample_name,
+    state_image_name,
 };
 use appytappy_config::signal::StateName;
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
@@ -234,6 +235,24 @@ pub(crate) fn to_saved(
     app: &str,
     id: &str,
 ) -> Result<SavedCheck, SpecError> {
+    to_saved_fix(spec, session, app, id, None)
+}
+
+/// Turns `spec` into the saved form of the value `id` drawn again at
+/// another size, as the fix numbered `fix` names its pictures:
+/// `{id}-{fix}-1.png` onward. With `None` it is the value's first drawing,
+/// as [`to_saved`] saves it.
+///
+/// # Errors
+///
+/// Returns what [`to_saved`] does.
+pub(crate) fn to_saved_fix(
+    spec: &CheckSpec,
+    session: Session<'_>,
+    app: &str,
+    id: &str,
+    fix: Option<usize>,
+) -> Result<SavedCheck, SpecError> {
     let built = build(spec, session)?;
     let mut pictures = Vec::new();
     let check = match spec {
@@ -264,7 +283,7 @@ pub(crate) fn to_saved(
         } => {
             let mut saved = Vec::with_capacity(states.len());
             for (state, number) in states.iter().zip(1_usize..) {
-                let image = format!("{id}-{number}.png");
+                let image = state_image_name(id, fix, number);
                 let (picture, mask) = picture_of(session.screenshots, built.region, state)?;
                 let png = match &mask {
                     Some(mask) => picture.encode_png_masked(mask),

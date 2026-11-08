@@ -6,6 +6,7 @@ import {
   buildSpec,
   DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
+  fixDraft,
   fromReference,
   newestOfSize,
   recordBlocked,
@@ -355,4 +356,46 @@ test("recording waits for a drawn region and the characters' color", () => {
   expect(recordBlocked({ ...ready, region: null })).toBe('Draw the region on a screenshot to record it.');
   expect(recordBlocked({ ...ready, drawnOn: null })).toBe('Draw the region on a screenshot to record it.');
   expect(recordBlocked({ ...ready, ink: null })).toBe("Pick the characters' color to record.");
+});
+
+describe('fixDraft', () => {
+  test("starts from the saved check's kind and settings, with no region", () => {
+    expect(fixDraft({ kind: 'number', reference: 'percent', whole: true })).toEqual({
+      ...EMPTY_DRAFT,
+      reference: 'percent',
+      whole: true,
+    });
+    expect(fixDraft({ kind: 'barFill', filled: red, empty: gray })).toEqual({
+      ...EMPTY_DRAFT,
+      kind: 'barFill',
+      tolerance: DEFAULT_TOLERANCE.barFill,
+      filled: red,
+      empty: gray,
+    });
+    expect(fixDraft({ kind: 'color', color: red, tolerance: 7 })).toEqual({
+      ...EMPTY_DRAFT,
+      kind: 'color',
+      tolerance: 7,
+      color: red,
+    });
+  });
+
+  test('names the states taken at the new size after the saved ones, in order', () => {
+    const draft = fixDraft({
+      kind: 'state',
+      states: [
+        { name: 'Shown', image: 'icon-1.png' },
+        { name: 'Hidden', image: 'icon-2.png' },
+      ],
+      tolerance: 9,
+    });
+    expect(draft.tolerance).toBe(9);
+    const first = withState(draft, 4);
+    expect(first.states.map((state) => state.name)).toEqual(['Shown']);
+    // A name typed over a saved one leaves that one for the next state.
+    const renamed = withStateAt(first, 0, (state) => ({ ...state, name: 'Hidden' }));
+    expect(withState(renamed, 5).states.map((state) => state.name)).toEqual(['Hidden', 'Shown']);
+    const both = withState(first, 5);
+    expect(withState(both, 6).states.map((state) => state.name)).toEqual(['Shown', 'Hidden', 'State 3']);
+  });
 });

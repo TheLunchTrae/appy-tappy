@@ -23,6 +23,8 @@ interface Props {
   readonly onDraft: (update: (draft: Draft) => Draft) => void;
   /** Shows the screenshot a state is taken from. */
   readonly onShow: (screenshot: number) => void;
+  /** Whether this draws a fix, which compares with the tolerance of the value's first drawing, so it has none. */
+  readonly fix: boolean;
 }
 
 /** Why a new state cannot be taken from the screenshot shown, or null when it can. */
@@ -119,7 +121,7 @@ function StateCard(props: CardProps) {
   );
 }
 
-export function StatesField({ draft, full, selected, masks, reading, position, onDraft, onShow }: Props) {
+export function StatesField({ draft, full, selected, masks, reading, position, onDraft, onShow, fix }: Props) {
   const blocked = addBlocked(draft, selected);
   const selecting = draft.states.some((state) => state.steps.length > 0);
   return (
@@ -197,13 +199,17 @@ export function StatesField({ draft, full, selected, masks, reading, position, o
             : 'Select the thing on a state’s screenshot, back where the region is drawn, to compare only its pixels.'}
         </span>
       </div>
-      <ToleranceField
-        help="How far, on average, the compared pixels may differ from a state's image."
-        value={draft.tolerance}
-        onChange={(value) => {
-          onDraft((current) => ({ ...current, tolerance: value }));
-        }}
-      />
+      {fix ? (
+        <p className="note">At this size it compares with the tolerance of its first drawing.</p>
+      ) : (
+        <ToleranceField
+          help="How far, on average, the compared pixels may differ from a state's image."
+          value={draft.tolerance}
+          onChange={(value) => {
+            onDraft((current) => ({ ...current, tolerance: value }));
+          }}
+        />
+      )}
     </>
   );
 }

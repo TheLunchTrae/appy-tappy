@@ -34,6 +34,7 @@ function value(id: string, name: string, check: CheckDef): ValueDef {
       windowSize: { width: 100, height: 50 },
       region: { x: 0, y: 0, width: 10, height: 10 },
       check,
+      fixes: [],
     },
   };
 }
@@ -62,6 +63,7 @@ const apps: readonly AppSummary[] = [
         mustMatch: { title: false, class: false },
         fallback: 'none',
       },
+      sizeChanges: 'often',
       antiCheat: 'unknown',
       values: [progress, iconVisible, status],
       references: [],
@@ -612,6 +614,7 @@ describe('clicks', () => {
       antiCheat: 'none' as const,
       values: [],
       references: [],
+      sizeChanges: 'often' as const,
     },
     error: null,
     windows: [],

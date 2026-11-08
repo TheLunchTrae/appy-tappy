@@ -48,7 +48,7 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayView;
 use crate::owner::{
-    AppSummary, ClickPictureView, FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec,
+    AppSummary, ClickPictureView, FixSpec, FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec,
     SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
@@ -119,6 +119,7 @@ fn declarations() -> String {
     found.visit::<ClickAtDef>();
     found.visit::<ClickPictureView>();
     found.visit::<ColorSpec>();
+    found.visit::<FixSpec>();
     found.visit::<FoundClick>();
     found.visit::<Live>();
     found.visit::<OverlayModeDef>();

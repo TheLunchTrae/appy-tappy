@@ -7,8 +7,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ReferenceDef, ScreenDef, SizeDef, ValueDef,
-    value_id,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ReferenceDef, ScreenDef, SizeChangesDef, SizeDef,
+    ValueDef, value_id,
 };
 use appytappy_sources::screen::saved;
 
@@ -116,10 +116,13 @@ impl<H: Host> Owner<H> {
             },
             region: saved.region,
             check: saved.check,
+            pin: Some(spec.pin),
+            fixes: Vec::new(),
         };
         read_back(
             &screen,
             &file.references,
+            file.size_changes,
             &saved.pictures,
             &stores.apps.folder(&app),
         )?;
@@ -300,16 +303,18 @@ fn checked_now(build: BuildDef) -> CheckedDef {
     CheckedDef { build, at }
 }
 
-/// Reads `screen` back as the runtime will, from `pictures`, about to be
-/// saved, and those already in the application's `folder`, so a value that
-/// saves is one the runtime can read.
-fn read_back(
+/// Reads `screen` back as the runtime will, with its application's
+/// `references` and `size_changes`, from `pictures`, about to be saved, and
+/// those already in the application's `folder`, so a value that saves is
+/// one the runtime can read.
+pub(super) fn read_back(
     screen: &ScreenDef,
     references: &[ReferenceDef],
+    size_changes: SizeChangesDef,
     pictures: &Pictures,
     folder: &Path,
 ) -> Result<(), String> {
-    saved::build(screen, references, |picture| {
+    saved::build(screen, references, size_changes, |picture| {
         pictures
             .iter()
             .find(|(name, _)| name == picture)
@@ -372,15 +377,29 @@ mod tests {
                     .collect(),
                 tolerance: 0,
             },
+            pin: None,
+            fixes: Vec::new(),
         };
         fs::write(folder.join("old.png"), &png).expect("writes");
         let new = vec![("new.png".to_owned(), png)];
         assert_eq!(
-            read_back(&screen(["new.png", "old.png"]), &[], &new, &folder),
+            read_back(
+                &screen(["new.png", "old.png"]),
+                &[],
+                SizeChangesDef::Often,
+                &new,
+                &folder
+            ),
             Ok(())
         );
         assert_eq!(
-            read_back(&screen(["new.png", "gone.png"]), &[], &new, &folder),
+            read_back(
+                &screen(["new.png", "gone.png"]),
+                &[],
+                SizeChangesDef::Often,
+                &new,
+                &folder
+            ),
             Err(
                 "AppyTappy could not read this value as saved: its picture gone.png cannot be \
                  read."
@@ -388,7 +407,14 @@ mod tests {
             )
         );
         assert!(
-            read_back(&screen(["old.png", "new.png"]), &[], &Vec::new(), &folder).is_err(),
+            read_back(
+                &screen(["old.png", "new.png"]),
+                &[],
+                SizeChangesDef::Often,
+                &Vec::new(),
+                &folder
+            )
+            .is_err(),
             "a new picture is not on disk yet"
         );
         fs::remove_dir_all(root).expect("clean up");
@@ -712,6 +738,7 @@ mod tests {
                         class: "OtherWindow",
                         executable: "Other.exe",
                     }),
+                    size_changes: appytappy_config::app_file::SizeChangesDef::Often,
                 },
             )
         });
@@ -765,6 +792,7 @@ mod tests {
                             class: "ExampleWindow",
                             executable,
                         }),
+                        size_changes: appytappy_config::app_file::SizeChangesDef::Often,
                     },
                 )
             })
@@ -820,6 +848,7 @@ mod tests {
                         class: "ExampleWindow",
                         executable: "Example.exe",
                     }),
+                    size_changes: appytappy_config::app_file::SizeChangesDef::Often,
                 }
             )),
             Err("no store in this test".to_owned())

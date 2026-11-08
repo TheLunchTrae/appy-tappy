@@ -1,15 +1,22 @@
 //! The automation editor's live reading: watching a saved value on its window
 //! and telling the interface what it reads.
+//!
+//! The capture copies only the value's region as it reads at one window
+//! size. Once frames show another size, and no other, for a quarter of a
+//! second, the value is placed there once, and the capture starts again for
+//! its region there, so the watch reads the value at each size as the
+//! runtime does, and a drag across many sizes starts it again only once.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
+use std::time::Instant;
 
 use appytappy_config::automation_file::WhenDef;
 use appytappy_config::signal::SignalName;
-use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::saved;
-use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Size};
+use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
+use appytappy_sources::screen::settle::Settle;
+use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Region, Size};
 use appytappy_sources::system::best_window;
 
 use super::host::Host;
@@ -19,16 +26,27 @@ use super::{Owner, WATCH_INTERVAL};
 /// The saved value the automation editor watches.
 #[derive(Debug)]
 pub(super) struct Watched {
+    /// The watch's number: the generation of its first capture, which it
+    /// keeps when its capture starts again for another window size.
+    id: u64,
     /// Its application's ID.
     app: String,
     /// Its ID.
     value: String,
     /// Its name, for messages.
     name: String,
-    /// The window's size when its region was drawn.
-    window_size: Size,
-    /// The value's check, which reads the captured region.
-    check: Check,
+    /// The captured window.
+    window: u64,
+    /// The value's saved check.
+    check: SavedValue,
+    /// The window size the value is placed at, and where and how it reads
+    /// there or why it does not.
+    placed: (Size, Result<AtSize, Unread>),
+    /// The region the capture copies: the value's at the last size it read
+    /// at.
+    copying: Region,
+    /// The window size frames show, settled at `placed`'s.
+    settle: Settle,
     /// What the newest frame showed, or `None` before one arrived.
     pub(super) seen: Option<Seen>,
     /// Why the capture stopped, once it has.
@@ -64,7 +82,7 @@ impl<H: Host> Owner<H> {
             .find(|saved| saved.id == value)
             .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
         let folder = stores.apps.folder(app);
-        let check = saved::build(&saved.screen, &file.references, |name| {
+        let check = saved::build(&saved.screen, &file.references, file.size_changes, |name| {
             fs::read(folder.join(name))
         })
         .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
@@ -72,35 +90,93 @@ impl<H: Host> Owner<H> {
         let windows = self.host.windows().map_err(|error| error.to_string())?;
         let window = best_window(&file.window.to_match(), processes, windows)
             .ok_or_else(|| format!("Open {} to see what {} reads.", file.name, saved.name))?;
+        // A value reads where it was first drawn, at the size it was drawn
+        // at, until a frame shows the window's size.
+        let size = check.drawn.window_size;
+        let region = check.drawn.region;
         let watch = self.start(
             window,
-            Crop::Layout(Layout::one(check.region)),
+            Crop::Layout(Layout::one(region)),
             WATCH_INTERVAL,
             watch_message,
         )?;
+        let placed = (size, check.at(size));
         self.watched = Some(Watched {
+            id: watch,
             app: app.to_owned(),
             value: value.to_owned(),
             name: saved.name.clone(),
-            window_size: check.window_size,
-            check: check.check,
+            window,
+            check,
+            placed,
+            copying: region,
+            settle: Settle::new(size),
             seen: None,
             failure: None,
         });
         Ok(watch)
     }
 
+    /// Keeps what a frame of the watched value's window showed. Once frames
+    /// settle at another size than the value is placed at, it places the
+    /// value there, and when it reads there at another region, starts the
+    /// capture again for that region, keeping the watch's number.
+    pub(super) fn watch_seen(&mut self, seen: Seen) {
+        let now = self.host.now();
+        let Some(watched) = self.watched.as_mut() else {
+            return;
+        };
+        let size = match &seen {
+            Seen::Region { window_size, .. } | Seen::Outside(window_size) => *window_size,
+        };
+        watched.settle.saw(size, now);
+        watched.seen = Some(seen);
+        self.settle_watch(now);
+    }
+
+    /// Places the watched value at the size its frames settled at by `now`,
+    /// once they have, and starts the capture again when the value reads
+    /// there at another region than the one copied.
+    fn settle_watch(&mut self, now: Instant) {
+        let Some(mut watched) = self.watched.take() else {
+            return;
+        };
+        if let Some(size) = watched.settle.settled(now) {
+            watched.placed = (size, watched.check.at(size));
+            if let Ok(at) = &watched.placed.1
+                && at.region != watched.copying
+            {
+                watched.seen = None;
+                watched.copying = at.region;
+                // Starting again drops the old capture's frames, which are of
+                // the old region.
+                if let Err(error) = self.start(
+                    watched.window,
+                    Crop::Layout(Layout::one(at.region)),
+                    WATCH_INTERVAL,
+                    watch_message,
+                ) {
+                    watched.failure = Some(error);
+                }
+            }
+        }
+        self.watched = Some(watched);
+    }
+
     /// What the watched value reads on the newest frame, and whether `when`
-    /// holds for it; an error once the watch was stopped or replaced.
+    /// holds for it; an error once the watch was stopped or replaced. A
+    /// window size that settled since the last frame places the value there
+    /// first, so a window that stopped drawing is placed too.
     pub(crate) fn watched_reading(
-        &self,
+        &mut self,
         watch: u64,
         when: Option<&WhenDef>,
     ) -> Result<Live, String> {
+        self.settle_watch(self.host.now());
         let watched = self
             .watched
             .as_ref()
-            .filter(|_| watch == self.generation)
+            .filter(|watched| watched.id == watch)
             .ok_or_else(|| "No value is watched.".to_owned())?;
         let name = &watched.name;
         if let Some(error) = &watched.failure {
@@ -113,16 +189,30 @@ impl<H: Host> Owner<H> {
             Some(Seen::Region { window_size, image }) => (*window_size, Some(image)),
             Some(Seen::Outside(window_size)) => (*window_size, None),
         };
-        let Some(image) = image.filter(|_| window_size == watched.window_size) else {
+        let (placed_at, placed) = &watched.placed;
+        if window_size != *placed_at {
+            return Ok(Live::Waiting);
+        }
+        let at = match placed {
+            Ok(at) => at,
+            Err(unread) => {
+                return Ok(Live::Problem {
+                    message: format!(
+                        "{name} is not read at {window_size}: {unread}. {}",
+                        advice(*unread)
+                    ),
+                });
+            },
+        };
+        let Some(image) = image else {
             return Ok(Live::Problem {
                 message: format!(
-                    "{name} was drawn when the window was {}, and it is {window_size} now. \
-                     Resize the window to read it.",
-                    watched.window_size
+                    "{name} cannot be read now: its region reaches outside the {window_size} \
+                     window."
                 ),
             });
         };
-        let value = match watched.check.read(image) {
+        let value = match watched.check.check(at).read(image) {
             Ok(value) => value,
             Err(error) => {
                 return Ok(Live::Problem {
@@ -145,9 +235,22 @@ impl<H: Host> Owner<H> {
 
     /// Stops watch `watch`, unless another capture took its place.
     pub(crate) fn stop_watching(&mut self, watch: u64) {
-        if self.watched.is_some() && watch == self.generation {
+        if self
+            .watched
+            .as_ref()
+            .is_some_and(|watched| watched.id == watch)
+        {
             self.stop();
         }
+    }
+}
+
+/// What the user can do about a value that is not read at a window size,
+/// as a sentence.
+const fn advice(unread: Unread) -> &'static str {
+    match unread {
+        Unread::NotDrawn => "Resize the window, or fix the value at this size on the Values page.",
+        Unread::Outside | Unread::TooSmall => "Fix the value at this size on the Values page.",
     }
 }
 
@@ -156,6 +259,8 @@ mod tests {
     use appytappy_config::app_file::WindowDef;
     use appytappy_config::automation_file::{ComparisonDef, TargetDef};
     use appytappy_sources::screen::{FrameHandler, Image, Region};
+
+    use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::CheckSpec;
     use crate::owner::messages::Reading;
@@ -267,20 +372,21 @@ mod tests {
             "another watch's number reads nothing"
         );
 
-        let resized = |width| {
-            Ok(Live::Problem {
-                message: format!(
-                    "Progress bar was drawn when the window was 4x2, and it is {width}x2 now. \
-                     Resize the window to read it."
-                ),
-            })
-        };
+        // As wide again but as tall, the bar pinned left reads where it was
+        // drawn, so the capture goes on.
         let wider = Size {
             width: 6,
             height: 2,
         };
         harness.deliver_at(&mut handler, Ok((wider, &frame_image())), WATCH_INTERVAL);
-        assert_eq!(harness.ask(watched(watch, None)), resized(6));
+        assert_eq!(
+            harness.ask(watched(watch, None)),
+            Ok(Live::Waiting),
+            "until the size settles"
+        );
+        harness.wait(SETTLE);
+        assert_eq!(harness.ask(watched(watch, None)), read(None));
+        assert!(harness.closed.try_recv().is_err(), "the capture goes on");
         let narrower = Size {
             width: 3,
             height: 2,
@@ -293,9 +399,19 @@ mod tests {
             .into()),
             WATCH_INTERVAL,
         );
-        assert_eq!(harness.ask(watched(watch, None)), resized(3));
+        harness.wait(SETTLE);
+        assert_eq!(
+            harness.ask(watched(watch, None)),
+            Ok(Live::Problem {
+                message: "Progress bar is not read at 3x2: scaled to this window size, its \
+                          region reaches outside the window. Fix the value at this size on the \
+                          Values page."
+                    .to_owned()
+            })
+        );
         let white = Image::new(WINDOW, vec![255; 32]).expect("matching length");
         harness.deliver_at(&mut handler, Ok((WINDOW, &white)), WATCH_INTERVAL);
+        harness.wait(SETTLE);
         let Ok(Live::Problem { message }) = harness.ask(watched(watch, None)) else {
             panic!("a bar of neither color cannot be read");
         };
@@ -318,6 +434,80 @@ mod tests {
             harness.closed.try_recv(),
             Ok(7),
             "a failed capture is closed at once"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_watch_follows_its_window_to_each_size_and_keeps_its_number() {
+        let (mut harness, root) = with_saved_bar("watch-sizes");
+        let (watch, mut handler) = watch_bar(&mut harness);
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the pick's capture");
+        // Twice the height, the bar doubles, and the capture starts again
+        // for its region there.
+        let large = Size {
+            width: 8,
+            height: 4,
+        };
+        let red = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        assert!(harness.closed.try_recv().is_err(), "not settled yet");
+        // A drag passes another size, which starts the wait again; the
+        // editor's poll places the value once it settled, with no frame.
+        harness.wait(SETTLE / 2);
+        let between = Size {
+            width: 6,
+            height: 3,
+        };
+        harness.deliver_at(&mut handler, Ok((between, &red)), WATCH_INTERVAL);
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.wait(SETTLE / 2);
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
+        assert!(harness.closed.try_recv().is_err(), "the wait started again");
+        harness.wait(SETTLE);
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
+        assert_eq!(harness.closed.try_recv(), Ok(7));
+        let started = harness.handlers.try_recv().expect("capture started again");
+        assert!(harness.handlers.try_recv().is_err(), "once");
+        assert_eq!(
+            started.crop,
+            Crop::Layout(Layout::one(Region::new(0, 0, 8, 4).expect("not empty")))
+        );
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
+        // A late frame of the old capture is dropped.
+        harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), WATCH_INTERVAL);
+        assert!(harness.handlers.try_recv().is_err(), "no capture starts");
+        let mut handler = started.handler;
+        let region = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
+        harness.deliver_at(&mut handler, Ok((large, &region)), WATCH_INTERVAL);
+        assert_eq!(
+            harness.ask(watched(watch, None)),
+            Ok(Live::Read {
+                reading: Reading::Number(100.0),
+                holds: None,
+            })
+        );
+        // Read only at the sizes it was drawn at, it says so.
+        let stores = harness.owner.stores().expect("stores");
+        let mut file = stores.app_file("example").expect("saved");
+        file.size_changes = appytappy_config::app_file::SizeChangesDef::Rarely;
+        stores.apps.save("example", &file, &[]).expect("saves");
+        let (watch, mut handler) = watch_bar(&mut harness);
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.wait(SETTLE);
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        assert!(
+            harness.handlers.try_recv().is_err(),
+            "nothing to copy there"
+        );
+        assert_eq!(
+            harness.ask(watched(watch, None)),
+            Ok(Live::Problem {
+                message: "Progress bar is not read at 8x4: it is read only at the window sizes \
+                          it was drawn at. Resize the window, or fix the value at this size on \
+                          the Values page."
+                    .to_owned()
+            })
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }

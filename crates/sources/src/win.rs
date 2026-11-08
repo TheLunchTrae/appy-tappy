@@ -25,6 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::BOOL;
 
+use crate::screen::Size;
 use crate::system::{Bounds, ProcessEntry, Rgb, System, WindowEntry, WindowPlace};
 
 mod build;
@@ -234,6 +235,41 @@ impl System for WindowsSystem {
         }))
     }
 
+    fn frame_size(&self, window: u64) -> io::Result<Option<Size>> {
+        let handle = HWND(ptr::without_provenance_mut(
+            usize::try_from(window).map_err(io::Error::other)?,
+        ));
+        let mut rect = RECT::default();
+        #[expect(unsafe_code, reason = "Win32 calls")]
+        // SAFETY: IsWindow and IsIconic only read the state of the window
+        // `handle` names; DwmGetWindowAttribute writes at most
+        // `struct_size::<RECT>()` bytes into `rect`, a live local of that size,
+        // and fails without harm when no such window exists.
+        let (exists, minimized, read) = unsafe {
+            (
+                IsWindow(Some(handle)).as_bool(),
+                IsIconic(handle).as_bool(),
+                DwmGetWindowAttribute(
+                    handle,
+                    DWMWA_EXTENDED_FRAME_BOUNDS,
+                    (&raw mut rect).cast(),
+                    struct_size::<RECT>()?,
+                ),
+            )
+        };
+        // A minimized window's bounds are its small placeholder, not the size
+        // it will draw at once restored.
+        if !exists || minimized {
+            return Ok(None);
+        }
+        read?;
+        let side = |from: i32, to: i32| u32::try_from(to.saturating_sub(from)).unwrap_or_default();
+        Ok(Some(Size {
+            width: side(rect.left, rect.right),
+            height: side(rect.top, rect.bottom),
+        }))
+    }
+
     fn frame_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
         let Some(place) = self.window_place(window)? else {
             return Ok(None);
@@ -242,7 +278,7 @@ impl System for WindowsSystem {
             usize::try_from(window).map_err(io::Error::other)?,
         ));
         let mut rect = RECT::default();
-        let size = u32::try_from(size_of::<RECT>()).map_err(io::Error::other)?;
+        let size = struct_size::<RECT>()?;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `rect` is a live local of the size passed, which the call
         // writes; it fails without harm when the window is gone.

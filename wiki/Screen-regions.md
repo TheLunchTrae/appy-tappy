@@ -8,7 +8,8 @@ information, and choose a check. The code lives in `appytappy-sources`:
 capture packs the regions it copies, `screen/capture.rs` the capture trait,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
-the saved checks, and `schedule.rs` the read interval.
+the saved checks, `screen/scale.rs` and `screen/resample.rs` how a value
+reads at another window size, and `schedule.rs` the read interval.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
 
 ## Checks
@@ -78,6 +79,71 @@ and a more transparent one is left out. A picture with no transparent pixel is
 compared whole, and one with no opaque pixel is refused. AppyTappy writes
 8-bit RGB, or RGBA with the left-out pixels fully transparent when a mask
 leaves any out.
+
+## Window sizes
+
+A region is drawn on a screenshot of one window size. Each application says
+how often its window changes size, as `sizeChanges`, and that decides what
+its values read at a size they were not drawn at.
+
+- **Often**, the default, scales each value from its first drawing.
+  Applications draw their interface larger as their window grows taller, so
+  `scale::scaled` scales the region by one factor, the new height over the
+  drawn height. The region keeps its scaled distance from the side of the
+  window it is pinned to, one of nine: a corner, the middle of an edge, or
+  the center. A value saved without a pin stays at the third of the window
+  its region's center is in, across and down, and the setup app guesses the
+  same way. Since the factor follows the height, the pin down the window
+  changes only how the region rounds; across a wider or narrower window it
+  moves the region. Each of the region's edges is placed and rounded, a
+  half away from zero, and its width and height are the distance between
+  them, at least 1 pixel, so a region that touches the side it is pinned to
+  still touches it. A region that scales outside the window does not read
+  there.
+- **Rarely** reads each value only at the sizes it was drawn at, so nothing
+  is guessed.
+
+A **fix** draws a value again at one more window size, up to `MAX_FIXES`.
+At that size the value reads at the fix's region, while its application's
+size changes either way. A fix of a state check has its own picture of each
+state, in the first drawing's order; a fix of a number check may name its
+own reference, for characters that look different at that size; a bar or
+color check keeps its first drawing's colors and fixes only its region. A
+fix cannot be at the size of the first drawing or of another fix, and the
+setup app and the runtime refuse such a file with the same checks
+(`saved::build`).
+
+`SavedValue::at` resolves where a value reads at a size: its drawing made
+there, the first or a fix, or its first drawing scaled, or why it does not
+read (`Unread`). A number reads at any size, since a character's shape is
+scaled to a fixed grid before it is compared; a bar or color check counts
+colors, which do not change with size. A state check compares pixel by
+pixel, so a scaled region needs its pictures and masks redrawn at its size.
+`resample` redraws each axis on its own: shrinking averages the pixels each
+new pixel covers, and growing takes the nearest one, so an interface's
+sharp edges stay sharp. A mask keeps a pixel when at least half the pixels
+it covers are kept, and its color averages only those, so a left-out
+background does not tint the thing's edge. A picture redrawn to no pixel
+to compare does not read. Redrawing costs one pass over each picture, so
+the runtime and the setup app resolve a size once, after the window has
+settled at it, and read every frame at that size with the result; a frame
+costs what it did before.
+
+A window dragged by its corner passes many sizes. The runtime and the setup
+app read nothing at a new size until frames have shown it, and no other,
+for `SETTLE` (250 ms, `screen::settle`). Then they resolve it, and start the
+capture again at the regions there when some value reads, once for each
+settled size. Until a size settles, its values are unseen, so no rule acts
+on them. Why a value does not read at a size leaves the size out, so the
+log says it once for each reason, not once for each size the window
+passes.
+
+State pictures are named after the value and the state's place, such as
+`status-1.png`, and a fix's after the value, the fix's number, and the
+state's place, such as `status-2-1.png`. Value IDs have no `-`, so the two
+never clash. A fix saved again at its size takes a number no saved fix
+uses, so its new pictures never overwrite the ones it replaces, and the
+setup app deletes the old ones once the file is saved.
 
 ## Selection
 

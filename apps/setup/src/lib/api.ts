@@ -13,6 +13,7 @@ import type {
   ClickAtDef,
   ClickPictureView,
   ColorSpec,
+  FixSpec,
   FoundClick,
   Live,
   OverlayModeDef,
@@ -192,6 +193,36 @@ export async function removeApp(application: string): Promise<string | null> {
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
   return invoke<SavedValue>('save_value', { spec });
+}
+
+/** Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would not fit. */
+export async function placeValue(
+  application: string,
+  value: string,
+  width: number,
+  height: number,
+): Promise<RegionSpec | null> {
+  return invoke<RegionSpec | null>('place_value', { application, value, width, height });
+}
+
+/** Saves a fix of a saved value at the size of the screenshot `spec` names. */
+export async function saveFix(spec: FixSpec): Promise<SavedValue> {
+  return invoke<SavedValue>('save_fix', { spec });
+}
+
+/** Removes the saved value's fix at `width` by `height`. */
+export async function removeFix(application: string, value: string, width: number, height: number): Promise<void> {
+  await invoke('remove_fix', { application, value, width, height });
+}
+
+/** What the application's values read now, for the Values page; the first call starts reading its window. */
+export async function liveValues(application: string): Promise<OverlayView> {
+  return invoke<OverlayView>('live_values', { application });
+}
+
+/** Stops reading values for the Values page. */
+export async function stopLiveValues(): Promise<void> {
+  await invoke('stop_live_values');
 }
 
 export async function deleteValue(application: string, value: string): Promise<void> {

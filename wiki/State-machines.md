@@ -205,7 +205,10 @@ stateDiagram-v2
     Waiting --> Finding: FIND_AGAIN passes
     Finding --> Capturing: the capture starts
     Capturing --> Capturing: Recovered, the backoff resets
-    Capturing --> Closing: Lost, Resized, or Failing from the frame handler
+    Capturing --> Capturing: Resizing, the size settles again from then
+    Capturing --> Capturing: a size where no value reads settles, why each is not read
+    Capturing --> Closing: Lost or Failing from the frame handler
+    Capturing --> Closing: a size where a value reads settles, Resized
     Capturing --> Closing: every CHECK_AGAIN, the window is hidden or no longer fits, or a better one fits or is another process's
     Closing --> Finding: Resized, or the check, after Unseen
     Closing --> Backoff: Lost or Failing
@@ -221,12 +224,40 @@ stateDiagram-v2
   session's process (`Job::process`), as detection does: one of that process's
   windows when it owns one, and otherwise the first that shows. It captures the
   window only when it is that process's, and otherwise waits for the session
-  to follow the other process.
-- **Capturing.** `watch` waits on `control` for at most `CHECK_AGAIN` at a time.
-  The capture's frame handler runs on another thread and sends `Lost`,
-  `Resized`, `Failing`, or `Recovered` back to this one. On each timeout,
-  `moved_on` checks that the window still shows and still fits as well as any
-  window, because a hidden window sends no frames and no close.
+  to follow the other process. Before the capture starts, `framed_at` asks
+  `System::frame_size` for the size the window's frames will have, the
+  window's bounds without its shadow (`DWMWA_EXTENDED_FRAME_BOUNDS`), and
+  places the values there when some value reads there, so a window that is
+  not at the first value's drawn size is not captured twice at each start.
+  The size is a guess: frames of another size are followed as below, and
+  after a capture ended with `Resized`, the next one starts at the size its
+  frames settled at, without guessing again. The first capture otherwise
+  starts at the first value's drawn size.
+- **Capturing.** `watch` waits on `control` until the next `CHECK_AGAIN` or
+  until a new size settles, whichever comes first. The capture's frame handler
+  runs on another thread and sends `Lost`, `Resizing`, `Failing`, or
+  `Recovered` back to this one. Each `CHECK_AGAIN`, `moved_on` checks that the
+  window still shows and still fits as well as any window, because a hidden
+  window sends no frames and no close.
+- **Settling.** `Resizing` names the size frames show now, and a `Settle`
+  (`crates/sources/src/screen/settle.rs`) waits for it to hold for `SETTLE`,
+  250 ms, starting again at each other size. The wait runs on this thread's
+  timer, so a window that stops drawing once it is dragged still settles.
+  The settled size is resolved once with `Placed::new`. When a value reads
+  there, the capture ends with `Resized`, which carries where each value reads,
+  and starts again at those regions, once for each settled size. When none
+  does, the capture goes on and this thread says why each value is not read
+  there (`say_unread`), at once, even when the window draws no more frames.
+  Each value's last problem moves between the two threads over channels:
+  the handler keeps it while frames show the capture's size, hands it to this
+  thread in its first `Resizing` for another size, and takes it back, as this
+  thread said it, on the first frame of its own size again. Nothing moves for
+  each frame. A capture started for a new size starts from those problems,
+  and one started after a capture ended any other way starts from none. A
+  size that settles back at the capture's own size changes nothing. Windows
+  can recreate the frame pool at a new size in place, and `capture.rs`
+  already does, but the capture's crop and packing are fixed when it starts,
+  so a new layout needs a new capture.
 - **Closing.** The thread closes the capture first, then drops what the closed
   capture sent after the message that ended it, still counting a `Stop` and a
   `Recovered`. When the 2 second check ended the capture, it then sends
@@ -242,20 +273,24 @@ stateDiagram-v2
 ### Frame handler
 
 `FrameReader::handle` runs once per frame and decides what each frame means.
-Its state is `size` (the window size whose values it reads), `last` (each
-value's last reading), `seen` (whether it sent a reading since it last sent
-`Unseen`), `failures` (frames in a row that failed), `restarted` (whether the
-reader started this capture again after the last one ended), and `ended`
-(whether it told the reader its capture ended).
+Its state is `placed` (the window size whose values it reads, and where
+each value reads at it, resolved once), `told` (the other size it last told
+the reader frames show), `last` (each value's last reading), `problems`
+(each value's last problem, handed to the reader while frames show
+another size), `heard` (where the reader gives it back), `seen` (whether
+it sent a reading since it last sent `Unseen`), `failures` (frames in a
+row that failed), `restarted` (whether the reader started this capture
+again after the last one ended), and `ended` (whether it told the reader
+its capture ended).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Reading
     Reading --> Reading: frame read, a Sample for each value that changed
     Reading --> Reading: frame error, logged once and counted
-    Reading --> Reading: another size with no values drawn at it, Unseen
+    Reading --> Reading: another size, Unseen, and Resizing once for each size
+    Reading --> Reading: its own size again, Resizing
     Reading --> Ended: the capture ended, Unseen and Lost
-    Reading --> Ended: another drawn size, Unseen and Resized
     Reading --> Ended: RESTART_AFTER frame errors in a row, Unseen and Failing
     Ended --> [*]: the reader closes the capture
 ```
@@ -273,8 +308,20 @@ stateDiagram-v2
 - **Ended.** The capture can still hand frames to the handler until the reader
   closes it. The handler reads none of them, so nothing it sends follows
   `Unseen`.
-- A window size at which no value was drawn sends `Unseen` and keeps the
-  capture, because a restart would find the same size.
+- A frame at another size sends `Unseen` and reads nothing, and the handler
+  tells the reader the size with `Resizing` once, not for each frame, so
+  nothing is resolved for each frame. Only the reader resolves a size, once
+  it settled.
+- A settled size at which no value reads keeps the capture, because a
+  restart would find the same size. The reader says once why each value is
+  not read there, and the handler reads nothing until frames show its own
+  size again.
+- A value that does not read at the capture's own size, such as one whose
+  scaled region reaches outside the window, says why once and is not
+  copied.
+- Each value's problem leaves the window size out and is carried into the
+  capture started for a new size, so the log says why once for each reason,
+  not once for each size or each restart.
 
 ### Read schedule
 
@@ -661,6 +708,7 @@ stateDiagram-v2
     Ended --> Previewing: another window is picked
     Previewing --> Watching: the automation editor watches a value
     Watching --> Previewing: a window is picked
+    Watching --> Watching: the window settles at another size, which starts the capture again at the value's region there
     Watching --> WatchFailed: the watch reports an error
     WatchFailed --> Closed: stop
     WatchFailed --> Watching: the editor watches again
@@ -678,6 +726,15 @@ stateDiagram-v2
   again". Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show.
+- **Watching** at another window size waits for the size to settle, as the
+  runtime's reader does: frames show it, and no other, for `SETTLE`, 250 ms.
+  Until then the editor's poll answers that it waits for a reading. Each
+  frame and each poll checks the wait against `Host::now`, so a window that
+  stops drawing still settles at the next poll. Once the size settles, the
+  watch places the value there with `SavedValue::at`, once. When its region
+  there differs from the one copied, the capture starts again under the same
+  watch number, so the editor's poll goes on. A size at which the value does
+  not read keeps the capture and answers why with each poll.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
@@ -749,12 +806,27 @@ stateDiagram-v2
     Opening --> Retrying: no window fits, or the file cannot be read
     Retrying --> Opening: 5 polls pass (RETRY_POLLS)
     Reading --> Retrying: the capture reports an error, such as a closed window
-    Reading --> Reading: the window takes another size
+    Reading --> Reading: the window settles at another size
     Reading --> Opening: a save that works changes its values, references, application, or overlay
     Retrying --> Opening: a save that works changes its values, references, application, or overlay
     Reading --> Off: the overlay is turned off, or its application is removed
     Retrying --> Off: the overlay is turned off, or its application is removed
 ```
+
+The Values page keeps a second set of entries, `live`, one for each running
+application whose values it shows, whether its overlay is on or not. They
+move through the same states but have no window: the page's poll opens one,
+and leaving the page turns them all off. Each value's reading carries the
+value's ID, so the page matches a reading to its row by ID.
+
+At another window size, an entry reads nothing until the size settles for
+`SETTLE`, which the poll checks against `Host::now`, so a window that stops
+drawing still settles. Until then each value shows no reading. Once the size
+settles, the entry places its values there with `SavedValue::at`, once. When
+some value reads there, the capture starts again at their regions, and the
+state pictures are drawn again, once for each settled size. When none does,
+the capture goes on and each value shows why it is not read there, such as
+that its region is too small, as `NotRead`.
 
 `overlay::window::sync` opens a window for each overlay that is on and closes
 each that is not. It runs when the main window mounts, after each overlay

@@ -124,7 +124,7 @@ impl<H: Host> Owner<H> {
     }
 
     /// Removes the reference `reference` of the application `app` and its
-    /// pictures, unless a value reads with it.
+    /// pictures, unless a value reads with it, in its check or in a fix.
     pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
         if let Some(file) = self.delete_reference_files(app, reference)? {
             self.tell(Changed::Values);
@@ -153,13 +153,7 @@ impl<H: Host> Owner<H> {
         let users: Vec<&str> = file
             .values
             .iter()
-            .filter(|value| {
-                matches!(
-                    &value.screen.check,
-                    appytappy_config::app_file::CheckDef::Number { reference: used, .. }
-                        if used == reference
-                )
-            })
+            .filter(|value| value.screen.reads_with(reference))
             .map(|value| value.name.as_str())
             .collect();
         if !users.is_empty() {
@@ -190,7 +184,7 @@ fn and_list(names: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::CheckDef;
+    use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
 
     use crate::owner::messages::SavedValue;
     use crate::owner::test_support::{
@@ -367,6 +361,36 @@ mod tests {
         harness
             .ask(|owner| owner.delete("example", "best"))
             .expect("removes the second value");
+        assert_eq!(
+            harness.ask(delete("digits")),
+            Err("Progress reads with Red digits. Change or remove it first.".to_owned())
+        );
+        // A value that reads with another reference keeps it while a fix
+        // still reads with it.
+        harness
+            .ask(|owner| {
+                let stores = owner.stores()?;
+                let mut file = stores.app_file("example")?;
+                let screen = &mut file.values[0].screen;
+                screen.check = CheckDef::Number {
+                    reference: "small".to_owned(),
+                    whole: true,
+                };
+                screen.fixes = vec![FixDef {
+                    window_size: SizeDef {
+                        width: 20,
+                        height: 20,
+                    },
+                    region: screen.region,
+                    images: Vec::new(),
+                    reference: Some("digits".to_owned()),
+                }];
+                stores
+                    .apps
+                    .save("example", &file, &[])
+                    .map_err(|error| error.to_string())
+            })
+            .expect("a fix reads with it");
         assert_eq!(
             harness.ask(delete("digits")),
             Err("Progress reads with Red digits. Change or remove it first.".to_owned())

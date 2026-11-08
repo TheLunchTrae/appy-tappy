@@ -149,20 +149,25 @@ Each thread below is a plain `std::thread`, and each channel is a
   [Lifecycle](#lifecycle) describes when it takes a snapshot.
 - **Readers.** One per attached application that has automations. Each finds the
   application's window with its [window match](Setup-app.md#window-matching),
-  copies only the regions of the values drawn at the window's current size,
-  packed one under another, and reads each value from its place in that
-  packed image. A `Layout` in `appytappy-sources::screen` says where each
-  region goes, and copies the one rectangle around them instead when that is
-  smaller, such as for values that overlap. It sends a `Sample` only when a
-  value changes, and reads less often while nothing changes. When the window closes or changes size, it sends `Unseen`,
-  and the owner forgets the application's values, so no rule acts on a value
-  nobody can see. Each rule stays as it was, run or not, until the values read
-  next decide its condition. When the window closes, when the capture cannot
-  go on, such as after the graphics device was lost, and after
-  `RESTART_AFTER` frames in a row fail, it sends `Unseen` and looks for the
-  window again. After a capture ends that way it waits first, from
-  `FIND_AGAIN`, doubling up to `RESTART_WAIT_MAX` while each new capture ends
-  before reading a frame, and it logs why once until the reason changes.
+  copies only the regions of the values that read at the window's current
+  size, packed one under another, and reads each value from its place in
+  that packed image. Where each value reads at a size, drawn there, fixed
+  there, or scaled from its first drawing, is resolved once each time the
+  window settles at the size, after it showed that size alone for 250 ms
+  ([Window sizes](Screen-regions.md#window-sizes)). A `Layout` in
+  `appytappy-sources::screen` says where each region goes, and copies the one
+  rectangle around them instead when that is smaller, such as for values
+  that overlap. It sends a `Sample` only when a value changes, and reads less
+  often while nothing changes. When the window closes or changes size, it
+  sends `Unseen`, and the owner forgets the application's values, so no rule
+  acts on a value nobody can see. Each rule stays as it was, run or not,
+  until the values read next decide its condition. When the window closes,
+  when the capture cannot go on, such as after the graphics device was
+  lost, and after `RESTART_AFTER` frames in a row fail, it sends `Unseen`
+  and looks for the window again. After a capture ends that way it waits
+  first, from `FIND_AGAIN`, doubling up to `RESTART_WAIT_MAX` while each
+  new capture ends before reading a frame, and it logs why once until the
+  reason changes.
   Every `CHECK_AGAIN` it checks that the window still shows and that no other
   window fits better, such as the main window opening after a launcher's,
   and looks again if not. It reads only a window of the process the session
@@ -728,11 +733,12 @@ is more windows of the setup app, one for each application whose overlay is
 on, so nothing is hooked or injected into the application. Each window loads
 the same UI, which renders only the readings when its label names an
 application. The owner thread keeps one capture for each overlay, which
-copies the values drawn at the window's current size with the same `Layout`
-as a reader, and the capture thread reads them from each frame, so only the
-readings cross to the owner. The window over the application is transparent, lets clicks
-through, and cannot take the focus. Tauri's window library activates a window
-it shows, so `platform` shows it once, off the screen, without activating it.
+copies the values that read at the window's current size with the same
+`Layout` and the same `SavedValue::at` as a reader, and the capture thread
+reads them from each frame, so only the readings cross to the owner. The
+window over the application is transparent, lets clicks through, and
+cannot take the focus. Tauri's window library activates a window it shows,
+so `platform` shows it once, off the screen, without activating it.
 From then on a thread of its own asks the owner over the channel where it goes
 about twenty times a second: the corner of the application's window while that
 window is in front, at the size its page measured for the card, and off the

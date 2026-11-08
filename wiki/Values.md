@@ -31,7 +31,9 @@ On the Values page, select **New value**.
    drag to draw a box around what to read. Drag inside the box to move it, or
    drag a corner to resize it. The **X**, **Y**, **Width**, and **Height**
    fields set it to the exact pixel, counted in the window's own pixels from
-   its top-left corner. Then select **Next: how to read it**.
+   its top-left corner. **Stays at** picks the side of the window the value
+   keeps to as the window changes size, as [Window size](#window-size)
+   describes. Then select **Next: how to read it**.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
    box under it then shows what AppyTappy reads on the live window, a few
    times a second. If the check cannot work, such as a bar whose filled and
@@ -116,15 +118,63 @@ other, or text on a background of the same color. For those, a **Color** or
 
 ## Window size
 
-A value reads only while the window is the size it was on the screenshot you
-drew the region on. If you use the window at more than one size, make a value
-at each size, with an automation for each; AppyTappy reads the values made at
-the window's current size. Each state of a **State** check comes from a
-screenshot of that same size, and trying or saving it says so if one is not.
+A value is drawn at the size the window was on the screenshot you drew its
+region on. Each state of a **State** check comes from a screenshot of that
+same size, and trying or saving it says so if one is not. At any other size,
+what AppyTappy reads depends on how often the application's window
+[changes size](Applications.md#how-often-the-window-changes-size):
 
-While the window is closed or at a size no value was made at, AppyTappy reads
-nothing. Automations neither run nor undo their changes until it can read
-again.
+- While it changes size **often**, the value scales with the window. Its
+  region grows or shrinks by how much taller or shorter the window is, and
+  keeps its scaled distance from the side it stays at. A **State** check's
+  pictures scale with it: shrinking averages the pixels each new pixel
+  covers, and growing repeats the nearest one, so sharp edges stay sharp. A
+  value whose region would reach past the window's edge isn't read.
+- While it changes size **rarely**, the value is read only at the sizes it
+  was drawn at.
+
+**Stays at** picks one of nine sides and corners of the window, on a 3 by 3
+grid. At first it is the third of the window the region's center is in, so a
+health bar in the bottom left stays at the bottom left. A value pinned to the
+right keeps its distance from the right edge as the window gets wider, and
+one pinned to the center keeps its distance from the middle. The Values page
+shows each value's size and side under **Region**, such as
+**Drawn at 1920 × 1080, pinned bottom left**.
+
+### Fix a value at one size
+
+While the application runs, the Values page adds a column for the window's
+size now, such as **At 3440 × 1440 now**, with what each value reads there.
+Each value has **Fix at this size** beside it there, unless the window is at
+the size the value was first drawn at. At that size, a value that reads wrong
+is deleted and made again. **Matches no state** isn't always wrong: the
+region may show none of the states right now.
+
+1. Pick the application's window. AppyTappy takes a screenshot of it at its
+   size now, with the region where the value would be read there: it
+   **Starts from the scaled region**.
+2. Move the region onto the value, then select **Next: how to read it**.
+3. For a **State** check, take a screenshot of each of its states at this
+   size and add them in the same order; each takes the next state's name.
+   The fix compares with the first drawing's tolerance.
+   For a **Number** check, **Read with** keeps the reference the value reads
+   with at every size, or **Learn a reference at this size** teaches a new
+   one from this size's screenshots. A **Bar fill** or **Color** check keeps
+   its colors.
+4. Select **Save fix**.
+
+At that size AppyTappy then reads the fix exactly, instead of scaling. The
+**Region** column lists each fix, such as **· fixed at 3440 × 1440**. A value
+can have up to 8 fixes. Fixing it again at the same size replaces the fix,
+and **Remove fix** beside a reading made with one removes it.
+
+While you resize the window, AppyTappy waits until the window keeps one size
+for a quarter of a second before it reads at that size. While the window is
+being resized, is closed or is at a size where no value reads, AppyTappy
+reads nothing. Automations neither run nor undo their changes until it can
+read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once
+which values it doesn't read at the window's size and why, and says it again
+only when the reason changes.
 
 ## When an application updates
 

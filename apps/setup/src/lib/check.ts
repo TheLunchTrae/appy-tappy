@@ -1,6 +1,7 @@
 // The check the user is setting up, and when it is complete enough to try.
 
 import {
+  type CheckDef,
   type CheckSpec,
   LIMITS,
   type RecordedLabel,
@@ -64,6 +65,8 @@ export interface Draft {
   readonly color: Color | null;
   /** A state check's looks, in the order they are listed. */
   readonly states: readonly DraftState[];
+  /** The names new states take first, in order: a saved value's, when it is drawn again at another size. */
+  readonly stateNames: readonly string[];
   /** How far a color may be from another and still count as alike, while selecting. */
   readonly colorMatch: number;
   /** Whether a state check compares only the selected pixels of each state. */
@@ -86,6 +89,7 @@ export const EMPTY_DRAFT: Draft = {
   empty: null,
   color: null,
   states: [],
+  stateNames: [],
   reference: null,
   colorMatch: DEFAULT_COLOR_MATCH,
   ignoreBackground: true,
@@ -279,9 +283,14 @@ export function stateOn(draft: Draft, screenshot: number | null): number {
   return draft.states.findIndex((state) => state.screenshot === screenshot);
 }
 
-/** The first of `State 1`, `State 2`, … that no state of `draft` is named. */
+/** The first of the draft's `stateNames` that no state of `draft` is named, or else the first of `State 1`,
+ * `State 2`, … that none is. */
 function nextStateName(draft: Draft): string {
   const taken = new Set(draft.states.map((state) => state.name.trim().toLowerCase()));
+  const saved = draft.stateNames.find((name) => !taken.has(name.trim().toLowerCase()));
+  if (saved !== undefined) {
+    return saved;
+  }
   let number = draft.states.length + 1;
   while (taken.has(`state ${number}`)) {
     number += 1;
@@ -349,6 +358,25 @@ export function toReference(draft: Draft, existing: ReferenceDef | null): Draft 
  */
 export function fromReference(draft: Draft, value: Drawn): Draft {
   return { ...draft, region: value.region, drawnOn: value.drawnOn, labels: new Map(), recorded: new Map() };
+}
+
+/**
+ * The draft that draws `check`, a saved value's, again at another window size: the same kind and settings, a bar's
+ * or a color's colors and a number's reference, and its states' names for the states taken at the new size. The
+ * region starts empty.
+ */
+export function fixDraft(check: CheckDef): Draft {
+  const start = { ...EMPTY_DRAFT, kind: check.kind, tolerance: DEFAULT_TOLERANCE[check.kind] };
+  switch (check.kind) {
+    case 'number':
+      return { ...start, reference: check.reference, whole: check.whole };
+    case 'barFill':
+      return { ...start, filled: check.filled, empty: check.empty };
+    case 'color':
+      return { ...start, color: check.color, tolerance: check.tolerance };
+    case 'state':
+      return { ...start, tolerance: check.tolerance, stateNames: check.states.map((state) => state.name) };
+  }
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

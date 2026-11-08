@@ -81,5 +81,5 @@ you to type.
 ## Delete a reference
 
 Select **Delete** next to a reference, then confirm. A reference that a value
-reads with cannot be deleted: AppyTappy names the values to change or delete
-first.
+reads with, at every size or in a fix at one size, cannot be deleted:
+AppyTappy names the values to change or delete first.

@@ -546,8 +546,8 @@ mod tests {
 
     use super::*;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, FORMAT, RegionDef, ScreenDef, SizeDef, StateDef, ValueDef,
-        WindowDef,
+        AntiCheatDef, CheckDef, FORMAT, RegionDef, ScreenDef, SizeChangesDef, SizeDef, StateDef,
+        ValueDef, WindowDef,
     };
     use crate::window_match::WindowFacts;
 
@@ -571,6 +571,7 @@ mod tests {
                 class: "ExampleWindow",
                 executable: "Example.exe",
             }),
+            size_changes: SizeChangesDef::Often,
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
@@ -595,6 +596,8 @@ mod tests {
                         }],
                         tolerance: 0,
                     },
+                    pin: None,
+                    fixes: Vec::new(),
                 },
             }],
             references: Vec::new(),

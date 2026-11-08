@@ -30,7 +30,8 @@ const MAX_IMAGE_NAME_LEN: usize = 64;
 
 /// The longest ID [`value_id`] makes, in bytes. It leaves room for the
 /// pictures named after the value, such as `{id}-16.png` for a state
-/// check's sixteenth state, within [`MAX_IMAGE_NAME_LEN`].
+/// check's sixteenth state and `{id}-9-16.png` for it in a fix, within
+/// [`MAX_IMAGE_NAME_LEN`].
 const MAX_VALUE_ID_LEN: usize = 48;
 
 /// The longest ID [`reference_id`] makes, in bytes. It leaves room for the
@@ -40,6 +41,9 @@ const MAX_REFERENCE_ID_LEN: usize = 40;
 
 /// The most states a state check may have.
 pub const MAX_STATES: usize = 16;
+
+/// The most fixes a value may have, each a drawing at another window size.
+pub const MAX_FIXES: usize = 8;
 
 /// One application's authoring file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +56,11 @@ pub struct AppFile {
     pub name: String,
     /// How to recognize the application's window.
     pub window: WindowDef,
+    /// How often its window changes size, which says whether its values
+    /// scale with the window. [`SizeChangesDef::Often`] when the file leaves
+    /// it out.
+    #[serde(default)]
+    pub size_changes: SizeChangesDef,
     /// How the application protects itself from other programs.
     pub anti_cheat: AntiCheatDef,
     /// The values read from the application's window.
@@ -235,6 +244,20 @@ impl From<&WindowMatch> for WindowDef {
     }
 }
 
+/// How often an application's window changes size, as the user answered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum SizeChangesDef {
+    /// Often, as in windowed play: at a size it was not drawn at, a value
+    /// reads its region scaled with the window.
+    #[default]
+    Often,
+    /// Rarely: a value reads only at the window sizes it was drawn at, and
+    /// nothing is guessed.
+    Rarely,
+}
+
 /// [`AntiCheatClass`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -298,17 +321,199 @@ pub struct ReferenceDef {
 }
 
 /// A value read from a region of the window's frame.
+///
+/// Its drawing is the window size it was drawn at, its region, and its
+/// check. At any other size it reads its fix for that size, if it has one,
+/// or else, while its application's window changes size
+/// [often](SizeChangesDef::Often), its region scaled from this drawing and
+/// kept at its pin's distance from that side of the window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScreenDef {
     /// The window's size when the region was drawn. A region's pixels mean
-    /// something only at this size.
+    /// something only at this size, or scaled from it.
     pub window_size: SizeDef,
     /// The region of the window's frame the check reads.
     pub region: RegionDef,
     /// The check.
     pub check: CheckDef,
+    /// The side of the window the region stays at as the window changes
+    /// size, or `None` for the side [`PinDef::guess`] picks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub pin: Option<PinDef>,
+    /// The value drawn again at other window sizes, each read exactly at its
+    /// own size. Always written, even when empty, since the setup app reads
+    /// the file's JSON as is.
+    #[serde(default)]
+    pub fixes: Vec<FixDef>,
+}
+
+impl ScreenDef {
+    /// The side the region stays at: the saved pin, or the one
+    /// [`PinDef::guess`] picks when the file has none.
+    #[must_use]
+    pub fn pin(&self) -> PinDef {
+        self.pin
+            .unwrap_or_else(|| PinDef::guess(self.region, self.window_size))
+    }
+
+    /// Whether the value reads with the reference `id`, in its number check
+    /// or in any fix.
+    #[must_use]
+    pub fn reads_with(&self, id: &str) -> bool {
+        let checked = matches!(&self.check, CheckDef::Number { reference, .. } if reference == id);
+        checked
+            || self
+                .fixes
+                .iter()
+                .any(|fix| fix.reference.as_deref() == Some(id))
+    }
+
+    /// The file names of the value's pictures: its state check's, then each
+    /// fix's.
+    pub fn images(&self) -> impl Iterator<Item = &str> {
+        self.check
+            .states()
+            .iter()
+            .map(|state| state.image.as_str())
+            .chain(
+                self.fixes
+                    .iter()
+                    .flat_map(|fix| fix.images.iter().map(String::as_str)),
+            )
+    }
+}
+
+/// A value drawn again at one window size, which it reads there exactly
+/// instead of scaling its first drawing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FixDef {
+    /// The window's size when it was drawn.
+    pub window_size: SizeDef,
+    /// The region at that size.
+    pub region: RegionDef,
+    /// For a state check, each state's picture at this size, in the order
+    /// of the check's states; empty for any other check. Always written.
+    #[serde(default)]
+    pub images: Vec<String>,
+    /// For a number check, the [`ReferenceDef::id`] of a reference learned
+    /// at this size, or `None` to read with the check's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub reference: Option<String>,
+}
+
+/// Where along one side of the window a pinned region stays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Along {
+    /// The left or the top.
+    Start,
+    /// The middle.
+    Middle,
+    /// The right or the bottom.
+    End,
+}
+
+impl Along {
+    /// The third of `length` that `twice_center`, twice a position along it,
+    /// falls in. Twice the position keeps a region's center whole.
+    fn third(twice_center: u64, length: u64) -> Self {
+        let thirds = twice_center.saturating_mul(3);
+        let twice = length.saturating_mul(2);
+        if thirds < twice {
+            Self::Start
+        } else if thirds < twice.saturating_mul(2) {
+            Self::Middle
+        } else {
+            Self::End
+        }
+    }
+}
+
+/// The side or corner of the window a value's region keeps its distance
+/// from as the window changes size: one of nine, top, middle or bottom by
+/// left, center or right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum PinDef {
+    /// The top-left corner.
+    TopLeft,
+    /// The middle of the top edge.
+    TopCenter,
+    /// The top-right corner.
+    TopRight,
+    /// The middle of the left edge.
+    MiddleLeft,
+    /// The window's center.
+    Center,
+    /// The middle of the right edge.
+    MiddleRight,
+    /// The bottom-left corner.
+    BottomLeft,
+    /// The middle of the bottom edge.
+    BottomCenter,
+    /// The bottom-right corner.
+    BottomRight,
+}
+
+impl PinDef {
+    /// The pin at `horizontal` from the left and `vertical` from the top.
+    #[must_use]
+    pub const fn new(horizontal: Along, vertical: Along) -> Self {
+        match (vertical, horizontal) {
+            (Along::Start, Along::Start) => Self::TopLeft,
+            (Along::Start, Along::Middle) => Self::TopCenter,
+            (Along::Start, Along::End) => Self::TopRight,
+            (Along::Middle, Along::Start) => Self::MiddleLeft,
+            (Along::Middle, Along::Middle) => Self::Center,
+            (Along::Middle, Along::End) => Self::MiddleRight,
+            (Along::End, Along::Start) => Self::BottomLeft,
+            (Along::End, Along::Middle) => Self::BottomCenter,
+            (Along::End, Along::End) => Self::BottomRight,
+        }
+    }
+
+    /// Where it sits from the left.
+    #[must_use]
+    pub const fn horizontal(self) -> Along {
+        match self {
+            Self::TopLeft | Self::MiddleLeft | Self::BottomLeft => Along::Start,
+            Self::TopCenter | Self::Center | Self::BottomCenter => Along::Middle,
+            Self::TopRight | Self::MiddleRight | Self::BottomRight => Along::End,
+        }
+    }
+
+    /// Where it sits from the top.
+    #[must_use]
+    pub const fn vertical(self) -> Along {
+        match self {
+            Self::TopLeft | Self::TopCenter | Self::TopRight => Along::Start,
+            Self::MiddleLeft | Self::Center | Self::MiddleRight => Along::Middle,
+            Self::BottomLeft | Self::BottomCenter | Self::BottomRight => Along::End,
+        }
+    }
+
+    /// The pin a region drawn on a window of `window` most likely stays at:
+    /// the third of the window its center is in, across and down. A region
+    /// in the bottom-left third, such as a health bar, stays at the bottom
+    /// left.
+    #[must_use]
+    pub fn guess(region: RegionDef, window: SizeDef) -> Self {
+        let twice = |start: u32, length: u32| {
+            u64::from(start)
+                .saturating_mul(2)
+                .saturating_add(u64::from(length))
+        };
+        Self::new(
+            Along::third(twice(region.x, region.width), u64::from(window.width)),
+            Along::third(twice(region.y, region.height), u64::from(window.height)),
+        )
+    }
 }
 
 /// A size in pixels.
@@ -488,14 +693,7 @@ impl AppFile {
         self.references
             .iter()
             .flat_map(|reference| reference.samples.iter().map(|sample| sample.image.as_str()))
-            .chain(self.values.iter().flat_map(|value| {
-                value
-                    .screen
-                    .check
-                    .states()
-                    .iter()
-                    .map(|state| state.image.as_str())
-            }))
+            .chain(self.values.iter().flat_map(|value| value.screen.images()))
             .collect()
     }
 
@@ -567,12 +765,7 @@ fn check_value(value: &ValueDef) -> Result<(), String> {
     if value.name.trim().is_empty() {
         return Err("it has no name".to_owned());
     }
-    value
-        .screen
-        .check
-        .states()
-        .iter()
-        .try_for_each(|state| check_image(&state.image))
+    value.screen.images().try_for_each(check_image)
 }
 
 /// Checks that `image` is a picture name the folder can hold.
@@ -686,6 +879,22 @@ pub fn sample_name(reference: &str, number: usize) -> String {
     format!("ref-{reference}-{number}.png")
 }
 
+/// The file name of the picture of a value's `state`th state, counted from
+/// 1.
+///
+/// It is `{value}-{state}.png` for its drawing, such as `status-2.png`, and
+/// `{value}-{fix}-{state}.png` for its picture in a fix numbered `fix`, such
+/// as `status-1-2.png`. A value's ID has no hyphen, so neither name is
+/// another value's. No reference's sample can have either: a sample's name
+/// has the reference's ID after `ref-`, which starts with a letter.
+#[must_use]
+pub fn state_image_name(value: &str, fix: Option<usize>, state: usize) -> String {
+    match fix {
+        Some(fix) => format!("{value}-{fix}-{state}.png"),
+        None => format!("{value}-{state}.png"),
+    }
+}
+
 /// An ID made from a name the user typed, as [`value_id`] describes, with
 /// `prefix` in front when the name does not start with a letter, and at most
 /// `max_len` bytes long.
@@ -750,6 +959,7 @@ mod tests {
                 class: "ExampleWindow",
                 executable: "Example.exe",
             }),
+            size_changes: SizeChangesDef::Often,
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
@@ -771,6 +981,8 @@ mod tests {
                         reference: "percent".to_owned(),
                         whole: true,
                     },
+                    pin: Some(PinDef::TopCenter),
+                    fixes: Vec::new(),
                 },
             }],
             references: vec![ReferenceDef {
@@ -817,6 +1029,152 @@ mod tests {
         let older = json.replace(",\n  \"references\": []", "");
         assert!(!older.contains("references"));
         assert_eq!(AppFile::parse(&older), Ok(file));
+    }
+
+    #[test]
+    fn what_a_file_leaves_out_takes_its_default() {
+        let file = dash();
+        let json = file.to_json();
+        assert!(json.contains("\"sizeChanges\": \"often\""));
+        assert!(json.contains("\"pin\": \"topCenter\""));
+        assert!(json.contains("\"fixes\": []"));
+        let bare = json
+            .replace("  \"sizeChanges\": \"often\",\n", "")
+            .replace("        \"pin\": \"topCenter\",\n", "")
+            .replace(",\n        \"fixes\": []", "");
+        assert!(!bare.contains("sizeChanges") && !bare.contains("pin") && !bare.contains("fixes"));
+        let read = AppFile::parse(&bare).expect("reads");
+        assert_eq!(read.size_changes, SizeChangesDef::Often);
+        let screen = &read.values[0].screen;
+        assert_eq!((screen.pin, screen.fixes.as_slice()), (None, [].as_slice()));
+        // Without a pin, the region's place picks one: it sits at the top
+        // of a 1920 wide window, around 1183 across.
+        assert_eq!(screen.pin(), PinDef::TopCenter);
+        let mut rarely = file;
+        rarely.size_changes = SizeChangesDef::Rarely;
+        assert!(rarely.to_json().contains("\"sizeChanges\": \"rarely\""));
+        assert_eq!(AppFile::parse(&rarely.to_json()), Ok(rarely));
+    }
+
+    fn fix(images: &[&str]) -> FixDef {
+        FixDef {
+            window_size: SizeDef {
+                width: 3440,
+                height: 1440,
+            },
+            region: RegionDef {
+                x: 1500,
+                y: 10,
+                width: 98,
+                height: 50,
+            },
+            images: images.iter().map(|&image| image.to_owned()).collect(),
+            reference: None,
+        }
+    }
+
+    #[test]
+    fn a_fix_round_trips_and_names_its_pictures() {
+        let mut file = dash();
+        let mut status = file.values[0].clone();
+        status.id = "status".to_owned();
+        status.screen.check = states(&[("Paused", "status-1.png"), ("Live", "status-2.png")]);
+        status.screen.fixes = vec![fix(&["status-1-1.png", "status-1-2.png"])];
+        file.values.push(status);
+        file.values[0].screen.fixes = vec![FixDef {
+            reference: Some("percent".to_owned()),
+            ..fix(&[])
+        }];
+        let json = file.to_json();
+        assert!(json.contains("\"reference\": \"percent\""));
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        assert_eq!(
+            file.images(),
+            [
+                "ref-percent-1.png",
+                "status-1.png",
+                "status-2.png",
+                "status-1-1.png",
+                "status-1-2.png"
+            ]
+        );
+        file.values[1].screen.fixes[0].images[1] = "../out.png".to_owned();
+        let error = AppFile::parse(&file.to_json()).expect_err("leaves the folder");
+        assert!(
+            error
+                .to_string()
+                .starts_with("value \"status\": picture \"../out.png\" must be"),
+            "{error}"
+        );
+        assert_eq!(state_image_name("status", None, 2), "status-2.png");
+        assert_eq!(state_image_name("status", Some(1), 2), "status-1-2.png");
+    }
+
+    #[test]
+    fn a_value_reads_with_its_check_s_reference_and_each_fix_s_only() {
+        let mut screen = dash().values[0].screen.clone();
+        assert!(screen.reads_with("percent"), "its number check's");
+        assert!(!screen.reads_with("small"));
+        screen.fixes = vec![
+            fix(&[]),
+            FixDef {
+                reference: Some("small".to_owned()),
+                ..fix(&[])
+            },
+        ];
+        assert!(screen.reads_with("small"), "a fix's");
+        assert!(!screen.reads_with("other"));
+        screen.check = states(&[("Paused", "status-1.png")]);
+        screen.fixes.clear();
+        assert!(
+            !screen.reads_with("percent"),
+            "a state check reads with none"
+        );
+    }
+
+    #[test]
+    fn a_pin_guess_takes_the_third_the_regions_center_is_in() {
+        let window = SizeDef {
+            width: 300,
+            height: 90,
+        };
+        let at = |x, y| {
+            PinDef::guess(
+                RegionDef {
+                    x,
+                    y,
+                    width: 2,
+                    height: 2,
+                },
+                window,
+            )
+        };
+        // A center at 99 across is in the first third, at 100 in the second,
+        // at 199 still in the second, and at 200 in the last; down, 29, 30,
+        // 59 and 60 split the same way.
+        assert_eq!(at(98, 28), PinDef::TopLeft);
+        assert_eq!(at(99, 28), PinDef::TopCenter);
+        assert_eq!(at(198, 28), PinDef::TopCenter);
+        assert_eq!(at(199, 28), PinDef::TopRight);
+        assert_eq!(at(98, 29), PinDef::MiddleLeft);
+        assert_eq!(at(150, 45), PinDef::Center);
+        assert_eq!(at(199, 58), PinDef::MiddleRight);
+        assert_eq!(at(0, 59), PinDef::BottomLeft);
+        assert_eq!(at(150, 88), PinDef::BottomCenter);
+        assert_eq!(at(298, 88), PinDef::BottomRight);
+        for pin in [
+            PinDef::TopLeft,
+            PinDef::TopCenter,
+            PinDef::TopRight,
+            PinDef::MiddleLeft,
+            PinDef::Center,
+            PinDef::MiddleRight,
+            PinDef::BottomLeft,
+            PinDef::BottomCenter,
+            PinDef::BottomRight,
+        ] {
+            assert_eq!(PinDef::new(pin.horizontal(), pin.vertical()), pin);
+        }
     }
 
     #[test]

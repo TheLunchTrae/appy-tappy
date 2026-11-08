@@ -16,6 +16,7 @@
 mod automations;
 mod capture;
 mod clicks;
+mod fixes;
 mod host;
 mod messages;
 mod overlays;
@@ -39,7 +40,7 @@ use appytappy_config::app_file::BuildDef;
 use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::check_spec::RegionCheck;
-use crate::overlay::Overlays;
+use crate::overlay::{Overlays, Purpose};
 use crate::recording::{Recording, ocr};
 use crate::stores::Stores;
 use crate::updates::Downloaded;
@@ -48,8 +49,8 @@ pub(crate) use self::clicks::{ClickPictureView, FoundClick};
 pub(crate) use self::host::Host;
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, Live, Message, Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId,
-    SavedValue,
+    AppSummary, FixSpec, Live, Message, Reading, ReferenceSaveSpec, Run, SaveSpec,
+    SavedReferenceId, SavedValue,
 };
 use self::watch::Watched;
 
@@ -91,6 +92,9 @@ pub(crate) struct Owner<H: Host> {
     watched: Option<Watched>,
     /// The overlays that show, each with a capture of its own.
     overlays: Overlays<H::Session>,
+    /// The Values page's readings of the application it shows, with a
+    /// capture of their own.
+    live: Overlays<H::Session>,
     /// The update downloaded and checked, until the user installs it.
     update: Option<Downloaded>,
     /// The build each running process runs, read once per process, since
@@ -122,7 +126,8 @@ impl<H: Host> Owner<H> {
             recording_id: 0,
             ocr,
             watched: None,
-            overlays: Overlays::new(),
+            overlays: Overlays::new(Purpose::Overlay),
+            live: Overlays::new(Purpose::ValuesPage),
             update: None,
             builds: BTreeMap::new(),
         }
@@ -169,7 +174,7 @@ impl<H: Host> Owner<H> {
                     .filter(|_| generation == self.generation)
                 {
                     match seen {
-                        Ok(seen) => watched.seen = Some(seen),
+                        Ok(seen) => self.watch_seen(seen),
                         Err(error) => {
                             watched.failure = Some(error);
                             // The editor watches again, so nothing needs this
@@ -184,17 +189,22 @@ impl<H: Host> Owner<H> {
                 }
             },
             Message::Overlay {
+                purpose,
                 app,
                 generation,
                 read,
             } => {
-                // The overlay shows why its capture stopped, and looks for
-                // the window again.
+                let overlays = match purpose {
+                    Purpose::Overlay => &mut self.overlays,
+                    Purpose::ValuesPage => &mut self.live,
+                };
+                // The overlay or the Values page shows why its capture
+                // stopped, and looks for the window again.
                 #[expect(
                     clippy::let_underscore_must_use,
                     reason = "the capture already failed, and the overlay shows why"
                 )]
-                let _ = self.overlays.read(&app, generation, read);
+                let _ = overlays.read(&app, generation, read, self.host.now());
             },
             Message::PanelPlaced { app, panel } => self.overlays.placed(&app, panel),
             Message::Shutdown => return ControlFlow::Break(()),
@@ -225,6 +235,11 @@ impl<H: Host> Owner<H> {
             reason = "an overlay's capture error already showed in its window, which is closing"
         )]
         let _ = self.overlays.close(None);
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the Values page showed its capture's error already, and it is closing"
+        )]
+        let _ = self.live.close(None);
         self.close()
     }
 
@@ -255,6 +270,11 @@ impl<H: Host> Owner<H> {
                 reason = "a capture that ended with an error stopped already, and the next poll starts another"
             )]
             let _ = self.overlays.close(None);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a capture that ended with an error stopped already, and the next poll starts another"
+            )]
+            let _ = self.live.close(None);
         }
         if changed.runtime() {
             self.host.reload_runtime();

@@ -22,6 +22,8 @@ png = "=0.18.1"
 # than the `windows-capture` crate, which adds its own thread pool and locks.
 # `Wdk_System_SystemInformation` and `Win32_Storage_FileSystem` read an
 # executable's path and file version for `win/build.rs`.
+# `Win32_Graphics_Dwm` reads the size a capture frames a window at before
+# the capture starts.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = [
   "Foundation",

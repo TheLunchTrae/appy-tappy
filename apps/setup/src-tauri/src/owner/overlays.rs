@@ -79,6 +79,28 @@ impl<H: Host> Owner<H> {
         }
     }
 
+    /// What the values of the application `app` read now, for the Values
+    /// page, whether its overlay is on or not. The first call starts a
+    /// capture of its window, which [`Owner::stop_live_values`] stops.
+    pub(crate) fn live_values(&mut self, app: &str) -> Result<OverlayView, String> {
+        let stores = self.stores.as_ref().map_err(Clone::clone);
+        self.live.view(&self.host, &self.messages, app, || {
+            let stores = stores?;
+            let file = stores.app_file(app)?;
+            Ok((file, stores.apps.folder(app)))
+        })
+    }
+
+    /// Stops reading the values of the application `app` for the Values
+    /// page, or of every application with `None`.
+    pub(crate) fn stop_live_values(&mut self, app: Option<&str>) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the Values page no longer shows the readings, so nothing shows the error"
+        )]
+        let _ = self.live.close(app);
+    }
+
     pub(super) fn overlay_view(&mut self, app: &str) -> Result<OverlayView, String> {
         let stores = self.stores.as_ref().map_err(Clone::clone);
         self.overlays.view(&self.host, &self.messages, app, || {
@@ -118,7 +140,8 @@ impl<H: Host> Owner<H> {
 mod tests {
     use std::io;
 
-    use appytappy_config::app_file::{AppFile, SizeDef};
+    use appytappy_config::app_file::{AppFile, SizeChangesDef, SizeDef};
+    use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{Crop, FrameHandler, Image, OutsideWindow, Region, Size};
 
     use crate::overlay::{
@@ -159,11 +182,18 @@ mod tests {
         reading: Option<Reading>,
         problem: Option<&str>,
     ) -> OverlayView {
+        // A reading or a problem comes from a frame of the window.
+        let framed = reading.is_some() || problem.is_some();
         OverlayView {
             name: "Example App".to_owned(),
             mode,
             message: None,
+            window_size: framed.then_some(SizeDef {
+                width: WINDOW.width,
+                height: WINDOW.height,
+            }),
             values: vec![ValueView {
+                id: "progress_bar".to_owned(),
                 name: "Progress bar".to_owned(),
                 reading,
                 problem: problem.map(str::to_owned),
@@ -205,6 +235,9 @@ mod tests {
     #[test]
     fn an_overlay_reads_its_applications_values_and_follows_its_window() {
         let (mut harness, root) = with_saved_bar("overlay");
+        // Read only at the size it was drawn at, the bar reads nothing on a
+        // window of another size.
+        change_app_file(&harness, |file| file.size_changes = SizeChangesDef::Rarely);
         assert_eq!(
             harness.ask(overlay_state),
             Err("The overlay for Example App is off.".to_owned())
@@ -263,19 +296,34 @@ mod tests {
         );
         harness.owner.host.minimized = false;
 
-        // A window of a size no value was drawn at reads nothing, and the
+        // A window of a size no value reads at reads nothing, and the
         // capture goes on.
         let wider = Size {
             width: 6,
             height: 2,
         };
         harness.deliver_at(&mut handler, Ok((wider, &frame_image())), OVERLAY_INTERVAL);
+        let mut settling = bar_view(over, None, None);
+        settling.window_size = Some(SizeDef {
+            width: 6,
+            height: 2,
+        });
+        assert_eq!(
+            harness.ask(overlay_state),
+            Ok(settling),
+            "nothing is read until the size settles"
+        );
+        harness.wait(SETTLE);
         let resized = |width| {
-            Ok(bar_view(
+            let mut view = bar_view(
                 over,
                 None,
-                Some(&format!("Drawn on a 4x2 window; it is {width}x2 now.")),
-            ))
+                Some(&format!(
+                    "Not read at {width}x2: it is read only at the window sizes it was drawn at."
+                )),
+            );
+            view.window_size = Some(SizeDef { width, height: 2 });
+            Ok(view)
         };
         assert_eq!(harness.ask(overlay_state), resized(6));
         let narrower = Size {
@@ -290,6 +338,8 @@ mod tests {
             .into()),
             OVERLAY_INTERVAL,
         );
+        harness.ask(overlay_state).expect("shows");
+        harness.wait(SETTLE);
         assert_eq!(harness.ask(overlay_state), resized(3));
         assert!(harness.closed.try_recv().is_err(), "the capture goes on");
         let white = Image::new(WINDOW, vec![255; 32]).expect("matching length");
@@ -297,6 +347,12 @@ mod tests {
         let view = harness.ask(overlay_state).expect("shows");
         let problem = view.values[0].problem.as_deref().expect("a problem");
         assert!(problem.starts_with("Cannot read: "), "{problem}");
+        // Back at the size the capture reads at, it is not started again
+        // once that size settles.
+        harness.wait(SETTLE);
+        harness.ask(overlay_state).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "the capture goes on");
+        assert!(harness.handlers.try_recv().is_err(), "and is not replaced");
 
         // A capture that stops closes, says why, and starts again about a
         // second later.
@@ -317,6 +373,7 @@ mod tests {
         let mut handler = overlay_capture(&mut harness);
         // Readings from the stopped capture are dropped.
         let message = Message::Overlay {
+            purpose: crate::overlay::Purpose::Overlay,
             app: "example".to_owned(),
             generation: 0,
             read: Ok(FrameRead::Values(vec![ValueRead::Read(Reading::Flag(
@@ -387,6 +444,7 @@ mod tests {
             }))
             .expect("the file's spelling");
             file.values.extend([small, icon]);
+            file.size_changes = SizeChangesDef::Rarely;
             file.overlay = Some(OverlayDef {
                 enabled: true,
                 mode: OverlayModeDef::PictureInPicture,
@@ -414,7 +472,11 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            ("Small", None, Some("Drawn on a 8x4 window; it is 4x2 now."))
+            (
+                "Small",
+                None,
+                Some("Not read at 4x2: it is read only at the window sizes it was drawn at.")
+            )
         );
         let (icon, reading, problem) = lines[2].clone();
         assert_eq!((icon, reading), ("Icon", None));
@@ -423,24 +485,86 @@ mod tests {
             "{problem:?}"
         );
 
-        // At 8x4 the capture starts again with the small value's region.
+        // At 8x4 the capture starts again with the small value's region,
+        // once the size settled.
         let large = Size {
             width: 8,
             height: 4,
         };
         harness.deliver_at(&mut handler, Ok((large, &frame_image())), OVERLAY_INTERVAL);
-        assert_eq!(harness.closed.try_recv(), Ok(7));
+        harness.ask(overlay_state).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "not settled yet");
+        harness.wait(SETTLE);
         let mut handler =
             overlay_capture_of(&mut harness, Region::new(4, 2, 4, 2).expect("not empty"));
         harness.deliver_at(&mut handler, Ok((large, &frame_image())), OVERLAY_INTERVAL);
         let view = harness.ask(overlay_state).expect("shows");
         assert_eq!(
             view.values[0].problem.as_deref(),
-            Some("Drawn on a 4x2 window; it is 8x4 now.")
+            Some("Not read at 8x4: it is read only at the window sizes it was drawn at.")
         );
         assert_eq!(view.values[1].reading, Some(Reading::Number(50.0)));
         // A panel does not go over the window.
         assert_eq!(harness.ask(overlay_place), None);
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_values_page_reads_values_scaled_to_the_windows_size_with_the_overlay_off() {
+        let (mut harness, root) = with_saved_bar("overlay-live");
+        let live = |owner: &mut Owner<FakeHost>| owner.live_values("example");
+        assert!(harness.ask(live).is_ok(), "the overlay is off");
+        let started = harness.handlers.try_recv().expect("capture started");
+        let mut handler = started.handler;
+        // Twice the height, the bar it reads doubles, and the capture starts
+        // again for its region there.
+        let large = Size {
+            width: 8,
+            height: 4,
+        };
+        let red = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
+        harness.deliver_at(&mut handler, Ok((large, &red)), OVERLAY_INTERVAL);
+        harness.ask(live).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "not settled yet");
+        // A drag passes another size first, which starts the wait again.
+        let between = Size {
+            width: 6,
+            height: 3,
+        };
+        harness.wait(SETTLE / 2);
+        harness.deliver_at(&mut handler, Ok((between, &red)), OVERLAY_INTERVAL);
+        harness.deliver_at(&mut handler, Ok((large, &red)), OVERLAY_INTERVAL);
+        harness.wait(SETTLE / 2);
+        harness.ask(live).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "the wait started again");
+        harness.wait(SETTLE);
+        harness.ask(live).expect("shows");
+        assert_eq!(harness.closed.try_recv(), Ok(7), "one restart");
+        let started = harness.handlers.try_recv().expect("capture started again");
+        assert!(harness.handlers.try_recv().is_err(), "only one");
+        let copied = match &started.crop {
+            Crop::Layout(layout) => layout.copies().iter().map(|copy| copy.from).collect(),
+            Crop::Whole => Vec::new(),
+        };
+        assert_eq!(copied, [Region::new(0, 0, 8, 4).expect("not empty")]);
+        let mut handler = started.handler;
+        harness.deliver_at(&mut handler, Ok((large, &red)), OVERLAY_INTERVAL);
+        let view = harness.ask(live).expect("shows");
+        assert_eq!(
+            view.window_size,
+            Some(SizeDef {
+                width: 8,
+                height: 4
+            })
+        );
+        assert_eq!(view.values[0].reading, Some(Reading::Number(100.0)));
+        // The overlay's own captures are apart from the page's.
+        assert_eq!(
+            harness.ask(overlay_state),
+            Err("The overlay for Example App is off.".to_owned())
+        );
+        harness.ask(|owner| owner.stop_live_values(None));
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the page stopped reading");
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -455,7 +579,9 @@ mod tests {
             name: "Example App".to_owned(),
             mode: OverlayModeDef::Overlay,
             message: Some("no windows here".to_owned()),
+            window_size: None,
             values: vec![ValueView {
+                id: "progress_bar".to_owned(),
                 name: "Progress bar".to_owned(),
                 reading: None,
                 problem: None,

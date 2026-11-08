@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ReferenceDef, ReferenceRef } from '../lib/bindings.ts';
-import { errorText, saveReference, saveValue } from '../lib/api.ts';
+import type { PinDef, ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
+import { errorText, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type Built,
@@ -11,6 +11,7 @@ import {
   CHECK_KINDS,
   type Drawn,
   EMPTY_DRAFT,
+  fixDraft,
   fromReference,
   KIND_NAMES,
   newestOfSize,
@@ -32,9 +33,11 @@ import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { clock } from '../lib/review.ts';
 import { type Point, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
+import { PinPicker } from './PinPicker.tsx';
+import { Hint } from './Hint.tsx';
+import { FIX_HINT, READ_WITH_HINT, guessPin, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
-import { Hint } from './Hint.tsx';
 import { CHECK_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
@@ -82,10 +85,14 @@ function viewHint(
   return 'Drag to draw a region. Drag inside it to move it, or drag a corner to resize it.';
 }
 
-/** What the capture screen makes: a value, or a reference, new or saved, on the References page. */
+/**
+ * What the capture screen makes: a value; a reference, new or saved, on the References page; or a fix, a saved value
+ * drawn again at the window's size now.
+ */
 export type CaptureMode =
   | { readonly kind: 'value' }
-  | { readonly kind: 'reference'; readonly existing: ReferenceDef | null };
+  | { readonly kind: 'reference'; readonly existing: ReferenceDef | null }
+  | { readonly kind: 'fix'; readonly value: ValueDef };
 
 /** The reference being made or changed, and its name as typed. */
 interface Editing {
@@ -120,7 +127,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       recording: false,
       valueName: '',
       editing,
-      draft: editing === null ? EMPTY_DRAFT : toReference(EMPTY_DRAFT, editing.existing),
+      draft:
+        mode.kind === 'fix'
+          ? fixDraft(mode.value.screen.check)
+          : editing === null
+            ? EMPTY_DRAFT
+            : toReference(EMPTY_DRAFT, editing.existing),
     };
   });
   const [draft, setDraft] = useState<Draft>(start.draft);
@@ -133,6 +145,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const [picking, setPicking] = useState<ColorTarget | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   const [valueName, setValueName] = useState(start.valueName);
+  // The side the value stays at as the user picked it, or null to follow the guess from where its region is.
+  const [pinned, setPinned] = useState<PinDef | null>(null);
+  const fixing = mode.kind === 'fix' ? mode.value : null;
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const screenshots = useScreenshots();
@@ -183,6 +198,36 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     setLiveError(errorText(error));
   }, []);
 
+  // A fix opens on a screenshot of the window as it is now, with the region where the value would be read there.
+  const fixShot = useRef<'none' | 'taken' | 'placed'>('none');
+  const take = screenshots.take;
+  useEffect(() => {
+    if (fixing === null || liveSize === null || fixShot.current !== 'none') {
+      return;
+    }
+    fixShot.current = 'taken';
+    background(take());
+  }, [fixing, liveSize, take]);
+  const firstShot = shots[0]?.index ?? null;
+  const firstPicture = firstShot === null ? undefined : full.get(firstShot);
+  useEffect(() => {
+    if (fixing === null || firstShot === null || firstPicture === undefined || fixShot.current === 'placed') {
+      return;
+    }
+    fixShot.current = 'placed';
+    const place = async (): Promise<void> => {
+      try {
+        const region = await placeValue(appId, fixing.id, firstPicture.width, firstPicture.height);
+        if (region !== null) {
+          setDraft((current) => (current.region === null ? { ...current, region, drawnOn: firstShot } : current));
+        }
+      } catch (error: unknown) {
+        setSaveError(errorText(error));
+      }
+    };
+    background(place());
+  }, [fixing, firstShot, firstPicture, appId]);
+
   const shownOn = regionScreenshot(selected, draft.drawnOn, full, shots.at(-1)?.index ?? null);
   const native = shownOn === null ? undefined : full.get(shownOn);
   // The window size the region's pixels refer to.
@@ -209,18 +254,26 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     }
   };
 
+  const pin: PinDef =
+    pinned ?? (draft.region === null || drawnSize === null ? 'topLeft' : guessPin(draft.region, drawnSize));
+
   const save = async (): Promise<void> => {
     if (!built.ok || draft.drawnOn === null) {
       return;
     }
     setSaving(true);
     try {
-      await saveValue({
-        app: choice.app,
-        valueName: valueName.trim(),
-        check: built.spec,
-        screenshot: draft.drawnOn,
-      });
+      if (fixing === null) {
+        await saveValue({
+          app: choice.app,
+          valueName: valueName.trim(),
+          check: built.spec,
+          screenshot: draft.drawnOn,
+          pin,
+        });
+      } else {
+        await saveFix({ app: choice.app, value: fixing.id, check: built.spec, screenshot: draft.drawnOn });
+      }
       onSaved();
     } catch (error: unknown) {
       setSaveError(errorText(error));
@@ -335,11 +388,15 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     }
   };
 
-  const canSave =
-    valueName.trim().length > 0 && built.ok && draft.drawnOn !== null && check.state.kind === 'set' && !saving;
+  const named = fixing !== null || valueName.trim().length > 0;
+  const canSave = named && built.ok && draft.drawnOn !== null && check.state.kind === 'set' && !saving;
   const canSaveRef =
     editing !== null && editing.name.trim().length > 0 && built.ok && check.state.kind === 'set' && !saving;
-  const whereDone = valueName.trim().length > 0 && draft.region !== null;
+  const whereDone = named && draft.region !== null;
+  const fixName = fixing === null ? null : `Fix ${fixing.name}`;
+  // The saved reference a fix of a number shares with its first drawing.
+  const fixedCheck = fixing?.screen.check;
+  const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
   const editedName = editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim();
 
   return (
@@ -348,13 +405,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
         <div className="bar">
           <span className="crumb">
             {mode.kind === 'reference' ? 'References' : 'Values'}
-            {mode.kind === 'value' && editing !== null ? ' / New value' : ''} /{' '}
+            {mode.kind !== 'reference' && editing !== null ? ` / ${fixName ?? 'New value'}` : ''} /{' '}
             {reviewing ? (
               <>
                 {editedName} / <b>Review recording</b>
               </>
             ) : (
-              <b>{editing === null ? 'New value' : editedName}</b>
+              <b>{editing === null ? (fixName ?? 'New value') : editedName}</b>
             )}
           </span>
           {recording?.recording === true ? (
@@ -605,7 +662,43 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               How to read it
             </button>
           </div>
-          {step === 'where' ? (
+          {step === 'where' && fixing !== null ? (
+            <>
+              <div className="group-title">
+                <span>
+                  {fixing.name} at {drawnSize === null ? "the window's size now" : sizeText(drawnSize)}
+                </span>
+                <Hint topic="Fix at this size">{FIX_HINT}</Hint>
+              </div>
+              <p className="note">
+                {draft.region === null
+                  ? 'Take a screenshot, then draw the region where the value shows at this size.'
+                  : 'Starts from the scaled region. Move it onto the value where it shows at this size.'}
+              </p>
+              <RegionFields
+                region={draft.region}
+                onRegion={(region) => {
+                  setDraft((current) => ({ ...current, region, drawnOn: current.drawnOn ?? shownOn }));
+                }}
+              />
+              <div className="sep" />
+              {saveError === null ? null : <p className="warn">{saveError}</p>}
+              <div className="actions">
+                <button type="button" className="btn" disabled={saving} onClick={onCancel}>
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => {
+                    setStep('how');
+                  }}
+                >
+                  Next: how to read it
+                </button>
+              </div>
+            </>
+          ) : step === 'where' ? (
             <>
               <div className="field">
                 <label htmlFor="value-name">Value name</label>
@@ -662,6 +755,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   setDraft((current) => ({ ...current, region, drawnOn: current.drawnOn ?? shownOn }));
                 }}
               />
+              <PinPicker
+                pin={pin}
+                guessed={pinned === null}
+                onPin={(picked) => {
+                  setPinned(picked);
+                }}
+              />
               <p className="note">
                 Draw the region where the value shows, on any screenshot of {choice.name}. Only where it is matters
                 here; how to read it comes next.
@@ -684,7 +784,60 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             </>
           ) : (
             <>
-              {draft.kind === 'number' ? (
+              {fixing !== null && draft.kind === 'number' && sharedReference !== null ? (
+                <fieldset className="choices" aria-describedby="hint-read-with">
+                  <legend className="group-title">
+                    <span>Read with</span>
+                    <Hint topic="Read with" id="hint-read-with">
+                      {READ_WITH_HINT}
+                    </Hint>
+                  </legend>
+                  <label className="choice" aria-label="Shared reference">
+                    <input
+                      type="radio"
+                      name="read-with"
+                      aria-describedby="read-with-shared"
+                      checked={draft.reference === sharedReference}
+                      onChange={() => {
+                        setDraft((current) => ({ ...current, reference: sharedReference }));
+                      }}
+                    />
+                    <span>
+                      <span className="choice-name">
+                        {file?.references.find((reference) => reference.id === sharedReference)?.name ??
+                          'Its reference'}
+                      </span>
+                      <small id="read-with-shared" className="note">
+                        The reference it reads with at every size.
+                      </small>
+                    </span>
+                  </label>
+                  <label className="choice" aria-label="Learn a reference at this size">
+                    <input
+                      type="radio"
+                      name="read-with"
+                      aria-describedby="read-with-own"
+                      checked={draft.reference !== sharedReference}
+                      onChange={() => {
+                        openEditor(null);
+                      }}
+                    />
+                    <span>
+                      <span className="choice-name">
+                        {draft.reference === sharedReference
+                          ? 'Learn a reference at this size'
+                          : (file?.references.find((reference) => reference.id === draft.reference)?.name ??
+                            'A reference learned at this size')}
+                      </span>
+                      <small id="read-with-own" className="note">
+                        Teach the characters again from this size&apos;s screenshots.
+                      </small>
+                    </span>
+                  </label>
+                </fieldset>
+              ) : fixing !== null && (draft.kind === 'barFill' || draft.kind === 'color') ? (
+                <p className="note">At this size it reads with the colors of its first drawing.</p>
+              ) : draft.kind === 'number' ? (
                 <ReferencePicker
                   appName={choice.name}
                   file={file}
@@ -714,6 +867,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   position={position}
                   onDraft={setDraft}
                   onShow={setSelected}
+                  fix={fixing !== null}
                 />
               ) : (
                 <ColorFields
@@ -728,7 +882,11 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
-              <p className="note">Saved values show on the Values page, under {choice.name}.</p>
+              <p className="note">
+                {fixing === null
+                  ? `Saved values show on the Values page, under ${choice.name}.`
+                  : `The fix shows on the Values page, beside ${fixing.name}.`}
+              </p>
               <div className="actions">
                 <button
                   type="button"
@@ -747,7 +905,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                     background(save());
                   }}
                 >
-                  Save value
+                  {fixing === null ? 'Save value' : 'Save fix'}
                 </button>
               </div>
             </>

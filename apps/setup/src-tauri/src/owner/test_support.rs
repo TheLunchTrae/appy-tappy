@@ -37,6 +37,8 @@ pub(super) struct FakeHost {
     /// Told each time the owner asks the runtime to read the saved files
     /// again.
     reloads: Sender<()>,
+    /// The time the owner reads, which [`Harness::wait`] moves on.
+    pub(super) clock: Instant,
 }
 
 /// The build the fake host's application runs unless a test changes it.
@@ -174,6 +176,10 @@ impl Host for FakeHost {
         })
     }
 
+    fn now(&self) -> Instant {
+        self.clock
+    }
+
     fn reload_runtime(&self) {
         self.reloads.send(()).expect("test listens");
     }
@@ -224,6 +230,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         process: 3,
         build: Some(example_build()),
         reloads: reload_sender,
+        clock: Instant::now(),
     };
     Harness {
         owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),
@@ -251,6 +258,11 @@ pub(super) fn frame_image() -> Image {
 }
 
 impl Harness {
+    /// Moves the owner's clock on by `time`, as if that long passed.
+    pub(super) fn wait(&mut self, time: Duration) {
+        self.owner.host.clock = self.owner.host.clock.checked_add(time).expect("in range");
+    }
+
     /// Calls `command` on the owner directly and returns its answer. How a
     /// `Run` reaches the owner is tested in `messages.rs`.
     pub(super) fn ask<T>(&mut self, command: impl FnOnce(&mut Owner<FakeHost>) -> T) -> T {
@@ -313,6 +325,7 @@ pub(super) fn spec(app: &str, value_name: &str, check: &str) -> SaveSpec {
         value_name: value_name.to_owned(),
         check: serde_json::from_str(check).expect("valid JSON"),
         screenshot: 0,
+        pin: appytappy_config::app_file::PinDef::TopLeft,
     }
 }
 
@@ -328,6 +341,7 @@ pub(super) fn add_example_app(harness: &mut Harness) {
                     class: "ExampleWindow",
                     executable: "Example.exe",
                 }),
+                size_changes: appytappy_config::app_file::SizeChangesDef::Often,
             },
         )
     });

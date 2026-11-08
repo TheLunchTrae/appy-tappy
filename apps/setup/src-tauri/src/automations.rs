@@ -98,9 +98,12 @@ fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> O
         Err(problem) => return Some(sentence(&problem)),
     };
     let folder = stores.apps.folder(compiled.app_id);
-    if let Err(error) = saved::build(&compiled.value.screen, &compiled.app.references, |name| {
-        fs::read(folder.join(name))
-    }) {
+    if let Err(error) = saved::build(
+        &compiled.value.screen,
+        &compiled.app.references,
+        compiled.app.size_changes,
+        |name| fs::read(folder.join(name)),
+    ) {
         return Some(format!("{} cannot be read: {error}.", compiled.value.name));
     }
     automation
@@ -330,8 +333,8 @@ mod tests {
     use std::{env, fs, process};
 
     use appytappy_config::app_file::{
-        AntiCheatDef, AppFile, CheckDef, ColorDef, FORMAT, RegionDef, ScreenDef, SizeDef, ValueDef,
-        WindowDef,
+        AntiCheatDef, AppFile, CheckDef, ColorDef, FORMAT, RegionDef, ScreenDef, SizeChangesDef,
+        SizeDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
         ActionDef, ClickAtDef, ClickButtonDef, ComparisonDef, FORMAT as AUTOMATIONS_FORMAT,
@@ -377,6 +380,8 @@ mod tests {
                     height: 10,
                 },
                 check,
+                pin: None,
+                fixes: Vec::new(),
             },
         };
         let app = AppFile {
@@ -387,6 +392,7 @@ mod tests {
                 class: "ExampleWindow",
                 executable: "Example.exe",
             }),
+            size_changes: SizeChangesDef::Often,
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,

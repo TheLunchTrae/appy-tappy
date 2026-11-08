@@ -236,7 +236,7 @@ fn on_screen(bounds: Bounds, x: u32, y: u32) -> Option<(i32, i32)> {
 mod tests {
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::{
-        AntiCheatDef, BuildDef, FORMAT, FallbackDef, MustMatchDef, WindowDef,
+        AntiCheatDef, BuildDef, FORMAT, FallbackDef, MustMatchDef, SizeChangesDef, WindowDef,
     };
     use appytappy_config::click::{Area, ClickButton, Corner, Spot};
     use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler};
@@ -265,6 +265,7 @@ mod tests {
             checked: None,
             values: Vec::new(),
             references: Vec::new(),
+            size_changes: SizeChangesDef::Often,
         }
     }
 
@@ -362,6 +363,10 @@ mod tests {
                 shown: self.shown,
                 front: false,
             }))
+        }
+
+        fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
         fn frame_bounds(&self, _window: u64) -> io::Result<Option<Bounds>> {
@@ -616,6 +621,9 @@ mod tests {
                 Ok(Vec::new())
             }
             fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
+                Ok(None)
+            }
+            fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
                 Ok(None)
             }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {

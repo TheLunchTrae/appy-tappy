@@ -1,10 +1,13 @@
 //! A saved value's check, rebuilt from its application's file.
 //!
 //! The setup app saves a value as plain data: the window size it was drawn
-//! at, its region, and its check, which names a picture or a reference. A
-//! reference is the characters of a font, learned from its own pictures. The
-//! runtime turns that back into a [`Check`] here. Anything else that reads a
-//! saved value should too, so a value reads the same wherever it is read.
+//! at, its region, and its check, which names a picture or a reference, then
+//! the side of the window it is pinned to and any fixes, each the value
+//! drawn again at another size. A reference is the characters of a font,
+//! learned from its own pictures. The runtime turns that back into a
+//! [`SavedValue`] here, which says where and how the value reads at each
+//! window size. Anything else that reads a saved value should too, so a
+//! value reads the same wherever it is read.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -12,26 +15,198 @@ use std::fmt;
 use std::io;
 
 use appytappy_config::app_file::{
-    CheckDef, ColorDef, MAX_STATES, ReferenceDef, ScreenDef, StateDef,
+    CheckDef, ColorDef, FixDef, MAX_FIXES, MAX_STATES, PinDef, ReferenceDef, RegionDef, ScreenDef,
+    SizeChangesDef, SizeDef, StateDef,
 };
 use appytappy_config::signal::{InvalidStateName, StateName};
 
 use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
 use super::digits::{DigitReader, LearnError};
 use super::mask::Mask;
+use super::scale::scaled;
 use super::{Image, ImageError, Region, Size};
 use crate::system::Rgb;
 
-/// A saved value, ready to read.
+/// A saved value's first drawing: the window size it was drawn at, its
+/// region, and its check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedCheck {
     /// The window's size when the region was drawn. The region means
-    /// something only while the window has this size.
+    /// something only at this size, or scaled from it.
     pub window_size: Size,
     /// The region of the window's frame the check reads.
     pub region: Region,
     /// The check.
     pub check: Check,
+}
+
+/// A saved value drawn again at another window size, which it reads there
+/// exactly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedFix {
+    /// The window's size when it was drawn.
+    pub window_size: Size,
+    /// The region at that size.
+    pub region: Region,
+    /// Its own check: its state pictures, or the reference learned at this
+    /// size. `None` reads with the first drawing's check.
+    pub check: Option<Check>,
+}
+
+/// A saved value, ready to read at each window size it reads at.
+///
+/// [`SavedValue::at`] resolves a window size: the drawing made at that
+/// size exactly, the first or a fix; else, while its application's window
+/// changes size often, the first drawing scaled to it with
+/// [`scaled`]; else nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedValue {
+    /// Its first drawing, which other sizes scale from.
+    pub drawn: SavedCheck,
+    /// Its fixes, each at a window size of its own.
+    pub fixes: Vec<SavedFix>,
+    /// The side of the window its region stays at as the window changes
+    /// size.
+    pub pin: PinDef,
+    /// Whether it reads at window sizes it was not drawn at.
+    pub size_changes: SizeChangesDef,
+}
+
+/// Where and with what a value reads at one window size, from
+/// [`SavedValue::at`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AtSize {
+    /// The region of the window's frame it reads.
+    pub region: Region,
+    /// Which check reads it.
+    check: Drawing,
+}
+
+/// The check a value reads with at one size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Drawing {
+    /// The first drawing's.
+    First,
+    /// The fix at this position's own.
+    Fix(usize),
+    /// The first drawing's state check with its pictures redrawn at the
+    /// region's scaled size.
+    Resized(Box<Check>),
+}
+
+impl AtSize {
+    /// Whether it reads the drawing made at this size exactly, the first
+    /// or a fix, rather than one scaled from the first.
+    #[must_use]
+    pub const fn is_drawn(&self) -> bool {
+        !matches!(self.check, Drawing::Resized(_))
+    }
+}
+
+/// Why a value does not read at a window size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unread {
+    /// Its application's window changes size rarely, and it has no drawing
+    /// at this size.
+    NotDrawn,
+    /// Scaled to this size, its region is empty or reaches outside the
+    /// window.
+    Outside,
+    /// Scaled to this size, its state pictures leave no pixel to compare.
+    TooSmall,
+}
+
+impl fmt::Display for Unread {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NotDrawn => "it is read only at the window sizes it was drawn at",
+            Self::Outside => "scaled to this window size, its region reaches outside the window",
+            Self::TooSmall => "scaled to this window size, its states leave no pixel to compare",
+        })
+    }
+}
+
+impl SavedValue {
+    /// The region it reads on a window of `size`, without redrawing its
+    /// pictures, as [`SavedValue::at`] resolves it.
+    ///
+    /// # Errors
+    ///
+    /// Returns why it does not read at that size: [`Unread::NotDrawn`] or
+    /// [`Unread::Outside`]. [`SavedValue::at`] can also find
+    /// [`Unread::TooSmall`].
+    pub fn region_at(&self, size: Size) -> Result<Region, Unread> {
+        self.placed(size).map(|(region, _)| region)
+    }
+
+    /// Where and with what it reads on a window of `size`: the drawing made
+    /// at that size, the first or a fix; else, while its application's
+    /// window changes size often, the first drawing scaled to it, with a
+    /// state check's pictures redrawn at the scaled region's size. Each call
+    /// redraws them, so a caller resolves each size once.
+    ///
+    /// # Errors
+    ///
+    /// Returns why it does not read at that size.
+    pub fn at(&self, size: Size) -> Result<AtSize, Unread> {
+        let (region, drawing) = self.placed(size)?;
+        let check = match drawing {
+            Some(drawing) => drawing,
+            None => match &self.drawn.check {
+                Check::State(states) if region.size() != self.drawn.region.size() => {
+                    let resized = states.resized(region.size()).ok_or(Unread::TooSmall)?;
+                    Drawing::Resized(Box::new(Check::State(resized)))
+                },
+                Check::Number { .. } | Check::BarFill(_) | Check::Color(_) | Check::State(_) => {
+                    Drawing::First
+                },
+            },
+        };
+        Ok(AtSize { region, check })
+    }
+
+    /// The check that reads it where `at` says.
+    #[must_use]
+    pub fn check<'value>(&'value self, at: &'value AtSize) -> &'value Check {
+        match &at.check {
+            Drawing::First => &self.drawn.check,
+            Drawing::Fix(position) => self
+                .fixes
+                .get(*position)
+                .and_then(|fix| fix.check.as_ref())
+                .unwrap_or(&self.drawn.check),
+            Drawing::Resized(check) => check,
+        }
+    }
+
+    /// The region at `size` and the drawing made there, or `None` for the
+    /// first drawing scaled to it.
+    fn placed(&self, size: Size) -> Result<(Region, Option<Drawing>), Unread> {
+        if size == self.drawn.window_size {
+            return Ok((self.drawn.region, Some(Drawing::First)));
+        }
+        if let Some((position, fix)) = self
+            .fixes
+            .iter()
+            .enumerate()
+            .find(|(_, fix)| fix.window_size == size)
+        {
+            return Ok((fix.region, Some(Drawing::Fix(position))));
+        }
+        match self.size_changes {
+            SizeChangesDef::Rarely => Err(Unread::NotDrawn),
+            SizeChangesDef::Often => {
+                scaled(self.drawn.region, self.drawn.window_size, size, self.pin)
+                    .map(|region| (region, None))
+                    .ok_or(Unread::Outside)
+            },
+        }
+    }
+
+    /// Every window size it was drawn at, the first drawing's first.
+    pub fn drawn_sizes(&self) -> impl Iterator<Item = Size> {
+        std::iter::once(self.drawn.window_size).chain(self.fixes.iter().map(|fix| fix.window_size))
+    }
 }
 
 impl From<ColorDef> for Rgb {
@@ -44,8 +219,10 @@ impl From<ColorDef> for Rgb {
     }
 }
 
-/// Rebuilds the check `screen` describes, with the application's
-/// `references`. `picture` returns the bytes of a PNG file the check or its
+/// Rebuilds the value `screen` describes, with the application's
+/// `references`, read as its window's `size_changes` say.
+///
+/// `picture` returns the bytes of a PNG file the check, a fix or a
 /// reference names, such as `status-1.png`.
 ///
 /// This is the one place that decides whether a saved value can be read: the
@@ -54,43 +231,25 @@ impl From<ColorDef> for Rgb {
 ///
 /// # Errors
 ///
-/// Returns a [`SavedError`] when the region is empty or does not fit the
+/// Returns a [`SavedError`] when a region is empty or does not fit the
 /// window size it was drawn at, a picture cannot be read or decoded or a
-/// state's picture is not the region's size, a state check has no states or
+/// state's picture is not its region's size, a state check has no states or
 /// too many, a state's name is invalid or two states share a name or a
-/// picture, the bar's two colors are the same, or a number's reference is
-/// missing or cannot learn from one of its pictures.
+/// picture, the bar's two colors are the same, a number's reference is
+/// missing or cannot learn from one of its pictures, or the value has too
+/// many fixes, two drawings at one size, or a fix whose pictures or
+/// reference do not suit its check.
 pub fn build(
     screen: &ScreenDef,
     references: &[ReferenceDef],
+    size_changes: SizeChangesDef,
     mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
-) -> Result<SavedCheck, SavedError> {
-    let region = Region::new(
-        screen.region.x,
-        screen.region.y,
-        screen.region.width,
-        screen.region.height,
-    )
-    .ok_or(SavedError::EmptyRegion)?;
-    let window_size = Size {
-        width: screen.window_size.width,
-        height: screen.window_size.height,
-    };
-    if !region.fits(window_size) {
-        return Err(SavedError::OutsideWindow { window_size });
-    }
+) -> Result<SavedValue, SavedError> {
+    let (region, window_size) = place(screen.region, screen.window_size)?;
     let check = match &screen.check {
-        CheckDef::Number { reference, whole } => {
-            let reference = references
-                .iter()
-                .find(|known| known.id == *reference)
-                .ok_or_else(|| SavedError::NoReference {
-                    id: reference.clone(),
-                })?;
-            Check::Number {
-                reader: reader(reference, picture)?,
-                whole: *whole,
-            }
+        CheckDef::Number { reference, whole } => Check::Number {
+            reader: reader(find(references, reference)?, &mut picture)?,
+            whole: *whole,
         },
         CheckDef::BarFill { filled, empty } => Check::BarFill(
             BarFill::new((*filled).into(), (*empty).into())
@@ -102,23 +261,140 @@ pub fn build(
         }),
         CheckDef::State { states, tolerance } => {
             check_states(states)?;
-            let states = states
-                .iter()
-                .map(|state| {
-                    let name = StateName::new(&state.name).map_err(SavedError::StateName)?;
-                    let picture =
-                        state_picture(&state.image, region.size(), *tolerance, &mut picture)?;
-                    Ok((name, picture))
-                })
-                .collect::<Result<_, SavedError>>()?;
-            Check::State(StateMatch::new(states))
+            let images: Vec<&str> = states.iter().map(|state| state.image.as_str()).collect();
+            state_match(states, &images, region.size(), *tolerance, &mut picture)?
         },
     };
-    Ok(SavedCheck {
+    if screen.fixes.len() > MAX_FIXES {
+        return Err(SavedError::TooManyFixes);
+    }
+    let mut sizes = BTreeSet::from([(window_size.width, window_size.height)]);
+    let mut images: BTreeSet<&str> = screen
+        .check
+        .states()
+        .iter()
+        .map(|state| state.image.as_str())
+        .collect();
+    let fixes = screen
+        .fixes
+        .iter()
+        .map(|fix| {
+            let in_fix = |source: SavedError| SavedError::Fix {
+                window_size: Size {
+                    width: fix.window_size.width,
+                    height: fix.window_size.height,
+                },
+                source: Box::new(source),
+            };
+            if !sizes.insert((fix.window_size.width, fix.window_size.height)) {
+                return Err(in_fix(SavedError::SameSize));
+            }
+            for image in &fix.images {
+                if !images.insert(image) {
+                    return Err(in_fix(SavedError::SamePicture(image.clone())));
+                }
+            }
+            build_fix(fix, &screen.check, references, &mut picture).map_err(in_fix)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(SavedValue {
+        drawn: SavedCheck {
+            window_size,
+            region,
+            check,
+        },
+        fixes,
+        pin: screen.pin(),
+        size_changes,
+    })
+}
+
+/// The region `region` of a window of `size`, once it is not empty and fits.
+fn place(region: RegionDef, size: SizeDef) -> Result<(Region, Size), SavedError> {
+    let window_size = Size {
+        width: size.width,
+        height: size.height,
+    };
+    let region = Region::new(region.x, region.y, region.width, region.height)
+        .ok_or(SavedError::EmptyRegion)?;
+    if region.fits(window_size) {
+        Ok((region, window_size))
+    } else {
+        Err(SavedError::OutsideWindow { window_size })
+    }
+}
+
+/// The reference `id` among `references`.
+fn find<'refs>(
+    references: &'refs [ReferenceDef],
+    id: &str,
+) -> Result<&'refs ReferenceDef, SavedError> {
+    references
+        .iter()
+        .find(|known| known.id == id)
+        .ok_or_else(|| SavedError::NoReference { id: id.to_owned() })
+}
+
+/// The fix `fix` of a value whose first drawing's check is `check`.
+fn build_fix(
+    fix: &FixDef,
+    check: &CheckDef,
+    references: &[ReferenceDef],
+    picture: &mut impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<SavedFix, SavedError> {
+    let (region, window_size) = place(fix.region, fix.window_size)?;
+    let states = check.states();
+    if fix.images.len() != states.len() {
+        return Err(SavedError::FixPictures {
+            found: fix.images.len(),
+            states: states.len(),
+        });
+    }
+    let own = match (check, &fix.reference) {
+        (CheckDef::Number { whole, .. }, Some(reference)) => Some(Check::Number {
+            reader: reader(find(references, reference)?, &mut *picture)?,
+            whole: *whole,
+        }),
+        (CheckDef::State { states, tolerance }, None) => {
+            let images: Vec<&str> = fix.images.iter().map(String::as_str).collect();
+            Some(state_match(
+                states,
+                &images,
+                region.size(),
+                *tolerance,
+                picture,
+            )?)
+        },
+        (CheckDef::Number { .. } | CheckDef::BarFill { .. } | CheckDef::Color { .. }, None) => None,
+        (CheckDef::BarFill { .. } | CheckDef::Color { .. } | CheckDef::State { .. }, Some(_)) => {
+            return Err(SavedError::FixReference);
+        },
+    };
+    Ok(SavedFix {
         window_size,
         region,
-        check,
+        check: own,
     })
+}
+
+/// A state check that tells `states` apart by `images`, one picture of
+/// `size` for each state in order.
+fn state_match(
+    states: &[StateDef],
+    images: &[&str],
+    size: Size,
+    tolerance: u8,
+    picture: &mut impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<Check, SavedError> {
+    let states = states
+        .iter()
+        .zip(images)
+        .map(|(state, image)| {
+            let name = StateName::new(&state.name).map_err(SavedError::StateName)?;
+            Ok((name, state_picture(image, size, tolerance, picture)?))
+        })
+        .collect::<Result<_, SavedError>>()?;
+    Ok(Check::State(StateMatch::new(states)))
 }
 
 /// Checks a state check's states: at least one and at most [`MAX_STATES`],
@@ -260,6 +536,26 @@ pub enum SavedError {
     SameColors,
     /// A state check has no states.
     NoStates,
+    /// The value has more than [`MAX_FIXES`] fixes.
+    TooManyFixes,
+    /// A fix is at the window size of the first drawing or another fix.
+    SameSize,
+    /// A fix's pictures do not number one for each state of the check.
+    FixPictures {
+        /// How many it has.
+        found: usize,
+        /// How many states the check has.
+        states: usize,
+    },
+    /// A fix names a reference, but the check reads no number.
+    FixReference,
+    /// One of the value's fixes cannot be read.
+    Fix {
+        /// The window size the fix was drawn at.
+        window_size: Size,
+        /// Why.
+        source: Box<SavedError>,
+    },
     /// A state check has more than [`MAX_STATES`] states.
     TooManyStates,
     /// Two states have this name, or names that differ only in case.
@@ -309,6 +605,19 @@ impl fmt::Display for SavedError {
                 formatter.write_str("its bar's filled and empty colors are the same")
             },
             Self::NoStates => formatter.write_str("its state check has no state"),
+            Self::TooManyFixes => write!(formatter, "it has more than {MAX_FIXES} fixes"),
+            Self::SameSize => formatter.write_str("it is drawn at this size already"),
+            Self::FixPictures { found, states } => write!(
+                formatter,
+                "it has {found} state pictures for the check's {states} states"
+            ),
+            Self::FixReference => {
+                formatter.write_str("it names a reference, but its check reads no number")
+            },
+            Self::Fix {
+                window_size,
+                source,
+            } => write!(formatter, "at {window_size}, {source}"),
             Self::TooManyStates => write!(
                 formatter,
                 "its state check has more than {MAX_STATES} states"
@@ -339,11 +648,16 @@ impl Error for SavedError {
             Self::Missing { source, .. } => Some(source),
             Self::Picture { source, .. } => Some(source),
             Self::Learn { source, .. } => Some(source),
+            Self::Fix { source, .. } => Some(source.as_ref()),
             Self::EmptyRegion
             | Self::OutsideWindow { .. }
             | Self::PictureSize { .. }
             | Self::SameColors
             | Self::NoStates
+            | Self::TooManyFixes
+            | Self::SameSize
+            | Self::FixPictures { .. }
+            | Self::FixReference
             | Self::TooManyStates
             | Self::SameStateName(_)
             | Self::SamePicture(_)
@@ -361,6 +675,8 @@ mod tests {
     use appytappy_config::signal::{Number, Value};
 
     use super::*;
+
+    const OFTEN: SizeChangesDef = SizeChangesDef::Often;
 
     const RED: ColorDef = ColorDef {
         red: 255,
@@ -393,6 +709,8 @@ mod tests {
                 height: 2,
             },
             check,
+            pin: None,
+            fixes: Vec::new(),
         }
     }
 
@@ -439,19 +757,29 @@ mod tests {
                 tolerance: 10,
             }),
             &[],
+            OFTEN,
             from(&BTreeMap::new()),
         )
         .expect("builds");
         assert_eq!(
-            built.window_size,
+            built.drawn.window_size,
             Size {
                 width: 800,
                 height: 600
             }
         );
-        assert_eq!(built.region, Region::new(10, 20, 4, 2).expect("not empty"));
-        assert_eq!(built.check.read(&solid(4, RED)), Ok(Value::Flag(true)));
-        assert_eq!(built.check.read(&solid(4, GRAY)), Ok(Value::Flag(false)));
+        assert_eq!(
+            built.drawn.region,
+            Region::new(10, 20, 4, 2).expect("not empty")
+        );
+        assert_eq!(
+            built.drawn.check.read(&solid(4, RED)),
+            Ok(Value::Flag(true))
+        );
+        assert_eq!(
+            built.drawn.check.read(&solid(4, GRAY)),
+            Ok(Value::Flag(false))
+        );
     }
 
     fn state_check(states: &[(&str, &str)]) -> ScreenDef {
@@ -481,15 +809,20 @@ mod tests {
             "icon.png".to_owned(),
             icon.encode_png_masked(&mask).unwrap(),
         );
-        let built =
-            build(&state_check(&[("Shown", "icon.png")]), &[], from(&files)).expect("builds");
+        let built = build(
+            &state_check(&[("Shown", "icon.png")]),
+            &[],
+            OFTEN,
+            from(&files),
+        )
+        .expect("builds");
         let red = [RED.blue, RED.green, RED.red, u8::MAX];
         let gray = [GRAY.blue, GRAY.green, GRAY.red, u8::MAX];
         let row = [red, red, gray, gray].concat();
         let changed = Image::new(icon.size(), [row.clone(), row].concat()).unwrap();
-        assert_eq!(built.check.read(&changed), Ok(state("Shown")));
+        assert_eq!(built.drawn.check.read(&changed), Ok(state("Shown")));
         assert_eq!(
-            built.check.read(&solid(4, GRAY)),
+            built.drawn.check.read(&solid(4, GRAY)),
             Ok(Value::State(StateName::none()))
         );
     }
@@ -502,11 +835,12 @@ mod tests {
                 empty: GRAY,
             }),
             &[],
+            OFTEN,
             from(&BTreeMap::new()),
         )
         .expect("builds");
         assert_eq!(
-            bar.check.read(&solid(4, RED)),
+            bar.drawn.check.read(&solid(4, RED)),
             Ok(Value::Number(Number::new(100.0).expect("finite")))
         );
         let same = build(
@@ -515,6 +849,7 @@ mod tests {
                 empty: RED,
             }),
             &[],
+            OFTEN,
             from(&BTreeMap::new()),
         );
         assert!(matches!(same, Err(SavedError::SameColors)), "{same:?}");
@@ -531,17 +866,23 @@ mod tests {
         let built = build(
             &state_check(&[("Red", "red.png"), ("Gray", "gray.png")]),
             &[],
+            OFTEN,
             from(&files),
         )
         .expect("builds");
-        assert_eq!(built.check.read(&solid(4, RED)), Ok(state("Red")));
-        assert_eq!(built.check.read(&solid(4, GRAY)), Ok(state("Gray")));
+        assert_eq!(built.drawn.check.read(&solid(4, RED)), Ok(state("Red")));
+        assert_eq!(built.drawn.check.read(&solid(4, GRAY)), Ok(state("Gray")));
         assert_eq!(
-            built.check.read(&solid(4, white)),
+            built.drawn.check.read(&solid(4, white)),
             Ok(Value::State(StateName::none()))
         );
-        let error = build(&state_check(&[("none", "red.png")]), &[], from(&files))
-            .expect_err("reserved name");
+        let error = build(
+            &state_check(&[("none", "red.png")]),
+            &[],
+            OFTEN,
+            from(&files),
+        )
+        .expect_err("reserved name");
         assert_eq!(
             error.to_string(),
             "its state name \"none\" is \"none\", which stands for no state"
@@ -587,19 +928,29 @@ mod tests {
             reference: "counter".to_owned(),
             whole: true,
         };
-        let built = build(&screen(number.clone()), &[counter("11")], from(&files)).expect("builds");
+        let built = build(
+            &screen(number.clone()),
+            &[counter("11")],
+            OFTEN,
+            from(&files),
+        )
+        .expect("builds");
         assert_eq!(
-            built.check.read(&elevens(1)),
+            built.drawn.check.read(&elevens(1)),
             Ok(Value::Number(Number::new(11.0).expect("finite")))
         );
-        assert!(matches!(built.check, Check::Number { whole: true, .. }));
+        assert!(matches!(
+            built.drawn.check,
+            Check::Number { whole: true, .. }
+        ));
         // A sample's transparency means nothing, even when every pixel is
         // transparent.
         let mut clear = BTreeMap::new();
         clear.insert(sample_name("counter", 1), transparent(&elevens(3)));
-        let from_clear = build(&screen(number), &[counter("11")], from(&clear)).expect("builds");
+        let from_clear =
+            build(&screen(number), &[counter("11")], OFTEN, from(&clear)).expect("builds");
         assert_eq!(
-            from_clear.check.read(&elevens(1)),
+            from_clear.drawn.check.read(&elevens(1)),
             Ok(Value::Number(Number::new(11.0).expect("finite")))
         );
         let error = build(
@@ -608,6 +959,7 @@ mod tests {
                 whole: false,
             }),
             &[counter("1")],
+            OFTEN,
             from(&files),
         )
         .expect_err("two characters, not one");
@@ -623,6 +975,7 @@ mod tests {
                 whole: false,
             }),
             &[counter("11")],
+            OFTEN,
             from(&files),
         )
         .expect_err("no such reference");
@@ -636,7 +989,7 @@ mod tests {
         let mut files = pictures(&[("small.png", &solid(3, RED))]);
         files.insert("broken.png".to_owned(), b"not a picture".to_vec());
         let problems = ["gone.png", "broken.png", "small.png"].map(|name| {
-            let error = build(&reference(name), &[], from(&files)).expect_err("refused");
+            let error = build(&reference(name), &[], OFTEN, from(&files)).expect_err("refused");
             (error.to_string(), error.source().is_some())
         });
         assert_eq!(
@@ -655,19 +1008,19 @@ mod tests {
         );
         let mut empty = reference("small.png");
         empty.region.width = 0;
-        let error = build(&empty, &[], from(&files)).expect_err("empty");
+        let error = build(&empty, &[], OFTEN, from(&files)).expect_err("empty");
         assert_eq!(error.to_string(), "its region is empty");
         assert!(error.source().is_none());
         let mut outside = reference("small.png");
         outside.region.x = 797;
-        let error = build(&outside, &[], from(&files)).expect_err("outside");
+        let error = build(&outside, &[], OFTEN, from(&files)).expect_err("outside");
         assert_eq!(
             error.to_string(),
             "its region lies outside the 800x600 window it was drawn on"
         );
         assert!(error.source().is_none());
         outside.region.x = 796;
-        let edge = build(&outside, &[], from(&files));
+        let edge = build(&outside, &[], OFTEN, from(&files));
         assert!(
             matches!(edge, Err(SavedError::PictureSize { .. })),
             "touching the edge fits, so only the picture is wrong: {edge:?}"
@@ -682,7 +1035,7 @@ mod tests {
     fn a_state_check_needs_a_few_states_each_named_and_pictured_once() {
         let files = pictures(&[("a.png", &solid(4, RED)), ("b.png", &solid(4, GRAY))]);
         let refused = |states: &[(&str, &str)]| {
-            build(&state_check(states), &[], from(&files))
+            build(&state_check(states), &[], OFTEN, from(&files))
                 .expect_err("refused")
                 .to_string()
         };
@@ -717,9 +1070,296 @@ mod tests {
             build(
                 &state_check(&[("Paused", "a.png"), ("Live", "b.png")]),
                 &[],
+                OFTEN,
                 from(&files)
             )
             .is_ok()
+        );
+    }
+
+    /// An image of `size` and one color.
+    fn filled(size: Size, color: ColorDef) -> Image {
+        let pixel = [color.blue, color.green, color.red, u8::MAX];
+        let pixels =
+            usize::try_from(size.width.checked_mul(size.height).expect("small")).expect("small");
+        Image::new(size, pixel.repeat(pixels)).expect("matching length")
+    }
+
+    fn size(width: u32, height: u32) -> Size {
+        Size { width, height }
+    }
+
+    fn fix_at(width: u32, height: u32, region: (u32, u32, u32, u32), images: &[&str]) -> FixDef {
+        FixDef {
+            window_size: SizeDef { width, height },
+            region: RegionDef {
+                x: region.0,
+                y: region.1,
+                width: region.2,
+                height: region.3,
+            },
+            images: images.iter().map(|&image| image.to_owned()).collect(),
+            reference: None,
+        }
+    }
+
+    /// A red-or-gray state check drawn at 800x600 on (10, 20, 4, 2), with
+    /// a fix at 1000x500 on (5, 5, 2, 2) whose pictures are swapped, so a
+    /// read tells which drawing read it.
+    fn red_or_gray() -> (ScreenDef, BTreeMap<String, Vec<u8>>) {
+        let mut screen = state_check(&[("Red", "status-1.png"), ("Gray", "status-2.png")]);
+        screen.fixes = vec![fix_at(
+            1000,
+            500,
+            (5, 5, 2, 2),
+            &["status-1-1.png", "status-1-2.png"],
+        )];
+        let files = pictures(&[
+            ("status-1.png", &solid(4, RED)),
+            ("status-2.png", &solid(4, GRAY)),
+            ("status-1-1.png", &filled(size(2, 2), GRAY)),
+            ("status-1-2.png", &filled(size(2, 2), RED)),
+        ]);
+        (screen, files)
+    }
+
+    #[test]
+    fn a_value_reads_its_drawing_at_its_size_and_scales_elsewhere() {
+        let (screen, files) = red_or_gray();
+        let value = build(&screen, &[], OFTEN, from(&files)).expect("builds");
+        // Its center is in the top-left third of the window.
+        assert_eq!(value.pin, PinDef::TopLeft);
+        let drawn = value.at(size(800, 600)).expect("reads");
+        assert_eq!(drawn.region, Region::new(10, 20, 4, 2).expect("not empty"));
+        assert!(drawn.is_drawn());
+        assert_eq!(value.check(&drawn).read(&solid(4, RED)), Ok(state("Red")));
+        // At the fix's size, the fix reads exactly, with its own pictures.
+        let fixed = value.at(size(1000, 500)).expect("reads");
+        assert_eq!(fixed.region, Region::new(5, 5, 2, 2).expect("not empty"));
+        assert!(fixed.is_drawn());
+        assert_eq!(
+            value.check(&fixed).read(&filled(size(2, 2), RED)),
+            Ok(state("Gray"))
+        );
+        // Twice as tall, the first drawing scales: twice as far from the top
+        // left, and its pictures twice the size.
+        let doubled = value.at(size(1600, 1200)).expect("reads");
+        assert_eq!(
+            doubled.region,
+            Region::new(20, 40, 8, 4).expect("not empty")
+        );
+        assert!(!doubled.is_drawn());
+        assert_eq!(value.region_at(size(1600, 1200)), Ok(doubled.region));
+        let check = value.check(&doubled);
+        assert_eq!(check.read(&filled(size(8, 4), GRAY)), Ok(state("Gray")));
+        assert_eq!(check.read(&filled(size(8, 4), RED)), Ok(state("Red")));
+        // Only wider, the region keeps its size, so its pictures do too.
+        let wider = value.at(size(1000, 600)).expect("reads");
+        assert!(
+            wider.is_drawn(),
+            "the first drawing's check, not a redrawn one"
+        );
+        assert_eq!(value.check(&wider).read(&solid(4, GRAY)), Ok(state("Gray")));
+        assert_eq!(
+            value.drawn_sizes().collect::<Vec<_>>(),
+            [size(800, 600), size(1000, 500)]
+        );
+    }
+
+    #[test]
+    fn a_value_that_cannot_scale_says_why() {
+        let (screen, files) = red_or_gray();
+        let rarely = build(&screen, &[], SizeChangesDef::Rarely, from(&files)).expect("builds");
+        assert_eq!(rarely.at(size(1600, 1200)), Err(Unread::NotDrawn));
+        assert_eq!(rarely.region_at(size(1600, 1200)), Err(Unread::NotDrawn));
+        assert!(rarely.at(size(1000, 500)).is_ok(), "a fix still reads");
+        assert!(rarely.at(size(800, 600)).is_ok());
+        let often = build(&screen, &[], OFTEN, from(&files)).expect("builds");
+        // Too narrow for the region pinned left at 10 to 14.
+        assert_eq!(often.at(size(12, 600)), Err(Unread::Outside));
+        assert_eq!(often.region_at(size(12, 600)), Err(Unread::Outside));
+        // A quarter as tall scales the 2 rows to 1 but every gray-over-red
+        // mask pixel of a sparse picture to nothing.
+        let mut sparse = state_check(&[("Dot", "dot.png")]);
+        sparse.region.width = 4;
+        let icon = solid(4, RED);
+        let mask = Mask::new(
+            icon.size(),
+            vec![true, false, false, false, false, false, false, false],
+        )
+        .expect("keeps one");
+        let mut dotted = BTreeMap::new();
+        dotted.insert(
+            "dot.png".to_owned(),
+            icon.encode_png_masked(&mask).expect("encodes"),
+        );
+        let dot = build(&sparse, &[], OFTEN, from(&dotted)).expect("builds");
+        assert_eq!(dot.at(size(400, 300)), Err(Unread::TooSmall));
+        assert_eq!(
+            dot.region_at(size(400, 300)),
+            Ok(Region::new(5, 10, 2, 1).expect("not empty")),
+            "the region alone still fits"
+        );
+        assert_eq!(
+            [Unread::NotDrawn, Unread::Outside, Unread::TooSmall].map(|unread| unread.to_string()),
+            [
+                "it is read only at the window sizes it was drawn at",
+                "scaled to this window size, its region reaches outside the window",
+                "scaled to this window size, its states leave no pixel to compare",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_number_fix_reads_with_the_reference_learned_at_its_size() {
+        let files = pictures(&[
+            (&sample_name("counter", 1), &elevens(3)),
+            (&sample_name("big", 1), &elevens(2)),
+        ]);
+        let mut big = counter("11");
+        big.id = "big".to_owned();
+        // A wider tolerance tells its reader from the counter's.
+        big.tolerance = 20;
+        big.samples[0].image = sample_name("big", 1);
+        let mut screen = screen(CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: true,
+        });
+        screen.fixes = vec![
+            FixDef {
+                reference: Some("big".to_owned()),
+                ..fix_at(1000, 500, (0, 0, 8, 4), &[])
+            },
+            fix_at(400, 300, (0, 0, 4, 2), &[]),
+        ];
+        let references = [counter("11"), big];
+        let value = build(&screen, &references, OFTEN, from(&files)).expect("builds");
+        let own = value.at(size(1000, 500)).expect("reads");
+        assert!(matches!(
+            value.check(&own),
+            Check::Number { whole: true, .. }
+        ));
+        assert_ne!(value.check(&own), &value.drawn.check, "its own reference");
+        let shared = value.at(size(400, 300)).expect("reads");
+        assert_eq!(value.check(&shared), &value.drawn.check);
+        assert_eq!(
+            value.check(&own).read(&elevens(2)),
+            Ok(Value::Number(Number::new(11.0).expect("finite")))
+        );
+        screen.fixes[0].reference = Some("gone".to_owned());
+        let error = build(&screen, &references, OFTEN, from(&files)).expect_err("missing");
+        assert_eq!(
+            error.to_string(),
+            "at 1000x500, its reference gone is not saved"
+        );
+        assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn a_value_may_have_as_many_fixes_as_the_most_and_no_more() {
+        let mut screen = screen(CheckDef::Color {
+            color: RED,
+            tolerance: 10,
+        });
+        let fixes = |count: usize| -> Vec<FixDef> {
+            (0..count)
+                .map(|n| {
+                    fix_at(
+                        1000 + u32::try_from(n).expect("small"),
+                        500,
+                        (0, 0, 1, 1),
+                        &[],
+                    )
+                })
+                .collect()
+        };
+        screen.fixes = fixes(MAX_FIXES);
+        let built = build(&screen, &[], OFTEN, from(&BTreeMap::new())).expect("builds");
+        assert_eq!(built.fixes.len(), MAX_FIXES);
+        screen.fixes = fixes(MAX_FIXES + 1);
+        assert_eq!(
+            build(&screen, &[], OFTEN, from(&BTreeMap::new()))
+                .expect_err("one too many")
+                .to_string(),
+            format!("it has more than {MAX_FIXES} fixes")
+        );
+    }
+
+    #[test]
+    fn fixes_that_do_not_suit_the_value_say_what_is_wrong() {
+        let (states, files) = red_or_gray();
+        let refused = |change: &dyn Fn(&mut ScreenDef)| {
+            let mut screen = states.clone();
+            change(&mut screen);
+            build(&screen, &[], OFTEN, from(&files))
+                .expect_err("refused")
+                .to_string()
+        };
+        assert_eq!(
+            refused(&|screen| screen.fixes[0].window_size = SizeDef {
+                width: 800,
+                height: 600
+            }),
+            "at 800x600, it is drawn at this size already"
+        );
+        assert_eq!(
+            refused(&|screen| screen.fixes.push(screen.fixes[0].clone())),
+            "at 1000x500, it is drawn at this size already"
+        );
+        assert_eq!(
+            refused(&|screen| {
+                screen.fixes = (0..=MAX_FIXES)
+                    .map(|n| {
+                        fix_at(
+                            1000 + u32::try_from(n).expect("small"),
+                            500,
+                            (0, 0, 1, 1),
+                            &[],
+                        )
+                    })
+                    .collect();
+            }),
+            format!("it has more than {MAX_FIXES} fixes")
+        );
+        assert_eq!(
+            refused(&|screen| {
+                screen.fixes[0].images.pop();
+            }),
+            "at 1000x500, it has 1 state pictures for the check's 2 states"
+        );
+        assert_eq!(
+            refused(&|screen| screen.fixes[0].images[1] = "status-1.png".to_owned()),
+            "at 1000x500, two of its states use the picture status-1.png"
+        );
+        assert_eq!(
+            refused(&|screen| screen.fixes[0].region.width = 3),
+            "at 1000x500, its picture status-1-1.png is 2x2 but its region is 3x2"
+        );
+        assert_eq!(
+            refused(&|screen| screen.fixes[0].region.x = 999),
+            "at 1000x500, its region lies outside the 1000x500 window it was drawn on"
+        );
+        assert_eq!(
+            refused(&|screen| screen.fixes[0].reference = Some("counter".to_owned())),
+            "at 1000x500, it names a reference, but its check reads no number"
+        );
+        let color = screen(CheckDef::Color {
+            color: RED,
+            tolerance: 1,
+        });
+        let mut pictured = color.clone();
+        pictured.fixes = vec![fix_at(1000, 500, (0, 0, 2, 2), &["x.png"])];
+        let error = build(&pictured, &[], OFTEN, from(&files)).expect_err("refused");
+        assert_eq!(
+            error.to_string(),
+            "at 1000x500, it has 1 state pictures for the check's 0 states"
+        );
+        let mut plain = color;
+        plain.fixes = vec![fix_at(1000, 500, (0, 0, 2, 2), &[])];
+        let value = build(&plain, &[], OFTEN, from(&files)).expect("builds");
+        assert_eq!(
+            value.fixes[0].check, None,
+            "a color fix reads with the value's own check"
         );
     }
 }

@@ -22,7 +22,7 @@ use appytappy_config::rule::Rule;
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::{AppStore, AutomationStore, StoredApp};
 use appytappy_config::window_match::WindowMatch;
-use appytappy_sources::screen::saved::{self, SavedCheck};
+use appytappy_sources::screen::saved::{self, SavedValue};
 
 use crate::click::ClickTargets;
 use crate::lifecycle::Watchlist;
@@ -84,8 +84,8 @@ pub(crate) struct ValuePlan {
     /// The signal the rules compare: the value's ID, which is unique within
     /// its application.
     pub(crate) signal: SignalName,
-    /// Where it is read and how.
-    pub(crate) check: SavedCheck,
+    /// Where it is read and how, at each window size.
+    pub(crate) check: SavedValue,
 }
 
 impl AppPlan {
@@ -202,8 +202,10 @@ pub(crate) fn compile(
             clicks: ClickTargets::default(),
         });
         let ready = built.entry((app_id, value.id.as_str())).or_insert_with(|| {
-            let check = saved::build(&value.screen, &app.references, |name| picture(app_id, name))
-                .map_err(|error| format!("{} of {}: {error}", value.name, app.name))?;
+            let check = saved::build(&value.screen, &app.references, app.size_changes, |name| {
+                picture(app_id, name)
+            })
+            .map_err(|error| format!("{} of {}: {error}", value.name, app.name))?;
             draft.values.push(ValuePlan { signal, check });
             draft.value_names.push(value.name.clone());
             Ok(())
@@ -249,11 +251,12 @@ pub(crate) mod examples {
     use std::time::Duration;
 
     use appytappy_config::action::{Action, MediaCommand, MediaTarget};
+    use appytappy_config::app_file::{PinDef, SizeChangesDef};
     use appytappy_config::rule::{Comparison, Condition, Restore, Rule};
     use appytappy_config::signal::{Number, SignalName, Value};
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{BarFill, Check};
-    use appytappy_sources::screen::saved::SavedCheck;
+    use appytappy_sources::screen::saved::{SavedCheck, SavedValue};
     use appytappy_sources::screen::{Region, Size};
     use appytappy_sources::system::Rgb;
 
@@ -320,13 +323,18 @@ pub(crate) mod examples {
                 },
                 values: vec![ValuePlan {
                     signal: signal(),
-                    check: SavedCheck {
-                        window_size: Size {
-                            width: 800,
-                            height: 600,
+                    check: SavedValue {
+                        drawn: SavedCheck {
+                            window_size: Size {
+                                width: 800,
+                                height: 600,
+                            },
+                            region: Region::new(0, 0, 10, 2).expect("not empty"),
+                            check: Check::BarFill(BarFill::new(white, black).expect("different")),
                         },
-                        region: Region::new(0, 0, 10, 2).expect("not empty"),
-                        check: Check::BarFill(BarFill::new(white, black).expect("different")),
+                        fixes: Vec::new(),
+                        pin: PinDef::TopLeft,
+                        size_changes: SizeChangesDef::Often,
                     },
                 }],
                 rules: Arc::from(vec![rule]),
@@ -343,8 +351,8 @@ mod tests {
 
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
-        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeDef, StateDef, ValueDef, WindowDef,
-        sample_name,
+        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef,
+        WindowDef, sample_name,
     };
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
@@ -376,6 +384,8 @@ mod tests {
                     height: 2,
                 },
                 check,
+                pin: None,
+                fixes: Vec::new(),
             },
         }
     }
@@ -394,6 +404,7 @@ mod tests {
                 },
                 fallback: FallbackDef::None,
             },
+            size_changes: SizeChangesDef::Often,
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             checked: None,

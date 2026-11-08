@@ -11,6 +11,8 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::{WindowFacts, WindowMatch};
 
+use crate::screen::Size;
+
 /// A running process, as a system-wide snapshot reports it without opening
 /// the process.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +106,16 @@ pub trait System {
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
+    /// The size of `window` as a capture of it frames it now: its bounds
+    /// without the shadow the system draws around it, or `None` once it
+    /// closed or while it is minimized. A capture can then start for the
+    /// size its first frame has.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn frame_size(&self, window: u64) -> io::Result<Option<Size>>;
+
     /// The bounds of `window`'s frame as the screen shows it, which a
     /// capture's frame covers, or `None` once it closed. On Windows they
     /// leave out the invisible borders that [`System::window_place`]'s
@@ -155,6 +167,10 @@ impl System for Unsupported {
     }
 
     fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
+        unsupported()
+    }
+
+    fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
         unsupported()
     }
 
@@ -460,6 +476,9 @@ mod tests {
                     front: false,
                 }))
             }
+            fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+                unsupported()
+            }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
                 unsupported()
             }
@@ -486,11 +505,12 @@ mod tests {
             system.processes().map(drop),
             system.windows().map(drop),
             system.window_place(7).map(drop),
+            system.frame_size(7).map(drop),
             system.frame_bounds(7).map(drop),
             system.executable_build(ProcessId::new(1)).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 6]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 7]);
     }
 }
