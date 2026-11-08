@@ -14,7 +14,8 @@
 # it closes. The trace phase has no targets: it reports what recording costs.
 # Between the steady and idle phases, a settle check opens the window once
 # more, changes a value once and then stops drawing, and fails unless the
-# runtime sees that change.
+# runtime sees that change. Last, a handle check opens and closes the window
+# a few more times and fails when the runtime's handles keep growing.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -41,6 +42,19 @@ $CpuSamples = 3
 $Settle = 5
 $IdleSample = 60
 $ActiveSample = 30
+# The handle check: attach and detach cycles after the idle after phase,
+# and how long the runtime then waits before its handles are counted. The
+# first attaches load libraries and set up thread pools once, so the check
+# compares with the count the idle after phase ends on, a minute after the
+# third detach, once that capture has been torn down. A capture that left
+# its handles behind added about 10 a cycle, about 30 over 3 cycles. A clean
+# one added 1 or 2 over six cycles counted two minutes later, and up to 5 over
+# 3 cycles counted 30 seconds later, while Windows still keeps idle thread
+# pool workers. So 3 cycles and at most 12 more handles than at the end of
+# the idle after phase tell the two apart with room on both sides.
+$MoreCycles = 3
+$HandleWait = 30
+$HandleGrowthLimit = 12
 
 $ProbeTitle = 'AppyTappy footprint probe'
 $ProbeExecutable = 'appytappy-footprint-probe.exe'
@@ -107,6 +121,102 @@ function Wait-Log([string]$Line, [int]$Seconds, [int]$Count = 1) {
         Start-Sleep -Milliseconds 250
     }
     throw "the runtime's log did not say '$Line' within $Seconds seconds"
+}
+
+# The runtime's handles counted by object type, such as Event or Section,
+# read from the system's handle list, to say what grew when the handle check
+# fails. A type is named by copying one of its handles into this script and
+# asking for its type; a type whose handle cannot be copied shows by its
+# number.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+
+public static class HandleTypes {
+    [DllImport("ntdll.dll")]
+    static extern int NtQuerySystemInformation(int kind, IntPtr buffer, int size, out int needed);
+    [DllImport("ntdll.dll")]
+    static extern int NtQueryObject(IntPtr handle, int kind, IntPtr buffer, int size, out int needed);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr OpenProcess(uint access, bool inherit, int id);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")]
+    static extern bool DuplicateHandle(IntPtr source, IntPtr handle, IntPtr target, out IntPtr copy, uint access, bool inherit, uint options);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+
+    static readonly Dictionary<int, string> names = new Dictionary<int, string>();
+
+    // SystemExtendedHandleInformation: a count, then one 40-byte entry per
+    // handle with its process ID at 8, value at 16 and type at 30.
+    public static string Of(int process) {
+        int size = 1 << 20;
+        IntPtr buffer = IntPtr.Zero;
+        try {
+            while (true) {
+                buffer = Marshal.AllocHGlobal(size);
+                int needed;
+                int status = NtQuerySystemInformation(64, buffer, size, out needed);
+                if (status == 0) { break; }
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+                // STATUS_INFO_LENGTH_MISMATCH
+                if (status != unchecked((int)0xC0000004)) { return "unreadable"; }
+                size = Math.Max(size * 2, needed + (1 << 16));
+            }
+            long count = Marshal.ReadInt64(buffer);
+            var counts = new Dictionary<int, int>();
+            var samples = new Dictionary<int, long>();
+            for (long i = 0; i < count; i++) {
+                IntPtr entry = IntPtr.Add(buffer, (int)(16 + i * 40));
+                if (Marshal.ReadInt64(entry, 8) != process) { continue; }
+                int kind = Marshal.ReadInt16(entry, 30);
+                int seen;
+                counts.TryGetValue(kind, out seen);
+                counts[kind] = seen + 1;
+                if (!samples.ContainsKey(kind)) { samples[kind] = Marshal.ReadInt64(entry, 16); }
+            }
+            IntPtr owner = OpenProcess(0x0040, false, process); // PROCESS_DUP_HANDLE
+            try {
+                return string.Join(", ", counts
+                    .Select(pair => new { Name = Name(owner, pair.Key, samples[pair.Key]), Count = pair.Value })
+                    .OrderBy(pair => pair.Name)
+                    .Select(pair => pair.Name + " " + pair.Count));
+            }
+            finally { if (owner != IntPtr.Zero) { CloseHandle(owner); } }
+        }
+        finally { if (buffer != IntPtr.Zero) { Marshal.FreeHGlobal(buffer); } }
+    }
+
+    static string Name(IntPtr owner, int kind, long sample) {
+        string name;
+        if (names.TryGetValue(kind, out name)) { return name; }
+        name = "type " + kind;
+        IntPtr copy;
+        // DUPLICATE_SAME_ACCESS
+        if (owner != IntPtr.Zero && DuplicateHandle(owner, new IntPtr(sample), GetCurrentProcess(), out copy, 0, false, 2)) {
+            IntPtr buffer = Marshal.AllocHGlobal(4096);
+            try {
+                int needed;
+                // ObjectTypeInformation starts with the type's name.
+                if (NtQueryObject(copy, 2, buffer, 4096, out needed) == 0) {
+                    int length = Marshal.ReadInt16(buffer);
+                    name = Marshal.PtrToStringUni(Marshal.ReadIntPtr(buffer, 8), length / 2);
+                }
+            }
+            finally { Marshal.FreeHGlobal(buffer); CloseHandle(copy); }
+        }
+        names[kind] = name;
+        return name;
+    }
+}
+'@
+
+function Get-HandleTypes {
+    [HandleTypes]::Of($script:process.Id)
 }
 
 function Get-PrivateWorkingSet([int]$Id) {
@@ -384,6 +494,36 @@ public static class Probe {
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
     # The stopped trace's writer has long finished its file by now.
     Measure-Trace
+    # The handle check's starting count, read after the idle sample, when the
+    # third capture's teardown has long finished: read sooner, a capture still
+    # closing could raise it enough to hide a leak.
+    $script:process.Refresh()
+    $afterThird = $script:process.HandleCount
+    $typesAfterThird = Get-HandleTypes
+
+    # The handle check: more attach and detach cycles, then the count after
+    # a wait, against the count at the end of the idle after phase.
+    for ($cycle = 4; $cycle -lt 4 + $MoreCycles; $cycle++) {
+        $reads = Measure-Log 'reading its values'
+        $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
+        $null = $probe.Handle
+        Wait-Log '): attached' 30 $cycle
+        Wait-Log 'reading its values' 10 ($reads + 1)
+        Start-Sleep -Seconds 2
+        Stop-Process -Id $probe.Id
+        $probe.WaitForExit()
+        $probe = $null
+        Wait-Log '): detached' 10 $cycle
+    }
+    Start-Sleep -Seconds $HandleWait
+    $script:process.Refresh()
+    $afterMore = $script:process.HandleCount
+    $within = $afterMore -le $afterThird + $HandleGrowthLimit
+    Add-Row "Handles $HandleWait s after $MoreCycles more detaches" "$afterMore, $afterThird after the idle after phase" "$($afterThird + $HandleGrowthLimit)" $within
+    if (-not $within) {
+        $script:details += "Handles by type after the idle after phase: $typesAfterThird"
+        $script:details += "Handles by type $HandleWait s after the last detach: $(Get-HandleTypes)"
+    }
 }
 catch {
     $Failures.Add($_.Exception.Message)
