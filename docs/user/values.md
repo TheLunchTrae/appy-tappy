@@ -65,18 +65,27 @@ select **Keep this window** or **Stay** to carry on, as
   **Color to look for**, such as a light that turns red. Use **Pick** and
   click the color on a screenshot. **Tolerance** says how close: drag the
   slider or type a number.
-- **Image** is yes when the region looks like it does on a screenshot you
-  choose, such as an icon that appears. Select that screenshot, then
-  **Use this one** next to **Compare against**. **Tolerance** says how much
-  it may differ on average. To compare only the thing itself and not what is
-  behind it, [select it](#select-the-thing-in-an-image).
+- **State** reads which of a few named looks the region shows, such as a
+  corner that says `PAUSED` or `LIVE`. Take a screenshot of each look. Select
+  one, then **Add a state from this screenshot** under **States**, and name
+  the state, such as `Paused`. A screenshot gives at most one state, and a
+  value can have up to 16. The value reads as the state whose screenshot the
+  region looks most like, or `none` when it is like none of them, such as
+  while the corner is empty. **Tolerance** says how much, on average, the
+  region may differ from a state's screenshot and still read as it. Each
+  state shows how many pixels it compares, and **matches now** while the
+  live window reads as it. To compare only the thing itself and not what is
+  behind it, [select it](#select-the-thing-in-a-state).
 
-## Select the thing in an image
+State names are up to 32 characters, with no space at either end. Two states
+cannot share a name, ignoring case, and none can be named `none`.
 
-An **Image** check compares every pixel of its region, so a background that
-changes, such as a sky behind an icon or a scene behind a word, can stop it
-from matching. **Select with**, under **Where to read**, marks just the thing
-instead:
+## Select the thing in a state
+
+A **State** check compares every pixel of its region, so a background that
+changes, such as a sky behind an icon or a scene behind a word, can stop a
+state from matching. **Select with**, under **Where to read**, marks just the
+thing on the screenshot shown instead:
 
 - **Box** draws the region by hand, as for other checks.
 - **Snap** takes a rough box. Drag one around the thing with some plain
@@ -88,28 +97,27 @@ instead:
 
 Hold **Shift** while you drag or click to add a part, or **Alt** to take one
 away. **Color match** says how close a color must be to count as the same:
-raise it if the selection stops short, and lower it if it spills over. The
-region fits the selection, and the screenshot you select on becomes the one
-the check compares against. Selecting on another screenshot, or choosing
-another with **Use this one**, starts the selection over.
+raise it if the selection stops short, and lower it if it spills over.
+Selecting on a screenshot with no state yet adds one for it, so you can name
+it under **How to read it**. Each state keeps its own selection, made on its
+own screenshot, and the region fits around what every state selects.
 
-Under **How to read it**, while **Ignore the background** is on, the pixels left out are shaded over the
-screenshot, and the check skips them. The note under it says how many pixels
-it compares. Turn it off to compare the whole region again. You can still
-adjust the region by hand with **Box**; anything you add to it counts as
-background.
+While **Ignore the background** is on, the pixels a state's selection leaves
+out are shaded over its screenshot, and the check skips them. Turn it off to
+compare the whole region again. You can still adjust the region by hand with
+**Box**; anything you add to it counts as background.
 
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
-**Image** check on the part that matters often works instead.
+**State** check on the part that matters often works instead.
 
 ## Window size
 
 A value reads only while the window is the size it was on the screenshot you
 drew the region on. If you use the window at more than one size, make a value
 at each size, with an automation for each; AppyTappy reads the values made at
-the window's current size. An **Image** check compares against a screenshot
-of that same size, and trying or saving it says so if it is not.
+the window's current size. Each state of a **State** check comes from a
+screenshot of that same size, and trying or saving it says so if one is not.
 
 While the window is closed or at a size no value was made at, AppyTappy reads
 nothing. Automations neither run nor undo their changes until it can read

@@ -23,8 +23,8 @@ export function checkSummary(
       return { name: 'Bar fill', colors: [check.filled, check.empty] };
     case 'color':
       return { name: 'Color', colors: [check.color] };
-    case 'image':
-      return { name: 'Image', colors: [] };
+    case 'state':
+      return { name: `State: ${check.states.map((state) => state.name).join(', ')}`, colors: [] };
   }
 }
 

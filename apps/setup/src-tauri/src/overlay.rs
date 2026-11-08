@@ -590,7 +590,7 @@ fn view<S>(overlay: &Overlay<S>, minimized: bool) -> OverlayView {
             let (reading, problem) = match (check, read) {
                 (Err(problem), _) => (None, Some(problem.clone())),
                 (Ok(_), None) => (None, None),
-                (Ok(_), Some(ValueRead::Read(reading))) => (Some(*reading), None),
+                (Ok(_), Some(ValueRead::Read(reading))) => (Some(reading.clone()), None),
                 (Ok(check), Some(ValueRead::Resized(size))) => (
                     None,
                     Some(format!(

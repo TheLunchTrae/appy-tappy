@@ -46,6 +46,25 @@ export function colorAt(picture: Picture, x: number, y: number): Color | null {
   return { red, green, blue };
 }
 
+/** The part of `picture` inside `box`, or null when `box` is empty or reaches outside it. */
+export function cropPicture(
+  picture: Picture,
+  box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): Picture | null {
+  const { x, y, width, height } = box;
+  const whole = [x, y, width, height].every((part) => Number.isInteger(part));
+  if (!whole || x < 0 || y < 0 || width < 1 || height < 1 || x + width > picture.width || y + height > picture.height) {
+    return null;
+  }
+  const data = new Uint8ClampedArray(width * height * BYTES_PER_PIXEL);
+  const rowBytes = width * BYTES_PER_PIXEL;
+  for (let row = 0; row < height; row += 1) {
+    const start = ((y + row) * picture.width + x) * BYTES_PER_PIXEL;
+    data.set(picture.data.subarray(start, start + rowBytes), row * rowBytes);
+  }
+  return { width, height, data };
+}
+
 /** The color as CSS hex, such as `#76f06a`. */
 export function hex(color: Color): string {
   const part = (channel: number): string => channel.toString(16).padStart(2, '0');

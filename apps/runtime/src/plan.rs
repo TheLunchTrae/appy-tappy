@@ -203,7 +203,8 @@ mod tests {
 
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
-        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeDef, ValueDef, WindowDef, sample_name,
+        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeDef, StateDef, ValueDef, WindowDef,
+        sample_name,
     };
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
@@ -305,6 +306,10 @@ mod tests {
         }
     }
 
+    fn state(name: &str) -> TargetDef {
+        TargetDef::State(name.to_owned())
+    }
+
     fn file(automations: Vec<AutomationDef>) -> AutomationsFile {
         AutomationsFile {
             format: FORMAT,
@@ -368,8 +373,11 @@ mod tests {
 
     #[test]
     fn what_cannot_run_is_named_and_the_rest_still_runs() {
-        let reference = CheckDef::Image {
-            image: "icon.png".to_owned(),
+        let reference = CheckDef::State {
+            states: vec![StateDef {
+                name: "Shown".to_owned(),
+                image: "icon.png".to_owned(),
+            }],
             tolerance: 0,
         };
         let apps = [
@@ -387,8 +395,8 @@ mod tests {
             automation("broken", "broken", "progress", TargetDef::Number(1.0)),
             automation("missing", "example", "speed", TargetDef::Number(1.0)),
             automation("kind", "example", "progress", TargetDef::Flag(true)),
-            automation("picture", "example", "icon", TargetDef::Flag(true)),
-            automation("again", "example", "icon", TargetDef::Flag(false)),
+            automation("picture", "example", "icon", state("Shown")),
+            automation("again", "example", "icon", state("none")),
             automation("good", "example", "progress", TargetDef::Number(90.0)),
             AutomationDef {
                 actions: Vec::new(),
@@ -453,20 +461,18 @@ mod tests {
         .expect("matching length")
         .encode_png()
         .expect("encodes");
-        let reference = CheckDef::Image {
-            image: "icon.png".to_owned(),
+        let reference = CheckDef::State {
+            states: vec![StateDef {
+                name: "Shown".to_owned(),
+                image: "icon.png".to_owned(),
+            }],
             tolerance: 0,
         };
         let apps = [stored(
             "example",
             Ok(app("Example App", vec![value("icon", reference)])),
         )];
-        let automations = file(vec![automation(
-            "on",
-            "example",
-            "icon",
-            TargetDef::Flag(true),
-        )]);
+        let automations = file(vec![automation("on", "example", "icon", state("Shown"))]);
         let mut asked = Vec::new();
         let plan = compile(&apps, &automations, |app, name| {
             asked.push(format!("{app}/{name}"));

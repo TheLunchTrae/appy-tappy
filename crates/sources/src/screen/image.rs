@@ -843,10 +843,10 @@ mod tests {
     /// at 37% and at 90%, a percent counter under it, and a panel that turns
     /// gold on the second. `digits.png` shows the counter's font.
     mod fixtures {
-        use appytappy_config::signal::{Number, Value};
+        use appytappy_config::signal::{Number, StateName, Value};
 
         use super::*;
-        use crate::screen::check::{BarFill, Check, ColorMatch, ImageMatch};
+        use crate::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
         use crate::screen::digits::DigitReader;
 
         const WHITE: Rgb = Rgb {
@@ -916,20 +916,26 @@ mod tests {
         }
 
         #[test]
-        fn color_and_image_see_the_panel_change() {
+        fn color_and_state_see_the_panel_change() {
             let [first, second] = screenshots();
             let panel = Region::new(100, 110, 120, 50).unwrap();
             let gold = Check::Color(ColorMatch {
                 color: second.pixel(105, 115).unwrap(),
                 tolerance: 40,
             });
-            let unchanged =
-                Check::Image(ImageMatch::new(first.crop(panel).unwrap(), None, 8).unwrap());
+            let before = StateName::new("Before").unwrap();
+            let unchanged = Check::State(StateMatch::new(vec![(
+                before.clone(),
+                ImageMatch::new(first.crop(panel).unwrap(), None, 8).unwrap(),
+            )]));
             let strip = Region::new(100, 110, 120, 12).unwrap();
             assert_eq!(read(&gold, &first, strip), Value::Flag(false));
             assert_eq!(read(&gold, &second, strip), Value::Flag(true));
-            assert_eq!(read(&unchanged, &first, panel), Value::Flag(true));
-            assert_eq!(read(&unchanged, &second, panel), Value::Flag(false));
+            assert_eq!(read(&unchanged, &first, panel), Value::State(before));
+            assert_eq!(
+                read(&unchanged, &second, panel),
+                Value::State(StateName::none())
+            );
         }
     }
 

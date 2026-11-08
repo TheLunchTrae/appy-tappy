@@ -114,8 +114,10 @@ impl Session {
     /// Releases come before fires, so a restore never undoes a change that
     /// another rule makes on the same value.
     pub fn sample(&mut self, signal: SignalName, value: Value, at: Instant) -> Vec<Effect> {
-        let previous = self.values.insert(signal.clone(), value);
-        let changed = previous.is_some_and(|previous| previous != value);
+        let changed = self
+            .values
+            .insert(signal.clone(), value)
+            .is_some_and(|previous| self.values.get(&signal) != Some(&previous));
         let mut effects = Vec::new();
         for (index, (rule, state)) in self.rules.iter().zip(&mut self.states).enumerate() {
             if let Trigger::Becomes { condition, rearm } = rule.trigger()
@@ -258,7 +260,7 @@ mod tests {
 
     use appytappy_config::action::{Action, MediaCommand, MediaTarget};
     use appytappy_config::rule::Comparison;
-    use appytappy_config::signal::Number;
+    use appytappy_config::signal::{Number, StateName};
 
     use super::*;
 
@@ -684,6 +686,58 @@ mod tests {
         assert_eq!(
             feed(&mut session, &clock, 6, &[1.0, 1.0, 2.0]),
             [Effect::Fire(SECOND)]
+        );
+    }
+
+    #[test]
+    fn state_rules_fire_on_the_state_and_on_a_new_state() {
+        let clock = Clock::new();
+        let state = |name: &str| Value::State(StateName::new(name).expect("valid"));
+        let paused =
+            Condition::compare(name("status"), Comparison::Equals, state("Paused")).expect("valid");
+        let mut session = start(
+            vec![
+                Rule::new(
+                    Trigger::Becomes {
+                        condition: paused,
+                        rearm: Rearm::WhenFalse,
+                    },
+                    pause(),
+                    Duration::ZERO,
+                    Restore::OnRelease,
+                )
+                .expect("valid"),
+                Rule::new(
+                    Trigger::Changes {
+                        signal: name("status"),
+                        guard: None,
+                    },
+                    pause(),
+                    Duration::ZERO,
+                    Restore::Never,
+                )
+                .expect("valid"),
+            ],
+            &clock,
+        );
+        let mut status = |value: &str, at| {
+            let value = if value == "none" {
+                Value::State(StateName::none())
+            } else {
+                state(value)
+            };
+            session.sample(name("status"), value, clock.at(at))
+        };
+        assert_eq!(status("Live", 1), []);
+        assert_eq!(status("Live", 2), []);
+        assert_eq!(
+            status("Paused", 3),
+            [Effect::Fire(FIRST), Effect::Fire(SECOND)]
+        );
+        assert_eq!(status("Paused", 4), []);
+        assert_eq!(
+            status("none", 5),
+            [Effect::Release(FIRST), Effect::Fire(SECOND)]
         );
     }
 

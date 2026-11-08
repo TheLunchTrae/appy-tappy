@@ -33,13 +33,15 @@ pub(crate) struct CaptureFailure {
 }
 
 /// A value the check read, as the UI shows it.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub(crate) enum Reading {
     /// A number, such as a percentage.
     Number(f64),
-    /// Yes or no, such as whether a panel shows.
+    /// Yes or no, such as whether a color shows.
     Flag(bool),
+    /// A state's name, such as `Paused`, or `none`.
+    State(String),
 }
 
 impl From<Value> for Reading {
@@ -47,6 +49,7 @@ impl From<Value> for Reading {
         match value {
             Value::Number(number) => Self::Number(number.raw()),
             Value::Flag(flag) => Self::Flag(flag),
+            Value::State(state) => Self::State(state.as_str().to_owned()),
         }
     }
 }
@@ -527,6 +530,8 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
+    use appytappy_config::signal::StateName;
+
     use crate::owner::test_support::{BAR, spec};
 
     use super::*;
@@ -638,6 +643,11 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Reading::Number(87.0)).expect("serializes"),
             serde_json::json!({"kind": "number", "value": 87.0})
+        );
+        assert_eq!(
+            serde_json::to_value(Reading::from(Value::State(StateName::none())))
+                .expect("serializes"),
+            serde_json::json!({"kind": "state", "value": "none"})
         );
         assert_eq!(
             serde_json::to_value(Live::Waiting).expect("serializes"),

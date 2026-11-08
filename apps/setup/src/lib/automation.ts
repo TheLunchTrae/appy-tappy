@@ -11,18 +11,30 @@ import type {
   Live,
   MediaCommand,
   Reading,
+  Target,
   ValueDef,
   WhenDef,
 } from './api.ts';
 import { spellKeys } from './shortcut.ts';
 
-/** What a value reads: a number, or yes or no. */
-export type ValueKind = 'number' | 'flag';
+/** What a value reads: a number, yes or no, or a state's name. */
+export type ValueKind = 'number' | 'flag' | 'state';
 
 /** The kind of value a check reads. */
 export function valueKind(check: CheckDef): ValueKind {
-  return check.kind === 'number' || check.kind === 'barFill' ? 'number' : 'flag';
+  switch (check.kind) {
+    case 'number':
+    case 'barFill':
+      return 'number';
+    case 'color':
+      return 'flag';
+    case 'state':
+      return 'state';
+  }
 }
+
+/** What a state check reads when the region shows none of its states. */
+export const NO_STATE = 'none';
 
 /** A saved value an automation can watch. */
 export interface ValueChoice {
@@ -32,6 +44,8 @@ export interface ValueChoice {
   readonly antiCheat: AntiCheat;
   readonly value: ValueDef;
   readonly kind: ValueKind;
+  /** The names of the states a state check reads, in its order; none for another kind. */
+  readonly states: readonly string[];
 }
 
 /** Every saved value of the applications whose files read fine, in the order the Values page lists them. */
@@ -45,6 +59,7 @@ export function valueChoices(apps: readonly AppSummary[]): readonly ValueChoice[
           antiCheat: app.file?.antiCheat ?? 'unknown',
           value,
           kind: valueKind(value.screen.check),
+          states: value.screen.check.kind === 'state' ? value.screen.check.states.map((state) => state.name) : [],
         })),
   );
 }
@@ -58,6 +73,7 @@ export function findValue(choices: readonly ValueChoice[], when: Pick<WhenDef, '
 export const COMPARISONS: Readonly<Record<ValueKind, readonly Comparison[]>> = {
   number: ['atLeast', 'above', 'atMost', 'below', 'equals', 'notEquals'],
   flag: ['equals', 'notEquals'],
+  state: ['equals', 'notEquals'],
 };
 
 /** Each comparison as the condition reads it, after the value's name. */
@@ -93,13 +109,18 @@ function numberText(value: number, target?: number): string {
   return rounded;
 }
 
-/** A reading as the UI shows it, such as `87`, `12.46` or `Yes`, never contradicting a comparison with `target`. */
-export function readingText(reading: Reading, target?: number | boolean): string {
+/**
+ * A reading as the UI shows it, such as `87`, `12.46`, `Yes` or `Paused`, never contradicting a comparison with
+ * `target`.
+ */
+export function readingText(reading: Reading, target?: Target): string {
   switch (reading.kind) {
     case 'number':
       return numberText(reading.value, typeof target === 'number' ? target : undefined);
     case 'flag':
       return reading.value ? 'Yes' : 'No';
+    case 'state':
+      return reading.value;
   }
 }
 
@@ -148,7 +169,7 @@ export function liveAnnouncement(live: LiveState): string {
 }
 
 /** A target as the condition reads it. */
-export function targetText(target: number | boolean): string {
+export function targetText(target: Target): string {
   if (typeof target === 'boolean') {
     return target ? 'yes' : 'no';
   }
@@ -256,6 +277,8 @@ export interface Draft {
   readonly number: string;
   /** The yes or no to compare with. */
   readonly flag: boolean;
+  /** The state to compare with, or empty before one is picked. */
+  readonly state: string;
   readonly actions: readonly ActionDraft[];
   readonly undo: boolean;
   /** The cooldown in seconds, as typed. */
@@ -275,6 +298,7 @@ export const EMPTY_DRAFT: Draft = {
   is: 'atLeast',
   number: '',
   flag: true,
+  state: '',
   actions: [newAction(0)],
   undo: true,
   cooldown: '0',
@@ -290,6 +314,7 @@ export function toDraft(automation: AutomationDef): Draft {
     is: when.is,
     number: typeof when.target === 'number' ? String(when.target) : '',
     flag: typeof when.target === 'boolean' ? when.target : true,
+    state: typeof when.target === 'string' ? when.target : '',
     actions: automation.actions.map((action, key) => ({
       key,
       kind: action.kind,
@@ -304,10 +329,35 @@ export function toDraft(automation: AutomationDef): Draft {
   };
 }
 
-/** The draft with the value `choice` picked, keeping a comparison that suits it. */
+/** Whether the state check `choice` reads the state `name`: one of its own, or none. */
+export function readsState(choice: ValueChoice, name: string): boolean {
+  return choice.kind === 'state' && (name === NO_STATE || choice.states.includes(name));
+}
+
+/**
+ * The draft with the value `choice` picked, keeping a comparison that suits it, and for a state check a state it
+ * reads, its first unless it reads the one picked.
+ */
 export function withSource(draft: Draft, choice: ValueChoice): Draft {
   const is = COMPARISONS[choice.kind].includes(draft.is) ? draft.is : (COMPARISONS[choice.kind][0] ?? 'equals');
-  return { ...draft, source: { app: choice.app, value: choice.value.id }, is };
+  const state = readsState(choice, draft.state) ? draft.state : (choice.states[0] ?? '');
+  return { ...draft, source: { app: choice.app, value: choice.value.id }, is, state };
+}
+
+/** Joins words with commas and a last `or`, such as `Paused, Live, or none`. */
+const OR_LIST = new Intl.ListFormat('en', { type: 'disjunction' });
+
+/** What `choice` reads, in a sentence, such as `Status reads a state: Paused, Live, or none.` */
+export function readsText(choice: ValueChoice): string {
+  const name = choice.value.name;
+  switch (choice.kind) {
+    case 'number':
+      return `${name} reads a number.`;
+    case 'flag':
+      return `${name} reads yes or no.`;
+    case 'state':
+      return `${name} reads a state: ${OR_LIST.format([...choice.states, NO_STATE])}.`;
+  }
 }
 
 /** The longest cooldown, in seconds: a day. */
@@ -353,13 +403,19 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
 
 /** The condition `draft` describes on the value `choice`, or the next thing to fill in. */
 export function buildWhen(draft: Draft, choice: ValueChoice): WhenDef | string {
-  let target: number | boolean = draft.flag;
+  let target: Target = draft.flag;
   if (choice.kind === 'number') {
     const number = typedNumber(draft.number);
     if (number === null) {
       return `Enter the number ${choice.value.name} is compared with, such as 90 or 12.5.`;
     }
     target = number;
+  }
+  if (choice.kind === 'state') {
+    if (!readsState(choice, draft.state)) {
+      return `Pick the state ${choice.value.name} is compared with.`;
+    }
+    target = draft.state;
   }
   if (!COMPARISONS[choice.kind].includes(draft.is)) {
     return `Pick how ${choice.value.name} is compared.`;

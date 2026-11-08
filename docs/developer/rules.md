@@ -11,13 +11,15 @@ the model they encode.
 
 ## Signals and conditions
 
-A signal value is a finite number or a flag (yes or no). Sources produce the
-values; a non-finite reading, such as NaN, is not a value.
+A signal value is a finite number, a flag (yes or no), or a state: one of the
+names a state check gives its looks, or `none`. Sources produce the values; a
+non-finite reading, such as NaN, is not a value.
 
 A condition tests the application's current signal values:
 
 - A **comparison** relates one signal to a value: below, at most, equals, not
-  equals, at least, or above. Flags support only equals and not equals.
+  equals, at least, or above. Flags and states support only equals and not
+  equals, and states compare by exact name.
 - An **all** group holds when every condition in it holds, and an **any**
   group holds when at least one does. Conditions nest up to eight levels,
   counting the comparison.

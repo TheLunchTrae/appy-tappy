@@ -353,8 +353,8 @@ mod tests {
             icon.id = "icon".to_owned();
             icon.name = "Icon".to_owned();
             icon.screen.check = serde_json::from_value(serde_json::json!({
-                "kind": "image",
-                "image": "missing.png",
+                "kind": "state",
+                "states": [{"name": "Shown", "image": "missing.png"}],
                 "tolerance": 0
             }))
             .expect("the file's spelling");
@@ -372,7 +372,13 @@ mod tests {
         let lines: Vec<(&str, Option<Reading>, Option<&str>)> = view
             .values
             .iter()
-            .map(|value| (value.name.as_str(), value.reading, value.problem.as_deref()))
+            .map(|value| {
+                (
+                    value.name.as_str(),
+                    value.reading.clone(),
+                    value.problem.as_deref(),
+                )
+            })
             .collect();
         assert_eq!(
             lines[0],
@@ -382,7 +388,7 @@ mod tests {
             lines[1],
             ("Small", None, Some("Drawn on a 8x4 window; it is 4x2 now."))
         );
-        let (icon, reading, problem) = lines[2];
+        let (icon, reading, problem) = lines[2].clone();
         assert_eq!((icon, reading), ("Icon", None));
         assert!(
             problem.is_some_and(|problem| problem.starts_with("Cannot read: ")),

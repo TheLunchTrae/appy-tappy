@@ -1,0 +1,172 @@
+//! Why a check the UI described cannot be built, in words the UI shows.
+
+use std::error::Error;
+use std::fmt;
+
+use appytappy_config::app_file::MAX_STATES;
+use appytappy_sources::screen::Size;
+use appytappy_sources::screen::digits::LearnError;
+
+/// `text` as a sentence: capitalized, with a full stop.
+pub(crate) fn sentence(text: &str) -> String {
+    let mut characters = text.chars();
+    characters.next().map_or_else(String::new, |first| {
+        format!("{}{}.", first.to_uppercase(), characters.as_str())
+    })
+}
+
+/// What a check cuts at its region besides the screenshot it was drawn on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cut {
+    /// A labeled screenshot, by index.
+    Label(usize),
+    /// The kept readings of the recording.
+    Recording,
+    /// The screenshot a state is taken from, by index.
+    State(usize),
+}
+
+/// A check the UI described cannot be built.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SpecError {
+    /// The region has no width or no height.
+    EmptyRegion,
+    /// A screenshot the check names does not exist in this session.
+    NoScreenshot,
+    /// The region reaches past the edge of the screenshot.
+    Outside,
+    /// The bar's filled and empty colors are the same.
+    SameColors,
+    /// A state's selection leaves no pixel of its region to compare.
+    NothingSelected,
+    /// A state check has no state.
+    NoStates,
+    /// A state check has more than [`MAX_STATES`] states.
+    TooManyStates,
+    /// A state's name breaks the rules, and how, as a sentence.
+    StateName(String),
+    /// Two states have the same name.
+    SameStateName(String),
+    /// A reference has no saved sample, labeled screenshot, or kept reading
+    /// to learn from.
+    NoLabels,
+    /// A recorded reading the check names is not in this session's
+    /// recording.
+    NoRecording,
+    /// The region is not the one the session's recording recorded.
+    RecordedElsewhere,
+    /// A screenshot or the recording the check cuts at its region has
+    /// another window size than the screenshot it was drawn on.
+    OtherSize {
+        /// What has the other size.
+        cut: Cut,
+        /// Its window size.
+        size: Size,
+        /// The screenshot the region was drawn on, by index.
+        drawn_on: usize,
+        /// That screenshot's window size.
+        drawn: Size,
+    },
+    /// A picture could not be encoded as PNG.
+    Picture,
+    /// A saved reference the check names cannot be had, and why.
+    Reference(String),
+    /// A value's reference belongs to another application.
+    OtherApplication,
+    /// Characters still being taught were saved as a value, or something
+    /// other than characters as a reference.
+    NotAValue,
+    /// A reference could not learn from a label.
+    Learn {
+        /// The text the user typed.
+        text: String,
+        /// Why the reference could not learn from it.
+        source: LearnError,
+    },
+}
+
+impl fmt::Display for SpecError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyRegion => formatter.write_str("Draw a region on the screenshot first."),
+            Self::NoScreenshot => {
+                formatter.write_str("That screenshot is gone. Take a new one and try again.")
+            },
+            Self::Outside => formatter.write_str(
+                "The region reaches past the edge of the window. Draw it inside the window.",
+            ),
+            Self::SameColors => {
+                formatter.write_str("Pick a filled color and an empty color that differ.")
+            },
+            Self::NothingSelected => formatter.write_str(
+                "Nothing in the region is selected. Select the thing again, or stop ignoring the background.",
+            ),
+            Self::NoStates => formatter.write_str("Add a state from a screenshot."),
+            Self::TooManyStates => write!(
+                formatter,
+                "A value can tell apart at most {MAX_STATES} states. Remove one."
+            ),
+            Self::StateName(problem) => formatter.write_str(problem),
+            Self::SameStateName(name) => write!(
+                formatter,
+                "Two states are named \"{name}\". Give each state its own name."
+            ),
+            Self::NoLabels => formatter.write_str(
+                "Type what the region shows on at least one screenshot, or keep a recorded reading.",
+            ),
+            Self::NoRecording => {
+                formatter.write_str("That recording is gone. Record the region again.")
+            },
+            Self::RecordedElsewhere => formatter.write_str(
+                "The region changed since it was recorded. Put it back, or record it again.",
+            ),
+            Self::OtherSize {
+                cut,
+                size,
+                drawn_on,
+                drawn,
+            } => {
+                // The UI numbers screenshots from 1.
+                let drawn_on = drawn_on.saturating_add(1);
+                let what = match cut {
+                    Cut::Label(screenshot) => {
+                        format!("Screenshot {} is", screenshot.saturating_add(1))
+                    },
+                    Cut::Recording => "The recording is of a window of".to_owned(),
+                    Cut::State(screenshot) => format!(
+                        "Screenshot {}, which a state is taken from, is",
+                        screenshot.saturating_add(1)
+                    ),
+                };
+                let fix = match cut {
+                    Cut::Label(_) => "Clear its label, or draw the region on it instead.",
+                    Cut::Recording => "Use its settings, or discard the recording.",
+                    Cut::State(_) => "Take that state from a screenshot of that size.",
+                };
+                write!(
+                    formatter,
+                    "{what} {size}, but the region was drawn on screenshot {drawn_on}, which is \
+                     {drawn}. {fix}"
+                )
+            },
+            Self::Picture => formatter.write_str("A picture of the region could not be saved."),
+            Self::Reference(why) => formatter.write_str(why),
+            Self::OtherApplication => formatter.write_str(
+                "That reference belongs to another application. Pick one of this application's.",
+            ),
+            Self::NotAValue => formatter.write_str("Pick a reference to read the number with."),
+            Self::Learn { text, source } => {
+                write!(formatter, "Could not learn from \"{text}\": {source}")
+            },
+        }
+    }
+}
+
+impl Error for SpecError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Learn { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}

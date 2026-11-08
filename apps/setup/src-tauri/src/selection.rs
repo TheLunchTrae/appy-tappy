@@ -1,4 +1,4 @@
-//! The thing an image check looks for, as the user selects it.
+//! The thing a state check looks for, as the user selects it.
 //!
 //! The UI sends the steps the user took on a screenshot: a rough box to snap
 //! to the thing inside it, or a click to grow over the thing's colors, each

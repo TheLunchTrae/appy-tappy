@@ -1,4 +1,4 @@
-//! Selecting the thing an image check looks for on a screenshot.
+//! Selecting the thing a state check looks for on a screenshot.
 //!
 //! The setup app offers two ways to select it instead of drawing its box
 //! exactly. [`snap`] shrinks a rough box to the thing inside it, and

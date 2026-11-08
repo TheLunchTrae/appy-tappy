@@ -11,8 +11,9 @@ use std::fmt;
 use std::io;
 
 use appytappy_config::app_file::{CheckDef, ColorDef, ReferenceDef, ScreenDef};
+use appytappy_config::signal::{InvalidStateName, StateName};
 
-use super::check::{BarFill, Check, ColorMatch, ImageMatch};
+use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
 use super::digits::{DigitReader, LearnError};
 use super::mask::Mask;
 use super::{Image, ImageError, Region, Size};
@@ -42,14 +43,14 @@ impl From<ColorDef> for Rgb {
 
 /// Rebuilds the check `screen` describes, with the application's
 /// `references`. `picture` returns the bytes of a PNG file the check or its
-/// reference names, such as `icon.png`.
+/// reference names, such as `status-1.png`.
 ///
 /// # Errors
 ///
 /// Returns a [`SavedError`] when the region is empty or does not fit the
-/// window size it was drawn at, a picture cannot be read or decoded or an
-/// image check's picture is not the region's size, the bar's two colors are
-/// the same, or a number's reference is missing or cannot learn from one of
+/// window size it was drawn at, a picture cannot be read or decoded or a
+/// state's picture is not the region's size, a state's name is invalid, the
+/// bar's two colors are the same, or a number's reference is missing or cannot learn from one of
 /// its pictures.
 pub fn build(
     screen: &ScreenDef,
@@ -91,23 +92,17 @@ pub fn build(
             color: (*color).into(),
             tolerance: *tolerance,
         }),
-        CheckDef::Image { image, tolerance } => {
-            let (saved, mask) = load_masked(image, &mut picture)?;
-            if saved.size() != region.size() {
-                return Err(SavedError::PictureSize {
-                    name: image.clone(),
-                    found: saved.size(),
-                    expected: region.size(),
-                });
-            }
-            // The mask came from the same file, so its size always fits.
-            let check = ImageMatch::new(saved, mask.as_ref(), *tolerance).map_err(|error| {
-                SavedError::Picture {
-                    name: image.clone(),
-                    source: ImageError::Mask(error),
-                }
-            })?;
-            Check::Image(check)
+        CheckDef::State { states, tolerance } => {
+            let states = states
+                .iter()
+                .map(|state| {
+                    let name = StateName::new(&state.name).map_err(SavedError::StateName)?;
+                    let picture =
+                        state_picture(&state.image, region.size(), *tolerance, &mut picture)?;
+                    Ok((name, picture))
+                })
+                .collect::<Result<_, SavedError>>()?;
+            Check::State(StateMatch::new(states))
         },
     };
     Ok(SavedCheck {
@@ -141,9 +136,32 @@ pub fn reader(
     Ok(reader)
 }
 
+/// A state's picture `name`, which must be `size`, compared within
+/// `tolerance` and only where its mask keeps pixels.
+fn state_picture(
+    name: &str,
+    size: Size,
+    tolerance: u8,
+    picture: &mut impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<ImageMatch, SavedError> {
+    let (saved, mask) = load_masked(name, picture)?;
+    if saved.size() != size {
+        return Err(SavedError::PictureSize {
+            name: name.to_owned(),
+            found: saved.size(),
+            expected: size,
+        });
+    }
+    // The mask came from the same file, so its size always fits.
+    ImageMatch::new(saved, mask.as_ref(), tolerance).map_err(|error| SavedError::Picture {
+        name: name.to_owned(),
+        source: ImageError::Mask(error),
+    })
+}
+
 /// The picture `name` and the mask its transparent pixels make, decoded
-/// from the bytes `picture` returns for it. Only an image check's picture
-/// is masked; a reference's samples are read as they look.
+/// from the bytes `picture` returns for it. Only a state's picture is
+/// masked; a reference's samples are read as they look.
 fn load_masked(
     name: &str,
     picture: &mut impl FnMut(&str) -> io::Result<Vec<u8>>,
@@ -208,6 +226,8 @@ pub enum SavedError {
     },
     /// The bar's filled and empty colors are the same.
     SameColors,
+    /// A state's name breaks the naming rules.
+    StateName(InvalidStateName),
     /// A number reads with a reference the application does not have.
     NoReference {
         /// The reference's ID.
@@ -248,6 +268,7 @@ impl fmt::Display for SavedError {
             Self::SameColors => {
                 formatter.write_str("its bar's filled and empty colors are the same")
             },
+            Self::StateName(error) => write!(formatter, "its {error}"),
             Self::NoReference { id } => {
                 write!(formatter, "its reference {id} is not saved")
             },
@@ -271,6 +292,7 @@ impl Error for SavedError {
             | Self::OutsideWindow { .. }
             | Self::PictureSize { .. }
             | Self::SameColors
+            | Self::StateName(_)
             | Self::NoReference { .. } => None,
         }
     }
@@ -280,7 +302,7 @@ impl Error for SavedError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use appytappy_config::app_file::{RegionDef, SampleDef, SizeDef, sample_name};
+    use appytappy_config::app_file::{RegionDef, SampleDef, SizeDef, StateDef, sample_name};
     use appytappy_config::signal::{Number, Value};
 
     use super::*;
@@ -377,8 +399,25 @@ mod tests {
         assert_eq!(built.check.read(&solid(4, GRAY)), Ok(Value::Flag(false)));
     }
 
+    fn state_check(states: &[(&str, &str)]) -> ScreenDef {
+        screen(CheckDef::State {
+            states: states
+                .iter()
+                .map(|(name, image)| StateDef {
+                    name: (*name).to_owned(),
+                    image: (*image).to_owned(),
+                })
+                .collect(),
+            tolerance: 0,
+        })
+    }
+
+    fn state(name: &str) -> Value {
+        Value::State(StateName::new(name).expect("valid"))
+    }
+
     #[test]
-    fn an_image_check_ignores_its_pictures_transparent_pixels() {
+    fn a_state_check_ignores_its_pictures_transparent_pixels() {
         let icon = solid(4, RED);
         // Only the left half of each row belongs to the icon.
         let mask = Mask::new(icon.size(), [true, true, false, false].repeat(2)).unwrap();
@@ -387,21 +426,17 @@ mod tests {
             "icon.png".to_owned(),
             icon.encode_png_masked(&mask).unwrap(),
         );
-        let built = build(
-            &screen(CheckDef::Image {
-                image: "icon.png".to_owned(),
-                tolerance: 0,
-            }),
-            &[],
-            from(&files),
-        )
-        .expect("builds");
+        let built =
+            build(&state_check(&[("Shown", "icon.png")]), &[], from(&files)).expect("builds");
         let red = [RED.blue, RED.green, RED.red, u8::MAX];
         let gray = [GRAY.blue, GRAY.green, GRAY.red, u8::MAX];
         let row = [red, red, gray, gray].concat();
         let changed = Image::new(icon.size(), [row.clone(), row].concat()).unwrap();
-        assert_eq!(built.check.read(&changed), Ok(Value::Flag(true)));
-        assert_eq!(built.check.read(&solid(4, GRAY)), Ok(Value::Flag(false)));
+        assert_eq!(built.check.read(&changed), Ok(state("Shown")));
+        assert_eq!(
+            built.check.read(&solid(4, GRAY)),
+            Ok(Value::State(StateName::none()))
+        );
     }
 
     #[test]
@@ -431,19 +466,32 @@ mod tests {
     }
 
     #[test]
-    fn an_image_check_compares_with_its_picture() {
-        let files = pictures(&[("icon.png", &solid(4, RED))]);
+    fn a_state_check_reads_the_state_its_region_shows() {
+        let white = ColorDef {
+            red: 255,
+            green: 255,
+            blue: 255,
+        };
+        let files = pictures(&[("red.png", &solid(4, RED)), ("gray.png", &solid(4, GRAY))]);
         let built = build(
-            &screen(CheckDef::Image {
-                image: "icon.png".to_owned(),
-                tolerance: 0,
-            }),
+            &state_check(&[("Red", "red.png"), ("Gray", "gray.png")]),
             &[],
             from(&files),
         )
         .expect("builds");
-        assert_eq!(built.check.read(&solid(4, RED)), Ok(Value::Flag(true)));
-        assert_eq!(built.check.read(&solid(4, GRAY)), Ok(Value::Flag(false)));
+        assert_eq!(built.check.read(&solid(4, RED)), Ok(state("Red")));
+        assert_eq!(built.check.read(&solid(4, GRAY)), Ok(state("Gray")));
+        assert_eq!(
+            built.check.read(&solid(4, white)),
+            Ok(Value::State(StateName::none()))
+        );
+        let error = build(&state_check(&[("none", "red.png")]), &[], from(&files))
+            .expect_err("reserved name");
+        assert_eq!(
+            error.to_string(),
+            "its state name \"none\" is \"none\", which stands for no state"
+        );
+        assert!(error.source().is_none());
     }
 
     /// "11" as two separate red columns on gray, 4 by 2 pixels drawn
@@ -529,12 +577,7 @@ mod tests {
 
     #[test]
     fn broken_pictures_and_regions_say_what_is_wrong() {
-        let reference = |image: &str| {
-            screen(CheckDef::Image {
-                image: image.to_owned(),
-                tolerance: 0,
-            })
-        };
+        let reference = |image: &str| state_check(&[("Shown", image)]);
         let mut files = pictures(&[("small.png", &solid(3, RED))]);
         files.insert("broken.png".to_owned(), b"not a picture".to_vec());
         let problems = ["gone.png", "broken.png", "small.png"].map(|name| {

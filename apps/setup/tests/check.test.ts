@@ -6,11 +6,17 @@ import {
   DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
   fromReference,
+  MAX_STATES,
   newestOfSize,
   reviewSpec,
   settingsDiffer,
+  stateOn,
   toReference,
   withKind,
+  withoutState,
+  withState,
+  withStateAt,
+  withStateStep,
 } from '../src/lib/check.ts';
 
 const region = { x: 1, y: 2, width: 3, height: 4 };
@@ -42,42 +48,118 @@ describe('buildSpec', () => {
     });
   });
 
-  test('builds a color and an image check', () => {
+  test('builds a color check', () => {
     const color = withKind({ ...EMPTY_DRAFT, region }, 'color');
     expect(buildSpec(color, 'example')).toEqual({ ok: false, next: 'Pick the color to look for.' });
     expect(buildSpec({ ...color, color: red }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'color', region, color: red, tolerance: DEFAULT_TOLERANCE.color },
     });
-    const image = withKind({ ...EMPTY_DRAFT, region, drawnOn: 1 }, 'image');
-    expect(buildSpec(image, 'example')).toEqual({ ok: false, next: 'Choose the screenshot to compare against.' });
-    expect(buildSpec({ ...image, image: 3 }, 'example')).toEqual({
+  });
+
+  test('builds a state check from its named states', () => {
+    const empty = withKind({ ...EMPTY_DRAFT, region, drawnOn: 1 }, 'state');
+    expect(buildSpec(empty, 'example')).toEqual({ ok: false, next: 'Add a state from a screenshot that shows it.' });
+    const two = withState(withState(empty, 1), 3);
+    expect(two.states.map((state) => state.name)).toEqual(['State 1', 'State 2']);
+    expect(buildSpec(two, 'example')).toEqual({
       ok: true,
-      spec: { kind: 'image', region, drawnOn: 1, screenshot: 3, tolerance: DEFAULT_TOLERANCE.image },
+      spec: {
+        kind: 'state',
+        region,
+        drawnOn: 1,
+        states: [
+          { name: 'State 1', screenshot: 1 },
+          { name: 'State 2', screenshot: 3 },
+        ],
+        tolerance: DEFAULT_TOLERANCE.state,
+      },
     });
-    expect(buildSpec({ ...image, image: 3, drawnOn: null }, 'example')).toEqual({
+    const named = withStateAt(two, 0, (state) => ({ ...state, name: '  Paused ' }));
+    const built = buildSpec(named, 'example');
+    expect(built.ok && built.spec.kind === 'state' ? built.spec.states[0]?.name : null).toBe('Paused');
+    expect(
+      buildSpec(
+        withStateAt(two, 1, (state) => ({ ...state, name: ' ' })),
+        'example',
+      ),
+    ).toEqual({
+      ok: false,
+      next: 'Name each state.',
+    });
+    expect(buildSpec({ ...two, drawnOn: null }, 'example')).toEqual({
       ok: false,
       next: 'Draw a region on a screenshot.',
     });
   });
 
-  test('an image check compares only what was selected while it ignores the background', () => {
-    const steps = [{ kind: 'click', x: 4, y: 5, combine: 'replace' }] as const;
-    const picture = { ...withKind({ ...EMPTY_DRAFT, region, drawnOn: 3 }, 'image'), image: 3, steps, colorMatch: 30 };
-    expect(buildSpec(picture, 'app')).toEqual({
+  test('a state check compares only what was selected on each state while it ignores the background', () => {
+    const step = { kind: 'click', x: 4, y: 5, combine: 'replace' } as const;
+    const steps = [step];
+    const draft = {
+      ...withStateStep(withState(withKind({ ...EMPTY_DRAFT, region, drawnOn: 3 }, 'state'), 2), 3, step),
+      colorMatch: 30,
+    };
+    expect(buildSpec(draft, 'app')).toEqual({
       ok: true,
       spec: {
-        kind: 'image',
+        kind: 'state',
         region,
         drawnOn: 3,
-        screenshot: 3,
-        tolerance: DEFAULT_TOLERANCE.image,
-        selection: { tolerance: 30, steps },
+        states: [
+          { name: 'State 1', screenshot: 2 },
+          { name: 'State 2', screenshot: 3, selection: { tolerance: 30, steps } },
+        ],
+        tolerance: DEFAULT_TOLERANCE.state,
       },
     });
-    const whole = { kind: 'image', region, drawnOn: 3, screenshot: 3, tolerance: DEFAULT_TOLERANCE.image } as const;
-    expect(buildSpec({ ...picture, ignoreBackground: false }, 'app')).toEqual({ ok: true, spec: whole });
-    expect(buildSpec({ ...picture, steps: [] }, 'app')).toEqual({ ok: true, spec: whole });
+    const ignoring = buildSpec({ ...draft, ignoreBackground: false }, 'app');
+    expect(ignoring.ok && ignoring.spec.kind === 'state' ? ignoring.spec.states[1] : null).toEqual({
+      name: 'State 2',
+      screenshot: 3,
+    });
+  });
+});
+
+describe('states', () => {
+  const draft = withKind(EMPTY_DRAFT, 'state');
+  const click = (combine: 'replace' | 'add' | 'remove', x = 1) => ({ kind: 'click', x, y: 0, combine }) as const;
+
+  test('a screenshot holds at most one state, and a check at most sixteen', () => {
+    const once = withState(draft, 4);
+    expect(withState(once, 4)).toBe(once);
+    expect(stateOn(once, 4)).toBe(0);
+    expect(stateOn(once, 5)).toBe(-1);
+    expect(stateOn(once, null)).toBe(-1);
+    let full = draft;
+    for (let screenshot = 0; screenshot < MAX_STATES; screenshot += 1) {
+      full = withState(full, screenshot);
+    }
+    expect(full.states).toHaveLength(MAX_STATES);
+    expect(withState(full, 99)).toBe(full);
+  });
+
+  test('a new state takes the first free number', () => {
+    const renamed = withStateAt(withState(draft, 0), 0, (state) => ({ ...state, name: 'state 2' }));
+    expect(withState(renamed, 1).states.map((state) => state.name)).toEqual(['state 2', 'State 3']);
+    const removed = withoutState(withState(withState(draft, 0), 1), 0);
+    expect(removed.states.map((state) => [state.name, state.screenshot])).toEqual([['State 2', 1]]);
+    expect(withState(removed, 2).states.map((state) => state.name)).toEqual(['State 2', 'State 3']);
+  });
+
+  test("a selection step goes to its screenshot's state, adding one when needed", () => {
+    const first = withStateStep(draft, 7, click('replace'));
+    expect(first.states).toEqual([{ name: 'State 1', screenshot: 7, steps: [click('replace')] }]);
+    const added = withStateStep(first, 7, click('add', 2));
+    expect(added.states[0]?.steps).toEqual([click('replace'), click('add', 2)]);
+    const other = withStateStep(added, 8, click('add', 3));
+    expect(other.states.map((state) => state.steps)).toEqual([
+      [click('replace'), click('add', 2)],
+      [click('replace', 3)],
+    ]);
+    // Taking away from nothing changes nothing, and adds no state.
+    expect(withStateStep(draft, 7, click('remove'))).toBe(draft);
+    expect(withStateAt(draft, 3, (state) => state)).toBe(draft);
   });
 });
 

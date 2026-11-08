@@ -396,10 +396,10 @@ impl<E: From<Reading>> FrameReader<E> {
         ) else {
             return false;
         };
-        if *last == Some(reading) {
+        if last.as_ref() == Some(&reading) {
             return false;
         }
-        *last = Some(reading);
+        *last = Some(reading.clone());
         self.seen = true;
         #[expect(
             clippy::let_underscore_must_use,

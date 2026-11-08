@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fmt;
 use std::ops::Range;
 
-use appytappy_config::signal::{Number, Value};
+use appytappy_config::signal::{Number, StateName, Value};
 
 use super::digits::{DigitReader, ReadError};
 use super::mask::{Mask, MaskError};
@@ -29,8 +29,8 @@ pub enum Check {
     BarFill(BarFill),
     /// Whether the region's average color is near a color.
     Color(ColorMatch),
-    /// Whether the region looks like a saved picture of it.
-    Image(ImageMatch),
+    /// Which of a few saved pictures of it the region looks like.
+    State(StateMatch),
 }
 
 impl Check {
@@ -48,7 +48,7 @@ impl Check {
                 .map_err(CheckError::Number),
             Self::BarFill(bar) => bar.percent(image).map(Value::Number),
             Self::Color(color) => Ok(Value::Flag(color.matches(image))),
-            Self::Image(picture) => picture.matches(image).map(Value::Flag),
+            Self::State(states) => states.read(image).map(Value::State),
         }
     }
 }
@@ -217,6 +217,16 @@ impl ImageMatch {
     /// Returns [`CheckError::SizeMismatch`] when the sizes differ, which
     /// means the region changed after the picture was taken.
     pub fn matches(&self, image: &Image) -> Result<bool, CheckError> {
+        self.difference(image)
+            .map(|difference| difference.within(self.tolerance))
+    }
+
+    /// How far `image` is from the picture over the compared pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError::SizeMismatch`] when the sizes differ.
+    fn difference(&self, image: &Image) -> Result<Difference, CheckError> {
         if image.size() != self.picture.size() {
             return Err(CheckError::SizeMismatch {
                 expected: self.picture.size(),
@@ -236,7 +246,75 @@ impl ImageMatch {
                 channels = channels.wrapping_add(3);
             }
         }
-        Ok(difference <= channels.saturating_mul(u64::from(self.tolerance)))
+        Ok(Difference {
+            total: difference,
+            channels,
+        })
+    }
+}
+
+/// How far a region is from a picture: the summed difference of the
+/// compared red, green, and blue channels, and how many there were.
+#[derive(Debug, Clone, Copy)]
+struct Difference {
+    total: u64,
+    channels: u64,
+}
+
+impl Difference {
+    /// Whether the average difference per channel is at most `tolerance`.
+    fn within(self, tolerance: u8) -> bool {
+        self.total <= self.channels.saturating_mul(u64::from(tolerance))
+    }
+
+    /// Whether the average difference is smaller than `other`'s. Both totals
+    /// and channel counts are below 2^40, so the products fit a `u128`.
+    fn closer_than(self, other: Self) -> bool {
+        u128::from(self.total).wrapping_mul(u128::from(other.channels))
+            < u128::from(other.total).wrapping_mul(u128::from(self.channels))
+    }
+}
+
+/// Which of a few named pictures a region looks like, such as a corner that
+/// shows `Paused` or `Live`.
+///
+/// Each state is an [`ImageMatch`] with its own picture and mask. The region
+/// reads as the state whose picture it is closest to on average, among those
+/// within the tolerance, or [`StateName::none`] when it is within none of
+/// them. A tie goes to the earlier state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateMatch {
+    states: Box<[(StateName, ImageMatch)]>,
+    none: StateName,
+}
+
+impl StateMatch {
+    /// A check that tells `states` apart, each a name and its picture.
+    #[must_use]
+    pub fn new(states: Vec<(StateName, ImageMatch)>) -> Self {
+        Self {
+            states: states.into_boxed_slice(),
+            none: StateName::none(),
+        }
+    }
+
+    /// The state `image` shows, or [`StateName::none`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError::SizeMismatch`] when `image` is not the size of
+    /// a state's picture, which means the region changed after the pictures
+    /// were taken.
+    pub fn read(&self, image: &Image) -> Result<StateName, CheckError> {
+        let mut best: Option<(&StateName, Difference)> = None;
+        for (name, picture) in &self.states {
+            let difference = picture.difference(image)?;
+            let closer = best.is_none_or(|(_, closest)| difference.closer_than(closest));
+            if difference.within(picture.tolerance) && closer {
+                best = Some((name, difference));
+            }
+        }
+        Ok(best.map_or(&self.none, |(name, _)| name).clone())
     }
 }
 
@@ -460,10 +538,6 @@ mod tests {
         assert_eq!(check.matches(&close), Ok(true));
         assert_eq!(check.matches(&far), Ok(false));
         assert_eq!(
-            Check::Image(check.clone()).read(&far),
-            Ok(Value::Flag(false))
-        );
-        assert_eq!(
             check.matches(&solid(3, GRAY)),
             Err(CheckError::SizeMismatch {
                 expected: Size {
@@ -476,6 +550,96 @@ mod tests {
                 },
             })
         );
+    }
+
+    fn state(name: &str) -> StateName {
+        StateName::new(name).unwrap()
+    }
+
+    #[test]
+    fn a_state_check_reads_the_closest_state_within_the_tolerance() {
+        let paused = ImageMatch::new(row(&[GRAY, GRAY]), None, 10).unwrap();
+        let live = ImageMatch::new(row(&[GREEN, GREEN]), None, 10).unwrap();
+        let states = StateMatch::new(vec![(state("Paused"), paused), (state("Live"), live)]);
+        let check = Check::State(states.clone());
+        assert_eq!(
+            check.read(&row(&[GRAY, GRAY])),
+            Ok(Value::State(state("Paused")))
+        );
+        assert_eq!(
+            check.read(&row(&[GREEN, Rgb { red: 20, ..GREEN }])),
+            Ok(Value::State(state("Live")))
+        );
+        // Far from both: no state.
+        assert_eq!(
+            check.read(&row(&[WHITE, WHITE])),
+            Ok(Value::State(StateName::none()))
+        );
+        assert_eq!(
+            states.read(&solid(3, GRAY)),
+            Err(CheckError::SizeMismatch {
+                expected: Size {
+                    width: 2,
+                    height: 1
+                },
+                found: Size {
+                    width: 3,
+                    height: 1
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_state_check_picks_the_closer_of_two_states_within_the_tolerance() {
+        let near = Rgb { red: 70, ..GRAY };
+        let dim = ImageMatch::new(row(&[GRAY, GRAY]), None, 20).unwrap();
+        let bright = ImageMatch::new(row(&[near, near]), None, 20).unwrap();
+        let states = StateMatch::new(vec![(state("Dim"), dim), (state("Bright"), bright)]);
+        // Red 68 is 2 from Bright's 70 and 13 from Dim's 55. Both are within
+        // 20 on average, and the closer one wins in either order.
+        let probe = Rgb { red: 68, ..GRAY };
+        assert_eq!(states.read(&row(&[probe, probe])), Ok(state("Bright")));
+        let reversed = StateMatch::new(states.states.iter().rev().cloned().collect());
+        assert_eq!(reversed.read(&row(&[probe, probe])), Ok(state("Bright")));
+    }
+
+    #[test]
+    fn a_state_check_breaks_a_tie_for_the_earlier_state() {
+        let picture = || ImageMatch::new(row(&[GRAY]), None, 5).unwrap();
+        let states = StateMatch::new(vec![
+            (state("First"), picture()),
+            (state("Second"), picture()),
+        ]);
+        assert_eq!(states.read(&row(&[GRAY])), Ok(state("First")));
+    }
+
+    #[test]
+    fn a_state_check_compares_states_by_their_average_difference() {
+        // Masked to one pixel, "Small" is off by 6 over 3 channels: 2 each.
+        // Unmasked, "Wide" is off by 9 over 6 channels: 1.5 each, so it is
+        // closer though its total is larger.
+        let picture = row(&[GRAY, GRAY]);
+        let mask = Mask::new(picture.size(), vec![true, false]).unwrap();
+        let small = ImageMatch::new(picture.clone(), Some(&mask), 5).unwrap();
+        let wide = ImageMatch::new(picture, None, 5).unwrap();
+        let image = row(&[
+            Rgb {
+                red: GRAY.red.wrapping_add(6),
+                ..GRAY
+            },
+            Rgb {
+                red: GRAY.red.wrapping_add(3),
+                ..GRAY
+            },
+        ]);
+        let states = StateMatch::new(vec![
+            (state("Small"), small.clone()),
+            (state("Wide"), wide.clone()),
+        ]);
+        assert_eq!(states.read(&image), Ok(state("Wide")));
+        let reversed = StateMatch::new(vec![(state("Wide"), wide), (state("Small"), small)]);
+        assert_eq!(reversed.read(&image), Ok(state("Wide")));
     }
 
     #[test]

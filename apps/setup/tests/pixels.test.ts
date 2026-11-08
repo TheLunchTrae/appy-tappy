@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { colorAt, decodePicture, hex } from '../src/lib/pixels.ts';
+import { colorAt, cropPicture, decodePicture, hex } from '../src/lib/pixels.ts';
 
 function encoded(width: number, height: number, pixels: readonly number[]): ArrayBuffer {
   const buffer = new ArrayBuffer(8 + pixels.length);
@@ -56,4 +56,32 @@ describe('colorAt', () => {
 test('hex pads each channel', () => {
   expect(hex({ red: 118, green: 240, blue: 6 })).toBe('#76f006');
   expect(hex({ red: 0, green: 0, blue: 0 })).toBe('#000000');
+});
+
+describe('cropPicture', () => {
+  // A 3 by 2 picture whose pixels count up from 0, one channel value each.
+  const picture = {
+    width: 3,
+    height: 2,
+    data: new Uint8ClampedArray(Array.from({ length: 24 }, (_, index) => Math.floor(index / 4))),
+  };
+
+  test('keeps the rows and columns inside the box', () => {
+    const crop = cropPicture(picture, { x: 1, y: 0, width: 2, height: 2 });
+    expect(crop?.width).toBe(2);
+    expect(crop?.height).toBe(2);
+    expect([...(crop?.data ?? [])].filter((_, index) => index % 4 === 0)).toEqual([1, 2, 4, 5]);
+  });
+
+  test('crops the whole picture to itself', () => {
+    expect([...(cropPicture(picture, { x: 0, y: 0, width: 3, height: 2 })?.data ?? [])]).toEqual([...picture.data]);
+  });
+
+  test('refuses a box that reaches outside the picture or holds no pixel', () => {
+    expect(cropPicture(picture, { x: 2, y: 0, width: 2, height: 1 })).toBeNull();
+    expect(cropPicture(picture, { x: 0, y: 1, width: 1, height: 2 })).toBeNull();
+    expect(cropPicture(picture, { x: -1, y: 0, width: 1, height: 1 })).toBeNull();
+    expect(cropPicture(picture, { x: 0, y: 0, width: 0, height: 1 })).toBeNull();
+    expect(cropPicture(picture, { x: 0.5, y: 0, width: 1, height: 1 })).toBeNull();
+  });
 });

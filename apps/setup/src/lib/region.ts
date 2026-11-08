@@ -27,6 +27,22 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(Math.max(value, low), high);
 }
 
+/** The smallest rectangle that holds every one of `rects`, or null when there are none. */
+export function bounding(rects: readonly Rect[]): Rect | null {
+  const [first, ...rest] = rects;
+  if (first === undefined) {
+    return null;
+  }
+  let [left, top, right, bottom] = [first.x, first.y, first.x + first.width, first.y + first.height];
+  for (const rect of rest) {
+    left = Math.min(left, rect.x);
+    top = Math.min(top, rect.y);
+    right = Math.max(right, rect.x + rect.width);
+    bottom = Math.max(bottom, rect.y + rect.height);
+  }
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 /** Whether `a` and `b` are the same rectangle, or both missing. */
 export function sameRect(a: Rect | null, b: Rect | null): boolean {
   if (a === null || b === null) {
