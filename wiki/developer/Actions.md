@@ -185,7 +185,8 @@ a drag or a Ctrl-click. It brings the click's window to the front first with
 its window or hold the mouse, and would then get the press itself. Windows
 lets only the program in front move the foreground, so the adapter attaches
 its thread to the input of the window in front for the moment it asks
-(`AttachThreadInput`). Windows may still refuse, and the click is then
+(`AttachThreadInput`), unless that window is hung, since sharing a hung
+window's input could wait on it. Windows may still refuse, and the click is then
 skipped. It clicks only when the click's window is the one that
 shows at its place, so it never lands in a window that covers it. It then
 moves the cursor there with `SetCursorPos` and reads the cursor back, since

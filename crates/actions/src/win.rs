@@ -71,8 +71,8 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GA_ROOT, GetAncestor, GetCursorPos, GetForegroundWindow, GetSystemMetrics,
-    GetWindowThreadProcessId, SM_SWAPBUTTON, SW_SHOWNOACTIVATE, SetCursorPos, SetForegroundWindow,
-    WindowFromPoint,
+    GetWindowThreadProcessId, IsHungAppWindow, SM_SWAPBUTTON, SW_SHOWNOACTIVATE, SetCursorPos,
+    SetForegroundWindow, WindowFromPoint,
 };
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
@@ -474,10 +474,15 @@ impl Controls for WindowsControls {
             // input, move the foreground; a click runs while another
             // program is in front, so this thread shares that program's
             // input for the moment it asks, then stops sharing it.
+            // A hung window is left alone, since sharing its input could
+            // wait on it.
             let ours = GetCurrentThreadId();
-            let theirs = GetWindowThreadProcessId(GetForegroundWindow(), None);
-            let attached =
-                theirs != 0 && theirs != ours && AttachThreadInput(ours, theirs, true).as_bool();
+            let foreground = GetForegroundWindow();
+            let theirs = GetWindowThreadProcessId(foreground, None);
+            let attached = theirs != 0
+                && theirs != ours
+                && !IsHungAppWindow(foreground).as_bool()
+                && AttachThreadInput(ours, theirs, true).as_bool();
             // It may still be refused, so the answer is whether the window
             // is in front after.
             let _asked = SetForegroundWindow(handle);
