@@ -1573,7 +1573,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_waits_while_the_window_is_another_processs() {
+    fn a_reader_waits_while_the_window_belongs_to_another_process() {
         let (system, desk) = FakeSystem::new();
         let (events, readings) = mpsc::channel::<Reading>();
         let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
