@@ -642,8 +642,8 @@ stateDiagram-v2
     Retrying --> Opening: 5 polls pass (RETRY_POLLS)
     Reading --> Retrying: the capture reports an error, such as a closed window
     Reading --> Reading: the window takes another size
-    Reading --> Opening: a save changes values or applications
-    Retrying --> Opening: a save changes values or applications
+    Reading --> Opening: a save that works changes its values, references, application, or overlay
+    Retrying --> Opening: a save that works changes its values, references, application, or overlay
     Reading --> Off: the overlay is turned off, or its application is removed
     Retrying --> Off: the overlay is turned off, or its application is removed
 ```
@@ -664,12 +664,21 @@ second copy over to the first, which brings its window forward
 
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
-one. Each save reads the file, changes it, and writes it back. After a save of
-values, automations, or applications that worked, the setup app tells the
-runtime to read the saved files again, and each overlay reads its values
-again. A save that failed changed nothing, so it tells neither. Turning an
-overlay on or off and moving a panel write the application's file without
-telling the runtime.
+one. Each save reads the file, changes it, and writes it back. After a save
+that works, `Owner::after` tells who reads what it changed:
+
+- **The runtime and the overlays:** an application, its values, or the
+  references they read with.
+- **The runtime only:** the automations, an application's anti-cheat class,
+  and the build its values were checked against.
+- **The overlays only:** turning an overlay on or off and changing its mode.
+
+A save that failed before it wrote anything changed nothing, so it tells
+neither, and an overlay that was reading goes on reading. A delete tells them
+once it has written the application's file, even when removing a picture the
+file no longer names fails afterwards, and removing an application tells them
+even when the removal fails partway. Moving a panel writes the application's
+file without telling anyone.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another

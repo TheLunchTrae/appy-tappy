@@ -220,9 +220,8 @@ impl<H: Host> Owner<H> {
         self.close()
     }
 
-    /// Does what follows from a save once `saved` shows that it worked:
-    /// each overlay reads again what `changed` names, and the runtime reads
-    /// the saved files again when it reads what changed. A save that failed
+    /// Does what follows from a save once `saved` shows that it worked, as
+    /// [`Owner::tell`] says. A save that failed before it wrote anything
     /// changed nothing, so nothing follows from it.
     pub(super) fn after<T>(
         &mut self,
@@ -230,21 +229,28 @@ impl<H: Host> Owner<H> {
         saved: Result<T, String>,
     ) -> Result<T, String> {
         if saved.is_ok() {
-            if changed.values() {
-                // Each overlay reads its values again from their saved
-                // files, after keeping where the user just put its panel.
-                self.save_panels(true);
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "a capture that ended with an error stopped already, and the next poll starts another"
-                )]
-                let _ = self.overlays.close(None);
-            }
-            if changed.runtime() {
-                self.host.reload_runtime();
-            }
+            self.tell(changed);
         }
         saved
+    }
+
+    /// Does what follows from a change to the saved files: each overlay
+    /// reads again what `changed` names, and the runtime reads the saved
+    /// files again when it reads what changed.
+    pub(super) fn tell(&mut self, changed: Changed) {
+        if changed.overlays() {
+            // Each overlay reads its values again from their saved files,
+            // after keeping where the user just put its panel.
+            self.save_panels(true);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a capture that ended with an error stopped already, and the next poll starts another"
+            )]
+            let _ = self.overlays.close(None);
+        }
+        if changed.runtime() {
+            self.host.reload_runtime();
+        }
     }
 }
 
@@ -263,7 +269,7 @@ pub(super) enum Changed {
 
 impl Changed {
     /// Whether the overlays read it.
-    const fn values(self) -> bool {
+    const fn overlays(self) -> bool {
         matches!(self, Self::Values | Self::Overlay)
     }
 
