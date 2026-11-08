@@ -10,6 +10,12 @@
 //! destroyed window leads to one too, and a backstop snapshot runs every
 //! [`RESCAN`] in case an app exits without an event, such as a process that
 //! never made a window.
+//!
+//! When several running processes fit an app's executable pattern, such as
+//! a launcher or helper beside the app itself, the session follows the one
+//! that owns the window its reader reads, which both pick with
+//! [`read_window`], and keeps a process whose window went away for
+//! [`OWNER_GRACE`]. Detection lists the windows only then.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -17,9 +23,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
-use appytappy_config::window_match::Pattern;
+use appytappy_config::window_match::WindowMatch;
 use appytappy_platform::WindowEvent;
-use appytappy_sources::system::ProcessEntry;
+use appytappy_sources::system::{ProcessEntry, WindowEntry, best_windows, read_window};
 
 /// How long after the first window event of a burst the snapshot runs.
 pub(crate) const SETTLE: Duration = Duration::from_millis(250);
@@ -27,14 +33,21 @@ pub(crate) const SETTLE: Duration = Duration::from_millis(250);
 /// How often a snapshot runs while an app runs or snapshots fail.
 pub(crate) const RESCAN: Duration = Duration::from_secs(5);
 
-/// The apps to watch: each app's ID and the pattern its executable's file
-/// name matches, such as `Example.exe` or `Example*.exe`.
+/// How long a session keeps a process that owned one of the app's best
+/// windows after it owns none, while another process does. An app that
+/// goes full screen replaces its window, and the snapshot after the old
+/// one closed may not list the new one yet.
+pub(crate) const OWNER_GRACE: Duration = RESCAN;
+
+/// The apps to watch: each app's ID and how to find its window, whose
+/// executable pattern names its processes, such as `Example.exe` or
+/// `Example*.exe`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Watchlist(BTreeMap<String, Pattern>);
+pub(crate) struct Watchlist(BTreeMap<String, WindowMatch>);
 
 impl Watchlist {
-    /// Watches `apps`, each an app's ID and its executable's pattern.
-    pub(crate) fn new(apps: impl IntoIterator<Item = (String, Pattern)>) -> Self {
+    /// Watches `apps`, each an app's ID and its window match.
+    pub(crate) fn new(apps: impl IntoIterator<Item = (String, WindowMatch)>) -> Self {
         Self(apps.into_iter().collect())
     }
 
@@ -90,6 +103,9 @@ pub(crate) struct Lifecycle {
     watchlist: Watchlist,
     /// The process each running app's session follows, by app ID.
     running: BTreeMap<String, ProcessId>,
+    /// For each app whose session's process owned one of the app's best
+    /// windows, since when it owns none, or `None` while it owns one.
+    owned: BTreeMap<String, Option<Instant>>,
     failing: bool,
     /// When the snapshot that window events asked for runs.
     scan_at: Option<Instant>,
@@ -101,6 +117,17 @@ fn later(now: Instant, delay: Duration) -> Instant {
     now.checked_add(delay).unwrap_or(now)
 }
 
+/// Whether `app`'s session keeps its process at `now` by [`OWNER_GRACE`]:
+/// the process owned one of the app's best windows, and owns one still or
+/// has owned none for less than the grace.
+fn in_grace(owned: &BTreeMap<String, Option<Instant>>, app: &str, now: Instant) -> bool {
+    match owned.get(app) {
+        Some(Some(since)) => now < later(*since, OWNER_GRACE),
+        Some(None) => true,
+        None => false,
+    }
+}
+
 impl Lifecycle {
     /// Starts detection at `now`. The first snapshot is due at once, so an
     /// app that already runs is found.
@@ -109,6 +136,7 @@ impl Lifecycle {
         Self {
             watchlist,
             running: BTreeMap::new(),
+            owned: BTreeMap::new(),
             failing: false,
             scan_at,
             rescan_at: None,
@@ -140,8 +168,11 @@ impl Lifecycle {
     /// to find the apps it adds.
     pub(crate) fn watch(&mut self, watchlist: Watchlist, now: Instant) -> Vec<Change> {
         let mut changes = Vec::new();
+        let executable = |watchlist: &Watchlist, app: &str| {
+            watchlist.0.get(app).map(|window| window.executable.clone())
+        };
         self.running.retain(|app, &mut process| {
-            let kept = self.watchlist.0.get(app) == watchlist.0.get(app);
+            let kept = executable(&self.watchlist, app) == executable(&watchlist, app);
             if !kept {
                 changes.push(Change::Exited {
                     app: app.clone(),
@@ -150,6 +181,7 @@ impl Lifecycle {
             }
             kept
         });
+        self.owned.retain(|app, _| self.running.contains_key(app));
         self.watchlist = watchlist;
         if !self.watchlist.is_empty() {
             self.scan_at = Some(now);
@@ -160,10 +192,14 @@ impl Lifecycle {
         changes
     }
 
-    /// Applies a snapshot taken at `now` and returns what changed.
+    /// Applies a snapshot taken at `now` and returns what changed. `windows`
+    /// lists the desktop's windows and `shown` says whether a window shows,
+    /// which it asks only when several processes fit one app.
     pub(crate) fn scan(
         &mut self,
         snapshot: io::Result<Vec<ProcessEntry>>,
+        windows: impl FnOnce() -> io::Result<Vec<WindowEntry>>,
+        shown: impl FnMut(u64) -> bool,
         now: Instant,
     ) -> Vec<Change> {
         self.scan_at = None;
@@ -180,7 +216,7 @@ impl Lifecycle {
                     self.failing = false;
                     changes.push(Change::ScanRestored);
                 }
-                self.reconcile(&processes, &mut changes);
+                self.reconcile(&processes, windows, shown, now, &mut changes);
             },
         }
         self.rescan_at = (self.failing || !self.running.is_empty()).then(|| later(now, RESCAN));
@@ -188,49 +224,105 @@ impl Lifecycle {
     }
 
     /// Ends the session of each app whose process is gone, then starts one
-    /// for each app that runs without one. A session follows the process
-    /// with the lowest ID, so a second copy of an app does not start a second
-    /// session.
-    fn reconcile(&mut self, processes: &[ProcessEntry], changes: &mut Vec<Change>) {
-        for (app, executable) in &self.watchlist.0 {
-            let runs = |entry: &ProcessEntry| executable.matches(&entry.executable);
-            if let Some(&process) = self.running.get(app) {
-                // The name check catches a process ID that Windows reused.
-                if processes
-                    .iter()
-                    .any(|entry| entry.id == process && runs(entry))
-                {
-                    continue;
-                }
-                self.running.remove(app);
-                changes.push(Change::Exited {
-                    app: app.clone(),
-                    process,
-                });
-            }
-            if let Some(entry) = processes
+    /// for each app that runs without one. When several processes fit an
+    /// app, its session follows the one that owns the window its reader
+    /// reads, which [`read_window`] picks: one of the session's own process
+    /// while it owns a window that fits best, so a second copy does not take
+    /// over, and otherwise the first that shows. A process that owned such a
+    /// window keeps the session for [`OWNER_GRACE`] after it owns none, so a
+    /// window it replaces does not hand the session to another copy. A
+    /// helper started first, which never owned one, gives the session up to
+    /// the process that opens the window at once. While no window fits, a
+    /// session keeps its process, and a new one follows the process with the
+    /// lowest ID.
+    fn reconcile(
+        &mut self,
+        processes: &[ProcessEntry],
+        windows: impl FnOnce() -> io::Result<Vec<WindowEntry>>,
+        mut shown: impl FnMut(u64) -> bool,
+        now: Instant,
+        changes: &mut Vec<Change>,
+    ) {
+        let mut windows = Some(windows);
+        // Listed once, on first need. Without the list, detection follows
+        // processes alone, and the reader reports why it cannot find the
+        // window.
+        let mut listed: Option<Vec<WindowEntry>> = None;
+        for (app, window) in &self.watchlist.0 {
+            let fitting: Vec<&ProcessEntry> = processes
                 .iter()
-                .filter(|entry| runs(entry))
-                .min_by_key(|entry| entry.id)
-            {
-                self.running.insert(app.clone(), entry.id);
-                changes.push(Change::Started {
-                    app: app.clone(),
-                    process: entry.id,
-                    executable: entry.executable.clone(),
+                .filter(|entry| window.executable.matches(&entry.executable))
+                .collect();
+            let current = self.running.get(app).copied();
+            // The name check catches a process ID that Windows reused.
+            let current =
+                current.filter(|&process| fitting.iter().any(|entry| entry.id == process));
+            // The processes that own one of the app's best windows.
+            let mut owners = Vec::new();
+            let owner = if fitting.len() > 1 {
+                let all = listed.get_or_insert_with(|| {
+                    windows
+                        .take()
+                        .and_then(|list| list().ok())
+                        .unwrap_or_default()
                 });
+                let candidates = fitting.iter().map(|&entry| entry.clone()).collect();
+                let best = best_windows(window, candidates, all.clone());
+                owners = best.iter().map(|entry| entry.process).collect();
+                let owns = current.is_some_and(|process| owners.contains(&process));
+                // The grace starts at the first snapshot where it owns none.
+                if let Some(since) = self.owned.get_mut(app).filter(|_| !owns) {
+                    since.get_or_insert(now);
+                }
+                let kept = current.filter(|_| in_grace(&self.owned, app, now));
+                kept.or_else(|| {
+                    read_window(&best, current, &mut shown).map(|(best, _)| best.process)
+                })
+            } else {
+                None
+            };
+            let follow = owner
+                .or(current)
+                .or_else(|| fitting.iter().map(|entry| entry.id).min());
+            let previous = self.running.get(app).copied();
+            if previous != follow {
+                if let Some(process) = previous {
+                    self.running.remove(app);
+                    self.owned.remove(app);
+                    changes.push(Change::Exited {
+                        app: app.clone(),
+                        process,
+                    });
+                }
+                if let Some(entry) =
+                    follow.and_then(|id| fitting.iter().find(|entry| entry.id == id))
+                {
+                    self.running.insert(app.clone(), entry.id);
+                    changes.push(Change::Started {
+                        app: app.clone(),
+                        process: entry.id,
+                        executable: entry.executable.clone(),
+                    });
+                }
+            }
+            if follow.is_some_and(|process| owners.contains(&process)) {
+                self.owned.insert(app.clone(), None);
             }
         }
     }
 }
 
 /// The lifecycle thread: runs snapshots when they are due and sends what
-/// changed. It ends when its input stops or nobody receives changes.
+/// changed. `snapshot` lists the processes, `windows` the desktop's windows,
+/// and `shown` says whether a window shows. It ends when its input stops or
+/// nobody receives changes.
 pub(crate) fn run<E: From<Change>>(
     mut lifecycle: Lifecycle,
     inputs: &Receiver<Input>,
     changes: &Sender<E>,
     mut snapshot: impl FnMut() -> io::Result<Vec<ProcessEntry>>,
+    mut windows: impl FnMut() -> io::Result<Vec<WindowEntry>>,
+    mut shown: impl FnMut(u64) -> bool,
 ) {
     let send = |found: Vec<Change>| {
         found
@@ -241,7 +333,7 @@ pub(crate) fn run<E: From<Change>>(
         let now = Instant::now();
         let input = match lifecycle.deadline() {
             Some(due) if due <= now => {
-                if !send(lifecycle.scan(snapshot(), now)) {
+                if !send(lifecycle.scan(snapshot(), &mut windows, &mut shown, now)) {
                     return;
                 }
                 continue;
@@ -272,7 +364,64 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
+    use appytappy_config::window_match::{MustMatch, Pattern};
+    use appytappy_sources::system::Bounds;
+
     use super::*;
+
+    impl Lifecycle {
+        /// Applies a snapshot that needs no window list.
+        fn scan_unlisted(
+            &mut self,
+            snapshot: io::Result<Vec<ProcessEntry>>,
+            now: Instant,
+        ) -> Vec<Change> {
+            self.scan(snapshot, unlisted, unasked, now)
+        }
+    }
+
+    fn unlisted() -> io::Result<Vec<WindowEntry>> {
+        panic!("one process fits each app, so no window list is needed")
+    }
+
+    fn unasked(_: u64) -> bool {
+        panic!("one process fits each app, so no window is checked")
+    }
+
+    /// Every window shows.
+    fn all_shown(_: u64) -> bool {
+        true
+    }
+
+    /// Matches `executable`'s windows titled `Example App`.
+    fn matching(executable: &str) -> WindowMatch {
+        WindowMatch {
+            title: Pattern::new("Example App"),
+            class: Pattern::new("*"),
+            executable: Pattern::new(executable),
+            must_match: MustMatch {
+                title: true,
+                class: false,
+            },
+            fallback: false,
+        }
+    }
+
+    fn window(handle: u64, process: u32, title: &str, visible: bool) -> WindowEntry {
+        WindowEntry {
+            handle,
+            process: ProcessId::new(process),
+            title: title.to_owned(),
+            class: "ExampleWindow".to_owned(),
+            visible,
+            bounds: Bounds {
+                left: 0,
+                top: 0,
+                right: 800,
+                bottom: 600,
+            },
+        }
+    }
 
     fn entry(id: u32, executable: &str) -> ProcessEntry {
         ProcessEntry {
@@ -286,7 +435,7 @@ mod tests {
     fn watching(apps: &[(&str, &str)]) -> Watchlist {
         Watchlist::new(
             apps.iter()
-                .map(|&(app, executable)| (app.to_owned(), Pattern::new(executable))),
+                .map(|&(app, executable)| (app.to_owned(), matching(executable))),
         )
     }
 
@@ -320,7 +469,7 @@ mod tests {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
         assert_eq!(lifecycle.deadline(), Some(now));
-        let changes = lifecycle.scan(
+        let changes = lifecycle.scan_unlisted(
             Ok(vec![entry(7, "explorer.exe"), entry(42, "example.EXE")]),
             now,
         );
@@ -339,7 +488,7 @@ mod tests {
     fn while_idle_only_a_new_window_makes_a_snapshot_due() {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
-        assert_eq!(lifecycle.scan(Ok(Vec::new()), now), []);
+        assert_eq!(lifecycle.scan_unlisted(Ok(Vec::new()), now), []);
         assert_eq!(lifecycle.deadline(), None, "idle detection does not poll");
         lifecycle.window_event(WindowEvent::Destroyed, now);
         assert_eq!(lifecycle.deadline(), None);
@@ -351,7 +500,7 @@ mod tests {
     fn a_burst_of_events_keeps_the_first_events_deadline() {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
-        lifecycle.scan(Ok(Vec::new()), now);
+        lifecycle.scan_unlisted(Ok(Vec::new()), now);
         lifecycle.window_event(WindowEvent::Created, now);
         lifecycle.window_event(WindowEvent::Created, later(now, Duration::from_millis(100)));
         assert_eq!(lifecycle.deadline(), Some(later(now, SETTLE)));
@@ -361,7 +510,7 @@ mod tests {
     fn a_running_app_is_rechecked_on_destroyed_windows_and_by_the_backstop() {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
-        lifecycle.scan(Ok(vec![entry(42, "Example.exe")]), now);
+        lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now);
         assert_eq!(lifecycle.deadline(), Some(later(now, RESCAN)));
         lifecycle.window_event(WindowEvent::Destroyed, now);
         assert_eq!(lifecycle.deadline(), Some(later(now, SETTLE)));
@@ -371,10 +520,13 @@ mod tests {
     fn an_app_whose_process_is_gone_exits_once() {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
-        lifecycle.scan(Ok(vec![entry(42, "Example.exe")]), now);
-        assert_eq!(lifecycle.scan(Ok(vec![entry(42, "Example.exe")]), now), []);
-        assert_eq!(lifecycle.scan(Ok(Vec::new()), now), [exited(42)]);
-        assert_eq!(lifecycle.scan(Ok(Vec::new()), now), []);
+        lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now);
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now),
+            []
+        );
+        assert_eq!(lifecycle.scan_unlisted(Ok(Vec::new()), now), [exited(42)]);
+        assert_eq!(lifecycle.scan_unlisted(Ok(Vec::new()), now), []);
         assert_eq!(lifecycle.deadline(), None, "detection is idle again");
     }
 
@@ -382,9 +534,9 @@ mod tests {
     fn a_reused_process_id_ends_the_session() {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
-        lifecycle.scan(Ok(vec![entry(42, "Example.exe")]), now);
+        lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now);
         assert_eq!(
-            lifecycle.scan(Ok(vec![entry(42, "Other.exe")]), now),
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "Other.exe")]), now),
             [exited(42)]
         );
     }
@@ -394,9 +546,12 @@ mod tests {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);
         let both = vec![entry(50, "Example.exe"), entry(42, "Example.exe")];
-        assert_eq!(lifecycle.scan(Ok(both), now), [started(42)]);
         assert_eq!(
-            lifecycle.scan(Ok(vec![entry(50, "Example.exe")]), now),
+            lifecycle.scan(Ok(both), || Ok(Vec::new()), unasked, now),
+            [started(42)]
+        );
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(50, "Example.exe")]), now),
             [exited(42), started(50)]
         );
     }
@@ -405,7 +560,8 @@ mod tests {
     fn wildcards_detect_an_app_and_apps_are_independent() {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(watching(&[("a", "a*.exe"), ("b", "b.exe")]), now);
-        let changes = lifecycle.scan(Ok(vec![entry(1, "b.exe"), entry(2, "A64.exe")]), now);
+        let changes =
+            lifecycle.scan_unlisted(Ok(vec![entry(1, "b.exe"), entry(2, "A64.exe")]), now);
         assert_eq!(
             changes,
             [started_as("a", 2, "A64.exe"), started_as("b", 1, "b.exe")]
@@ -417,7 +573,7 @@ mod tests {
         let now = Instant::now();
         let both = watching(&[("a", "a.exe"), ("b", "b.exe")]);
         let mut lifecycle = Lifecycle::new(both, now);
-        lifecycle.scan(Ok(vec![entry(1, "a.exe"), entry(2, "b.exe")]), now);
+        lifecycle.scan_unlisted(Ok(vec![entry(1, "a.exe"), entry(2, "b.exe")]), now);
         let later_on = later(now, Duration::from_secs(1));
         let changes = lifecycle.watch(watching(&[("a", "a.exe"), ("b", "b2.exe")]), later_on);
         assert_eq!(
@@ -434,7 +590,7 @@ mod tests {
             "a snapshot is due at once"
         );
         assert_eq!(
-            lifecycle.scan(Ok(vec![entry(1, "a.exe"), entry(3, "b2.exe")]), later_on),
+            lifecycle.scan_unlisted(Ok(vec![entry(1, "a.exe"), entry(3, "b2.exe")]), later_on),
             [started_as("b", 3, "b2.exe")]
         );
         let none = lifecycle.watch(watching(&[]), later_on);
@@ -448,11 +604,11 @@ mod tests {
         let mut lifecycle = Lifecycle::new(example_app(), now);
         let failure = || Err(io::Error::other("snapshot failed"));
         assert_eq!(
-            lifecycle.scan(failure(), now),
+            lifecycle.scan_unlisted(failure(), now),
             [Change::ScanFailed("snapshot failed".to_owned())]
         );
         assert_eq!(lifecycle.deadline(), Some(later(now, RESCAN)));
-        assert_eq!(lifecycle.scan(failure(), now), []);
+        assert_eq!(lifecycle.scan_unlisted(failure(), now), []);
         lifecycle.watch(watching(&[]), now);
         assert_eq!(
             lifecycle.deadline(),
@@ -461,7 +617,7 @@ mod tests {
         );
         lifecycle.watch(example_app(), now);
         assert_eq!(
-            lifecycle.scan(Ok(vec![entry(42, "Example.exe")]), now),
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now),
             [Change::ScanRestored, started(42)]
         );
     }
@@ -477,9 +633,14 @@ mod tests {
         ];
         let lifecycle = Lifecycle::new(example_app(), Instant::now());
         let thread = thread::spawn(move || {
-            run(lifecycle, &received, &sender, || {
-                Ok(snapshots.pop().unwrap_or_default())
-            });
+            run(
+                lifecycle,
+                &received,
+                &sender,
+                || Ok(snapshots.pop().unwrap_or_default()),
+                unlisted,
+                unasked,
+            );
         });
         let wait = Duration::from_secs(5);
         assert_eq!(changes.recv_timeout(wait).expect("start"), started(42));
@@ -501,5 +662,164 @@ mod tests {
         );
         drop(inputs);
         thread.join().expect("the thread ends when its input stops");
+    }
+
+    #[test]
+    fn the_session_follows_the_process_that_owns_the_best_window() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(watching(&[(APP, "Example*.exe")]), now);
+        let helper_and_app = || vec![entry(40, "ExampleHelper.exe"), entry(42, "Example.exe")];
+        let app_window = || Ok(vec![window(5, 42, "Example App", true)]);
+        let app = || started_as(APP, 42, "Example.exe");
+        assert_eq!(
+            lifecycle.scan(Ok(helper_and_app()), app_window, all_shown, now),
+            [app()],
+            "the helper has the lowest ID and no window"
+        );
+        let mut lifecycle = Lifecycle::new(watching(&[(APP, "Example*.exe")]), now);
+        let hidden = || Ok(vec![window(5, 42, "Example App", false)]);
+        assert_eq!(
+            lifecycle.scan(Ok(helper_and_app()), hidden, all_shown, now),
+            [started_as(APP, 40, "ExampleHelper.exe")],
+            "while no window fits, the lowest ID"
+        );
+        assert_eq!(
+            lifecycle.scan(Ok(helper_and_app()), app_window, all_shown, now),
+            [
+                Change::Exited {
+                    app: APP.to_owned(),
+                    process: ProcessId::new(40)
+                },
+                app()
+            ],
+            "the session moves to the process whose window opened"
+        );
+        let failing = || Err(io::Error::other("denied"));
+        assert_eq!(
+            lifecycle.scan(Ok(helper_and_app()), hidden, all_shown, now),
+            [],
+            "a session keeps its process while no window fits"
+        );
+        assert_eq!(
+            lifecycle.scan(Ok(helper_and_app()), failing, all_shown, now),
+            []
+        );
+    }
+
+    #[test]
+    fn a_minimized_copy_with_the_lower_id_gives_way_to_the_one_that_shows() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(example_app(), now);
+        let copies = || vec![entry(40, "Example.exe"), entry(42, "Example.exe")];
+        // Copy 40's window is listed first but minimized; copy 42's shows.
+        let windows = || {
+            Ok(vec![
+                window(5, 40, "Example App", true),
+                window(6, 42, "Example App", true),
+            ])
+        };
+        let shown = |handle| handle != 5;
+        assert_eq!(
+            lifecycle.scan(Ok(copies()), windows, shown, now),
+            [started(42)],
+            "the copy whose window the reader reads"
+        );
+        assert_eq!(
+            lifecycle.scan(Ok(copies()), windows, all_shown, now),
+            [],
+            "copy 40's window showing again does not take the session"
+        );
+        assert_eq!(
+            lifecycle.scan(Ok(copies()), windows, |handle| handle != 6, now),
+            [],
+            "nor does copy 42's window being minimized"
+        );
+    }
+
+    #[test]
+    fn a_second_copy_takes_over_only_when_the_first_exits() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(example_app(), now);
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(42, "Example.exe")]), now),
+            [started(42)]
+        );
+        // The second copy got a lower, reused ID, and its window is in front.
+        let both = || vec![entry(40, "Example.exe"), entry(42, "Example.exe")];
+        let windows = || {
+            Ok(vec![
+                window(5, 40, "Example App", true),
+                window(6, 42, "Example App", true),
+            ])
+        };
+        assert_eq!(lifecycle.scan(Ok(both()), windows, all_shown, now), []);
+        assert_eq!(
+            lifecycle.scan_unlisted(Ok(vec![entry(40, "Example.exe")]), now),
+            [exited(42), started(40)]
+        );
+    }
+
+    #[test]
+    fn a_copy_whose_window_is_replaced_keeps_the_session_for_a_while() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(example_app(), now);
+        let copies = || Ok(vec![entry(40, "Example.exe"), entry(42, "Example.exe")]);
+        let both = || {
+            Ok(vec![
+                window(5, 40, "Example App", true),
+                window(6, 42, "Example App", true),
+            ])
+        };
+        // Copy 40 goes full screen: its old window closed, and the new one is
+        // not listed yet.
+        let only_42 = || Ok(vec![window(6, 42, "Example App", true)]);
+        assert_eq!(
+            lifecycle.scan(copies(), both, all_shown, now),
+            [started(40)]
+        );
+        let gap = later(now, SETTLE);
+        assert_eq!(
+            lifecycle.scan(copies(), only_42, all_shown, gap),
+            [],
+            "one snapshot without its window does not hand the session over"
+        );
+        let back = later(gap, RESCAN);
+        assert_eq!(lifecycle.scan(copies(), both, all_shown, back), []);
+        let gone = later(back, SETTLE);
+        assert_eq!(
+            lifecycle.scan(copies(), only_42, all_shown, gone),
+            [],
+            "its window came back, so the wait starts again"
+        );
+        assert_eq!(
+            lifecycle.scan(copies(), only_42, all_shown, later(gone, OWNER_GRACE)),
+            [exited(40), started(42)],
+            "after the grace, the copy that owns the window takes over"
+        );
+    }
+
+    #[test]
+    fn an_app_watched_again_forgets_which_process_owned_its_window() {
+        let now = Instant::now();
+        let mut lifecycle = Lifecycle::new(example_app(), now);
+        let both = || Ok(vec![entry(40, "Example.exe"), entry(42, "Example.exe")]);
+        let app_window = || Ok(vec![window(6, 42, "Example App", true)]);
+        let hidden = || Ok(vec![window(6, 42, "Example App", false)]);
+        assert_eq!(
+            lifecycle.scan(both(), app_window, all_shown, now),
+            [started(42)]
+        );
+        assert_eq!(lifecycle.watch(watching(&[]), now), [exited(42)]);
+        lifecycle.watch(example_app(), now);
+        assert_eq!(
+            lifecycle.scan(both(), hidden, all_shown, now),
+            [started(40)],
+            "while no window fits, the lowest ID"
+        );
+        assert_eq!(
+            lifecycle.scan(both(), app_window, all_shown, now),
+            [exited(40), started(42)],
+            "process 40 never owned the window, so it gets no grace"
+        );
     }
 }

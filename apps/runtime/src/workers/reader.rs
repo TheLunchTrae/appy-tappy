@@ -3,8 +3,11 @@
 //! Each running session has a reader thread. It finds the application's
 //! window with the application's
 //! [`appytappy_config::window_match::WindowMatch`], among the windows of
-//! every running process whose executable fits it, as the setup app does.
-//! Then it captures one region of the window: the smallest rectangle that
+//! every running process whose executable fits it, and reads one of the
+//! windows that fit best only when it belongs to the process the session
+//! follows, picking among them with [`read_window`] as detection does
+//! (see the Lifecycle section of `docs/developer/architecture.md`). Then it
+//! captures one region of the window: the smallest rectangle that
 //! holds the regions of every value drawn at the window's current size, so
 //! the capture copies no more pixels than the values need. Windows pushes a
 //! frame only when the window's content changes, so a still window is
@@ -31,8 +34,9 @@
 //! checks every [`CHECK_AGAIN`] that the window still shows and still fits
 //! the application best, because a hidden window sends no frames and no
 //! close, and the application may open a better window, such as its main
-//! window after a launcher. While no window fits, or the one that fits best
-//! is minimized, it looks again every [`FIND_AGAIN`]. Each time a capture
+//! window after a launcher. While no window fits, the window it would read
+//! is minimized, or the window that fits best is another process's, it
+//! looks again every [`FIND_AGAIN`]. Each time a capture
 //! ends, the values it read can no longer be seen, so the reader sends
 //! [`Reading::Unseen`], and the capture's handler sends nothing more.
 
@@ -42,12 +46,13 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::{
     Capture, CaptureSession, Crop, Frame, OutsideWindow, Region, Size,
 };
-use appytappy_sources::system::{System, WindowPlace, best_windows};
+use appytappy_sources::system::{System, best_windows, read_window, shows};
 
 use crate::plan::AppPlan;
 
@@ -77,6 +82,8 @@ pub(crate) struct Job {
     pub(crate) session: SessionId,
     /// The application's values and window.
     pub(crate) plan: Arc<AppPlan>,
+    /// The process the session follows, whose window the reader reads.
+    pub(crate) process: ProcessId,
     /// The attached process's executable, such as `Example.exe`, for the
     /// log.
     pub(crate) executable: String,
@@ -286,6 +293,12 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 }
                 continue;
             },
+            Ok(Found::Elsewhere) => {
+                if !report(&mut reported, elsewhere(job)) || !wait() {
+                    return;
+                }
+                continue;
+            },
             Err(error) => {
                 let problem = format!("its windows cannot be listed: {error}");
                 if !report(&mut reported, problem) || !wait() {
@@ -427,31 +440,39 @@ fn watch<S: System>(
 /// What the reader found to capture.
 #[derive(Debug, PartialEq, Eq)]
 enum Found {
-    /// The first window that fits the app best and shows.
+    /// The window to read, which shows.
     Shown(u64),
-    /// Windows fit, but every one that fits best is minimized.
+    /// The window to read is minimized.
     Minimized,
+    /// The windows that fit best are another process's, which the session
+    /// does not follow, at least not yet.
+    Elsewhere,
     /// No window fits.
     Nothing,
 }
 
-/// The first shown window among the visible windows that fit the app best.
+/// The window to read: the one [`read_window`] picks among the windows that
+/// fit the app best for the session's process. Detection follows the
+/// process that owns the window it picks, so the reader reads it only when
+/// it is the session's process's.
 fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Found> {
     let processes = system.processes()?;
     let best = best_windows(&job.plan.window, processes, system.windows()?);
-    if best.is_empty() {
-        return Ok(Found::Nothing);
-    }
-    Ok(best
-        .iter()
-        .find(|entry| shown(system.window_place(entry.handle)))
-        .map_or(Found::Minimized, |entry| Found::Shown(entry.handle)))
+    let shown = |handle| shows(system.window_place(handle));
+    Ok(match read_window(&best, Some(job.process), shown) {
+        Some((window, _)) if window.process != job.process => Found::Elsewhere,
+        Some((window, true)) => Found::Shown(window.handle),
+        Some((_, false)) => Found::Minimized,
+        None => Found::Nothing,
+    })
 }
 
-/// Whether a window shows. A window whose place cannot be read counts as
-/// shown, so a failing check never stops a capture that works.
-fn shown(place: io::Result<Option<WindowPlace>>) -> bool {
-    !matches!(place, Ok(None | Some(WindowPlace { shown: false, .. })))
+fn elsewhere(job: &Job) -> String {
+    format!(
+        "the window that fits {}'s window best belongs to another process, so it is read once \
+         the session follows that process",
+        job.plan.name
+    )
 }
 
 fn minimized(job: &Job) -> String {
@@ -465,11 +486,11 @@ fn no_window(job: &Job) -> String {
     )
 }
 
-/// Why the reader should stop capturing `window` and look again, or `None`
-/// while it still shows and fits the app as well as any window. A check
-/// that fails keeps the capture.
+/// Why the reader should stop capturing `window`, a window of the session's
+/// process, and look again, or `None` while it still shows and fits the app
+/// as well as any window. A check that fails keeps the capture.
 fn moved_on<S: System>(system: &S, job: &Job, window: u64) -> Option<String> {
-    if !shown(system.window_place(window)) {
+    if !shows(system.window_place(window)) {
         return Some(minimized(job));
     }
     let processes = system.processes().ok()?;
@@ -477,11 +498,19 @@ fn moved_on<S: System>(system: &S, job: &Job, window: u64) -> Option<String> {
     if best.is_empty() {
         return Some(no_window(job));
     }
-    (!best.iter().any(|entry| entry.handle == window)).then(|| {
+    // Any window tied for the best fit is kept, so tied windows do not swap
+    // back and forth. The reader captures only the session's process's
+    // windows, so this one is.
+    if best.iter().any(|entry| entry.handle == window) {
+        return None;
+    }
+    Some(if best.iter().any(|entry| entry.process == job.process) {
         format!(
             "another window fits {}'s window better, so it is read instead",
             job.plan.name
         )
+    } else {
+        elsewhere(job)
     })
 }
 
@@ -863,6 +892,7 @@ mod tests {
         Job {
             session: SessionId(3),
             plan: plan(values),
+            process: ProcessId::new(43),
             executable: "Example.exe".to_owned(),
         }
     }
@@ -1543,6 +1573,27 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_waits_while_the_window_belongs_to_another_process() {
+        let (system, desk) = FakeSystem::new();
+        let (events, readings) = mpsc::channel::<Reading>();
+        let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
+        let other = || Ok(vec![window(2, 42, "Main window", true)]);
+        desk.answer(other());
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Problem {
+                session: SessionId(3),
+                problem: "the window that fits Example App's window best belongs to another \
+                          process, so it is read once the session follows that process"
+                    .to_owned()
+            })
+        );
+        assert!(!desk.asks_soon(), "it waits before looking again");
+        desk.answer(other());
+        stopped(reader, desk, &readings);
+    }
+
+    #[test]
     fn a_reader_that_cannot_list_windows_says_so_once_and_waits() {
         let (system, desk) = FakeSystem::new();
         let (events, readings) = mpsc::channel::<Reading>();
@@ -1628,12 +1679,15 @@ mod tests {
         type Process = NoProcess;
 
         fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
-            Ok(vec![ProcessEntry {
-                id: ProcessId::new(43),
-                parent: ProcessId::new(1),
-                executable: "Example.exe".to_owned(),
-                threads: 1,
-            }])
+            Ok([42, 43]
+                .into_iter()
+                .map(|id| ProcessEntry {
+                    id: ProcessId::new(id),
+                    parent: ProcessId::new(1),
+                    executable: "Example.exe".to_owned(),
+                    threads: 1,
+                })
+                .collect())
         }
 
         fn windows(&self) -> io::Result<Vec<WindowEntry>> {
@@ -1697,6 +1751,58 @@ mod tests {
             Some("no window of Example.exe fits Example App's window yet"),
             "every window that fits closed"
         );
+        let copies = || {
+            Ok(vec![
+                window(6, 42, "Main window", true),
+                window(4, 43, "Main window", true),
+            ])
+        };
+        assert_eq!(
+            check(4, copies(), Vec::new()),
+            None,
+            "another copy's window fits as well"
+        );
+        assert_eq!(
+            check(4, Ok(vec![window(6, 42, "Main window", true)]), Vec::new()).as_deref(),
+            Some(
+                "the window that fits Example App's window best belongs to another process, so \
+                 it is read once the session follows that process"
+            ),
+            "only another copy's window fits"
+        );
+    }
+
+    #[test]
+    fn the_window_read_is_the_sessions_process_even_when_minimized() {
+        let icon = job(vec![red_at("icon", 0, 0)]);
+        let find = |windows: Vec<WindowEntry>, minimized| {
+            find_window(
+                &Still {
+                    windows: Ok(windows),
+                    minimized,
+                },
+                &icon,
+            )
+            .expect("listed")
+        };
+        let copies = || {
+            vec![
+                window(6, 42, "Main window", true),
+                window(4, 43, "Main window", true),
+            ]
+        };
+        assert_eq!(find(copies(), Vec::new()), Found::Shown(4));
+        assert_eq!(
+            find(copies(), vec![4]),
+            Found::Minimized,
+            "detection follows process 43, so another copy's window is not read"
+        );
+        assert_eq!(
+            find(vec![window(6, 42, "Main window", true)], Vec::new()),
+            Found::Elsewhere,
+            "another copy's window, until the session follows that copy"
+        );
+        assert_eq!(find(Vec::new(), Vec::new()), Found::Nothing);
     }
 
     #[test]

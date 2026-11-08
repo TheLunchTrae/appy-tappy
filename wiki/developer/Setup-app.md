@@ -146,26 +146,27 @@ it beside the debug build.
 
 ## Window matching
 
-[How AppyTappy finds the
-window](../user/Applications.md#how-appytappy-finds-the-window) gives the
-patterns, the must-match fields, and the fallback. The file stores them as
-`mustMatch`, with a flag for the title and the class, and `fallback`: `none` or
-`executable`. The executable always has to match, because the runtime attaches
-to an application by its process's executable. A window qualifies when its
-executable and every required field match. Fallback windows count only when no
-window qualifies. Windows rank by fewer missed fields, then by the title
-matching. On a tie the runtime takes the window Windows lists first, usually the
-front-most, so the setup app marks every window that ties for the best fit as a
-best match. The setup app uses the match to show which applications are running,
-and the runtime finds each application's window with the same rules. A value's
-region means something only while the window has the size it had when the region
-was drawn. Values can be drawn at more than one size, and the runtime reads the
-ones drawn at the window's current size. When the window closes or changes size,
-the runtime forgets the values it read. Each automation stays as it was until
-the values read next show whether its condition still holds, so it neither runs
-again nor undoes what it changed while the window is out of sight. When the
-window has a size no value was drawn at, the runtime reads nothing and logs that
-the window should be resized or the value drawn again.
+[How AppyTappy finds the window](../user/Applications.md#how-appytappy-finds-the-window)
+gives the patterns, the must-match fields, and the fallback. The file stores
+them as `mustMatch`, with a flag for the title and the class, and `fallback`:
+`none` or `executable`. The executable always has to match, because the
+runtime attaches to an application by its process's executable. A window
+qualifies when its executable and every required field match. Fallback
+windows count only when no window qualifies. Windows rank by fewer missed
+fields, then by the title matching. On a tie the runtime keeps a window of
+the process its session already follows, and otherwise takes the first that
+Windows lists, usually the front-most, that is not minimized, so the setup
+app marks every window that ties for the best fit as a best match.
+The setup app uses the match to show which applications are running, and the
+runtime finds each application's window with the same rules. A value's region
+means something only while the window has the size it had when the region was
+drawn. Values can be drawn at more than one size, and the runtime reads the
+ones drawn at the window's current size. When the window closes or changes
+size, the runtime forgets the values it read. Each automation stays as it was
+until the values read next show whether its condition still holds, so it
+neither runs again nor undoes what it changed while the window is out of sight.
+When the window has a size no value was drawn at, the runtime reads nothing and
+logs that the window should be resized or the value drawn again.
 
 ## Saved files
 

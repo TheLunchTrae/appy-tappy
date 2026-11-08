@@ -277,6 +277,7 @@ impl Model {
         let mut orders = vec![Order::Read(reader::Job {
             session: id,
             plan: Arc::clone(plan),
+            process: attached.process,
             executable: attached.executable.clone(),
         })];
         let watched = Watched {

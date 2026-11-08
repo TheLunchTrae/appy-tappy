@@ -12,7 +12,7 @@ use appytappy_config::paths::Locations;
 use appytappy_config::store::{AppStore, AutomationStore};
 use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, WindowWatch};
 use appytappy_sources::HostSystem;
-use appytappy_sources::system::System;
+use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
 use crate::log::Log;
@@ -139,7 +139,14 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let detect = Arc::clone(&system);
     let changes = sender.clone();
     let detector = spawn("lifecycle", move || {
-        lifecycle::run(lifecycle, &input_events, &changes, || detect.processes());
+        lifecycle::run(
+            lifecycle,
+            &input_events,
+            &changes,
+            || detect.processes(),
+            || detect.windows(),
+            |window| shows(detect.window_place(window)),
+        );
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed send means the owner already stopped, which is what this tells it"
@@ -943,6 +950,7 @@ mod tests {
             Order::Read(reader::Job {
                 session: SessionId(1),
                 plan,
+                process: appytappy_config::anti_cheat::ProcessId::new(1),
                 executable: "Example.exe".to_owned(),
             }),
             Order::StopReading(SessionId(1), "Example App".to_owned()),
