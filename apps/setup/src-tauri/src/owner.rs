@@ -28,11 +28,12 @@ use std::time::{Duration, Instant};
 use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::applications;
-use crate::automations::{self, Stores};
+use crate::automations;
 use crate::check_spec::{self, RegionCheck};
 use crate::overlay::Overlays;
 use crate::pixels;
 use crate::recording::{Recording, ocr};
+use crate::stores::Stores;
 use crate::window_list;
 
 pub(crate) use self::host::Host;
