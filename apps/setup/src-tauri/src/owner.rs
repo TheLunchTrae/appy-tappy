@@ -22,6 +22,7 @@ mod recording;
 mod references;
 #[cfg(test)]
 mod test_support;
+mod update;
 mod values;
 mod watch;
 
@@ -39,6 +40,7 @@ use crate::check_spec::RegionCheck;
 use crate::overlay::Overlays;
 use crate::recording::{Recording, ocr};
 use crate::stores::Stores;
+use crate::updates::Downloaded;
 
 pub(crate) use self::host::Host;
 use self::messages::CaptureFailure;
@@ -86,6 +88,8 @@ pub(crate) struct Owner<H: Host> {
     watched: Option<Watched>,
     /// The overlays that show, each with a capture of its own.
     overlays: Overlays<H::Session>,
+    /// The update downloaded and checked, until the user installs it.
+    update: Option<Downloaded>,
     /// The build each running process runs, read once per process, since
     /// the application list asks again every few seconds.
     builds: BTreeMap<ProcessId, BuildDef>,
@@ -116,6 +120,7 @@ impl<H: Host> Owner<H> {
             ocr,
             watched: None,
             overlays: Overlays::new(),
+            update: None,
             builds: BTreeMap::new(),
         }
     }

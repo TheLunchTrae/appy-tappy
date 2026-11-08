@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-mcp"
-description = "A local MCP server that gives an AI agent read-only tools to investigate how an app stores its state."
+description = "A local MCP server that gives an AI agent read-only tools to investigate how an app shows its state."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

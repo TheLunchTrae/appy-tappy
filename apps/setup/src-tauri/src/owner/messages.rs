@@ -197,6 +197,8 @@ impl<H: Host> Run<H> {
     }
 }
 
+// The work is a closure, which cannot be printed, so a `Run` prints only its
+// name.
 impl<H: Host> fmt::Debug for Run<H> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("Run")
@@ -326,6 +328,7 @@ mod tests {
             owner.stop();
             sender.send(()).expect("test listens");
         });
+        assert_eq!(format!("{run:?}"), "Run");
         assert!(harness.owner.handle(Message::Run(run)).is_continue());
         assert_eq!(told.try_recv(), Ok(()));
     }

@@ -1,16 +1,13 @@
-//! Source primitives that read app state for the runtime and the setup app,
-//! and the guided memory scan that finds what to read.
+//! Source primitives that read app state for the runtime and the setup app.
 //!
-//! The scan and the pointer-chain walker are portable and take a
-//! [`memory::ProcessMemory`]. The screen region checks are portable and take
-//! a cropped [`screen::Image`]. The Windows adapter in `win` implements
-//! [`memory::ProcessMemory`], [`system::System`], and [`screen::Capture`];
-//! other platforms get [`system::Unsupported`].
+//! The screen region checks are portable and take a cropped
+//! [`screen::Image`]. The Windows adapter in `win` implements
+//! [`system::System`] and [`screen::Capture`]; other platforms get
+//! [`system::Unsupported`].
 //!
 //! See `wiki/developer/Architecture.md` for this crate's boundaries.
 
 pub mod build;
-pub mod memory;
 pub mod schedule;
 pub mod screen;
 pub mod system;
