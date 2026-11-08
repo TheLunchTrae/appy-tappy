@@ -128,7 +128,7 @@ Each snapshot ends the session of an application whose process is gone, and
 starts one for an application that runs without one. When several processes
 fit one application, the session follows the process that owns the window its
 reader reads, and a process that owned one keeps the session for
-`OWNER_GRACE` after it owns none; [Lifecycle](architecture.md#lifecycle) gives
+`OWNER_GRACE` after it owns none; [Lifecycle](Architecture.md#lifecycle) gives
 the rule. A new watchlist ends the session of each application it drops or
 whose executable pattern it changes, and forgets which process owned its
 window.

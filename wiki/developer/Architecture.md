@@ -262,7 +262,7 @@ helper beside the application, the snapshot also lists the windows and
 checks which show, and the session follows the process that owns the window
 the reader reads. Both pick it the same way (`read_window` in
 `crates/sources/src/system.rs`) among the windows the application's
-[window match](setup-app.md#window-matching) fits best: one of the session's
+[window match](Setup-app.md#window-matching) fits best: one of the session's
 own process while it owns one, and otherwise the first that is not
 minimized, then the first. So the values, the session, and the check that a
 key press goes to the application in front all agree on one process. When
