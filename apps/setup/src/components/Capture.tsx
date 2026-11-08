@@ -1342,7 +1342,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               </p>
               <div className="sep" />
               <div className="actions">
-                <button type="button" className="btn" onClick={onCancel}>
+                <button type="button" className="btn" disabled={saving} onClick={onCancel}>
                   Discard
                 </button>
                 <button
@@ -1485,6 +1485,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             <button
               type="button"
               className="btn"
+              disabled={saving}
               onClick={() => {
                 if (mode.kind === 'reference') {
                   onCancel();

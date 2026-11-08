@@ -41,8 +41,9 @@ This page covers what the user guide leaves out.
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
   capture counts its screenshots and recording too, since only the session
-  has them. The page tabs ask before they drop unsaved work and wait while a
-  save runs, and **Change window** asks the same. A save closes its flow only
+  has them. The page tabs, the page already shown included, ask before they
+  drop unsaved work, and **Change window** asks the same. While a save runs,
+  the tabs, the question's answers, and **Discard** or **Cancel** wait. A save closes its flow only
   while that flow is still open, so one that finishes after the user moved on
   leaves the next flow alone. Leaving a capture stops its recording.
 - **Selection.** An image check's selection travels as the steps the user

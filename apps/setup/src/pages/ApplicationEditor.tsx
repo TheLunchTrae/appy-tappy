@@ -230,7 +230,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
             </p>
           )}
           <div className="actions">
-            <button type="button" className="btn" onClick={onCancel}>
+            <button type="button" className="btn" disabled={busy} onClick={onCancel}>
               Cancel
             </button>
             <button

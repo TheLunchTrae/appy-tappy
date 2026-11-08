@@ -42,13 +42,13 @@ That is all. The background part runs the automation from then on.
   window or in a small panel.
 - [Troubleshooting](troubleshooting.md)
 
+In this guide, an **application** is any program with a window that you want
+AppyTappy to watch: a game, a media player, a browser, or anything else.
+
 ## Leave before you save
 
 While you make or change an application, a value, a reference, or an
-automation, selecting another page first asks whether to leave without
-saving, because what you have not saved is lost. Select **Stay** to carry on,
-or **Leave** to drop it. While a save is still under way, the pages wait for
-it to finish.
-
-In this guide, an **application** is any program with a window that you want
-AppyTappy to watch: a game, a media player, a browser, or anything else.
+automation, selecting a page, even the one it opened from, first asks whether
+to leave without saving, because what you have not saved is lost. Select
+**Stay** to carry on, or **Leave** to drop it. While a save is still under way,
+the pages, **Leave**, and **Discard** or **Cancel** wait for it to finish.

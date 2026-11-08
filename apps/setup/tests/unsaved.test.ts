@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { EMPTY_DRAFT } from '../src/lib/check.ts';
-import { held, sameContent } from '../src/lib/unsaved.ts';
+import { held, onLeave, sameContent } from '../src/lib/unsaved.ts';
 
 describe('sameContent', () => {
   test('compares what objects hold, not which objects they are', () => {
@@ -43,4 +43,10 @@ describe('held', () => {
     expect(held(true, 'a', 'a')).toBe('saving');
     expect(held(true, 'a', 'b')).toBe('saving');
   });
+});
+
+test('leaving a flow asks first only for unsaved work, and waits for a save', () => {
+  expect(onLeave('nothing')).toBe('leave');
+  expect(onLeave('unsaved')).toBe('ask');
+  expect(onLeave('saving')).toBe('wait');
 });
