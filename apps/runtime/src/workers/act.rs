@@ -7,8 +7,10 @@
 //! ties them to the thread that made them.
 //!
 //! When the controls cannot be made, such as while Windows is still
-//! starting up after sign-in, the thread makes them again when a later
-//! automation fires, waiting longer after each failure. A restore that
+//! starting up after sign-in, the thread tells the owner that actions
+//! cannot run, so the tray can show it, and makes them again after a wait
+//! that grows with each failure, or when an automation fires after that
+//! wait. It tells the owner again once actions can run. A restore that
 //! fails is tried again: a media restore once, after a short wait, and a
 //! volume restore after each later job and every few seconds until it
 //! works. When the jobs stop, every restore still pending gets a last try.
@@ -57,31 +59,44 @@ pub(crate) enum Job {
     },
 }
 
-/// A note from the action thread for the log: an action that could not
-/// run, or that actions can run again.
+/// What the action thread tells the owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ActionFailed(pub(crate) String);
+pub(crate) enum ActionReport {
+    /// A line for the log, such as an action that could not run.
+    Note(String),
+    /// Whether actions can run. The owner takes it that they can until it
+    /// hears otherwise, so this comes only when that changes: `false` when
+    /// the controls cannot be made, and `true` once they are.
+    CanRun(bool),
+}
 
 /// Runs `jobs` until the owner stops sending them, then gives each restore
 /// still pending a last try. `controls` makes the operating system's
 /// controls on this thread; when it fails, the jobs that come meanwhile are
-/// reported as not run, and it is called again when a job comes after a
-/// wait that grows with each failure.
+/// reported as not run, and it is called again after a wait that grows
+/// with each failure. Each note, and each change in whether actions can
+/// run, goes to `reports`.
 pub(crate) fn run<C, E>(
     controls: impl FnMut() -> io::Result<C>,
     jobs: &Receiver<Job>,
-    failures: &Sender<E>,
+    reports: &Sender<E>,
 ) where
     C: Controls,
-    E: From<ActionFailed>,
+    E: From<ActionReport>,
 {
-    let report = |notes: Vec<String>| {
-        notes
+    let mut told = true;
+    let mut report = |notes: Vec<String>, can_run: bool| {
+        let noted = notes
             .into_iter()
-            .all(|note| failures.send(E::from(ActionFailed(note))).is_ok())
+            .all(|note| reports.send(E::from(ActionReport::Note(note))).is_ok());
+        if !noted || can_run == told {
+            return noted;
+        }
+        told = can_run;
+        reports.send(E::from(ActionReport::CanRun(can_run))).is_ok()
     };
     let (mut worker, notes) = Worker::start(controls, Instant::now());
-    if !report(notes) {
+    if !report(notes, worker.can_run()) {
         return;
     }
     loop {
@@ -100,12 +115,13 @@ pub(crate) fn run<C, E>(
             Some(job) => worker.job(job, Instant::now()),
             None => worker.retry(Instant::now()),
         };
-        if !report(notes) {
+        if !report(notes, worker.can_run()) {
             break;
         }
     }
     // Nothing reads a note once the owner stopped, so a failed send is fine.
-    report(worker.finish());
+    let notes = worker.finish();
+    report(notes, worker.can_run());
 }
 
 /// The action thread's state: the journal once the controls are made, and
@@ -140,7 +156,7 @@ where
                     backoff: Backoff::new(now),
                 }),
                 vec![format!(
-                    "actions cannot run yet, so they are tried again when an automation fires: {error}"
+                    "actions cannot run yet, so the controls are made again, waiting longer after each failure: {error}"
                 )],
             ),
         };
@@ -192,12 +208,18 @@ where
         notes
     }
 
-    /// Tries the pending restores that are due at `now`, when no job came
-    /// in time.
+    /// Whether the controls are made, so actions can run.
+    const fn can_run(&self) -> bool {
+        self.actions.is_ok()
+    }
+
+    /// When no job came in time: makes the controls again if they are
+    /// missing and their wait is over, or tries the pending restores that
+    /// are due at `now`.
     fn retry(&mut self, now: Instant) -> Vec<String> {
         match &mut self.actions {
             Ok(actions) => given_up(actions.retry_restores(now)).into_iter().collect(),
-            Err(_) => Vec::new(),
+            Err(_) => self.make_again(now),
         }
     }
 
@@ -217,7 +239,10 @@ where
     /// How long to wait at `now` for a job before [`Worker::retry`], or
     /// `None` to wait for one however long it takes.
     fn retry_in(&self, now: Instant) -> Option<Duration> {
-        let actions = self.actions.as_ref().ok()?;
+        let actions = match &self.actions {
+            Ok(actions) => actions,
+            Err(missing) => return Some(missing.backoff.retry_at().saturating_duration_since(now)),
+        };
         match actions.next_retry() {
             Some(due) => Some(due.saturating_duration_since(now)),
             None => actions.has_pending().then_some(VOLUME_RETRY),
@@ -400,7 +425,7 @@ mod tests {
     #[test]
     fn jobs_run_in_order_and_failures_name_the_automation_and_action() {
         let (jobs, received) = mpsc::channel();
-        let (failures, failed) = mpsc::channel::<ActionFailed>();
+        let (failures, failed) = mpsc::channel::<ActionReport>();
         jobs.send(fire(pause_then_mute())).expect("send");
         jobs.send(release()).expect("send");
         drop(jobs);
@@ -413,7 +438,7 @@ mod tests {
         );
         assert_eq!(
             failed.try_iter().collect::<Vec<_>>(),
-            [ActionFailed(
+            [ActionReport::Note(
                 "Pause near the end: action 2 failed: the volume target has no audio session"
                     .to_owned()
             )]
@@ -439,9 +464,12 @@ mod tests {
         );
         assert_eq!(
             notes,
-            ["actions cannot run yet, so they are tried again when an automation fires: no audio"]
+            [
+                "actions cannot run yet, so the controls are made again, waiting longer after each failure: no audio"
+            ]
         );
-        assert_eq!(worker.retry_in(start), None, "nothing waits for a timer");
+        assert!(!worker.can_run());
+        assert_eq!(worker.retry_in(start), Some(Duration::from_secs(1)));
         let not_run = [
             "Pause near the end: its actions did not run, because the controls cannot be made: no audio",
         ];
@@ -464,15 +492,54 @@ mod tests {
             Vec::<String>::new(),
             "nothing to undo"
         );
-        assert_eq!(worker.retry(at(6)), Vec::<String>::new());
+        assert_eq!(worker.retry_in(at(6)), Some(Duration::from_secs(1)));
+        assert_eq!(worker.retry(at(6)), Vec::<String>::new(), "not due yet");
         assert_eq!(
             worker.job(fire(pause()), at(7)),
             ["actions can run now"],
             "the fourth try works, at 1 + 2 + 4 seconds"
         );
+        assert!(worker.can_run());
         assert_eq!(sent.try_iter().collect::<Vec<_>>(), [MediaCommand::Pause]);
         drop(worker);
         assert_eq!(tries.len(), 4, "made at 0, 1, 3 and 7 seconds");
+    }
+
+    #[test]
+    fn the_owner_hears_when_actions_cannot_run_and_when_they_can_again() {
+        let (jobs, received) = mpsc::channel::<Job>();
+        let (reports, reported) = mpsc::channel::<ActionReport>();
+        let (commands, _sent) = mpsc::channel();
+        let mut player = Some(OnePlayer::new(commands));
+        let mut tries = 0_u8;
+        let make = move || {
+            tries = tries.saturating_add(1);
+            if tries == 1 {
+                return Err(io::Error::other("no audio"));
+            }
+            player.take().ok_or_else(|| io::Error::other("made twice"))
+        };
+        let actor = std::thread::spawn(move || run(make, &received, &reports));
+        // No automation fires: the wait alone makes the controls again.
+        let patience = Duration::from_secs(5);
+        let heard: Vec<ActionReport> = (0..4)
+            .map(|_| reported.recv_timeout(patience).expect("a report"))
+            .collect();
+        drop(jobs);
+        actor.join().expect("the thread ends when the jobs stop");
+        assert_eq!(
+            heard,
+            [
+                ActionReport::Note(
+                    "actions cannot run yet, so the controls are made again, waiting longer after each failure: no audio"
+                        .to_owned()
+                ),
+                ActionReport::CanRun(false),
+                ActionReport::Note("actions can run now".to_owned()),
+                ActionReport::CanRun(true),
+            ]
+        );
+        assert_eq!(reported.try_iter().count(), 0, "said once each");
     }
 
     fn pause() -> Box<[Action]> {
@@ -589,7 +656,7 @@ mod tests {
     #[test]
     fn restores_still_pending_when_the_jobs_stop_get_a_last_try() {
         let (jobs, received) = mpsc::channel();
-        let (failures, failed) = mpsc::channel::<ActionFailed>();
+        let (failures, failed) = mpsc::channel::<ActionReport>();
         let (commands, sent) = mpsc::channel();
         let mut player = OnePlayer::new(commands);
         player.refusals = 2;
@@ -605,10 +672,10 @@ mod tests {
         assert_eq!(
             failed.try_iter().collect::<Vec<_>>(),
             [
-                ActionFailed(
+                ActionReport::Note(
                     "Pause near the end: undoing failed, so it is tried again: the media session did not take the command".to_owned()
                 ),
-                ActionFailed(
+                ActionReport::Note(
                     "a restore failed on its last try, as actions stop: the media session did not take the command".to_owned()
                 ),
             ]
@@ -670,7 +737,7 @@ mod tests {
     #[test]
     fn a_failed_media_restore_is_tried_again_when_no_job_comes() {
         let (jobs, received) = mpsc::channel();
-        let (failures, failed) = mpsc::channel::<ActionFailed>();
+        let (failures, failed) = mpsc::channel::<ActionReport>();
         let (commands, sent) = mpsc::channel();
         let mut player = OnePlayer::new(commands);
         player.refusals = 1;
@@ -685,7 +752,7 @@ mod tests {
         actor.join().expect("the thread ends when the jobs stop");
         assert_eq!(
             failed.try_iter().collect::<Vec<_>>(),
-            [ActionFailed(
+            [ActionReport::Note(
                 "Pause near the end: undoing failed, so it is tried again: the media session did not take the command".to_owned()
             )],
             "the retry worked, so only the first failure is logged"

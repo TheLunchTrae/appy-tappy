@@ -32,7 +32,7 @@ on, so it must stay small. Every design choice below follows from that split.
   │ reload watch ─ reload ──────────┐                       │
   │ lifecycle ─ started, exited ────┤                       │
   │ readers ─ samples, problems ────┼─► owner thread:       │
-  │ action thread ─ failures ───────┤   model + engine      │
+  │ action thread ─ notes, can run ─┤   model + engine      │
   │ tray ─ enable, disable, quit ───┘           │           │
   │ ◄── actions, undos, readers started, stopped┘           │
   └─────────────────────────────────────────────────────────┘
@@ -326,7 +326,12 @@ as the user sees it. The runtime shows an icon in the taskbar's notification
 area: the setup app's icon, which the runtime's build script also links into its
 program file from `apps/runtime/runtime.rc`. Pointing at it shows a tooltip with
 the state, such as `AppyTappy: idle`, or `AppyTappy: disabled` while automations
-are off. Right-clicking it opens a small menu:
+are off. While the action thread cannot make the media and audio controls, the
+tooltip adds `actions cannot run yet`, as in
+`AppyTappy: attached, actions cannot run yet`, and the menu starts with a grayed
+`Actions cannot run yet` line; see
+[When the controls cannot start](Actions.md#when-the-controls-cannot-start).
+Right-clicking it opens a small menu:
 
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
   fire, the readers stop, and what the automations changed is undone, but

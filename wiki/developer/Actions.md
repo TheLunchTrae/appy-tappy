@@ -136,10 +136,12 @@ needs it, with the same growing wait as below, because each request can take
 
 If the controls cannot be made at all, the log says so, and each automation
 that fires meanwhile logs that its actions did not run. The worker makes the
-controls again when an automation fires, waiting a second after the first
-failure and twice as long after each one after it, up to a minute. The log
-says when actions can run again. An automation that fired while the controls
-were missing changed nothing, so its release has nothing to undo.
+controls again a second after the first failure and twice as long after each
+one after it, up to a minute, or when an automation fires after that wait.
+The worker tells the owner when actions cannot run and when they can again,
+and the [tray](Architecture.md#tray) shows it; the log says so too. An
+automation that fired while the controls were missing changed nothing, so its
+release has nothing to undo.
 
 ## Not in v1
 
