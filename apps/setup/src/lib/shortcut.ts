@@ -1,4 +1,7 @@
-// The screenshot shortcut, as a global-shortcut accelerator such as `Control+Shift+S`.
+// The screenshot shortcut, as a global-shortcut accelerator such as `Control+Shift+S`, and the keys of a key press
+// action.
+
+import { KEY_NAMES } from './bindings.ts';
 
 /** The keys of a key press that a shortcut reads. */
 export interface KeyPress {
@@ -8,8 +11,6 @@ export interface KeyPress {
   readonly shiftKey: boolean;
   readonly metaKey: boolean;
 }
-
-export const DEFAULT_SHORTCUT = 'F9';
 
 const NAMED_KEYS: Readonly<Record<string, string>> = {
   Space: 'Space',
@@ -75,8 +76,8 @@ export function shortcutLabel(shortcut: string): string {
   return shortcut.replace('Control', 'Ctrl').replace('Super', 'Win');
 }
 
-/** The keys a key press action can press, by their `code`, as the automations file spells them. */
-const ACTION_KEYS: Readonly<Record<string, string>> = {
+/** The named keys a key press action can press, by their `code`, as the automations file spells them. */
+const ACTION_KEYS: Readonly<Record<string, (typeof KEY_NAMES.named)[number]>> = {
   Space: 'Space',
   Enter: 'Enter',
   Tab: 'Tab',
@@ -107,7 +108,8 @@ export interface TypedKeyPress extends KeyPress {
 export function actionKeys(press: TypedKeyPress): string | null {
   const letter = /^[A-Za-z]$/u.test(press.key) ? press.key.toUpperCase() : /^Key([A-Z])$/u.exec(press.code)?.[1];
   const digit = /^Digit(\d)$/u.exec(press.code)?.[1];
-  const function_ = /^F([1-9]|1\d|2[0-4])$/u.test(press.code) ? press.code : undefined;
+  const number = /^F([1-9]\d*)$/u.exec(press.code)?.[1];
+  const function_ = number !== undefined && Number(number) <= KEY_NAMES.maxFunctionKey ? press.code : undefined;
   const found = letter ?? digit ?? function_ ?? ACTION_KEYS[press.code];
   if (found === undefined) {
     return null;
@@ -123,10 +125,7 @@ export function actionKeys(press: TypedKeyPress): string | null {
     .join('+');
 }
 
-const MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Win'] as const;
-
-/** The names of the keys a key press action can press besides letters, digits and function keys. */
-const NAMED_ACTION_KEYS: readonly string[] = Object.values(ACTION_KEYS);
+const MODIFIERS = KEY_NAMES.modifiers;
 
 /** One key's name as an action spells it, or null when an action cannot press it. */
 function keyName(name: string): string | null {
@@ -135,9 +134,9 @@ function keyName(name: string): string | null {
   }
   const function_ = /^f([1-9]\d*)$/iu.exec(name)?.[1];
   if (function_ !== undefined) {
-    return Number(function_) <= 24 ? `F${function_}` : null;
+    return Number(function_) <= KEY_NAMES.maxFunctionKey ? `F${function_}` : null;
   }
-  return NAMED_ACTION_KEYS.find((named) => named.toLowerCase() === name.toLowerCase()) ?? null;
+  return KEY_NAMES.named.find((named) => named.toLowerCase() === name.toLowerCase()) ?? null;
 }
 
 /**

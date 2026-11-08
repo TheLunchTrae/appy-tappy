@@ -25,7 +25,7 @@ use serde::Serialize;
 use crate::stores::Stores;
 
 /// A saved automation, as the Automations page lists it.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AutomationSummary {
     /// The automation.

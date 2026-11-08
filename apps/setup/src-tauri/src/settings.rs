@@ -23,7 +23,7 @@ use crate::stores::Stores;
 const RUNTIME_PROGRAM: &str = "appytappy-runtime.exe";
 
 /// The settings as the Settings page shows them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SettingsView {
     /// The saved settings, or the defaults when the file cannot be read.

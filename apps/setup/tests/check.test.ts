@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
+import { LIMITS } from '../src/lib/bindings.ts';
 import {
   buildCharacters,
   buildSpec,
   DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
   fromReference,
-  MAX_STATES,
   newestOfSize,
   recordBlocked,
   regionScreenshot,
@@ -134,10 +134,10 @@ describe('states', () => {
     expect(stateOn(once, 5)).toBe(-1);
     expect(stateOn(once, null)).toBe(-1);
     let full = draft;
-    for (let screenshot = 0; screenshot < MAX_STATES; screenshot += 1) {
+    for (let screenshot = 0; screenshot < LIMITS.maxStates; screenshot += 1) {
       full = withState(full, screenshot);
     }
-    expect(full.states).toHaveLength(MAX_STATES);
+    expect(full.states).toHaveLength(LIMITS.maxStates);
     expect(withState(full, 99)).toBe(full);
   });
 

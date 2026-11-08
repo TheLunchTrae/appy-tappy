@@ -100,7 +100,7 @@ fn updater(app: &AppHandle) -> Result<Updater, String> {
 }
 
 /// A newer release the user can install.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
 pub(crate) struct UpdateOffer {
     /// Its version, such as `0.2.0`.
     version: String,

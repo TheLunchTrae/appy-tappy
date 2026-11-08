@@ -1,20 +1,23 @@
 // What an automation means in words, and the editor's draft of one.
 
-import type {
-  ActionDef,
-  AntiCheat,
-  AppSummary,
-  AutomationDef,
-  AutomationSummary,
-  CheckDef,
-  Comparison,
-  Live,
-  MediaCommand,
-  Reading,
-  Target,
-  ValueDef,
-  WhenDef,
-} from './api.ts';
+import {
+  type ActionDef,
+  ACTIONS,
+  type AntiCheatDef,
+  type AppSummary,
+  type AutomationDef,
+  type AutomationSummary,
+  type CheckDef,
+  type ComparisonDef,
+  LIMITS,
+  type Live,
+  type MediaCommandDef,
+  NO_STATE,
+  type Reading,
+  type TargetDef,
+  type ValueDef,
+  type WhenDef,
+} from './bindings.ts';
 import { spellKeys } from './shortcut.ts';
 
 /** What a value reads: a number, yes or no, or a state's name. */
@@ -33,15 +36,12 @@ export function valueKind(check: CheckDef): ValueKind {
   }
 }
 
-/** What a state check reads when the region shows none of its states. */
-export const NO_STATE = 'none';
-
 /** A saved value an automation can watch. */
 export interface ValueChoice {
   readonly app: string;
   readonly appName: string;
   /** The anti-cheat class of the value's application. */
-  readonly antiCheat: AntiCheat;
+  readonly antiCheat: AntiCheatDef;
   readonly value: ValueDef;
   readonly kind: ValueKind;
   /** The names of the states a state check reads, in its order; none for another kind. */
@@ -70,14 +70,14 @@ export function findValue(choices: readonly ValueChoice[], when: Pick<WhenDef, '
 }
 
 /** The comparisons each kind of value offers, the usual one first. */
-export const COMPARISONS: Readonly<Record<ValueKind, readonly Comparison[]>> = {
+export const COMPARISONS: Readonly<Record<ValueKind, readonly ComparisonDef[]>> = {
   number: ['atLeast', 'above', 'atMost', 'below', 'equals', 'notEquals'],
   flag: ['equals', 'notEquals'],
   state: ['equals', 'notEquals'],
 };
 
 /** Each comparison as the condition reads it, after the value's name. */
-export const COMPARISON_NAMES: Readonly<Record<Comparison, string>> = {
+export const COMPARISON_NAMES: Readonly<Record<ComparisonDef, string>> = {
   below: 'is below',
   atMost: 'is at most',
   equals: 'is',
@@ -113,7 +113,7 @@ function numberText(value: number, target?: number): string {
  * A reading as the UI shows it, such as `87`, `12.46`, `Yes` or `Paused`, never contradicting a comparison with
  * `target`.
  */
-export function readingText(reading: Reading, target?: Target): string {
+export function readingText(reading: Reading, target?: TargetDef): string {
   switch (reading.kind) {
     case 'number':
       return numberText(reading.value, typeof target === 'number' ? target : undefined);
@@ -169,7 +169,7 @@ export function liveAnnouncement(live: LiveState): string {
 }
 
 /** A target as the condition reads it. */
-export function targetText(target: Target): string {
+export function targetText(target: TargetDef): string {
   if (typeof target === 'boolean') {
     return target ? 'yes' : 'no';
   }
@@ -177,7 +177,7 @@ export function targetText(target: Target): string {
 }
 
 /** What each media command does, as an action's name. */
-export const MEDIA_NAMES: Readonly<Record<MediaCommand, string>> = {
+export const MEDIA_NAMES: Readonly<Record<MediaCommandDef, string>> = {
   pause: 'Pause media',
   play: 'Play media',
   next: 'Next track',
@@ -206,20 +206,11 @@ export function actionText(action: ActionDef): string {
 }
 
 /**
- * Whether undo can put back what `action` changed: a skipped track cannot be unskipped, pressed keys cannot
- * be unpressed, and what was opened or played has nothing to put back.
+ * Whether undo can put back what `action` changed, as the runtime decides: a skipped track cannot be unskipped,
+ * pressed keys cannot be unpressed, and what was opened or played has nothing to put back.
  */
 export function undoable(action: ActionDef): boolean {
-  switch (action.kind) {
-    case 'media':
-      return action.command === 'play' || action.command === 'pause';
-    case 'volume':
-      return true;
-    case 'keys':
-    case 'open':
-    case 'sound':
-      return false;
-  }
+  return ACTIONS.undoable[action.kind === 'media' ? (`media.${action.command}` as const) : action.kind];
 }
 
 /**
@@ -228,10 +219,10 @@ export function undoable(action: ActionDef): boolean {
  */
 export function keysBlocked(
   actions: readonly { readonly kind: ActionDef['kind'] }[],
-  antiCheat: AntiCheat,
+  antiCheat: AntiCheatDef,
   appName: string,
 ): string | null {
-  if (antiCheat === 'none' || !actions.some((action) => action.kind === 'keys')) {
+  if (antiCheat === 'none' || !actions.some((action) => ACTIONS.injectsInput[action.kind])) {
     return null;
   }
   return `Anti-cheat can treat pressed keys as cheating, so keys are pressed only once ${appName}'s anti-cheat is set to None on the Applications page.`;
@@ -268,7 +259,7 @@ export interface ActionDraft {
   /** Tells the rows apart while they are added, moved and removed. */
   readonly key: number;
   readonly kind: ActionDef['kind'];
-  readonly command: MediaCommand;
+  readonly command: MediaCommandDef;
   readonly percent: string;
   readonly target: ActionTarget;
   /** The application's executable, such as `Player.exe`, when `target` is `app`. */
@@ -287,7 +278,7 @@ export interface Draft {
   readonly enabled: boolean;
   /** The watched value's application and ID, or null before one is picked. */
   readonly source: { readonly app: string; readonly value: string } | null;
-  readonly is: Comparison;
+  readonly is: ComparisonDef;
   /** The number to compare with, as typed. */
   readonly number: string;
   /** The yes or no to compare with. */
@@ -377,8 +368,8 @@ export function readsText(choice: ValueChoice): string {
   }
 }
 
-/** The longest cooldown, in seconds: a day. */
-const MAX_COOLDOWN_SECONDS = 86_400;
+/** The longest cooldown, in seconds. */
+const MAX_COOLDOWN_SECONDS = LIMITS.maxCooldownMs / 1000;
 
 /**
  * A plain decimal number, such as `90`, `-3`, `12.5` or `1,234`: as a number
@@ -414,15 +405,12 @@ function isFullPath(text: string): boolean {
   return /^[a-z]:[\\/]/iu.test(text);
 }
 
-/** The most bytes a path or link may take, as the runtime allows. */
-const MAX_TARGET_BYTES = 2048;
-
 /** Why the path or link `text` of action `position` can't be saved whatever its kind, or `null` when it can be. */
 function targetProblem(text: string, position: number): string | null {
   if (/\p{Cc}/u.test(text)) {
     return `The path or link in action ${position} has a tab or line break in it. Remove it.`;
   }
-  if (new TextEncoder().encode(text).length > MAX_TARGET_BYTES) {
+  if (new TextEncoder().encode(text).length > LIMITS.maxTargetBytes) {
     return `The path or link in action ${position} is too long to save. Shorten it.`;
   }
   return null;
@@ -473,6 +461,12 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
   if (app === '') {
     return `Name the application for action ${position}, such as Player.exe.`;
   }
+  if (app !== null && /\p{Cc}/u.test(app)) {
+    return `The application name in action ${position} has a tab or line break in it. Remove it.`;
+  }
+  if (app !== null && new TextEncoder().encode(app).length > LIMITS.maxAppNameBytes) {
+    return `The application name in action ${position} is too long to save. Shorten it.`;
+  }
   if (draft.kind === 'media') {
     return { kind: 'media', command: draft.command, app };
   }
@@ -485,7 +479,7 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
 
 /** The condition `draft` describes on the value `choice`, or the next thing to fill in. */
 export function buildWhen(draft: Draft, choice: ValueChoice): WhenDef | string {
-  let target: Target = draft.flag;
+  let target: TargetDef = draft.flag;
   if (choice.kind === 'number') {
     const number = typedNumber(draft.number);
     if (number === null) {
@@ -556,7 +550,7 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
   }
   const cooldown = typedNumber(draft.cooldown);
   if (cooldown === null || cooldown < 0 || cooldown > MAX_COOLDOWN_SECONDS) {
-    return { ok: false, next: 'Set the wait before it runs again in seconds, from 0 to 86400.' };
+    return { ok: false, next: `Set the wait before it runs again in seconds, from 0 to ${MAX_COOLDOWN_SECONDS}.` };
   }
   return {
     ok: true,

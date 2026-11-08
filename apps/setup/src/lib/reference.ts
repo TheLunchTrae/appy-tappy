@@ -1,6 +1,5 @@
+import type { AppFile, ReferenceDef } from './bindings.ts';
 // How references read on the capture screen and the References page.
-
-import type { AppFile, ReferenceDef } from './api.ts';
 
 /** Digits before other characters, then by code point, so the order is the same on every machine. */
 function order(left: string, right: string): number {

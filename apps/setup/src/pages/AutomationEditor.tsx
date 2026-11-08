@@ -1,17 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  type AppSummary,
-  type AutomationDef,
-  type MediaCommand,
-  type WhenDef,
-  errorText,
-  listWindows,
-  saveAutomation,
-  stopWatching,
-  watchValue,
-  watchedReading,
-} from '../lib/api.ts';
+import { type AppSummary, type AutomationDef, type MediaCommandDef, NO_STATE, type WhenDef } from '../lib/bindings.ts';
+import { errorText, listWindows, saveAutomation, stopWatching, watchValue, watchedReading } from '../lib/api.ts';
 import {
   type ActionDraft,
   type Draft,
@@ -20,7 +10,6 @@ import {
   COMPARISON_NAMES,
   EMPTY_DRAFT,
   MEDIA_NAMES,
-  NO_STATE,
   type ValueChoice,
   buildAutomation,
   buildWhen,
@@ -41,7 +30,7 @@ import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
-type ActionChoice = MediaCommand | Exclude<ActionDraft['kind'], 'media'>;
+type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
 
 const ACTION_CHOICES: readonly ActionChoice[] = [
   'pause',

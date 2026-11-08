@@ -16,7 +16,7 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
-appytappy-config = { version = "=0.1.0", path = "../../../crates/config" }
+appytappy-config = { version = "=0.1.0", path = "../../../crates/config", features = ["ts"] }
 # Tells the runtime to read the automations again after each save.
 appytappy-platform = { version = "=0.1.0", path = "../../../crates/platform" }
 appytappy-sources = { version = "=0.1.0", path = "../../../crates/sources" }
@@ -49,6 +49,10 @@ tauri-plugin-updater = { version = "=2.14.1", default-features = false, features
 # Keeps one copy of the setup app running, so two copies cannot overwrite
 # each other's saves, and brings its window forward when another starts.
 tauri-plugin-single-instance = "=2.5.5"
+# Writes the TypeScript types of the commands' arguments and answers, which a
+# test checks against the page's bindings.ts, so the page cannot drift from
+# the Rust side.
+ts-rs = "=12.0.1"
 # Each command awaits the owner thread's answer on a oneshot channel, so a
 # slow request never freezes the window; Tauri does not re-export it.
 tokio = { version = "=1.54.1", features = ["sync"] }

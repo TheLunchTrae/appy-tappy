@@ -60,7 +60,7 @@ pub(crate) enum FrameRead {
 }
 
 /// An application's overlay, as its window shows it.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OverlayView {
     /// The application's name.
@@ -101,7 +101,7 @@ pub(crate) struct Card {
 }
 
 /// One value's line in the overlay.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ValueView {
     /// The value's name.

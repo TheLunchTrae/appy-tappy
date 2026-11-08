@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+import { DEFAULT_SETTINGS } from '../src/lib/bindings.ts';
 import {
-  DEFAULT_SETTINGS,
   readMs,
   readWhole,
   sameSettings,

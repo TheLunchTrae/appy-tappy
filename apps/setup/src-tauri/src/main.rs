@@ -9,6 +9,8 @@
 
 mod applications;
 mod automations;
+#[cfg(test)]
+mod bindings;
 mod check_spec;
 mod commands;
 mod overlay;
