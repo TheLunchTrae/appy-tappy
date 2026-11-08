@@ -94,21 +94,20 @@ export interface SettingsHandle {
   readonly change: (update: SettingsUpdate) => Promise<string | null>;
 }
 
+/** Outside the app's provider there are no saved settings to change, so a change fails rather than save the defaults. */
 export const SettingsContext = createContext<SettingsHandle>({
   settings: DEFAULT_SETTINGS,
-  change: async (update) => {
-    const next = update(DEFAULT_SETTINGS);
-    if ('problem' in next) {
-      return next.problem;
-    }
-    await saveSettings(next);
-    return null;
-  },
+  change: () => Promise.reject(new Error('The settings have not loaded.')),
 });
 
 /** Whether two settings are the same, so saving one over the other changes nothing. */
 export function sameSettings(one: Settings, other: Settings): boolean {
-  return JSON.stringify(one) === JSON.stringify(other);
+  return (
+    one.format === other.format &&
+    one.readInterval.fastestMs === other.readInterval.fastestMs &&
+    one.readInterval.slowestMs === other.readInterval.slowestMs &&
+    one.screenshotShortcut === other.screenshotShortcut
+  );
 }
 
 export function useSettings(): SettingsHandle {
