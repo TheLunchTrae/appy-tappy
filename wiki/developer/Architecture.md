@@ -158,10 +158,13 @@ Each thread below is a plain `std::thread`, and each channel is a
   before reading a frame, and it logs why once until the reason changes.
   Every `CHECK_AGAIN` it checks that the window still shows and that no other
   window fits better, such as the main window opening after a launcher's,
-  and looks again if not. Among windows that fit equally well, it takes one
-  that shows over a minimized one. While no window fits, or every one that
-  fits best is minimized, it looks every `FIND_AGAIN`, until the application
-  exits. The constants are in `apps/runtime/src/workers/reader.rs`.
+  and looks again if not. It reads only a window of the process the session
+  follows, picked among the windows that fit equally well as
+  [Lifecycle](#lifecycle) describes: one that shows over a minimized one.
+  While no window fits, the window it would read is minimized, or the window
+  that fits best is another process's, it looks every `FIND_AGAIN`, until
+  the application exits. The constants are in
+  `apps/runtime/src/workers/reader.rs`.
   Other kinds of source, such as a log tail or a memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
@@ -265,10 +268,15 @@ minimized, then the first. So the values, the session, and the check that a
 key press goes to the application in front all agree on one process. When
 the session's process owns no such window and another does, such as the
 application opening its window after a helper started first, the session
-ends and starts again on that process. While no window fits, a session keeps
-its process, and a new one follows the process with the lowest ID. So a
-second copy of an application starts no second session, and it takes over
-when the first exits. A process ID that
+ends and starts again on that process. A process that owned such a window
+keeps the session for `OWNER_GRACE` (`apps/runtime/src/lifecycle.rs`) after
+it owns none, because an application that switches to full screen replaces
+its window, and the snapshot after the old one closed may not list the new
+one yet; only after that does another copy that owns one take over. While no
+window fits, a session keeps its process, and a new one follows the process
+with the lowest ID. So a second copy of an application starts no second
+session, and it takes over when the first exits or has shown no window
+that fits for that long. A process ID that
 Windows reused for another executable ends the session. An application
 relaunched within 5 seconds that gets its old process ID back keeps its session,
 because a snapshot cannot tell the two processes apart. A crashed application is
