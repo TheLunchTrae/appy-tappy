@@ -461,6 +461,18 @@ pub(crate) async fn save_settings(app: AppHandle, settings: SettingsFile) -> Res
     .await?
 }
 
+/// The folder the runtime writes its trace files to.
+#[tauri::command]
+pub(crate) async fn trace_folder() -> Result<String, String> {
+    crate::settings::trace_folder().map(|folder| folder.display().to_string())
+}
+
+/// Opens the trace folder in File Explorer.
+#[tauri::command]
+pub(crate) async fn open_trace_folder() -> Result<(), String> {
+    crate::settings::open_trace_folder()
+}
+
 /// Whether the runtime starts when the user signs in to Windows.
 #[tauri::command]
 pub(crate) async fn starts_with_windows(app: AppHandle) -> Result<bool, String> {

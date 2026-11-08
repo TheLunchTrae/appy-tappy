@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
-import { DEFAULT_SETTINGS, readMs, sameSettings, withWait } from '../src/lib/settings.ts';
+import {
+  DEFAULT_SETTINGS,
+  readMs,
+  readWhole,
+  sameSettings,
+  traceEnd,
+  traceRecords,
+  withCategory,
+  withWait,
+} from '../src/lib/settings.ts';
 
 describe('readMs', () => {
   test('takes a whole number of milliseconds in range', () => {
@@ -41,6 +50,7 @@ describe('sameSettings', () => {
         fastestMs: DEFAULT_SETTINGS.readInterval.fastestMs,
       },
       format: DEFAULT_SETTINGS.format,
+      trace: { ...DEFAULT_SETTINGS.trace, record: [...DEFAULT_SETTINGS.trace.record].reverse() },
     };
     expect(sameSettings(DEFAULT_SETTINGS, reordered)).toBe(true);
     expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, format: 2 })).toBe(false);
@@ -49,5 +59,51 @@ describe('sameSettings', () => {
       const readInterval = { ...DEFAULT_SETTINGS.readInterval, [which]: 1 };
       expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, readInterval })).toBe(false);
     }
+    const trace = DEFAULT_SETTINGS.trace;
+    for (const changed of [
+      { ...trace, on: true },
+      { ...trace, until: 5 },
+      { ...trace, fileLimitMb: 51 },
+      { ...trace, keepFiles: 6 },
+      { ...trace, record: [...trace.record, 'readings' as const] },
+      { ...trace, record: trace.record.slice(1) },
+    ]) {
+      expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, trace: changed })).toBe(false);
+    }
+  });
+});
+
+describe('readWhole', () => {
+  test('takes a whole number in range', () => {
+    expect(readWhole(' 5 ', 1, 100)).toBe(5);
+    expect(readWhole('1', 1, 100)).toBe(1);
+    expect(readWhole('100', 1, 100)).toBe(100);
+    for (const text of ['0', '101', '2.5', '', 'five']) {
+      expect(readWhole(text, 1, 100)).toBeNull();
+    }
+  });
+});
+
+describe('the runtime trace', () => {
+  const now = 1_762_612_800_000;
+  const on = { ...DEFAULT_SETTINGS.trace, on: true };
+
+  test('ends after the length picked, or never', () => {
+    expect(traceEnd(10, now)).toBe(now + 600_000);
+    expect(traceEnd(60, now)).toBe(now + 3_600_000);
+    expect(traceEnd('off', now)).toBeNull();
+  });
+
+  test('records while on and before its end time', () => {
+    expect(traceRecords(DEFAULT_SETTINGS.trace, now)).toBe(false);
+    expect(traceRecords({ ...on, until: null }, now)).toBe(true);
+    expect(traceRecords({ ...on, until: now + 1 }, now)).toBe(true);
+    expect(traceRecords({ ...on, until: now }, now)).toBe(false);
+  });
+
+  test('keeps its categories in the page order', () => {
+    expect(withCategory(on, 'readings', true).record).toEqual(['readings', 'changes', 'rules', 'actions', 'lifecycle']);
+    expect(withCategory(on, 'rules', false).record).toEqual(['changes', 'actions', 'lifecycle']);
+    expect(withCategory(on, 'rules', true).record).toEqual(on.record);
   });
 });

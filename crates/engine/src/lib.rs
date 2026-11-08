@@ -3,7 +3,8 @@
 //!
 //! A [`Session`] holds one app session's rule state, from the app's start
 //! to its exit. Each event goes in as a method call, and the [`Effect`]s that
-//! come out say which rules fired and which were released. The evaluator does
+//! come out say which rules fired, which were held back by their cooldown,
+//! and which were released. The evaluator does
 //! no I/O and reads no clock: every event carries the time it happened.
 //! `wiki/developer/Rules.md` explains the model.
 //!
@@ -29,6 +30,9 @@ pub enum Effect {
     Fire(RuleIndex),
     /// The rule was released: restore what its paired actions changed.
     Release(RuleIndex),
+    /// The rule would have fired, but its cooldown held it back. Nothing
+    /// runs; the runtime's trace records it.
+    Held(RuleIndex),
 }
 
 /// One rule's state within a session.
@@ -145,8 +149,12 @@ impl Session {
                 } => changed && *watched == signal && guard_holds(guard.as_ref(), &self.values),
                 Trigger::On { .. } => false,
             };
-            if fires && state.cooled(rule, at) {
-                effects.push(state.fire(rule, index, at));
+            if fires {
+                effects.push(if state.cooled(rule, at) {
+                    state.fire(rule, index, at)
+                } else {
+                    Effect::Held(RuleIndex(index))
+                });
             }
         }
         effects
@@ -237,9 +245,12 @@ impl Session {
             if let Trigger::On { event, guard } = rule.trigger()
                 && *event == happened
                 && guard_holds(guard.as_ref(), &self.values)
-                && state.cooled(rule, at)
             {
-                effects.push(state.fire(rule, index, at));
+                effects.push(if state.cooled(rule, at) {
+                    state.fire(rule, index, at)
+                } else {
+                    Effect::Held(RuleIndex(index))
+                });
             }
         }
     }
@@ -463,12 +474,16 @@ mod tests {
         );
         assert_eq!(
             feed(&mut session, &clock, 1, &[90.1, 89.9, 90.1, 89.9, 90.1]),
-            [Effect::Fire(FIRST)]
+            [
+                Effect::Fire(FIRST),
+                Effect::Held(FIRST),
+                Effect::Held(FIRST)
+            ]
         );
         // The rule stays armed and fires on the first holding value once the cooldown has passed.
         assert_eq!(
             session.sample(name("progress"), number(90.1), clock.at(10)),
-            []
+            [Effect::Held(FIRST)]
         );
         assert_eq!(
             session.sample(name("progress"), number(90.1), clock.at(11)),
@@ -487,7 +502,7 @@ mod tests {
         assert_eq!(session.next_due(), None, "nothing fired yet");
         assert_eq!(
             feed(&mut session, &clock, 1, &[95.0, 10.0, 95.0]),
-            [Effect::Fire(FIRST)]
+            [Effect::Fire(FIRST), Effect::Held(FIRST)]
         );
         // The value then holds still, so no sample comes.
         assert_eq!(session.next_due(), Some(clock.at(11)));
@@ -544,11 +559,11 @@ mod tests {
         let mut session = start(vec![changes, focused], &clock);
         assert_eq!(
             feed(&mut session, &clock, 1, &[1.0, 2.0, 3.0]),
-            [Effect::Fire(FIRST)]
+            [Effect::Fire(FIRST), Effect::Held(FIRST)]
         );
         assert_eq!(session.focus(true, clock.at(4)), [Effect::Fire(SECOND)]);
         assert_eq!(session.focus(false, clock.at(5)), []);
-        assert_eq!(session.focus(true, clock.at(6)), []);
+        assert_eq!(session.focus(true, clock.at(6)), [Effect::Held(SECOND)]);
         assert_eq!(session.next_due(), None, "their events were dropped");
         assert_eq!(session.recheck(clock.at(20)), []);
     }
@@ -777,7 +792,7 @@ mod tests {
         let mut session = start(vec![rule], &clock);
         assert_eq!(session.focus(true, clock.at(1)), [Effect::Fire(FIRST)]);
         assert_eq!(session.focus(false, clock.at(2)), []);
-        assert_eq!(session.focus(true, clock.at(3)), []);
+        assert_eq!(session.focus(true, clock.at(3)), [Effect::Held(FIRST)]);
         assert_eq!(session.focus(false, clock.at(4)), []);
         assert_eq!(session.focus(true, clock.at(11)), [Effect::Fire(FIRST)]);
     }

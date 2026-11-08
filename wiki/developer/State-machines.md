@@ -166,9 +166,9 @@ stateDiagram-v2
 - **Unseen.** When the reader says the values can no longer be seen, the owner
   calls `forget_values`. The rules keep their state, so a rule that fired stays
   fired until new readings decide its condition.
-- **A new read interval.** `restart_readers` stops each running application's
-  reader that reads at another interval and starts it again in the same
-  session, and calls `forget_values` first, as for `Unseen`, because the new
+- **A new read interval or trace.** `restart_readers` stops each running
+  application's reader that reads at another interval, or records to another
+  trace, and starts it again in the same session, and calls `forget_values` first, as for `Unseen`, because the new
   reader sends its first readings whether or not they changed. A reading the
   old reader sent just before it stopped can still arrive after that, a few
   milliseconds old.
@@ -453,12 +453,13 @@ while the menu is open, but it still calls the procedure, so neither is lost.
 
 The reload watch waits on the auto-reset named event `Local\AppyTappy.Reload`
 and sends `Reload` each time the setup app sets it. Several saves before the
-reload watch wakes become one reload. `read_saved` reads the settings first and
-gives the model their read interval, so the readers that `replan` starts read
-at it. It then reads the saved applications and automations; when they read,
+reload watch wakes become one reload. `read_saved` reads the settings first,
+gives the model their read interval, and starts, keeps, or stops the trace as
+[Runtime trace](#runtime-trace) describes, so the readers that `replan` starts
+read at the new interval and record to the new trace. It then reads the saved applications and automations; when they read,
 the owner sends detection the new watchlist and `replan` switches to their
 plan. Last, `restart_readers` starts over the readers the plan kept running at
-the old interval, so no reader starts twice. When either read fails, such as
+the old interval or with the old trace, so no reader starts twice. When either read fails, such as
 while another program holds a file, the owner keeps what it has (the plan, or
 the settings, or the defaults when they never read) and reads the files that
 failed again, and only those. Its state is `Reloads`: `retry`, an optional
@@ -483,6 +484,41 @@ most 5 tries (`RETRIES`) follow one failed read. A try runs when the owner
 wakes at its time, or with the first event after it. One automation that
 cannot run, such as one that breaks a rule after a hand edit, does not fail
 the read: it is logged and left out of the plan.
+
+### Runtime trace
+
+The owner's `Switch` in `apps/runtime/src/trace/switch.rs` holds the trace
+that runs, if any: its number, its writer, the options it writes with, and
+its end time. [Trace](Trace.md) describes what it records.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Off
+    Off --> Recording: settings turn it on, with an end time to come or none
+    Recording --> Recording: a new end time
+    Recording --> Recording: other options, so a new trace starts in a new file
+    Recording --> Off: settings turn it off, or its end time passed
+    Recording --> Off: its time is up
+    Recording --> Off: the writer cannot write
+    Recording --> Off: the runtime quits
+```
+
+- **Starting.** Each start takes the next trace number, so a failure the old
+  writer reports late (`TraceReport::Failed`) stops only the trace with its
+  number. A trace whose writer cannot start, such as when the folder cannot be
+  made, is logged and leaves the trace off.
+- **A new trace.** Whenever the trace changes, the owner sends the new handle
+  to the action thread and detection, and the readers start over with it. Two
+  handles are equal when they record the same categories of the same trace,
+  so the same settings change nothing.
+- **Its time is up.** The owner wakes at the end time (`wake`) and stops the
+  trace. The settings still say `on`; the setup app shows the trace stopped,
+  and turning it on again sets a new end time.
+- **Writer failure.** The writer logs why and ends. Each handle that sends to
+  it after that turns itself off, and the owner stops the trace when the
+  writer's report arrives.
+- **Quitting.** The trace stops after every other thread, so it holds what
+  they did up to their end.
 
 ### Log rotation
 

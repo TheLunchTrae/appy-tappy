@@ -10,6 +10,7 @@
 //! user's `Run` registry key, which the installer and the uninstaller already
 //! manage.
 
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
@@ -27,6 +28,12 @@ pub const FASTEST_READ_MS: u32 = 1;
 /// 10 seconds.
 pub const SLOWEST_READ_MS: u32 = 10_000;
 
+/// The largest trace file the user can choose, in megabytes.
+pub const MAX_TRACE_FILE_MB: u32 = 1_000;
+
+/// The most trace files the user can choose to keep.
+pub const MAX_TRACE_FILES: u32 = 100;
+
 /// Every setting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
@@ -38,6 +45,8 @@ pub struct SettingsFile {
     /// The global shortcut that takes a screenshot in the setup app, as an
     /// accelerator such as `F9` or `Control+Shift+S`.
     pub screenshot_shortcut: String,
+    /// The runtime trace, which records what the runtime reads and does.
+    pub trace: TraceDef,
 }
 
 impl Default for SettingsFile {
@@ -46,8 +55,67 @@ impl Default for SettingsFile {
             format: FORMAT,
             read_interval: ReadIntervalDef::default(),
             screenshot_shortcut: "F9".to_owned(),
+            trace: TraceDef::default(),
         }
     }
+}
+
+/// The runtime trace: whether the runtime records what it reads and does to
+/// a file, what it records, and how much disk the files may take.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct TraceDef {
+    /// Whether the runtime records.
+    pub on: bool,
+    /// When recording ends, as Unix time in milliseconds, or `None` to
+    /// record until it is turned off. The setup app sets it when the trace
+    /// is turned on, so a forgotten trace ends without the runtime writing
+    /// this file.
+    pub until: Option<u64>,
+    /// What the runtime records.
+    pub record: BTreeSet<TraceCategory>,
+    /// The size at which a trace file ends and the trace continues in a new
+    /// one, in megabytes.
+    pub file_limit_mb: u32,
+    /// How many trace files to keep; the oldest beyond this are deleted.
+    pub keep_files: u32,
+}
+
+impl Default for TraceDef {
+    /// Off, and when on, everything but each read, in files of up to 50 MB,
+    /// keeping 5.
+    fn default() -> Self {
+        Self {
+            on: false,
+            until: None,
+            record: BTreeSet::from([
+                TraceCategory::Changes,
+                TraceCategory::Rules,
+                TraceCategory::Actions,
+                TraceCategory::Lifecycle,
+            ]),
+            file_limit_mb: 50,
+            keep_files: 5,
+        }
+    }
+}
+
+/// What a trace can record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TraceCategory {
+    /// Every read of every value: how old the frame was, how long the check
+    /// took, and what it read.
+    Readings,
+    /// Each value change a reader sends, and when the owner received it.
+    Changes,
+    /// Each event the owner handles and how long it took, and each rule that
+    /// fired, was held back by its cooldown, or was released.
+    Rules,
+    /// When each action was queued, started, and finished, and its result.
+    Actions,
+    /// Process snapshots, readers starting and stopping, and reloads.
+    Lifecycle,
 }
 
 /// How often the runtime reads a value: as often as `fastest_ms` allows while
@@ -137,6 +205,16 @@ impl SettingsFile {
             return Err(SettingsError::Setting(
                 "The fastest read cannot wait longer than the slowest.".to_owned(),
             ));
+        }
+        if !(1..=MAX_TRACE_FILE_MB).contains(&self.trace.file_limit_mb) {
+            return Err(SettingsError::Setting(format!(
+                "A trace file must hold between 1 and {MAX_TRACE_FILE_MB} MB."
+            )));
+        }
+        if !(1..=MAX_TRACE_FILES).contains(&self.trace.keep_files) {
+            return Err(SettingsError::Setting(format!(
+                "Keep between 1 and {MAX_TRACE_FILES} trace files."
+            )));
         }
         if !is_shortcut(&self.screenshot_shortcut) {
             return Err(SettingsError::Setting(
@@ -347,6 +425,58 @@ mod tests {
             "Control+Bogus",
         ] {
             assert!(!is_shortcut(shortcut), "{shortcut}");
+        }
+    }
+
+    #[test]
+    fn the_trace_is_off_and_leaves_out_each_read_by_default() {
+        let json = SettingsFile::default().to_json();
+        assert!(
+            json.contains(
+                "\"trace\": {\n    \"on\": false,\n    \"until\": null,\n    \"record\": [\n      \
+                 \"changes\",\n      \"rules\",\n      \"actions\",\n      \"lifecycle\"\n    ],\n    \
+                 \"fileLimitMb\": 50,\n    \"keepFiles\": 5\n  }"
+            ),
+            "{json}"
+        );
+        let on = SettingsFile::parse(
+            r#"{"format": 1, "trace": {"on": true, "until": 1762612800000, "record": ["readings"]}}"#,
+        )
+        .expect("valid");
+        assert_eq!(
+            on.trace,
+            TraceDef {
+                on: true,
+                until: Some(1_762_612_800_000),
+                record: BTreeSet::from([TraceCategory::Readings]),
+                ..TraceDef::default()
+            }
+        );
+    }
+
+    #[test]
+    fn trace_files_stay_in_range() {
+        let with = |file_limit_mb, keep_files| SettingsFile {
+            trace: TraceDef {
+                file_limit_mb,
+                keep_files,
+                ..TraceDef::default()
+            },
+            ..SettingsFile::default()
+        };
+        assert_eq!(with(1, 1).check(), Ok(()));
+        assert_eq!(with(1_000, 100).check(), Ok(()));
+        for (limit, keep, problem) in [
+            (0, 5, "A trace file must hold between 1 and 1000 MB."),
+            (1_001, 5, "A trace file must hold between 1 and 1000 MB."),
+            (50, 0, "Keep between 1 and 100 trace files."),
+            (50, 101, "Keep between 1 and 100 trace files."),
+        ] {
+            assert_eq!(
+                with(limit, keep).check(),
+                Err(SettingsError::Setting(problem.to_owned())),
+                "{limit} {keep}"
+            );
         }
     }
 

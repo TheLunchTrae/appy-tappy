@@ -2,11 +2,12 @@ import { type KeyboardEvent, useEffect, useState } from 'react';
 
 import { errorText } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
+import { NumberSetting } from '../components/NumberSetting.tsx';
+import { RuntimeTrace } from '../components/RuntimeTrace.tsx';
 import {
   FASTEST_READ_MS,
   type ReadInterval,
   SLOWEST_READ_MS,
-  readMs,
   setStartsWithWindows,
   startsWithWindows,
   useSettings,
@@ -154,84 +155,24 @@ interface WaitProps {
   readonly note: string;
 }
 
-/**
- * One of the read interval's waits, saved when the field loses focus or Enter is pressed. A wait that cannot be saved
- * puts the saved one back in the field and says why under it, so the field never shows a wait the runtime does not use.
- */
+/** One of the read interval's waits. */
 function Wait({ which, label, note }: WaitProps) {
-  const { settings, change } = useSettings();
-  const saved = settings.readInterval[which];
-  const [text, setText] = useState(String(saved));
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    setText(String(saved));
-  }, [saved]);
-  const refuse = (problem: string): void => {
-    setText(String(saved));
-    setError(problem);
-  };
-  const commit = (): void => {
-    const ms = readMs(text);
-    if (ms === null) {
-      refuse(`${label} must be a whole number of milliseconds from ${FASTEST_READ_MS} to ${SLOWEST_READ_MS}.`);
-      return;
-    }
-    if (ms === saved) {
-      setError(null);
-      return;
-    }
-    change((current) => {
-      const next = withWait(current.readInterval, which, ms);
-      return 'problem' in next ? next : { ...current, readInterval: next.interval };
-    }).then(
-      (problem) => {
-        if (problem === null) {
-          setError(null);
-        } else {
-          refuse(problem);
-        }
-      },
-      (failure: unknown) => {
-        refuse(errorText(failure));
-      },
-    );
-  };
-  const id = `wait-${which}`;
-  const described = [`${id}-note`, `${id}-unit`, ...(error === null ? [] : [`${id}-error`])].join(' ');
+  const { settings } = useSettings();
   return (
-    <div className="set-row">
-      <div className="what">
-        <label htmlFor={id}>{label}</label>
-        <span className="note" id={`${id}-note`}>
-          {note}
-        </span>
-        {error === null ? null : (
-          <span className="warn" id={`${id}-error`} role="alert">
-            {error}
-          </span>
-        )}
-      </div>
-      <span className="num">
-        <input
-          id={id}
-          className="input"
-          inputMode="numeric"
-          aria-invalid={error !== null}
-          aria-describedby={described}
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              commit();
-            }
-          }}
-        />
-        <span id={`${id}-unit`}>ms</span>
-      </span>
-    </div>
+    <NumberSetting
+      id={`wait-${which}`}
+      label={label}
+      note={note}
+      unit="ms"
+      saved={settings.readInterval[which]}
+      min={FASTEST_READ_MS}
+      max={SLOWEST_READ_MS}
+      invalid={`${label} must be a whole number of milliseconds from ${FASTEST_READ_MS} to ${SLOWEST_READ_MS}.`}
+      update={(current, ms) => {
+        const next = withWait(current.readInterval, which, ms);
+        return 'problem' in next ? next : { ...current, readInterval: next.interval };
+      }}
+    />
   );
 }
 
@@ -273,6 +214,7 @@ export function SettingsPage({ problem }: Props) {
             note="How long AppyTappy waits at most while a value holds still. Longer uses less CPU."
           />
         </section>
+        <RuntimeTrace />
       </div>
     </main>
   );

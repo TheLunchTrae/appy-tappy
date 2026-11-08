@@ -112,6 +112,10 @@ pub(crate) fn show_without_focus(_window: usize) -> io::Result<()> {
     unsupported()
 }
 
+pub(crate) fn lower_thread_priority() -> io::Result<()> {
+    unsupported()
+}
+
 pub(crate) const fn local_time() -> Option<LocalTime> {
     None
 }
@@ -142,9 +146,10 @@ mod tests {
             crate::enable_autostart("test", OsStr::new("runtime.exe")),
             crate::disable_autostart("test"),
             crate::autostart_enabled("test").map(drop),
+            crate::lower_thread_priority(),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 8]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 9]);
         assert_eq!(LocalTime::now(), None);
     }
 }

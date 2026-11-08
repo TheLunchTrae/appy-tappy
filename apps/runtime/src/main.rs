@@ -14,6 +14,7 @@ mod log;
 mod model;
 mod owner;
 mod plan;
+mod trace;
 mod tray;
 mod workers;
 

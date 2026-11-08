@@ -116,6 +116,8 @@ fn main() -> ExitCode {
             commands::save_settings,
             commands::starts_with_windows,
             commands::set_starts_with_windows,
+            commands::trace_folder,
+            commands::open_trace_folder,
         ])
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));

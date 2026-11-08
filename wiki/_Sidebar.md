@@ -19,6 +19,7 @@
 - [Screen regions](developer/Screen-regions.md)
 - [Rules](developer/Rules.md)
 - [Actions](developer/Actions.md)
+- [Trace](developer/Trace.md)
 - [Installer](developer/Installer.md)
 - [MCP investigation server](developer/MCP-investigation-server.md)
 - [State machines](developer/State-machines.md)

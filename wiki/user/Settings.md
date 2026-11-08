@@ -31,3 +31,30 @@ Each wait is a whole number of milliseconds from 1 to 10000, and the fastest
 read cannot wait longer than the slowest. Type a number and press Enter, or
 move to another field, to apply it. A change applies to every application
 right away and does not undo or rerun any automation.
+
+## Runtime trace
+
+The runtime trace records what the background part reads and does, with
+timings, to a file. It is for measuring how quickly AppyTappy responds, such as
+how long a changed value takes to run its automation, and for sharing with a
+developer. It is off at first.
+
+- **Record a runtime trace.** Turn it on to start recording. The line under it
+  says until when it records. Recording makes the background part do a little
+  more work, so turn it off when you are done.
+- **Record for.** 10 minutes, 1 hour, or until you turn it off. A trace left
+  on stops by itself at the end of this time, so a forgotten trace does not
+  keep writing. Picking another length while it records counts from then.
+- **Record.** What the trace records. **Each read** writes a row for every read
+  of every value, which makes large files quickly, so it is off at first. A
+  trace records at least one thing.
+- **Largest trace file.** A trace continues in a new file once its file
+  reaches this size, 50 MB at first.
+- **Trace files to keep.** The oldest files are deleted once there are more,
+  5 at first.
+- **Trace folder.** Where the files go. **Open folder** opens it in File
+  Explorer.
+
+Changing what the trace records, or its files' size or number, while it records
+starts a new trace in a new file. The files are CSV, which a spreadsheet opens;
+[Trace](../developer/Trace.md) describes their columns.

@@ -179,8 +179,8 @@ Each thread below is a plain `std::thread`, and each channel is a
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save that changes what the runtime runs, and
   sends `Reload`. The owner reads the settings, then the saved applications
-  and automations, again. A new read interval restarts each reader the new
-  plan keeps, in its session, so automations keep their state and nothing is
+  and automations, again. A new read interval or trace restarts each reader
+  the new plan keeps, in its session, so automations keep their state and nothing is
   undone; settings that cannot be read are logged, and the runtime keeps the
   ones it has. An application whose automations
   did not change keeps running untouched; one whose automations changed starts
@@ -192,6 +192,10 @@ Each thread below is a plain `std::thread`, and each channel is a
   reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
   `apps/runtime/src/owner.rs` set, before it waits for the next save.
   [Files and handoff](#files-and-handoff) describes what it reads.
+- **Trace writer.** Only while the [runtime trace](Trace.md) records. Owns
+  the trace files and turns the records the other threads send it into CSV
+  rows, at the lowest thread priority. The owner starts and stops it as the
+  settings say.
 - **Tray thread.** Owns the hidden window behind the tray icon, runs its
   Windows message loop, and sends the user's menu picks, Windows' requests
   to close, and its own early end to the owner.
@@ -438,7 +442,8 @@ changing.
     [Setup app](Setup-app.md#saved-files) describes each file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
-    describes, and the runtime's log in `logs\`.
+    describes, the runtime's log in `logs\`, and the
+    [runtime trace](Trace.md)'s files in `traces\`.
 - **Writing.** Only the setup app writes the saved files, through
   `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
   file beside the old one, is flushed to disk with `sync_all`, and is renamed

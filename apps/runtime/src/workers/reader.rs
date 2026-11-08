@@ -47,6 +47,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::{
@@ -55,6 +56,7 @@ use appytappy_sources::screen::{
 use appytappy_sources::system::{System, best_windows, read_window, shows};
 
 use crate::plan::AppPlan;
+use crate::trace::{Record, Trace, What};
 
 /// How often a reader looks for a window while none fits.
 pub(crate) const FIND_AGAIN: Duration = Duration::from_secs(1);
@@ -89,6 +91,8 @@ pub(crate) struct Job {
     pub(crate) executable: String,
     /// How often to read the values, from the settings.
     pub(crate) interval: ReadInterval,
+    /// The trace its frame handler records each reading to.
+    pub(crate) trace: Trace,
 }
 
 /// What a reader reports.
@@ -547,6 +551,8 @@ struct FrameReader<E> {
     /// of them, so nothing it sends follows the reader's `Unseen`.
     ended: bool,
     schedule: ReadSchedule,
+    /// Where it records each reading and change, when the trace is on.
+    trace: Trace,
     events: Sender<E>,
     control: Sender<Control>,
 }
@@ -581,6 +587,7 @@ impl<E: From<Reading>> FrameReader<E> {
             seen: false,
             ended: false,
             schedule: ReadSchedule::new(job.interval),
+            trace: job.trace.clone(),
             events,
             control,
         })
@@ -636,8 +643,23 @@ impl<E: From<Reading>> FrameReader<E> {
             }
         }
         let mut changed = false;
+        // The clock is read only when each reading is traced.
+        let timed = self.trace.wants(TraceCategory::Readings);
+        let session = self.session;
         for position in 0..self.plan.values.len() {
+            let started = timed.then(Instant::now);
             let read = self.read(position, window_size, frame.as_ref());
+            if let (Some(started), Some(Ok(value)), Some(frame)) = (started, &read, &frame) {
+                let took = started.elapsed();
+                self.trace.record(What::Read, |record| Record {
+                    session: Some(session),
+                    item: Some(position),
+                    value: Some(value.clone()),
+                    took: Some(took),
+                    cause: Some(frame.received),
+                    ..record
+                });
+            }
             match read {
                 Some(Ok(reading)) => changed |= self.record(position, reading, frame.as_ref()),
                 Some(Err(problem)) => self.report(position, problem),
@@ -718,6 +740,14 @@ impl<E: From<Reading>> FrameReader<E> {
         }
         *last = Some(reading.clone());
         self.seen = true;
+        let session = self.session;
+        self.trace.record(What::Changed, |record| Record {
+            session: Some(session),
+            item: Some(position),
+            value: Some(reading.clone()),
+            cause: Some(frame.received),
+            ..record
+        });
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed send means the owner stopped this session"
@@ -897,6 +927,7 @@ mod tests {
             process: ProcessId::new(43),
             executable: "Example.exe".to_owned(),
             interval: ReadInterval::DEFAULT,
+            trace: Trace::OFF,
         }
     }
 

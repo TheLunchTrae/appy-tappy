@@ -42,6 +42,8 @@ To get an installer of a branch without a release, use one of these:
   engine evaluates them.
 - [Actions](Actions.md): media, volume, key press, open, and sound actions,
   and how restoring works.
+- [Trace](Trace.md): the runtime trace, its file format, and what recording
+  costs.
 - [Installer](Installer.md): what the installer does, builds, and the release
   workflow.
 - [MCP investigation server](MCP-investigation-server.md): the local server an
