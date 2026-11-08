@@ -179,8 +179,7 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
   const remove = async (app: string): Promise<void> => {
     setBusy(true);
     try {
-      await removeApp(app);
-      setSetError(null);
+      setSetError(await removeApp(app));
       add.current?.focus();
       await onChanged();
     } catch (error: unknown) {

@@ -17,8 +17,8 @@ on with the application's **Overlay** menu on the
   application is minimized, the panel says so instead of showing readings.
 
 The overlay shows only while AppyTappy Setup is open, and the overlay or panel
-closes when you turn the overlay off or remove the application. It never changes the application: the readings
-are a window of AppyTappy's own.
+closes when you turn the overlay off or remove the application. It never
+changes the application: the readings are a window of AppyTappy's own.
 
 Like automations, the overlay reads only the values made at the window's
 current [size](values.md#window-size). A value it cannot read says why in place

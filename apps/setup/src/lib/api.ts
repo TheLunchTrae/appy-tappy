@@ -371,9 +371,12 @@ export async function saveApp(existing: string | null, spec: AppSpec): Promise<s
   return invoke<string>('save_app', { existing, spec });
 }
 
-/** Removes an application with its values, unless an automation uses one of them. */
-export async function removeApp(application: string): Promise<void> {
-  await invoke('remove_app', { application });
+/**
+ * Removes an application with its values, unless an automation uses one of them, and closes its overlay. The removal
+ * worked when this resolves; the answer is why an overlay window could not open or close, or null.
+ */
+export async function removeApp(application: string): Promise<string | null> {
+  return invoke<string | null>('remove_app', { application });
 }
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {

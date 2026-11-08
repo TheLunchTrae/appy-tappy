@@ -474,8 +474,9 @@ one window is with a few calls about that window alone, so following it costs
 no listing of every window. The windows are matched to the overlays that are on
 when the main window opens, after an overlay changes and after an application
 is removed; a window that cannot open or close is reported and does not stop
-the others. The picture-in-picture panel reports where it was
-moved, and the owner saves that once the panel stops moving.
+the others, and a removal that worked is not undone by such a report. The
+picture-in-picture panel reports where it was moved, and the owner saves that
+once the panel stops moving.
 
 ## Unsafe code
 
