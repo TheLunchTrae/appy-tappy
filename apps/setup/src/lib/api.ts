@@ -543,3 +543,30 @@ export async function overlayState(application: string): Promise<OverlayView> {
 export async function overlayCard(application: string, width: number, height: number): Promise<void> {
   await invoke('overlay_card', { application, width, height });
 }
+
+/** A newer AppyTappy release the user can install. */
+export interface UpdateOffer {
+  readonly version: string;
+}
+
+/** The newer release on GitHub, or null when this one is the newest or this build does not update itself. */
+export async function checkForUpdate(): Promise<UpdateOffer | null> {
+  return invoke<UpdateOffer | null>('check_for_update');
+}
+
+/**
+ * Downloads the newest release and checks its signature; AppyTappy Setup keeps it until {@link installUpdate}. The
+ * release it downloaded can be newer than the one offered, if one came out since. It rejects when the check or the
+ * download fails.
+ */
+export async function downloadUpdate(): Promise<UpdateOffer> {
+  return invoke<UpdateOffer>('download_update');
+}
+
+/**
+ * Runs the downloaded installer for `version`, which closes AppyTappy Setup and the background part, updates both,
+ * and starts them again. It rejects when the update fails before the installer starts, and never settles otherwise.
+ */
+export async function installUpdate(version: string): Promise<void> {
+  await invoke('install_update', { version });
+}

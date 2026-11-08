@@ -184,9 +184,9 @@ installer, the Start menu, and the tray name the product **AppyTappy**.
 ## State machines
 
 [`wiki/developer/State-machines.md`](wiki/developer/State-machines.md) maps
-each state machine in the runtime, the setup app, and the MCP investigation
-server, including implicit ones: state spread over fields, flags, `Option`s,
-maps, or a thread's place in its loop.
+each state machine in the runtime and the setup app, including implicit ones:
+state spread over fields, flags, `Option`s, maps, or a thread's place in its
+loop.
 
 - A change that adds or removes a machine, or changes a machine's states,
   transitions, or stale-message guards, updates that machine's section in the

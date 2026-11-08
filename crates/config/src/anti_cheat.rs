@@ -1,13 +1,13 @@
-//! The anti-cheat policy: protection classes and the permit that every path
-//! opening an app's process requires.
+//! The anti-cheat policy: protection classes, the input they allow, and the
+//! anti-cheat programs the code recognizes. It also holds [`ProcessId`], the
+//! Windows process ID the other crates share.
 
-use std::error::Error;
 use std::fmt;
 
 /// How an app protects itself from other programs.
 ///
-/// Only [`AntiCheatClass::None`] permits memory sources and anything else that
-/// opens the app's process.
+/// Only [`AntiCheatClass::None`] permits input-injection actions: see
+/// [`allows_input`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AntiCheatClass {
     /// The app has no anti-cheat.
@@ -54,69 +54,6 @@ impl fmt::Display for ProcessId {
         self.0.fmt(formatter)
     }
 }
-
-/// Proof that the anti-cheat policy allows opening one process.
-///
-/// [`ProcessAccessPermit::issue`] is the only constructor, and it refuses every
-/// class but [`AntiCheatClass::None`]. Code that opens a process takes a permit
-/// for that process, so opening one always names a class at a visible call
-/// site. The type does not prove where the class came from: the caller that
-/// classifies the process, such as the MCP server's attach after the user's
-/// answer, is what the policy rests on.
-#[derive(Debug, PartialEq, Eq)]
-pub struct ProcessAccessPermit {
-    process: ProcessId,
-}
-
-impl ProcessAccessPermit {
-    /// Issues a permit for `process` when its app's class is
-    /// [`AntiCheatClass::None`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AccessBlocked`] for every other class.
-    pub fn issue(process: ProcessId, class: AntiCheatClass) -> Result<Self, AccessBlocked> {
-        match class {
-            AntiCheatClass::None => Ok(Self { process }),
-            AntiCheatClass::UserMode | AntiCheatClass::KernelLevel | AntiCheatClass::Unknown => {
-                Err(AccessBlocked { process, class })
-            },
-        }
-    }
-
-    /// The process this permit allows opening.
-    #[must_use]
-    pub const fn process(&self) -> ProcessId {
-        self.process
-    }
-}
-
-/// The policy refused to open a process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AccessBlocked {
-    process: ProcessId,
-    class: AntiCheatClass,
-}
-
-impl AccessBlocked {
-    /// The class that blocked access.
-    #[must_use]
-    pub const fn class(&self) -> AntiCheatClass {
-        self.class
-    }
-}
-
-impl fmt::Display for AccessBlocked {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "process {} has anti-cheat class {}, so AppyTappy does not open it",
-            self.process, self.class
-        )
-    }
-}
-
-impl Error for AccessBlocked {}
 
 /// Whether the policy lets AppyTappy send input, such as a key press, for an
 /// app of `class`.
@@ -197,24 +134,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn issues_a_permit_only_for_class_none() {
-        let process = ProcessId::new(42);
-        let permit = ProcessAccessPermit::issue(process, AntiCheatClass::None)
-            .expect("class none permits access");
-        assert_eq!(permit.process(), process);
-
-        for class in [
-            AntiCheatClass::UserMode,
-            AntiCheatClass::KernelLevel,
-            AntiCheatClass::Unknown,
-        ] {
-            let blocked = ProcessAccessPermit::issue(process, class)
-                .expect_err("every class but none blocks access");
-            assert_eq!(blocked.class(), class);
-        }
-    }
-
-    #[test]
     fn only_class_none_allows_input() {
         assert!(allows_input(AntiCheatClass::None));
         for class in [
@@ -236,15 +155,5 @@ mod tests {
             })
         );
         assert_eq!(known_anti_cheat("Example.exe"), None);
-    }
-
-    #[test]
-    fn blocked_access_names_the_process_and_class() {
-        let blocked = ProcessAccessPermit::issue(ProcessId::new(7), AntiCheatClass::Unknown)
-            .expect_err("unknown blocks access");
-        assert_eq!(
-            blocked.to_string(),
-            "process 7 has anti-cheat class unknown, so AppyTappy does not open it"
-        );
     }
 }
