@@ -241,13 +241,14 @@ impl System for WindowsSystem {
         ));
         let mut rect = RECT::default();
         #[expect(unsafe_code, reason = "Win32 calls")]
-        // SAFETY: IsWindow only reads the state of the window `handle` names;
-        // DwmGetWindowAttribute writes at most `struct_size::<RECT>()` bytes
-        // into `rect`, a live local of that size, and fails without harm when
-        // no such window exists.
-        let (exists, read) = unsafe {
+        // SAFETY: IsWindow and IsIconic only read the state of the window
+        // `handle` names; DwmGetWindowAttribute writes at most
+        // `struct_size::<RECT>()` bytes into `rect`, a live local of that size,
+        // and fails without harm when no such window exists.
+        let (exists, minimized, read) = unsafe {
             (
                 IsWindow(Some(handle)).as_bool(),
+                IsIconic(handle).as_bool(),
                 DwmGetWindowAttribute(
                     handle,
                     DWMWA_EXTENDED_FRAME_BOUNDS,
@@ -256,7 +257,9 @@ impl System for WindowsSystem {
                 ),
             )
         };
-        if !exists {
+        // A minimized window's bounds are its small placeholder, not the size
+        // it will draw at once restored.
+        if !exists || minimized {
             return Ok(None);
         }
         read?;

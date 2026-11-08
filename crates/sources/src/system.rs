@@ -108,7 +108,8 @@ pub trait System {
 
     /// The size of `window` as a capture of it frames it now: its bounds
     /// without the shadow the system draws around it, or `None` once it
-    /// closed. A capture can then start for the size its first frame has.
+    /// closed or while it is minimized. A capture can then start for the
+    /// size its first frame has.
     ///
     /// # Errors
     ///

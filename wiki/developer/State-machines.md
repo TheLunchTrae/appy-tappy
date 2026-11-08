@@ -277,10 +277,11 @@ Its state is `placed` (the window size whose values it reads, and where
 each value reads at it, resolved once), `told` (the other size it last told
 the reader frames show), `last` (each value's last reading), `problems`
 (each value's last problem, handed to the reader while frames show
-another size), `heard` (where the reader gives it back), `seen` (whether it sent a reading
-since it last sent `Unseen`), `failures` (frames in a row that failed),
-`restarted` (whether the reader started this capture again after the last
-one ended), and `ended` (whether it told the reader its capture ended).
+another size), `heard` (where the reader gives it back), `seen` (whether
+it sent a reading since it last sent `Unseen`), `failures` (frames in a
+row that failed), `restarted` (whether the reader started this capture
+again after the last one ended), and `ended` (whether it told the reader
+its capture ended).
 
 ```mermaid
 stateDiagram-v2
