@@ -41,12 +41,11 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCh
         label={`Set ${name}'s anti-cheat to None?`}
         keepLabel={`Keep ${ANTI_CHEAT_NAMES[antiCheat]}`}
         actLabel="Set to None"
-        onAnswer={(set) => {
-          if (set) {
-            onSet('none');
-          } else {
-            onConfirm(false);
-          }
+        onKeep={() => {
+          onConfirm(false);
+        }}
+        onAct={() => {
+          onSet('none');
         }}
       >
         Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat can get your
@@ -116,13 +115,10 @@ function RemoveCell({ name, loses, confirming, onConfirm, onRemove, busy }: Remo
         keepLabel="Keep"
         actLabel="Remove"
         busy={busy}
-        onAnswer={(removing) => {
-          if (removing) {
-            onRemove();
-          } else {
-            onConfirm(false);
-          }
+        onKeep={() => {
+          onConfirm(false);
         }}
+        onAct={onRemove}
       >
         Remove {name}? {loses}
       </Question>
