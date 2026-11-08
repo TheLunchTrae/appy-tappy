@@ -589,7 +589,7 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
                 note(
                     log,
                     &format!(
-                        "{name}: its window closed or changed size, so its values are read \
+                        "{name}: its values can no longer be seen, so they are read \
                          again before any automation runs or is undone"
                     ),
                 );

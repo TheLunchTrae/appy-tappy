@@ -145,14 +145,24 @@ Each thread below is a plain `std::thread`, and each channel is a
 - **Readers.** One per attached application that has automations. Each finds the
   application's window with its [window match](Setup-app.md#window-matching),
   captures the smallest rectangle that covers the values drawn at the window's
-  current size, and reads each value from its own region of each frame. It sends
-  a `Sample` only when a value changes, and reads less often while nothing
-  changes. When the window closes or changes size, it sends `Unseen`, and the
-  owner forgets the application's values, so no rule acts on a value nobody can
-  see. Each rule stays as it was, run or not, until the values read next decide
-  its condition. When the window closes it looks for one again, once a second,
-  until the application exits. Other kinds of source, such as a log tail or a
-  memory read, join them later
+  current size, and reads each value from its own region of each frame. It
+  sends a `Sample` only when a value changes, and reads less often while
+  nothing changes. When the window closes or changes size, it sends `Unseen`,
+  and the owner forgets the application's values, so no rule acts on a value
+  nobody can see. Each rule stays as it was, run or not, until the values read
+  next decide its condition. When the window closes, when the capture cannot
+  go on, such as after the graphics device was lost, and after
+  `RESTART_AFTER` frames in a row fail, it sends `Unseen` and looks for the
+  window again. After a capture ends that way it waits first, from
+  `FIND_AGAIN`, doubling up to `RESTART_WAIT_MAX` while each new capture ends
+  before reading a frame, and it logs why once until the reason changes.
+  Every `CHECK_AGAIN` it checks that the window still shows and that no other
+  window fits better, such as the main window opening after a launcher's,
+  and looks again if not. Among windows that fit equally well, it takes one
+  that shows over a minimized one. While no window fits, or every one that
+  fits best is minimized, it looks every `FIND_AGAIN`, until the application
+  exits. The constants are in `apps/runtime/src/workers/reader.rs`.
+  Other kinds of source, such as a log tail or a memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
   back what failed. It makes the media and audio controls on its own thread,

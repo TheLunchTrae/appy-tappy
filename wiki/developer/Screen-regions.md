@@ -125,7 +125,12 @@ asks the system for no more than one frame per minimum interval. Between reads
 the capture keeps only the newest frame and copies nothing. When a read is
 due, the graphics card copies just the region into a small texture the CPU can
 read, and those rows land in a buffer that is reused for every frame. When
-the window closes, the capture tells its handler and stops.
+the window closes, the capture tells its handler and stops. It does the same
+when it can no longer produce frames: when the graphics device is lost, such
+as after a driver reset or update, and when it cannot follow the window to a
+new size. A lost device can stop frames altogether, so while no frame comes,
+the capture checks its device every `DEVICE_CHECK`
+(`crates/sources/src/win/capture.rs`).
 
 Each frame carries the time since the system composed it. The benchmark uses
 that to report capture-to-decision latency on a live window:

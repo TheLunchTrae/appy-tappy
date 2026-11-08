@@ -9,6 +9,14 @@
 //! nothing; when the handler's wait ends, the GPU copies just the region into
 //! a small CPU-readable texture, and the thread copies those rows into a
 //! reused buffer.
+//!
+//! A capture that can no longer produce frames ends the way a closed window
+//! does: its handler receives a [`io::ErrorKind::NotConnected`] error that
+//! says why, and the thread stops. That happens when the Direct3D device is
+//! lost, such as after a graphics driver reset or update, and when the frame
+//! pool cannot follow the window to a new size. While it waits for frames,
+//! the thread checks the device every [`DEVICE_CHECK`], because a lost
+//! device may stop frames altogether rather than fail them.
 
 use std::io;
 use std::ptr;
@@ -55,6 +63,9 @@ const POOL_BUFFERS: i32 = 2;
 
 /// How long `start` waits for the capture thread to set up.
 const START_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How often the thread checks its Direct3D device while no frame arrives.
+const DEVICE_CHECK: Duration = Duration::from_secs(2);
 
 /// Windows time spans count 100-nanosecond ticks.
 const TICKS_PER_SECOND: i128 = 10_000_000;
@@ -284,9 +295,8 @@ impl Capturer {
     }
 
     /// Waits for frames and hands the newest to `handler` whenever its last
-    /// wait has ended, until the session stops or the window closes; a
-    /// closed window reaches the handler as a [`io::ErrorKind::NotConnected`]
-    /// error.
+    /// wait has ended, until the session stops or the capture ends; an
+    /// ending reaches the handler as a [`io::ErrorKind::NotConnected`] error.
     fn handle_frames(&mut self, crop: Crop, handler: &mut FrameHandler, events: &Receiver<Event>) {
         let mut held: Option<Held> = None;
         let mut clock = ReadClock::new(Instant::now());
@@ -294,25 +304,28 @@ impl Capturer {
             let event = if held.is_some() {
                 events.recv_timeout(clock.remaining(Instant::now()))
             } else {
-                events
-                    .recv()
-                    .map_err(|_disconnected| RecvTimeoutError::Disconnected)
+                events.recv_timeout(DEVICE_CHECK)
             };
             match event {
                 Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                 Ok(Event::Closed) => {
-                    // The handler's wait is moot: nothing more will arrive.
-                    let _wait = handler(Err(io::Error::new(
-                        io::ErrorKind::NotConnected,
-                        "the captured window closed",
-                    )));
+                    end(handler, ended("the captured window closed"));
                     break;
                 },
                 Ok(Event::Frame) => self.take_newest(&mut held),
-                Err(RecvTimeoutError::Timeout) => {},
+                Err(RecvTimeoutError::Timeout) => {
+                    if held.is_none()
+                        && let Some(lost) = self.lost_device()
+                    {
+                        end(handler, lost);
+                        break;
+                    }
+                },
             }
             if let Some(frame) = held.take_if(|_| clock.due(Instant::now())) {
-                let wait = self.read(frame, crop, handler);
+                let Some(wait) = self.read(frame, crop, handler) else {
+                    break;
+                };
                 clock.after_read(Instant::now(), wait);
             }
         }
@@ -351,12 +364,12 @@ impl Capturer {
     }
 
     /// Copies `crop` of one frame and passes it to `handler`, returning the
-    /// handler's wait.
-    fn read(&mut self, held: Held, crop: Crop, handler: &mut FrameHandler) -> Duration {
+    /// handler's wait, or `None` when the capture ended.
+    fn read(&mut self, held: Held, crop: Crop, handler: &mut FrameHandler) -> Option<Duration> {
         let copied = self.copy(&held.frame, crop);
         close(&held.frame);
         match copied {
-            Ok(Some(window_size)) => match self.buffer.image() {
+            Ok(Some(window_size)) => Some(match self.buffer.image() {
                 Some(image) => handler(Ok(Frame {
                     window_size,
                     image,
@@ -364,12 +377,34 @@ impl Capturer {
                     delay: held.delay,
                 })),
                 None => Duration::ZERO,
-            },
+            }),
             // The pool was resized for the window's new size; the next frame
             // has the right size.
-            Ok(None) => Duration::ZERO,
-            Err(error) => handler(Err(error)),
+            Ok(None) => Some(Duration::ZERO),
+            Err(error) => match self.lost_device() {
+                Some(lost) => {
+                    end(handler, lost);
+                    None
+                },
+                None if error.kind() == io::ErrorKind::NotConnected => {
+                    end(handler, error);
+                    None
+                },
+                None => Some(handler(Err(error))),
+            },
         }
+    }
+
+    /// Why the Direct3D device can no longer be used, such as after a
+    /// graphics driver reset, or `None` while it works.
+    fn lost_device(&self) -> Option<io::Error> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes no arguments and only reads the state of
+        // `device`, which is live.
+        let removed = unsafe { self.device.GetDeviceRemovedReason() };
+        removed
+            .err()
+            .map(|error| ended(&format!("the graphics device was lost: {error}")))
     }
 
     /// Copies `crop` of `frame` into the buffer and returns the window's
@@ -377,12 +412,18 @@ impl Capturer {
     fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: Crop) -> io::Result<Option<Size>> {
         let content = frame.ContentSize()?;
         if content != self.pool_size {
-            self.pool.Recreate(
-                &self.winrt_device,
-                DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                POOL_BUFFERS,
-                content,
-            )?;
+            self.pool
+                .Recreate(
+                    &self.winrt_device,
+                    DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                    POOL_BUFFERS,
+                    content,
+                )
+                .map_err(|error| {
+                    ended(&format!(
+                        "the capture cannot follow the window's new size: {error}"
+                    ))
+                })?;
             self.pool_size = content;
             return Ok(None);
         }
@@ -548,6 +589,17 @@ fn configure(session: &GraphicsCaptureSession, throttle: Duration) {
         session.SetIsCursorCaptureEnabled(false),
         session.SetMinUpdateInterval(TimeSpan { Duration: ticks }),
     );
+}
+
+/// The error that tells a handler its capture ended.
+fn ended(why: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::NotConnected, why)
+}
+
+/// Tells `handler` that its capture ended. Its wait is moot: nothing more
+/// will arrive.
+fn end(handler: &mut FrameHandler, error: io::Error) {
+    let _wait = handler(Err(error));
 }
 
 /// Returns a frame's buffer to the pool.
