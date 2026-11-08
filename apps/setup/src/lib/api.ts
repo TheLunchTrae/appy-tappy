@@ -240,7 +240,7 @@ export interface SaveSpec {
   readonly screenshot: number;
 }
 
-/** A reference to save, with a new application when `app` is null. */
+/** A reference to save to a saved application. */
 export interface ReferenceSaveSpec {
   /** The saved application the reference belongs to. */
   readonly app: string;

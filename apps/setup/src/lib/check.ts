@@ -1,6 +1,6 @@
 // The check the user is setting up, and when it is complete enough to try.
 
-import type { CharactersSpec, CheckSpec, RecordedLabel, ReferenceRef } from './api.ts';
+import type { CharactersSpec, CheckSpec, RecordedLabel, ReferenceDef, ReferenceRef } from './api.ts';
 import type { Color } from './pixels.ts';
 import type { Rect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, type SelectStep } from './selection.ts';
@@ -138,15 +138,15 @@ export function buildCharacters(draft: Draft, reference: ReferenceRef | null): B
   return { ok: true, spec };
 }
 
-/** The check `draft` describes for the saved application `app`, or null for a new one; or the next thing it needs. */
-export function buildSpec(draft: Draft, app: string | null): Built {
+/** The check `draft` describes for the saved application `app`, or the next thing it needs. */
+export function buildSpec(draft: Draft, app: string): Built {
   const { region, tolerance } = draft;
   if (region === null) {
     return missing('Draw a region on a screenshot.');
   }
   switch (draft.kind) {
     case 'number': {
-      if (app === null || draft.reference === null) {
+      if (draft.reference === null) {
         return missing('Pick a reference to read the number with, or make one from this region.');
       }
       return {
@@ -180,6 +180,28 @@ export function buildSpec(draft: Draft, app: string | null): Built {
       return { ok: true, spec: { ...spec, selection: { tolerance: draft.colorMatch, steps: draft.steps } } };
     }
   }
+}
+
+/**
+ * `draft` opening the reference editor: its characters start as `existing`'s, or a new reference's, with no labels or
+ * recorded readings yet. The region stays, so a new reference starts from the value's.
+ */
+export function toReference(draft: Draft, existing: ReferenceDef | null): Draft {
+  return {
+    ...draft,
+    ink: existing?.ink ?? null,
+    tolerance: existing?.tolerance ?? DEFAULT_TOLERANCE.number,
+    labels: new Map(),
+    recorded: new Map(),
+  };
+}
+
+/**
+ * `draft` leaving the reference editor for the value it was opened from: the value's region comes back, whatever
+ * region the reference was taught on, and the editor's labels and recorded readings are dropped.
+ */
+export function fromReference(draft: Draft, valueRegion: Rect | null): Draft {
+  return { ...draft, region: valueRegion, labels: new Map(), recorded: new Map() };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

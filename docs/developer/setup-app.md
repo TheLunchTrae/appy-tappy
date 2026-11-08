@@ -49,10 +49,10 @@ This page covers what the user guide leaves out.
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
   saved reference it adds to, if any; the owner learns that reference's saved
-  pictures first, so trying an edit reads as the saved reference will. Saving
-  a reference in a new application saves the application with it, so a value
-  made right after can read with it. A reference keeps its ID when renamed,
-  and one that a value reads with cannot be deleted.
+  pictures first, so trying an edit reads as the saved reference will. A
+  reference belongs to a saved application. It keeps its ID when renamed, and
+  a new one named like a renamed one's old name gets that ID with a number.
+  One that a value reads with cannot be deleted.
 - **Key recording.** **Record** takes the next keys pressed, Tab included,
   and records a letter as the keyboard layout types it.
 - **Saving an automation** checks that its value is still saved and that the

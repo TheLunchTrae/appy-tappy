@@ -4,7 +4,7 @@
 
 use std::fs;
 
-use appytappy_config::app_file::reference_id;
+use appytappy_config::app_file::{new_reference_id, reference_id};
 use appytappy_sources::screen::Image;
 
 use crate::check_spec::{self, ReferenceRef, SavedReference, Session};
@@ -45,8 +45,8 @@ impl<H: Host> Owner<H> {
                     .and_then(|bytes| Image::decode_png(&bytes).ok())
                     .ok_or_else(|| {
                         format!(
-                            "The reference {} is missing its picture {}. Delete the reference \
-                             and make it again.",
+                            "The reference {} is missing its picture {}. Remove the values that \
+                             read with it, then delete the reference and make it again.",
                             saved.name, sample.image
                         )
                     })
@@ -79,17 +79,28 @@ impl<H: Host> Owner<H> {
         }
         let app = spec.app.clone();
         let mut file = self.app_file(&app)?;
-        let id = match &editing {
-            Some(editing) => editing.id.clone(),
-            None => reference_id(name),
-        };
-        let taken = file.references.iter().any(|saved| {
-            saved.id != id && (saved.id == reference_id(name) || saved.name.trim() == name)
-        }) || (editing.is_none() && file.references.iter().any(|saved| saved.id == id));
-        if taken {
+        let id = editing.as_ref().map_or_else(
+            || {
+                let taken: Vec<&str> = file
+                    .references
+                    .iter()
+                    .map(|saved| saved.id.as_str())
+                    .collect();
+                new_reference_id(name, &taken)
+            },
+            |editing| editing.id.clone(),
+        );
+        // Names that make the same ID, such as "Digits" and "digits ", are
+        // one name.
+        let same = reference_id(name);
+        if let Some(other) = file
+            .references
+            .iter()
+            .find(|saved| saved.id != id && reference_id(&saved.name) == same)
+        {
             return Err(format!(
-                "{} already has a reference named like \"{name}\". Pick another name.",
-                file.name
+                "{} already has a reference named \"{}\". Pick another name.",
+                file.name, other.name
             ));
         }
         let (reference, pictures) = self
@@ -128,9 +139,10 @@ impl<H: Host> Owner<H> {
             .collect();
         if !users.is_empty() {
             return Err(format!(
-                "{} reads {}. Change or remove {} first.",
-                saved.name,
+                "{} {} with {}. Change or remove {} first.",
                 and_list(&users),
+                if users.len() == 1 { "reads" } else { "read" },
+                saved.name,
                 if users.len() == 1 { "it" } else { "them" }
             ));
         }
@@ -195,6 +207,14 @@ mod tests {
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
         let save = |spec| move |reply| Request::SaveReference { spec, reply };
+        let delete = |reference: &str| {
+            let reference = reference.to_owned();
+            move |reply| Request::DeleteReference {
+                app: "example".to_owned(),
+                reference,
+                reply,
+            }
+        };
         assert_eq!(
             harness.ask(save(reference("example", " ", None))),
             Err("Name the reference first.".to_owned())
@@ -216,10 +236,10 @@ mod tests {
         assert_eq!(
             harness.ask(save(reference("example", "digits", None))),
             Err(
-                "Example App already has a reference named like \"digits\". Pick another name."
+                "Example App already has a reference named \"Digits\". Pick another name."
                     .to_owned()
             ),
-            "a new reference whose ID is taken"
+            "a new reference named like another"
         );
         assert_eq!(
             harness.ask(save(reference(
@@ -229,7 +249,10 @@ mod tests {
             ))),
             Err("That reference belongs to another application.".to_owned())
         );
-        // Editing keeps the ID and its own name, and adds the new sample.
+        // Editing keeps the ID and its own name, adds the new sample, and
+        // leaves the saved samples' pictures as they were.
+        let folder = apps_root.join("example");
+        let first = std::fs::read(folder.join("ref-digits-1.png")).expect("saved picture");
         harness
             .ask(save(reference(
                 "example",
@@ -247,10 +270,10 @@ mod tests {
                 Some(("example", "small")),
             ))),
             Err(
-                "Example App already has a reference named like \"Digits\". Pick another name."
+                "Example App already has a reference named \"Digits\". Pick another name."
                     .to_owned()
             ),
-            "renaming to another reference's ID"
+            "renaming to another reference's name"
         );
         harness
             .ask(save(reference(
@@ -266,19 +289,34 @@ mod tests {
                 Some(("example", "small")),
             ))),
             Err(
-                "Example App already has a reference named like \"Red digits\". Pick another \
-                 name."
+                "Example App already has a reference named \"Red digits\". Pick another name."
                     .to_owned()
             ),
             "renaming to another reference's name, whose ID differs"
+        );
+        // The old name is free again, and its ID goes to a new reference
+        // with a number.
+        assert_eq!(
+            harness.ask(save(reference("example", "Digits", None))),
+            Ok(SavedReferenceId {
+                app: "example".to_owned(),
+                reference: "digits_2".to_owned()
+            })
+        );
+        assert_eq!(
+            harness.ask(delete("digits_2")),
+            Ok(()),
+            "an unused reference goes"
         );
         let apps = harness.ask(Request::ListApps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         let saved = file.reference("digits").expect("saved");
         assert_eq!(saved.name, "Red digits");
         assert_eq!(saved.samples.len(), 3);
-        let folder = apps_root.join("example");
-        assert!(folder.join("ref-digits-1.png").exists());
+        assert_eq!(
+            std::fs::read(folder.join("ref-digits-1.png")).expect("kept"),
+            first
+        );
         assert!(folder.join("ref-digits-3.png").exists());
 
         // A number value reads with it, and keeps it until the value goes.
@@ -301,17 +339,26 @@ mod tests {
                 whole: true
             }
         );
-        let delete = |reference: &str| {
-            let reference = reference.to_owned();
-            move |reply| Request::DeleteReference {
-                app: "example".to_owned(),
-                reference,
+        harness
+            .ask(|reply| Request::SaveValue {
+                spec: Box::new(spec("example", "Best", NUMBER)),
                 reply,
-            }
-        };
+            })
+            .expect("a second value");
         assert_eq!(
             harness.ask(delete("digits")),
-            Err("Red digits reads Progress. Change or remove it first.".to_owned())
+            Err("Progress and Best read with Red digits. Change or remove them first.".to_owned())
+        );
+        harness
+            .ask(|reply| Request::DeleteValue {
+                app: "example".to_owned(),
+                value: "best".to_owned(),
+                reply,
+            })
+            .expect("removes the second value");
+        assert_eq!(
+            harness.ask(delete("digits")),
+            Err("Progress reads with Red digits. Change or remove it first.".to_owned())
         );
         harness
             .ask(|reply| Request::DeleteValue {
@@ -358,8 +405,8 @@ mod tests {
                 reply
             }),
             Err(
-                "The reference Digits is missing its picture ref-digits-1.png. Delete the \
-                 reference and make it again."
+                "The reference Digits is missing its picture ref-digits-1.png. Remove the values \
+                 that read with it, then delete the reference and make it again."
                     .to_owned()
             )
         );

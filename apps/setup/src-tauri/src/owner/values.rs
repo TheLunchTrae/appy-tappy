@@ -98,9 +98,7 @@ impl<H: Host> Owner<H> {
             ));
         }
         let saved = self
-            .with_session(|session| {
-                check_spec::to_saved(&spec.check, session, Some(spec.app.as_str()), &id)
-            })
+            .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
             .map_err(|error| error.to_string())?;
         file.values.push(ValueDef {
             id: id.clone(),

@@ -194,13 +194,13 @@ pub(crate) struct Session<'a> {
 ///
 /// Returns the [`SpecError`] that [`build`] would, so only a check that
 /// works is saved; [`SpecError::OtherApplication`] for a reference of
-/// another application, or none yet; [`SpecError::NotAValue`] for
+/// another application; [`SpecError::NotAValue`] for
 /// characters still being taught; or [`SpecError::Picture`] when a picture
 /// cannot be encoded.
 pub(crate) fn to_saved(
     spec: &CheckSpec,
     session: Session<'_>,
-    app: Option<&str>,
+    app: &str,
     id: &str,
 ) -> Result<SavedCheck, SpecError> {
     let built = build(spec, session)?;
@@ -209,7 +209,7 @@ pub(crate) fn to_saved(
         CheckSpec::Number {
             reference, whole, ..
         } => {
-            if app != Some(reference.app.as_str()) {
+            if app != reference.app {
                 return Err(SpecError::OtherApplication);
             }
             CheckDef::Number {
@@ -316,10 +316,15 @@ pub(crate) fn to_saved_reference(
     let mut number = samples.len();
     for shown in new {
         let (image, text) = shown?;
-        // A saved reference's next number is free: its pictures are named
-        // `1` onward, one per sample.
-        number = number.saturating_add(1);
-        let name = sample_name(id, number);
+        // The next number no sample's picture has, even when a file edited
+        // by hand left a gap. There are finitely many samples, so one is free.
+        let name = loop {
+            number = number.saturating_add(1);
+            let name = sample_name(id, number);
+            if samples.iter().all(|sample| sample.image != name) {
+                break name;
+            }
+        };
         pictures.push((
             name.clone(),
             image.encode_png().map_err(|_encode| SpecError::Picture)?,
@@ -617,8 +622,7 @@ pub(crate) enum SpecError {
     Picture,
     /// A saved reference the check names cannot be had, and why.
     Reference(String),
-    /// A value's reference belongs to another application, or the value's
-    /// application is not saved yet.
+    /// A value's reference belongs to another application.
     OtherApplication,
     /// Characters still being taught were saved as a value, or something
     /// other than characters as a reference.
@@ -881,8 +885,13 @@ mod tests {
             Ok(Value::Flag(false))
         );
 
-        let saved =
-            to_saved(&spec(whole()), session(&[screenshot()], None), None, "icon").expect("valid");
+        let saved = to_saved(
+            &spec(whole()),
+            session(&[screenshot()], None),
+            "app",
+            "icon",
+        )
+        .expect("valid");
         let (picture, mask) =
             Image::decode_png_masked(&saved.pictures[0].1).expect("a PNG with a mask");
         assert_eq!(picture.size(), screenshot().size());
@@ -937,7 +946,7 @@ mod tests {
             build(&spec(false), session(&[], None)).map(|built| built.check),
             Ok(Check::Number { whole: false, .. })
         ));
-        let saved = to_saved(&spec(true), session(&[], None), Some("app"), "progress")
+        let saved = to_saved(&spec(true), session(&[], None), "app", "progress")
             .expect("a value of the reference's application");
         assert_eq!(
             saved.check,
@@ -950,12 +959,10 @@ mod tests {
             saved.pictures.is_empty(),
             "the reference keeps the pictures"
         );
-        for app in [None, Some("other")] {
-            assert_eq!(
-                to_saved(&spec(true), session(&[], None), app, "progress"),
-                Err(SpecError::OtherApplication)
-            );
-        }
+        assert_eq!(
+            to_saved(&spec(true), session(&[], None), "other", "progress"),
+            Err(SpecError::OtherApplication)
+        );
         let gone = CheckSpec::Number {
             region: left(),
             reference: ReferenceRef {
@@ -981,13 +988,8 @@ mod tests {
             built.check.read(&red_square),
             Ok(Value::Number(Number::new(1.0).expect("finite")))
         );
-        let error = to_saved(
-            &spec,
-            session(&[screenshot()], None),
-            Some("app"),
-            "progress",
-        )
-        .expect_err("a reference, not a value");
+        let error = to_saved(&spec, session(&[screenshot()], None), "app", "progress")
+            .expect_err("a reference, not a value");
         assert_eq!(error, SpecError::NotAValue);
         assert_eq!(
             error.to_string(),
@@ -1211,6 +1213,37 @@ mod tests {
     }
 
     #[test]
+    fn a_new_sample_skips_a_picture_name_already_taken() {
+        // A file edited by hand left one sample, named as the second.
+        let gapped = |reference: &ReferenceRef| {
+            let mut saved = digits(reference)?;
+            if let Some(sample) = saved.reference.samples.first_mut() {
+                sample.image = sample_name("digits", 2);
+            }
+            Ok(saved)
+        };
+        let spec = CheckSpec::Characters {
+            region: left(),
+            reference: Some(digits_ref()),
+            ink: RED,
+            tolerance: 0,
+            labels: one(0),
+            recorded: Vec::new(),
+        };
+        let screenshots = [screenshot()];
+        let session = Session {
+            screenshots: &screenshots,
+            recording: None,
+            references: &gapped,
+        };
+        let (reference, pictures) =
+            to_saved_reference(&spec, session, "digits", "Digits").expect("valid characters");
+        let names: Vec<&str> = pictures.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["ref-digits-3.png"]);
+        assert_eq!(reference.samples.len(), 2);
+    }
+
+    #[test]
     fn recorded_readings_are_learned_and_saved_after_the_labels() {
         let now = std::time::Instant::now();
         let region = Region::new(0, 0, 4, 2).expect("not empty");
@@ -1309,8 +1342,13 @@ mod tests {
             tolerance: 7,
             selection: None,
         };
-        let saved =
-            to_saved(&image, session(&[screenshot()], None), None, "icon_visible").expect("valid");
+        let saved = to_saved(
+            &image,
+            session(&[screenshot()], None),
+            "app",
+            "icon_visible",
+        )
+        .expect("valid");
         assert_eq!(
             saved.check,
             CheckDef::Image {
@@ -1326,7 +1364,7 @@ mod tests {
             filled: RED,
             empty: GRAY,
         };
-        let saved = to_saved(&bar, session(&[], None), None, "bar").expect("valid");
+        let saved = to_saved(&bar, session(&[], None), "app", "bar").expect("valid");
         assert_eq!(
             saved.check,
             CheckDef::BarFill {
@@ -1342,7 +1380,7 @@ mod tests {
             tolerance: 4,
         };
         assert_eq!(
-            to_saved(&color, session(&[], None), None, "color")
+            to_saved(&color, session(&[], None), "app", "color")
                 .expect("valid")
                 .check,
             CheckDef::Color {
@@ -1351,7 +1389,7 @@ mod tests {
             }
         );
         assert_eq!(
-            to_saved(&bar, session(&[], None), None, "bar").map(|saved| saved.region),
+            to_saved(&bar, session(&[], None), "app", "bar").map(|saved| saved.region),
             Ok(RegionDef {
                 x: 2,
                 y: 0,

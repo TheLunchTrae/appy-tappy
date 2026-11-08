@@ -120,7 +120,9 @@ export function Picker({ apps, heading, lockedApp, initial, onCancel, onPick, on
         <aside className="side" aria-label="Application">
           <h2>Application</h2>
           {saved.length === 0 ? (
-            <p className="note">Values belong to an application. Add the application first, then come back here.</p>
+            <p className="note">
+              Values and references belong to an application. Add the application first, then come back here.
+            </p>
           ) : (
             <div className="field">
               <label htmlFor="target">Save to</label>

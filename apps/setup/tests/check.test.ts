@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildCharacters, buildSpec, DEFAULT_TOLERANCE, EMPTY_DRAFT, reviewSpec, withKind } from '../src/lib/check.ts';
+import {
+  buildCharacters,
+  buildSpec,
+  DEFAULT_TOLERANCE,
+  EMPTY_DRAFT,
+  fromReference,
+  reviewSpec,
+  toReference,
+  withKind,
+} from '../src/lib/check.ts';
 
 const region = { x: 1, y: 2, width: 3, height: 4 };
 const red = { red: 255, green: 0, blue: 0 };
@@ -15,8 +24,6 @@ describe('buildSpec', () => {
   test("builds a number from the application's reference and whether it is whole", () => {
     const pick = 'Pick a reference to read the number with, or make one from this region.';
     expect(buildSpec({ ...EMPTY_DRAFT, region }, 'example')).toEqual({ ok: false, next: pick });
-    // An application not saved yet has no references.
-    expect(buildSpec({ ...EMPTY_DRAFT, region, reference: 'percent' }, null)).toEqual({ ok: false, next: pick });
     expect(buildSpec({ ...EMPTY_DRAFT, region, reference: 'percent', whole: true }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'number', region, reference: percent, whole: true },
@@ -25,9 +32,9 @@ describe('buildSpec', () => {
 
   test('builds a bar fill from both colors', () => {
     const bar = withKind({ ...EMPTY_DRAFT, region }, 'barFill');
-    expect(buildSpec(bar, null)).toEqual({ ok: false, next: "Pick the bar's filled color." });
-    expect(buildSpec({ ...bar, filled: red }, null)).toEqual({ ok: false, next: "Pick the bar's empty color." });
-    expect(buildSpec({ ...bar, filled: red, empty: gray }, null)).toEqual({
+    expect(buildSpec(bar, 'example')).toEqual({ ok: false, next: "Pick the bar's filled color." });
+    expect(buildSpec({ ...bar, filled: red }, 'example')).toEqual({ ok: false, next: "Pick the bar's empty color." });
+    expect(buildSpec({ ...bar, filled: red, empty: gray }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'barFill', region, filled: red, empty: gray },
     });
@@ -35,14 +42,14 @@ describe('buildSpec', () => {
 
   test('builds a color and an image check', () => {
     const color = withKind({ ...EMPTY_DRAFT, region }, 'color');
-    expect(buildSpec(color, null)).toEqual({ ok: false, next: 'Pick the color to look for.' });
-    expect(buildSpec({ ...color, color: red }, null)).toEqual({
+    expect(buildSpec(color, 'example')).toEqual({ ok: false, next: 'Pick the color to look for.' });
+    expect(buildSpec({ ...color, color: red }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'color', region, color: red, tolerance: DEFAULT_TOLERANCE.color },
     });
     const image = withKind({ ...EMPTY_DRAFT, region }, 'image');
-    expect(buildSpec(image, null)).toEqual({ ok: false, next: 'Choose the screenshot to compare against.' });
-    expect(buildSpec({ ...image, image: 3 }, null)).toEqual({
+    expect(buildSpec(image, 'example')).toEqual({ ok: false, next: 'Choose the screenshot to compare against.' });
+    expect(buildSpec({ ...image, image: 3 }, 'example')).toEqual({
       ok: true,
       spec: { kind: 'image', region, screenshot: 3, tolerance: DEFAULT_TOLERANCE.image },
     });
@@ -155,4 +162,36 @@ test('withKind keeps the region and colors and resets the tolerance', () => {
   expect(draft.region).toEqual(region);
   expect(draft.ink).toEqual(red);
   expect(draft.tolerance).toBe(DEFAULT_TOLERANCE.color);
+});
+
+describe('the reference editor', () => {
+  const region = { x: 1, y: 2, width: 30, height: 10 };
+  const taught = { x: 5, y: 6, width: 40, height: 12 };
+  const saved = {
+    id: 'percent',
+    name: 'Percent',
+    ink: red,
+    tolerance: 25,
+    samples: [{ image: 'ref-percent-1.png', text: '87%' }],
+  };
+
+  test("opens with the reference's characters and the value's region", () => {
+    const value = { ...EMPTY_DRAFT, region, ink: gray, labels: new Map([[0, '5']]) };
+    expect(toReference(value, saved)).toEqual({ ...value, ink: red, tolerance: 25, labels: new Map() });
+    expect(toReference(value, null)).toEqual({
+      ...value,
+      ink: null,
+      tolerance: DEFAULT_TOLERANCE.number,
+      labels: new Map(),
+    });
+  });
+
+  test("puts the value's region back however the reference was taught", () => {
+    const editor = {
+      ...toReference({ ...EMPTY_DRAFT, region }, saved),
+      region: taught,
+      labels: new Map([[0, '100%']]),
+    };
+    expect(fromReference(editor, region)).toEqual({ ...editor, region, labels: new Map(), recorded: new Map() });
+  });
 });

@@ -32,10 +32,11 @@ import {
   buildCharacters,
   buildSpec,
   CHECK_KINDS,
-  DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
+  fromReference,
   KIND_NAMES,
   reviewSpec,
+  toReference,
   withKind,
 } from '../lib/check.ts';
 import { readers } from '../lib/reference.ts';
@@ -341,6 +342,8 @@ export type CaptureMode =
 interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
+  /** The value's region when the editor opened from a value, to put back when it closes. */
+  readonly valueRegion: Rect | null;
 }
 
 /** The value's two steps: where it shows, then how to read it. */
@@ -354,20 +357,9 @@ interface Props {
   readonly onSaved: () => void;
 }
 
-/** A draft whose characters start as `existing`'s, or a new reference's. */
-function forReference(draft: Draft, existing: ReferenceDef | null): Draft {
-  return {
-    ...draft,
-    ink: existing?.ink ?? null,
-    tolerance: existing?.tolerance ?? DEFAULT_TOLERANCE.number,
-    labels: new Map(),
-    recorded: new Map(),
-  };
-}
-
 export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Props) {
   const startEditing: Editing | null =
-    mode.kind === 'reference' ? { existing: mode.existing, name: mode.existing?.name ?? '' } : null;
+    mode.kind === 'reference' ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: null } : null;
   const [shots, setShots] = useState<readonly Shot[]>([]);
   const [full, setFull] = useState<ReadonlyMap<number, Picture>>(new Map());
   const [selected, setSelected] = useState<number | null>(null);
@@ -375,7 +367,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Pro
   const [liveError, setLiveError] = useState<string | null>(null);
   const [shotError, setShotError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() =>
-    startEditing === null ? EMPTY_DRAFT : forReference(EMPTY_DRAFT, startEditing.existing),
+    startEditing === null ? EMPTY_DRAFT : toReference(EMPTY_DRAFT, startEditing.existing),
   );
   // The saved application the value or reference belongs to.
   const appId = choice.app;
@@ -910,20 +902,22 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Pro
   // Opens the reference editor on `existing`, or on a new reference read
   // from the value's region.
   const openEditor = (existing: ReferenceDef | null): void => {
-    setEditing({ existing, name: existing?.name ?? '' });
-    setDraft((current) => forReference(current, existing));
+    setEditing({ existing, name: existing?.name ?? '', valueRegion: draft.region });
+    setDraft((current) => toReference(current, existing));
     setPicking(null);
     setSaveError(null);
   };
 
-  // Leaves the reference editor, forgetting its labels and recording.
+  // Leaves the reference editor for the value, forgetting its labels and
+  // recording and putting the value's region back.
   const closeEditor = (): void => {
     if (recording !== null) {
       background(discard());
     }
+    const valueRegion = editing?.valueRegion ?? null;
     setEditing(null);
     setPicking(null);
-    setDraft((current) => ({ ...current, labels: new Map(), recorded: new Map() }));
+    setDraft((current) => fromReference(current, valueRegion));
   };
 
   const saveRef = async (): Promise<void> => {

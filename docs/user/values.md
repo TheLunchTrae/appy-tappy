@@ -47,7 +47,8 @@ the new value.
   **New reference from this region** to make one from the region you drew.
   **Edit** changes the picked one, such as to teach it a digit it does not
   know yet. Turn on **Whole number only** to ignore every digit after the
-  decimal point, so `87.5%` reads as 87.
+  decimal point, so `87.5%` reads as 87. The reference still has to know the
+  point, so teach it on a screenshot that shows one.
 - **Bar fill** reads how full a bar is, from 0 to 100. Use **Pick** next to
   **Filled color** and click a filled part of the bar, then next to
   **Empty color** and click an empty part. Borders and labels inside the

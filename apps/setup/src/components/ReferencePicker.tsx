@@ -4,7 +4,7 @@ import { CharacterChips } from './CharacterChips.tsx';
 
 interface Props {
   readonly appName: string;
-  /** The application's saved file, or null for an application not saved yet. */
+  /** The application's saved file, or null until it is read. */
   readonly file: AppFile | null;
   readonly selected: string | null;
   /** Whether a region is drawn to make a reference from. */
@@ -89,7 +89,10 @@ export function ReferencePicker(props: Props) {
           />
           Whole number only
         </label>
-        <span className="note">Reads 87.5% as 87. Every digit after the decimal point is ignored.</span>
+        <span className="note">
+          Reads 87.5% as 87. Every digit after the decimal point is ignored, though the reference still has to know the
+          point.
+        </span>
       </div>
     </>
   );

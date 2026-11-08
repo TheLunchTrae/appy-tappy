@@ -50,8 +50,9 @@ pub struct AppFile {
     pub anti_cheat: AntiCheatDef,
     /// The values read from the application's window.
     pub values: Vec<ValueDef>,
-    /// The characters its number values are read with.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// The characters its number values are read with. Always written,
+    /// even when empty, since the setup app reads the file's JSON as is.
+    #[serde(default)]
     pub references: Vec<ReferenceDef>,
     /// How the setup app shows the values' live readings on top of the
     /// application, or `None` when it never has.
@@ -560,6 +561,27 @@ pub fn reference_id(name: &str) -> String {
     id_from_name(name, "reference", MAX_REFERENCE_ID_LEN)
 }
 
+/// The ID for a new reference named `name` that no ID in `taken` uses yet:
+/// [`reference_id`] of the name, or that with `_2`, `_3` and so on when a
+/// renamed reference still has it.
+#[must_use]
+pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
+    let id = reference_id(name);
+    if !taken.contains(&id.as_str()) {
+        return id;
+    }
+    let mut base = id;
+    base.truncate(MAX_REFERENCE_ID_LEN.saturating_sub(4));
+    let base = base.trim_end_matches('_');
+    // `taken` is finite, so one of its length plus one numbers is free.
+    (2_usize..=taken.len().saturating_add(2))
+        .map(|number| format!("{base}_{number}"))
+        .find(|candidate| {
+            candidate.len() <= MAX_REFERENCE_ID_LEN && !taken.contains(&candidate.as_str())
+        })
+        .unwrap_or_else(|| base.to_owned())
+}
+
 /// The file name of a reference's `number`th sample, such as
 /// `ref-percent_font-3.png`. No value's picture can have it: a value's ID
 /// has no hyphen, and its picture is `{id}.png`.
@@ -674,13 +696,17 @@ mod tests {
     }
 
     #[test]
-    fn a_file_without_references_leaves_them_out() {
+    fn a_file_without_references_still_lists_them() {
         let mut file = dash();
         file.values.clear();
         file.references.clear();
         let json = file.to_json();
-        assert!(!json.contains("references"));
-        assert_eq!(AppFile::parse(&json), Ok(file));
+        assert!(json.contains("\"references\": []"));
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        // A file written before references reads as having none.
+        let older = json.replace(",\n  \"references\": []", "");
+        assert!(!older.contains("references"));
+        assert_eq!(AppFile::parse(&older), Ok(file));
     }
 
     #[test]
@@ -937,6 +963,15 @@ mod tests {
         assert_eq!(long.len(), MAX_REFERENCE_ID_LEN);
         assert!(SignalName::new(&long).is_ok());
         assert_eq!(sample_name("percent_font", 3), "ref-percent_font-3.png");
+        assert_eq!(new_reference_id("Digits", &["other"]), "digits");
+        assert_eq!(
+            new_reference_id("Digits", &["digits", "digits_2"]),
+            "digits_3"
+        );
+        let numbered = new_reference_id(&"abc".repeat(30), &[long.as_str()]);
+        assert_eq!(numbered.len(), MAX_REFERENCE_ID_LEN.saturating_sub(2));
+        assert!(numbered.ends_with("_2"));
+        assert!(SignalName::new(&numbered).is_ok());
         assert!(is_image_name(&sample_name(&long, 999_999_999)));
     }
 }
