@@ -84,7 +84,6 @@ enum Event {
     /// The system has a new frame in the pool.
     Frame,
     /// The window closed, so no more frames will come.
-    #[expect(dead_code, reason = "experiment: no handler sends it")]
     Closed,
     /// The session is closing.
     Stop,
@@ -269,9 +268,7 @@ struct Held {
 
 /// Every Direct3D and capture object of one session, owned by its thread.
 struct Capturer {
-    #[expect(dead_code, reason = "experiment: kept alive, but nothing reads it")]
     item: GraphicsCaptureItem,
-    #[expect(dead_code, reason = "experiment: no Closed handler")]
     closed: i64,
     device: ID3D11Device,
     context: ID3D11DeviceContext,
@@ -322,9 +319,11 @@ impl Capturer {
             frames.send(Event::Frame);
             Ok(())
         }))?;
-        // Experiment: no Closed handler, to learn whether it leaves handles
-        // behind after a detach.
-        let closed = 0;
+        let ended = wake.clone();
+        let closed = item.Closed(&TypedEventHandler::new(move |_, _| {
+            ended.send(Event::Closed);
+            Ok(())
+        }))?;
         let session = pool.CreateCaptureSession(&item)?;
         configure(&session);
         ask_interval(&session, throttle);
@@ -642,6 +641,7 @@ impl Capturer {
         )]
         let _ = (
             self.pool.RemoveFrameArrived(self.arrived),
+            self.item.RemoveClosed(self.closed),
             self.session.Close(),
             self.pool.Close(),
         );
