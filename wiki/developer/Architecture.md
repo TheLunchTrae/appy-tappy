@@ -462,9 +462,8 @@ design enforces the block in four places:
 ## The setup app
 
 The setup app is a Tauri v2 app with a React and TypeScript frontend, in
-`apps/setup/`. The owner chose Tauri, which settles the framework question in
-[#16](https://github.com/TheLunchTrae/appy-tappy/issues/16); the shell and its
-screens stay with that issue.
+`apps/setup/`. The owner chose Tauri, which settled the framework question in
+[#16](https://github.com/TheLunchTrae/appy-tappy/issues/16).
 
 Its Rust side exposes Tauri commands and holds no logic of its own: discovery,
 scanning, preview, and saving come from the shared crates. It follows the
