@@ -50,9 +50,11 @@ the new value.
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.
   To read numbers with a thousands separator, such as `1,234`, teach the
-  reference the `,` too. A `,` counts only between groups of three digits:
+  reference the `,` too. A `.` is always the decimal point, and a `,` only
+  separates thousands: it counts only between groups of three digits, so
   `12,5` reads as 12. A number written with its point first, such as `.5`,
-  reads as 0.5.
+  reads as 0.5, and a `.` with no digit after it, such as `...`, is not a
+  number.
 - **Bar fill** reads how full a bar is, from 0 to 100. Use **Pick** next to
   **Filled color** and click a filled part of the bar, then next to
   **Empty color** and click an empty part. Borders and labels inside the

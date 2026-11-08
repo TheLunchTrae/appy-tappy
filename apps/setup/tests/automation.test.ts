@@ -163,10 +163,11 @@ describe('buildAutomation', () => {
     expect(next(named)).toBe('Pick the value to watch.');
     expect(next({ ...named, source: { app: 'example', value: 'gone' } })).toBe('Pick the value to watch.');
     const watching = { ...named, source: { app: 'example', value: 'progress' } };
-    for (const number of ['', 'ninety', '0x5A', '1e2', '12,5', 'Infinity']) {
+    for (const number of ['', 'ninety', '0x5A', '1e2', '12,5', '1,23', '1234,567', ',500', '1,234,5', 'Infinity']) {
       expect(next({ ...watching, number })).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
     }
     expect(next({ ...watching, number: '-.5' })).toBe('ok');
+    expect(next({ ...watching, number: '-1,234.5' })).toBe('ok');
     const complete = { ...watching, number: ' 90 ' };
     expect(next(complete)).toBe('ok');
     expect(next({ ...complete, actions: [] })).toBe('Add an action.');
@@ -317,6 +318,12 @@ describe('buildWhen', () => {
       value: 'progress',
       is: 'atLeast',
       target: 90,
+    });
+    expect(buildWhen({ ...draft, number: '-1,234.5' }, number)).toEqual({
+      app: 'example',
+      value: 'progress',
+      is: 'atLeast',
+      target: -1234.5,
     });
     expect(buildWhen(draft, number)).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
     expect(buildWhen({ ...draft, flag: false, is: 'notEquals' }, icon)).toEqual({

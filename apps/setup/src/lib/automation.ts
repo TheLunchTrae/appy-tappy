@@ -313,13 +313,17 @@ export function withSource(draft: Draft, choice: ValueChoice): Draft {
 /** The longest cooldown, in seconds: a day. */
 const MAX_COOLDOWN_SECONDS = 86_400;
 
-/** A plain decimal number, such as `90`, `-3` or `12.5`. */
-const DECIMAL = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/u;
+/**
+ * A plain decimal number, such as `90`, `-3`, `12.5` or `1,234`: as a number
+ * check reads one, `.` is the decimal point and `,` only separates groups of
+ * three digits.
+ */
+const DECIMAL = /^-?(?:\d{1,3}(?:,\d{3})+(?:\.\d*)?|\d+(?:\.\d*)?|\.\d+)$/u;
 
 /** A number typed into a field, or null when it is not a plain decimal number or too large to hold. */
 function typedNumber(text: string): number | null {
   const trimmed = text.trim();
-  const number = DECIMAL.test(trimmed) ? Number(trimmed) : Number.NaN;
+  const number = DECIMAL.test(trimmed) ? Number(trimmed.replaceAll(',', '')) : Number.NaN;
   return Number.isFinite(number) ? number : null;
 }
 

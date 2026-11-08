@@ -146,12 +146,13 @@ impl DigitReader {
 
     /// Reads the first number in `image`: an optional `-`, digits, and an
     /// optional `.` with more digits. A number that starts with its `.`
-    /// reads as `0.`, so `-.5` reads as -0.5. A `,` between groups of three
-    /// digits is skipped, so `1,234` reads as 1234; any other `,`, and other
-    /// learned characters such as `%` or `/`, separate numbers, so `12,5`
-    /// and `12/50` read as 12. With `whole`, the number ends at the `.`, so
-    /// the digits after it are ignored and need no glyphs: `87.5%` reads as
-    /// 87.
+    /// reads as `0.`, so `-.5` reads as -0.5, unless letters came before,
+    /// so `Lv.5` reads as 5; a `.` with no digit after it is no number. A
+    /// `,` between groups of three digits is skipped, so `1,234` reads as
+    /// 1234; any other `,`, and other learned characters such as `%` or
+    /// `/`, separate numbers, so `12,5` and `12/50` read as 12. With
+    /// `whole`, the number ends at the `.`, so the digits after it are
+    /// ignored and need no glyphs: `87.5%` reads as 87.
     ///
     /// # Errors
     ///
@@ -358,14 +359,25 @@ struct NumberText {
     digits: bool,
     ended: bool,
     point: Point,
-    /// Whether a character that is not part of a number came before, such
-    /// as the letters of `Lv.5`, so a `.` there is not the number's.
-    skipped: bool,
+    lead: Lead,
     /// The length of `text` at the last `,` between digit groups, while
     /// the digits after it may still turn out not to be a group of three.
     group: Option<usize>,
     /// The digits since the number started or since its last `,`.
     run: usize,
+}
+
+/// What came before a number's first digit, for a `.` there.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Lead {
+    /// Nothing that changes how a `.` reads.
+    #[default]
+    Plain,
+    /// A `.`, as in `.5`: the number reads as `0.` if a digit follows, and
+    /// the `.` is skipped otherwise.
+    Point,
+    /// A letter, such as the `v` of `Lv.5`, so a `.` is not the number's.
+    Letter,
 }
 
 /// What a `.` after the digits does to a number being read.
@@ -391,22 +403,35 @@ impl NumberText {
         if self.ended {
             return;
         }
+        if self.lead == Lead::Point && !character.is_ascii_digit() {
+            // The `.` started no number, so it is skipped like any other
+            // character before one, as in `...`.
+            self.lead = Lead::Plain;
+            self.len = 0;
+        }
         if character != ',' && !character.is_ascii_digit() && !self.close_groups() {
             self.ended = true;
             return;
         }
         let accepted = match character {
             '0'..='9' => {
+                if self.lead == Lead::Point {
+                    self.lead = Lead::Plain;
+                    self.push('0');
+                    self.push('.');
+                    if self.ended {
+                        return;
+                    }
+                }
                 self.digits = true;
                 self.run = self.run.saturating_add(1);
                 true
             },
             '-' => self.len == 0,
-            // A number that starts with its point, such as `.5`, reads as
-            // `0.5`.
-            '.' if !self.digits && !self.skipped => {
-                self.push('0');
-                self.push('.');
+            // A number may start with its point, such as `.5`, which reads
+            // as `0.5` once its digit comes.
+            '.' if !self.digits && self.lead == Lead::Plain => {
+                self.lead = Lead::Point;
                 return;
             },
             '.' if self.digits && self.point == Point::Starts => {
@@ -426,7 +451,9 @@ impl NumberText {
             self.ended = self.digits;
             if !self.digits {
                 self.len = 0;
-                self.skipped = true;
+                if character.is_alphabetic() {
+                    self.lead = Lead::Letter;
+                }
             }
             return;
         }
@@ -453,27 +480,29 @@ impl NumberText {
         self.digits && self.point != Point::Taken && group_before
     }
 
+    /// Where the number ends when the digits after its last `,` are not a
+    /// group of three, as in `12,5`: at that `,`.
+    fn short_group(&self) -> Option<usize> {
+        self.group.filter(|_| self.run != 3)
+    }
+
     /// Ends the digit groups before a character that is not a digit or a
-    /// `,`. When the digits after the last `,` are not a group of three, as
-    /// in `12,5`, the number ends at that `,` and this returns false.
+    /// `,`. When the last group is short, the number ends at its `,` and
+    /// this returns false.
     fn close_groups(&mut self) -> bool {
-        match self.group.take() {
-            Some(start) if self.run != 3 => {
-                self.len = start;
-                false
-            },
-            _ => true,
+        let short = self.short_group();
+        self.group = None;
+        if let Some(start) = short {
+            self.len = start;
         }
+        short.is_none()
     }
 
     fn parse(&self) -> Option<Number> {
         if !self.digits {
             return None;
         }
-        let len = match self.group {
-            Some(start) if self.run != 3 => start,
-            _ => self.len,
-        };
+        let len = self.short_group().unwrap_or(self.len);
         let text = std::str::from_utf8(self.text.get(..len)?).ok()?;
         Number::new(text.trim_end_matches('.').parse().ok()?)
     }
@@ -690,10 +719,19 @@ mod tests {
         assert_eq!(parsed("-.5"), Number::new(-0.5));
         assert_eq!(parsed(".25%"), Number::new(0.25));
         assert_eq!(parsed("-.5.5"), Number::new(-0.5));
-        // After other characters, such as the letters of a level label, a
-        // `.` is not the number's.
+        assert_eq!(parsed("$.50"), Number::new(0.5));
+        assert_eq!(parsed("+.5"), Number::new(0.5));
+        // After letters, such as those of a level label, a `.` is not the
+        // number's.
         assert_eq!(parsed("x.5"), Number::new(5.0));
         assert_eq!(parsed("-x.5"), Number::new(5.0));
+        assert_eq!(parsed("Lv.5"), Number::new(5.0));
+        // A point with no digit after it is no number, such as a loading
+        // ellipsis.
+        for characters in [".", "...", "-.--", ".%", "-."] {
+            assert_eq!(parsed(characters), None, "{characters}");
+        }
+        assert_eq!(parsed(".%5"), Number::new(5.0));
     }
 
     #[test]
