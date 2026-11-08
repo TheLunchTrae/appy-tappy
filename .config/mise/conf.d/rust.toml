@@ -25,10 +25,11 @@ run = "cargo fmt --all -- --check"
 
 # Cargo tasks share one build-directory lock, so the gate orders them from the
 # cheapest check to the full test run instead of letting them contend for it.
-# rust:policy and rust:mutants run beside them, and cargo-mutants builds in its
-# own copy of the tree. rust:policy's `cargo test` builds also take the shared
-# lock; the rest of its time goes to the lock self-test's shutdown timeouts and
-# to Clippy on the lint-wall probe, which uses a separate target directory.
+# rust:policy runs beside them, and the mutation lane waits for all of them, so
+# a copy of target/ never catches a build half written. rust:policy's
+# `cargo test` builds also take the shared lock; the rest of its time goes to
+# the lock self-test's shutdown timeouts and to Clippy on the lint-wall probe,
+# which uses a separate target directory.
 # tests/lint_wall.rs replays only rust:lint's run value: keep it one plain
 # command line that passes Cargo only the arguments the test lists, set no key
 # but description and run, and define rust:lint in no other mise file.
@@ -104,6 +105,10 @@ run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 
 # Both mutation lanes test two mutants at once: each mutant's build waits on
 # its linker most of the time, so a second build uses the idle cores.
+# cargo-mutants builds in its own copy of the tree and leaves target/ out of
+# it. MUTANTS_COPY_TARGET=true copies target/ too, so the baseline reuses the
+# builds already there; CI sets it, and a local run leaves it off rather than
+# copy a developer's whole target/ twice.
 # MUTANTS_SHARD=k/n runs only shard k of n (counting from 0), so CI can split
 # the sweep across runners; unset, it runs every mutant. Round-robin sharding
 # spreads each crate's mutants across the shards, so they take similar time.
@@ -126,7 +131,7 @@ trap 'exit 143' TERM
 
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --cargo-arg=--locked "$@"
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked "$@"
 run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 """
 
@@ -184,7 +189,7 @@ trap 'exit 143' TERM
 
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --cargo-arg=--locked --in-diff "$diff_file"
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked --in-diff "$diff_file"
 if [ ! -d mutants.out ]; then
   echo "The diff selects no mutants; nothing to verify."
   exit 0
@@ -215,6 +220,7 @@ depends = ["rust:fmt"]
 # gate reaches the lane's own traps.
 [tasks."rust:mutants:gate"]
 description = "Run the mutation lane MUTANTS_LANE names: full (default) or diff"
+wait_for = ["rust:policy", "rust:package"]
 run = """
 set -eu
 

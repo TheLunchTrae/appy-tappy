@@ -35,6 +35,7 @@ jobs:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       CARGO_INCREMENTAL: '0'
       MUTANTS_SHARD: ${{ matrix.shard }}
+      MUTANTS_COPY_TARGET: 'true'
       # Tasks would otherwise install every tool, not only install_args.
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
@@ -54,8 +55,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
       # Reads the quality job's build cache from main and never saves one.
-      # cargo-mutants copies target/ into its build directories, so the
-      # baseline reuses the dependency builds.
+      # MUTANTS_COPY_TARGET has cargo-mutants copy target/ into its build
+      # directories, so the baseline reuses the dependency builds.
       - name: Restore the Rust build cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

@@ -17,8 +17,8 @@ x86_64 binaries only, so mise skips it on macOS.
 
 Cargo tasks share one build-directory lock, so the gate runs Clippy, the
 documentation build, the tests, and the package check in a fixed order.
-`rust:policy` and cargo-mutants run beside them; cargo-mutants builds in its
-own copy of the tree.
+`rust:policy` runs beside them. The mutation lane waits for all of them, then
+cargo-mutants builds in its own copy of the tree.
 
 ## Lint wall
 
@@ -120,9 +120,11 @@ mutants. Run the mutation sweep workflow manually on its branch to check the
 whole workspace before merging it.
 
 Both lanes run two mutants at once (`--jobs=2`), since each mutant's build
-waits on its linker most of the time. `.cargo/mutants.toml` sets
-`copy_target = true`, so cargo-mutants copies `target/` into its build
-directories and the baseline reuses the dependency builds that CI restores.
+waits on its linker most of the time. CI sets `MUTANTS_COPY_TARGET=true`, so
+cargo-mutants copies `target/` into its build directories and the baseline
+reuses the builds already there. A local run leaves it off, so it doesn't copy
+a developer's whole `target/` twice. The gate starts the lane only after the
+other Cargo tasks finish, so the copy never catches a build half written.
 Both lanes also run every workspace package's tests against each mutant
 (`--test-workspace=true`), because a mutant in one crate can be caught by
 another crate's tests. Whether testing only the mutated package catches the

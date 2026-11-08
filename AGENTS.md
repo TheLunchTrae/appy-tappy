@@ -33,7 +33,7 @@ manual runs. `footprint` runs `rust:footprint` on Windows.
 split across eight `mutants` shards, and on demand for any branch.
 `quality`, `windows`, and `footprint` restore a Rust build cache that only
 pushes to main save, once for each set of manifests, `Cargo.lock` and
-toolchain.
+toolchain. The mutation sweep reads the `quality` job's cache and saves none.
 
 - Inline mise tasks are POSIX `sh`. `[task_config] shell` in
   `.config/mise/config.toml` runs them with `sh` on every platform, so tasks
@@ -373,8 +373,9 @@ coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
 Mutation evidence covers the code each pull request and each push to main
-changes, and the nightly sweep covers the whole workspace. `.cargo/mutants.toml` excludes the Windows `win.rs`
-adapters with the owner's approval, because the Linux gate compiles them out.
+changes, and the nightly sweep covers the whole workspace.
+`.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
+approval, because the Linux gate compiles them out.
 Read [mutation operation](wiki/developer/Rust-standards.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.
 Confirm no run is active before clearing a stale lock.
