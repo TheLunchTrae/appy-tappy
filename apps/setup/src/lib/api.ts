@@ -311,7 +311,7 @@ export interface AutomationSummary {
 
 /** The message of a failed command, which the Rust side writes for the user. */
 export function errorText(error: unknown): string {
-  return typeof error === 'string' ? error : 'Something went wrong in AppyTappy setup.';
+  return typeof error === 'string' ? error : 'Something went wrong in AppyTappy Setup.';
 }
 
 export async function listWindows(): Promise<WindowList> {

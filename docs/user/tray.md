@@ -2,7 +2,7 @@
 
 AppyTappy's background part shows an icon in the taskbar's notification area,
 next to the clock. If you don't see it, select the arrow that shows hidden
-icons. The icon is the same as the setup app's.
+icons. The icon is the same as AppyTappy Setup's.
 
 Point at the icon to see what AppyTappy is doing:
 
