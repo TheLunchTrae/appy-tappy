@@ -5,7 +5,10 @@
 //! event handlers only wake a thread this module owns, and that thread makes
 //! every Direct3D and capture call. The system's own threads fill the frame
 //! pool on the same Direct3D device, so the device is set to serialize its
-//! calls. Between reads the thread keeps only the newest frame and copies
+//! calls. Every capture shares one device, made by the first and kept as
+//! long as the system is, so a capture's start and stop make and free only
+//! its own capture objects; once that device is lost, each capture makes its
+//! own. Between reads the thread keeps only the newest frame and copies
 //! nothing; when the handler's wait ends, the GPU copies just the values'
 //! regions into a small CPU-readable texture, as the crop's layout packs
 //! them, and the thread copies those rows into a reused buffer.
@@ -27,8 +30,8 @@ use std::io;
 use std::marker::PhantomData;
 use std::ptr;
 use std::slice;
-use std::sync::Once;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::{Arc, Once, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -57,7 +60,7 @@ use windows::Win32::System::WinRT::Direct3D11::{
 };
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
-use windows::core::{Interface, factory};
+use windows::core::{AgileReference, Interface, factory};
 
 use super::WindowsSystem;
 use crate::schedule::{ReadClock, frame_interval};
@@ -164,9 +167,15 @@ impl Capture for WindowsSystem {
         let events = Wake(events);
         let (ready, started) = mpsc::sync_channel(1);
         let wake = events.clone();
+        let target = Target {
+            device: Arc::clone(&self.device.0),
+            window,
+            crop,
+            throttle,
+        };
         let thread = thread::Builder::new()
             .name("appytappy-capture".into())
-            .spawn(move || run(window, crop, throttle, handler, &wake, &received, &ready))?;
+            .spawn(move || run(&target, handler, &wake, &received, &ready))?;
         let session = WindowsCaptureSession {
             events,
             thread: Some(thread),
@@ -187,18 +196,24 @@ impl Capture for WindowsSystem {
     }
 }
 
-/// The capture thread: sets up, reports whether that worked, then handles
-/// frames until told to stop.
-fn run(
+/// What one capture thread captures, and the device it shares.
+struct Target {
+    device: Arc<OnceLock<SharedDevice>>,
     window: usize,
     crop: Crop,
     throttle: Duration,
+}
+
+/// The capture thread: sets up, reports whether that worked, then handles
+/// frames until told to stop.
+fn run(
+    target: &Target,
     mut handler: FrameHandler,
     wake: &Wake,
     events: &Receiver<Event>,
     ready: &SyncSender<io::Result<()>>,
 ) {
-    let window = HWND(ptr::without_provenance_mut(window));
+    let window = HWND(ptr::without_provenance_mut(target.window));
     // Declared first, so it leaves the apartment after everything else here
     // is dropped.
     let _apartment = match Apartment::join() {
@@ -212,7 +227,7 @@ fn run(
             return;
         },
     };
-    let mut capture = match Capturer::start(window, throttle, wake) {
+    let mut capture = match Capturer::start(&target.device, window, target.throttle, wake) {
         Ok(capture) => capture,
         Err(error) => {
             #[expect(
@@ -228,7 +243,7 @@ fn run(
         reason = "a send fails only when `start` stopped waiting, and nobody is left to tell"
     )]
     let _ = ready.send(Ok(()));
-    capture.handle_frames(&crop, &mut handler, events);
+    capture.handle_frames(&target.crop, &mut handler, events);
     capture.stop();
 }
 
@@ -266,7 +281,8 @@ struct Held {
     delay: Duration,
 }
 
-/// Every Direct3D and capture object of one session, owned by its thread.
+/// Every capture object of one session, owned by its thread, and the
+/// shared Direct3D device it copies frames with.
 struct Capturer {
     item: GraphicsCaptureItem,
     closed: i64,
@@ -287,21 +303,16 @@ struct Capturer {
 }
 
 impl Capturer {
-    fn start(window: HWND, throttle: Duration, wake: &Wake) -> windows::core::Result<Self> {
-        let (device, context) = create_device()?;
-        let multithread: ID3D11Multithread = device.cast()?;
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "the result is the previous setting, which nothing needs"
-        )]
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: the call takes a flag; `multithread` is live.
-        let _ = unsafe { multithread.SetMultithreadProtected(true) };
-        let dxgi: IDXGIDevice = device.cast()?;
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `dxgi` is a live DXGI device; the call returns a new reference.
-        let winrt_device: IDirect3DDevice =
-            unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }?.cast()?;
+    fn start(
+        device: &OnceLock<SharedDevice>,
+        window: HWND,
+        throttle: Duration,
+        wake: &Wake,
+    ) -> windows::core::Result<Self> {
+        let shared = shared_device(device)?;
+        let device = shared.device;
+        let context = shared.context;
+        let winrt_device = shared.winrt.resolve()?;
         let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: the call takes a window handle by value; an invalid handle
@@ -630,10 +641,8 @@ impl Capturer {
 
     /// Ends the capture and releases the system's objects. Direct3D destroys
     /// released objects only when its context next flushes, so the context
-    /// drops what it holds and flushes once the frame pool and the staging
-    /// texture are let go. Closing the Direct3D device's Windows Runtime
-    /// wrapper releases the device it holds even if the system still holds
-    /// the wrapper.
+    /// flushes once the frame pool and the staging texture are let go. The
+    /// device stays, for the next capture.
     fn stop(self) {
         #[expect(
             clippy::let_underscore_must_use,
@@ -646,18 +655,77 @@ impl Capturer {
             self.pool.Close(),
         );
         drop(self.staging);
-        #[expect(unsafe_code, reason = "Win32 calls")]
-        // SAFETY: both calls take no arguments; `context` is live, and this
-        // thread is the only one that uses it.
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes no arguments; `context` is live, and the
+        // device's multithread protection serializes it with other captures.
         unsafe {
-            self.context.ClearState();
             self.context.Flush();
         };
+    }
+}
+
+/// Where the Direct3D device every capture shares is kept: made by the first
+/// capture and kept for as long as the system is.
+#[derive(Debug, Default)]
+pub(super) struct DeviceSlot(Arc<OnceLock<SharedDevice>>);
+
+/// A Direct3D device, its immediate context, and its Windows Runtime
+/// wrapper, which each capture thread resolves for itself.
+#[derive(Clone, Debug)]
+pub(super) struct SharedDevice {
+    device: ID3D11Device,
+    context: ID3D11DeviceContext,
+    winrt: AgileReference<IDirect3DDevice>,
+}
+
+impl SharedDevice {
+    /// A new device whose calls are serialized, so the system's threads and
+    /// every capture thread can use it.
+    fn create() -> windows::core::Result<Self> {
+        let (device, context) = create_device()?;
+        let multithread: ID3D11Multithread = device.cast()?;
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "the session is ending, and a failure to close leaves nothing to retry"
+            reason = "the result is the previous setting, which nothing needs"
         )]
-        let _ = self.winrt_device.Close();
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes a flag; `multithread` is live.
+        let _ = unsafe { multithread.SetMultithreadProtected(true) };
+        let dxgi: IDXGIDevice = device.cast()?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `dxgi` is a live DXGI device; the call returns a new reference.
+        let winrt: IDirect3DDevice =
+            unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }?.cast()?;
+        Ok(Self {
+            device,
+            context,
+            winrt: AgileReference::new(&winrt)?,
+        })
+    }
+
+    /// Whether the device can no longer be used, such as after a graphics
+    /// driver reset.
+    fn lost(&self) -> bool {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes no arguments and only reads the state of
+        // `device`, which is live.
+        let removed = unsafe { self.device.GetDeviceRemovedReason() };
+        removed.is_err()
+    }
+}
+
+/// The shared device, made on first use. Once it is lost, such as after a
+/// graphics driver reset, each capture makes a device of its own instead.
+fn shared_device(slot: &OnceLock<SharedDevice>) -> windows::core::Result<SharedDevice> {
+    match slot.get() {
+        Some(shared) if shared.lost() => SharedDevice::create(),
+        Some(shared) => Ok(shared.clone()),
+        // Two captures that start together may both make one; the first
+        // kept is the one both use, and the other is dropped.
+        None => {
+            let made = SharedDevice::create()?;
+            Ok(slot.get_or_init(|| made).clone())
+        },
     }
 }
 
