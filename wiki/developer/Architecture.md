@@ -619,7 +619,9 @@ state, and Tauri keeps only that thread's `Sender`, never state behind a
 `Mutex`. Each command is `async`: it sends the owner thread a `Run`, a
 closure that calls one of the owner's methods, with a `tokio::sync::oneshot`
 reply channel, and awaits the reply, so a slow scan never freezes the window.
-A new command is a method on the owner and a command that calls it. The guided memory scan
+A new command is a method on the owner, a command in `commands.rs` that calls
+it, its name in `generate_handler!` in `main.rs`, and its call in the UI's
+`api.ts`. The guided memory scan
 ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) lives with the
 memory source. The AI-assisted discovery flow belongs to
 [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).

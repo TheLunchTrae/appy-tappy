@@ -94,7 +94,7 @@ impl<T: System + Capture + 'static> Host for T {
         self.start(window, crop, interval, handler)
     }
 
-    #[mutants::skip]
+    #[mutants::skip] // Sets a named Windows event, which no test can observe.
     fn reload_runtime(&self) {
         #[expect(
             clippy::let_underscore_must_use,

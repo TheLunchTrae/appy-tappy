@@ -47,6 +47,7 @@ fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
 }
 
 impl<H: Host> Owner<H> {
+    /// Lists the windows the user can pick.
     pub(crate) fn window_list(&self) -> Result<WindowList, String> {
         let windows = self.host.windows().map_err(|error| error.to_string())?;
         let processes = self.host.processes().map_err(|error| error.to_string())?;
@@ -71,6 +72,8 @@ impl<H: Host> Owner<H> {
         self.watched = None;
     }
 
+    /// Captures `window`, dropping the previous window's screenshots and
+    /// check, and answers once the capture started.
     pub(crate) fn pick(&mut self, window: u64) -> Result<(), String> {
         self.start(window, Crop::Whole, PREVIEW_INTERVAL, preview_message)
             .map(drop)
@@ -139,6 +142,7 @@ impl<H: Host> Owner<H> {
         self.failure = Some(failure);
     }
 
+    /// Keeps the newest frame as a screenshot and answers its index.
     pub(crate) fn screenshot(&mut self) -> Result<usize, String> {
         if let Some(failure) = &self.failure {
             let next = if failure.ended {
@@ -156,6 +160,8 @@ impl<H: Host> Owner<H> {
         Ok(self.screenshots.len().saturating_sub(1))
     }
 
+    /// What the check reads on the newest frame: `None` until a check is
+    /// set up and a frame arrived.
     pub(crate) fn reading(&self) -> Result<Option<Reading>, String> {
         let (Some(check), Some(latest)) = (&self.check, &self.latest) else {
             return Ok(None);

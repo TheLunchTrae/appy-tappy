@@ -117,10 +117,10 @@ pub(crate) fn save(
     Ok(id)
 }
 
-/// Removes the application `app` with its values and pictures, unless an
-/// automation watches one of its values. An application whose file cannot
-/// be read can be removed too, so the user can clear it away.
-pub(crate) fn remove(stores: &Stores, app: &str) -> Result<(), String> {
+/// Checks that the application `app` is saved and that no automation
+/// watches one of its values, so it can be removed. An application whose
+/// file cannot be read can be removed too, so the user can clear it away.
+pub(crate) fn check_removable(stores: &Stores, app: &str) -> Result<(), String> {
     let found = stores
         .apps
         .load()
@@ -131,8 +131,7 @@ pub(crate) fn remove(stores: &Stores, app: &str) -> Result<(), String> {
     let name = found
         .file
         .map_or_else(|_broken| app.to_owned(), |file| file.name);
-    automations::check_app_unused(stores, app, &name)?;
-    stores.apps.remove(app).map_err(|error| error.to_string())
+    automations::check_app_unused(stores, app, &name)
 }
 
 #[cfg(test)]
@@ -286,21 +285,21 @@ mod tests {
         });
         stores.automations.save(&file).expect("saves automations");
         assert_eq!(
-            remove(&stores, &id),
+            check_removable(&stores, &id),
             Err("Pause music uses a value of Example App. Change or delete it first.".to_owned())
         );
         stores
             .automations
             .save(&AutomationsFile::default())
             .expect("clears automations");
-        assert_eq!(remove(&stores, &id), Ok(()));
-        assert!(!stores.apps.folder(&id).exists());
+        assert_eq!(check_removable(&stores, &id), Ok(()));
+        stores.apps.remove(&id).expect("removes the application");
         assert_eq!(
-            remove(&stores, &id),
+            check_removable(&stores, &id),
             Err("That application is no longer saved.".to_owned())
         );
         fs::create_dir_all(stores.apps.folder("broken")).expect("broken folder");
-        assert_eq!(remove(&stores, "broken"), Ok(()));
+        assert_eq!(check_removable(&stores, "broken"), Ok(()));
         fs::remove_dir_all(folder).expect("clean up");
     }
 }
