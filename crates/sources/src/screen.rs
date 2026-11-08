@@ -4,7 +4,7 @@
 //! Capture is the only part that needs the operating system, so it sits
 //! behind the [`Capture`] trait. Everything else here is portable Rust over a
 //! cropped [`Image`] and gives the same result on every platform.
-//! `wiki/developer/Screen-regions.md` describes the source and its checks.
+//! `wiki/Screen-regions.md` describes the source and its checks.
 
 #![forbid(unsafe_code)]
 

@@ -1,27 +1,30 @@
-<!-- The wiki's sidebar. scripts/wiki.py fails the build when a page other than Home has no line here. -->
+<!-- The wiki's sidebar. mise run md:wiki:check fails when a page other than Home has no link here. -->
 
-**[User guide](Home.md)**
+**[Home](Home.md)**
 
-- [Install, update, and uninstall](user/Install,-update,-and-uninstall.md)
-- [The tray icon](user/The-tray-icon.md)
-- [Applications](user/Applications.md)
-- [Values](user/Values.md)
-- [References](user/References.md)
-- [Automations](user/Automations.md)
-- [Overlay](user/Overlay.md)
-- [Settings](user/Settings.md)
-- [Troubleshooting](user/Troubleshooting.md)
+**[User guide](Home.md#user-guide)**
 
-**[Developer docs](developer/Developer-docs.md)**
+- [Getting started](Getting-started.md)
+- [Applications](Applications.md)
+- [Values](Values.md)
+- [References](References.md)
+- [Automations](Automations.md)
+- [Settings](Settings.md)
+- [The tray icon](The-tray-icon.md)
+- [Troubleshooting](Troubleshooting.md)
 
-- [Architecture](developer/Architecture.md)
-- [Setup app](developer/Setup-app.md)
-- [Screen regions](developer/Screen-regions.md)
-- [Rules](developer/Rules.md)
-- [Actions](developer/Actions.md)
-- [Trace](developer/Trace.md)
-- [Installer](developer/Installer.md)
-- [MCP investigation server](developer/MCP-investigation-server.md)
-- [State machines](developer/State-machines.md)
-- [Rust standards](developer/Rust-standards.md)
-- [Wiki](developer/Wiki.md)
+**[Developer docs](Home.md#developer-docs)**
+
+- [Architecture](Architecture.md)
+- [Setup app](Setup-app.md)
+- [Screen regions](Screen-regions.md)
+- [Rules](Rules.md)
+- [Actions](Actions.md)
+- [Trace](Trace.md)
+- [Installer](Installer.md)
+- [State machines](State-machines.md)
+
+**[Contributing](Home.md#contributing)**
+
+- [Development](Development.md)
+- [Rust standards](Rust-standards.md)

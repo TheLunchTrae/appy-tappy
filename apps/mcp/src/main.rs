@@ -2,7 +2,7 @@
 //! to investigate how an app shows its state.
 //!
 //! The agent launches it and talks MCP over stdin and stdout. See
-//! `wiki/developer/MCP-investigation-server.md` for setup and the tool workflow.
+//! `wiki/Development.md#mcp-investigation-server` for setup and the tool workflow.
 
 #![forbid(unsafe_code)]
 

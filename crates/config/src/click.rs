@@ -1,6 +1,6 @@
 //! A click in another application: where it lands and how it presses.
 //!
-//! These are validated types; `wiki/developer/Actions.md` explains how the
+//! These are validated types; `wiki/Actions.md` explains how the
 //! runtime finds the target and when it clicks.
 
 use std::error::Error;

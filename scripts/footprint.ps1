@@ -1,6 +1,6 @@
 # Measures the shipped runtime on Windows and fails when it exceeds a
 # footprint target. `mise run rust:footprint` builds the runtime and runs it;
-# wiki/developer/Architecture.md#footprint says what each phase and target
+# wiki/Architecture.md#footprint says what each phase and target
 # measures. The targets are the constants below.
 #
 # The runtime gets scratch LOCALAPPDATA and APPDATA folders holding one

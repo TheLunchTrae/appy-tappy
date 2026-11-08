@@ -1,19 +1,17 @@
 name: Wiki
 
-# Publishes wiki/ to the repository's GitHub wiki, which mirrors it: every
-# wiki page is generated, and a page removed from wiki/ leaves the wiki. A
-# push to main publishes. A manual run on main publishes too; on any other
-# branch it is a dry run that keeps the built wiki in the run's artifacts.
-# wiki/developer/Wiki.md describes the pages it builds.
+# Publishes wiki/ to the repository's GitHub wiki, which mirrors it: a page
+# removed from wiki/ leaves the wiki. A push to main publishes. A manual run
+# on main publishes too; on any other branch it is a dry run that keeps the
+# built wiki in the run's artifacts. wiki/Development.md#wiki describes the
+# pages.
 on:
   push:
     branches:
       - main
     paths:
       - wiki/**
-      - scripts/wiki.py
       - .github/workflows/wiki.yml
-      - .config/mise/conf.d/markdown.toml
   workflow_dispatch:
 
 permissions:
@@ -33,23 +31,27 @@ jobs:
     permissions:
       # The token pushes to the wiki repository, which this scope covers.
       contents: write
-    env:
-      MISE_LOCKED: '1'
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # md:wiki installs the Python it names when it runs.
-      - name: Install mise
-        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
-        with:
-          version: '2026.10.19'
-          install: false
-          cache: true
+      # The wiki already shows each page's name as its title, so a page's
+      # level 1 heading goes, except on Home. Its page addresses have no .md,
+      # so relative links to pages lose it, anchors kept.
       - name: Build the wiki
-        run: mise run md:wiki
+        run: |
+          set -eu
+          mkdir -p artifacts/wiki
+          cp -R wiki/. artifacts/wiki/
+          cd artifacts/wiki
+          sed -E -i 's#\]\(([^]():/[:space:]]+)\.md(\#[^)]*)?\)#](\1\2)#g' *.md
+          for page in *.md; do
+            case $page in
+              Home.md | _*) ;;
+              *) sed -i '1{/^# /d}' "$page" ;;
+            esac
+          done
       - name: Keep the dry run's wiki
         if: github.ref != 'refs/heads/main'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

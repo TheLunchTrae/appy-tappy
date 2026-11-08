@@ -10,7 +10,7 @@ names each automation that cannot run, and why.
 ## Windows warns about the installer
 
 AppyTappy is not signed, so Windows warns the first time you run the installer.
-[Install](Install,-update,-and-uninstall.md#install) says what to select.
+[Install](Getting-started.md#install) says what to select.
 
 ## I can't find the tray icon
 
@@ -29,13 +29,13 @@ Check these in order:
 3. **Is the application running?** Point at the tray icon: it says
    **AppyTappy: attached** while one of your applications runs. The tray's
    **Active automations** lists the automations that run now.
-4. **Does the value read?** Turn on the [overlay](Overlay.md) to see what
-   AppyTappy reads, or look at the Values page while the application runs.
-   At a size the value wasn't drawn at, it reads as
+4. **Does the value read?** Turn on the [overlay](Applications.md#overlay) to
+   see what AppyTappy reads, or look at the Values page while the application
+   runs. At a size the value wasn't drawn at, it reads as
    [Window size](Values.md#window-size) describes, and the log says why a
-   value doesn't read there. A value also reads only while its
-   window shows: while the window is minimized, AppyTappy waits, and reads
-   the values again when it shows.
+   value doesn't read there. A value also reads only while its window shows:
+   while the window is minimized, AppyTappy waits, and reads the values again
+   when it shows.
 5. **Did it already run?** An automation runs once each time its condition
    becomes true. It runs again only after the condition has stopped being
    true, and after its wait.
@@ -67,7 +67,7 @@ says what to do.
 The game probably runs in exclusive fullscreen, which draws over every other
 window. Switch it to borderless or windowed fullscreen, or use
 **Picture in picture** on another monitor. See
-[Fullscreen](Overlay.md#fullscreen).
+[Fullscreen](Applications.md#fullscreen).
 
 ## Media or volume actions do nothing
 

@@ -1,4 +1,21 @@
-# Install, update, and uninstall
+# Getting started
+
+AppyTappy watches the windows of other programs on your Windows PC and acts
+when something in them changes. For example, it can pause your music when a
+progress bar fills up, or turn the volume down while a number on screen is
+above 90.
+
+In the user guide, an **application** is any program with a window that you want
+AppyTappy to watch: a game, a media player, a browser, or anything else.
+
+AppyTappy has two parts:
+
+- **AppyTappy Setup** is the program you open from the Start menu. You use it
+  to tell AppyTappy what to watch and what to do. Opening it while it is open
+  brings its window to the front.
+- **The background part** starts when you sign in and shows an icon in the
+  taskbar's notification area. It does the watching and runs your
+  automations, whether AppyTappy Setup is open or not.
 
 AppyTappy runs on Windows. It installs for your Windows account only, so it
 does not need administrator rights.
@@ -29,6 +46,22 @@ Installing does three things:
 - It starts AppyTappy's background part, which shows the
   [tray icon](The-tray-icon.md).
 - It sets the background part to start each time you sign in to Windows.
+
+## Make your first automation
+
+1. Open **AppyTappy** from the Start menu.
+2. [Add the application](Applications.md): pick the window of the program to
+   watch.
+3. [Make a value](Values.md): take a screenshot of that window and draw a box
+   around what AppyTappy should read, such as a number or a bar.
+4. [Make an automation](Automations.md): say when it runs, such as when the
+   value is at least 90, and what it does, such as pause the music.
+
+That is all. The background part runs the automation from then on.
+
+A **?** beside a field, heading, or column header in AppyTappy Setup explains
+it. Hold the pointer over it, or move to it with Tab, to read the explanation,
+and press Esc to hide it.
 
 ## Update
 
@@ -66,3 +99,12 @@ in the uninstaller.
 
 If the installer or the uninstaller asks you to close AppyTappy Setup and you
 cancel, the background part stays closed until you next sign in.
+
+## Leave before you save
+
+While you make or change an application, a value, a reference, or an
+automation, selecting a page, even the one it opened from, first asks whether
+to leave without saving when you have changed something, because what you have
+not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
+save is still under way, the pages, **Leave**, **Change window**, and
+**Discard** or **Cancel** wait for it to finish.

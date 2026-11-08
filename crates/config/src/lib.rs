@@ -1,7 +1,7 @@
 //! The saved files' formats, rules, their validation, and where the files live and how they are
 //! written.
 //!
-//! See `wiki/developer/Architecture.md` for this crate's boundaries.
+//! See `wiki/Architecture.md` for this crate's boundaries.
 
 #![forbid(unsafe_code)]
 
