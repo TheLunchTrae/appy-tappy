@@ -1,11 +1,24 @@
 //! The tray icon, its hidden window, and its right-click menu.
 //!
-//! The window procedure keeps no state: it turns the shell's notices into
-//! messages posted to its own window, and the tray thread's message loop,
-//! which owns the menu, handles them. While the menu is open, its own loop
-//! dispatches those posts to the procedure, which drops them, so the tray loop
-//! refreshes the icon each time the menu closes. Stopping the tray works even
-//! then, because the procedure itself closes the menu and ends the loop.
+//! The window procedure turns the shell's notices into messages posted to its
+//! own window, and the tray thread's message loop, which owns the menu,
+//! handles them. While the menu is open, its own loop dispatches those posts
+//! to the procedure, which drops them, so the tray loop refreshes the icon
+//! each time the menu closes. Stopping the tray works even then, because the
+//! procedure itself closes the menu and ends the loop.
+//!
+//! A request to close and the end of the session cannot wait for the loop,
+//! because a menu's loop would drop the one and Windows may end the process
+//! once the procedure returns from the other. The procedure tells the owner
+//! about both itself, through the [`Closing`] the tray thread attaches to the
+//! window, and at the end of the session it waits until [`Tray::stop`] says
+//! the owner is done.
+//!
+//! The window is hidden, and Windows ends a program with no visible window
+//! that takes more than 5 seconds over the end of the session, unless it
+//! gave a reason with `ShutdownBlockReasonCreate`. So the procedure gives
+//! one as soon as Windows asks whether the session may end, agrees, and
+//! takes the reason back once the session ends or Windows calls it off.
 
 use std::io;
 use std::mem::size_of;
@@ -13,21 +26,24 @@ use std::num::NonZeroU16;
 use std::ptr;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use windows::Win32::Foundation::{ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
     NOTIFY_ICON_MESSAGE, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, EndMenu, GetMessageW, GetSystemMetrics, HICON, HMENU, IDI_APPLICATION,
-    IMAGE_ICON, LR_SHARED, LoadIconW, LoadImageW, MENU_ITEM_FLAGS, MF_CHECKED, MF_GRAYED, MF_POPUP,
-    MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
-    RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow, TPM_NONOTIFY,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WINDOW_EX_STYLE, WM_APP, WM_CLOSE,
-    WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_NULL, WNDCLASSW, WS_OVERLAPPED,
+    DispatchMessageW, EndMenu, GWLP_USERDATA, GetMessageW, GetSystemMetrics, GetWindowLongPtrW,
+    HICON, HMENU, IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadIconW, LoadImageW, MENU_ITEM_FLAGS,
+    MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PostMessageW,
+    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON,
+    SetForegroundWindow, SetWindowLongPtrW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    TrackPopupMenu, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION,
+    WM_NULL, WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
@@ -52,8 +68,16 @@ const MENU_CHANGED: u32 = WM_APP + 5;
 /// Posted by [`Tray::stop`] to end the loop.
 const STOP_TRAY: u32 = WM_APP + 6;
 
-/// Posted by the tray window when Windows asks the program to close.
-const CLOSE_REQUESTED: u32 = WM_APP + 7;
+/// The longest the window procedure holds the end of the session while the
+/// owner undoes what the automations changed. With a reason given, Windows
+/// treats the hidden window like a visible one, which may take longer than
+/// 5 seconds, and after 5 seconds it can show the reason and let the user
+/// end the session anyway.
+const END_SESSION_WAIT: Duration = Duration::from_secs(10);
+
+/// The reason Windows can show while the runtime holds the end of the
+/// session.
+const END_SESSION_REASON: PCWSTR = w!("Restoring what automations changed");
 
 /// The exit code of the tray loop's `WM_QUIT` when [`Tray::stop`] ended it.
 /// Any other `WM_QUIT` means the window went away.
@@ -74,6 +98,9 @@ pub(crate) struct Tray {
     /// threads but posting to it from any thread is safe.
     window: usize,
     menus: Sender<TrayMenu>,
+    /// Dropped by [`Tray::stop`], which ends a wait at the end of the
+    /// session.
+    done: Sender<()>,
     thread: JoinHandle<io::Result<()>>,
 }
 
@@ -84,10 +111,11 @@ impl Tray {
     {
         let (ready, started) = mpsc::sync_channel(1);
         let (menus, updates) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("tray".to_owned())
             .spawn(move || {
-                let result = run_tray(&events, menu, &updates, &ready);
+                let result = run_tray(&events, menu, &updates, &finished, &ready);
                 let reason = match &result {
                     Ok(TrayExit::Stopped | TrayExit::NotStarted | TrayExit::OwnerGone) => None,
                     Ok(TrayExit::WindowGone) => Some("its window was destroyed".to_owned()),
@@ -106,6 +134,7 @@ impl Tray {
         Ok(Self {
             window,
             menus,
+            done,
             thread,
         })
     }
@@ -118,12 +147,21 @@ impl Tray {
     }
 
     pub(crate) fn stop(self) -> io::Result<()> {
+        let Self {
+            window,
+            done,
+            thread,
+            ..
+        } = self;
+        // A procedure that holds the end of the session returns first, so
+        // the loop can see the post below.
+        drop(done);
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed post means the loop already ended, and the join below reports its result"
         )]
-        let _ = post(self.window, STOP_TRAY);
-        join(self.thread, "tray")
+        let _ = post(window, STOP_TRAY);
+        join(thread, "tray")
     }
 }
 
@@ -149,6 +187,59 @@ enum TrayExit {
     WindowGone,
 }
 
+/// What the window procedure reaches through the window: how to tell the
+/// owner thread that Windows asks the program to close, and the end of
+/// [`Tray::stop`]'s sender, which says the owner thread is done.
+struct Closing<'a> {
+    /// Sends [`TrayEvent::CloseRequested`] and returns whether anyone
+    /// received it.
+    close: &'a dyn Fn() -> bool,
+    /// Disconnects when [`Tray::stop`] runs.
+    done: &'a Receiver<()>,
+}
+
+/// Tells the owner thread that the session ends and waits, at most
+/// [`END_SESSION_WAIT`], until it is done, so Windows does not end the
+/// process while the owner thread undoes what the automations changed.
+fn hold_end_of_session(closing: &Closing<'_>) {
+    if (closing.close)() {
+        // Every outcome, the owner thread's word included, ends the wait; it
+        // never sends, it only drops the sender.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a disconnect is the owner thread's word and a timeout the bound; both end the wait the same way"
+        )]
+        let _ = closing.done.recv_timeout(END_SESSION_WAIT);
+    }
+}
+
+/// Gives Windows the reason the runtime may hold the end of the session.
+fn give_reason(window: HWND) {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: this thread made the window, and the reason is a static wide
+    // string.
+    let given = unsafe { ShutdownBlockReasonCreate(window, END_SESSION_REASON) };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "without the reason Windows allows 5 seconds, and the session ends either way"
+    )]
+    let _ = given;
+}
+
+/// Takes the reason back, so a later end of the session that something
+/// else holds does not name the runtime.
+fn take_reason_back(window: HWND) {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: this thread made the window; a window with no reason fails
+    // without effect.
+    let taken = unsafe { ShutdownBlockReasonDestroy(window) };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "it fails when no reason was given, and the reason goes with the window anyway"
+    )]
+    let _ = taken;
+}
+
 /// The tray thread: creates the window and the icon, reports the start, and
 /// runs the message loop until [`Tray::stop`], the window goes, or nobody
 /// receives events.
@@ -156,11 +247,19 @@ fn run_tray<E: From<TrayEvent>>(
     events: &Sender<E>,
     mut menu: TrayMenu,
     updates: &Receiver<TrayMenu>,
+    done: &Receiver<()>,
     ready: &SyncSender<io::Result<usize>>,
 ) -> io::Result<TrayExit> {
+    let close = || events.send(E::from(TrayEvent::CloseRequested)).is_ok();
+    // It is declared before the window, so it outlives every call of the
+    // window's procedure.
+    let closing = Closing {
+        close: &close,
+        done,
+    };
     // The icon is declared after the window, so it is removed before the
     // window is destroyed.
-    let window = match TrayWindow::create() {
+    let window = match TrayWindow::create(&closing) {
         Ok(window) => window,
         Err(error) => {
             ready.send(Err(error)).map_err(io::Error::other)?;
@@ -202,7 +301,6 @@ fn run_tray<E: From<TrayEvent>>(
                 icon.show(&menu.tooltip);
                 picked.ok().flatten().map(TrayEvent::Picked)
             },
-            CLOSE_REQUESTED => Some(TrayEvent::CloseRequested),
             ADD_ICON_AGAIN => {
                 icon.add();
                 None
@@ -235,11 +333,13 @@ fn run_tray<E: From<TrayEvent>>(
 
 /// The hidden window that receives the shell's notices about the icon. It
 /// is top-level, not message-only, because only top-level windows hear that
-/// the taskbar restarted.
+/// the taskbar restarted and that the session ends.
 struct TrayWindow(HWND);
 
 impl TrayWindow {
-    fn create() -> io::Result<Self> {
+    /// Makes the window and attaches `closing` to it, which must outlive the
+    /// window.
+    fn create(closing: &Closing<'_>) -> io::Result<Self> {
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: no module name asks for the running program's own module.
         let module = unsafe { GetModuleHandleW(None) }?;
@@ -280,7 +380,20 @@ impl TrayWindow {
                 None,
             )
         }?;
-        Ok(Self(window))
+        // Until it is attached, the procedure sees only the creation notices,
+        // which it leaves to Windows.
+        let window = Self(window);
+        let address = ptr::from_ref(closing).expose_provenance();
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: this thread made the window; the call only stores an integer.
+        unsafe {
+            SetWindowLongPtrW(
+                window.0,
+                GWLP_USERDATA,
+                isize::try_from(address).map_err(io::Error::other)?,
+            );
+        }
+        Ok(window)
     }
 }
 
@@ -408,10 +521,34 @@ fn notify(action: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> bool {
     done.as_bool()
 }
 
-/// The tray window's procedure. It keeps no state: a right-click on the
-/// icon, a restarted taskbar, and a request to close become messages posted
-/// to the window, which the tray thread's loop handles. It never panics,
-/// because it runs inside a Windows call.
+/// Calls `act` with the [`Closing`] that [`TrayWindow::create`] attached to
+/// `window`, once it has. The reference lives only for the call, inside one
+/// call of the window's procedure.
+fn with_closing(window: HWND, act: impl FnOnce(&Closing<'_>)) {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes this thread's window handle and reads an integer.
+    let address = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) };
+    let Some(address) = usize::try_from(address)
+        .ok()
+        .filter(|&address| address != 0)
+    else {
+        return;
+    };
+    let closing = ptr::with_exposed_provenance::<Closing<'_>>(address);
+    #[expect(unsafe_code, reason = "a pointer the window holds")]
+    // SAFETY: only TrayWindow::create stores this value, from a Closing that
+    // outlives the window, and the procedure runs on the thread that holds it,
+    // which only reads it.
+    if let Some(closing) = unsafe { closing.as_ref() } {
+        act(closing);
+    }
+}
+
+/// The tray window's procedure. A right-click on the icon and a restarted
+/// taskbar become messages posted to the window, which the tray thread's loop
+/// handles. A request to close and the end of the session go to the owner
+/// thread at once, through [`Closing`]. It never panics, because it runs
+/// inside a Windows call.
 extern "system" fn on_tray_message(
     window: HWND,
     message: u32,
@@ -425,10 +562,30 @@ extern "system" fn on_tray_message(
             Some((OPEN_MENU, wparam))
         },
         // A close request must not destroy the window, or the icon would stay
-        // with no menu; the owner decides what it means. A non-zero `wparam`
-        // on WM_ENDSESSION means the session really ends.
-        WM_CLOSE => Some((CLOSE_REQUESTED, WPARAM(0))),
-        WM_ENDSESSION if wparam.0 != 0 => Some((CLOSE_REQUESTED, WPARAM(0))),
+        // with no menu; the owner decides what it means. A post would be lost
+        // while the menu is open, so the owner hears it from here.
+        WM_CLOSE => {
+            // An owner thread that is gone is already stopping.
+            with_closing(window, |closing| {
+                (closing.close)();
+            });
+            return LRESULT(0);
+        },
+        // The session may end, and the undo waits until it really does; the
+        // reason lets it take longer than 5 seconds then.
+        WM_QUERYENDSESSION => {
+            give_reason(window);
+            return LRESULT(1);
+        },
+        // A non-zero `wparam` means the session really ends, and Windows may
+        // end the process once this returns; zero means it was called off.
+        WM_ENDSESSION => {
+            if wparam.0 != 0 {
+                with_closing(window, hold_end_of_session);
+            }
+            take_reason_back(window);
+            return LRESULT(0);
+        },
         STOP_TRAY => {
             end_loop(STOPPED);
             return LRESULT(0);
@@ -619,7 +776,7 @@ mod tests {
     use std::time::Duration;
 
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetMenuItemCount, GetMenuItemID, GetMenuState, GetSubMenu, MF_BYPOSITION,
+        GetMenuItemCount, GetMenuItemID, GetMenuState, GetSubMenu, MF_BYPOSITION, SendMessageW,
     };
 
     use super::*;
@@ -690,6 +847,40 @@ mod tests {
         tray.show(sample_menu()).expect("the tray still runs");
         tray.stop().expect("stop");
         assert!(received.try_recv().is_err(), "a stop reports no end");
+    }
+
+    #[test]
+    fn the_end_of_the_session_waits_until_the_tray_stops() {
+        let (events, received) = mpsc::channel::<TrayEvent>();
+        let tray = Tray::start(events, sample_menu()).expect("start");
+        let address = tray.window;
+        let (returned, answered) = mpsc::channel();
+        // Windows sends the notice and waits for the procedure to return, as
+        // this thread does.
+        let windows = thread::spawn(move || {
+            let window = HWND(ptr::without_provenance_mut(address));
+            #[expect(unsafe_code, reason = "Win32 calls")]
+            // SAFETY: the calls take the tray's window handle and integers.
+            let (agreed, answer) = unsafe {
+                (
+                    SendMessageW(window, WM_QUERYENDSESSION, Some(WPARAM(0)), Some(LPARAM(0))),
+                    SendMessageW(window, WM_ENDSESSION, Some(WPARAM(1)), Some(LPARAM(0))),
+                )
+            };
+            assert_eq!(agreed.0, 1, "the session may end");
+            returned.send(answer.0).expect("report the answer");
+        });
+        let event = received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("an event");
+        assert_eq!(event, TrayEvent::CloseRequested);
+        assert!(
+            answered.recv_timeout(Duration::from_millis(500)).is_err(),
+            "the session waits while the owner undoes"
+        );
+        tray.stop().expect("stop");
+        assert_eq!(answered.recv_timeout(Duration::from_secs(5)), Ok(0));
+        windows.join().expect("no panic");
     }
 
     #[test]

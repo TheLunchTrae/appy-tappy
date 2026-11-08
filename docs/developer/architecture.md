@@ -134,7 +134,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   applications are attached, and one engine session per attached application
   that has automations, which holds its signal values and rule state. It applies each event as a
   `(state, event) -> (state, effects)` transition. Effects are action requests
-  and orders to start or stop a worker.
+  and orders to start or stop a worker. It also wakes when a cooldown that
+  held back a rule ends, as [Evaluation](rules.md#evaluation) describes.
 - **Lifecycle.** Reports when a watched application starts and exits. It matches
   processes to applications by the executable name in a process snapshot
   (`CreateToolhelp32Snapshot`), which does not open any process, so it is safe
@@ -163,7 +164,12 @@ Each thread below is a plain `std::thread`, and each channel is a
   saved applications and automations again. An application whose automations
   did not change keeps running untouched; one whose automations changed starts
   over, undoing what they changed first. An automation that cannot run, such
-  as one whose value lost a picture, is logged, and the rest run. The runtime
+  as one whose value lost a picture or one that breaks a rule after a hand
+  edit, is logged, and the rest run. When the applications' folder or the
+  automations' file cannot be read as a whole, such as while another program
+  holds the file, the runtime logs it, keeps running the plan it has, and
+  reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
+  `apps/runtime/src/owner.rs` set, before it waits for the next save. The runtime
   reads the setup app's files directly; the compiled config under
   [Files and handoff](#files-and-handoff) stays planned in
   [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
@@ -271,7 +277,10 @@ never turns autostart on by itself.
 The log is `runtime.log` in `%LOCALAPPDATA%\AppyTappy\logs\`, one
 timestamped line per start, exit, state change, and problem. A line that
 would take it past 512 KiB first moves it to `runtime.old.log`, replacing the
-older one, so the log never takes more than about 1 MiB. Only the copy that
+older one, so the log normally takes no more than about 1 MiB. When moving
+it or opening the new file fails, such as while another program holds the log open, the
+runtime keeps writing to the file it has and tries again with the next line,
+because the log is its only output. Only the copy that
 holds the single-instance guard rotates it; a second copy or an `--autostart`
 command only adds its line. When `%LOCALAPPDATA%` is unknown or the log
 cannot be opened, nothing is logged, and running exits with code 1.
@@ -298,22 +307,46 @@ small menu:
 
 When Windows asks the program to close, as when the session ends or a tool
 sends it a close message, the runtime logs it and quits the same way. Either
-way it undoes what the running automations changed before it exits.
+way it undoes what the running automations changed before it exits: the
+owner queues the undo, waits for the action thread to finish it, and only
+then stops the tray.
 
 `appytappy-platform` draws the icon and the menu from a description the
 runtime gives it, and the runtime's `tray` module decides what the
 description says. The tray thread makes a hidden top-level window, which,
 unlike a message-only window, hears when Explorer restarts, so it adds the
 icon again. At sign-in the taskbar may not exist yet; the icon then appears
-when it starts. The window's procedure keeps no state: it posts a right-click,
-a taskbar restart, and a close request back to its own window, and the tray
-thread's loop, which holds the menu, handles them. A close request never
-destroys the window, so the icon cannot outlive its menu.
+when it starts, and until then the window still hears that the session
+ends. The window's procedure posts a right-click and a taskbar restart back
+to its own window, and the tray thread's loop, which holds the menu, handles
+them. While the menu is open, Windows runs its own loop, which drops those
+posts, so the tray loop refreshes the icon each time the menu closes, which
+covers a taskbar restart in that time. Stopping the tray closes an open menu
+first.
 
-While the menu is open, Windows runs its own loop, which drops those posts.
-The tray loop therefore refreshes the icon each time the menu closes, which
-covers a taskbar restart in that time; a close request in that time is lost,
-and the next one works. Stopping the tray closes an open menu first.
+A close request and the end of the session cannot wait for the tray loop, so
+the procedure sends `CloseRequested` to the owner itself, through a value the
+tray thread attaches to the window (`GWLP_USERDATA`). The menu's loop still
+calls the procedure, so neither is lost while the menu is open. A close
+request never destroys the window, so the icon cannot outlive its menu.
+
+Windows may end the process as soon as every program returns from
+`WM_ENDSESSION`. So when the session ends, the procedure does not return
+until `Tray::stop` drops the sender it waits on, or 10 seconds pass. Windows
+ends a program with no visible window that takes more than 5 seconds there,
+unless the program gave a shutdown block reason. The procedure therefore
+calls `ShutdownBlockReasonCreate` on `WM_QUERYENDSESSION` and agrees at once,
+since the undo runs only once the session really ends; Windows then treats
+the hidden window like a visible one, which after 5 seconds can show the
+reason and let the user end the session anyway. `WM_ENDSESSION` takes the
+reason back with `ShutdownBlockReasonDestroy`, also when Windows calls the
+session's end off, so a later end that something else holds does not name the
+runtime. A critical shutdown, or a user who ends the session anyway, can still
+end the runtime before the wait is over. The restore journal lives only in memory: a forced
+end, a crash, or a wait that runs out loses what it had not undone.
+Without the tray window, such as when it cannot be made or someone destroys
+it, nothing hears the end of the session, and Windows ends the runtime
+without an undo.
 
 The Enabled item names what a pick does, enable or disable, rather than
 flipping the current setting, so a pick from a menu that was out of date
@@ -471,8 +504,13 @@ screen otherwise. Moving it never shows it again, so a page that the webview
 throttles cannot hold its place back; the page's own polls still open the
 overlay, start its capture and restart it after a change. `sources` answers where
 one window is with a few calls about that window alone, so following it costs
-no listing of every window. The picture-in-picture panel reports where it was
-moved, and the owner saves that once the panel stops moving.
+no listing of every window. The windows are matched to the overlays that are on
+when the main window opens, after an overlay changes and after an application
+is removed; a window that cannot open or close is reported and does not stop
+the others, and a removal or overlay change that worked is not undone by such
+a report. With no monitors listed, a panel opens where it was left. The
+picture-in-picture panel reports where it was moved, and the owner saves that
+once the panel stops moving.
 
 ## Unsafe code
 
@@ -541,6 +579,12 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
 - **[`tauri-plugin-global-shortcut`](https://v2.tauri.app/plugin/global-shortcut/).**
   Tauri's plugin for a key press that works while another window has focus,
   which the setup app uses for its screenshot shortcut.
+- **[`tauri-plugin-single-instance`](https://v2.tauri.app/plugin/single-instance/).**
+  Tauri's plugin that keeps one copy of the setup app running, so two copies
+  never save over each other or open the same overlays. A second copy tells
+  the first to bring its window forward and exits before it opens a window. A
+  named mutex like the runtime's would find the running copy too, but bringing
+  its window forward would also need a message between the two processes.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
   many random inputs to check a property, such as "a compiled config reads back
   to the same value". The standards require it at trust boundaries such as file

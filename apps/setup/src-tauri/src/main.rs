@@ -66,6 +66,11 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let code = tauri::Builder::default()
+        // A second copy that starts hands over to this one and exits, before
+        // it opens a window. The plugin asks to be registered first.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            overlay::window::bring_forward(app);
+        }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Bridge(sender.clone()))
         .on_window_event(overlay::window::on_event)

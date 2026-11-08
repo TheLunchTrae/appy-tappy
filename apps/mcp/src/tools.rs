@@ -141,7 +141,32 @@ impl<S: System> Session<S> {
         Ok(json!({ "windows": windows }))
     }
 
+    /// Attaches to the process `args` names. The process attached before
+    /// stays attached until the new one is ready, so a failed attach keeps
+    /// it and its scan. The error names it, unless the user refused its
+    /// program, because the error then says the program is refused.
     fn process_attach(&mut self, args: AttachArgs) -> Outcome {
+        match self.open_attachment(args) {
+            Ok((attached, result)) => {
+                self.attached = Some(attached);
+                Ok(result)
+            },
+            Err(error) => {
+                let still = self
+                    .attached
+                    .as_ref()
+                    .map(|old| &old.entry)
+                    .filter(|old| !self.refused.contains(&old.executable.to_lowercase()));
+                Err(attach_error(error, still))
+            },
+        }
+    }
+
+    /// Opens and checks the process `args` names, and describes it.
+    fn open_attachment(
+        &mut self,
+        args: AttachArgs,
+    ) -> Result<(Attached<S::Process>, Value), String> {
         let processes = self
             .system
             .processes()
@@ -164,7 +189,6 @@ impl<S: System> Session<S> {
                 format!("{blocked}: {} is an anti-cheat process", entry.executable)
             }
         })?;
-        self.attached = None;
         let process = self
             .system
             .open(&permit)
@@ -198,13 +222,13 @@ impl<S: System> Session<S> {
                 "size": module.size,
             })).collect::<Vec<_>>(),
         });
-        self.attached = Some(Attached {
+        let attached = Attached {
             entry,
             process,
             modules,
             scan: None,
-        });
-        Ok(result)
+        };
+        Ok((attached, result))
     }
 
     /// The anti-cheat class to apply to `entry`: a known anti-cheat's own
@@ -260,9 +284,16 @@ impl<S: System> Session<S> {
             FirstMode::Range => FirstScan::Value(range(args.min, args.max)?),
         };
         let attached = self.attached()?;
-        attached.scan = None;
-        let scan =
-            Scan::first(&attached.process, value_type, scan).map_err(|error| error.to_string())?;
+        // A snapshot can be as large as the previous one, so the previous
+        // scan is dropped first rather than held while the new one is made.
+        let dropped = attached.scan.take().is_some();
+        let scan = Scan::first(&attached.process, value_type, scan).map_err(|error| {
+            if dropped {
+                format!("{error}; the previous scan was dropped")
+            } else {
+                error.to_string()
+            }
+        })?;
         let summary = scan_summary(&scan);
         attached.scan = Some(scan);
         Ok(summary)
@@ -404,6 +435,18 @@ fn read_value(memory: &impl ProcessMemory, address: u64, value_type: ValueType) 
         .ok_or_else(|| "the read returned too few bytes".to_owned())
 }
 
+/// The error of a failed attach, naming the process `still` that stays
+/// attached, if any.
+fn attach_error(error: String, still: Option<&ProcessEntry>) -> String {
+    match still {
+        Some(entry) => format!(
+            "{error}; process {} ({}) is still attached",
+            entry.id, entry.executable
+        ),
+        None => error,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -419,6 +462,8 @@ mod tests {
     struct FakeProcess {
         bytes: Vec<u8>,
         image: String,
+        /// Whether listing its memory regions fails.
+        unlisted: bool,
     }
 
     impl FakeProcess {
@@ -433,6 +478,9 @@ mod tests {
 
     impl ProcessMemory for FakeProcess {
         fn regions(&self) -> io::Result<Vec<Region>> {
+            if self.unlisted {
+                return Err(io::Error::other("no regions"));
+            }
             Ok(vec![Region {
                 base: BASE,
                 size: self.bytes.len() as u64,
@@ -525,6 +573,7 @@ mod tests {
             Ok(FakeProcess {
                 bytes: vec![0; 0x1000],
                 image: self.image.clone(),
+                unlisted: false,
             })
         }
 
@@ -631,6 +680,72 @@ mod tests {
             );
             assert!(session.attached.is_none());
         }
+    }
+
+    #[test]
+    fn a_failed_attach_keeps_the_process_attached_before_and_its_scan() {
+        let (mut session, _questions) = attached();
+        session
+            .process_mut()
+            .write(BASE + 0x10, &1234_i32.to_le_bytes());
+        let first = json!({ "value_type": "i32", "mode": "exact", "value": 1234 });
+        call(&mut session, "memory_scan_first", first).unwrap();
+        "other.exe".clone_into(&mut session.system.image);
+        assert_eq!(
+            call(&mut session, "process_attach", json!({ "pid": 10 })),
+            Err(
+                "process 10 now runs other.exe, not the Example.exe the user allowed; it was \
+                 closed; process 10 (Example.exe) is still attached"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            call(&mut session, "memory_scan_results", json!({})).unwrap()["total"],
+            1,
+            "the scan is still there"
+        );
+        assert_eq!(
+            session.attached.as_ref().unwrap().process.image,
+            "EXAMPLE.EXE",
+            "the process attached first, not the one that failed its check"
+        );
+    }
+
+    #[test]
+    fn refusing_the_attached_program_does_not_call_it_still_attached() {
+        let (mut session, _questions) = attached();
+        session.system.answer = AccessAnswer::Refused;
+        let error = call(&mut session, "process_attach", json!({ "pid": 10 })).unwrap_err();
+        assert!(
+            error.starts_with("the user did not allow reading Example.exe's memory"),
+            "{error}"
+        );
+        assert!(!error.contains("still attached"), "{error}");
+        assert!(session.attached.is_some(), "the process stays attached");
+    }
+
+    #[test]
+    fn a_failed_first_scan_says_it_dropped_the_previous_one() {
+        let (mut session, _questions) = attached();
+        let first = json!({ "value_type": "i32", "mode": "exact", "value": 0 });
+        session.process_mut().unlisted = true;
+        let error = call(&mut session, "memory_scan_first", first.clone()).unwrap_err();
+        assert!(
+            !error.contains("dropped"),
+            "there was no scan to drop: {error}"
+        );
+        session.process_mut().unlisted = false;
+        call(&mut session, "memory_scan_first", first.clone()).unwrap();
+        session.process_mut().unlisted = true;
+        let error = call(&mut session, "memory_scan_first", first).unwrap_err();
+        assert!(
+            error.ends_with("; the previous scan was dropped"),
+            "{error}"
+        );
+        assert_eq!(
+            call(&mut session, "memory_scan_results", json!({})),
+            Err("no scan is running; call memory_scan_first first".to_owned())
+        );
     }
 
     #[test]
