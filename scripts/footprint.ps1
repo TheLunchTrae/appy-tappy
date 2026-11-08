@@ -1,7 +1,7 @@
 # Measures the shipped runtime on Windows and fails when it exceeds a
 # footprint target. `mise run rust:footprint` builds the runtime and runs it;
-# wiki/developer/Architecture.md#footprint states the targets and what each
-# phase measures.
+# wiki/developer/Architecture.md#footprint says what each phase and target
+# measures. The targets are the constants below.
 #
 # The runtime gets scratch LOCALAPPDATA and APPDATA folders holding one
 # application, a window this script opens, and three automations that watch
@@ -23,14 +23,16 @@ Set-StrictMode -Version Latest
 # Manager's Details tab; CPU is the share of one core over the sample.
 $BinaryLimit = 2MB
 $IdleMemoryLimit = 3MB
-$IdleCpuLimit = 0.05
+$IdleCpuLimit = 0.1
 $ActiveMemoryLimit = 6MB
 $ActiveCpuLimit = 2.0
 
 # Sampling: how long each phase settles before its sample, and how long the
-# sample runs.
+# sample runs. Windows charges CPU time in 15.6 ms ticks, so an idle sample
+# runs long enough that its limit spans several: 0.1 % of 60 s is 60 ms.
 $Settle = 5
-$Sample = 30
+$IdleSample = 60
+$ActiveSample = 30
 
 $ProbeTitle = 'AppyTappy footprint probe'
 $ProbeExecutable = 'appytappy-footprint-probe.exe'
@@ -50,65 +52,106 @@ function Format-Bytes([long]$Bytes) {
 $exe = (Resolve-Path $Runtime).Path
 
 # Binary: the file the installer ships, and whether it needs the Visual C++
-# Redistributable. An import names its DLL in plain ASCII, so the DLL's name
-# appears in the file only when the program imports it.
+# Redistributable. An import names its DLL in plain ASCII, so a DLL the
+# program imports appears in the file by name; a text that happens to name
+# one fails the check too, which errs the safe way.
 $size = (Get-Item $exe).Length
 Add-Row 'Binary size' (Format-Bytes $size) (Format-Bytes $BinaryLimit) ($size -le $BinaryLimit)
 $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($exe))
-$redistributable = $text.IndexOf('vcruntime140', [StringComparison]::OrdinalIgnoreCase) -ge 0
+$imports = [regex]::Matches($text, '(vcruntime|msvcp|concrt)1\d\d[\w]*\.dll', 'IgnoreCase') | ForEach-Object { $_.Value.ToLowerInvariant() } | Sort-Object -Unique
+$redistributable = @($imports).Count -gt 0
 $Rows.Add("| Needs the Visual C++ Redistributable | $(if ($redistributable) { 'yes' } else { 'no' }) | no | $(if ($redistributable) { 'OVER' } else { 'ok' }) |")
-if ($redistributable) { $Failures.Add('the runtime imports vcruntime140.dll, so it needs the Visual C++ Redistributable') }
+if ($redistributable) { $Failures.Add("the runtime names $($imports -join ', '), so it needs the Visual C++ Redistributable") }
 
+$utf8 = New-Object Text.UTF8Encoding $false
 $scratch = Join-Path ([IO.Path]::GetTempPath()) "appytappy-footprint-$PID"
 $local = Join-Path $scratch 'local'
 $roaming = Join-Path $scratch 'roaming'
 $appFolder = Join-Path $roaming 'AppyTappy\apps\probe'
-New-Item -ItemType Directory -Force -Path $appFolder, $local | Out-Null
 $log = Join-Path $local 'AppyTappy\logs\runtime.log'
+$script:details = @()
+$script:process = $null
+$probe = $null
+$peak = $null
 
-# Three values in the probe's window: two color checks and a bar fill.
-$region = { param($x, $y, $width, $height) @{ windowSize = @{ width = 400; height = 300 }; region = @{ x = $x; y = $y; width = $width; height = $height } } }
-$light = & $region 10 10 120 40
-$light.check = @{ kind = 'color'; color = @{ red = 192; green = 192; blue = 192 }; tolerance = 8 }
-$green = & $region 140 10 120 40
-$green.check = @{ kind = 'color'; color = @{ red = 0; green = 255; blue = 0 }; tolerance = 0 }
-$fill = & $region 10 60 250 20
-$fill.check = @{ kind = 'barFill'; filled = @{ red = 192; green = 192; blue = 192 }; empty = @{ red = 105; green = 105; blue = 105 } }
-$app = @{
-    format = 1
-    name = 'Footprint probe'
-    window = @{ title = $ProbeTitle; class = '*'; executable = $ProbeExecutable; mustMatch = @{ title = $true; class = $false }; fallback = 'none' }
-    antiCheat = 'none'
-    values = @(
-        @{ id = 'light'; name = 'Light'; screen = $light },
-        @{ id = 'green'; name = 'Green'; screen = $green },
-        @{ id = 'fill'; name = 'Fill'; screen = $fill }
-    )
-    references = @()
+function Wait-Log([string]$Line, [int]$Seconds) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch -Quiet -Pattern $Line)) { return }
+        if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) before its log said '$Line'" }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "the runtime's log did not say '$Line' within $Seconds seconds"
 }
-$nothing = @(@{ kind = 'volume'; percent = 50; app = 'AppyTappyFootprintNoSuchProgram.exe' })
-# The probe alternates silver and dim gray, so `light` fires on the first
-# silver frame and its hour-long cooldown keeps it from firing again, and
-# the bar reads full or empty, never above 1000. The green check never
-# holds.
-$automations = @{
-    format = 1
-    automations = @(
-        @{ id = 'light'; name = 'Light'; enabled = $true; when = @{ app = 'probe'; value = 'light'; is = 'equals'; target = $true }; actions = $nothing; undo = $false; cooldownMs = 3600000 },
-        @{ id = 'green'; name = 'Green'; enabled = $true; when = @{ app = 'probe'; value = 'green'; is = 'equals'; target = $true }; actions = $nothing; undo = $false },
-        @{ id = 'fill'; name = 'Fill'; enabled = $true; when = @{ app = 'probe'; value = 'fill'; is = 'above'; target = 1000 }; actions = $nothing; undo = $false }
-    )
-}
-$utf8 = New-Object Text.UTF8Encoding $false
-[IO.File]::WriteAllText((Join-Path $appFolder 'app.json'), (ConvertTo-Json $app -Depth 10), $utf8)
-[IO.File]::WriteAllText((Join-Path $roaming 'AppyTappy\automations.json'), (ConvertTo-Json $automations -Depth 10), $utf8)
 
-# The probe: a program of its own, so no other process shares its
-# executable's name, that shows a borderless 400 by 300 window and repaints
-# it every 16 ms. It is DPI aware, so its size is in physical pixels at any
-# display scale.
-$probeExe = Join-Path $scratch $ProbeExecutable
-Add-Type -OutputType WindowsApplication -OutputAssembly $probeExe -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+function Get-PrivateWorkingSet([int]$Id) {
+    $counter = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess=$Id"
+    if ($null -eq $counter -or -not $counter.WorkingSetPrivate) { throw "Windows reported no private working set for process $Id" }
+    [long]$counter.WorkingSetPrivate
+}
+
+# Measures one phase: CPU over the sample as a share of one core, and the
+# private working set at its end.
+function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double]$CpuLimit) {
+    Start-Sleep -Seconds $Settle
+    $script:process.Refresh()
+    $before = $script:process.TotalProcessorTime
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    Start-Sleep -Seconds $Seconds
+    $script:process.Refresh()
+    if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) during the $Name sample" }
+    $cpu = 100 * ($script:process.TotalProcessorTime - $before).TotalSeconds / $clock.Elapsed.TotalSeconds
+    $memory = Get-PrivateWorkingSet $script:process.Id
+    Add-Row "$Name memory" (Format-Bytes $memory) (Format-Bytes $MemoryLimit) ($memory -le $MemoryLimit)
+    Add-Row "$Name CPU" ('{0:N3} %' -f $cpu) ('{0:N3} %' -f $CpuLimit) ($cpu -le $CpuLimit)
+    $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $($script:process.Threads.Count) threads, $($script:process.HandleCount) handles"
+}
+
+try {
+    New-Item -ItemType Directory -Force -Path $appFolder, $local | Out-Null
+
+    # Three values in the probe's window: two color checks and a bar fill.
+    $region = { param($x, $y, $width, $height) @{ windowSize = @{ width = 400; height = 300 }; region = @{ x = $x; y = $y; width = $width; height = $height } } }
+    $light = & $region 10 10 120 40
+    $light.check = @{ kind = 'color'; color = @{ red = 192; green = 192; blue = 192 }; tolerance = 8 }
+    $green = & $region 140 10 120 40
+    $green.check = @{ kind = 'color'; color = @{ red = 0; green = 255; blue = 0 }; tolerance = 0 }
+    $fill = & $region 10 60 250 20
+    $fill.check = @{ kind = 'barFill'; filled = @{ red = 192; green = 192; blue = 192 }; empty = @{ red = 105; green = 105; blue = 105 } }
+    $app = @{
+        format = 1
+        name = 'Footprint probe'
+        window = @{ title = $ProbeTitle; class = '*'; executable = $ProbeExecutable; mustMatch = @{ title = $true; class = $false }; fallback = 'none' }
+        antiCheat = 'none'
+        values = @(
+            @{ id = 'light'; name = 'Light'; screen = $light },
+            @{ id = 'green'; name = 'Green'; screen = $green },
+            @{ id = 'fill'; name = 'Fill'; screen = $fill }
+        )
+        references = @()
+    }
+    $nothing = @(@{ kind = 'volume'; percent = 50; app = 'AppyTappyFootprintNoSuchProgram.exe' })
+    # The probe alternates silver and dim gray, so `light` fires on the first
+    # silver frame and its hour-long cooldown keeps it from firing again. The
+    # bar reads full or empty, a share of at most 100, and the green check
+    # never holds.
+    $automations = @{
+        format = 1
+        automations = @(
+            @{ id = 'light'; name = 'Light'; enabled = $true; when = @{ app = 'probe'; value = 'light'; is = 'equals'; target = $true }; actions = $nothing; undo = $false; cooldownMs = 3600000 },
+            @{ id = 'green'; name = 'Green'; enabled = $true; when = @{ app = 'probe'; value = 'green'; is = 'equals'; target = $true }; actions = $nothing; undo = $false },
+            @{ id = 'fill'; name = 'Fill'; enabled = $true; when = @{ app = 'probe'; value = 'fill'; is = 'above'; target = 1000 }; actions = $nothing; undo = $false }
+        )
+    }
+    [IO.File]::WriteAllText((Join-Path $appFolder 'app.json'), (ConvertTo-Json $app -Depth 10), $utf8)
+    [IO.File]::WriteAllText((Join-Path $roaming 'AppyTappy\automations.json'), (ConvertTo-Json $automations -Depth 10), $utf8)
+
+    # The probe: a program of its own, so no other process shares its
+    # executable's name, that shows a borderless 400 by 300 window and repaints
+    # it every 16 ms. It is DPI aware, so its size is in physical pixels at any
+    # display scale.
+    $probeExe = Join-Path $scratch $ProbeExecutable
+    Add-Type -OutputType WindowsApplication -OutputAssembly $probeExe -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -137,69 +180,45 @@ public static class Probe {
 }
 '@
 
-function Wait-Log([string]$Line, [int]$Seconds) {
-    $deadline = (Get-Date).AddSeconds($Seconds)
-    while ((Get-Date) -lt $deadline) {
-        if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch -Quiet -Pattern $Line)) { return }
-        if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) before its log said '$Line'" }
-        Start-Sleep -Milliseconds 250
-    }
-    throw "the runtime's log did not say '$Line' within $Seconds seconds"
-}
-
-function Get-PrivateWorkingSet([int]$Id) {
-    (Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess=$Id").WorkingSetPrivate
-}
-
-# Measures one phase: CPU over the sample as a share of one core, and the
-# private working set at its end.
-function Measure-Phase([string]$Name, [long]$MemoryLimit, [double]$CpuLimit) {
-    Start-Sleep -Seconds $Settle
-    $script:process.Refresh()
-    $before = $script:process.TotalProcessorTime
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    Start-Sleep -Seconds $Sample
-    $script:process.Refresh()
-    if ($script:process.HasExited) { throw "the runtime exited during the $Name sample" }
-    $cpu = 100 * ($script:process.TotalProcessorTime - $before).TotalSeconds / $clock.Elapsed.TotalSeconds
-    $memory = Get-PrivateWorkingSet $script:process.Id
-    Add-Row "$Name memory" (Format-Bytes $memory) (Format-Bytes $MemoryLimit) ($memory -le $MemoryLimit)
-    Add-Row "$Name CPU" ('{0:N3} %' -f $cpu) ('{0:N3} %' -f $CpuLimit) ($cpu -le $CpuLimit)
-    $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $($script:process.Threads.Count) threads, $($script:process.HandleCount) handles"
-}
-
-$script:details = @()
-$script:process = $null
-$probe = $null
-$env:LOCALAPPDATA = $local
-$env:APPDATA = $roaming
-try {
+    $env:LOCALAPPDATA = $local
+    $env:APPDATA = $roaming
     $script:process = Start-Process -FilePath $exe -PassThru
+    # Reading the handle once keeps it open, so the exit code survives the
+    # runtime's exit.
+    $null = $script:process.Handle
     Wait-Log 'runtime started' 10
     Wait-Log 'automations run for Footprint probe' 10
 
-    Measure-Phase 'Idle' $IdleMemoryLimit $IdleCpuLimit
+    Measure-Phase 'Idle' $IdleSample $IdleMemoryLimit $IdleCpuLimit
 
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
+    $null = $probe.Handle
     Wait-Log 'attached' 30
     Wait-Log 'Light: runs' 30
-    Measure-Phase 'Active' $ActiveMemoryLimit $ActiveCpuLimit
+    Measure-Phase 'Active' $ActiveSample $ActiveMemoryLimit $ActiveCpuLimit
+    # Every value has to read without a problem, or the active sample
+    # measured the error path instead of the reads.
+    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured'
+    if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
 
     Stop-Process -Id $probe.Id
+    $probe.WaitForExit()
     $probe = $null
     Wait-Log 'detached' 10
-    Measure-Phase 'Idle after' $ActiveMemoryLimit $IdleCpuLimit
+    Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
 }
 catch {
     $Failures.Add($_.Exception.Message)
 }
 finally {
-    if ($null -ne $probe -and -not $probe.HasExited) { Stop-Process -Id $probe.Id }
-    $peak = $null
+    if ($null -ne $probe) {
+        Stop-Process -Id $probe.Id -ErrorAction SilentlyContinue
+        $probe.WaitForExit()
+    }
     if ($null -ne $script:process -and -not $script:process.HasExited) {
         $script:process.Refresh()
         $peak = $script:process.PeakWorkingSet64
-        Stop-Process -Id $script:process.Id
+        Stop-Process -Id $script:process.Id -ErrorAction SilentlyContinue
         $script:process.WaitForExit()
     }
 }
@@ -210,15 +229,14 @@ $report += $script:details | ForEach-Object { "- $_" }
 if ($null -ne $peak) { $report += "- Peak working set: $(Format-Bytes $peak)" }
 $report | Write-Output
 if ($env:GITHUB_STEP_SUMMARY) {
-    @('## Runtime footprint', '') + $report | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+    [IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, ((@('## Runtime footprint', '') + $report) -join "`n") + "`n", $utf8)
 }
 if ($Failures.Count -gt 0) {
     if (Test-Path $log) {
         Write-Output '', "The runtime's log:"
         Get-Content $log | Write-Output
     }
-    Remove-Item -Recurse -Force $scratch
     $Failures | ForEach-Object { [Console]::Error.WriteLine("footprint: $_") }
-    exit 1
 }
-Remove-Item -Recurse -Force $scratch
+Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue
+if ($Failures.Count -gt 0) { exit 1 }

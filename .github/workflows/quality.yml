@@ -87,8 +87,7 @@ jobs:
       - name: Run the mutation shard
         run: mise run rust:mutants
 
-  # AppyTappy ships for Windows only. This job proves the runtime the
-  # installer ships meets its footprint targets, and the Rust workspace
+  # AppyTappy ships for Windows only. This job proves the Rust workspace
   # formats, lints, documents, and passes the member crates' tests on the
   # target platform, where the Windows adapters' tests run. The root package's
   # standards policy tests compare POSIX paths, so they run in `quality`.
@@ -117,9 +116,6 @@ jobs:
           install: true
           install_args: rust github:nextest-rs/nextest bun
           cache: true
-      # The runtime needs no setup UI, so its footprint check runs first.
-      - name: Check the runtime's footprint
-        run: mise run rust:footprint
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
         run: mise run ui:build
@@ -135,3 +131,30 @@ jobs:
       # if a benchmark errors, never on a slow time.
       - name: Benchmark
         run: mise run rust:bench
+
+  # Builds the runtime the installer ships and checks it against its
+  # footprint targets. It runs on a runner of its own, so no build beside it
+  # skews the CPU it measures.
+  footprint:
+    name: footprint
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
+      MISE_TASK_RUN_AUTO_INSTALL: 'false'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned tools
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          version: '2026.10.19'
+          install: true
+          install_args: rust
+          cache: true
+      - name: Check the runtime's footprint
+        run: mise run rust:footprint

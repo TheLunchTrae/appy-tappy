@@ -84,7 +84,7 @@ run = "cargo bench -p appytappy-sources --bench screen --locked"
 # Builds the runtime the installer ships and measures it on Windows: its
 # size, whether it needs the Visual C++ Redistributable, and its memory and
 # CPU while idle and while it reads a window. It fails when a measurement
-# exceeds its target in wiki/developer/Architecture.md#footprint.
+# exceeds its target; wiki/developer/Architecture.md#footprint describes them.
 [tasks."rust:footprint"]
 description = "Check the shipped runtime against its footprint targets (Windows only)"
 run = """

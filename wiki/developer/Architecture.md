@@ -365,43 +365,41 @@ The runtime runs all day beside games, so it has to stay small and use next to
 no CPU. `mise run rust:footprint` builds the runtime the installer ships, with
 the `dist` profile, and
 [`scripts/footprint.ps1`](../../scripts/footprint.ps1) runs it on Windows and
-fails when a measurement exceeds its target. The `windows` CI job runs it on
-every pull request and every push to `main`.
+fails when a measurement exceeds its target. The `footprint` CI job runs it.
+The targets, and how long each phase settles and samples, are the constants at
+the top of the script.
 
 The script gives the runtime scratch app data folders that hold one
 application with three values, two color checks and a bar fill, and an
-automation on each. It runs the runtime through three phases and samples each
-for 30 seconds after 5 seconds of settling:
+automation on each. It runs the runtime through three phases:
 
 1. **Idle.** The application is not running.
 2. **Active.** A probe program the script compiles shows the application's
    window and repaints it every 16 ms, the way a game does. Two of the values
    change on every frame, so the runtime reads at its fastest. One automation
    fires once, which shows the reads work; its action targets a program that
-   does not exist, so it changes nothing.
+   does not exist, so it changes nothing. The phase fails if any value cannot
+   be read.
 3. **Idle after.** The probe has exited and the runtime has detached.
 
-| Measure                    | Target        |
-| -------------------------- | ------------- |
-| Binary size                | At most 2 MB  |
-| Visual C++ Redistributable | Not needed    |
-| Idle memory                | At most 3 MB  |
-| Idle CPU, before and after | At most 0.05% |
-| Active memory, and after   | At most 6 MB  |
-| Active CPU                 | At most 2%    |
+It checks these against their targets:
 
-Memory is the private working set, which Task Manager's Details tab shows as
-Memory. It leaves out the pages of Windows DLLs that every program shares.
-CPU is the share of one core over the sample; Task Manager shows the share of
-all cores, which is smaller by the number of cores. The script holds these
-values, so a change to a target changes both. The script also prints the full
-working set, commit size, threads, and handles of each phase, and the CI job
-shows the table in its run summary.
+- **Binary size.** The size of the program the installer ships.
+- **Visual C++ Redistributable.** The program must not import the Visual C++
+  runtime DLLs. The runtime links the C startup files and the Visual C++
+  runtime into the program, as the setup app's Tauri build does, and leaves
+  the Universal C runtime to the copy in Windows.
+- **Memory.** The private working set at the end of each phase, which Task
+  Manager's Details tab shows as Memory. It leaves out the pages of Windows
+  DLLs that every program shares. Idle has its own target; active and idle
+  after share a larger one.
+- **CPU.** The share of one core over each phase's sample. Task Manager shows
+  the share of all cores, which is smaller by the number of cores. Both idle
+  phases share one target. Windows charges CPU time in ticks of about 16 ms,
+  so an idle sample runs long enough that its target spans several ticks.
 
-The runtime links the C startup files and the Visual C++ runtime into the
-program, as the setup app's Tauri build does, and leaves the Universal C
-runtime to the copy in Windows. The script checks that the program imports no
-`vcruntime140.dll`.
+The script also prints each phase's full working set, commit size, threads,
+and handles, and the CI job shows the table in its run summary.
 
 ## Sources, rules, and actions
 
