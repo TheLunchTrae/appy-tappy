@@ -11,13 +11,13 @@
 //! not read it, so a hand edit that breaks or repeats it stops nothing, and
 //! [`unique_ids`] gives each automation one the page can go by.
 
+use std::fs;
+
 use appytappy_config::action::KeyChord;
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
 };
 use appytappy_config::signal::SignalName;
-use std::fs;
-
 use appytappy_config::store::{AppStore, StoredApp};
 use appytappy_sources::screen::saved;
 use serde::Serialize;
