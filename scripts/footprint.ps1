@@ -47,14 +47,14 @@ $ActiveSample = 30
 # first attaches load libraries and set up thread pools once, so the check
 # compares with the count the idle after phase ends on, a minute after the
 # third detach, once that capture has been torn down. A capture that left
-# its handles behind added about 10 a cycle. A clean one added 1 or 2 over
-# six cycles counted two minutes later, and about 1 a cycle counted at once,
-# while Windows still keeps idle thread pool workers. So 3 cycles and at most
-# 8 more handles than at the end of the idle after phase tell the two apart
-# with room on both sides.
+# its handles behind added about 10 a cycle, about 30 over 3 cycles. A clean
+# one added 1 or 2 over six cycles counted two minutes later, and up to 5 over
+# 3 cycles counted 30 seconds later, while Windows still keeps idle thread
+# pool workers. So 3 cycles and at most 12 more handles than at the end of
+# the idle after phase tell the two apart with room on both sides.
 $MoreCycles = 3
 $HandleWait = 30
-$HandleGrowthLimit = 8
+$HandleGrowthLimit = 12
 
 $ProbeTitle = 'AppyTappy footprint probe'
 $ProbeExecutable = 'appytappy-footprint-probe.exe'
