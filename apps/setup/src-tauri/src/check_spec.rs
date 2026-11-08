@@ -17,7 +17,7 @@ use appytappy_config::app_file::{
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch};
 use appytappy_sources::screen::digits::{DigitReader, LearnError};
 use appytappy_sources::screen::mask::Mask;
-use appytappy_sources::screen::{Image, Region};
+use appytappy_sources::screen::{Image, Region, Size};
 use appytappy_sources::system::Rgb;
 use serde::{Deserialize, Serialize};
 
@@ -105,6 +105,10 @@ pub(crate) enum CheckSpec {
     /// editor builds it; a value names a saved reference instead.
     Characters {
         region: RegionSpec,
+        /// The screenshot the region was drawn on. Every labeled screenshot
+        /// and the recording must have its window size, since the region
+        /// means another spot on a window of another size.
+        screenshot: usize,
         #[serde(default)]
         reference: Option<ReferenceRef>,
         ink: ColorSpec,
@@ -348,6 +352,59 @@ pub(crate) fn to_saved_reference(
     ))
 }
 
+/// The window size of screenshot `drawn_on`, the one the region of `spec`
+/// was drawn on, once every other screenshot and the recording that `spec`
+/// cuts at the region have that size too.
+///
+/// # Errors
+///
+/// Returns [`SpecError::NoScreenshot`] for a screenshot that does not exist,
+/// or [`SpecError::OtherSize`] naming the first screenshot or the recording
+/// of another size.
+pub(crate) fn drawn_size(
+    spec: &CheckSpec,
+    session: Session<'_>,
+    drawn_on: usize,
+) -> Result<Size, SpecError> {
+    let size_of = |screenshot: usize| {
+        session
+            .screenshots
+            .get(screenshot)
+            .map(Image::size)
+            .ok_or(SpecError::NoScreenshot)
+    };
+    let drawn = size_of(drawn_on)?;
+    let same = |cut: Cut, size: Size| {
+        if size == drawn {
+            Ok(())
+        } else {
+            Err(SpecError::OtherSize {
+                cut,
+                size,
+                drawn_on,
+                drawn,
+            })
+        }
+    };
+    match spec {
+        CheckSpec::Image { screenshot, .. } => {
+            same(Cut::Compared(*screenshot), size_of(*screenshot)?)?;
+        },
+        CheckSpec::Characters {
+            labels, recorded, ..
+        } => {
+            for label in labels {
+                same(Cut::Label(label.screenshot), size_of(label.screenshot)?)?;
+            }
+            if let Some(recording) = session.recording.filter(|_| !recorded.is_empty()) {
+                same(Cut::Recording, recording.window_size())?;
+            }
+        },
+        CheckSpec::Number { .. } | CheckSpec::BarFill { .. } | CheckSpec::Color { .. } => {},
+    }
+    Ok(drawn)
+}
+
 /// Builds the check `spec` describes from the `session`.
 ///
 /// # Errors
@@ -492,6 +549,7 @@ fn taught_reader(
     region: Region,
 ) -> Result<DigitReader, SpecError> {
     let CheckSpec::Characters {
+        screenshot,
         reference,
         ink,
         tolerance,
@@ -501,6 +559,7 @@ fn taught_reader(
     else {
         return Err(SpecError::NotAValue);
     };
+    drawn_size(spec, session, *screenshot)?;
     let mut reader = match reference {
         Some(saved) => {
             let saved = (session.references)(saved).map_err(SpecError::Reference)?;
@@ -599,6 +658,17 @@ fn recorded_image(
         .ok_or(SpecError::NoRecording)
 }
 
+/// What a check cuts at its region besides the screenshot it was drawn on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cut {
+    /// A labeled screenshot, by index.
+    Label(usize),
+    /// The kept readings of the recording.
+    Recording,
+    /// The screenshot an image check compares against, by index.
+    Compared(usize),
+}
+
 /// A check the UI described cannot be built.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SpecError {
@@ -620,6 +690,18 @@ pub(crate) enum SpecError {
     NoRecording,
     /// The region is not the one the session's recording recorded.
     RecordedElsewhere,
+    /// A screenshot or the recording the check cuts at its region has
+    /// another window size than the screenshot it was drawn on.
+    OtherSize {
+        /// What has the other size.
+        cut: Cut,
+        /// Its window size.
+        size: Size,
+        /// The screenshot the region was drawn on, by index.
+        drawn_on: usize,
+        /// That screenshot's window size.
+        drawn: Size,
+    },
     /// A picture could not be encoded as PNG.
     Picture,
     /// A saved reference the check names cannot be had, and why.
@@ -663,6 +745,35 @@ impl fmt::Display for SpecError {
             Self::RecordedElsewhere => formatter.write_str(
                 "The region changed since it was recorded. Put it back, or record it again.",
             ),
+            Self::OtherSize {
+                cut,
+                size,
+                drawn_on,
+                drawn,
+            } => {
+                // The UI numbers screenshots from 1.
+                let drawn_on = drawn_on.saturating_add(1);
+                let what = match cut {
+                    Cut::Label(screenshot) => {
+                        format!("Screenshot {} is", screenshot.saturating_add(1))
+                    },
+                    Cut::Recording => "The recording is of a window of".to_owned(),
+                    Cut::Compared(screenshot) => format!(
+                        "Screenshot {}, which the image is compared against, is",
+                        screenshot.saturating_add(1)
+                    ),
+                };
+                let fix = match cut {
+                    Cut::Label(_) => "Clear its label, or draw the region on it instead.",
+                    Cut::Recording => "Use its settings, or discard the recording.",
+                    Cut::Compared(_) => "Compare against a screenshot of that size.",
+                };
+                write!(
+                    formatter,
+                    "{what} {size}, but the region was drawn on screenshot {drawn_on}, which is \
+                     {drawn}. {fix}"
+                )
+            },
             Self::Picture => formatter.write_str("A picture of the region could not be saved."),
             Self::Reference(why) => formatter.write_str(why),
             Self::OtherApplication => formatter.write_str(
@@ -788,6 +899,7 @@ mod tests {
     ) -> CheckSpec {
         CheckSpec::Characters {
             region,
+            screenshot: 0,
             reference,
             ink: RED,
             tolerance: 0,
@@ -1012,7 +1124,7 @@ mod tests {
         );
         // A saved reference teaches on its own, with no new label.
         let saved_only = characters(left(), Some(digits_ref()), Vec::new(), Vec::new());
-        assert!(build(&saved_only, session(&[], None)).is_ok());
+        assert!(build(&saved_only, session(&[screenshot()], None)).is_ok());
     }
 
     #[test]
@@ -1079,6 +1191,72 @@ mod tests {
     }
 
     #[test]
+    fn what_a_check_cuts_at_its_region_has_the_size_it_was_drawn_at() {
+        let small = Image::new(
+            Size {
+                width: 2,
+                height: 2,
+            },
+            [0, 0, 255, 0].repeat(4),
+        )
+        .expect("matching length");
+        let screenshots = [screenshot(), small.clone()];
+        let now = std::time::Instant::now();
+        let region = Region::new(0, 0, 2, 2).expect("not empty");
+        let mut recording = Recording::new(1, region, (RED.into(), 0), small.size(), now);
+        recording.offer(&small, now).expect("a reading");
+        let kept = vec![RecordedLabel {
+            reading: 0,
+            text: "1".to_owned(),
+        }];
+        let labeled_both = characters(left(), None, [one(0), one(1)].concat(), Vec::new());
+        let error = build(&labeled_both, session(&screenshots, None)).expect_err("two sizes");
+        assert_eq!(
+            error.to_string(),
+            "Screenshot 2 is 2x2, but the region was drawn on screenshot 1, which is 4x2. Clear \
+             its label, or draw the region on it instead."
+        );
+        let recorded_elsewhere = characters(left(), None, one(0), kept.clone());
+        assert_eq!(
+            build(&recorded_elsewhere, session(&screenshots, Some(&recording)))
+                .expect_err("recorded at another size")
+                .to_string(),
+            "The recording is of a window of 2x2, but the region was drawn on screenshot 1, \
+             which is 4x2. Use its settings, or discard the recording."
+        );
+        let mut drawn_on_small = characters(left(), None, one(1), kept);
+        if let CheckSpec::Characters { screenshot, .. } = &mut drawn_on_small {
+            *screenshot = 1;
+        }
+        assert!(
+            build(&drawn_on_small, session(&screenshots, Some(&recording))).is_ok(),
+            "all of one size"
+        );
+        assert_eq!(
+            recorded_problems(&labeled_both, session(&screenshots, None)),
+            Err(error),
+            "review checks the sizes too"
+        );
+        let image = CheckSpec::Image {
+            region: left(),
+            screenshot: 1,
+            tolerance: 0,
+            selection: None,
+        };
+        assert_eq!(
+            drawn_size(&image, session(&screenshots, None), 0)
+                .expect_err("compared at another size")
+                .to_string(),
+            "Screenshot 2, which the image is compared against, is 2x2, but the region was drawn \
+             on screenshot 1, which is 4x2. Compare against a screenshot of that size."
+        );
+        assert_eq!(
+            drawn_size(&image, session(&screenshots, None), 1),
+            Ok(small.size())
+        );
+    }
+
+    #[test]
     fn a_label_the_reference_cannot_learn_names_the_text() {
         let spec = characters(
             whole(),
@@ -1103,7 +1281,7 @@ mod tests {
     #[test]
     fn the_ui_describes_checks_in_camel_case_json() {
         // The owner's requests parse the other kinds; these are the numbers.
-        let json = r#"{"kind":"characters","region":{"x":1,"y":2,"width":3,"height":4},
+        let json = r#"{"kind":"characters","region":{"x":1,"y":2,"width":3,"height":4},"screenshot":0,
             "ink":{"red":1,"green":2,"blue":3},"tolerance":5,
             "labels":[{"screenshot":0,"text":"12"}]}"#;
         let spec: CheckSpec = serde_json::from_str(json).expect("valid JSON");
@@ -1116,6 +1294,7 @@ mod tests {
                     width: 3,
                     height: 4
                 },
+                screenshot: 0,
                 reference: None,
                 ink: ColorSpec {
                     red: 1,
@@ -1183,6 +1362,7 @@ mod tests {
     fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
         let spec = CheckSpec::Characters {
             region: left(),
+            screenshot: 0,
             reference: Some(digits_ref()),
             ink: RED,
             tolerance: 3,
@@ -1226,6 +1406,7 @@ mod tests {
         };
         let spec = CheckSpec::Characters {
             region: left(),
+            screenshot: 0,
             reference: Some(digits_ref()),
             ink: RED,
             tolerance: 0,
@@ -1275,20 +1456,21 @@ mod tests {
         assert_eq!(picture.size(), recording.readings()[0].image.size());
 
         let only_recorded = characters(whole(), None, Vec::new(), recorded(0));
-        assert!(build(&only_recorded, session(&[], Some(&recording))).is_ok());
+        assert!(build(&only_recorded, session(&[screenshot()], Some(&recording))).is_ok());
         assert_eq!(
-            build(&only_recorded, session(&[], None)),
+            build(&only_recorded, session(&[screenshot()], None)),
             Err(SpecError::NoRecording)
         );
         assert_eq!(
             build(
                 &characters(whole(), None, Vec::new(), recorded(1)),
-                session(&[], Some(&recording))
+                session(&[screenshot()], Some(&recording))
             ),
             Err(SpecError::NoRecording)
         );
         let moved = characters(left(), None, Vec::new(), recorded(0));
-        let error = build(&moved, session(&[], Some(&recording))).expect_err("another region");
+        let error =
+            build(&moved, session(&[screenshot()], Some(&recording))).expect_err("another region");
         assert_eq!(error, SpecError::RecordedElsewhere);
         assert_eq!(
             error.to_string(),
@@ -1310,13 +1492,13 @@ mod tests {
         };
         // The saved reference took the red square for a 1.
         let spec = characters(left(), Some(digits_ref()), Vec::new(), as_text("7"));
-        let problems =
-            recorded_problems(&spec, session(&[], Some(&recording))).expect("a valid spec");
+        let problems = recorded_problems(&spec, session(&[screenshot()], Some(&recording)))
+            .expect("a valid spec");
         assert_eq!(problems.len(), 1);
         assert!(problems[0].is_some(), "{problems:?}");
         let spec = characters(left(), Some(digits_ref()), Vec::new(), as_text("1"));
         assert_eq!(
-            recorded_problems(&spec, session(&[], Some(&recording))),
+            recorded_problems(&spec, session(&[screenshot()], Some(&recording))),
             Ok(vec![None])
         );
         let color = CheckSpec::Color {
@@ -1325,7 +1507,7 @@ mod tests {
             tolerance: 0,
         };
         assert_eq!(
-            recorded_problems(&color, session(&[], Some(&recording))),
+            recorded_problems(&color, session(&[screenshot()], Some(&recording))),
             Ok(Vec::new())
         );
     }

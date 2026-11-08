@@ -22,6 +22,16 @@ use crate::window_list::{WindowFit, WindowList};
 /// Where a request's answer goes.
 pub(crate) type Reply<T> = oneshot::Sender<T>;
 
+/// Why the picked window's capture failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CaptureFailure {
+    /// Why, for the user.
+    pub(crate) error: String,
+    /// Whether the window closed, which ends the capture for good. Any other
+    /// failure lasts only until the next good frame.
+    pub(crate) ended: bool,
+}
+
 /// A value the check read, as the UI shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
@@ -455,8 +465,8 @@ pub(crate) enum Message {
     CaptureFailed {
         /// Which capture stopped.
         generation: u64,
-        /// Why, for the user.
-        error: String,
+        /// Why, and whether the capture ended.
+        failure: CaptureFailure,
     },
     /// An application's overlay read its values, or stopped and why.
     Overlay {
@@ -592,6 +602,7 @@ mod tests {
             "check": {
                 "kind": "characters",
                 "region": {"x": 0, "y": 0, "width": 1, "height": 1},
+                "screenshot": 0,
                 "ink": {"red": 0, "green": 0, "blue": 0},
                 "tolerance": 0,
                 "labels": []

@@ -1,8 +1,8 @@
 // The check the user is setting up, and when it is complete enough to try.
 
-import type { CharactersSpec, CheckSpec, RecordedLabel, ReferenceDef, ReferenceRef } from './api.ts';
+import type { CharactersSpec, CheckSpec, RecordedLabel, RecordingSettings, ReferenceDef, ReferenceRef } from './api.ts';
 import type { Color } from './pixels.ts';
-import type { Rect } from './region.ts';
+import { type Rect, type Size, sameRect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, type SelectStep } from './selection.ts';
 
 /** The kinds of check, in the order the capture screen offers them. */
@@ -30,6 +30,8 @@ export const DEFAULT_TOLERANCE: Readonly<Record<CheckKind, number>> = {
 export interface Draft {
   readonly kind: CheckKind;
   readonly region: Rect | null;
+  /** The screenshot the region was drawn on, whose window size the region's pixels refer to. */
+  readonly drawnOn: number | null;
   readonly tolerance: number;
   /** The reference's characters' color. */
   readonly ink: Color | null;
@@ -57,6 +59,7 @@ export interface Draft {
 export const EMPTY_DRAFT: Draft = {
   kind: 'number',
   region: null,
+  drawnOn: null,
   tolerance: DEFAULT_TOLERANCE.number,
   ink: null,
   labels: new Map(),
@@ -71,6 +74,34 @@ export const EMPTY_DRAFT: Draft = {
   ignoreBackground: true,
   whole: false,
 };
+
+/** Where the region is: its rectangle and the screenshot it was drawn on. */
+export type Drawn = Pick<Draft, 'region' | 'drawnOn'>;
+
+/**
+ * Whether `draft` would record other than the stopped recording's `settings`: another region, characters' color or
+ * tolerance, or a region drawn on a screenshot whose window size `drawnSize` is not the recording's.
+ */
+export function settingsDiffer(draft: Draft, settings: RecordingSettings, drawnSize: Size | null): boolean {
+  return (
+    draft.tolerance !== settings.tolerance ||
+    !sameRect(draft.region, settings.region) ||
+    draft.ink?.red !== settings.ink.red ||
+    draft.ink.green !== settings.ink.green ||
+    draft.ink.blue !== settings.ink.blue ||
+    drawnSize?.width !== settings.windowSize.width ||
+    drawnSize.height !== settings.windowSize.height
+  );
+}
+
+/**
+ * The newest of `screenshots`, each a screenshot's index and its window size, that has `size`, or null when none
+ * has it.
+ */
+export function newestOfSize(screenshots: readonly (readonly [number, Size])[], size: Size): number | null {
+  const found = screenshots.findLast(([, each]) => each.width === size.width && each.height === size.height);
+  return found?.[0] ?? null;
+}
 
 /** The draft's check, or what the user still has to do. */
 export type Built<Spec = CheckSpec> =
@@ -106,12 +137,13 @@ export function reviewSpec(
   kept: readonly RecordedLabel[],
   reference: ReferenceRef | null,
 ): CharactersSpec | null {
-  if (draft.region === null || draft.ink === null) {
+  if (draft.region === null || draft.drawnOn === null || draft.ink === null) {
     return null;
   }
   return {
     kind: 'characters',
     region: draft.region,
+    screenshot: draft.drawnOn,
     reference,
     ink: draft.ink,
     tolerance: draft.tolerance,
@@ -122,7 +154,7 @@ export function reviewSpec(
 
 /** The characters `draft` teaches the reference `reference`, or a new one when null; or what it still needs. */
 export function buildCharacters(draft: Draft, reference: ReferenceRef | null): Built<CharactersSpec> {
-  if (draft.region === null) {
+  if (draft.region === null || draft.drawnOn === null) {
     return missing('Draw a region around the characters on a screenshot.');
   }
   if (draft.ink === null) {
@@ -197,11 +229,11 @@ export function toReference(draft: Draft, existing: ReferenceDef | null): Draft 
 }
 
 /**
- * `draft` leaving the reference editor for the value it was opened from: the value's region comes back, whatever
- * region the reference was taught on, and the editor's labels and recorded readings are dropped.
+ * `draft` leaving the reference editor for the value it was opened from: the value's region, and the screenshot it
+ * was drawn on, come back, whatever region the reference was taught on, and the editor's labels and recorded readings are dropped.
  */
-export function fromReference(draft: Draft, valueRegion: Rect | null): Draft {
-  return { ...draft, region: valueRegion, labels: new Map(), recorded: new Map() };
+export function fromReference(draft: Draft, value: Drawn): Draft {
+  return { ...draft, region: value.region, drawnOn: value.drawnOn, labels: new Map(), recorded: new Map() };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

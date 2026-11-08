@@ -32,10 +32,13 @@ import {
   buildCharacters,
   buildSpec,
   CHECK_KINDS,
+  type Drawn,
   EMPTY_DRAFT,
   fromReference,
   KIND_NAMES,
+  newestOfSize,
   reviewSpec,
+  settingsDiffer,
   toReference,
   withKind,
 } from '../lib/check.ts';
@@ -111,13 +114,13 @@ function viewHint(
   shortcut: string,
   tool: SelectTool,
 ): string {
+  if (selected === null && liveError !== null) {
+    return liveError;
+  }
   if (recording && selected === null) {
     return 'Recording. Use the application; each different reading is kept.';
   }
   if (selected === null) {
-    if (liveError !== null) {
-      return liveError;
-    }
     return shotCount === 0
       ? `Take a screenshot (${shortcut}) when the window shows what to read.`
       : 'Select a screenshot to draw on it.';
@@ -345,7 +348,7 @@ interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
   /** The value's region when the editor opened from a value, to put back when it closes. */
-  readonly valueRegion: Rect | null;
+  readonly valueRegion: Drawn;
 }
 
 /** The value's two steps: where it shows, then how to read it. */
@@ -366,7 +369,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const [start] = useState(() => {
     const editing: Editing | null =
       mode.kind === 'reference'
-        ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: null }
+        ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
         : null;
     return {
       screenshots: 0,
@@ -586,7 +589,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
           const untouched = last === null || last.steps !== steps || sameRect(shownRegion.current, last.region);
           if (view !== null && untouched) {
             fitted.current = { steps, region: view.region };
-            setDraft((latest) => ({ ...latest, region: view.region }));
+            setDraft((latest) => ({ ...latest, region: view.region, drawnOn: image }));
           }
         })
         .catch((error: unknown) => {
@@ -742,10 +745,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     setLiveError(errorText(error));
   }, []);
 
-  // The region is measured on the screenshot shown, or on the newest one
-  // while the live view is shown.
-  const drawnOn = selected !== null && full.has(selected) ? selected : (shots.at(-1)?.index ?? null);
-  const native = drawnOn === null ? undefined : full.get(drawnOn);
+  // The region shows over the screenshot shown, or the newest one while the
+  // live view is shown, at the same pixels of the window.
+  const shownOn = selected !== null && full.has(selected) ? selected : (shots.at(-1)?.index ?? null);
+  const native = shownOn === null ? undefined : full.get(shownOn);
+  // The window size the region's pixels refer to.
+  const drawnPicture = draft.drawnOn === null ? undefined : full.get(draft.drawnOn);
+  const drawnSize = drawnPicture === undefined ? null : { width: drawnPicture.width, height: drawnPicture.height };
   const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
   const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
@@ -768,7 +774,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   };
 
   const save = async (): Promise<void> => {
-    if (!built.ok || drawnOn === null) {
+    if (!built.ok || draft.drawnOn === null) {
       return;
     }
     setSaving(true);
@@ -777,7 +783,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
         app: choice.app,
         valueName: valueName.trim(),
         check: built.spec,
-        screenshot: drawnOn,
+        screenshot: draft.drawnOn,
       });
       onSaved();
     } catch (error: unknown) {
@@ -808,7 +814,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     if (editing === null) {
       return null;
     }
-    if (draft.region === null || drawnOn === null) {
+    if (draft.region === null || draft.drawnOn === null) {
       return 'Draw the region on a screenshot to record it.';
     }
     if (draft.ink === null) {
@@ -836,12 +842,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   // owner refuses to go on with other settings rather than start over, so
   // kept readings and review edits are never dropped without a discard.
   const record = async (more: boolean): Promise<void> => {
-    if (draft.region === null || draft.ink === null || drawnOn === null) {
+    if (draft.region === null || draft.ink === null || draft.drawnOn === null) {
       return;
     }
     recordingTurn.current += 1;
     try {
-      await startRecording(draft.region, draft.ink, draft.tolerance, drawnOn, more);
+      await startRecording(draft.region, draft.ink, draft.tolerance, draft.drawnOn, more);
       setRecordError(null);
       setReviewing(false);
       setSelected(null);
@@ -913,17 +919,24 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   // Record more can offer to take them back.
   const settings = recording?.settings;
   const settingsChanged =
-    recording !== null &&
-    !recording.recording &&
-    settings !== undefined &&
-    (draft.tolerance !== settings.tolerance ||
-      JSON.stringify(draft.region) !== JSON.stringify(settings.region) ||
-      JSON.stringify(draft.ink) !== JSON.stringify(settings.ink));
+    recording !== null && !recording.recording && settings !== undefined && settingsDiffer(draft, settings, drawnSize);
   const useSettings = (): void => {
     if (settings === undefined) {
       return;
     }
-    setDraft((current) => ({ ...current, region: settings.region, ink: settings.ink, tolerance: settings.tolerance }));
+    // The region goes back on a screenshot of the size it was recorded at.
+    const sizes = [...full].map(([index, picture]) => [index, picture] as const);
+    const sameSize =
+      drawnSize?.width === settings.windowSize.width && drawnSize.height === settings.windowSize.height
+        ? draft.drawnOn
+        : newestOfSize(sizes, settings.windowSize);
+    setDraft((current) => ({
+      ...current,
+      region: settings.region,
+      drawnOn: sameSize ?? current.drawnOn,
+      ink: settings.ink,
+      tolerance: settings.tolerance,
+    }));
     setRecordError(null);
     // The pressed button gives way to Record more, so focus moves to it.
     requestAnimationFrame(() => {
@@ -934,7 +947,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   // Opens the reference editor on `existing`, or on a new reference read
   // from the value's region.
   const openEditor = (existing: ReferenceDef | null): void => {
-    setEditing({ existing, name: existing?.name ?? '', valueRegion: draft.region });
+    setEditing({ existing, name: existing?.name ?? '', valueRegion: { region: draft.region, drawnOn: draft.drawnOn } });
     setDraft((current) => toReference(current, existing));
     setPicking(null);
     setSaveError(null);
@@ -946,7 +959,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     if (recording !== null) {
       background(discard());
     }
-    const valueRegion = editing?.valueRegion ?? null;
+    const valueRegion = editing?.valueRegion ?? { region: null, drawnOn: null };
     setEditing(null);
     setPicking(null);
     setDraft((current) => fromReference(current, valueRegion));
@@ -985,7 +998,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       ? null
       : 'Checking the readings…';
 
-  const canSave = valueName.trim().length > 0 && built.ok && drawnOn !== null && checkState.kind === 'set' && !saving;
+  const canSave =
+    valueName.trim().length > 0 && built.ok && draft.drawnOn !== null && checkState.kind === 'set' && !saving;
   const canSaveRef =
     editing !== null && editing.name.trim().length > 0 && built.ok && checkState.kind === 'set' && !saving;
   const whereDone = valueName.trim().length > 0 && draft.region !== null;
@@ -1108,6 +1122,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 onClick={() => {
                   setChangingShortcut((current) => !current);
                 }}
+                onBlur={() => {
+                  setChangingShortcut(false);
+                }}
                 onKeyDown={shortcutKey}
               >
                 {changingShortcut ? 'Press the new shortcut, or Esc' : 'Change shortcut'}
@@ -1176,7 +1193,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 tool={selecting}
                 ignored={ignored}
                 onRegion={(region) => {
-                  setDraft((current) => ({ ...current, region }));
+                  setDraft((current) => ({ ...current, region, drawnOn: selected }));
                 }}
                 onPick={pick}
                 onSnap={(rough, combine) => {
@@ -1315,7 +1332,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               <RegionFields
                 region={draft.region}
                 onRegion={(region) => {
-                  setDraft((current) => ({ ...current, region }));
+                  // Typed pixels keep to the screenshot the region was drawn on.
+                  setDraft((current) => ({ ...current, region, drawnOn: current.drawnOn ?? shownOn }));
                 }}
               />
               <p className="note">

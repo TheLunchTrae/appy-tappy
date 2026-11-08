@@ -186,7 +186,7 @@ mod tests {
             app: app.to_owned(),
             reference_name: name.to_owned(),
             check: serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},"screenshot":0,
                     "reference":{editing},"ink":{{"red":255,"green":0,"blue":0}},
                     "tolerance":0,"labels":[{{"screenshot":0,"text":"1"}}]}}"#
             ))

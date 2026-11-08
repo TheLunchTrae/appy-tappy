@@ -97,6 +97,7 @@ impl<H: Host> Owner<H> {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::sync::mpsc;
 
     use appytappy_sources::screen::Size;
@@ -248,7 +249,7 @@ mod tests {
                 .map(|(reading, text)| format!(r#"{{"reading":{reading},"text":"{text}"}}"#))
                 .collect();
             let spec: CheckSpec = serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[{labels}],
                     "recorded":[{}]}}"#,
                 recorded.join(",")
@@ -286,7 +287,7 @@ mod tests {
         assert_eq!(labeled[1], None);
         let number = |reading| -> CheckSpec {
             serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[],
                     "recorded":[{{"reading":{reading},"text":"1"}}]}}"#
             ))
@@ -420,6 +421,29 @@ mod tests {
             }),
             Err("Draw the region to record first.".to_owned())
         );
+    }
+
+    #[test]
+    fn a_capture_failure_stops_the_recording_and_says_why() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255, false)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
+        let stopped = harness.recording().expect("kept for review");
+        assert!(!stopped.recording, "nothing records while frames fail");
+        assert_eq!(
+            stopped.problem.as_deref(),
+            Some("Recording stopped: A frame was lost. Record more once the window shows again.")
+        );
+        assert_eq!(stopped.readings.len(), 1, "what it kept stays");
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        harness.ask(start_recording(255, true)).expect("goes on");
+        let going = harness.recording().expect("the same recording");
+        assert!(going.recording);
+        assert_eq!(going.problem, None, "going on clears why it stopped");
     }
 
     #[test]

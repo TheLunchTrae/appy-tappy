@@ -2,10 +2,9 @@
 //! saving and deleting them, and each application's anti-cheat setting.
 
 use appytappy_config::app_file::{AntiCheatDef, AppFile, ScreenDef, SizeDef, ValueDef, value_id};
-use appytappy_sources::screen::Image;
 
 use crate::automations::{self, Stores};
-use crate::check_spec::{self, CheckSpec};
+use crate::check_spec;
 use crate::window_list;
 
 use super::Owner;
@@ -73,16 +72,14 @@ impl<H: Host> Owner<H> {
         if name.is_empty() {
             return Err("Name the value first.".to_owned());
         }
-        // An image check's region was drawn on the screenshot it keeps.
-        let drawn_on = match &spec.check {
-            CheckSpec::Image { screenshot, .. } => *screenshot,
-            _ => spec.screenshot,
-        };
+        if self.screenshots.get(spec.screenshot).is_none() {
+            return Err("Take a screenshot first.".to_owned());
+        }
+        // The value keeps the window size its region was drawn at, which
+        // any screenshot it cuts at the region must have too.
         let size = self
-            .screenshots
-            .get(drawn_on)
-            .map(Image::size)
-            .ok_or_else(|| "Take a screenshot first.".to_owned())?;
+            .with_session(|session| check_spec::drawn_size(&spec.check, session, spec.screenshot))
+            .map_err(|error| error.to_string())?;
         let loaded = store.load().map_err(|error| error.to_string())?;
         let app = spec.app.clone();
         let mut file = loaded
@@ -161,7 +158,7 @@ impl<H: Host> Owner<H> {
 mod tests {
     use appytappy_config::app_file::WindowDef;
     use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
-    use appytappy_sources::screen::Size;
+    use appytappy_sources::screen::{Image, Size};
 
     use crate::owner::messages::Request;
     use crate::owner::test_support::{
@@ -201,14 +198,25 @@ mod tests {
         )
         .expect("matching length");
         harness.deliver(&mut handler, Ok(&shrunk));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(1));
         assert_eq!(
             harness.ask(save(spec("example", "  ", IMAGE))),
             Err("Name the value first.".to_owned())
         );
-        let mut stale = spec("example", "Icon visible", IMAGE);
-        // An image check's own screenshot wins over the one shown.
-        stale.screenshot = 9;
-        let saved = harness.ask(save(stale)).expect("saves a new app");
+        let mut elsewhere = spec("example", "Icon visible", IMAGE);
+        elsewhere.screenshot = 1;
+        assert_eq!(
+            harness.ask(save(elsewhere)),
+            Err(
+                "Screenshot 1, which the image is compared against, is 4x2, but the region was \
+                 drawn on screenshot 2, which is 2x1. Compare against a screenshot of that size."
+                    .to_owned()
+            ),
+            "a value is saved at one window size"
+        );
+        let saved = harness
+            .ask(save(spec("example", "Icon visible", IMAGE)))
+            .expect("saves a new app");
         assert_eq!(
             saved,
             SavedValue {

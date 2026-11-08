@@ -6,7 +6,9 @@ import {
   DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
   fromReference,
+  newestOfSize,
   reviewSpec,
+  settingsDiffer,
   toReference,
   withKind,
 } from '../src/lib/check.ts';
@@ -79,6 +81,7 @@ describe('buildCharacters', () => {
     const draft = {
       ...EMPTY_DRAFT,
       region,
+      drawnOn: 2,
       ink: red,
       labels: new Map([
         [2, ' 87% '],
@@ -91,6 +94,7 @@ describe('buildCharacters', () => {
       spec: {
         kind: 'characters',
         region,
+        screenshot: 2,
         reference: null,
         ink: red,
         tolerance: DEFAULT_TOLERANCE.number,
@@ -107,6 +111,7 @@ describe('buildCharacters', () => {
     const draft = {
       ...EMPTY_DRAFT,
       region,
+      drawnOn: 0,
       ink: red,
       recorded: new Map([
         [4, '9%'],
@@ -126,28 +131,36 @@ describe('buildCharacters', () => {
       ok: false,
       next: 'Draw a region around the characters on a screenshot.',
     });
-    expect(buildCharacters({ ...EMPTY_DRAFT, region }, null)).toEqual({
+    expect(buildCharacters({ ...EMPTY_DRAFT, region, ink: red }, null)).toEqual({
+      ok: false,
+      next: 'Draw a region around the characters on a screenshot.',
+    });
+    expect(buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0 }, null)).toEqual({
       ok: false,
       next: "Pick the characters' color.",
     });
-    expect(buildCharacters({ ...EMPTY_DRAFT, region, ink: red, labels: new Map([[0, ' ']]) }, null)).toEqual({
+    expect(
+      buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0, ink: red, labels: new Map([[0, ' ']]) }, null),
+    ).toEqual({
       ok: false,
       next: 'Type what the region shows on a screenshot, or record it.',
     });
   });
 
   test('a saved reference needs nothing new to be tried', () => {
-    const built = buildCharacters({ ...EMPTY_DRAFT, region, ink: red }, percent);
+    const built = buildCharacters({ ...EMPTY_DRAFT, region, drawnOn: 0, ink: red }, percent);
     expect(built.ok && built.spec.reference).toEqual(percent);
   });
 });
 
 test('reviewSpec waits for the region and color, and names the reference', () => {
-  expect(reviewSpec({ ...EMPTY_DRAFT, region }, [], null)).toBeNull();
+  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1 }, [], null)).toBeNull();
+  expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, [], null)).toBeNull();
   const kept = [{ reading: 0, text: '5' }];
-  expect(reviewSpec({ ...EMPTY_DRAFT, region, ink: red }, kept, percent)).toEqual({
+  expect(reviewSpec({ ...EMPTY_DRAFT, region, drawnOn: 1, ink: red }, kept, percent)).toEqual({
     kind: 'characters',
     region,
+    screenshot: 1,
     reference: percent,
     ink: red,
     tolerance: DEFAULT_TOLERANCE.number,
@@ -188,10 +201,48 @@ describe('the reference editor', () => {
 
   test("puts the value's region back however the reference was taught", () => {
     const editor = {
-      ...toReference({ ...EMPTY_DRAFT, region }, saved),
+      ...toReference({ ...EMPTY_DRAFT, region, drawnOn: 0 }, saved),
       region: taught,
+      drawnOn: 3,
       labels: new Map([[0, '100%']]),
     };
-    expect(fromReference(editor, region)).toEqual({ ...editor, region, labels: new Map(), recorded: new Map() });
+    expect(fromReference(editor, { region, drawnOn: 0 })).toEqual({
+      ...editor,
+      region,
+      drawnOn: 0,
+      labels: new Map(),
+      recorded: new Map(),
+    });
+  });
+});
+
+describe('a stopped recording', () => {
+  const settings = { region, ink: red, tolerance: 40, windowSize: { width: 1920, height: 1080 } };
+  const recorded = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red, tolerance: 40 };
+  const big = { width: 1920, height: 1080 };
+  const small = { width: 1280, height: 720 };
+
+  test('records the same while the draft has its settings at its window size', () => {
+    expect(settingsDiffer({ ...recorded, region: { ...region } }, settings, { ...big })).toBe(false);
+  });
+
+  test('offers its settings back for any other region, color, tolerance or window size', () => {
+    expect(settingsDiffer({ ...recorded, region: { ...region, x: 2 } }, settings, big)).toBe(true);
+    expect(settingsDiffer({ ...recorded, ink: gray }, settings, big)).toBe(true);
+    expect(settingsDiffer({ ...recorded, ink: null }, settings, big)).toBe(true);
+    expect(settingsDiffer({ ...recorded, tolerance: 41 }, settings, big)).toBe(true);
+    expect(settingsDiffer(recorded, settings, small)).toBe(true);
+    expect(settingsDiffer(recorded, settings, null)).toBe(true);
+  });
+
+  test('goes back on the newest screenshot of its window size', () => {
+    const screenshots = [
+      [0, big],
+      [1, small],
+      [2, big],
+      [3, small],
+    ] as const;
+    expect(newestOfSize(screenshots, { ...big })).toBe(2);
+    expect(newestOfSize(screenshots, { width: 800, height: 600 })).toBeNull();
   });
 });

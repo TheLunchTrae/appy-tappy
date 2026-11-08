@@ -25,7 +25,15 @@ This page covers what the user guide leaves out.
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
 - **Screenshots.** The owner thread keeps the session's screenshots until
-  another window is picked or the user leaves the new value. The screenshot
+  another window is picked or the user leaves the new value. The draft keeps
+  the screenshot its region was drawn on, and a value saves that screenshot's
+  window size. The owner refuses a check or a save that cuts the region from
+  a labeled screenshot, a recording, or a compared screenshot of another
+  window size, and names which (`check_spec::drawn_size`).
+- **Capture failures.** A frame error shows in the preview until the next good
+  frame of the same capture; only a closed window ends the capture. While a
+  failure stands, a screenshot is refused, and a recording stops with the
+  failure as its problem. The screenshot
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
@@ -104,7 +112,8 @@ flagged on the reading that causes it. **Record more** goes on with the stopped
 recording only when the region, color, tolerance, and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
 UI then offers **Use its settings**, which puts the recording's region, color,
-and tolerance back on the draft. Kept readings are lost only on a discard or
+and tolerance back on the draft, drawn on the newest screenshot of the
+recording's window size. Kept readings are lost only on a discard or
 when the capture stops, such as on **Change window**. **Back** and Escape
 leave review without keeping, and review's edits stay for the next one.
 
