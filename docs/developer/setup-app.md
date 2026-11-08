@@ -43,9 +43,9 @@ This page covers what the user guide leaves out.
   capture counts its screenshots and recording too, since only the session
   has them. The page tabs, the page already shown included, ask before they
   drop unsaved work, and **Change window** asks the same. While a save runs,
-  the tabs, the question's answers, and **Discard** or **Cancel** wait. A save closes its flow only
-  while that flow is still open, so one that finishes after the user moved on
-  leaves the next flow alone. Leaving a capture stops its recording.
+  the tabs, **Change window**, the questions' answers, and **Discard** or
+  **Cancel** wait. A save closes its flow only while that flow is still open,
+  so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
 - **Selection.** An image check's selection travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner

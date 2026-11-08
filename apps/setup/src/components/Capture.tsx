@@ -1091,6 +1091,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   label="Change window?"
                   keepLabel="Keep this window"
                   actLabel="Change window"
+                  busy={saving}
                   onKeep={() => {
                     setLeavingWindow(false);
                   }}
