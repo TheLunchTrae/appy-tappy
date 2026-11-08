@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/api.ts';
+import type { AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/bindings.ts';
 import {
   EMPTY_DRAFT,
   actionText,
@@ -214,6 +214,16 @@ describe('buildAutomation', () => {
     expect(next({ ...complete, actions: [] })).toBe('Add an action.');
     expect(next({ ...complete, actions: [newAction(1), { ...newAction(2), target: 'app', app: '  ' }] })).toBe(
       'Name the application for action 2, such as Player.exe.',
+    );
+    const longestApp = `${'a'.repeat(252)}.exe`;
+    const app = (name: string): typeof EMPTY_DRAFT => ({
+      ...complete,
+      actions: [{ ...newAction(1), target: 'app', app: name }],
+    });
+    expect(next(app(longestApp))).toBe('ok');
+    expect(next(app(`a${longestApp}`))).toBe('The application name in action 1 is too long to save. Shorten it.');
+    expect(next(app('Player\t.exe'))).toBe(
+      'The application name in action 1 has a tab or line break in it. Remove it.',
     );
     for (const percent of ['', '101', '-1', '2.5', 'x']) {
       expect(next({ ...complete, actions: [{ ...newAction(1, 'volume'), percent }] })).toBe(

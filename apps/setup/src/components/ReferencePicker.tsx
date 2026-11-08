@@ -1,4 +1,4 @@
-import type { AppFile } from '../lib/api.ts';
+import type { AppFile } from '../lib/bindings.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
 import { CharacterChips } from './CharacterChips.tsx';
 

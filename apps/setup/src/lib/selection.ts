@@ -1,6 +1,7 @@
 // Selecting the thing a state check looks for: the steps the user takes on
 // a screenshot, and which pixels of the region the selection leaves out.
 
+import type { Combine, SelectStep, SelectionView } from './bindings.ts';
 import { type Rect, bounding, sameRect } from './region.ts';
 
 /** How the user marks the region: by hand, by snapping a rough box, or by clicking the thing. */
@@ -15,29 +16,6 @@ export const TOOL_NAMES: Readonly<Record<SelectTool, { readonly name: string; re
   snap: { name: 'Snap', hint: 'Rough box' },
   click: { name: 'Click', hint: 'Click the thing' },
 };
-
-/** How a step's pick combines with the selection before it. */
-export type Combine = 'replace' | 'add' | 'remove';
-
-/** One thing the user did to select. */
-export type SelectStep =
-  | { readonly kind: 'snap'; readonly region: Rect; readonly combine: Combine }
-  | { readonly kind: 'click'; readonly x: number; readonly y: number; readonly combine: Combine };
-
-/** The steps the setup app replays on the screenshot a state is taken from. */
-export interface SelectionSpec {
-  /** How far a color may be from another and still count as alike. */
-  readonly tolerance: number;
-  readonly steps: readonly SelectStep[];
-}
-
-/** A selection as the setup app answers it. */
-export interface SelectionView {
-  /** The box around the selected pixels. */
-  readonly region: Rect;
-  /** The runs of selected pixels in the box, each from its first pixel's index to the one after its last. */
-  readonly spans: readonly (readonly [number, number])[];
-}
 
 /** A selection made for a state's steps, at a color match. */
 export interface Selection {

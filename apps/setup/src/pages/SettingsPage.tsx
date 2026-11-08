@@ -1,18 +1,11 @@
 import { useEffect, useState } from 'react';
 
+import { LIMITS, type ReadIntervalDef } from '../lib/bindings.ts';
 import { errorText } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
 import { NumberSetting } from '../components/NumberSetting.tsx';
 import { RuntimeTrace } from '../components/RuntimeTrace.tsx';
-import {
-  FASTEST_READ_MS,
-  type ReadInterval,
-  SLOWEST_READ_MS,
-  setStartsWithWindows,
-  startsWithWindows,
-  useSettings,
-  withWait,
-} from '../lib/settings.ts';
+import { setStartsWithWindows, startsWithWindows, useSettings, withWait } from '../lib/settings.ts';
 import { useShortcutChoice } from '../lib/useShortcutChoice.ts';
 
 interface Props {
@@ -128,7 +121,7 @@ function ScreenshotShortcut() {
 }
 
 interface WaitProps {
-  readonly which: keyof ReadInterval;
+  readonly which: keyof ReadIntervalDef;
   readonly label: string;
   readonly note: string;
 }
@@ -143,9 +136,9 @@ function Wait({ which, label, note }: WaitProps) {
       note={note}
       unit="ms"
       saved={settings.readInterval[which]}
-      min={FASTEST_READ_MS}
-      max={SLOWEST_READ_MS}
-      invalid={`${label} must be a whole number of milliseconds from ${FASTEST_READ_MS} to ${SLOWEST_READ_MS}.`}
+      min={LIMITS.fastestReadMs}
+      max={LIMITS.slowestReadMs}
+      invalid={`${label} must be a whole number of milliseconds from ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs}.`}
       update={(current, ms) => {
         const next = withWait(current.readInterval, which, ms);
         return 'problem' in next ? next : { ...current, readInterval: next.interval };

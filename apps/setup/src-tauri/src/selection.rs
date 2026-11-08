@@ -16,6 +16,7 @@ use crate::check_spec::RegionSpec;
 
 /// How a step's pick combines with the selection before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum Combine {
     /// The pick becomes the selection.
@@ -29,6 +30,7 @@ pub(crate) enum Combine {
 
 /// One thing the user did to select.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum SelectStep {
     /// Dragged a rough box, which snaps to the thing inside it.
@@ -48,6 +50,7 @@ pub(crate) enum SelectStep {
 
 /// What the user selected, as the steps they took.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct SelectionSpec {
     /// How far a color may be from another and still count as alike.
     pub(crate) tolerance: u8,
@@ -81,6 +84,7 @@ pub(crate) fn select(image: &Image, spec: &SelectionSpec) -> Option<Selection> {
 
 /// A selection as the UI draws it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct SelectionView {
     /// The box around the selected pixels.
     region: RegionSpec,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { type WindowChoice, type WindowDef, type WindowFit, errorText, matchWindows } from '../lib/api.ts';
+import type { WindowChoice, WindowDef, WindowFit } from '../lib/bindings.ts';
+import { errorText, matchWindows } from '../lib/api.ts';
 import { fitLabel } from '../lib/matching.ts';
 
 /** How long after a change the match waits before it looks for windows again. */
