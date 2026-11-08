@@ -234,7 +234,9 @@ stateDiagram-v2
 ### Frame handler
 
 `FrameReader::handle` runs once per frame and decides what each frame means.
-Its state is `size` (the window size whose values it reads), `last` (each
+Its state is `placed` (the window size whose values it reads, and where
+each value reads at it, resolved once), `elsewhere` (the last other size
+frames showed where no value reads, resolved once too), `last` (each
 value's last reading), `seen` (whether it sent a reading since it last sent
 `Unseen`), `failures` (frames in a row that failed), `restarted` (whether the
 reader started this capture again after the last one ended), and `ended`
@@ -245,9 +247,9 @@ stateDiagram-v2
     [*] --> Reading
     Reading --> Reading: frame read, a Sample for each value that changed
     Reading --> Reading: frame error, logged once and counted
-    Reading --> Reading: another size with no values drawn at it, Unseen
+    Reading --> Reading: another size at which no value reads, Unseen
     Reading --> Ended: the capture ended, Unseen and Lost
-    Reading --> Ended: another drawn size, Unseen and Resized
+    Reading --> Ended: another size at which a value reads, Unseen and Resized
     Reading --> Ended: RESTART_AFTER frame errors in a row, Unseen and Failing
     Ended --> [*]: the reader closes the capture
 ```
@@ -265,8 +267,15 @@ stateDiagram-v2
 - **Ended.** The capture can still hand frames to the handler until the reader
   closes it. The handler reads none of them, so nothing it sends follows
   `Unseen`.
-- A window size at which no value was drawn sends `Unseen` and keeps the
-  capture, because a restart would find the same size.
+- A window size at which no value reads sends `Unseen` and keeps the
+  capture, because a restart would find the same size. It is kept as
+  `elsewhere`, so the frames that follow at that size are not resolved
+  again, and each value says once why it is not read there.
+- `Resized` carries where each value reads at the new size, so the reader
+  starts the capture at those regions without resolving the size again.
+- A value that does not read at the capture's own size, such as one whose
+  scaled region reaches outside the window, says why once and is not
+  copied.
 
 ### Read schedule
 
@@ -644,6 +653,7 @@ stateDiagram-v2
     Ended --> Previewing: another window is picked
     Previewing --> Watching: the automation editor watches a value
     Watching --> Previewing: a window is picked
+    Watching --> Watching: the window takes another size, which starts the capture again at the value's region there
     Watching --> WatchFailed: the watch reports an error
     WatchFailed --> Closed: stop
     WatchFailed --> Watching: the editor watches again
@@ -661,6 +671,11 @@ stateDiagram-v2
   again". Only a stop or another pick leaves it.
 - **WatchFailed** closes the capture and keeps the watch's error for the editor
   to show.
+- **Watching** at another window size places the value there with
+  `SavedValue::at`. When its region there differs from the one copied, the
+  capture starts again under the same watch number, so the editor's poll
+  goes on. A size at which the value does not read keeps the capture and
+  answers why with each poll.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
@@ -738,6 +753,12 @@ stateDiagram-v2
     Reading --> Off: the overlay is turned off, or its application is removed
     Retrying --> Off: the overlay is turned off, or its application is removed
 ```
+
+The Values page keeps a second set of entries, `live`, one for each running
+application whose values it shows, whether its overlay is on or not. They
+move through the same states but have no window: the page's poll opens one,
+and leaving the page turns them all off. At each window size, an entry
+reads its values where `SavedValue::at` places them.
 
 `overlay::window::sync` opens a window for each overlay that is on and closes
 each that is not. It runs when the main window mounts, after each overlay

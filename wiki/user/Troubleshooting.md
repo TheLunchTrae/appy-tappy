@@ -30,9 +30,10 @@ Check these in order:
    **AppyTappy: attached** while one of your applications runs. The tray's
    **Active automations** lists the automations that run now.
 4. **Does the value read?** Turn on the [overlay](Overlay.md) to see what
-   AppyTappy reads. A value reads only while the window is the
-   [size it was made at](Values.md#window-size). If the window has a size no
-   value was made at, the log says so. A value also reads only while its
+   AppyTappy reads, or look at the Values page while the application runs.
+   At a size the value wasn't drawn at, it reads as
+   [Window size](Values.md#window-size) describes, and the log says why a
+   value doesn't read there. A value also reads only while its
    window shows: while the window is minimized, AppyTappy waits, and reads
    the values again when it shows.
 5. **Did it already run?** An automation runs once each time its condition

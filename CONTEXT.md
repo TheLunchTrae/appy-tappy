@@ -23,6 +23,11 @@ parts fit.
   with a saved image.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
+- **Fix.** A screen region value drawn again at one more window size, which
+  it reads there exactly instead of scaled from its first drawing.
+- **Pin.** The side of the window, a corner, an edge's middle, or the center,
+  that a region keeps its scaled distance from as the window changes size.
+  The UI calls it **Stays at**.
 - **Read interval.** The minimum and maximum time between a source's reads.
   The source reads at the minimum while its value moves and backs off toward
   the maximum while it holds still.
@@ -52,5 +57,8 @@ parts fit.
   and save its files.
 - **Signal.** A named, typed value an application exposes, such as `progress`
   or `icon_visible`.
+- **Size changes.** How often an application's window changes size: often,
+  so its values scale with the window, or rarely, so each is read only at
+  the sizes it was drawn at.
 - **Source primitive.** One kind of state reader the runtime ships: screen
   region, log file, local API, or process and window events.

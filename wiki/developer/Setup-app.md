@@ -62,6 +62,21 @@ This page covers what the user guide leaves out.
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to
   four decimals unless more are needed to compare them with the target.
+- **Window sizes.** A new value saves the side of the window it stays at
+  as `pin`, the guess from where its region is unless the user picks
+  another. The Values page reads each running application's values about
+  once a second at the window's size now, with a capture of its own like an
+  overlay's, whether the overlay is on or not, and stops when the page
+  closes (`live_values`, `stop_live_values`). The automation editor's
+  reading follows its window to each size the same way and keeps its watch's
+  number, so the editor's poll goes on. **Fix at this size** opens the
+  capture locked to the value's application. Its first screenshot sets the
+  size, and its region starts where the value reads at that size: its fix
+  there, or its first drawing scaled (`place_value`). The owner refuses a
+  fix at the size of the first drawing, of another kind of check, or with
+  other states than the value's, and saves it over any fix at the same size
+  (`save_fix`, `remove_fix`). A fix of a number names its own reference only
+  when it differs from the value's.
 - **References.** A number value names a reference of its own application
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
@@ -158,14 +173,16 @@ Windows lists, usually the front-most, that is not minimized, so the setup
 app marks every window that ties for the best fit as a best match.
 The setup app uses the match to show which applications are running, and the
 runtime finds each application's window with the same rules. A value's region
-means something only while the window has the size it had when the region was
-drawn. Values can be drawn at more than one size, and the runtime reads the
-ones drawn at the window's current size. When the window closes or changes
-size, the runtime forgets the values it read. Each automation stays as it was
-until the values read next show whether its condition still holds, so it
-neither runs again nor undoes what it changed while the window is out of sight.
-When the window has a size no value was drawn at, the runtime reads nothing and
-logs that the window should be resized or the value drawn again.
+is drawn at one window size, and the runtime reads it at another by
+scaling it, or only at a size it was drawn at, as its application's
+`sizeChanges` says ([Window sizes](Screen-regions.md#window-sizes)). When
+the window closes or changes size, the runtime forgets the values it read.
+Each automation stays as it was until the values read next show whether its
+condition still holds, so it neither runs again nor undoes what it changed
+while the window is out of sight.
+A value that does not read at the window's size is not read, and the
+runtime logs once for each size why and that the window should be resized
+or the value fixed at that size.
 
 ## Saved files
 
@@ -176,7 +193,8 @@ the region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
 and each state check's pictures, named after its value and the state's
 place, such as `status-1.png`, and transparent where the state's selection
 leaves the background out
-([Saved pictures](Screen-regions.md#saved-pictures)).
+([Saved pictures](Screen-regions.md#saved-pictures)). A fix's pictures add
+the fix's number, such as `status-2-1.png`.
 
 ```json
 {
@@ -189,6 +207,7 @@ leaves the background out
     "mustMatch": { "title": false, "class": false },
     "fallback": "none"
   },
+  "sizeChanges": "often",
   "antiCheat": "none",
   "overlay": { "enabled": true, "mode": "pictureInPicture" },
   "checked": {
@@ -202,7 +221,15 @@ leaves the background out
       "screen": {
         "windowSize": { "width": 1920, "height": 1080 },
         "region": { "x": 1146, "y": 14, "width": 74, "height": 38 },
-        "check": { "kind": "number", "reference": "percent_font", "whole": true }
+        "check": { "kind": "number", "reference": "percent_font", "whole": true },
+        "pin": "topRight",
+        "fixes": [
+          {
+            "windowSize": { "width": 3440, "height": 1440 },
+            "region": { "x": 2990, "y": 18, "width": 99, "height": 51 },
+            "images": []
+          }
+        ]
       }
     }
   ],
@@ -265,6 +292,14 @@ file leaves out takes its default:
   "screenshotShortcut": "F9"
 }
 ```
+
+An application's `sizeChanges` is `often` or `rarely`, and `often` when the
+file leaves it out. A value's `pin` is one of `topLeft`, `topCenter`,
+`topRight`, `middleLeft`, `center`, `middleRight`, `bottomLeft`,
+`bottomCenter`, and `bottomRight`, and is guessed from where the region is
+when the file leaves it out. Each of its `fixes` has its own window size and
+region; a state check's fix lists `images`, a picture for each state in the
+check's order, and a number check's fix may name its own `reference`.
 
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved

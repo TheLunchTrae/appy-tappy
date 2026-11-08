@@ -31,8 +31,8 @@ On the Automations page, select **New automation**. To change one, select
    While the value's application is open, the editor reads the value about
    twice a second and says what it reads now and whether the condition is
    true, so you can try a target before you save it. It says so when the
-   application is not open, or when its window is not the
-   [size the value was made at](Values.md#window-size).
+   application is not open, or when the value doesn't read at the window's
+   [size](Values.md#window-size) now.
 
 3. **Do, in order.** Add any number of [actions](#actions), and move them up
    or down.

@@ -11,10 +11,11 @@ how AppyTappy finds its window, its anti-cheat setting, its
 
 - **Add.** Select **Add application**, pick the program's window in the list
   of open windows, and choose what has to match to
-  [find it again](#how-appytappy-finds-the-window). Give it a name and select
-  **Save application**.
-- **Change.** Select **Edit** on its row to change its name or how its window
-  is found. Its values stay as they are.
+  [find it again](#how-appytappy-finds-the-window). Give it a name, answer
+  [how often its window changes size](#how-often-the-window-changes-size),
+  and select **Save application**.
+- **Change.** Select **Edit** on its row to change its name, how its window
+  is found, or how often it changes size. Its values stay as they are.
 - **Remove.** Select **Remove** on its row and confirm. Its values go with it.
   An application whose values an automation uses can't be removed until that
   automation is changed or deleted.
@@ -62,6 +63,23 @@ matches everything ticked:
 While you edit, the list of windows marks the one AppyTappy would use as
 **best match**, the others that qualify as **matches**, and those it would take
 only as the fallback as **fallback**.
+
+## How often the window changes size
+
+**How often does this window change size?** says how AppyTappy reads the
+application's values when its window is a size they weren't drawn at:
+
+- **Often**, recommended for windowed play, scales each value with the
+  window. Most applications draw their interface larger as their window grows
+  taller, so AppyTappy grows or shrinks the value's region by how much taller
+  or shorter the window is, and keeps it as far from the side it
+  [stays at](Values.md#window-size). Fix a size only where a value doesn't
+  read.
+- **Rarely** reads values only at the sizes you drew them at. Nothing is
+  guessed, and a new size asks you to draw the value again there. Pick it for
+  an application that always runs full screen at one size.
+
+An application saved before AppyTappy asked this reads as **Often**.
 
 ## Anti-cheat
 

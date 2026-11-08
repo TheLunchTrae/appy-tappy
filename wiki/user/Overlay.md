@@ -20,7 +20,7 @@ The overlay shows only while AppyTappy Setup is open, and the overlay or panel
 closes when you turn the overlay off or remove the application. It never
 changes the application: the readings are a window of AppyTappy's own.
 
-Like automations, the overlay reads only the values made at the window's
+Like automations, the overlay reads each value as it reads at the window's
 current [size](Values.md#window-size). A value it cannot read says why in place
 of its reading, and the others still read.
 
