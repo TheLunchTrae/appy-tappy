@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   type AppSummary,
@@ -9,6 +9,7 @@ import {
   listAutomations,
   syncOverlays,
 } from './lib/api.ts';
+import { Question, useQuestion } from './components/Question.tsx';
 import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
@@ -18,6 +19,7 @@ import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
+import { type Held, onLeave } from './lib/unsaved.ts';
 
 type Page = 'automations' | 'applications' | 'values' | 'references';
 
@@ -39,12 +41,30 @@ type Flow =
   | { readonly kind: 'application'; readonly existing: AppSummary | null }
   | { readonly kind: 'reference'; readonly existing: SavedRef | null };
 
+/** What leaving each kind of flow before it is saved loses. */
+const LOST: Readonly<Record<Flow['kind'], string>> = {
+  value: 'Leave without saving? The screenshots, the region and any recording are lost.',
+  reference: 'Leave without saving? The screenshots, the labels and any recording are lost.',
+  automation: 'Leave without saving? The changes to this automation are lost.',
+  application: 'Leave without saving? The changes to this application are lost.',
+};
+
 /** How often the saved files are read again, which also refreshes which applications are running. */
 const REFRESH_MS = 3000;
 
 export function App() {
   const [page, setPage] = useState<Page>('automations');
   const [flow, setFlow] = useState<Flow | null>(null);
+  // What the open flow would lose, as it reports it.
+  const [held, setHeld] = useState<Held>('nothing');
+  // The page a press asked to leave the flow for, while the question asks whether to; and the last one asked for,
+  // whose tab takes focus back after the answer.
+  const [leaving, setLeaving] = useState<Page | null>(null);
+  const [askedFor, setAskedFor] = useState<Page>('automations');
+  const { control, refs } = useQuestion<HTMLButtonElement>(leaving !== null);
+  // The flow open now, for a save that finishes after the user moved on.
+  const openFlow = useRef(flow);
+  openFlow.current = flow;
   const [apps, setApps] = useState<readonly AppSummary[] | null>(null);
   const [automations, setAutomations] = useState<readonly AutomationSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -80,21 +100,51 @@ export function App() {
     references: apps === null ? null : apps.reduce((total, app) => total + (app.file?.references.length ?? 0), 0),
   };
 
+  const open = (next: Flow | null): void => {
+    setLeaving(null);
+    setFlow(next);
+  };
+  const goTo = (target: Page): void => {
+    setLeaving(null);
+    setFlow(null);
+    setPage(target);
+  };
+  // A tab leaves an open flow only once the user agrees to lose its work, and never while it saves.
+  const pressTab = (target: Page): void => {
+    switch (onLeave(held)) {
+      case 'leave':
+        goTo(target);
+        break;
+      case 'ask':
+        setLeaving(target);
+        setAskedFor(target);
+        break;
+      case 'wait':
+        break;
+    }
+  };
+  // A save closes its own flow, and nothing once the user has left it for another.
+  const saved = (opened: Flow, target: Page): void => {
+    if (openFlow.current === opened) {
+      goTo(target);
+    }
+  };
+
   const content = (() => {
     if (flow?.kind === 'value') {
       return (
         <NewValue
           apps={apps ?? []}
           onCancel={() => {
-            setFlow(null);
+            open(null);
           }}
           onSaved={() => {
-            setFlow(null);
-            setPage('values');
+            saved(flow, 'values');
           }}
           onAddApplication={() => {
-            setFlow({ kind: 'application', existing: null });
+            open({ kind: 'application', existing: null });
           }}
+          onHeld={setHeld}
         />
       );
     }
@@ -103,13 +153,13 @@ export function App() {
         <ApplicationEditor
           existing={flow.existing}
           onCancel={() => {
-            setFlow(null);
+            open(null);
           }}
           onSaved={() => {
-            setFlow(null);
-            setPage('applications');
+            saved(flow, 'applications');
             background(refresh());
           }}
+          onHeld={setHeld}
         />
       );
     }
@@ -119,15 +169,15 @@ export function App() {
           apps={apps ?? []}
           existing={flow.existing}
           onCancel={() => {
-            setFlow(null);
+            open(null);
           }}
           onSaved={() => {
-            setFlow(null);
-            setPage('references');
+            saved(flow, 'references');
           }}
           onAddApplication={() => {
-            setFlow({ kind: 'application', existing: null });
+            open({ kind: 'application', existing: null });
           }}
+          onHeld={setHeld}
         />
       );
     }
@@ -137,13 +187,13 @@ export function App() {
           apps={apps ?? []}
           existing={flow.existing}
           onCancel={() => {
-            setFlow(null);
+            open(null);
           }}
           onSaved={() => {
-            setFlow(null);
-            setPage('automations');
+            saved(flow, 'automations');
             background(refresh());
           }}
+          onHeld={setHeld}
         />
       );
     }
@@ -156,7 +206,7 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              setFlow({ kind: 'value' });
+              open({ kind: 'value' });
             }}
           />
         );
@@ -168,10 +218,10 @@ export function App() {
             loadError={automationError ?? loadError}
             onChanged={refresh}
             onNew={() => {
-              setFlow({ kind: 'automation', existing: null });
+              open({ kind: 'automation', existing: null });
             }}
             onEdit={(summary) => {
-              setFlow({ kind: 'automation', existing: summary.automation });
+              open({ kind: 'automation', existing: summary.automation });
             }}
           />
         );
@@ -182,10 +232,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onAdd={() => {
-              setFlow({ kind: 'application', existing: null });
+              open({ kind: 'application', existing: null });
             }}
             onEdit={(app) => {
-              setFlow({ kind: 'application', existing: app });
+              open({ kind: 'application', existing: app });
             }}
           />
         );
@@ -196,10 +246,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              setFlow({ kind: 'reference', existing: null });
+              open({ kind: 'reference', existing: null });
             }}
             onEdit={(existing) => {
-              setFlow({ kind: 'reference', existing });
+              open({ kind: 'reference', existing });
             }}
           />
         );
@@ -216,10 +266,11 @@ export function App() {
               key={id}
               type="button"
               className="tab"
+              ref={id === askedFor ? control : undefined}
               aria-current={page === id && flow === null ? 'page' : undefined}
+              disabled={held === 'saving'}
               onClick={() => {
-                setFlow(null);
-                setPage(id);
+                pressTab(id);
               }}
             >
               {name}
@@ -227,6 +278,23 @@ export function App() {
             </button>
           );
         })}
+        {leaving === null || flow === null ? null : (
+          <Question
+            refs={refs}
+            label="Leave without saving?"
+            keepLabel="Stay"
+            actLabel="Leave"
+            busy={held === 'saving'}
+            onKeep={() => {
+              setLeaving(null);
+            }}
+            onAct={() => {
+              goTo(leaving);
+            }}
+          >
+            {LOST[flow.kind]}
+          </Question>
+        )}
       </nav>
       {content}
     </div>

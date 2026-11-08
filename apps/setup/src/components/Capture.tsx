@@ -41,6 +41,7 @@ import {
 } from '../lib/check.ts';
 import { readers } from '../lib/reference.ts';
 import { type CheckState, ColorField, ReadingBox, RegionFields, ToleranceField } from './Fields.tsx';
+import { Question, useQuestion } from './Question.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
@@ -63,6 +64,7 @@ import { background, useRepeat } from '../lib/repeat.ts';
 import { accelerator, shortcutLabel } from '../lib/shortcut.ts';
 import { useSize } from '../lib/size.ts';
 import { loadShortcut, saveShortcut } from '../lib/storage.ts';
+import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 
 /** A screenshot taken this session. */
 interface Shot {
@@ -355,26 +357,38 @@ interface Props {
   readonly onCancel: () => void;
   readonly onChangeWindow: () => void;
   readonly onSaved: () => void;
+  /** Hears what leaving the capture would lose. */
+  readonly onHeld: (held: Held) => void;
 }
 
-export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Props) {
-  const startEditing: Editing | null =
-    mode.kind === 'reference' ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: null } : null;
+export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHeld }: Props) {
+  // What the capture shows before the user does anything, which leaving it loses nothing of.
+  const [start] = useState(() => {
+    const editing: Editing | null =
+      mode.kind === 'reference'
+        ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: null }
+        : null;
+    return {
+      screenshots: 0,
+      recording: false,
+      valueName: '',
+      editing,
+      draft: editing === null ? EMPTY_DRAFT : toReference(EMPTY_DRAFT, editing.existing),
+    };
+  });
   const [shots, setShots] = useState<readonly Shot[]>([]);
   const [full, setFull] = useState<ReadonlyMap<number, Picture>>(new Map());
   const [selected, setSelected] = useState<number | null>(null);
   const [liveSize, setLiveSize] = useState<Size | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [shotError, setShotError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft>(() =>
-    startEditing === null ? EMPTY_DRAFT : toReference(EMPTY_DRAFT, startEditing.existing),
-  );
+  const [draft, setDraft] = useState<Draft>(start.draft);
   // The saved application the value or reference belongs to.
   const appId = choice.app;
   const [file, setFile] = useState<AppFile | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('where');
-  const [editing, setEditing] = useState<Editing | null>(startEditing);
+  const [editing, setEditing] = useState<Editing | null>(start.editing);
   const [picking, setPicking] = useState<ColorTarget | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   // The selection the steps last made, for the steps it was made from.
@@ -383,7 +397,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Pro
     readonly view: SelectionView | null;
   } | null>(null);
   const [selectError, setSelectError] = useState<string | null>(null);
-  const [valueName, setValueName] = useState('');
+  const [valueName, setValueName] = useState(start.valueName);
   const [checkState, setCheckState] = useState<CheckState>({ kind: 'idle' });
   const [reading, setReading] = useState<Reading | null>(null);
   const [saving, setSaving] = useState(false);
@@ -411,6 +425,24 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Pro
     id: -1,
     pictures: new Map(),
   });
+
+  const holds = held(saving, start, {
+    screenshots: shots.length,
+    recording: recording !== null,
+    valueName,
+    editing,
+    draft,
+  });
+  useReportHeld(onHeld, holds);
+  const [leavingWindow, setLeavingWindow] = useState(false);
+  const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
+  // A recording samples the window until it stops, so leaving the capture stops it.
+  useEffect(
+    () => () => {
+      background(stopRecording());
+    },
+    [],
+  );
 
   // The application's saved file, for its references and the values that read with them.
   const loadFile = useCallback(async (app: string | null): Promise<void> => {
@@ -1039,9 +1071,37 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Pro
             </div>
           ) : (
             <div className="end">
-              <button type="button" className="btn" onClick={onChangeWindow}>
-                Change window
-              </button>
+              {leavingWindow ? (
+                <Question
+                  refs={leaveQuestion.refs}
+                  label="Change window?"
+                  keepLabel="Keep this window"
+                  actLabel="Change window"
+                  busy={saving}
+                  onKeep={() => {
+                    setLeavingWindow(false);
+                  }}
+                  onAct={onChangeWindow}
+                >
+                  Change window? The screenshots, everything set up on them, and any recording are lost.
+                </Question>
+              ) : (
+                <button
+                  ref={leaveQuestion.control}
+                  type="button"
+                  className="btn"
+                  disabled={saving}
+                  onClick={() => {
+                    if (holds === 'unsaved') {
+                      setLeavingWindow(true);
+                    } else {
+                      onChangeWindow();
+                    }
+                  }}
+                >
+                  Change window
+                </button>
+              )}
               <button
                 type="button"
                 className="btn small"
@@ -1265,7 +1325,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Pro
               </p>
               <div className="sep" />
               <div className="actions">
-                <button type="button" className="btn" onClick={onCancel}>
+                <button type="button" className="btn" disabled={saving} onClick={onCancel}>
                   Discard
                 </button>
                 <button
@@ -1408,6 +1468,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved }: Pro
             <button
               type="button"
               className="btn"
+              disabled={saving}
               onClick={() => {
                 if (mode.kind === 'reference') {
                   onCancel();

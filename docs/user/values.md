@@ -37,7 +37,9 @@ On the Values page, select **New value**.
 5. **Save.** Select **Save value**. **Back** returns to the first step.
 
 AppyTappy keeps the screenshots until you select **Change window** or leave
-the new value.
+the new value. Before either drops work you have not saved, it asks first:
+select **Keep this window** or **Stay** to carry on, as
+[Leave before you save](README.md#leave-before-you-save) describes.
 
 ## Checks
 
