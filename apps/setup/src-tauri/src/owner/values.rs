@@ -400,7 +400,7 @@ mod tests {
             "cooldownMs": 1500
         }))
         .expect("the UI's spelling");
-        let _saved_before = harness.reloads();
+        harness.forget_reloads();
         let id = harness
             .ask(|owner| owner.save_automation(None, automation))
             .expect("saves");
@@ -585,7 +585,7 @@ mod tests {
             "a later value leaves the checked build alone"
         );
         let mark = |harness: &mut Harness, app: &str| harness.ask(|owner| owner.mark_checked(app));
-        let _saved_before = harness.reloads();
+        harness.forget_reloads();
         assert_eq!(mark(&mut harness, "example"), Ok(()));
         assert_eq!(harness.reloads(), 1, "the runtime reads the checked build");
         assert_eq!(

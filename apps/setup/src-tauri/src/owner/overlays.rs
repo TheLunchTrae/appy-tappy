@@ -349,7 +349,7 @@ mod tests {
             .ask(set_overlay(true, OverlayModeDef::PictureInPicture))
             .expect("saves");
         drop(overlay_capture(&mut harness));
-        let _saved_before = harness.reloads();
+        harness.forget_reloads();
         harness
             .ask(|owner| owner.remove_app("example"))
             .expect("removes");
