@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import { type Color, type Picture, decodePicture } from './pixels.ts';
-import type { Rect } from './region.ts';
+import type { Rect, Size } from './region.ts';
 import type { SelectionSpec, SelectionView } from './selection.ts';
 
 /** A window the user can pick. */
@@ -130,6 +130,8 @@ export interface ReferenceRef {
 export interface CharactersSpec {
   readonly kind: 'characters';
   readonly region: Rect;
+  /** The screenshot the region was drawn on; every labeled screenshot and the recording must have its window size. */
+  readonly screenshot: number;
   /** The saved reference these add to, or null for a new one. */
   readonly reference: ReferenceRef | null;
   readonly ink: Color;
@@ -148,6 +150,8 @@ export type CheckSpec =
   | {
       readonly kind: 'image';
       readonly region: Rect;
+      /** The screenshot the region was drawn on; the compared screenshot must have its window size. */
+      readonly drawnOn: number;
       readonly screenshot: number;
       readonly tolerance: number;
       /** The thing to compare, selected on the screenshot; without one the whole region is compared. */
@@ -196,11 +200,12 @@ export interface RecordingView {
   readonly settings: RecordingSettings;
 }
 
-/** The region, color and tolerance a recording reads with. */
-interface RecordingSettings {
+/** The region, color and tolerance a recording reads with, and the window size the region was drawn at. */
+export interface RecordingSettings {
   readonly region: Rect;
   readonly ink: Color;
   readonly tolerance: number;
+  readonly windowSize: Size;
 }
 
 /** What a check read. */

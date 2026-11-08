@@ -39,6 +39,7 @@ use crate::stores::Stores;
 use crate::window_list;
 
 pub(crate) use self::host::Host;
+use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
     AppSummary, Live, Message, Reading, ReferenceSaveSpec, Reply, Request, SaveSpec,
     SavedReferenceId, SavedValue,
@@ -68,7 +69,8 @@ pub(crate) struct Owner<H: Host> {
     generation: u64,
     session: Option<H::Session>,
     latest: Option<Image>,
-    failure: Option<String>,
+    /// Why the picked window's capture failed, until a good frame arrives.
+    failure: Option<CaptureFailure>,
     screenshots: Vec<Image>,
     check: Option<RegionCheck>,
     /// The region the user records, with the readings it showed.
@@ -122,8 +124,7 @@ impl<H: Host> Owner<H> {
                 received,
             } => {
                 if generation == self.generation {
-                    self.record(&image, received);
-                    self.latest = Some(image);
+                    self.frame(image, received);
                 }
             },
             Message::Recognized {
@@ -139,9 +140,12 @@ impl<H: Host> Owner<H> {
                     current.read(index, text);
                 }
             },
-            Message::CaptureFailed { generation, error } => {
+            Message::CaptureFailed {
+                generation,
+                failure,
+            } => {
                 if generation == self.generation {
-                    self.failure = Some(error);
+                    self.capture_failed(failure);
                 }
             },
             Message::Watch { generation, seen } => {
@@ -228,7 +232,7 @@ impl<H: Host> Owner<H> {
             Request::Preview { max_width, reply } => send(
                 reply,
                 match (&self.failure, &self.latest) {
-                    (Some(error), _) => Err(error.clone()),
+                    (Some(failure), _) => Err(failure.error.clone()),
                     (None, latest) => {
                         Ok(latest.as_ref().map(|image| pixels::rgba(image, max_width)))
                     },

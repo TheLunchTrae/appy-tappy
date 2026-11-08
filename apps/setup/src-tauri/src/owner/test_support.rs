@@ -293,7 +293,7 @@ pub(super) fn add_example_app(harness: &mut Harness) {
 }
 
 pub(super) const IMAGE: &str = r#"{"kind":"image","region":{"x":0,"y":0,"width":2,"height":2},
-    "screenshot":0,"tolerance":0}"#;
+    "drawnOn":0,"screenshot":0,"tolerance":0}"#;
 
 pub(super) const BAR: &str = r#"{"kind":"barFill","region":{"x":0,"y":0,"width":4,"height":2},
     "filled":{"red":255,"green":0,"blue":0},"empty":{"red":40,"green":40,"blue":40}}"#;

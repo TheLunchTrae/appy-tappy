@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use appytappy_sources::screen::{Image, Region};
 
-use crate::check_spec::{ColorSpec, RegionSpec};
+use crate::check_spec::{self, ColorSpec, RegionSpec};
 use crate::recording::{Recording, Text, ocr};
 
 use super::Owner;
@@ -44,6 +44,14 @@ impl<H: Host> Owner<H> {
     ) -> Result<(), String> {
         if self.session.is_none() {
             return Err("Pick a window to record.".to_owned());
+        }
+        // A closed window sends no more frames, so a recording would count
+        // up with nothing in it.
+        if let Some(failure) = self.failure.as_ref().filter(|failure| failure.ended) {
+            return Err(format!(
+                "{} Change window to pick it again.",
+                check_spec::sentence(&failure.error)
+            ));
         }
         let region = Region::new(region.x, region.y, region.width, region.height)
             .ok_or_else(|| "Draw the region to record first.".to_owned())?;
@@ -96,6 +104,7 @@ impl<H: Host> Owner<H> {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::sync::mpsc;
 
     use appytappy_sources::screen::Size;
@@ -247,7 +256,7 @@ mod tests {
                 .map(|(reading, text)| format!(r#"{{"reading":{reading},"text":"{text}"}}"#))
                 .collect();
             let spec: CheckSpec = serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[{labels}],
                     "recorded":[{}]}}"#,
                 recorded.join(",")
@@ -285,7 +294,7 @@ mod tests {
         assert_eq!(labeled[1], None);
         let number = |reading| -> CheckSpec {
             serde_json::from_str(&format!(
-                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":4,"height":2}},"screenshot":0,
                     "ink":{{"red":255,"green":0,"blue":0}},"tolerance":0,"labels":[],
                     "recorded":[{{"reading":{reading},"text":"1"}}]}}"#
             ))
@@ -418,6 +427,87 @@ mod tests {
                 reply,
             }),
             Err("Draw the region to record first.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_capture_failure_stops_the_recording_and_says_why() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255, false)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
+        let stopped = harness.recording().expect("kept for review");
+        assert!(!stopped.recording, "nothing records while frames fail");
+        assert_eq!(
+            stopped.problem.as_deref(),
+            Some("Recording stopped: A frame was lost. Record more once the window shows again.")
+        );
+        assert_eq!(stopped.readings.len(), 1, "what it kept stays");
+        harness.deliver(&mut handler, Ok(&red_columns(3)));
+        harness.ask(start_recording(255, true)).expect("goes on");
+        let going = harness.recording().expect("the same recording");
+        assert!(going.recording);
+        assert_eq!(going.problem, None, "going on clears why it stopped");
+    }
+
+    #[test]
+    fn a_closed_window_records_nothing_more() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255, false)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.deliver(
+            &mut handler,
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the captured window closed",
+            )),
+        );
+        let closed = "The captured window closed. Change window to pick it again.";
+        for more in [true, false] {
+            assert_eq!(
+                harness.ask(start_recording(255, more)),
+                Err(closed.to_owned())
+            );
+        }
+        let stopped = harness.recording().expect("kept for review");
+        assert!(!stopped.recording);
+        assert_eq!(
+            stopped.problem.as_deref(),
+            Some("Recording stopped: The captured window closed. Change window to pick it again.")
+        );
+    }
+
+    #[test]
+    fn a_recording_stopped_before_the_window_closed_says_it_cannot_go_on() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        harness.ask(start_recording(255, false)).expect("records");
+        harness.deliver(&mut handler, Ok(&red_columns(2)));
+        harness.ask(Request::StopRecording);
+        harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
+        assert_eq!(
+            harness.recording().expect("kept").problem,
+            None,
+            "a stopped recording can still go on after a passing failure"
+        );
+        harness.deliver(
+            &mut handler,
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the captured window closed",
+            )),
+        );
+        assert_eq!(
+            harness.recording().expect("kept").problem.as_deref(),
+            Some("Recording stopped: The captured window closed. Change window to pick it again.")
         );
     }
 

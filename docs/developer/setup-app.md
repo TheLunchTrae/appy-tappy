@@ -25,10 +25,19 @@ This page covers what the user guide leaves out.
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
 - **Screenshots.** The owner thread keeps the session's screenshots until
-  another window is picked or the user leaves the new value. The screenshot
+  another window is picked or the user leaves the new value. The draft keeps
+  the screenshot its region was drawn on, and a value saves that screenshot's
+  window size. The owner refuses a check or a save that cuts the region from
+  a labeled screenshot, a recording, or a compared screenshot of another
+  window size, and names which (`check_spec::drawn_size`). The screenshot
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
+- **Capture failures.** A frame error shows in the preview until the next good
+  frame of the same capture; only a closed window ends the capture. While a
+  failure stands, a screenshot is refused, and a recording stops with the
+  failure as its problem. Once the window has closed, no recording starts or goes
+  on until another window is picked.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
@@ -105,9 +114,12 @@ flagged on the reading that causes it. **Record more** goes on with the stopped
 recording only when the region, color, tolerance, and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
 UI then offers **Use its settings**, which puts the recording's region, color,
-and tolerance back on the draft. Kept readings are lost only on a discard or
-when the capture stops, such as on **Change window**. **Back** and Escape
-leave review without keeping, and review's edits stay for the next one.
+and tolerance back on the draft. The region stays on the screenshot it was
+drawn on when that one has the recording's window size, and otherwise moves to
+the newest screenshot of that size. Kept readings are lost only on a discard,
+when another window is picked, or when the flow is left, such as on **Change
+window**; a closed window keeps them for review. **Back** and Escape leave
+review without keeping, and review's edits stay for the next one.
 
 ### The text reader
 

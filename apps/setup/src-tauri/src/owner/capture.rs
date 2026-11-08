@@ -2,16 +2,16 @@
 //! keeping screenshots, and reading the check the user sets up on its frames.
 
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
 
-use crate::check_spec::RegionCheck;
+use crate::check_spec::{self, RegionCheck};
 use crate::window_list::{self, WindowList};
 
 use super::host::Host;
-use super::messages::{Message, Reading};
+use super::messages::{CaptureFailure, Message, Reading};
 use super::{Owner, PREVIEW_INTERVAL};
 
 /// A preview capture's message for one frame.
@@ -24,7 +24,10 @@ fn preview_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
         },
         Err(error) => Message::CaptureFailed {
             generation,
-            error: error.to_string(),
+            failure: CaptureFailure {
+                ended: error.kind() == io::ErrorKind::NotConnected,
+                error: error.to_string(),
+            },
         },
     }
 }
@@ -101,7 +104,47 @@ impl<H: Host> Owner<H> {
         Ok(generation)
     }
 
+    /// Keeps `image`, a frame of the picked window that arrived at
+    /// `received`, unless the capture ended. A good frame ends a failure
+    /// that did not end the capture.
+    pub(super) fn frame(&mut self, image: Image, received: Instant) {
+        if self.failure.as_ref().is_some_and(|failure| failure.ended) {
+            return;
+        }
+        self.failure = None;
+        self.record(&image, received);
+        self.latest = Some(image);
+    }
+
+    /// Notes that the capture failed, and stops a recording, which records
+    /// nothing until frames come again, with the failure as its problem.
+    pub(super) fn capture_failed(&mut self, failure: CaptureFailure) {
+        if let Some(recording) = &mut self.recording {
+            let error = check_spec::sentence(&failure.error);
+            if failure.ended {
+                recording.end(
+                    Instant::now(),
+                    format!("Recording stopped: {error} Change window to pick it again."),
+                );
+            } else {
+                recording.fail(
+                    Instant::now(),
+                    format!("Recording stopped: {error} Record more once the window shows again."),
+                );
+            }
+        }
+        self.failure = Some(failure);
+    }
+
     pub(super) fn screenshot(&mut self) -> Result<usize, String> {
+        if let Some(failure) = &self.failure {
+            let next = if failure.ended {
+                "Change window to pick it again."
+            } else {
+                "Take it once the window shows again."
+            };
+            return Err(format!("{} {next}", check_spec::sentence(&failure.error)));
+        }
         let image = self
             .latest
             .clone()
@@ -172,6 +215,48 @@ mod tests {
         );
         let _next = harness.pick();
         assert_eq!(harness.ask(preview), Ok(None));
+    }
+
+    #[test]
+    fn a_frame_error_lasts_until_a_good_frame_but_a_closed_window_ends_the_capture() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        let preview = |reply| Request::Preview {
+            max_width: 100,
+            reply,
+        };
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
+        assert_eq!(harness.ask(preview), Err("a frame was lost".to_owned()));
+        assert_eq!(
+            harness.ask(Request::Screenshot),
+            Err("A frame was lost. Take it once the window shows again.".to_owned()),
+            "no screenshot of a frame from before the failure"
+        );
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert!(
+            harness.ask(preview).is_ok(),
+            "the next good frame clears it"
+        );
+        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+
+        harness.deliver(
+            &mut handler,
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the captured window closed",
+            )),
+        );
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(
+            harness.ask(preview),
+            Err("the captured window closed".to_owned()),
+            "a closed window is final"
+        );
+        assert_eq!(
+            harness.ask(Request::Screenshot),
+            Err("The captured window closed. Change window to pick it again.".to_owned())
+        );
     }
 
     #[test]

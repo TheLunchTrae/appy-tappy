@@ -59,13 +59,21 @@ the application, and keep each different reading it shows.
    screenshots. **Review recording** opens them again with your choices, and
    **Record more** goes on with the same recording. **Back** leaves review
    without keeping, and your changes stay for next time. To record more, keep
-   the region, the characters' color, and the tolerance as they were: if you
-   changed them, **Use its settings** puts them back. Or **Discard** the
-   recording to start a new one. Changing window also discards it.
+   the region, the characters' color, and the tolerance as they were, on a
+   screenshot of the same window size: if you changed them, **Use its
+   settings** puts them back. Or **Discard** the recording to start a new one.
+   Changing window also discards it.
 
 Keep the window the size it was when you took the screenshot you drew the
 region on: at another size, recording pauses and says to resize the window.
-One recording keeps at most 200 readings.
+Every screenshot you label, and the recording, must have that size too, and
+the reference says which one does not. If the window's capture fails for a
+moment, recording stops and says why; select **Record more** once the window
+shows again. If the window closes, nothing more can be recorded from it.
+Review and keep the readings you want, then select **Save reference**, which
+still works after the window closed: **Change window** drops everything you
+have not saved. To record more, open the window again and **Edit** the
+reference. One recording keeps at most 200 readings.
 
 If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.

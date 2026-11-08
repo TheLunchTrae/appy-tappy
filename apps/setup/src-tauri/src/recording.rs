@@ -184,6 +184,23 @@ impl Recording {
         }
     }
 
+    /// Stops recording at `at` because frames stopped coming, with
+    /// `problem` saying why. A stopped recording keeps its problem.
+    pub(crate) fn fail(&mut self, at: Instant, problem: String) {
+        if self.stopped.is_none() {
+            self.stop(at);
+            self.problem = Some(problem);
+        }
+    }
+
+    /// Stops recording at `at` for good, as when the window closed, with
+    /// `problem` saying why even if it had stopped already, since it can
+    /// never go on.
+    pub(crate) fn end(&mut self, at: Instant, problem: String) {
+        self.stop(at);
+        self.problem = Some(problem);
+    }
+
     /// Whether it records `region` of a window of `window_size`, with ink
     /// within `tolerance` of `ink`, so going on with it records the same
     /// thing.
@@ -202,9 +219,16 @@ impl Recording {
     /// Goes on recording at `at` after a stop, keeping its readings. The
     /// time it shows goes on from where it stopped.
     pub(crate) fn resume(&mut self, at: Instant) {
+        // Why it last stopped no longer holds; the next frame tells.
+        self.problem = None;
         if let Some(recorded) = self.stopped.take() {
             self.started = at.checked_sub(recorded).unwrap_or(at);
         }
+    }
+
+    /// The window's size when the region was drawn.
+    pub(crate) const fn window_size(&self) -> Size {
+        self.window_size
     }
 
     /// The readings it kept, in the order they first showed.
@@ -236,6 +260,10 @@ impl Recording {
                     blue: self.ink.blue,
                 },
                 tolerance: self.tolerance,
+                window_size: SizeView {
+                    width: self.window_size.width,
+                    height: self.window_size.height,
+                },
             },
             readings: self
                 .readings
@@ -275,8 +303,10 @@ pub(crate) struct RecordingView {
     pub(crate) readings: Vec<ReadingView>,
 }
 
-/// What a recording records: the region, and what counts as ink there.
+/// What a recording records: the region of a window of one size, and what
+/// counts as ink there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Settings {
     /// The region of the window.
     pub(crate) region: RegionView,
@@ -284,6 +314,15 @@ pub(crate) struct Settings {
     pub(crate) ink: ColorView,
     /// How far a pixel may be from the characters' color and still be ink.
     pub(crate) tolerance: u8,
+    /// The window's size when the region was drawn.
+    pub(crate) window_size: SizeView,
+}
+
+/// A window's size as the UI describes one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) struct SizeView {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 /// A region as the UI describes one.
@@ -570,7 +609,10 @@ mod tests {
         let json = serde_json::to_string(&view.settings).expect("serializes");
         assert_eq!(
             json,
-            r#"{"region":{"x":2,"y":1,"width":5,"height":3},"ink":{"red":255,"green":0,"blue":0},"tolerance":7}"#
+            concat!(
+                r#"{"region":{"x":2,"y":1,"width":5,"height":3},"ink":{"red":255,"green":0,"blue":0},"#,
+                r#""tolerance":7,"windowSize":{"width":8,"height":4}}"#
+            )
         );
     }
 
