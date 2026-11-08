@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use appytappy_actions::PlacedClick;
 use appytappy_config::app_file::AppFile;
-use appytappy_config::click::{Click, ClickAt, ClickPicture};
+use appytappy_config::click::{Click, ClickAt, ClickPicture, InvalidClick};
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::find::PictureSearch;
 use appytappy_sources::screen::{Capture, Image, Region, Size, grab};
@@ -101,17 +101,15 @@ fn search(wanted: &ClickPicture, bytes: &[u8]) -> Result<PictureSearch, String> 
     let (image, mask) = Image::decode_png_masked(bytes)
         .map_err(|error| format!("its picture {name} cannot be read: {error}"))?;
     let size = image.size();
-    if size.width > wanted.search.width || size.height > wanted.search.height {
-        return Err(format!(
-            "its picture {name} is larger than the area it is looked for in"
-        ));
-    }
-    let (x, y) = wanted.press;
-    if x >= size.width || y >= size.height {
-        return Err(format!(
-            "the place it presses lies outside its picture {name}"
-        ));
-    }
+    wanted
+        .fits_picture(size.width, size.height)
+        .map_err(|misfit| {
+            if misfit == InvalidClick::PressOutside {
+                format!("the place it presses lies outside its picture {name}")
+            } else {
+                format!("its picture {name} is larger than the area it is looked for in")
+            }
+        })?;
     PictureSearch::new(image, mask.as_ref(), wanted.tolerance)
         .map_err(|error| format!("its picture {name} cannot be used: {error}"))
 }

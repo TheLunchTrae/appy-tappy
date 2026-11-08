@@ -165,15 +165,17 @@ pub(crate) async fn match_windows(
     ask(&app, move |owner| owner.match_windows(&window)).await?
 }
 
-/// Keeps `region` of the screenshot `screenshot` as a click picture.
+/// Keeps `region` of the screenshot `screenshot` as a click picture, with
+/// only what `selection` picks compared.
 #[tauri::command]
 pub(crate) async fn add_click_picture(
     app: AppHandle,
     screenshot: usize,
     region: RegionSpec,
+    selection: Option<SelectionSpec>,
 ) -> Result<ClickPictureView, String> {
     ask(&app, move |owner| {
-        owner.add_click_picture(screenshot, region)
+        owner.add_click_picture(screenshot, region, selection.as_ref())
     })
     .await?
 }

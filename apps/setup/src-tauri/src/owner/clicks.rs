@@ -5,11 +5,13 @@
 use appytappy_config::automation_file::ClickAtDef;
 use appytappy_config::click::ClickAt;
 use appytappy_sources::screen::find::PictureSearch;
+use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::{Image, Region, Size};
 use serde::Serialize;
 
 use crate::check_spec::{RegionSpec, sentence};
 use crate::pixels;
+use crate::selection::{self, SelectionSpec};
 
 use super::Owner;
 use super::host::Host;
@@ -39,26 +41,38 @@ pub(crate) struct FoundClick {
 
 impl<H: Host> Owner<H> {
     /// Keeps `region` of screenshot `screenshot` as a new click picture and
-    /// answers its name with the window's size. A picture that no saved
-    /// automation names goes the next time the automations are saved.
+    /// answers its name with the window's size. With `selection`, only the
+    /// pixels it picks are compared; the rest of the picture is kept
+    /// transparent. A picture that no saved automation names goes the next
+    /// time the automations are saved.
     pub(crate) fn add_click_picture(
         &self,
         screenshot: usize,
         region: RegionSpec,
+        selection: Option<&SelectionSpec>,
     ) -> Result<ClickPictureView, String> {
         let image = self
             .screenshots
             .get(screenshot)
             .ok_or_else(|| "That screenshot is gone. Take another.".to_owned())?;
-        let picture = Region::new(region.x, region.y, region.width, region.height)
-            .and_then(|region| image.crop(region))
-            .ok_or_else(|| {
-                "The picture reaches past the edge of the window. Draw it inside the window."
-                    .to_owned()
-            })?;
-        let bytes = picture
-            .encode_png()
-            .map_err(|error| sentence(&error.to_string()))?;
+        let outside = || {
+            "The picture reaches past the edge of the window. Draw it inside the window.".to_owned()
+        };
+        let region =
+            Region::new(region.x, region.y, region.width, region.height).ok_or_else(outside)?;
+        let picture = image.crop(region).ok_or_else(outside)?;
+        let mask = selection
+            .map(|selection| {
+                selection::select(image, selection)
+                    .and_then(|selected| selected.mask_in(region))
+                    .ok_or_else(|| "Nothing is selected. Mark the picture again.".to_owned())
+            })
+            .transpose()?;
+        let bytes = match &mask {
+            Some(mask) => picture.encode_png_masked(mask),
+            None => picture.encode_png(),
+        }
+        .map_err(|error| sentence(&error.to_string()))?;
         let name = self
             .stores()?
             .automations
@@ -78,7 +92,7 @@ impl<H: Host> Owner<H> {
         name: &str,
         max_width: u32,
     ) -> Result<Vec<u8>, String> {
-        let image = self.click_picture(name)?;
+        let (image, _mask) = self.click_picture(name)?;
         Ok(pixels::rgba(&image, max_width))
     }
 
@@ -117,12 +131,16 @@ impl<H: Host> Owner<H> {
                         size.width, size.height, taken.width, taken.height
                     ));
                 }
-                let picture = self.click_picture(&wanted.image)?;
+                let (picture, mask) = self.click_picture(&wanted.image)?;
+                let size = picture.size();
+                wanted
+                    .fits_picture(size.width, size.height)
+                    .map_err(|misfit| sentence(&misfit.to_string()))?;
                 let area = wanted.search;
                 let searched = Region::new(area.x, area.y, area.width, area.height)
                     .and_then(|region| frame.crop(region))
                     .ok_or_else(|| "The search area reaches past the window.".to_owned())?;
-                let search = PictureSearch::new(picture, None, wanted.tolerance)
+                let search = PictureSearch::new(picture, mask.as_ref(), wanted.tolerance)
                     .map_err(|error| sentence(&error.to_string()))?;
                 let found = search.find(&searched).ok_or_else(|| {
                     "The picture is not in its search area now, so the click would not happen."
@@ -149,13 +167,13 @@ impl<H: Host> Owner<H> {
     }
 
     /// The click picture `name`.
-    fn click_picture(&self, name: &str) -> Result<Image, String> {
+    fn click_picture(&self, name: &str) -> Result<(Image, Option<Mask>), String> {
         let bytes = self
             .stores()?
             .automations
             .picture(name)
             .map_err(|error| format!("The picture {name} cannot be read: {error}."))?;
-        Image::decode_png(&bytes)
+        Image::decode_png_masked(&bytes)
             .map_err(|error| format!("The picture {name} cannot be read: {error}."))
     }
 }
@@ -167,6 +185,7 @@ mod tests {
 
     use super::*;
     use crate::owner::test_support::{FakeHost, frame_image, harness, harness_with, scratch_store};
+    use crate::selection::{Combine, SelectStep};
 
     fn region(x: u32, y: u32, width: u32, height: u32) -> RegionSpec {
         RegionSpec {
@@ -209,7 +228,7 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         // The gray right half of the 4 by 2 frame.
         let kept = harness
-            .ask(|owner| owner.add_click_picture(0, region(2, 0, 2, 2)))
+            .ask(|owner| owner.add_click_picture(0, region(2, 0, 2, 2), None))
             .expect("kept");
         assert_eq!(
             kept,
@@ -244,6 +263,48 @@ mod tests {
         let resized =
             harness.ask(|owner| owner.find_click(&picture("click-1.png", (8, 2), (0, 0, 2, 2), 0)));
         assert!(resized.expect_err("another size").contains("4x2 now"));
+        let narrow =
+            harness.ask(|owner| owner.find_click(&picture("click-1.png", (4, 2), (2, 0, 1, 2), 0)));
+        assert!(narrow.expect_err("too narrow").contains("fit inside"));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_selection_keeps_only_what_it_picks() {
+        let (stores, root) = scratch_store("click-picture-mask");
+        let mut harness = harness_with(false, Ok(stores));
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // A click on the gray half picks it alone, so the red column the
+        // region also holds is left out.
+        let gray = SelectionSpec {
+            tolerance: 0,
+            steps: vec![SelectStep::Click {
+                x: 3,
+                y: 0,
+                combine: Combine::Replace,
+            }],
+        };
+        let kept = harness
+            .ask(|owner| owner.add_click_picture(0, region(1, 0, 3, 2), Some(&gray)))
+            .expect("kept");
+        let masked = harness.ask(|owner| {
+            owner
+                .click_picture(&kept.image)
+                .map(|(_picture, mask)| mask.is_some())
+        });
+        assert_eq!(masked, Ok(true));
+        let nothing = SelectionSpec {
+            tolerance: 0,
+            steps: Vec::new(),
+        };
+        assert!(
+            harness
+                .ask(|owner| owner.add_click_picture(0, region(1, 0, 3, 2), Some(&nothing)))
+                .expect_err("nothing selected")
+                .contains("Nothing is selected")
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -286,7 +347,7 @@ mod tests {
         let mut harness = harness_with(false, Ok(stores));
         assert!(
             harness
-                .ask(|owner| owner.add_click_picture(0, region(0, 0, 1, 1)))
+                .ask(|owner| owner.add_click_picture(0, region(0, 0, 1, 1), None))
                 .expect_err("no screenshot")
                 .contains("Take another")
         );
@@ -295,7 +356,7 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert!(
             harness
-                .ask(|owner| owner.add_click_picture(0, region(3, 0, 2, 2)))
+                .ask(|owner| owner.add_click_picture(0, region(3, 0, 2, 2), None))
                 .expect_err("past the edge")
                 .contains("past the edge")
         );

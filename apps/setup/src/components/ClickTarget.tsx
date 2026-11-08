@@ -29,7 +29,7 @@ import {
 import type { Picture } from '../lib/pixels.ts';
 import { type Point, type Rect, type Size, contains, fit, toPicture } from '../lib/region.ts';
 import { background } from '../lib/repeat.ts';
-import { DEFAULT_COLOR_MATCH, type SelectTool } from '../lib/selection.ts';
+import { DEFAULT_COLOR_MATCH, type SelectTool, type SelectionSpec } from '../lib/selection.ts';
 import { useSize } from '../lib/size.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
 import { useScreenshots } from '../lib/useScreenshots.ts';
@@ -79,10 +79,15 @@ export function ClickPictureThumb({ image, label }: { readonly image: string; re
 /** Where a click looks: the same spot every time, or wherever its picture is. */
 type Mode = 'spot' | 'picture';
 
-/** A picture drawn this session: its region on a screenshot, and where on it the click presses. */
+/**
+ * A picture drawn this session: its region on a screenshot, the selection that made it when the snap or click tool
+ * did, and where on it the click presses.
+ */
 interface Drawn {
   readonly screenshot: number;
   readonly region: Rect;
+  /** Only what this picks is compared; the rest of the region is left out. Null for a drawn box. */
+  readonly selection: SelectionSpec | null;
   readonly press: Point;
 }
 
@@ -141,7 +146,10 @@ interface StageProps {
   readonly initial: ClickAtDef | null;
   readonly button: ClickButton;
   readonly tolerance: number;
-  readonly appField: ReactNode;
+  /** The application field, disabled while a picture is kept or looked for. */
+  readonly appField: (busy: boolean) => ReactNode;
+  /** Opens the screen again on the application, to find its window anew. */
+  readonly onLookAgain: () => void;
   readonly onButton: (button: ClickButton) => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onCancel: () => void;
@@ -157,13 +165,13 @@ function TargetStage({
   button,
   tolerance,
   appField,
+  onLookAgain,
   onButton,
   onTolerance,
   onCancel,
   onUse,
 }: StageProps) {
   const [window, setWindow] = useState<Window>({ kind: 'looking' });
-  const [look, setLook] = useState(0);
   const [mode, setMode] = useState<Mode>(initial?.kind ?? 'picture');
   const [spot, setSpot] = useState<ClickAtDef | null>(initial?.kind === 'spot' ? initial : null);
   const [drawn, setDrawn] = useState<Drawn | null>(null);
@@ -175,6 +183,14 @@ function TargetStage({
   const [error, setError] = useState<string | null>(null);
   // The picture kept for a drawn region, so finding and using it keep it once.
   const kept = useRef<{ readonly key: string; readonly at: ClickAtDef } | null>(null);
+  // Whether the screen still shows this stage, so a target finished after it closed is not used.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const screenshots = useScreenshots();
   const { shots, full, selected, setSelected, position } = screenshots;
@@ -212,6 +228,10 @@ function TargetStage({
             }
             return;
           }
+          // A screen closed meanwhile has stopped capture, which a pick now would start again.
+          if (!isCurrent()) {
+            return;
+          }
           await pickWindow(best.handle);
           if (isCurrent()) {
             setWindow({ kind: 'picked' });
@@ -226,9 +246,9 @@ function TargetStage({
     return () => {
       current = false;
     };
-    // The window rules are read when the screen opens and each time the user looks again, not each time the lists
+    // The window rules are read when the stage opens, and looking again opens a new one, not each time the lists
     // are read again.
-  }, [look]);
+  }, []);
 
   const view = useRef<HTMLDivElement>(null);
   const space = useSize(view);
@@ -273,27 +293,28 @@ function TargetStage({
     setError(null);
   };
 
-  const setRegion = (region: Rect): void => {
+  const setRegion = (region: Rect, selection: SelectionSpec | null): void => {
     if (selected === null) {
       return;
     }
     changed();
-    setDrawn({ screenshot: selected, region, press: middle(region) });
+    setDrawn({ screenshot: selected, region, selection, press: middle(region) });
   };
 
-  const selectWith = (steps: Parameters<typeof select>[1]['steps']): void => {
+  const selectWith = (steps: SelectionSpec['steps']): void => {
     if (selected === null) {
       return;
     }
     const on = selected;
+    const selection: SelectionSpec = { tolerance: colorMatch, steps };
     background(
-      select(on, { tolerance: colorMatch, steps })
+      select(on, selection)
         .then((view_) => {
           if (view_ === null) {
             setError('Nothing was selected there. Try a bigger box or a higher color match.');
             return;
           }
-          setRegion(view_.region);
+          setRegion(view_.region, selection);
           setStep('press');
         })
         .catch((caught: unknown) => {
@@ -353,11 +374,11 @@ function TargetStage({
         `The picture is too big to look for. Draw it smaller: at most ${MAX_SEARCH_PIXELS.toLocaleString()} pixels.`,
       );
     }
-    const { region } = drawn;
-    const key = `${drawn.screenshot}:${region.x},${region.y},${region.width},${region.height}`;
+    const { region, selection } = drawn;
+    const key = JSON.stringify([drawn.screenshot, region, selection]);
     let base = kept.current?.key === key ? kept.current.at : null;
     if (base === null) {
-      const view_ = await addClickPicture(drawn.screenshot, region);
+      const view_ = await addClickPicture(drawn.screenshot, region, selection);
       base = {
         kind: 'picture',
         image: view_.image,
@@ -408,7 +429,9 @@ function TargetStage({
 
   const use = (): void => {
     run(async (at) => {
-      onUse({ app, button, at });
+      if (mounted.current) {
+        onUse({ app, button, at });
+      }
       await Promise.resolve();
     });
   };
@@ -434,13 +457,13 @@ function TargetStage({
             </span>
           )}
           <div className="end">
-            {window.kind === 'missing' ? (
+            {window.kind === 'missing' || (window.kind === 'picked' && liveError !== null) ? (
               <button
                 type="button"
                 className="btn"
-                onClick={() => {
-                  setLook((count) => count + 1);
-                }}
+                disabled={busy}
+                title="Finds the application's window again. Screenshots taken so far are cleared."
+                onClick={onLookAgain}
               >
                 Look again
               </button>
@@ -500,7 +523,7 @@ function TargetStage({
                 picking={false}
                 tool={tool}
                 onRegion={(region) => {
-                  setRegion(region);
+                  setRegion(region, null);
                 }}
                 onPick={() => {
                   // Clicks pick no colors.
@@ -578,7 +601,7 @@ function TargetStage({
         </div>
       </section>
       <aside className="inspector" aria-label="Click target">
-        {appField}
+        {appField(busy)}
         <div className="field">
           <span className="name">
             <span id="click-where">Where to click</span>
@@ -791,6 +814,8 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
     initial.at?.kind === 'picture' ? initial.at.tolerance : DEFAULT_TOLERANCE,
   );
   const chosen = choices.find((choice) => choice.id === app) ?? null;
+  // Each look again opens a new stage, which picks the window afresh and forgets the screenshots.
+  const [round, setRound] = useState(0);
 
   // Capture stops when the screen closes, so the editor's live reading can watch again.
   useEffect(
@@ -802,8 +827,8 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
 
   return (
     <TargetStage
-      // A new application picks a new window, which forgets the screenshots.
-      key={app}
+      // A new application, or looking again, picks a new window, which forgets the screenshots.
+      key={`${app}:${round}`}
       apps={apps}
       app={app}
       appName={chosen?.name ?? app}
@@ -815,7 +840,10 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
       onTolerance={setTolerance}
       onCancel={onCancel}
       onUse={onUse}
-      appField={
+      onLookAgain={() => {
+        setRound((count) => count + 1);
+      }}
+      appField={(busy) => (
         <div className="field">
           <span className="name">
             <label htmlFor="click-app">Application</label>
@@ -829,6 +857,7 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
             className="input"
             aria-describedby="hint-click-app"
             value={app}
+            disabled={busy}
             onChange={(event) => {
               setApp(event.target.value);
             }}
@@ -836,6 +865,10 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
             {app === '' ? (
               <option value="" disabled>
                 Pick an application
+              </option>
+            ) : chosen === null ? (
+              <option value={app} disabled>
+                {app} (no longer saved)
               </option>
             ) : null}
             {choices.map((choice) => (
@@ -845,7 +878,7 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
             ))}
           </select>
         </div>
-      }
+      )}
     />
   );
 }

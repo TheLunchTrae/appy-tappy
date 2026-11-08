@@ -144,7 +144,11 @@ then choose **Where to click**:
 - **A picture** clicks only when the picture is found near where it was. Mark
   the picture, such as a button, with **Box**, **Snap**, or **Click**, then
   select **Where to click on it** and click the place. It starts in the
-  middle.
+  middle. With **Snap** or **Click**, only what they select is compared, so
+  the background around a round button does not count.
+
+If the window closes while you set up the target, open it again and select
+**Look again**. Looking again clears the screenshots taken so far.
 
 For a picture, **How alike it must look** sets how far its colors may be from
 the window's. Raise it if the button changes a little, such as when it is

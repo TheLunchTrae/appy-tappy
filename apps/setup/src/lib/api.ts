@@ -507,9 +507,16 @@ export async function matchWindows(window: WindowDef): Promise<readonly WindowFi
   return invoke<readonly WindowFit[]>('match_windows', { window });
 }
 
-/** Keeps `region` of screenshot `index` as a new click picture. One that no saved automation names goes the next time automations are saved. */
-export async function addClickPicture(index: number, region: Rect): Promise<ClickPictureView> {
-  return invoke<ClickPictureView>('add_click_picture', { screenshot: index, region });
+/**
+ * Keeps `region` of screenshot `index` as a new click picture, comparing only what `selection` picks when it is given.
+ * One that no saved automation names goes the next time automations are saved.
+ */
+export async function addClickPicture(
+  index: number,
+  region: Rect,
+  selection: SelectionSpec | null,
+): Promise<ClickPictureView> {
+  return invoke<ClickPictureView>('add_click_picture', { screenshot: index, region, selection });
 }
 
 /** The click picture `image`, at most `maxWidth` wide. */
