@@ -6,7 +6,7 @@ it. It also says where a machine can reach a state it never leaves, or a state
 that does the wrong thing. Each of those has an issue, linked under
 **Open problems** at the end of its section.
 
-Read [Architecture](architecture.md) first: it describes the threads that these
+Read [Architecture](Architecture.md) first: it describes the threads that these
 machines run on.
 
 ## How to read this page
@@ -93,8 +93,8 @@ stateDiagram-v2
     Degraded --> Attached: a snapshot works, a watched application runs
 ```
 
-Degraded wins over the other two while `problem` is set. [Lifecycle](architecture.md#lifecycle)
-explains each state.
+Degraded wins over the other two while `problem` is set.
+[Lifecycle](Architecture.md#lifecycle) explains each state.
 
 ### Detection timers
 
@@ -377,7 +377,7 @@ stateDiagram-v2
     MenuOpen --> [*]: stop closes the menu first
 ```
 
-[Tray](architecture.md#tray) explains why a post made while the menu is open
+[Tray](Architecture.md#tray) explains why a post made while the menu is open
 is dropped.
 
 Open problems:
@@ -586,9 +586,9 @@ Open problems:
 
 ## MCP investigation server
 
-The [MCP investigation server](mcp.md) answers one request at a time. Its
-`Session` in `apps/mcp/src/tools.rs` keeps the executables the user refused,
-and at most one attached process with its memory scan.
+The [MCP investigation server](MCP-investigation-server.md) answers one request
+at a time. Its `Session` in `apps/mcp/src/tools.rs` keeps the executables the
+user refused, and at most one attached process with its memory scan.
 
 ```mermaid
 stateDiagram-v2

@@ -23,7 +23,7 @@ own copy of the tree.
 ## Lint wall
 
 The workspace pins Rust, uses edition 2024, denies `unsafe` code outside the
-Windows adapters (see [architecture](architecture.md#unsafe-code)), requires
+Windows adapters (see [architecture](Architecture.md#unsafe-code)), requires
 documented public API with `Debug` implementations, denies rustdoc warnings,
 checks doctests, and runs Clippy on every target and feature with warnings
 promoted to errors. The wall lives in `[workspace.lints]`, and every package

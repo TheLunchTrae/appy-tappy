@@ -25,7 +25,8 @@ ALLOWED_PATHS = ("vendor/", "third_party/")
 # Examples: "api/", "proto/", "docs/blog/".
 CONTRACT_PATHS = ("migrations/", "db/migrate/")
 # Directories that hold history rather than current contracts, checked at the
-# top level and under docs/, where sediment collects.
+# top level and under the documentation directories, where sediment collects.
+DOC_DIRECTORIES = ("docs", "wiki")
 HISTORY_DIRECTORIES = {
     "adr",
     "archive",
@@ -185,7 +186,7 @@ def name_findings(entries: dict[str, bool]) -> list[str]:
         parts = PurePosixPath(path).parts
         name = parts[-1]
         directories = parts[:-1]
-        scoped = directories if parts[0] == "docs" else directories[:1]
+        scoped = directories if parts[0] in DOC_DIRECTORIES else directories[:1]
         history = next((part for part in scoped if part.lower() in HISTORY_DIRECTORIES), None)
         name_tokens = tokens(name)
         stem_tokens = tokens(name.split(".")[0])
@@ -198,7 +199,7 @@ def name_findings(entries: dict[str, bool]) -> list[str]:
             findings.append(f"{path}: versioned file name; replace the old version in place")
         elif PurePosixPath(name).suffix in NOTE_SUFFIXES and stem_tokens and set(stem_tokens) <= NOTE_TOKENS:
             findings.append(f"{path}: handoff note; keep task notes in untracked .scratch/")
-        elif not contract and len(parts) <= 2 and parts[0] in ("docs", name) and DATED_NAME.search(name):
+        elif not contract and len(parts) <= 2 and (parts[0] in DOC_DIRECTORIES or parts[0] == name) and DATED_NAME.search(name):
             findings.append(f"{path}: dated name; current docs carry no dates")
     return findings
 

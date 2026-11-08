@@ -2,7 +2,7 @@
 //! screenshots, and sets up the values automations read.
 //!
 //! It is a separate program from the runtime: it opens on demand and exits
-//! fully when closed. See `docs/developer/architecture.md` for how the two meet.
+//! fully when closed. See `wiki/developer/Architecture.md` for how the two meet.
 
 #![forbid(unsafe_code)]
 #![windows_subsystem = "windows"]

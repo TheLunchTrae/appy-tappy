@@ -65,9 +65,31 @@ run = "bun run standards"
 
 [tasks."md:standards:check"]
 description = "Run the Markdown standards CI gate"
-depends = ["md:install", "md:links", "md:typos"]
+depends = ["md:install", "md:links", "md:typos", "md:wiki:check"]
 run = "bun run standards:check"
 
 [tasks."md:standards:check:deep"]
 description = "Run the Markdown CI gate plus external link and dependency checks"
 depends = ["md:standards:check", "md:links:deep", "md:audit"]
+
+# wiki/ publishes to the GitHub wiki; wiki/developer/Wiki.md describes how.
+# Neither task publishes: the Wiki workflow pushes what md:wiki builds.
+[tasks."md:wiki"]
+description = "Build the wiki from wiki/ into artifacts/wiki, without publishing it"
+tools = { python = "3.15.1" }
+run = '''
+set -eu
+rm -rf artifacts/wiki
+python -B scripts/wiki.py artifacts/wiki --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
+'''
+
+[tasks."md:wiki:check"]
+description = "Test the wiki build, then build the wiki from wiki/ into a temporary directory"
+tools = { python = "3.15.1" }
+run = '''
+set -eu
+python -B -m unittest discover -s scripts -p wiki_test.py
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
+python -B scripts/wiki.py "$out/wiki" --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
+'''

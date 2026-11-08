@@ -3,7 +3,7 @@
 The overlay shows an application's values as AppyTappy reads them right now,
 so you can check that they read right while you use the application. Turn it
 on with the application's **Overlay** menu on the
-[Applications](applications.md) page:
+[Applications](Applications.md) page:
 
 - **Off.**
 - **Over the window** shows the readings in the top-left corner of the
@@ -21,7 +21,7 @@ closes when you turn the overlay off or remove the application. It never
 changes the application: the readings are a window of AppyTappy's own.
 
 Like automations, the overlay reads only the values made at the window's
-current [size](values.md#window-size). A value it cannot read says why in place
+current [size](Values.md#window-size). A value it cannot read says why in place
 of its reading, and the others still read.
 
 ## Fullscreen

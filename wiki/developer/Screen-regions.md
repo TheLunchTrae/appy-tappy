@@ -62,7 +62,7 @@ The runtime uses neither. Windows OCR would make results depend on the Windows
 version and its language packs. `ocrs` adds a few megabytes to a binary and
 loads a separate neural network model file, to read text that a learned shape
 match reads in microseconds. The setup app uses `ocrs` only to guess the text of
-[recorded readings](setup-app.md#recording) for the user to check.
+[recorded readings](Setup-app.md#recording) for the user to check.
 Reading with it at runtime stays an option for text the number check cannot
 read
 ([#33](https://github.com/TheLunchTrae/appy-tappy/issues/33)).

@@ -81,7 +81,7 @@ editing `app.json` by hand counts from the next reload or restart.
 ## Restoring
 
 A rule that restores on release undoes its actions when it is released (see
-[Rules](rules.md)). Each action records the state of each session or volume
+[Rules](Rules.md)). Each action records the state of each session or volume
 it touched, just before it acted:
 
 - **Pause** and **play** put back whether each session was playing. A session

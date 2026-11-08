@@ -27,7 +27,7 @@ Installing does three things:
 
 - It adds **AppyTappy** to the Start menu. That opens AppyTappy Setup.
 - It starts AppyTappy's background part, which shows the
-  [tray icon](tray.md).
+  [tray icon](The-tray-icon.md).
 - It sets the background part to start each time you sign in to Windows.
 
 ## Update

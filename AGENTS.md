@@ -3,7 +3,7 @@
 AppyTappy is a Windows background app that runs automations when another
 application reaches a state, such as a certain number appearing in a region of
 its window or an icon becoming visible. Read
-`CONTEXT.md` first if it exists. Then read the pages in `docs/developer/` that
+`CONTEXT.md` first if it exists. Then read the pages in `wiki/developer/` that
 own the change before changing architecture, domain language, or enforcement.
 
 ## Commands
@@ -128,12 +128,19 @@ version-numbered names.
   files, so a fresh agent can find them.
 - Write in the present tense. Do not date text or narrate history, as in "now
   uses", "no longer", "previously", or "the new parser".
-- `docs/` holds current pages and their images, in two sections.
-  `docs/user/` is the user guide: how to install and use AppyTappy, in the
-  setup app's own words, with no implementation, crates, frameworks, or
-  algorithms. `docs/developer/` holds the architecture, contracts, and
-  decisions, and links to the user guide for what the user sees rather than
-  repeating it. A change to what the user sees updates the user guide.
+- `wiki/` holds current pages and their images: `Home.md`, the sidebar, and
+  two sections. `wiki/user/` is the rest of the user guide: how to install
+  and use AppyTappy, in the setup app's own words, with no implementation,
+  crates, frameworks, or algorithms. `wiki/developer/` holds the architecture,
+  contracts, and decisions, and links to the user guide for what the user sees
+  rather than repeating it. A change to what the user sees updates the user
+  guide.
+- `wiki/` publishes to the GitHub wiki on each push to `main`. Edit `wiki/`,
+  never the wiki itself, and link between pages with relative `.md` links. A
+  page's file name is its wiki page's name, with hyphens for spaces, and every
+  page other than `Home.md` needs a line in `wiki/_Sidebar.md`;
+  [`wiki/developer/Wiki.md`](wiki/developer/Wiki.md) says what else the build
+  requires.
 - Record owner decisions on one current developer page and replace a decision
   when it changes.
 - Follow the
@@ -176,7 +183,7 @@ installer, the Start menu, and the tray name the product **AppyTappy**.
 
 ## State machines
 
-[`docs/developer/state-machines.md`](docs/developer/state-machines.md) maps
+[`wiki/developer/State-machines.md`](wiki/developer/State-machines.md) maps
 each state machine in the runtime, the setup app, and the MCP investigation
 server, including implicit ones: state spread over fields, flags, `Option`s,
 maps, or a thread's place in its loop.
@@ -184,10 +191,10 @@ maps, or a thread's place in its loop.
 - A change that adds or removes a machine, or changes a machine's states,
   transitions, or stale-message guards, updates that machine's section in the
   same change. The section names every state, the event that causes each
-  transition, the failure states the machine can reach, and how it recovers
-  from each. Update the diagram if the section has one. A guard change also
-  updates the guard list in
-  [How to read this page](docs/developer/state-machines.md#how-to-read-this-page).
+  transition, the failure states the machine can reach, and how it recovers from
+  each. Update the diagram if the section has one. A guard change also updates
+  the guard list in [How to read this
+  page](wiki/developer/State-machines.md#how-to-read-this-page).
 - A reachable state that the machine never leaves, or that does the wrong
   thing, gets an issue linked under the section's **Open problems** list,
   which the change adds if the section has none. The change that fixes the
@@ -210,8 +217,8 @@ maps, or a thread's place in its loop.
 
 `Cargo.toml`, `clippy.toml`, and `deny.toml` own executable policy;
 `.config/mise/conf.d/rust.toml` owns commands. Read
-[`docs/developer/rust.md`](docs/developer/rust.md) for setup, scanner limits, and mutation
-operation before changing enforcement.
+[`wiki/developer/Rust-standards.md`](wiki/developer/Rust-standards.md) for
+setup, scanner limits, and mutation operation before changing enforcement.
 
 ### Work and verification
 
@@ -221,20 +228,19 @@ source changes; add `rust:doc` for public API changes.
 dependency changes and commit it.
 
 `rust:mutants` runs the full sweep. `rust:mutants:diff` mutates only changed
-code; its base defaults to `origin/main`, then local `main`, and can be set
-with `MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
+code; its base defaults to `origin/main`, then local `main`, and can be set with
+`MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
 `rust:standards:check` runs the lane that `MUTANTS_LANE` names, `full` by
-default; [mutation testing](docs/developer/rust.md#mutation-testing) says which lane CI
-runs.
-Before handoff, run `mise run rust:standards:check`; report skipped checks and their
-reasons.
+default; [mutation testing](wiki/developer/Rust-standards.md#mutation-testing)
+says which lane CI runs. Before handoff, run `mise run rust:standards:check`;
+report skipped checks and their reasons.
 
 ### Ownership and state
 
 This application profile favors one owner for state, pure `(state, event)`
 transitions, and messages to the owner. Libraries, runtimes, and concurrency
 primitives need a deliberate profile adaptation; see
-[`docs/developer/rust.md`](docs/developer/rust.md#ownership-boundary).
+[`wiki/developer/Rust-standards.md`](wiki/developer/Rust-standards.md#ownership-boundary).
 
 - Keep program-owned counters, IDs, and dispatch state on the root model.
   Mirror external state through construction and events.
@@ -341,13 +347,13 @@ and `platform`. A crate root without such a module keeps
 authorization.
 
 Every workspace package, including the root package, declares
-`[lints] workspace = true`. Release profiles belong in the root manifest;
-keep overflow checks enabled. `tests/allow_policy.rs` checks first-party
-source inputs, and `rust:policy` checks configured policy probes. Read their
-[scope and limitations](docs/developer/rust.md#source-policy-scan) before adding macros,
-custom target paths, includes, or symlinks.
-Checker-specific production behavior and synthesized suppression attributes
-are prohibited even when static analysis cannot detect them.
+`[lints] workspace = true`. Release profiles belong in the root manifest; keep
+overflow checks enabled. `tests/allow_policy.rs` checks first-party source
+inputs, and `rust:policy` checks configured policy probes. Read their [scope and
+limitations](wiki/developer/Rust-standards.md#source-policy-scan) before adding
+macros, custom target paths, includes, or symlinks. Checker-specific production
+behavior and synthesized suppression attributes are prohibited even when static
+analysis cannot detect them.
 
 ### Tests and mutation
 
@@ -363,10 +369,10 @@ dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-Mutation evidence covers the code a pull request changes and, on pushes to
-main, the whole workspace.
-`.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
-approval, because the Linux gate compiles them out. Read [mutation operation](docs/developer/rust.md#mutation-testing)
+Mutation evidence covers the code a pull request changes and, on pushes to main,
+the whole workspace. `.cargo/mutants.toml` excludes the Windows `win.rs`
+adapters with the owner's approval, because the Linux gate compiles them out.
+Read [mutation operation](wiki/developer/Rust-standards.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.
 Confirm no run is active before clearing a stale lock.
 

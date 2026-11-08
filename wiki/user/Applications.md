@@ -1,11 +1,11 @@
 # Applications
 
 An application is a program whose window AppyTappy watches. Add it before you
-[make its values](values.md#make-a-value), since every value belongs to one.
+[make its values](Values.md#make-a-value), since every value belongs to one.
 
 The **Applications** page in AppyTappy Setup lists each saved application:
 how AppyTappy finds its window, its anti-cheat setting, its
-[overlay](overlay.md), and how many of its windows are open now.
+[overlay](Overlay.md), and how many of its windows are open now.
 
 ## Add, change, or remove an application
 
