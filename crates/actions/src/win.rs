@@ -10,9 +10,9 @@
 //! after asking which process that window belongs to. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
 //! Explorer's open, on a short-lived thread of its own, so a slow program
-//! cannot hold up the action worker for longer than 2 seconds; while one
-//! open is still running, the next is skipped, so a program that never
-//! answers leaves one waiting thread at most. A sound plays through
+//! cannot hold up the action worker for longer than 2 seconds; while an open
+//! that timed out is still running, the next is skipped, so a program that
+//! never answers leaves one waiting thread at most. A sound plays through
 //! `PlaySoundW`, which returns once the sound is queued, after the adapter
 //! checks that its file is there, because the call does not report a
 //! missing file when it plays asynchronously.
@@ -164,8 +164,7 @@ pub struct WindowsControls {
     /// The media session manager, or why Windows did not give it yet.
     media: Result<GlobalSystemMediaTransportControlsSessionManager, MediaMissing>,
     devices: IMMDeviceEnumerator,
-    /// The thread of the last open, which may still be waiting on the shell.
-    opening: Option<JoinHandle<()>>,
+    opener: Opener,
     // Dropped last, after the COM objects above.
     _apartment: Apartment,
 }
@@ -191,7 +190,7 @@ impl WindowsControls {
         Ok(Self {
             media,
             devices,
-            opening: None,
+            opener: Opener::default(),
             _apartment: apartment,
         })
     }
@@ -433,50 +432,83 @@ impl Controls for WindowsControls {
     }
 
     fn open(&mut self, target: &OpenTarget) -> io::Result<()> {
-        if self
-            .opening
-            .as_ref()
-            .is_some_and(|last| !last.is_finished())
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "the last program, file, or link is still opening, so this one was skipped",
-            ));
-        }
-        let file = wide(target.as_str().encode_utf16());
-        let folder = target.folder().map(|folder| wide(folder.encode_utf16()));
-        let (done, outcome) = mpsc::channel();
-        // The thread is not joined: after a timeout it finishes on its own,
-        // and its answer goes nowhere.
-        self.opening = Some(
-            thread::Builder::new()
-                .name("open".to_owned())
-                .spawn(move || {
-                    #[expect(
-                        clippy::let_underscore_must_use,
-                        reason = "after a timeout nobody waits for the answer"
-                    )]
-                    let _ = done.send(shell_open(&file, folder.as_deref()));
-                })?,
-        );
-        match outcome.recv_timeout(OPEN_TIMEOUT) {
-            Ok(opened) => opened,
-            Err(RecvTimeoutError::Timeout) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!(
-                    "opening it did not finish within {} seconds, so it may still open",
-                    OPEN_TIMEOUT.as_secs()
-                ),
-            )),
-            Err(RecvTimeoutError::Disconnected) => {
-                Err(io::Error::other("the thread that opens it stopped"))
-            },
-        }
+        self.opener.open(target)
     }
 
     fn play_sound(&mut self, file: &Path) -> io::Result<bool> {
         Ok(play_file(file))
     }
+}
+
+/// Opens programs, files, and links, one at a time.
+#[derive(Debug, Default)]
+struct Opener {
+    /// The thread of an open that timed out, which may still be waiting on
+    /// the shell. An open that answered in time leaves none, so the next open
+    /// right after it runs.
+    waiting: Option<JoinHandle<()>>,
+}
+
+impl Opener {
+    /// Opens `target` on a short-lived thread, waiting for it at most
+    /// [`OPEN_TIMEOUT`]. It skips `target` while an open that timed out is
+    /// still running, so a target that never answers leaves one waiting
+    /// thread.
+    fn open(&mut self, target: &OpenTarget) -> io::Result<()> {
+        if let Some(last) = self.waiting.take() {
+            if !last.is_finished() {
+                self.waiting = Some(last);
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "the last program, file, or link is still opening, so this one was skipped",
+                ));
+            }
+            wait_out(last);
+        }
+        let file = wide(target.as_str().encode_utf16());
+        let folder = target.folder().map(|folder| wide(folder.encode_utf16()));
+        let (done, outcome) = mpsc::channel();
+        let thread = thread::Builder::new()
+            .name("open".to_owned())
+            .spawn(move || {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "after a timeout nobody waits for the answer"
+                )]
+                let _ = done.send(shell_open(&file, folder.as_deref()));
+            })?;
+        match outcome.recv_timeout(OPEN_TIMEOUT) {
+            Ok(opened) => {
+                wait_out(thread);
+                opened
+            },
+            Err(RecvTimeoutError::Timeout) => {
+                // Not joined: it finishes on its own, and its answer goes
+                // nowhere.
+                self.waiting = Some(thread);
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "opening it did not finish within {} seconds, so it may still open",
+                        OPEN_TIMEOUT.as_secs()
+                    ),
+                ))
+            },
+            Err(RecvTimeoutError::Disconnected) => {
+                wait_out(thread);
+                Err(io::Error::other("the thread that opens it stopped"))
+            },
+        }
+    }
+}
+
+/// Waits for an open's `thread`, which has answered or stopped, to end.
+fn wait_out(thread: JoinHandle<()>) {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the answer, or its absence, was already read from the channel"
+    )]
+    let _ = thread.join();
 }
 
 /// Starts playing the WAV file at `file` without waiting for it to end,
@@ -776,7 +808,9 @@ mod tests {
     use std::env;
     use std::os::windows::ffi::OsStrExt;
 
-    use super::{play_file, shell_open, wide};
+    use appytappy_config::action::OpenTarget;
+
+    use super::{Opener, play_file, shell_open, wide};
 
     #[test]
     fn a_missing_sound_file_does_not_play() {
@@ -793,5 +827,24 @@ mod tests {
         let file = wide(missing.as_os_str().encode_wide());
         let folder = wide(folder.as_os_str().encode_wide());
         assert!(shell_open(&file, Some(&folder)).is_err());
+    }
+
+    #[test]
+    fn an_open_that_answered_does_not_hold_up_the_next() {
+        let missing = env::temp_dir()
+            .join("appytappy-test-missing-folder")
+            .join("program.exe");
+        assert!(!missing.exists(), "{}", missing.display());
+        let target =
+            OpenTarget::parse(missing.to_str().expect("a UTF-8 path")).expect("a full path");
+        let mut opener = Opener::default();
+        for time in ["first", "second", "third"] {
+            let error = opener.open(&target).expect_err("the program is missing");
+            assert_ne!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock,
+                "{time}: {error}"
+            );
+        }
     }
 }

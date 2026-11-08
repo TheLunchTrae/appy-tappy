@@ -103,10 +103,10 @@ The shell asks its callers for a single-threaded COM apartment, while Core
 Audio's controls need the action thread in the multithreaded one, so each open
 runs on a short-lived thread of its own. The action thread waits for it for at
 most 2 seconds, so a program that is slow to start cannot hold up the actions
-behind it. After that the log says it may still open, and it may. While that
-thread is still running, a later open is skipped and the log says so, so a
-target that never answers leaves one waiting thread, not one for each time
-the automation runs.
+behind it. After that the log says it may still open, and it may. While a
+thread that timed out is still running, a later open is skipped and the log
+says so, so a target that never answers leaves one waiting thread, not one for
+each time the automation runs. An open that answered in time holds up nothing.
 
 Links are only `http` and `https`, because a link of another kind goes to
 whichever program registered that kind, and some such programs have run

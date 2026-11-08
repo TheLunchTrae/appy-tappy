@@ -423,7 +423,7 @@ function targetProblem(text: string, position: number): string | null {
     return `The path or link in action ${position} has a tab or line break in it. Remove it.`;
   }
   if (new TextEncoder().encode(text).length > MAX_TARGET_BYTES) {
-    return `The path or link in action ${position} is too long to save. Shorten it to 2,048 characters or fewer.`;
+    return `The path or link in action ${position} is too long to save. Shorten it.`;
   }
   return null;
 }

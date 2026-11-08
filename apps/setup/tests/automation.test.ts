@@ -430,7 +430,7 @@ describe('opening and sounds', () => {
     });
     expect(typed('open', `${longest}a`)).toEqual({
       ok: false,
-      next: 'The path or link in action 1 is too long to save. Shorten it to 2,048 characters or fewer.',
+      next: 'The path or link in action 1 is too long to save. Shorten it.',
     });
     for (const kind of ['open', 'sound'] as const) {
       expect(typed(kind, 'C:\\Sounds\tDing.wav')).toEqual({
