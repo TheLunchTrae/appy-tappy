@@ -95,11 +95,14 @@ change the SmartScreen warning.
 Check a downloaded installer with the [GitHub CLI](https://cli.github.com/):
 
 ```sh
-gh attestation verify "AppyTappy Setup_0.1.0_x64-setup.exe" -R TheLunchTrae/appy-tappy
+gh attestation verify AppyTappy_0.1.0_x64-setup.exe -R TheLunchTrae/appy-tappy
 ```
 
 Only the release job attests, and only for a pushed `v*` tag. Test builds have
 no attestation, so a passing check means the installer came from a release
 tag. Add `--source-ref refs/tags/v0.1.0` to check that it came from one
-release in particular. The attesting job alone gets the `id-token` and
-`attestations` permissions, so the build steps cannot sign anything.
+release in particular, and
+`--signer-workflow TheLunchTrae/appy-tappy/.github/workflows/release.yml` to
+reject an attestation that any other workflow might add later. The attesting
+job alone gets the `id-token` and `attestations` permissions, so the build
+steps cannot sign anything.
