@@ -120,7 +120,9 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let (sender, events) = mpsc::channel();
     let mut model = Model::default();
     // No reader runs yet, so the settings change no reader here.
-    drop(read_settings(&stores.settings, log, &mut model));
+    let mut retry = read_settings(&stores.settings, log, &mut model)
+        .err()
+        .and_then(|error| failed(log, &error, None, Instant::now(), DEFAULTS));
     // Without a desktop the runtime still works; it only has no icon.
     let mut shown = tray::menu(&model);
     let tray = Tray::start(sender.clone(), shown.clone())
@@ -135,11 +137,11 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             );
         })
         .ok();
-    let mut retry = None;
     let mut had = Had::Plan;
     let first = load(&stores, log).unwrap_or_else(|error| {
         had = Had::Nothing;
-        retry = failed(log, &error, None, Instant::now(), had);
+        // A settings read that failed too asks for the same retry.
+        retry = failed(log, &error, None, Instant::now(), had.keeps());
         plan::Plan::default()
     });
     let lifecycle = Lifecycle::new(first.watchlist(), Instant::now());
@@ -202,30 +204,31 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 retry.is_some_and(|retry| retry.due(Instant::now()))
             },
             Step::Reload => {
-                carry(
-                    read_settings(&stores.settings, log, &mut model),
-                    &mut crew,
-                    log,
-                );
                 // A save starts the tries over.
                 retry = None;
                 true
             },
             Step::Stop => break,
         };
-        if read_again
-            && let Some((watchlist, orders)) = reread(
-                &stores,
-                log,
-                &mut model,
-                (&mut retry, &mut had),
-                Instant::now(),
-            )
-        {
-            if inputs.send(Input::Watch(watchlist)).is_err() {
-                break;
+        if read_again {
+            let previous = retry;
+            let now = Instant::now();
+            if let Some((watchlist, orders)) =
+                reread(&stores, log, &mut model, (&mut retry, &mut had), now)
+            {
+                if inputs.send(Input::Watch(watchlist)).is_err() {
+                    break;
+                }
+                carry(orders, &mut crew, log);
             }
-            carry(orders, &mut crew, log);
+            // After the plan, so a new read interval restarts only the
+            // readers the new plan keeps.
+            match read_settings(&stores.settings, log, &mut model) {
+                Ok(orders) => carry(orders, &mut crew, log),
+                Err(error) => {
+                    retry = retry.or_else(|| failed(log, &error, previous, now, KEPT));
+                },
+            }
         }
         // Most events, such as each value read, leave the menu as it was, and
         // the icon is redrawn only when it changes.
@@ -427,6 +430,22 @@ enum Had {
     Plan,
 }
 
+impl Had {
+    /// What the runtime does meanwhile, as the log says it.
+    const fn keeps(self) -> &'static str {
+        match self {
+            Self::Nothing => "runs no automations",
+            Self::Plan => "keeps running what it ran",
+        }
+    }
+}
+
+/// What the runtime uses while the settings cannot be read at start.
+const DEFAULTS: &str = "uses the default settings";
+
+/// What the runtime uses while the settings cannot be read later.
+const KEPT: &str = "keeps its settings";
+
 /// Reads the saved automations and logs what cannot run.
 ///
 /// # Errors
@@ -460,21 +479,21 @@ fn reread(
             Some((plan.watchlist(), model.replan(plan.apps)))
         },
         Err(error) => {
-            *retry = failed(log, &error, *retry, now, *had);
+            *retry = failed(log, &error, *retry, now, had.keeps());
             None
         },
     }
 }
 
 /// Logs that the saved files cannot be read for `error`, and what the
-/// runtime runs meanwhile, as `had` says, and returns when to read them
-/// again: soon, unless `previous`, the try that just failed, was the last.
+/// runtime `keeps` doing meanwhile, and returns when to read them again:
+/// soon, unless `previous`, the try that just failed, was the last.
 fn failed(
     log: &mut Log,
     error: &str,
     previous: Option<Retry>,
     now: Instant,
-    had: Had,
+    keeps: &str,
 ) -> Option<Retry> {
     let left = previous
         .map_or(RETRIES, |previous| previous.left)
@@ -490,34 +509,29 @@ fn failed(
     } else {
         "waits for the next save".to_owned()
     };
-    let keeps = match had {
-        Had::Nothing => "runs no automations",
-        Had::Plan => "keeps running what it ran",
-    };
     note(log, &format!("{error}, so the runtime {keeps} and {then}"));
     retry
 }
 
 /// Reads the settings and gives `model` the ones the runtime uses, returning
-/// the orders that carry them out. Settings that cannot be read are logged,
-/// and the runtime keeps the ones it has until the next save.
-fn read_settings(store: &SettingsStore, log: &mut Log, model: &mut Model) -> Vec<Order> {
-    match store.load() {
-        Ok(settings) => {
-            let interval = read_interval(settings.read_interval);
-            if interval != model.interval() {
-                note(log, &interval_line(interval));
-            }
-            model.set_interval(interval)
-        },
-        Err(error) => {
-            note(
-                log,
-                &format!("the settings cannot be read, so the runtime keeps its settings: {error}"),
-            );
-            Vec::new()
-        },
+/// the orders that carry them out.
+///
+/// # Errors
+///
+/// Returns why the settings cannot be read; `model` keeps the ones it has.
+fn read_settings(
+    store: &SettingsStore,
+    log: &mut Log,
+    model: &mut Model,
+) -> Result<Vec<Order>, String> {
+    let settings = store
+        .load()
+        .map_err(|error| format!("the settings cannot be read: {error}"))?;
+    let interval = read_interval(settings.read_interval);
+    if interval != model.interval() {
+        note(log, &interval_line(interval));
     }
+    Ok(model.set_interval(interval))
 }
 
 /// The read interval `saved` asks for. A saved file is checked, so its
@@ -894,7 +908,7 @@ mod tests {
         let store = SettingsStore::new(folder.join("settings.json"));
         let mut log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
         let mut model = Model::default();
-        assert_eq!(read_settings(&store, &mut log, &mut model), []);
+        assert_eq!(read_settings(&store, &mut log, &mut model), Ok(Vec::new()));
         assert_eq!(
             model.interval(),
             ReadInterval::DEFAULT,
@@ -905,12 +919,23 @@ mod tests {
             r#"{"format":1,"readInterval":{"fastestMs":40,"slowestMs":2000}}"#,
         )
         .expect("write");
-        assert_eq!(read_settings(&store, &mut log, &mut model), []);
+        assert_eq!(read_settings(&store, &mut log, &mut model), Ok(Vec::new()));
         let slower = ReadInterval::new(Duration::from_millis(40), Duration::from_secs(2));
         assert_eq!(Some(model.interval()), slower);
         fs::write(folder.join("settings.json"), "not JSON").expect("break the file");
-        assert_eq!(read_settings(&store, &mut log, &mut model), []);
+        let error = read_settings(&store, &mut log, &mut model).expect_err("not JSON");
+        assert!(
+            error.starts_with("the settings cannot be read: the settings file is not valid: "),
+            "{error}"
+        );
         assert_eq!(Some(model.interval()), slower, "the settings are kept");
+        let now = Instant::now();
+        let retry = failed(&mut log, &error, None, now, KEPT);
+        assert_eq!(
+            retry.map(|retry| retry.at),
+            now.checked_add(RETRY_WAIT),
+            "unreadable settings are read again soon"
+        );
         let written =
             fs::read_to_string(folder.join("logs").join("runtime.log")).expect("read the log");
         let lines: Vec<&str> = written.lines().collect();
@@ -920,7 +945,8 @@ mod tests {
             "{written:?}"
         );
         assert!(
-            lines[1].contains("the settings cannot be read, so the runtime keeps its settings: "),
+            lines[1]
+                .ends_with(", so the runtime keeps its settings and reads them again in 2 seconds"),
             "{written:?}"
         );
         fs::remove_dir_all(folder).expect("clean up");
@@ -982,7 +1008,7 @@ mod tests {
             "the automations cannot be read: locked",
             None,
             now,
-            had,
+            had.keeps(),
         );
         assert_eq!(
             retry.map(|retry| retry.at),

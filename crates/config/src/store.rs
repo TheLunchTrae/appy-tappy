@@ -3,7 +3,8 @@
 //! Each application has a folder under [`crate::paths::Locations::apps`]
 //! named by its ID, holding `app.json` and the pictures its values name.
 //! The automations live in one file of their own, at
-//! [`crate::paths::Locations::automations`]. Every write goes to a temporary
+//! [`crate::paths::Locations::automations`], and the settings in another, at
+//! [`crate::paths::Locations::settings`]. Every write goes to a temporary
 //! file first and then replaces the old file in one step, so a reader never
 //! sees half a file.
 
@@ -616,6 +617,12 @@ mod tests {
                 .starts_with("the settings file is not valid"),
             "{error}"
         );
+
+        // Only a missing file stands for the defaults; one that cannot be
+        // read, such as a folder in its place, is an error.
+        fs::remove_file(&path).expect("remove the file");
+        fs::create_dir(&path).expect("a folder in its place");
+        assert!(store.load().is_err(), "a folder is not the defaults");
         fs::remove_dir_all(root).expect("clean up");
     }
 

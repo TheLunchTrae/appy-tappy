@@ -239,15 +239,18 @@ impl Model {
 
     /// Sets how often readers read. Each running app's reader starts over
     /// with the new interval, in the same session, so its automations keep
-    /// their state and nothing is undone.
+    /// their state and nothing is undone. Its values are forgotten, as when
+    /// a reader can no longer see them, so no rule fires on a value read
+    /// before the restart until the new reader reads it again.
     pub(crate) fn set_interval(&mut self, interval: ReadInterval) -> Vec<Order> {
         if interval == self.interval {
             return Vec::new();
         }
         self.interval = interval;
         self.running
-            .values()
+            .values_mut()
             .flat_map(|running| {
+                running.session.forget_values();
                 [
                     Order::StopReading(running.id, running.plan.name.clone()),
                     Order::Read(reader::Job {
@@ -415,88 +418,12 @@ fn acts(id: SessionId, plan: &AppPlan, watched: &Watched, effects: Vec<Effect>) 
 mod tests {
     use std::time::Duration;
 
-    use appytappy_config::action::{Action, MediaCommand, MediaTarget};
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
-    use appytappy_config::signal::Number;
-    use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_engine::RuleIndex;
-    use appytappy_sources::screen::check::{BarFill, Check};
-    use appytappy_sources::screen::saved::SavedCheck;
-    use appytappy_sources::screen::{Region, Size};
-    use appytappy_sources::system::Rgb;
 
     use super::*;
-    use crate::plan::ValuePlan;
-
-    fn signal() -> SignalName {
-        SignalName::new("progress").expect("valid")
-    }
-
-    fn number(raw: f64) -> Value {
-        Value::Number(Number::new(raw).expect("finite"))
-    }
-
-    fn pause() -> Box<[Action]> {
-        Box::new([Action::Media {
-            target: MediaTarget::Current,
-            command: MediaCommand::Pause,
-        }])
-    }
-
-    /// An app whose one automation pauses media while progress is at least
-    /// `threshold`, and undoes it after.
-    fn plan(name: &str, threshold: f64) -> Arc<AppPlan> {
-        let condition =
-            Condition::compare(signal(), Comparison::AtLeast, number(threshold)).expect("valid");
-        let rule = Rule::new(
-            Trigger::Becomes {
-                condition,
-                rearm: Rearm::WhenFalse,
-            },
-            pause(),
-            Duration::ZERO,
-            Restore::OnRelease,
-        )
-        .expect("valid");
-        let black = Rgb {
-            red: 0,
-            green: 0,
-            blue: 0,
-        };
-        let white = Rgb {
-            red: 255,
-            green: 255,
-            blue: 255,
-        };
-        Arc::new(AppPlan {
-            name: name.to_owned(),
-            window: WindowMatch {
-                title: Pattern::new("*"),
-                class: Pattern::new("*"),
-                executable: Pattern::new("Example.exe"),
-                must_match: MustMatch {
-                    title: false,
-                    class: false,
-                },
-                fallback: false,
-            },
-            values: vec![ValuePlan {
-                signal: signal(),
-                name: "Progress".to_owned(),
-                check: SavedCheck {
-                    window_size: Size {
-                        width: 800,
-                        height: 600,
-                    },
-                    region: Region::new(0, 0, 10, 2).expect("not empty"),
-                    check: Check::BarFill(BarFill::new(white, black).expect("different")),
-                },
-            }],
-            rules: Arc::from(vec![rule]),
-            automations: vec![format!("Pause {name}")],
-        })
-    }
+    use crate::plan::examples::{number, pause, plan, plan_with_cooldown, signal};
 
     fn plans(apps: &[(&str, &Arc<AppPlan>)]) -> BTreeMap<String, Arc<AppPlan>> {
         apps.iter()
@@ -800,6 +727,26 @@ mod tests {
             job.interval, slower,
             "a new reader reads at the new interval"
         );
+    }
+
+    #[test]
+    fn a_new_read_interval_forgets_the_values_read_before() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[(
+            "a",
+            &plan_with_cooldown("A", Duration::from_secs(60)),
+        )]));
+        model.apply(started("a", 7), now);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        model.sample(SessionId(0), signal(), number(10.0), now);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        assert!(model.next_due().is_some(), "held back by its cooldown");
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        model.set_interval(slower);
+        assert_eq!(model.next_due(), None, "nothing holds on unseen values");
+        assert_eq!(model.recheck(now + Duration::from_secs(61)), []);
     }
 
     #[test]

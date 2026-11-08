@@ -196,6 +196,102 @@ pub(crate) fn compile(
     Plan { apps, problems }
 }
 
+/// Plans for the runtime's tests.
+#[cfg(test)]
+pub(crate) mod examples {
+    use std::time::Duration;
+
+    use appytappy_config::action::{Action, MediaCommand, MediaTarget};
+    use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
+    use appytappy_config::signal::{Number, SignalName, Value};
+    use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
+    use appytappy_sources::screen::check::{BarFill, Check};
+    use appytappy_sources::screen::saved::SavedCheck;
+    use appytappy_sources::screen::{Region, Size};
+    use appytappy_sources::system::Rgb;
+
+    use super::*;
+
+    pub(crate) fn signal() -> SignalName {
+        SignalName::new("progress").expect("valid")
+    }
+
+    pub(crate) fn number(raw: f64) -> Value {
+        Value::Number(Number::new(raw).expect("finite"))
+    }
+
+    pub(crate) fn pause() -> Box<[Action]> {
+        Box::new([Action::Media {
+            target: MediaTarget::Current,
+            command: MediaCommand::Pause,
+        }])
+    }
+
+    /// An app whose one automation pauses media while progress is at least
+    /// `threshold`, and undoes it after.
+    pub(crate) fn plan(name: &str, threshold: f64) -> Arc<AppPlan> {
+        plan_of(name, threshold, Duration::ZERO)
+    }
+
+    /// An app whose one automation pauses media once progress is at least
+    /// 90, at most once every `cooldown`.
+    pub(crate) fn plan_with_cooldown(name: &str, cooldown: Duration) -> Arc<AppPlan> {
+        plan_of(name, 90.0, cooldown)
+    }
+
+    fn plan_of(name: &str, threshold: f64, cooldown: Duration) -> Arc<AppPlan> {
+        let condition =
+            Condition::compare(signal(), Comparison::AtLeast, number(threshold)).expect("valid");
+        let rule = Rule::new(
+            Trigger::Becomes {
+                condition,
+                rearm: Rearm::WhenFalse,
+            },
+            pause(),
+            cooldown,
+            Restore::OnRelease,
+        )
+        .expect("valid");
+        let black = Rgb {
+            red: 0,
+            green: 0,
+            blue: 0,
+        };
+        let white = Rgb {
+            red: 255,
+            green: 255,
+            blue: 255,
+        };
+        Arc::new(AppPlan {
+            name: name.to_owned(),
+            window: WindowMatch {
+                title: Pattern::new("*"),
+                class: Pattern::new("*"),
+                executable: Pattern::new("Example.exe"),
+                must_match: MustMatch {
+                    title: false,
+                    class: false,
+                },
+                fallback: false,
+            },
+            values: vec![ValuePlan {
+                signal: signal(),
+                name: "Progress".to_owned(),
+                check: SavedCheck {
+                    window_size: Size {
+                        width: 800,
+                        height: 600,
+                    },
+                    region: Region::new(0, 0, 10, 2).expect("not empty"),
+                    check: Check::BarFill(BarFill::new(white, black).expect("different")),
+                },
+            }],
+            rules: Arc::from(vec![rule]),
+            automations: vec![format!("Pause {name}")],
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::env;

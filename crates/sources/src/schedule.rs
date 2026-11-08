@@ -5,8 +5,8 @@
 //! window that does not change is not read at all, whatever the maximum.
 //!
 //! Reading less often saves CPU; reading more often cuts the time between a
-//! change on screen and the rule that acts on it. The interval bounds let the
-//! user choose that trade per signal.
+//! change on screen and the rule that acts on it. The interval bounds, which
+//! the user sets in the settings, choose that trade.
 
 #![forbid(unsafe_code)]
 

@@ -238,6 +238,17 @@ Each names its value by application ID and value ID:
 }
 ```
 
+The settings live in `%APPDATA%\AppyTappy\settings.json`. A setting the
+file leaves out takes its default:
+
+```json
+{
+  "format": 1,
+  "readInterval": { "fastestMs": 16, "slowestMs": 500 },
+  "screenshotShortcut": "F9"
+}
+```
+
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
 its `panel` holds its place and size in screen pixels, as `x`, `y`, `width`,
@@ -261,7 +272,8 @@ or `"none"`, as its target. A state check is saved with its states in order:
 An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
-`appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`) and
+`appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
+`settings_file.rs`) and
 the files (`store.rs`). Each save writes a temporary file and renames it over
 the old one, so a crash never leaves half a file; a later save in that folder
 removes a temporary file that a crash left between the two steps, once it is ten

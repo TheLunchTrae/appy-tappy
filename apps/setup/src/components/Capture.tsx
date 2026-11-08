@@ -202,7 +202,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const appSettings = useAppSettings();
   const shortcut = appSettings.settings.screenshotShortcut;
   const [changingShortcut, setChangingShortcut] = useState(false);
+  // Why the shortcut cannot be set up, and, apart from it, why a new one
+  // cannot be saved: setting the old one up again must not hide the second.
   const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const [shortcutSaveError, setShortcutSaveError] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingView | null>(null);
   // Each error clears only when what set it next succeeds: a start, stop or
   // discard; reading the recording's state; or asking review's problems.
@@ -639,9 +642,14 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     const next = accelerator(event);
     if (next !== null) {
       setChangingShortcut(false);
-      appSettings.change({ ...appSettings.settings, screenshotShortcut: next }).catch((error: unknown) => {
-        setShortcutError(errorText(error));
-      });
+      appSettings.change({ ...appSettings.settings, screenshotShortcut: next }).then(
+        () => {
+          setShortcutSaveError(null);
+        },
+        (error: unknown) => {
+          setShortcutSaveError(errorText(error));
+        },
+      );
     }
   };
 
@@ -953,6 +961,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               <button
                 type="button"
                 className="btn small"
+                aria-label={changingShortcut ? undefined : 'Change screenshot shortcut'}
                 aria-pressed={changingShortcut}
                 onClick={() => {
                   setChangingShortcut((current) => !current);
@@ -977,6 +986,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
           )}
         </div>
         {shortcutError === null ? null : <p className="warn">{shortcutError}</p>}
+        {shortcutSaveError === null ? null : <p className="warn">{shortcutSaveError}</p>}
         {shotError === null ? null : <p className="warn">{shotError}</p>}
         {reviewing && recording !== null ? (
           <ReviewSheet

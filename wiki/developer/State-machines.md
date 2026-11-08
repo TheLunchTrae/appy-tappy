@@ -166,6 +166,10 @@ stateDiagram-v2
 - **Unseen.** When the reader says the values can no longer be seen, the owner
   calls `forget_values`. The rules keep their state, so a rule that fired stays
   fired until new readings decide its condition.
+- **A new read interval.** `set_interval` stops each running application's
+  reader and starts it again in the same session, and calls `forget_values`
+  first, as for `Unseen`, because the new reader sends its first readings
+  whether or not they changed.
 
 ### Reader thread
 
@@ -270,7 +274,8 @@ stateDiagram-v2
 
 **Fast** and **Slow** are the fastest and slowest reads from the settings,
 16 ms and 500 ms by default. The reader's job carries them, so a new read
-interval stops the reader and starts it again in the same session.
+interval stops the reader and starts it again in the same session, after the
+owner forgets the session's values.
 `Activity::NearThreshold` also resets the wait to the minimum, but the reader
 never reports it, so a value near a rule's threshold backs off like any other.
 
@@ -446,12 +451,14 @@ while the menu is open, but it still calls the procedure, so neither is lost.
 
 The reload watch waits on the auto-reset named event `Local\AppyTappy.Reload`
 and sends `Reload` each time the setup app sets it. Several saves before the
-reload watch wakes become one reload. The owner first reads the settings
-(`read_settings`), keeping the ones it has when they cannot be read, and then
-the saved files (`reread`). When they read, it sends detection the new watchlist and calls
+reload watch wakes become one reload. The owner first reads the saved files
+(`reread`). When they read, it sends detection the new watchlist and calls
 `replan`. When they cannot be read as a whole, such as while another program
-holds a file, the owner keeps the plan it has and reads them again. Its state
-is `retry`, an optional `Retry` with a time and the tries left, and `had`,
+holds a file, the owner keeps the plan it has and reads them again. Then it
+reads the settings (`read_settings`), after the plan, so a new read interval
+restarts only the readers the new plan keeps. Settings that cannot be read are
+kept as they were and read again on the same tries as the files. Its state is
+`retry`, an optional `Retry` with a time and the tries left, and `had`,
 whether any read has worked yet.
 
 ```mermaid

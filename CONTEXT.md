@@ -46,8 +46,8 @@ parts fit.
   `app.json` with its pictures, `automations.json`, and `settings.json`. The
   runtime reads them when it starts and again each time the setup app saves an
   application, a value, a reference, an anti-cheat class, an automation, or the
-  settings; saving only an
-  overlay's settings does not tell it. `appytappy-config` calls each one an authoring file.
+  settings; saving only an overlay's settings does not tell it.
+  `appytappy-config` calls each one an authoring file.
 - **Session.** One run of an application, from its start to its exit, or until
   the runtime stops it for a pause or a config change. Rule state resets with
   each session.

@@ -27,10 +27,6 @@ pub const FASTEST_READ_MS: u32 = 1;
 /// 10 seconds.
 pub const SLOWEST_READ_MS: u32 = 10_000;
 
-/// The longest screenshot shortcut, in bytes, such as
-/// `Control+Alt+Shift+Super+PrintScreen` with room to spare.
-const MAX_SHORTCUT_LEN: usize = 64;
-
 /// Every setting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
@@ -142,15 +138,64 @@ impl SettingsFile {
                 "The fastest read cannot wait longer than the slowest.".to_owned(),
             ));
         }
-        let shortcut = self.screenshot_shortcut.trim();
-        if shortcut.is_empty() || shortcut.len() > MAX_SHORTCUT_LEN {
+        if !is_shortcut(&self.screenshot_shortcut) {
             return Err(SettingsError::Setting(
-                "The screenshot shortcut must be a key, with any of Ctrl, Alt, Shift and Win."
+                "The screenshot shortcut must be F1 to F24, Print Screen, or Pause, or a letter, \
+                 digit, or other key with any of Ctrl, Alt, Shift and Win."
                     .to_owned(),
             ));
         }
         Ok(())
     }
+}
+
+/// The keys a shortcut can hold down with its key, in the order they are
+/// written.
+const MODIFIERS: [&str; 4] = ["Control", "Alt", "Shift", "Super"];
+
+/// The keys other than letters, digits, and function keys that a shortcut
+/// can end with.
+const NAMED_KEYS: [&str; 13] = [
+    "Space",
+    "Insert",
+    "Delete",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "PrintScreen",
+    "Pause",
+];
+
+/// Whether `shortcut` is an accelerator the setup app records, such as `F9`
+/// or `Control+Shift+S`: modifiers in [`MODIFIERS`] order, each at most
+/// once, then one key. A key that types, such as a letter, needs a
+/// modifier, so the shortcut does not take that key from every other
+/// application.
+fn is_shortcut(shortcut: &str) -> bool {
+    let mut parts: Vec<&str> = shortcut.split('+').collect();
+    let Some(key) = parts.pop() else {
+        return false;
+    };
+    let mut order = MODIFIERS.iter();
+    let modifiers_in_order = parts
+        .iter()
+        .all(|part| order.by_ref().any(|modifier| modifier == part));
+    let function = key
+        .strip_prefix('F')
+        .and_then(|number| number.parse::<u8>().ok())
+        .is_some_and(|number| (1..=24).contains(&number) && !key.starts_with("F0"));
+    let alone = function || key == "PrintScreen" || key == "Pause";
+    let typing = (key.len() == 1
+        && key
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()))
+        || NAMED_KEYS.contains(&key);
+    modifiers_in_order && (alone || (typing && !parts.is_empty()))
 }
 
 /// Why a settings file cannot be used.
@@ -273,8 +318,41 @@ mod tests {
     }
 
     #[test]
-    fn the_screenshot_shortcut_needs_a_key() {
-        for shortcut in ["", "   ", &"F".repeat(65)] {
+    fn the_screenshot_shortcut_is_a_key_with_modifiers_in_order() {
+        for shortcut in [
+            "F9",
+            "F24",
+            "PrintScreen",
+            "Pause",
+            "Control+Shift+S",
+            "Control+Alt+Shift+Super+PrintScreen",
+            "Alt+7",
+            "Super+Left",
+        ] {
+            assert!(is_shortcut(shortcut), "{shortcut}");
+        }
+        for shortcut in [
+            "",
+            " F9 ",
+            "F0",
+            "F25",
+            "F09",
+            "S",
+            "Space",
+            "Shift+Control+S",
+            "Control+Control+S",
+            "Control+",
+            "Control+s",
+            "Bogus",
+            "Control+Bogus",
+        ] {
+            assert!(!is_shortcut(shortcut), "{shortcut}");
+        }
+    }
+
+    #[test]
+    fn a_shortcut_that_is_not_one_is_refused() {
+        for shortcut in ["", " F9 ", "Bogus"] {
             let settings = SettingsFile {
                 screenshot_shortcut: shortcut.to_owned(),
                 ..SettingsFile::default()
@@ -284,10 +362,5 @@ mod tests {
                 "{shortcut:?}"
             );
         }
-        let longest = SettingsFile {
-            screenshot_shortcut: "F".repeat(64),
-            ..SettingsFile::default()
-        };
-        assert_eq!(longest.check(), Ok(()));
     }
 }

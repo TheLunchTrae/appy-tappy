@@ -120,6 +120,7 @@ function ScreenshotShortcut({ onError }: { readonly onError: (error: string | nu
       <button
         type="button"
         className="btn small"
+        aria-label={changing ? undefined : 'Change screenshot shortcut'}
         aria-pressed={changing}
         onClick={() => {
           setChanging((current) => !current);
@@ -139,53 +140,70 @@ interface WaitProps {
   readonly which: keyof ReadInterval;
   readonly label: string;
   readonly note: string;
-  readonly onError: (error: string | null) => void;
 }
 
-/** One of the read interval's waits, saved when the field loses focus or Enter is pressed. */
-function Wait({ which, label, note, onError }: WaitProps) {
+/**
+ * One of the read interval's waits, saved when the field loses focus or Enter is pressed. A wait that cannot be saved
+ * puts the saved one back in the field and says why under it, so the field never shows a wait the runtime does not use.
+ */
+function Wait({ which, label, note }: WaitProps) {
   const { settings, change } = useSettings();
   const saved = settings.readInterval[which];
   const [text, setText] = useState(String(saved));
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setText(String(saved));
   }, [saved]);
+  const refuse = (problem: string): void => {
+    setText(String(saved));
+    setError(problem);
+  };
   const commit = (): void => {
     const ms = readMs(text);
     if (ms === null) {
-      onError(`${label} must be a whole number of milliseconds from ${FASTEST_READ_MS} to ${SLOWEST_READ_MS}.`);
+      refuse(`${label} must be a whole number of milliseconds from ${FASTEST_READ_MS} to ${SLOWEST_READ_MS}.`);
       return;
     }
     if (ms === saved) {
-      onError(null);
+      setError(null);
       return;
     }
     const next = withWait(settings.readInterval, which, ms);
     if ('problem' in next) {
-      onError(next.problem);
+      refuse(next.problem);
       return;
     }
     change({ ...settings, readInterval: next.interval }).then(
       () => {
-        onError(null);
+        setError(null);
       },
       (failure: unknown) => {
-        onError(errorText(failure));
+        refuse(errorText(failure));
       },
     );
   };
   const id = `wait-${which}`;
+  const described = [`${id}-note`, `${id}-unit`, ...(error === null ? [] : [`${id}-error`])].join(' ');
   return (
     <div className="set-row">
       <div className="what">
         <label htmlFor={id}>{label}</label>
-        <span className="note">{note}</span>
+        <span className="note" id={`${id}-note`}>
+          {note}
+        </span>
+        {error === null ? null : (
+          <span className="warn" id={`${id}-error`} role="alert">
+            {error}
+          </span>
+        )}
       </div>
       <span className="num">
         <input
           id={id}
           className="input"
           inputMode="numeric"
+          aria-invalid={error !== null}
+          aria-describedby={described}
           value={text}
           onChange={(event) => {
             setText(event.target.value);
@@ -197,7 +215,7 @@ function Wait({ which, label, note, onError }: WaitProps) {
             }
           }}
         />
-        ms
+        <span id={`${id}-unit`}>ms</span>
       </span>
     </div>
   );
@@ -206,7 +224,6 @@ function Wait({ which, label, note, onError }: WaitProps) {
 /** The settings that apply to AppyTappy as a whole. Each change is saved as it is made. */
 export function SettingsPage({ problem }: Props) {
   const [generalError, setGeneralError] = useState<string | null>(null);
-  const [readingError, setReadingError] = useState<string | null>(null);
   return (
     <main className="page">
       <div className="page-head">
@@ -235,19 +252,12 @@ export function SettingsPage({ problem }: Props) {
             which="fastestMs"
             label="Fastest read"
             note="How often a value is read while it changes. Shorter notices changes sooner."
-            onError={setReadingError}
           />
           <Wait
             which="slowestMs"
             label="Slowest read"
             note="How long AppyTappy waits at most while a value holds still. Longer uses less CPU."
-            onError={setReadingError}
           />
-          {readingError === null ? null : (
-            <p className="warn" role="alert">
-              {readingError}
-            </p>
-          )}
         </section>
       </div>
     </main>
