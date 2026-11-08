@@ -179,16 +179,16 @@ pub(crate) fn place<S: System + Capture>(
             if frame_size != taken {
                 return Err(other_size(frame_size));
             }
-            // The grab takes a moment, and a window that moved meanwhile
-            // would put the click off by as much.
+            let found = search
+                .find(&image)
+                .ok_or_else(|| format!("its picture was not found in {name}'s window"))?;
+            // The grab and the search take a moment, and a window that
+            // moved meanwhile would put the click off by as much.
             if screen.frame_bounds(window.handle).map_err(failed)? != Some(bounds) {
                 return Err(format!(
                     "{name}'s window moved while its picture was looked for"
                 ));
             }
-            let found = search
-                .find(&image)
-                .ok_or_else(|| format!("its picture was not found in {name}'s window"))?;
             let (press_x, press_y) = wanted.press;
             area.x
                 .checked_add(found.x)

@@ -56,6 +56,7 @@ use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, COINIT_MULTITHREADED,
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
 };
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MOUSEEVENTF_LEFTDOWN,
@@ -469,9 +470,20 @@ impl Controls for WindowsControls {
         // SAFETY: the calls take a window handle and fail without harm when
         // no such window exists.
         let front = unsafe {
-            // It may fail while another program holds the foreground, so
-            // the answer is whether the window is in front after.
+            // Windows lets only the program in front, or one sharing its
+            // input, move the foreground; a click runs while another
+            // program is in front, so this thread shares that program's
+            // input for the moment it asks, then stops sharing it.
+            let ours = GetCurrentThreadId();
+            let theirs = GetWindowThreadProcessId(GetForegroundWindow(), None);
+            let attached =
+                theirs != 0 && theirs != ours && AttachThreadInput(ours, theirs, true).as_bool();
+            // It may still be refused, so the answer is whether the window
+            // is in front after.
             let _asked = SetForegroundWindow(handle);
+            if attached {
+                let _detached = AttachThreadInput(ours, theirs, false);
+            }
             GetForegroundWindow()
         };
         Ok(front == handle)
