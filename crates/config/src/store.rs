@@ -225,19 +225,30 @@ impl AutomationStore {
     }
 
     /// Writes `bytes` as a new click picture and answers its file name,
-    /// such as `click-1.png`, the first such name not taken.
+    /// such as `click-3.png`, numbered one past the highest the folder
+    /// holds.
     ///
     /// # Errors
     ///
     /// Returns the error from listing or creating the folder or from the
-    /// write.
+    /// write, or an invalid-input error once the numbers run out.
     pub fn add_picture(&self, bytes: &[u8]) -> io::Result<String> {
         let folder = self.pictures();
         fs::create_dir_all(&folder)?;
-        let name = (1..=u32::MAX)
-            .map(|number| format!("click-{number}.png"))
-            .find(|name| !folder.join(name).exists())
+        let mut highest = 0_u32;
+        for entry in fs::read_dir(&folder)? {
+            let name = entry?.file_name();
+            let number = name
+                .to_str()
+                .and_then(|name| name.strip_prefix("click-"))
+                .and_then(|name| name.strip_suffix(".png"))
+                .and_then(|number| number.parse::<u32>().ok());
+            highest = highest.max(number.unwrap_or(0));
+        }
+        let next = highest
+            .checked_add(1)
             .ok_or_else(|| invalid("every click picture name is taken".to_owned()))?;
+        let name = format!("click-{next}.png");
         write_atomic(&folder.join(&name), bytes)?;
         Ok(name)
     }
@@ -805,7 +816,40 @@ mod tests {
         assert!(!store.pictures().join("click-1.png").exists());
         assert!(store.pictures().join("click-2.png").exists());
         assert!(store.pictures().join("notes.txt").exists());
-        assert_eq!(store.add_picture(b"three").expect("adds"), "click-1.png");
+        assert_eq!(store.add_picture(b"three").expect("adds"), "click-3.png");
+        fs::write(store.pictures().join("click-9.png.bak"), b"other").expect("write");
+        assert_eq!(store.add_picture(b"four").expect("adds"), "click-4.png");
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn click_pictures_past_the_last_number_are_refused() {
+        let root = scratch("click-last");
+        let store = AutomationStore::new(root.join("automations.json"));
+        fs::create_dir_all(store.pictures()).expect("folder");
+        fs::write(
+            store.pictures().join(format!("click-{}.png", u32::MAX)),
+            b"last",
+        )
+        .expect("write");
+        assert_eq!(
+            store
+                .add_picture(b"over")
+                .expect_err("no number left")
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn pruning_a_folder_that_cannot_be_listed_fails() {
+        let root = scratch("click-unlisted");
+        let store = AutomationStore::new(root.join("automations.json"));
+        fs::create_dir_all(&root).expect("folder");
+        // A file where the folder should be cannot be listed.
+        fs::write(store.pictures(), b"not a folder").expect("write");
+        assert!(store.prune_pictures(&AutomationsFile::default()).is_err());
         fs::remove_dir_all(root).expect("clean up");
     }
 

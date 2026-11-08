@@ -19,7 +19,7 @@ use appytappy_config::automation_file::{
 };
 use appytappy_config::click::{ClickAt, ClickPicture};
 use appytappy_config::signal::SignalName;
-use appytappy_config::store::{AppStore, StoredApp};
+use appytappy_config::store::StoredApp;
 use appytappy_sources::screen::{Image, saved};
 use serde::Serialize;
 
@@ -88,20 +88,31 @@ fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
 }
 
 /// What stops `automation` from running with the applications in `apps`,
-/// whose folders `store` holds, if anything, as a sentence: the same answer
-/// the runtime gets. The runtime also builds the check of the value it
-/// watches, so a value a hand edit broke shows here too.
-fn problem(automation: &AutomationDef, apps: &[StoredApp], store: &AppStore) -> Option<String> {
+/// if anything, as a sentence: the same answer the runtime gets. The runtime
+/// also builds the check of the value it watches and reads each click's
+/// picture, so a value or a picture a hand edit broke shows here too.
+fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> Option<String> {
     let compiled = match automation.compile(apps) {
         Ok(compiled) => compiled,
         Err(problem) => return Some(sentence(&problem)),
     };
-    let folder = store.folder(compiled.app_id);
-    saved::build(&compiled.value.screen, &compiled.app.references, |name| {
+    let folder = stores.apps.folder(compiled.app_id);
+    if let Err(error) = saved::build(&compiled.value.screen, &compiled.app.references, |name| {
         fs::read(folder.join(name))
-    })
-    .err()
-    .map(|error| format!("{} cannot be read: {error}.", compiled.value.name))
+    }) {
+        return Some(format!("{} cannot be read: {error}.", compiled.value.name));
+    }
+    automation
+        .actions
+        .iter()
+        .zip(1_usize..)
+        .find_map(|(action, number)| match action {
+            ActionDef::Click { at, .. } => match at.to_at() {
+                Ok(ClickAt::Picture(wanted)) => check_picture(stores, &wanted, number).err(),
+                Ok(ClickAt::Spot(_)) | Err(_) => None,
+            },
+            _ => None,
+        })
 }
 
 /// Every automation, with what stops each one from running.
@@ -113,7 +124,7 @@ pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
         .iter()
         .map(|automation| AutomationSummary {
             automation: automation.clone(),
-            problem: problem(automation, &apps, &stores.apps),
+            problem: problem(automation, &apps, stores),
         })
         .collect())
 }
@@ -150,15 +161,8 @@ pub(crate) fn save(
             ActionDef::Click { .. } => {},
         }
     }
-    if let Some(problem) = problem(&draft, &apps(stores)?, &stores.apps) {
+    if let Some(problem) = problem(&draft, &apps(stores)?, stores) {
         return Err(problem);
-    }
-    for (position, action) in draft.actions.iter().enumerate() {
-        if let ActionDef::Click { at, .. } = action
-            && let Ok(ClickAt::Picture(wanted)) = at.to_at()
-        {
-            check_picture(stores, &wanted, position.saturating_add(1))?;
-        }
     }
     let mut file = load(stores)?;
     if file.automations.iter().any(|automation| {
@@ -244,7 +248,7 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
     )]
     {
         let automation = &file.automations[position];
-        if enabled && let Some(problem) = problem(automation, &apps(stores)?, &stores.apps) {
+        if enabled && let Some(problem) = problem(automation, &apps(stores)?, stores) {
             return Err(format!(
                 "{} cannot run until it is fixed. {problem}",
                 automation.name
@@ -848,6 +852,22 @@ mod tests {
                 "Action 1's target cannot be used: {}. Set up its target again.",
                 InvalidClick::PressOutside
             ))
+        );
+        // A picture removed outside the app shows on the list, and the
+        // automation cannot be turned back on, as the runtime would refuse it.
+        let mut kept = clicking(&stores, "Kept", &picture);
+        kept.enabled = false;
+        let id = save(&stores, None, kept).expect("saves");
+        fs::remove_file(stores.automations.pictures().join(&picture)).expect("removes");
+        let gone = "The picture action 1 clicks on is gone. Set up its target again.".to_owned();
+        let listed = list(&stores).expect("lists");
+        assert_eq!(
+            listed.first().and_then(|summary| summary.problem.clone()),
+            Some(gone.clone())
+        );
+        assert_eq!(
+            set_enabled(&stores, &id, true),
+            Err(format!("Kept cannot run until it is fixed. {gone}"))
         );
         fs::remove_dir_all(folder).expect("clean up");
     }
