@@ -267,21 +267,14 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         let received = crew.trace.wants(TraceCategory::Rules).then(Instant::now);
         let (kind, cause) = (event.kind(), event.cause());
         receive(&mut crew.trace, &model, &event);
-        let read = match handle(&mut model, log, &stores.enabled, event) {
-            Step::Carry(orders) => {
+        let step = handle(&mut model, log, &stores.enabled, event);
+        reloads.after(&step);
+        let read = match step {
+            Step::Carry(orders) | Step::Picked(orders) => {
                 carry(orders, &mut crew, log);
                 reloads.due(Instant::now())
             },
-            Step::Picked(orders) => {
-                reloads.picked = true;
-                carry(orders, &mut crew, log);
-                reloads.due(Instant::now())
-            },
-            Step::Reload => {
-                // A save starts the tries over.
-                reloads.retry = None;
-                Some(Stale::BOTH)
-            },
+            Step::Reload => Some(Stale::BOTH),
             Step::TraceFailed(id) => {
                 if let Some(trace) = crew.tracing.failed(id, log) {
                     retrace(trace, &mut model, &mut crew, log);
@@ -564,6 +557,17 @@ impl Default for Reloads {
 }
 
 impl Reloads {
+    /// Notes what `step` means for the reads to come, before the owner takes
+    /// it: a pick from the tray outranks how the tray left automations in an
+    /// earlier run, and a save starts the tries over.
+    fn after(&mut self, step: &Step) {
+        match step {
+            Step::Picked(_) => self.picked = true,
+            Step::Reload => self.retry = None,
+            Step::Carry(_) | Step::TraceFailed(_) | Step::Stop => {},
+        }
+    }
+
     /// The files to read again at `now`, when a retry is due.
     fn due(&self, now: Instant) -> Option<Stale> {
         self.retry
@@ -1723,8 +1727,7 @@ mod tests {
         let enable = Event::from(TrayEvent::Picked(tray::ENABLE));
         let step = handle(&mut model, &mut scratch.log, &unkept, enable);
         assert_eq!(step, Step::Picked(Vec::new()));
-        // As the owner loop does on a pick.
-        reloads.picked = true;
+        reloads.after(&step);
         scratch.write("settings.json", REMEMBER);
         assert_eq!(scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY), []);
         assert!(model.enabled(), "the pick stands");
@@ -1734,6 +1737,28 @@ mod tests {
                 .log()
                 .contains("automations disabled, as the tray last left them")
         );
+    }
+
+    #[test]
+    fn only_a_pick_marks_the_reloads_picked_and_only_a_save_ends_the_tries() {
+        let retrying = || Reloads {
+            retry: Some(Retry {
+                at: Instant::now(),
+                left: RETRIES,
+            }),
+            ..Reloads::default()
+        };
+        for step in [Step::Carry(Vec::new()), Step::TraceFailed(0), Step::Stop] {
+            let mut reloads = retrying();
+            reloads.after(&step);
+            assert!(!reloads.picked && reloads.retry.is_some(), "{step:?}");
+        }
+        let mut reloads = retrying();
+        reloads.after(&Step::Picked(Vec::new()));
+        assert!(reloads.picked && reloads.retry.is_some());
+        let mut reloads = retrying();
+        reloads.after(&Step::Reload);
+        assert!(!reloads.picked && reloads.retry.is_none());
     }
 
     #[test]

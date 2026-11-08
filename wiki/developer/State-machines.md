@@ -496,7 +496,7 @@ stateDiagram-v2
     [*] --> Retrying: the first read fails, so nothing runs, or the settings are the defaults
     Current --> Current: a save, and the read works
     Current --> Retrying: a save, and the read fails, so the plan keeps running
-    Retrying --> Current: a save or a try reads; remembered state applies unless picked
+    Retrying --> Current: a save or a try reads; a pick beats remembered state
     Retrying --> Retrying: a try fails with tries left, or a save starts the tries over
     Retrying --> Waiting: the fifth try fails
     Waiting --> Current: a save, and the read works
