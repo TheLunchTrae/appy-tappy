@@ -155,6 +155,16 @@ impl System for Unsupported {
     }
 }
 
+/// Each process's executable name, by process ID, as the action controls
+/// name an audio session's app.
+#[must_use]
+pub fn executables(processes: Vec<ProcessEntry>) -> Vec<(ProcessId, String)> {
+    processes
+        .into_iter()
+        .map(|process| (process.id, process.executable))
+        .collect()
+}
+
 /// The handle of the visible window that `window` fits best.
 ///
 /// Only windows of a process whose executable `window` fits count, and ties
@@ -278,6 +288,17 @@ mod tests {
                 bottom: 2,
             },
         }
+    }
+
+    #[test]
+    fn executables_name_each_process_by_its_id() {
+        assert_eq!(
+            executables(vec![process(4, "Player.exe"), process(9, "Chat.exe")]),
+            [
+                (ProcessId::new(4), "Player.exe".to_owned()),
+                (ProcessId::new(9), "Chat.exe".to_owned()),
+            ]
+        );
     }
 
     #[test]

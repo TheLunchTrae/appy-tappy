@@ -4,8 +4,9 @@
 //! Media sessions come from the Windows Runtime media transport controls,
 //! which music players and browsers publish without any app-specific API.
 //! Volumes come from Core Audio on the default playback device. Naming an
-//! audio session's app takes a process snapshot, which never opens a process,
-//! so no action opens a watched app's process. Key presses go through
+//! audio session's app takes the process list the caller hands the controls,
+//! a snapshot that never opens a process, so no action opens a watched app's
+//! process. Key presses go through
 //! `SendInput`, which types into whichever window has the keyboard focus,
 //! after asking which process that window belongs to. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
@@ -24,7 +25,7 @@
 //! plugged back in, is found again by its ID; an audio session that is not
 //! found again ended for good.
 
-use std::collections::BTreeMap;
+use std::fmt;
 use std::io;
 use std::marker::PhantomData;
 use std::mem::size_of;
@@ -41,7 +42,7 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
-use windows::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, ERROR_NOT_FOUND, HANDLE};
+use windows::Win32::Foundation::ERROR_NOT_FOUND;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
@@ -51,9 +52,6 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, COINIT_MULTITHREADED,
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
-};
-use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
@@ -154,6 +152,10 @@ impl PartialEq for VolumeKey {
     }
 }
 
+/// Lists the running processes' executable names by process ID, such as
+/// from the system's process snapshot, which opens no process.
+pub type Executables = Box<dyn Fn() -> io::Result<Vec<(ProcessId, String)>>>;
+
 /// The Windows implementation of [`Controls`].
 ///
 /// It joins the calling thread to the COM multithreaded apartment, so it is
@@ -165,18 +167,20 @@ pub struct WindowsControls {
     media: Result<GlobalSystemMediaTransportControlsSessionManager, MediaMissing>,
     devices: IMMDeviceEnumerator,
     opener: Opener,
+    /// Names each audio session's app.
+    executables: Lister,
     // Dropped last, after the COM objects above.
     _apartment: Apartment,
 }
 
 impl WindowsControls {
     /// Connects to the audio devices, and to the media session manager if
-    /// it is ready.
+    /// it is ready. `executables` names each audio session's app.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error.
-    pub fn new() -> io::Result<Self> {
+    pub fn new(executables: Executables) -> io::Result<Self> {
         let apartment = Apartment::join(COINIT_MULTITHREADED)?;
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the class ID is a static GUID, and the result is a new owned interface.
@@ -191,6 +195,7 @@ impl WindowsControls {
             media,
             devices,
             opener: Opener::default(),
+            executables: Lister(executables),
             _apartment: apartment,
         })
     }
@@ -346,14 +351,15 @@ impl Controls for WindowsControls {
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the call takes no arguments and returns a string the caller owns.
         let device_id = take_string(unsafe { device.GetId() }?)?;
-        let executables = executables()?;
+        let executables = (self.executables.0)()?;
         let mut volumes = Vec::new();
         for (id, details) in sessions(&device)? {
             #[expect(unsafe_code, reason = "a COM call")]
             // SAFETY: the call takes no arguments. For a session that spans several
             // processes it still succeeds and names the process that created it.
             let process = unsafe { details.GetProcessId() }?;
-            let Some(executable) = executables.get(&process) else {
+            let process = ProcessId::new(process);
+            let Some((_, executable)) = executables.iter().find(|(id, _)| *id == process) else {
                 continue;
             };
             let control: ISimpleAudioVolume = details.cast()?;
@@ -747,59 +753,12 @@ fn take_string(text: PWSTR) -> io::Result<String> {
     copied.map_err(io::Error::other)
 }
 
-/// An owned kernel handle, closed on drop.
-#[derive(Debug)]
-struct OwnedHandle(HANDLE);
+/// The caller's process lister, which has no `Debug` of its own.
+struct Lister(Executables);
 
-impl Drop for OwnedHandle {
-    fn drop(&mut self) {
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "closing a handle this value owns cannot be retried, and Drop has no caller to report to"
-        )]
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: the handle came from a successful snapshot call and is closed once.
-        let _ = unsafe { CloseHandle(self.0) };
-    }
-}
-
-/// Every running process's executable name, by process ID, from a snapshot
-/// that opens no process.
-fn executables() -> io::Result<BTreeMap<u32, String>> {
-    #[expect(unsafe_code, reason = "a Win32 call")]
-    // SAFETY: the call takes flags and a process ID and returns a new handle.
-    let snapshot = OwnedHandle(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }?);
-    let mut entry = PROCESSENTRY32W {
-        dwSize: u32::try_from(size_of::<PROCESSENTRY32W>()).map_err(io::Error::other)?,
-        ..Default::default()
-    };
-    let mut executables = BTreeMap::new();
-    #[expect(unsafe_code, reason = "a Win32 call")]
-    // SAFETY: `entry` is a PROCESSENTRY32W whose dwSize is set, as the call requires.
-    let mut found = walk_end(unsafe { Process32FirstW(snapshot.0, &raw mut entry) })?;
-    while found {
-        let end = entry
-            .szExeFile
-            .iter()
-            .position(|&unit| unit == 0)
-            .unwrap_or(entry.szExeFile.len());
-        let name = String::from_utf16_lossy(entry.szExeFile.get(..end).unwrap_or_default());
-        executables.insert(entry.th32ProcessID, name);
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: as for Process32FirstW.
-        let next = unsafe { Process32NextW(snapshot.0, &raw mut entry) };
-        found = walk_end(next)?;
-    }
-    Ok(executables)
-}
-
-/// Ends a Toolhelp walk: running out of entries is the normal end, and any
-/// other failure is an error.
-fn walk_end(result: windows::core::Result<()>) -> io::Result<bool> {
-    match result {
-        Ok(()) => Ok(true),
-        Err(error) if error.code() == ERROR_NO_MORE_FILES.to_hresult() => Ok(false),
-        Err(error) => Err(error.into()),
+impl fmt::Debug for Lister {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Lister")
     }
 }
 

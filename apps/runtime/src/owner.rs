@@ -210,8 +210,9 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     });
     let (jobs, job_events) = mpsc::channel();
     let reports = sender.clone();
+    let acting = Arc::clone(&system);
     let actor = spawn("actions", move || {
-        act::run(controls, &job_events, &reports);
+        act::run(|| controls(&acting), &job_events, &reports);
     });
     let (detector, actor) = match (detector, actor) {
         (Ok(detector), Ok(actor)) => (detector, actor),
@@ -366,16 +367,22 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
 }
 
 /// The operating system's media and audio controls, made on the action
-/// thread.
+/// thread. They name each audio session's app from `system`'s process
+/// list, the same snapshot detection reads.
 #[cfg(windows)]
 #[mutants::skip] // Makes the real controls, checked by hand on Windows.
-fn controls() -> io::Result<appytappy_actions::win::WindowsControls> {
-    appytappy_actions::win::WindowsControls::new()
+fn controls(system: &Arc<HostSystem>) -> io::Result<appytappy_actions::win::WindowsControls> {
+    let system = Arc::clone(system);
+    appytappy_actions::win::WindowsControls::new(Box::new(move || {
+        system
+            .processes()
+            .map(appytappy_sources::system::executables)
+    }))
 }
 
 /// Off Windows there are no controls, so no action can run.
 #[cfg(not(windows))]
-fn controls() -> io::Result<NoControls> {
+fn controls(_system: &Arc<HostSystem>) -> io::Result<NoControls> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "actions run only on Windows",
@@ -1075,7 +1082,9 @@ mod tests {
     #[test]
     fn off_windows_actions_cannot_run() {
         assert_eq!(
-            controls().expect_err("unsupported").kind(),
+            controls(&Arc::new(HostSystem::default()))
+                .expect_err("unsupported")
+                .kind(),
             io::ErrorKind::Unsupported
         );
     }
