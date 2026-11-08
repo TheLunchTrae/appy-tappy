@@ -1,7 +1,8 @@
 //! The Windows adapter: each function turns one Windows API call into a typed
 //! value or an error and makes no decisions of its own.
 //!
-//! Listing processes and windows never opens a process. Only
+//! Listing processes and windows, and reading a process's executable
+//! build, never open a process. Only
 //! [`WindowsSystem::open`] does, it needs a permit, and it asks for read
 //! access only: no rights to write memory, create threads, or inject input.
 
@@ -11,6 +12,7 @@ use std::mem::size_of;
 use std::ptr;
 
 use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
+use appytappy_config::app_file::BuildDef;
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_BAD_LENGTH, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, HANDLE, HWND,
     LPARAM, RECT,
@@ -42,6 +44,7 @@ use windows::core::{BOOL, HSTRING, PWSTR};
 use crate::memory::{Module, PointerWidth, ProcessMemory, Region};
 use crate::system::{AccessAnswer, Bounds, ProcessEntry, Rgb, System, WindowEntry, WindowPlace};
 
+mod build;
 mod capture;
 
 pub use capture::WindowsCaptureSession;
@@ -389,6 +392,10 @@ impl System for WindowsSystem {
             shown: visible && !minimized,
             front,
         }))
+    }
+
+    fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
+        build::executable_build(process)
     }
 
     fn ask_memory_access(

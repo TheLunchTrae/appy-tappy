@@ -104,6 +104,7 @@ fn main() -> ExitCode {
             commands::save_reference,
             commands::delete_reference,
             commands::set_anti_cheat,
+            commands::mark_checked,
             commands::list_automations,
             commands::save_automation,
             commands::set_automation_enabled,

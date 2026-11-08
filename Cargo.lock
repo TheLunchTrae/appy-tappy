@@ -111,6 +111,7 @@ dependencies = [
  "appytappy-sources",
  "embed-resource",
  "mutants",
+ "static_vcruntime",
 ]
 
 [[package]]

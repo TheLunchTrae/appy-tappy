@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
-import { type SelectStep, combineOf, ignoredPixels, keptCount, shade, withStep } from '../src/lib/selection.ts';
+import {
+  type SelectStep,
+  type Selection,
+  combineOf,
+  ignoredPixels,
+  keptCount,
+  madeFor,
+  refit,
+  shade,
+  withStep,
+} from '../src/lib/selection.ts';
 
 const click = (x: number, combine: SelectStep['combine']): SelectStep => ({ kind: 'click', x, y: 0, combine });
 
@@ -66,4 +76,53 @@ test('shade tints only the left-out pixels, with light diagonal stripes', () => 
   expect(at(1)).toEqual([17, 19, 23, 160]);
   expect(at(4)).toEqual([17, 19, 23, 160]);
   expect(at(7)).toEqual([255, 255, 255, 110]);
+});
+
+describe('selections', () => {
+  const steps = [click(1, 'replace')];
+  const box = (x: number) => ({ x, y: 0, width: 2, height: 2 });
+  const made = (of: readonly SelectStep[], x: number | null, colorMatch = 24): Selection => ({
+    steps: of,
+    colorMatch,
+    view: x === null ? null : { region: box(x), spans: [] },
+  });
+
+  test("are a state's only for its steps and color match", () => {
+    const selections = new Map([[3, made(steps, 0)]]);
+    expect(madeFor(selections, { screenshot: 3, steps }, 24)).toBe(selections.get(3) ?? null);
+    expect(madeFor(selections, { screenshot: 3, steps: [...steps] }, 24)).toBeNull();
+    expect(madeFor(selections, { screenshot: 3, steps }, 30)).toBeNull();
+    expect(madeFor(selections, { screenshot: 4, steps }, 24)).toBeNull();
+  });
+
+  test('fit the region around what every state selects', () => {
+    const other = [click(9, 'replace')];
+    const fit = refit([made(steps, 0), made(other, 6)], null, null);
+    expect(fit.region).toEqual({ x: 0, y: 0, width: 8, height: 2 });
+    expect([...(fit.fitted?.steps ?? [])]).toEqual([steps, other]);
+  });
+
+  test('refit a region changed by hand only for steps that select something new', () => {
+    const last = { steps: new Set([steps]), region: box(0) };
+    const byHand = box(5);
+    const newer = [click(2, 'replace')];
+    expect(refit([made(newer, 4)], last, byHand).region).toEqual(box(4));
+    // A new color match for steps seen before leaves the hand edit.
+    const kept = refit([made(steps, 4, 30)], last, byHand);
+    expect(kept.region).toBeNull();
+    expect(kept.fitted?.region).toEqual(box(0));
+    // Steps that select nothing leave it too, and are no longer new to it.
+    const nothing = refit([made(newer, null)], last, byHand);
+    expect(nothing.region).toBeNull();
+    expect([...(nothing.fitted?.steps ?? [])]).toEqual([steps, newer]);
+  });
+
+  test('refit a region left as fitted for a new color match', () => {
+    const last = { steps: new Set([steps]), region: box(0) };
+    expect(refit([made(steps, 4, 30)], last, box(0)).region).toEqual(box(4));
+  });
+
+  test('leave the region before any selection finds something', () => {
+    expect(refit([made(steps, null)], null, box(0))).toEqual({ fitted: null, region: null });
+  });
 });

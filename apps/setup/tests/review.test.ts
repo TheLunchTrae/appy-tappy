@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { RecordedReading } from '../src/lib/api.ts';
-import { clock, entries, keptLabels, seen, startEntry, tileNote } from '../src/lib/review.ts';
+import {
+  clock,
+  editAll,
+  entries,
+  flaggedReadings,
+  keepBlocked,
+  keptLabels,
+  seen,
+  startEntry,
+  tileNote,
+} from '../src/lib/review.ts';
 
 const read = (text: string): RecordedReading => ({ firstMs: 0, seen: 1, text: { kind: 'read', text } });
 const pending: RecordedReading = { firstMs: 0, seen: 1, text: { kind: 'pending' } };
@@ -60,5 +70,39 @@ describe('tile notes', () => {
     expect(tileNote(failed, { keep: false, text: '5' }, undefined)).toBeNull();
     expect(tileNote(pending, { keep: false, text: '' }, undefined)).toBe('Reading…');
     expect(tileNote(read('7'), { keep: true, text: '7' }, undefined)).toBeNull();
+  });
+});
+
+describe('reviewing the kept readings', () => {
+  const kept = [
+    { reading: 1, text: '1' },
+    { reading: 4, text: '4' },
+  ];
+
+  test('flags each reading by its index, from answers in the order of the kept ones', () => {
+    expect([...flaggedReadings(kept, [null, 'Its 4 has another shape.'])]).toEqual([[4, 'Its 4 has another shape.']]);
+    expect(flaggedReadings(kept, [null, null, 'Extra.']).size).toBe(0);
+  });
+
+  test('Keep waits for the check, and for every flagged reading to be fixed or left out', () => {
+    expect(keepBlocked(kept, new Map(), false)).toBe('Checking the readings…');
+    expect(keepBlocked(kept, new Map([[4, 'No.']]), true)).toBe('Fix or leave out the flagged readings to keep them.');
+    expect(keepBlocked(kept, new Map([[2, 'No.']]), true)).toBeNull();
+  });
+
+  test('Keep all and Keep none edit every reading but one still being read', () => {
+    const readings = [read('1'), pending, read(''), pending];
+    const edits = new Map([[3, { keep: false, text: '9' }]]);
+    const all = entries(readings, edits, new Map());
+    expect([...editAll(edits, all, readings, true)]).toEqual([
+      [3, { keep: true, text: '9' }],
+      [0, { keep: true, text: '1' }],
+      [2, { keep: false, text: '' }],
+    ]);
+    expect([...editAll(edits, all, readings, false)].map(([index, entry]) => [index, entry.keep])).toEqual([
+      [3, false],
+      [0, false],
+      [2, false],
+    ]);
   });
 });

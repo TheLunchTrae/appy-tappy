@@ -887,6 +887,7 @@ mod tests {
             values,
             rules: Arc::<[Rule]>::from(Vec::new()),
             automations: Vec::new(),
+            checked: None,
         })
     }
 
@@ -1374,6 +1375,13 @@ mod tests {
             }))
         }
 
+        fn executable_build(
+            &self,
+            _process: appytappy_config::anti_cheat::ProcessId,
+        ) -> io::Result<appytappy_config::app_file::BuildDef> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+
         fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
@@ -1718,6 +1726,13 @@ mod tests {
         }
 
         fn open(&self, _: &ProcessAccessPermit) -> io::Result<NoProcess> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+
+        fn executable_build(
+            &self,
+            _process: appytappy_config::anti_cheat::ProcessId,
+        ) -> io::Result<appytappy_config::app_file::BuildDef> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 

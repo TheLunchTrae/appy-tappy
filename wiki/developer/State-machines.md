@@ -130,9 +130,11 @@ starts one for an application that runs without one. When several processes
 fit one application, the session follows the process that owns the window its
 reader reads, and a process that owned one keeps the session for
 `OWNER_GRACE` after it owns none; [Lifecycle](Architecture.md#lifecycle) gives
-the rule. A new watchlist ends the session of each application it drops or
-whose executable pattern it changes, and forgets which process owned its
-window.
+the rule. Each start is followed by an `Identified` change with the build of
+the executable that runs, which changes no state: the owner only logs it, as
+[Build detection](Architecture.md#build-detection) describes. A new watchlist
+ends the session of each application it drops or whose executable pattern it
+changes, and forgets which process owned its window.
 
 ### Per-application run state
 
@@ -675,10 +677,12 @@ second copy over to the first, which brings its window forward
 
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
-one. Each save reads the file, changes it, and writes it back. After a request
-that saves values, automations, or applications, the setup app tells the
-runtime to read the saved files again. Turning an overlay on or off and moving a
-panel write the application's file without telling the runtime.
+one. Each save reads the file, changes it, and writes it back. After a save of
+values, automations, or applications that worked, the setup app tells the
+runtime to read the saved files again, and each overlay reads its values
+again. A save that failed changed nothing, so it tells neither. Turning an
+overlay on or off and moving a panel write the application's file without
+telling the runtime.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another

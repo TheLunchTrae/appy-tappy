@@ -6,18 +6,17 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
-use appytappy_config::app_file::WindowDef;
+use appytappy_config::app_file::{BuildDef, WindowDef};
 use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
-use tokio::sync::oneshot;
 
 use crate::applications::AppSpec;
 use crate::recording::ocr;
 use crate::stores::Stores;
 
 use super::host::Host;
-use super::messages::{Message, Reply, Request, SaveSpec};
+use super::messages::{Message, SaveSpec};
 use super::{Owner, PREVIEW_INTERVAL};
 
 /// A host with one window whose captures the test drives by hand: each
@@ -31,6 +30,22 @@ pub(super) struct FakeHost {
     pub(super) unlisted: bool,
     /// Makes window 7 minimized.
     pub(super) minimized: bool,
+    /// The process that owns window 7, the example application's.
+    pub(super) process: u32,
+    /// The build that process runs, or `None` when it cannot be read.
+    pub(super) build: Option<BuildDef>,
+    /// Told each time the owner asks the runtime to read the saved files
+    /// again.
+    reloads: Sender<()>,
+}
+
+/// The build the fake host's application runs unless a test changes it.
+pub(super) fn example_build() -> BuildDef {
+    BuildDef {
+        version: Some("1.4.2.0".to_owned()),
+        size: 1_024,
+        modified: 1_762_500_000,
+    }
 }
 
 /// A capture the fake host started.
@@ -82,7 +97,7 @@ impl Host for FakeHost {
             own,
             WindowEntry {
                 handle: 7,
-                process: ProcessId::new(3),
+                process: ProcessId::new(self.process),
                 title: "Example App".to_owned(),
                 class: "ExampleWindow".to_owned(),
                 visible: true,
@@ -99,7 +114,7 @@ impl Host for FakeHost {
     fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
         Ok(vec![
             ProcessEntry {
-                id: ProcessId::new(3),
+                id: ProcessId::new(self.process),
                 parent: ProcessId::new(0),
                 executable: "Example.exe".to_owned(),
                 threads: 1,
@@ -126,6 +141,15 @@ impl Host for FakeHost {
         }))
     }
 
+    fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
+        if process != ProcessId::new(self.process) {
+            return Err(io::Error::other("another process"));
+        }
+        self.build
+            .clone()
+            .ok_or_else(|| io::Error::other("unreadable here"))
+    }
+
     fn capture(
         &self,
         window: u64,
@@ -149,15 +173,21 @@ impl Host for FakeHost {
             closed: self.closed.clone(),
         })
     }
+
+    fn reload_runtime(&self) {
+        self.reloads.send(()).expect("test listens");
+    }
 }
 
 pub(super) struct Harness {
     pub(super) owner: Owner<FakeHost>,
-    pub(super) messages: Receiver<Message>,
+    pub(super) messages: Receiver<Message<FakeHost>>,
     pub(super) handlers: Receiver<Started>,
     pub(super) closed: Receiver<u64>,
     /// What the owner sends the text reader.
     pub(super) jobs: Receiver<ocr::Job>,
+    /// Each time the owner asked the runtime to read the saved files again.
+    reloads: Receiver<()>,
 }
 
 /// Fresh, empty stores for one test, all in one folder.
@@ -184,12 +214,16 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
     let (handler_sender, handlers) = mpsc::channel();
     let (closed_sender, closed) = mpsc::channel();
     let (job_sender, jobs) = mpsc::channel();
+    let (reload_sender, reloads) = mpsc::channel();
     let host = FakeHost {
         handlers: handler_sender,
         closed: closed_sender,
         refuse,
         unlisted: false,
         minimized: false,
+        process: 3,
+        build: Some(example_build()),
+        reloads: reload_sender,
     };
     Harness {
         owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),
@@ -197,6 +231,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         handlers,
         closed,
         jobs,
+        reloads,
     }
 }
 
@@ -216,22 +251,21 @@ pub(super) fn frame_image() -> Image {
 }
 
 impl Harness {
-    /// Sends `request` built around a fresh reply channel and returns the
+    /// Runs `command` on the owner, as a command does, and returns its
     /// answer.
-    pub(super) fn ask<T>(&mut self, request: impl FnOnce(Reply<T>) -> Request) -> T {
-        let (reply, answer) = oneshot::channel();
-        assert!(
-            self.owner
-                .handle(Message::Request(request(reply)))
-                .is_continue()
-        );
-        answer.blocking_recv().expect("answered")
+    pub(super) fn ask<T>(&mut self, command: impl FnOnce(&mut Owner<FakeHost>) -> T) -> T {
+        command(&mut self.owner)
+    }
+
+    /// How many times the owner asked the runtime to read the saved files
+    /// again since the last time this was asked.
+    pub(super) fn reloads(&self) -> usize {
+        self.reloads.try_iter().count()
     }
 
     /// Picks window 7 and returns the capture's handler.
     pub(super) fn pick(&mut self) -> FrameHandler {
-        self.ask(|reply| Request::Pick { window: 7, reply })
-            .expect("capture starts");
+        self.ask(|owner| owner.pick(7)).expect("capture starts");
         let started = self.handlers.try_recv().expect("capture started");
         assert_eq!(
             (started.window, started.crop, started.interval),
@@ -278,17 +312,18 @@ pub(super) fn spec(app: &str, value_name: &str, check: &str) -> SaveSpec {
 
 /// Saves `Example App`, with no values, as the application `example`.
 pub(super) fn add_example_app(harness: &mut Harness) {
-    let saved = harness.ask(|reply| Request::SaveApp {
-        existing: None,
-        spec: AppSpec {
-            name: " Example App ".to_owned(),
-            window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
-                title: "Example App",
-                class: "ExampleWindow",
-                executable: "Example.exe",
-            }),
-        },
-        reply,
+    let saved = harness.ask(|owner| {
+        owner.save_app(
+            None,
+            AppSpec {
+                name: " Example App ".to_owned(),
+                window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                    title: "Example App",
+                    class: "ExampleWindow",
+                    executable: "Example.exe",
+                }),
+            },
+        )
     });
     assert_eq!(saved, Ok("example".to_owned()));
 }
@@ -307,12 +342,9 @@ pub(super) fn with_saved_bar(name: &str) -> (Harness, std::path::PathBuf) {
     add_example_app(&mut harness);
     let mut handler = harness.pick();
     harness.deliver(&mut handler, Ok(&frame_image()));
-    assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+    assert_eq!(harness.ask(Owner::screenshot), Ok(0));
     harness
-        .ask(|reply| Request::SaveValue {
-            spec: Box::new(spec("example", "Progress bar", BAR)),
-            reply,
-        })
+        .ask(|owner| owner.save(&spec("example", "Progress bar", BAR)))
         .expect("saves");
     (harness, root)
 }

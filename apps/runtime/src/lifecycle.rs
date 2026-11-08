@@ -16,6 +16,10 @@
 //! that owns the window its reader reads, which both pick with
 //! [`read_window`], and keeps a process whose window went away for
 //! [`OWNER_GRACE`]. Detection lists the windows only then.
+//!
+//! Each started app's executable is then identified: which build of it runs,
+//! read from the file without opening the process, so the log can say when
+//! it is not the build its values were checked against.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -23,6 +27,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_platform::WindowEvent;
 use appytappy_sources::system::{ProcessEntry, WindowEntry, best_windows, read_window};
@@ -90,6 +95,14 @@ pub(crate) enum Change {
         app: String,
         /// The process that exited.
         process: ProcessId,
+    },
+    /// Which build of its executable an app that just started runs, or why
+    /// that cannot be read. It follows the app's [`Change::Started`].
+    Identified {
+        /// The app's ID.
+        app: String,
+        /// The build, or why it cannot be read.
+        build: Result<BuildDef, String>,
     },
     /// A process snapshot failed, so detection cannot see starts and exits.
     ScanFailed(String),
@@ -312,10 +325,40 @@ impl Lifecycle {
     }
 }
 
+/// Sends each of `found` with `send`, and after each [`Change::Started`] a
+/// [`Change::Identified`] with the build `identify` reads. The build is read
+/// only once the start is sent, so reading it never holds back a session.
+/// False once `send` fails.
+fn send_identified(
+    found: Vec<Change>,
+    identify: &mut impl FnMut(ProcessId) -> io::Result<BuildDef>,
+    mut send: impl FnMut(Change) -> bool,
+) -> bool {
+    for change in found {
+        let started = match &change {
+            Change::Started { app, process, .. } => Some((app.clone(), *process)),
+            Change::Exited { .. }
+            | Change::Identified { .. }
+            | Change::ScanFailed(_)
+            | Change::ScanRestored => None,
+        };
+        if !send(change) {
+            return false;
+        }
+        if let Some((app, process)) = started {
+            let build = identify(process).map_err(|error| error.to_string());
+            if !send(Change::Identified { app, build }) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// The lifecycle thread: runs snapshots when they are due and sends what
 /// changed. `snapshot` lists the processes, `windows` the desktop's windows,
-/// and `shown` says whether a window shows. It ends when its input stops or
-/// nobody receives changes.
+/// `shown` says whether a window shows, and `identify` reads each started
+/// app's build. It ends when its input stops or nobody receives changes.
 pub(crate) fn run<E: From<Change>>(
     mut lifecycle: Lifecycle,
     inputs: &Receiver<Input>,
@@ -323,11 +366,12 @@ pub(crate) fn run<E: From<Change>>(
     mut snapshot: impl FnMut() -> io::Result<Vec<ProcessEntry>>,
     mut windows: impl FnMut() -> io::Result<Vec<WindowEntry>>,
     mut shown: impl FnMut(u64) -> bool,
+    mut identify: impl FnMut(ProcessId) -> io::Result<BuildDef>,
 ) {
-    let send = |found: Vec<Change>| {
-        found
-            .into_iter()
-            .all(|change| changes.send(E::from(change)).is_ok())
+    let mut send = |found: Vec<Change>| {
+        send_identified(found, &mut identify, |change| {
+            changes.send(E::from(change)).is_ok()
+        })
     };
     loop {
         let now = Instant::now();
@@ -455,6 +499,14 @@ mod tests {
 
     fn started(id: u32) -> Change {
         started_as(APP, id, "Example.exe")
+    }
+
+    fn build() -> BuildDef {
+        BuildDef {
+            version: Some("1.4.2.0".to_owned()),
+            size: 1_024,
+            modified: 1_762_588_800,
+        }
     }
 
     fn exited(id: u32) -> Change {
@@ -640,10 +692,24 @@ mod tests {
                 || Ok(snapshots.pop().unwrap_or_default()),
                 unlisted,
                 unasked,
+                |process| {
+                    if process == ProcessId::new(42) {
+                        Ok(build())
+                    } else {
+                        Err(io::Error::other("unreadable"))
+                    }
+                },
             );
         });
         let wait = Duration::from_secs(5);
         assert_eq!(changes.recv_timeout(wait).expect("start"), started(42));
+        assert_eq!(
+            changes.recv_timeout(wait).expect("identified"),
+            Change::Identified {
+                app: APP.to_owned(),
+                build: Ok(build()),
+            }
+        );
         let destroyed_at = Instant::now();
         inputs
             .send(Input::from(WindowEvent::Destroyed))
@@ -659,6 +725,13 @@ mod tests {
         assert_eq!(
             changes.recv_timeout(wait).expect("start"),
             started_as("other", 7, "Other.exe")
+        );
+        assert_eq!(
+            changes.recv_timeout(wait).expect("identified"),
+            Change::Identified {
+                app: "other".to_owned(),
+                build: Err("unreadable".to_owned()),
+            }
         );
         drop(inputs);
         thread.join().expect("the thread ends when its input stops");
@@ -704,6 +777,75 @@ mod tests {
             lifecycle.scan(Ok(helper_and_app()), failing, all_shown, now),
             []
         );
+    }
+
+    #[test]
+    fn a_build_is_read_after_its_start_is_sent_and_not_once_sending_fails() {
+        #[derive(Debug, PartialEq)]
+        enum Step {
+            Sent(Change),
+            Read(ProcessId),
+        }
+        let started = |app: &str, process| Change::Started {
+            app: app.to_owned(),
+            process: ProcessId::new(process),
+            executable: "Example.exe".to_owned(),
+        };
+        let exited = || Change::Exited {
+            app: "two".to_owned(),
+            process: ProcessId::new(2),
+        };
+        let found = || vec![started("one", 1), exited(), started("three", 3)];
+        let build = || BuildDef {
+            version: Some("1.0.0.0".to_owned()),
+            size: 6,
+            modified: 1,
+        };
+        let (log, steps) = mpsc::channel();
+        let reads = log.clone();
+        let mut identify = |process: ProcessId| {
+            reads.send(Step::Read(process)).expect("log");
+            if process == ProcessId::new(1) {
+                Ok(build())
+            } else {
+                Err(io::Error::other("unreadable"))
+            }
+        };
+        assert!(send_identified(found(), &mut identify, |change| {
+            log.send(Step::Sent(change)).is_ok()
+        }));
+        let identified = |app: &str, build| {
+            Step::Sent(Change::Identified {
+                app: app.to_owned(),
+                build,
+            })
+        };
+        assert_eq!(
+            steps.try_iter().collect::<Vec<_>>(),
+            [
+                Step::Sent(started("one", 1)),
+                Step::Read(ProcessId::new(1)),
+                identified("one", Ok(build())),
+                Step::Sent(exited()),
+                Step::Sent(started("three", 3)),
+                Step::Read(ProcessId::new(3)),
+                identified("three", Err("unreadable".to_owned())),
+            ]
+        );
+
+        // Once nobody receives, nothing more is read or sent.
+        assert!(!send_identified(found(), &mut identify, |_| false));
+        assert_eq!(steps.try_iter().count(), 0);
+        let mut count = 0;
+        assert!(!send_identified(found(), &mut identify, |_| {
+            count += 1;
+            count < 2
+        }));
+        assert_eq!(
+            steps.try_iter().collect::<Vec<_>>(),
+            [Step::Read(ProcessId::new(1))]
+        );
+        assert_eq!(count, 2, "the build of the first start was the last send");
     }
 
     #[test]

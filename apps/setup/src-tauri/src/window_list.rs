@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use appytappy_config::anti_cheat::known_anti_cheat;
+use appytappy_config::anti_cheat::{ProcessId, known_anti_cheat};
 use appytappy_config::app_file::WindowDef;
 use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
@@ -21,6 +21,10 @@ const DESKTOP_CLASSES: [&str; 3] = ["Progman", "WorkerW", "Shell_TrayWnd"];
 pub(crate) struct WindowChoice {
     /// The window's handle, which the capture takes.
     pub(crate) handle: u64,
+    /// The process that owns it, whose executable's build the setup app
+    /// reads. The UI does not need it.
+    #[serde(skip)]
+    pub(crate) process: ProcessId,
     /// The window's title.
     pub(crate) title: String,
     /// The window's class name, which a window match can use.
@@ -72,6 +76,7 @@ pub(crate) fn list(
             let executable = executables.get(&window.process.raw())?;
             (width > 0 && height > 0).then(|| WindowChoice {
                 handle: window.handle,
+                process: window.process,
                 title: window.title,
                 class: window.class,
                 executable: (*executable).to_owned(),
@@ -133,7 +138,6 @@ pub(crate) fn matching(windows: &[WindowChoice], window: &WindowDef) -> Vec<Wind
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::FallbackDef;
     use appytappy_sources::system::Bounds;
 
@@ -199,6 +203,7 @@ mod tests {
             [
                 WindowChoice {
                     handle: 3,
+                    process: ProcessId::new(1),
                     title: "Example App".to_owned(),
                     class: "AppWindow".to_owned(),
                     executable: "Example.exe".to_owned(),
@@ -207,6 +212,7 @@ mod tests {
                 },
                 WindowChoice {
                     handle: 4,
+                    process: ProcessId::new(2),
                     title: "media Player".to_owned(),
                     class: "AppWindow".to_owned(),
                     executable: "Player.exe".to_owned(),
