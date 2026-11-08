@@ -146,6 +146,18 @@ mod tests {
     }
 
     #[test]
+    fn names_each_class() {
+        let names = [
+            AntiCheatClass::None,
+            AntiCheatClass::UserMode,
+            AntiCheatClass::KernelLevel,
+            AntiCheatClass::Unknown,
+        ]
+        .map(|class| class.to_string());
+        assert_eq!(names, ["none", "user-mode", "kernel-level", "unknown"]);
+    }
+
+    #[test]
     fn identifies_anti_cheat_executables_ignoring_case() {
         assert_eq!(
             known_anti_cheat("BEService.exe"),
