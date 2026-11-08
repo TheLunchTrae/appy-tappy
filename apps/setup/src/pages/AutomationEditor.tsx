@@ -51,6 +51,7 @@ const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = {
   keys: 'Press keys',
   open: 'Open a program, file, or link',
   sound: 'Play a sound',
+  click: 'Click in another application',
 };
 
 interface KeysFieldProps {

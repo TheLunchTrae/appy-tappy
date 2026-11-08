@@ -203,6 +203,8 @@ export function actionText(action: ActionDef): string {
       return `Open ${action.target}`;
     case 'sound':
       return `Play ${fileName(action.file)}`;
+    case 'click':
+      return `Click in ${action.app}`;
   }
 }
 
@@ -446,6 +448,10 @@ export function appName(text: string): string | null {
 }
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
+  if (draft.kind === 'click') {
+    // The draft keeps none of a click's fields yet, so saving it would lose them.
+    return `Action ${position} clicks in another application, which this editor cannot change yet. Remove it to save.`;
+  }
   if (draft.kind === 'open') {
     const target = typedPath(draft.opens);
     if (target === '') {

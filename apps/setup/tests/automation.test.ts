@@ -194,6 +194,26 @@ describe('buildAutomation', () => {
     expect(buildAutomation(toDraft(flag), choices, 'x')).toEqual({ ok: true, automation: { ...flag, id: 'x' } });
   });
 
+  test('a saved click is not saved as some other action', () => {
+    const click: AutomationDef = {
+      ...pauseMusic,
+      actions: [
+        {
+          kind: 'click',
+          app: 'example',
+          button: 'left',
+          returnFocus: true,
+          at: { kind: 'spot', corner: 'topLeft', x: 4, y: 8 },
+        },
+      ],
+      undo: false,
+    };
+    expect(buildAutomation(toDraft(click), choices, 'x')).toEqual({
+      ok: false,
+      next: 'Action 1 clicks in another application, which this editor cannot change yet. Remove it to save.',
+    });
+  });
+
   test('says what to fill in next', () => {
     const next = (draft: typeof EMPTY_DRAFT): string => {
       const built = buildAutomation(draft, choices, '');

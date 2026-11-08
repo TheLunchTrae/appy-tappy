@@ -146,6 +146,8 @@ pub(crate) fn save(
                     *keys = chord.to_string();
                 }
             },
+            // A click holds only names and numbers the setup app chose.
+            ActionDef::Click { .. } => {},
         }
     }
     if let Some(problem) = problem(&draft, &apps(stores)?, &stores.apps) {

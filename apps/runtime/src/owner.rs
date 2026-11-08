@@ -224,7 +224,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let reports = sender.clone();
     let acting = Arc::clone(&system);
     let actor = spawn("actions", move || {
-        act::run(|| controls(&acting), &job_events, &reports);
+        act::run(|| controls(&acting), acting.as_ref(), &job_events, &reports);
     });
     let (detector, actor) = match (detector, actor) {
         (Ok(detector), Ok(actor)) => (detector, actor),
@@ -469,6 +469,41 @@ impl appytappy_actions::Controls for NoControls {
 
     #[mutants::skip]
     fn send_strokes(&mut self, _strokes: &[appytappy_actions::Stroke]) -> io::Result<usize> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn front_window(&mut self) -> io::Result<Option<u64>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn window_at(&mut self, _x: i32, _y: i32) -> io::Result<Option<u64>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn bring_to_front(&mut self, _window: u64) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn cursor(&mut self) -> io::Result<(i32, i32)> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn move_cursor(&mut self, _x: i32, _y: i32) -> io::Result<()> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn buttons_held(&mut self) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn send_presses(&mut self, _presses: &[appytappy_actions::Press]) -> io::Result<usize> {
         match self.0 {}
     }
 
@@ -1455,6 +1490,7 @@ mod tests {
                 },
                 values: Vec::new(),
                 rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
+                clicks: Arc::default(),
             },
         })
     }
@@ -2153,6 +2189,7 @@ mod tests {
                     executable: "Example.exe".to_owned(),
                 },
                 actions: Box::new([]),
+                clicks: Arc::default(),
                 restore: appytappy_config::rule::Restore::OnRelease,
                 cause: None,
             }),

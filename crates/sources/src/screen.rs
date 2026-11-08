@@ -10,6 +10,7 @@
 
 pub mod check;
 pub mod digits;
+pub mod find;
 pub mod mask;
 pub mod saved;
 pub mod select;
@@ -18,6 +19,6 @@ mod capture;
 mod image;
 mod layout;
 
-pub use capture::{Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession};
+pub use capture::{Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession, grab};
 pub use image::{FrameBuffer, Image, ImageError, OutsideWindow, Region, Size};
 pub use layout::{Layout, Placement};

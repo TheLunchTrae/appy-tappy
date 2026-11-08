@@ -4,11 +4,12 @@
 //! Each application has a folder under [`crate::paths::Locations::apps`]
 //! named by its ID, holding `app.json` and the pictures its values name.
 //! The automations live in one file of their own, at
-//! [`crate::paths::Locations::automations`], and the settings in another, at
-//! [`crate::paths::Locations::settings`]. The runtime keeps whether
-//! automations are enabled at [`crate::paths::Locations::enabled`]. Every
-//! write goes to a temporary file first and then replaces the old file in
-//! one step, so a reader never sees half a file.
+//! [`crate::paths::Locations::automations`], with the pictures their clicks
+//! look for in the [`CLICK_PICTURES`] folder beside it, and the settings in
+//! another file, at [`crate::paths::Locations::settings`]. The runtime keeps
+//! whether automations are enabled at [`crate::paths::Locations::enabled`].
+//! Every write goes to a temporary file first and then replaces the old file
+//! in one step, so a reader never sees half a file.
 
 use std::fs;
 use std::io::{self, Write};
@@ -23,6 +24,13 @@ use crate::settings_file::SettingsFile;
 
 /// The authoring file's name in an application's folder.
 pub const APP_FILE: &str = "app.json";
+
+/// The folder beside the automations file for the pictures clicks look for.
+///
+/// They cannot live in the folder of the application they click
+/// in, because saving that application removes the pictures its own file
+/// does not name.
+pub const CLICK_PICTURES: &str = "clicks";
 
 /// How many times a write tries to replace the old file. Antivirus and
 /// backup tools can hold a file open for a moment.
@@ -195,6 +203,26 @@ impl AutomationStore {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(AutomationsFile::default()),
             Err(error) => Err(error),
         }
+    }
+
+    /// The folder of the pictures clicks look for.
+    #[must_use]
+    pub fn pictures(&self) -> PathBuf {
+        self.path.with_file_name(CLICK_PICTURES)
+    }
+
+    /// The bytes of the click picture `name`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-input error when `name` is not a picture file
+    /// name, so it cannot reach outside the folder, or the error from
+    /// reading the file.
+    pub fn picture(&self, name: &str) -> io::Result<Vec<u8>> {
+        if !is_image_name(name) {
+            return Err(invalid(format!("{name:?} is not a valid picture name")));
+        }
+        fs::read(self.pictures().join(name))
     }
 
     /// Replaces the automations with `file`, creating the folder it lives
@@ -765,6 +793,29 @@ mod tests {
 
         let folder = AutomationStore::new(root.clone());
         assert!(folder.load().is_err());
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn click_pictures_live_beside_the_automations() {
+        let root = scratch("click-pictures");
+        let store = AutomationStore::new(root.join("automations.json"));
+        assert_eq!(store.pictures(), root.join(CLICK_PICTURES));
+        fs::create_dir_all(store.pictures()).expect("create");
+        fs::write(store.pictures().join("button-1.png"), b"png").expect("write");
+        assert_eq!(store.picture("button-1.png").expect("reads"), b"png");
+        assert_eq!(
+            store.picture("missing.png").expect_err("missing").kind(),
+            io::ErrorKind::NotFound
+        );
+        fs::write(root.join("outside.png"), b"png").expect("write");
+        for name in ["../outside.png", "Button.PNG"] {
+            assert_eq!(
+                store.picture(name).expect_err("not a name").kind(),
+                io::ErrorKind::InvalidInput,
+                "{name}"
+            );
+        }
         fs::remove_dir_all(root).expect("clean up");
     }
 

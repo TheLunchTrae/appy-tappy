@@ -8,7 +8,10 @@
 //! controls, which must not open a process, so no action opens a watched
 //! app's process. Key presses go through `SendInput`, which types into
 //! whichever window has the keyboard focus, after asking which process that
-//! window belongs to. Opening a program,
+//! window belongs to. A click moves the cursor with `SetCursorPos` and
+//! presses through `SendInput` too, after `WindowFromPoint` says which
+//! top-level window shows there; giving the focus back goes through
+//! `SetForegroundWindow`. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
 //! Explorer's open, on a short-lived thread of its own, so a slow program
 //! cannot hold up the action worker for longer than 2 seconds; while an open
@@ -42,7 +45,7 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
-use windows::Win32::Foundation::ERROR_NOT_FOUND;
+use windows::Win32::Foundation::{ERROR_NOT_FOUND, HWND, POINT};
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
@@ -53,23 +56,28 @@ use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, COINIT_MULTITHREADED,
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
 };
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput,
-    VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME,
-    VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR,
-    VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MapVirtualKeyW,
+    SendInput, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
+    VK_HOME, VK_INSERT, VK_LBUTTON, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MBUTTON,
+    VK_MENU, VK_NEXT, VK_PRIOR, VK_RBUTTON, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE,
+    VK_TAB, VK_UP,
 };
 use windows::Win32::UI::Shell::{
     SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, SW_SHOWNOACTIVATE,
+    GA_ROOT, GetAncestor, GetCursorPos, GetForegroundWindow, GetSystemMetrics,
+    GetWindowThreadProcessId, IsHungAppWindow, SM_SWAPBUTTON, SW_SHOWNOACTIVATE, SetCursorPos,
+    SetForegroundWindow, WindowFromPoint,
 };
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
-use crate::{Backoff, Controls, MediaSession, Stroke, Volume};
+use crate::{Backoff, Controls, MediaSession, MouseButton, Press, Stroke, Volume};
 
 /// How long a media request may take before it counts as failed, so an app
 /// that hangs cannot stall the action worker.
@@ -435,6 +443,103 @@ impl Controls for WindowsControls {
         Ok(usize::try_from(sent).unwrap_or(0))
     }
 
+    fn front_window(&mut self) -> io::Result<Option<u64>> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes no arguments.
+        let window = unsafe { GetForegroundWindow() };
+        Ok(number(window))
+    }
+
+    fn window_at(&mut self, x: i32, y: i32) -> io::Result<Option<u64>> {
+        #[expect(unsafe_code, reason = "Win32 calls")]
+        // SAFETY: the calls take a point and a window handle Windows gave,
+        // and read no memory of ours.
+        let root = unsafe {
+            let window = WindowFromPoint(POINT { x, y });
+            if window.is_invalid() {
+                return Ok(None);
+            }
+            GetAncestor(window, GA_ROOT)
+        };
+        Ok(number(root))
+    }
+
+    fn bring_to_front(&mut self, window: u64) -> io::Result<bool> {
+        let handle = handle(window)?;
+        #[expect(unsafe_code, reason = "Win32 calls")]
+        // SAFETY: the calls take a window handle and fail without harm when
+        // no such window exists.
+        let front = unsafe {
+            // Windows lets only the program in front, or one sharing its
+            // input, move the foreground; a click runs while another
+            // program is in front, so this thread shares that program's
+            // input for the moment it asks, then stops sharing it.
+            // A hung window is left alone, since sharing its input could
+            // wait on it.
+            let ours = GetCurrentThreadId();
+            let foreground = GetForegroundWindow();
+            let theirs = GetWindowThreadProcessId(foreground, None);
+            let attached = theirs != 0
+                && theirs != ours
+                && !IsHungAppWindow(foreground).as_bool()
+                && AttachThreadInput(ours, theirs, true).as_bool();
+            // It may still be refused, so the answer is whether the window
+            // is in front after.
+            let _asked = SetForegroundWindow(handle);
+            if attached {
+                let _detached = AttachThreadInput(ours, theirs, false);
+            }
+            GetForegroundWindow()
+        };
+        Ok(front == handle)
+    }
+
+    fn cursor(&mut self) -> io::Result<(i32, i32)> {
+        let mut point = POINT::default();
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `point` is a live local the call writes.
+        unsafe { GetCursorPos(&raw mut point) }?;
+        Ok((point.x, point.y))
+    }
+
+    fn move_cursor(&mut self, x: i32, y: i32) -> io::Result<()> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes two integers and reads no memory.
+        unsafe { SetCursorPos(x, y) }?;
+        Ok(())
+    }
+
+    fn buttons_held(&mut self) -> io::Result<bool> {
+        Ok([VK_LBUTTON, VK_RBUTTON, VK_MBUTTON]
+            .into_iter()
+            .any(|button| {
+                #[expect(unsafe_code, reason = "a Win32 call")]
+                // SAFETY: the call takes one integer and reads no memory.
+                let state = unsafe { GetAsyncKeyState(i32::from(button.0)) };
+                // The high bit is set while the button is down.
+                state < 0
+            }))
+    }
+
+    fn send_presses(&mut self, presses: &[Press]) -> io::Result<usize> {
+        if presses.is_empty() {
+            return Ok(0);
+        }
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes one integer and reads no memory.
+        let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+        let inputs: Vec<INPUT> = presses
+            .iter()
+            .map(|&press| mouse_input(press, swapped))
+            .collect();
+        let size = i32::try_from(size_of::<INPUT>()).map_err(io::Error::other)?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the slice holds initialized mouse inputs, and `size` is the
+        // size of one, as the call requires.
+        let sent = unsafe { SendInput(&inputs, size) };
+        Ok(usize::try_from(sent).unwrap_or(0))
+    }
+
     fn hold(&mut self, time: Duration) {
         thread::sleep(time);
     }
@@ -613,6 +718,50 @@ fn input(stroke: Stroke) -> INPUT {
             },
         },
     }
+}
+
+/// The mouse input for one press, at wherever the cursor is.
+fn mouse_input(press: Press, swapped: bool) -> INPUT {
+    // Injected events name the physical buttons, so with the buttons
+    // swapped in Windows' settings the left click is the right button.
+    let button = match (press.button, swapped) {
+        (MouseButton::Left, false) | (MouseButton::Right, true) => MouseButton::Left,
+        (MouseButton::Right, false) | (MouseButton::Left, true) => MouseButton::Right,
+    };
+    let flags = match (button, press.down) {
+        (MouseButton::Left, true) => MOUSEEVENTF_LEFTDOWN,
+        (MouseButton::Left, false) => MOUSEEVENTF_LEFTUP,
+        (MouseButton::Right, true) => MOUSEEVENTF_RIGHTDOWN,
+        (MouseButton::Right, false) => MOUSEEVENTF_RIGHTUP,
+    };
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouseData: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+/// The window handle a number from the runtime names.
+fn handle(window: u64) -> io::Result<HWND> {
+    Ok(HWND(ptr::without_provenance_mut(
+        usize::try_from(window).map_err(io::Error::other)?,
+    )))
+}
+
+/// A window handle as the number the runtime names it by, or `None` for no
+/// window.
+fn number(window: HWND) -> Option<u64> {
+    (!window.is_invalid())
+        .then(|| u64::try_from(window.0.addr()).ok())
+        .flatten()
 }
 
 /// A modifier's left-hand key, and whether it is an extended key.

@@ -11,6 +11,7 @@ use std::ptr;
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use windows::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, HANDLE, HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{CLR_INVALID, GetDC, GetPixel, ReleaseDC};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -231,6 +232,36 @@ impl System for WindowsSystem {
             shown: visible && !minimized,
             front,
         }))
+    }
+
+    fn frame_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
+        let Some(place) = self.window_place(window)? else {
+            return Ok(None);
+        };
+        let handle = HWND(ptr::without_provenance_mut(
+            usize::try_from(window).map_err(io::Error::other)?,
+        ));
+        let mut rect = RECT::default();
+        let size = u32::try_from(size_of::<RECT>()).map_err(io::Error::other)?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `rect` is a live local of the size passed, which the call
+        // writes; it fails without harm when the window is gone.
+        let read = unsafe {
+            DwmGetWindowAttribute(
+                handle,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                (&raw mut rect).cast(),
+                size,
+            )
+        };
+        // Without the desktop window manager's bounds, the window's own are
+        // the best there is.
+        Ok(Some(read.map_or(place.bounds, |()| Bounds {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        })))
     }
 
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
