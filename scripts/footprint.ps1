@@ -375,7 +375,8 @@ try {
         )
         references = @()
     }
-    $nothing = @(@{ kind = 'volume'; percent = 50; app = 'AppyTappyFootprintNoSuchProgram.exe' })
+    # Experiment: a sound whose file is missing, so no action reaches Core Audio.
+    $nothing = @(@{ kind = 'sound'; file = (Join-Path $scratch 'appytappy-no-such-sound.wav') })
     # The probe alternates silver and dim gray, so `light` fires on the first
     # silver frame and its hour-long cooldown keeps it from firing again until
     # the window opens anew, which starts the cooldown over. The
