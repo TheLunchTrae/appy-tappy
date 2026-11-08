@@ -104,11 +104,13 @@ pub(crate) enum Reading {
         /// What is wrong, as a sentence fragment for the log.
         problem: String,
     },
-    /// The values read so far can no longer be seen, because their capture
-    /// ended: the window closed, changed size, was minimized or hidden, or
-    /// gave way to a window that fits better, or the capture lost its
-    /// graphics device or its frames kept failing. Rules on them should
-    /// forget them rather than hold their last readings.
+    /// The values read so far can no longer be seen: the window closed, was
+    /// minimized or hidden, took a size at which they were not drawn, or
+    /// gave way to a window that fits better, no window fits any more, such
+    /// as after a title change, or the capture lost its graphics device,
+    /// could not follow the window to a new size, or its frames kept
+    /// failing. Rules on them should forget them rather than hold their last
+    /// readings.
     Unseen {
         /// The session.
         session: SessionId,
@@ -329,15 +331,14 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                     return;
                 }
             },
-            Ok(Control::Recovered) => {},
-            Ok(Control::Resized(resized)) => size = resized,
-            Ok(Control::Lost(problem)) => {
+            Ok(Ended::Resized(resized)) => size = resized,
+            Ok(Ended::Lost(problem)) => {
                 let (pause_for, new) = recovery.failed(problem.clone(), None);
                 if (new && !report(&mut reported, problem)) || !pause(control, pause_for) {
                     return;
                 }
             },
-            Ok(Control::Failing(error)) => {
+            Ok(Ended::Failing(error)) => {
                 let problem = format!(
                     "{RESTART_AFTER} frames in a row cannot be read, so its capture starts \
                      again: {error}"
@@ -347,7 +348,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                     return;
                 }
             },
-            Ok(Control::Stop) => return,
+            Ok(Ended::Stop) => return,
         }
     }
 }
@@ -383,6 +384,19 @@ fn pause(control: &Receiver<Control>, time: Duration) -> bool {
     }
 }
 
+/// What ended a capture, as [`watch`] reports it.
+#[derive(Debug, PartialEq, Eq)]
+enum Ended {
+    /// The session ended.
+    Stop,
+    /// See [`Control::Lost`].
+    Lost(String),
+    /// See [`Control::Resized`].
+    Resized(Size),
+    /// See [`Control::Failing`].
+    Failing(String),
+}
+
 /// Waits while `window` is captured, checking it every `check`, and returns
 /// what ended the capture, or why the reader should look for the window
 /// again.
@@ -393,17 +407,19 @@ fn watch<S: System>(
     check: Duration,
     control: &Receiver<Control>,
     recovery: &mut Recovery,
-) -> Result<Control, String> {
+) -> Result<Ended, String> {
     loop {
         match control.recv_timeout(check) {
             Ok(Control::Recovered) => recovery.recovered(),
-            Ok(next) => return Ok(next),
+            Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected) => return Ok(Ended::Stop),
+            Ok(Control::Lost(problem)) => return Ok(Ended::Lost(problem)),
+            Ok(Control::Resized(size)) => return Ok(Ended::Resized(size)),
+            Ok(Control::Failing(error)) => return Ok(Ended::Failing(error)),
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(problem) = moved_on(system, job, window) {
                     return Err(problem);
                 }
             },
-            Err(RecvTimeoutError::Disconnected) => return Ok(Control::Stop),
         }
     }
 }
@@ -1484,6 +1500,45 @@ mod tests {
         );
         // It waits before it looks again, and the stop ends that wait.
         drop(handler);
+        stopped(reader, desk, &readings);
+    }
+
+    #[test]
+    fn a_capture_that_keeps_ending_is_logged_once_and_waits_longer() {
+        let (system, desk) = FakeSystem::new();
+        let (events, readings) = mpsc::channel::<Reading>();
+        let check = Duration::from_secs(60);
+        let reader = Reader::checking_every(check, system, job(vec![red_at("icon", 0, 0)]), events)
+            .expect("start");
+        let closed = || Err(io::Error::new(io::ErrorKind::NotConnected, "closed"));
+        desk.answer(Ok(desktop()));
+        let (_, _, mut first) = desk.capture();
+        first(closed());
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Problem {
+                session: SessionId(3),
+                problem: "its capture ended: closed".to_owned()
+            })
+        );
+        assert!(!desk.asks_soon(), "it waits before looking again");
+        desk.answer(Ok(desktop()));
+        let (_, _, mut second) = desk.capture();
+        second(closed());
+        assert_eq!(
+            readings.recv_timeout(QUIET),
+            Err(RecvTimeoutError::Timeout),
+            "the same reason is logged once"
+        );
+        // The second wait is twice the first, so it outlasts FIND_AGAIN.
+        assert!(
+            matches!(
+                desk.lists.recv_timeout(FIND_AGAIN),
+                Err(RecvTimeoutError::Timeout)
+            ),
+            "it waits longer"
+        );
+        drop((first, second));
         stopped(reader, desk, &readings);
     }
 
