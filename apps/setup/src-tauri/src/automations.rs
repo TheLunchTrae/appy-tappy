@@ -11,17 +11,10 @@ use appytappy_config::app_file::AppFile;
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
 };
-use appytappy_config::store::{AppStore, AutomationStore, StoredApp};
+use appytappy_config::store::StoredApp;
 use serde::Serialize;
 
-/// Where the authoring files live.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Stores {
-    /// The applications' folders.
-    pub(crate) apps: AppStore,
-    /// The automations' file.
-    pub(crate) automations: AutomationStore,
-}
+use crate::stores::Stores;
 
 /// A saved automation, as the Automations page lists it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -255,6 +248,7 @@ mod tests {
     use appytappy_config::automation_file::{
         ActionDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
     };
+    use appytappy_config::store::{AppStore, AutomationStore};
     use appytappy_config::window_match::WindowFacts;
 
     use super::*;

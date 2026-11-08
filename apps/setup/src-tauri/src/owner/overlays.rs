@@ -26,7 +26,7 @@ impl<H: Host> Owner<H> {
         enabled: bool,
         mode: OverlayModeDef,
     ) -> Result<(), String> {
-        let mut file = self.app_file(app)?;
+        let mut file = self.stores()?.app_file(app)?;
         let panel = file.overlay.and_then(|overlay| overlay.panel);
         file.overlay = Some(OverlayDef {
             enabled,
@@ -43,14 +43,7 @@ impl<H: Host> Owner<H> {
         let stores = self.stores.as_ref().map_err(Clone::clone);
         self.overlays.view(&self.host, &self.messages, app, || {
             let stores = stores?;
-            let file = stores
-                .apps
-                .load()
-                .map_err(|error| error.to_string())?
-                .into_iter()
-                .find(|stored| stored.id == app)
-                .ok_or_else(|| "That application is no longer saved.".to_owned())?
-                .file?;
+            let file = stores.app_file(app)?;
             Ok((file, stores.apps.folder(app)))
         })
     }
@@ -69,7 +62,7 @@ impl<H: Host> Owner<H> {
     }
 
     fn save_panel(&self, app: &str, panel: PanelDef) -> Result<(), String> {
-        let mut file = self.app_file(app)?;
+        let mut file = self.stores()?.app_file(app)?;
         let Some(overlay) = &mut file.overlay else {
             return Ok(());
         };
@@ -171,15 +164,7 @@ mod tests {
     /// save did, without telling the overlays.
     fn change_app_file(harness: &Harness, change: impl FnOnce(&mut AppFile)) {
         let stores = harness.owner.stores().expect("stores");
-        let mut file = stores
-            .apps
-            .load()
-            .expect("loads")
-            .into_iter()
-            .find(|stored| stored.id == "example")
-            .expect("saved")
-            .file
-            .expect("readable");
+        let mut file = stores.app_file("example").expect("saved and readable");
         change(&mut file);
         stores.apps.save("example", &file, &[]).expect("saves");
     }

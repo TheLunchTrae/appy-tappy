@@ -746,19 +746,19 @@ mod tests {
         let tabs = || Fake {
             sessions: vec![
                 session(1, "Player.exe", true),
-                session(2, "Chrome", false),
-                session(3, "Chrome", true),
-                session(4, "Chrome", true),
+                session(2, "Browser", false),
+                session(3, "Browser", true),
+                session(4, "Browser", true),
             ],
             current: Some(1),
             ..Fake::default()
         };
-        let chrome = || MediaTarget::App(app("chrome"));
+        let browser = || MediaTarget::App(app("browser"));
         let mut actions = Actions::new(tabs());
         actions
             .perform(
                 'a',
-                &media(chrome(), MediaCommand::Pause),
+                &media(browser(), MediaCommand::Pause),
                 Restore::OnRelease,
                 &watched(),
             )
@@ -777,7 +777,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &media(chrome(), MediaCommand::Play),
+                &media(browser(), MediaCommand::Play),
                 Restore::Never,
                 &watched(),
             )
@@ -790,7 +790,7 @@ mod tests {
         actions
             .perform(
                 'a',
-                &media(chrome(), MediaCommand::Play),
+                &media(browser(), MediaCommand::Play),
                 Restore::Never,
                 &watched(),
             )
@@ -801,10 +801,10 @@ mod tests {
     #[test]
     fn a_pause_that_changes_nothing_still_holds_every_session_of_the_app() {
         let mut actions = Actions::new(Fake {
-            sessions: vec![session(1, "Chrome", false), session(2, "Chrome", true)],
+            sessions: vec![session(1, "Browser", false), session(2, "Browser", true)],
             ..Fake::default()
         });
-        let pause = media(MediaTarget::App(app("Chrome")), MediaCommand::Pause);
+        let pause = media(MediaTarget::App(app("Browser")), MediaCommand::Pause);
         actions
             .perform('a', &pause, Restore::OnRelease, &watched())
             .expect("paused");
@@ -822,10 +822,10 @@ mod tests {
     #[test]
     fn skipping_goes_to_the_first_playing_session_and_is_never_undone() {
         let mut actions = Actions::new(Fake {
-            sessions: vec![session(1, "Chrome", false), session(2, "Chrome", true)],
+            sessions: vec![session(1, "Browser", false), session(2, "Browser", true)],
             ..Fake::default()
         });
-        let next = media(MediaTarget::App(app("Chrome")), MediaCommand::Next);
+        let next = media(MediaTarget::App(app("Browser")), MediaCommand::Next);
         actions
             .perform('a', &next, Restore::OnRelease, &watched())
             .expect("skipped");
@@ -834,7 +834,7 @@ mod tests {
             .sessions
             .iter_mut()
             .for_each(|session| session.playing = false);
-        let previous = media(MediaTarget::App(app("Chrome")), MediaCommand::Previous);
+        let previous = media(MediaTarget::App(app("Browser")), MediaCommand::Previous);
         actions
             .perform('a', &previous, Restore::OnRelease, &watched())
             .expect("skipped");
@@ -874,7 +874,7 @@ mod tests {
         let mut actions = Actions::new(Fake {
             apps: vec![
                 (
-                    "Discord.exe".to_owned(),
+                    "Chat.exe".to_owned(),
                     Volume {
                         key: "call",
                         level: percent(100),
@@ -888,7 +888,7 @@ mod tests {
                     },
                 ),
                 (
-                    "discord.EXE".to_owned(),
+                    "chat.EXE".to_owned(),
                     Volume {
                         key: "ping",
                         level: percent(40),
@@ -897,9 +897,9 @@ mod tests {
             ],
             ..Fake::default()
         });
-        let discord = || VolumeTarget::App(app("Discord.exe"));
+        let chat = || VolumeTarget::App(app("Chat.exe"));
         actions
-            .perform('a', &volume(discord(), 20), Restore::OnRelease, &watched())
+            .perform('a', &volume(chat(), 20), Restore::OnRelease, &watched())
             .expect("set");
         assert_eq!(actions.controls().level("call"), Some(percent(20)));
         assert_eq!(actions.controls().level("ping"), Some(percent(20)));
@@ -914,14 +914,14 @@ mod tests {
         let mut actions = Actions::new(Fake {
             apps: vec![
                 (
-                    "Discord.exe".to_owned(),
+                    "Chat.exe".to_owned(),
                     Volume {
                         key: "call",
                         level: percent(100),
                     },
                 ),
                 (
-                    "Discord.exe".to_owned(),
+                    "Chat.exe".to_owned(),
                     Volume {
                         key: "ping",
                         level: percent(40),
@@ -931,9 +931,9 @@ mod tests {
             broken: Some("ping"),
             ..Fake::default()
         });
-        let discord = VolumeTarget::App(app("Discord.exe"));
+        let chat = VolumeTarget::App(app("Chat.exe"));
         assert!(matches!(
-            actions.perform('a', &volume(discord, 20), Restore::OnRelease, &watched()),
+            actions.perform('a', &volume(chat, 20), Restore::OnRelease, &watched()),
             Err(ActionError::Os(_))
         ));
         actions.release('a').expect("restored");
