@@ -146,6 +146,11 @@ impl Model {
             .collect()
     }
 
+    /// The plan of `app`, if it has automations that can run.
+    pub(crate) fn plan(&self, app: &str) -> Option<&AppPlan> {
+        self.plan.get(app).map(AsRef::as_ref)
+    }
+
     /// The name of the app a session reads, for the log.
     pub(crate) fn app_name(&self, id: SessionId) -> Option<&str> {
         self.running
@@ -175,6 +180,9 @@ impl Model {
                 self.attached.remove(&app);
                 self.stop(&app, Stop::Exited(at))
             },
+            // Which build an app runs changes nothing the model holds; the
+            // owner notes it in the log.
+            Change::Identified { .. } => Vec::new(),
             Change::ScanFailed(problem) => {
                 self.problem = Some(problem);
                 Vec::new()
@@ -206,14 +214,14 @@ impl Model {
             .collect()
     }
 
-    /// Switches to a new plan. An app whose part changed starts over with
-    /// it, undoing what its automations changed; an app whose part did not
-    /// change keeps running untouched.
+    /// Switches to a new plan. An app whose part runs differently, as
+    /// [`AppPlan::runs_as`] compares them, starts over with it, undoing what
+    /// its automations changed; any other app keeps running untouched.
     pub(crate) fn replan(&mut self, plan: BTreeMap<String, Arc<AppPlan>>) -> Vec<Order> {
         let changed: Vec<String> = self
             .running
             .iter()
-            .filter(|(app, running)| plan.get(*app).is_none_or(|new| **new != *running.plan))
+            .filter(|(app, running)| plan.get(*app).is_none_or(|new| !new.runs_as(&running.plan)))
             .map(|(app, _)| app.clone())
             .collect();
         let mut orders: Vec<Order> = changed
@@ -382,6 +390,7 @@ mod tests {
 
     use appytappy_config::action::{Action, MediaCommand, MediaTarget};
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::app_file::BuildDef;
     use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
     use appytappy_config::signal::Number;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
@@ -460,6 +469,7 @@ mod tests {
             }],
             rules: Arc::from(vec![rule]),
             automations: vec![format!("Pause {name}")],
+            checked: None,
         })
     }
 
@@ -583,6 +593,7 @@ mod tests {
             values: Vec::new(),
             rules: Arc::from(vec![rule]),
             automations: base.automations.clone(),
+            checked: None,
         });
         let mut model = Model::default();
         let now = Instant::now();
@@ -635,6 +646,7 @@ mod tests {
             values: Vec::new(),
             rules: Arc::from(vec![rule]),
             automations: base.automations.clone(),
+            checked: None,
         });
         let mut model = Model::default();
         let now = Instant::now();
@@ -731,6 +743,26 @@ mod tests {
         assert_eq!(model.active_automations(), ["Pause B"]);
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
         assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
+    }
+
+    #[test]
+    fn a_new_checked_build_restarts_nothing_but_is_what_the_log_reads() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        assert_eq!(kinds(&model.apply(started("a", 7), now)), ["read 0 A"]);
+        let mut checked = plan("A", 90.0);
+        let build = BuildDef {
+            version: Some("1.0.0.0".to_owned()),
+            size: 1,
+            modified: 2,
+        };
+        Arc::get_mut(&mut checked).expect("unshared").checked = Some(build.clone());
+        assert_eq!(model.replan(plans(&[("a", &checked)])), []);
+        assert_eq!(
+            model.plan("a").and_then(|plan| plan.checked.as_ref()),
+            Some(&build)
+        );
     }
 
     #[test]

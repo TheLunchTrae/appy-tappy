@@ -130,9 +130,11 @@ starts one for an application that runs without one. When several processes
 fit one application, the session follows the process that owns the window its
 reader reads, and a process that owned one keeps the session for
 `OWNER_GRACE` after it owns none; [Lifecycle](Architecture.md#lifecycle) gives
-the rule. A new watchlist ends the session of each application it drops or
-whose executable pattern it changes, and forgets which process owned its
-window.
+the rule. Each start is followed by an `Identified` change with the build of
+the executable that runs, which changes no state: the owner only logs it, as
+[Build detection](Architecture.md#build-detection) describes. A new watchlist
+ends the session of each application it drops or whose executable pattern it
+changes, and forgets which process owned its window.
 
 ### Per-application run state
 

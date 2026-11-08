@@ -1,5 +1,5 @@
-//! Links the runtime's Windows resources, from `runtime.rc`, into the program.
-//! Builds for other systems skip it.
+//! Links the runtime's Windows resources, from `runtime.rc`, and the Visual
+//! C++ runtime into the program. Builds for other systems skip both.
 
 use std::error::Error;
 
@@ -11,5 +11,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     embed_resource::compile("runtime.rc", embed_resource::NONE)
         .manifest_required()
         .map_err(|error| error.to_string())?;
+    // The setup app's Tauri build does the same, so neither program needs
+    // the Visual C++ Redistributable.
+    static_vcruntime::metabuild();
     Ok(())
 }

@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
-use appytappy_config::app_file::WindowDef;
+use appytappy_config::app_file::{BuildDef, WindowDef};
 use appytappy_config::store::{AppStore, AutomationStore};
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
@@ -31,6 +31,19 @@ pub(super) struct FakeHost {
     pub(super) unlisted: bool,
     /// Makes window 7 minimized.
     pub(super) minimized: bool,
+    /// The process that owns window 7, the example application's.
+    pub(super) process: u32,
+    /// The build that process runs, or `None` when it cannot be read.
+    pub(super) build: Option<BuildDef>,
+}
+
+/// The build the fake host's application runs unless a test changes it.
+pub(super) fn example_build() -> BuildDef {
+    BuildDef {
+        version: Some("1.4.2.0".to_owned()),
+        size: 1_024,
+        modified: 1_762_500_000,
+    }
 }
 
 /// A capture the fake host started.
@@ -82,7 +95,7 @@ impl Host for FakeHost {
             own,
             WindowEntry {
                 handle: 7,
-                process: ProcessId::new(3),
+                process: ProcessId::new(self.process),
                 title: "Example App".to_owned(),
                 class: "ExampleWindow".to_owned(),
                 visible: true,
@@ -99,7 +112,7 @@ impl Host for FakeHost {
     fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
         Ok(vec![
             ProcessEntry {
-                id: ProcessId::new(3),
+                id: ProcessId::new(self.process),
                 parent: ProcessId::new(0),
                 executable: "Example.exe".to_owned(),
                 threads: 1,
@@ -124,6 +137,15 @@ impl Host for FakeHost {
             shown: !self.minimized,
             front: true,
         }))
+    }
+
+    fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
+        if process != ProcessId::new(self.process) {
+            return Err(io::Error::other("another process"));
+        }
+        self.build
+            .clone()
+            .ok_or_else(|| io::Error::other("unreadable here"))
     }
 
     fn capture(
@@ -189,6 +211,8 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         refuse,
         unlisted: false,
         minimized: false,
+        process: 3,
+        build: Some(example_build()),
     };
     Harness {
         owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),

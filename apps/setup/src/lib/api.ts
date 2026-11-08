@@ -102,7 +102,24 @@ interface OverlayDef {
   readonly mode: OverlayMode;
 }
 
-/** A saved application's file. `overlay` is absent until the overlay was first set. */
+/** Which build of an executable runs: its file version, if it has one, its size in bytes, and when it was written. */
+export interface BuildDef {
+  readonly version?: string;
+  readonly size: number;
+  /** Seconds since 1970. */
+  readonly modified: number;
+}
+
+/** The build an application's values were last checked against, and when, in seconds since 1970. */
+interface CheckedDef {
+  readonly build: BuildDef;
+  readonly at: number;
+}
+
+/**
+ * A saved application's file. `overlay` is absent until the overlay was first set, and `checked` until a value was
+ * saved while the application ran.
+ */
 export interface AppFile {
   readonly format: number;
   readonly name: string;
@@ -111,14 +128,19 @@ export interface AppFile {
   readonly values: readonly ValueDef[];
   readonly references: readonly ReferenceDef[];
   readonly overlay?: OverlayDef;
+  readonly checked?: CheckedDef;
 }
 
-/** A saved application, with the handles of the running windows its window match takes, the best first. */
+/**
+ * A saved application, with the handles of the running windows its window match takes, the best first, and the build
+ * that runs in the best one, or null when none runs or its build cannot be read.
+ */
 export interface AppSummary {
   readonly id: string;
   readonly file: AppFile | null;
   readonly error: string | null;
   readonly windows: readonly number[];
+  readonly running: BuildDef | null;
 }
 
 /** An application's name and how its window is recognized, as the editor saves them. */
@@ -439,6 +461,11 @@ export async function matchWindows(window: WindowDef): Promise<readonly WindowFi
 
 export async function listApps(): Promise<readonly AppSummary[]> {
   return invoke<readonly AppSummary[]>('list_apps');
+}
+
+/** Records the build of `application` that runs now as the one its values were checked against. */
+export async function markChecked(application: string): Promise<void> {
+  await invoke('mark_checked', { application });
 }
 
 /** Saves `spec` over the application `existing`, or as a new one; returns its ID. */

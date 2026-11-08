@@ -22,11 +22,14 @@ mod update;
 mod values;
 mod watch;
 
+use std::collections::BTreeMap;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
+use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::app_file::BuildDef;
 use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::applications;
@@ -88,6 +91,9 @@ pub(crate) struct Owner<H: Host> {
     overlays: Overlays<H::Session>,
     /// The update downloaded and checked, until the user installs it.
     update: Option<Downloaded>,
+    /// The build each running process runs, read once per process, since
+    /// the application list asks again every few seconds.
+    builds: BTreeMap<ProcessId, BuildDef>,
 }
 
 impl<H: Host> Owner<H> {
@@ -116,6 +122,7 @@ impl<H: Host> Owner<H> {
             watched: None,
             overlays: Overlays::new(),
             update: None,
+            builds: BTreeMap::new(),
         }
     }
 
@@ -375,6 +382,7 @@ impl<H: Host> Owner<H> {
             Request::SetAntiCheat { app, class, reply } => {
                 send(reply, self.set_anti_cheat(&app, class));
             },
+            Request::MarkChecked { app, reply } => send(reply, self.mark_checked(&app)),
             Request::ListAutomations(reply) => {
                 send(reply, self.stores().and_then(automations::list));
             },

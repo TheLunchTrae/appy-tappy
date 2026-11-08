@@ -262,6 +262,17 @@ pub(crate) async fn delete_value(
     .await?
 }
 
+/// Records the build an application runs now as the one its values were
+/// checked against.
+#[tauri::command]
+pub(crate) async fn mark_checked(app: AppHandle, application: String) -> Result<(), String> {
+    ask(&app, |reply| Request::MarkChecked {
+        app: application,
+        reply,
+    })
+    .await?
+}
+
 /// Sets how an application protects itself from other programs.
 #[tauri::command]
 pub(crate) async fn set_anti_cheat(

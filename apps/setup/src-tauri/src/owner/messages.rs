@@ -4,7 +4,9 @@
 
 use std::time::Instant;
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, OverlayModeDef, PanelDef, WindowDef};
+use appytappy_config::app_file::{
+    AntiCheatDef, AppFile, BuildDef, OverlayModeDef, PanelDef, WindowDef,
+};
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Image, Size};
@@ -156,6 +158,9 @@ pub(crate) struct AppSummary {
     pub(crate) error: Option<String>,
     /// The handles of the running windows that match, the best fit first.
     pub(crate) windows: Vec<u64>,
+    /// The build the best fit's executable runs, or `None` while no window
+    /// matches or its build cannot be read.
+    pub(crate) running: Option<BuildDef>,
 }
 
 /// A command from the UI.
@@ -357,6 +362,14 @@ pub(crate) enum Request {
         /// Answered once it is gone.
         reply: Reply<Result<(), String>>,
     },
+    /// Records the build the application runs now as the one its values
+    /// were checked against.
+    MarkChecked {
+        /// The application's ID.
+        app: String,
+        /// Answered once it is saved, or with why it cannot be.
+        reply: Reply<Result<(), String>>,
+    },
     /// Sets how an application protects itself from other programs.
     SetAntiCheat {
         /// The application's ID.
@@ -518,6 +531,7 @@ impl Request {
                 | Self::SaveReference { .. }
                 | Self::DeleteReference { .. }
                 | Self::SetAntiCheat { .. }
+                | Self::MarkChecked { .. }
                 | Self::SaveAutomation { .. }
                 | Self::SetAutomationEnabled { .. }
                 | Self::DeleteAutomation { .. }
@@ -587,6 +601,10 @@ mod tests {
             Request::SetAntiCheat {
                 app: "example".to_owned(),
                 class: AntiCheatDef::None,
+                reply: oneshot::channel().0,
+            },
+            Request::MarkChecked {
+                app: "example".to_owned(),
                 reply: oneshot::channel().0,
             },
             Request::SaveApp {
