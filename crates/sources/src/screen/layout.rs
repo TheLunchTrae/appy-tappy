@@ -8,17 +8,17 @@
 
 use super::{Region, Size};
 
-/// The tallest texture that Direct3D 11 makes, so the tallest packed image.
-const TALLEST: u32 = 16_384;
+/// The tallest packed image: the tallest texture that every Direct3D 11
+/// device makes, down to feature level 10.
+const TALLEST: u32 = 8_192;
 
-/// One copy from a frame into the packed image.
+/// One copy from a frame into the packed image, whose left edge it starts
+/// at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Placement {
     /// The part of the frame copied.
     pub from: Region,
-    /// The packed image's left edge where it goes.
-    pub x: u32,
-    /// The packed image's top edge where it goes.
+    /// The row of the packed image where it goes.
     pub y: u32,
 }
 
@@ -41,11 +41,7 @@ impl Layout {
     pub fn one(region: Region) -> Self {
         Self {
             size: region.size(),
-            copies: Box::new([Placement {
-                from: region,
-                x: 0,
-                y: 0,
-            }]),
+            copies: Box::new([Placement { from: region, y: 0 }]),
             slots: Box::new([Region::whole(region.size())]),
         }
     }
@@ -80,11 +76,7 @@ impl Layout {
                 copy.y
             } else {
                 let y = height;
-                copies.push(Placement {
-                    from: region,
-                    x: 0,
-                    y,
-                });
+                copies.push(Placement { from: region, y });
                 height = height.checked_add(region.size().height)?;
                 width = width.max(region.size().width);
                 y
@@ -103,11 +95,7 @@ impl Layout {
     fn bounded(regions: &[Option<Region>], bounds: Region) -> Self {
         Self {
             size: bounds.size(),
-            copies: Box::new([Placement {
-                from: bounds,
-                x: 0,
-                y: 0,
-            }]),
+            copies: Box::new([Placement { from: bounds, y: 0 }]),
             slots: regions
                 .iter()
                 .map(|region| region.and_then(|region| within(region, bounds)))
@@ -202,12 +190,10 @@ mod tests {
             [
                 Placement {
                     from: region(0, 0, 10, 4),
-                    x: 0,
                     y: 0
                 },
                 Placement {
                     from: region(2000, 1000, 6, 3),
-                    x: 0,
                     y: 4
                 },
             ]
@@ -233,7 +219,6 @@ mod tests {
             layout.copies(),
             [Placement {
                 from: region(10, 10, 20, 20),
-                x: 0,
                 y: 0
             }]
         );
@@ -252,6 +237,34 @@ mod tests {
                 height: 4000
             }
         );
+    }
+
+    #[test]
+    fn a_stack_no_smaller_than_the_rectangle_copies_the_rectangle() {
+        // Side by side, the stack is 2x4 and the rectangle 4x2.
+        let layout = Layout::new([Some(region(0, 0, 2, 2)), Some(region(2, 0, 2, 2))]).unwrap();
+        assert_eq!(
+            layout.copies(),
+            [Placement {
+                from: region(0, 0, 4, 2),
+                y: 0
+            }]
+        );
+    }
+
+    #[test]
+    fn a_stack_as_tall_as_a_texture_can_be_is_kept() {
+        let half = TALLEST / 2;
+        let layout =
+            Layout::new([Some(region(0, 0, 1, half)), Some(region(100, 0, 1, half))]).unwrap();
+        assert_eq!(layout.copies().len(), 2);
+        assert_eq!(layout.size().height, TALLEST);
+        let taller = Layout::new([
+            Some(region(0, 0, 1, half)),
+            Some(region(100, 0, 1, half + 1)),
+        ])
+        .unwrap();
+        assert_eq!(taller.copies().len(), 1, "one row too tall");
     }
 
     #[test]

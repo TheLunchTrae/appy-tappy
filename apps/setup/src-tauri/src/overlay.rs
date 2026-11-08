@@ -3,8 +3,8 @@
 //!
 //! The capture reads the values on its own thread and sends only their
 //! readings, so no frame is copied here. Like the runtime, it reads the
-//! values drawn at the window's current size and captures only the smallest
-//! part of the window that holds them. Nothing is sent into the application:
+//! values drawn at the window's current size and copies only their regions,
+//! packed by a [`Layout`]. Nothing is sent into the application:
 //! the capture is the same one the automation editor uses, and the overlay
 //! is a window of the setup app's own (see [`window`]).
 

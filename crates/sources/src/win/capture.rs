@@ -7,8 +7,8 @@
 //! pool on the same Direct3D device, so the device is set to serialize its
 //! calls. Between reads the thread keeps only the newest frame and copies
 //! nothing; when the handler's wait ends, the GPU copies just the values'
-//! regions into a small CPU-readable texture, as the crop's layout packs them, and the thread copies those rows into a
-//! reused buffer.
+//! regions into a small CPU-readable texture, as the crop's layout packs
+//! them, and the thread copies those rows into a reused buffer.
 //!
 //! A capture that can no longer produce frames ends the way a closed window
 //! does: its handler receives a [`io::ErrorKind::NotConnected`] error that
@@ -432,18 +432,16 @@ impl Capturer {
             width: u32::try_from(content.Width).unwrap_or_default(),
             height: u32::try_from(content.Height).unwrap_or_default(),
         };
-        let whole;
+        let outside = OutsideWindow { window_size };
+        let whole = [Placement {
+            from: Region::whole(window_size).ok_or(outside)?,
+            y: 0,
+        }];
         let (size, placements) = match crop {
-            Crop::Whole => {
-                whole = Region::whole(window_size).map(|from| Placement { from, x: 0, y: 0 });
-                (window_size, whole.as_slice())
-            },
+            Crop::Whole => (window_size, whole.as_slice()),
             Crop::Layout(layout) if layout.fits(window_size) => (layout.size(), layout.copies()),
-            Crop::Layout(_) => return Err(OutsideWindow { window_size }.into()),
+            Crop::Layout(_) => return Err(outside.into()),
         };
-        if placements.is_empty() {
-            return Err(OutsideWindow { window_size }.into());
-        }
         let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `access` wraps the frame's live surface; the call returns a
@@ -467,7 +465,7 @@ impl Capturer {
                 self.context.CopySubresourceRegion(
                     &staging,
                     0,
-                    placement.x,
+                    0,
                     placement.y,
                     0,
                     &source,
@@ -654,7 +652,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::*;
-    use crate::screen::{Layout, Region};
+    use crate::screen::{Image, Layout, Region};
     use crate::system::System;
 
     /// Captures a visible window on the desktop of whoever runs it. It is
@@ -699,6 +697,67 @@ mod tests {
             }
         );
         assert!(latency < Duration::from_secs(5), "{latency:?}");
+    }
+
+    /// The newest frame's window size and image for `crop` of `window`.
+    fn capture_once(system: &WindowsSystem, window: u64, crop: Crop) -> (Size, Image) {
+        let (frames, received) = mpsc::channel();
+        let session = system
+            .start(
+                window,
+                crop,
+                Duration::ZERO,
+                Box::new(move |frame| {
+                    let frame = frame.unwrap();
+                    // The test stops listening after the first frame.
+                    let _sent = frames.send((frame.window_size, frame.image.clone()));
+                    Duration::from_secs(60)
+                }),
+            )
+            .unwrap();
+        let frame = received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a frame within five seconds");
+        session.close().unwrap();
+        frame
+    }
+
+    /// Packs two far-apart regions of a visible window and checks that each
+    /// lands where the layout says, by comparing it with the same region of
+    /// a whole frame. The window may change between the two captures, so it
+    /// tries a few times. It is ignored because CI runners have no visible
+    /// windows.
+    #[test]
+    #[ignore = "needs a visible window on an interactive desktop"]
+    fn packs_each_region_where_its_layout_says() {
+        let system = WindowsSystem::new();
+        let window = system
+            .windows()
+            .unwrap()
+            .into_iter()
+            .find(|window| {
+                window.visible
+                    && window.bounds.right - window.bounds.left >= 256
+                    && window.bounds.bottom - window.bounds.top >= 256
+                    && !window.title.is_empty()
+            })
+            .expect("a visible window of at least 256 by 256 pixels");
+        let (size, _) = capture_once(&system, window.handle, Crop::Whole);
+        let regions = [
+            Region::new(4, 4, 40, 12).unwrap(),
+            Region::new(size.width - 36, size.height - 28, 32, 24).unwrap(),
+        ];
+        let layout = Layout::new(regions.map(Some)).unwrap();
+        assert_eq!(layout.copies().len(), 2, "far apart regions are stacked");
+        let matched = (0..5).any(|_| {
+            let (_, packed) = capture_once(&system, window.handle, Crop::Layout(layout.clone()));
+            let (_, whole) = capture_once(&system, window.handle, Crop::Whole);
+            assert_eq!(packed.size(), layout.size());
+            regions.iter().enumerate().all(|(slot, region)| {
+                packed.crop(layout.packed(slot).unwrap()) == whole.crop(*region)
+            })
+        });
+        assert!(matched, "each packed region matches the whole frame's");
     }
 
     #[test]

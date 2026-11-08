@@ -7,9 +7,9 @@
 //! windows that fit best only when it belongs to the process the session
 //! follows, picking among them with [`read_window`] as detection does
 //! (see the Lifecycle section of `docs/developer/architecture.md`). Then it
-//! captures one region of the window: the smallest rectangle that
-//! holds the regions of every value drawn at the window's current size, so
-//! the capture copies no more pixels than the values need. Windows pushes a
+//! captures the regions of every value drawn at the window's current size,
+//! packed one under another by a [`Layout`], so the capture copies about
+//! as many pixels as the values need. Windows pushes a
 //! frame only when the window's content changes, so a still window is
 //! copied no more, and the [`ReadSchedule`] backs off while the values hold
 //! still. What a still window costs is the checks below: the reader lists
@@ -955,12 +955,10 @@ mod tests {
             [
                 Placement {
                     from: region(10, 20),
-                    x: 0,
                     y: 0
                 },
                 Placement {
                     from: region(16, 22),
-                    x: 0,
                     y: 2
                 },
             ],

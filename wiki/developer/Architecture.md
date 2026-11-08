@@ -149,9 +149,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   packed one under another, and reads each value from its place in that
   packed image. A `Layout` in `appytappy-sources::screen` says where each
   region goes, and copies the one rectangle around them instead when that is
-  smaller, such as for values that overlap. It
-  sends a `Sample` only when a value changes, and reads less often while
-  nothing changes. When the window closes or changes size, it sends `Unseen`,
+  smaller, such as for values that overlap. It sends a `Sample` only when a
+  value changes, and reads less often while nothing changes. When the window closes or changes size, it sends `Unseen`,
   and the owner forgets the application's values, so no rule acts on a value
   nobody can see. Each rule stays as it was, run or not, until the values read
   next decide its condition. When the window closes, when the capture cannot
@@ -644,10 +643,10 @@ The overlay ([#36](https://github.com/TheLunchTrae/appy-tappy/issues/36))
 is more windows of the setup app, one for each application whose overlay is
 on, so nothing is hooked or injected into the application. Each window loads
 the same UI, which renders only the readings when its label names an
-application. The owner thread keeps one capture for each overlay, which copies the values drawn
-at the window's current size with the same `Layout` as a reader, and
-the capture thread reads them from each frame, so only the readings cross to
-the owner. The window over the application is transparent, lets clicks
+application. The owner thread keeps one capture for each overlay, which
+copies the values drawn at the window's current size with the same `Layout`
+as a reader, and the capture thread reads them from each frame, so only the
+readings cross to the owner. The window over the application is transparent, lets clicks
 through, and cannot take the focus. Tauri's window library activates a window
 it shows, so `platform` shows it once, off the screen, without activating it.
 From then on a thread of its own asks the owner over the channel where it goes
