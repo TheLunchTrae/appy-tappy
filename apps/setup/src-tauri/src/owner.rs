@@ -30,10 +30,9 @@ use appytappy_sources::screen::{CaptureSession, Image};
 use crate::applications;
 use crate::automations::{self, Stores};
 use crate::check_spec::{self, RegionCheck};
-use crate::ocr;
 use crate::overlay::Overlays;
 use crate::pixels;
-use crate::recording::Recording;
+use crate::recording::{Recording, ocr};
 use crate::window_list;
 
 pub(crate) use self::host::Host;

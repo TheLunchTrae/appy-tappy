@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 
 use crate::applications::AppSpec;
 use crate::automations::Stores;
-use crate::ocr;
+use crate::recording::ocr;
 
 use super::host::Host;
 use super::messages::{Message, Reply, Request, SaveSpec};
