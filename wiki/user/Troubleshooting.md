@@ -32,7 +32,9 @@ Check these in order:
 4. **Does the value read?** Turn on the [overlay](Overlay.md) to see what
    AppyTappy reads. A value reads only while the window is the
    [size it was made at](Values.md#window-size). If the window has a size no
-   value was made at, the log says so.
+   value was made at, the log says so. A value also reads only while its
+   window shows: while the window is minimized, AppyTappy waits, and reads
+   the values again when it shows.
 5. **Did it already run?** An automation runs once each time its condition
    becomes true. It runs again only after the condition has stopped being
    true, and after its wait.

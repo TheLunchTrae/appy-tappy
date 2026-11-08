@@ -7,8 +7,9 @@
 //! folder.
 //! The file is JSON, so a person can read it and a text diff shows a change.
 //!
-//! [`AppFile::parse`] checks everything the setup app or a person could get
-//! wrong, so a file that parses is one the compile step can use.
+//! [`AppFile::parse`] checks everything in the file alone that the setup app
+//! or a person could get wrong. It does not read the pictures the file
+//! names; whatever uses them reads and checks them.
 
 use std::collections::BTreeSet;
 use std::error::Error;

@@ -126,8 +126,13 @@ window is relevant only while a watched application runs. More events while
 two delays are `SETTLE` and `RESCAN`.
 
 Each snapshot ends the session of an application whose process is gone, and
-starts one for an application that runs without one. A new watchlist ends the
-session of each application it drops or whose executable pattern it changes.
+starts one for an application that runs without one. When several processes
+fit one application, the session follows the process that owns the window its
+reader reads, and a process that owned one keeps the session for
+`OWNER_GRACE` after it owns none; [Lifecycle](Architecture.md#lifecycle) gives
+the rule. A new watchlist ends the session of each application it drops or
+whose executable pattern it changes, and forgets which process owned its
+window.
 
 ### Per-application run state
 
@@ -162,77 +167,91 @@ stateDiagram-v2
   calls `forget_values`. The rules keep their state, so a rule that fired stays
   fired until new readings decide its condition.
 
-Open problems:
-
-- [#92](https://github.com/TheLunchTrae/appy-tappy/issues/92): a store-level read
-  error, or one invalid automation, makes the next plan empty.
-- [#96](https://github.com/TheLunchTrae/appy-tappy/issues/96): the session follows
-  one process while the reader can read another copy's window.
-
 ### Reader thread
 
 Each running application has a reader thread (`read` in
 `apps/runtime/src/workers/reader.rs`). The thread's position in its loop is its
-state.
+state, along with `Recovery`: why the last capture ended and how long to wait
+before the next one.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Finding
-    Finding --> Waiting: no window fits, or windows cannot be listed
-    Waiting --> Finding: 1 second passes, or Lost or Resized
+    Finding --> Waiting: no window fits, it is minimized or another process's, or windows cannot be listed
     Finding --> Waiting: the capture cannot start
+    Waiting --> Finding: FIND_AGAIN passes
     Finding --> Capturing: the capture starts
-    Capturing --> Finding: Lost, the window closed
-    Capturing --> Finding: Resized, the window took another drawn size
-    Capturing --> [*]: Stop
+    Capturing --> Capturing: Recovered, the backoff resets
+    Capturing --> Closing: Lost, Resized, or Failing from the frame handler
+    Capturing --> Closing: every CHECK_AGAIN, the window is hidden or no longer fits, or a better one fits or is another process's
+    Closing --> Finding: Resized, or the check, after Unseen
+    Closing --> Backoff: Lost or Failing
+    Backoff --> Finding: the backoff wait passes
+    Capturing --> Closing: Stop
+    Closing --> [*]: Stop, during the capture or while it closes
     Waiting --> [*]: Stop
+    Backoff --> [*]: Stop
 ```
 
-- **Finding.** `find_window` lists the processes and windows and picks the best
-  window with `best_window`. It looks across every process whose executable
-  fits the pattern.
-- **Capturing.** The thread blocks on `control.recv()`. The capture's frame
-  handler runs on another thread and sends `Lost` or `Resized` back to this
-  one. Only `Lost`, `Resized`, or `Stop` wakes it.
+- **Finding.** `find_window` lists the processes and windows, takes the windows
+  that fit best with `best_windows`, and picks one with `read_window` for the
+  session's process (`Job::process`), as detection does: one of that process's
+  windows when it owns one, and otherwise the first that shows. It captures the
+  window only when it is that process's, and otherwise waits for the session
+  to follow the other process.
+- **Capturing.** `watch` waits on `control` for at most `CHECK_AGAIN` at a time.
+  The capture's frame handler runs on another thread and sends `Lost`,
+  `Resized`, `Failing`, or `Recovered` back to this one. On each timeout,
+  `moved_on` checks that the window still shows and still fits as well as any
+  window, because a hidden window sends no frames and no close.
+- **Closing.** The thread closes the capture first, then drops what the closed
+  capture sent after the message that ended it, still counting a `Stop` and a
+  `Recovered`. When the 2 second check ended the capture, it then sends
+  `Unseen`, so no reading from the old capture can follow it.
+- **Backoff.** After `Lost` or `Failing`, the thread waits before it looks
+  again: `FIND_AGAIN` at first, doubling up to `RESTART_WAIT_MAX` while each new
+  capture ends before it reads a frame. It logs the reason once until the reason
+  changes. A restarted capture that reads a frame sends `Recovered`, which
+  resets both.
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
-
-Open problems:
-
-- [#90](https://github.com/TheLunchTrae/appy-tappy/issues/90): a capture that keeps
-  running but stops giving usable frames never wakes the thread.
-- [#96](https://github.com/TheLunchTrae/appy-tappy/issues/96): `Job` carries no
-  process ID, so the reader can pick another copy's window.
 
 ### Frame handler
 
 `FrameReader::handle` runs once per frame and decides what each frame means.
 Its state is `size` (the window size whose values it reads), `last` (each
-value's last reading), and `seen` (whether it sent a reading since it last sent
-`Unseen`).
+value's last reading), `seen` (whether it sent a reading since it last sent
+`Unseen`), `failures` (frames in a row that failed), `restarted` (whether the
+reader started this capture again after the last one ended), and `ended`
+(whether it told the reader its capture ended).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Reading
     Reading --> Reading: frame read, a Sample for each value that changed
-    Reading --> Reading: frame error, reported once
-    Reading --> Unseen: the window closed
-    Reading --> Unseen: the window took another size
-    Unseen --> [*]: Lost or Resized sent to the reader thread
-    Unseen --> Reading: another size with no values drawn at it
+    Reading --> Reading: frame error, logged once and counted
+    Reading --> Reading: another size with no values drawn at it, Unseen
+    Reading --> Ended: the capture ended, Unseen and Lost
+    Reading --> Ended: another drawn size, Unseen and Resized
+    Reading --> Ended: RESTART_AFTER frame errors in a row, Unseen and Failing
+    Ended --> [*]: the reader closes the capture
 ```
 
 - A `Sample` goes to the owner only when a value reads differently from its
   last reading.
-- A frame error other than a closed window is logged once and the capture goes
-  on. The values read before stay in the engine.
+- A frame error is logged once until another problem or a good frame replaces
+  it. A good frame starts the count again. A region that lies outside a window
+  of its own drawn size does not count, because a new capture would fail the
+  same way.
+- The capture ends, as when the window closes, the graphics device is lost, or
+  the frame pool cannot follow the window to a new size, with a
+  `NotConnected` error.
+- After a restart, the first good frame sends `Recovered` to the reader thread.
+- **Ended.** The capture can still hand frames to the handler until the reader
+  closes it. The handler reads none of them, so nothing it sends follows
+  `Unseen`.
 - A window size at which no value was drawn sends `Unseen` and keeps the
   capture, because a restart would find the same size.
-
-Open problems:
-
-- [#90](https://github.com/TheLunchTrae/appy-tappy/issues/90): frame errors that
-  never stop, such as a lost graphics device, keep stale values in the engine.
 
 ### Read schedule
 
