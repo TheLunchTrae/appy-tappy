@@ -47,6 +47,12 @@ least one of them, and check the characters' color. Some text the **Number**
 check cannot read; [Checks](Values.md#checks) says what it can't, and what to
 use instead.
 
+## A value read right before an update
+
+When the application updates, the Values page says its values were checked
+against another build. [When an application updates](Values.md#when-an-application-updates)
+says what to do.
+
 ## A key press does nothing
 
 - The application's anti-cheat must be **None** on the Applications page. See

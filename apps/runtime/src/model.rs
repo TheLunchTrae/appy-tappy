@@ -130,6 +130,11 @@ impl Model {
             .collect()
     }
 
+    /// The plan of `app`, if it has automations that can run.
+    pub(crate) fn plan(&self, app: &str) -> Option<&AppPlan> {
+        self.plan.get(app).map(AsRef::as_ref)
+    }
+
     /// The name of the app a session reads, for the log.
     pub(crate) fn app_name(&self, id: SessionId) -> Option<&str> {
         self.running
@@ -159,6 +164,9 @@ impl Model {
                 self.attached.remove(&app);
                 self.stop(&app, Stop::Exited(at))
             },
+            // Which build an app runs changes nothing the model holds; the
+            // owner notes it in the log.
+            Change::Identified { .. } => Vec::new(),
             Change::ScanFailed(problem) => {
                 self.problem = Some(problem);
                 Vec::new()
@@ -444,6 +452,7 @@ mod tests {
             }],
             rules: Arc::from(vec![rule]),
             automations: vec![format!("Pause {name}")],
+            checked: None,
         })
     }
 
@@ -567,6 +576,7 @@ mod tests {
             values: Vec::new(),
             rules: Arc::from(vec![rule]),
             automations: base.automations.clone(),
+            checked: None,
         });
         let mut model = Model::default();
         let now = Instant::now();
@@ -619,6 +629,7 @@ mod tests {
             values: Vec::new(),
             rules: Arc::from(vec![rule]),
             automations: base.automations.clone(),
+            checked: None,
         });
         let mut model = Model::default();
         let now = Instant::now();

@@ -361,6 +361,7 @@ impl<H: Host> Owner<H> {
             Request::SetAntiCheat { app, class, reply } => {
                 send(reply, self.set_anti_cheat(&app, class));
             },
+            Request::MarkChecked { app, reply } => send(reply, self.mark_checked(&app)),
             Request::ListAutomations(reply) => {
                 send(reply, self.stores().and_then(automations::list));
             },

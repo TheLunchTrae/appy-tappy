@@ -1,7 +1,8 @@
 import { useState } from 'react';
 
-import { type AppSummary, type AutomationSummary, deleteValue, errorText } from '../lib/api.ts';
+import { type AppSummary, type AutomationSummary, deleteValue, errorText, markChecked } from '../lib/api.ts';
 import { usedBy } from '../lib/automation.ts';
+import { buildChange } from '../lib/build.ts';
 import { checkSummary } from '../lib/describe.ts';
 import { hex } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
@@ -12,6 +13,7 @@ interface AppRowsProps {
   readonly confirming: string | null;
   readonly onConfirm: (key: string | null) => void;
   readonly onDelete: (value: string) => void;
+  readonly onMarkChecked: () => void;
 }
 
 /** The automations that use a value, in a few words. */
@@ -22,7 +24,7 @@ function usedByText(names: readonly string[] | null): string {
   return names.length === 0 ? 'No automations yet' : names.join(', ');
 }
 
-function AppRows({ app, automations, confirming, onConfirm, onDelete }: AppRowsProps) {
+function AppRows({ app, automations, confirming, onConfirm, onDelete, onMarkChecked }: AppRowsProps) {
   const running = app.windows.length > 0;
   if (app.file === null) {
     return (
@@ -38,6 +40,7 @@ function AppRows({ app, automations, confirming, onConfirm, onDelete }: AppRowsP
   if (file.values.length === 0) {
     return null;
   }
+  const changed = buildChange(file, app.running);
   return (
     <>
       <tr className="group">
@@ -47,6 +50,16 @@ function AppRows({ app, automations, confirming, onConfirm, onDelete }: AppRowsP
           <small>
             {app.file.window.executable} · {running ? 'running' : 'not running'}
           </small>
+          {changed === null ? null : (
+            <div className="changed">
+              <span className="warn">
+                Changed since its values were checked ({changed}). Check that each value still reads right.
+              </span>
+              <button type="button" className="btn small" onClick={onMarkChecked}>
+                Mark as checked
+              </button>
+            </div>
+          )}
         </td>
       </tr>
       {app.file.values.map((value) => {
@@ -117,16 +130,26 @@ interface Props {
 
 export function ValuesPage({ apps, automations, loadError, onChanged, onNew }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const remove = async (app: string, value: string): Promise<void> => {
     try {
       await deleteValue(app, value);
-      setDeleteError(null);
+      setActionError(null);
       setConfirming(null);
       await onChanged();
     } catch (error: unknown) {
-      setDeleteError(errorText(error));
+      setActionError(errorText(error));
+    }
+  };
+
+  const markAsChecked = async (app: string): Promise<void> => {
+    try {
+      await markChecked(app);
+      setActionError(null);
+      await onChanged();
+    } catch (error: unknown) {
+      setActionError(errorText(error));
     }
   };
 
@@ -148,9 +171,9 @@ export function ValuesPage({ apps, automations, loadError, onChanged, onNew }: P
           {loadError}
         </p>
       )}
-      {deleteError === null ? null : (
+      {actionError === null ? null : (
         <p className="warn" role="alert">
-          {deleteError}
+          {actionError}
         </p>
       )}
       {apps !== null && total === 0 && apps.every((app) => app.error === null) ? (
@@ -189,6 +212,9 @@ export function ValuesPage({ apps, automations, loadError, onChanged, onNew }: P
                 onConfirm={setConfirming}
                 onDelete={(value) => {
                   background(remove(app.id, value));
+                }}
+                onMarkChecked={() => {
+                  background(markAsChecked(app.id));
                 }}
               />
             ))}

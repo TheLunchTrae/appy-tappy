@@ -374,6 +374,7 @@ mod tests {
             }),
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
+            checked: None,
             references: Vec::new(),
             values: vec![
                 value(

@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
-use appytappy_config::app_file::WindowDef;
+use appytappy_config::app_file::{BuildDef, WindowDef};
 use appytappy_config::store::{AppStore, AutomationStore};
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
@@ -31,6 +31,17 @@ pub(super) struct FakeHost {
     pub(super) unlisted: bool,
     /// Makes window 7 minimized.
     pub(super) minimized: bool,
+    /// The build each process runs, or `None` for one that cannot be read.
+    pub(super) build: Option<BuildDef>,
+}
+
+/// The build the fake host's application runs unless a test changes it.
+pub(super) fn example_build() -> BuildDef {
+    BuildDef {
+        version: Some("1.4.2.0".to_owned()),
+        size: 1_024,
+        modified: 1_762_500_000,
+    }
 }
 
 /// A capture the fake host started.
@@ -126,6 +137,12 @@ impl Host for FakeHost {
         }))
     }
 
+    fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
+        self.build
+            .clone()
+            .ok_or_else(|| io::Error::other("unreadable here"))
+    }
+
     fn capture(
         &self,
         window: u64,
@@ -189,6 +206,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         refuse,
         unlisted: false,
         minimized: false,
+        build: Some(example_build()),
     };
     Harness {
         owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),

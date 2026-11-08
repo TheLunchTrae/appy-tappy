@@ -14,7 +14,7 @@ use std::fs;
 use std::io;
 use std::sync::Arc;
 
-use appytappy_config::app_file::AppFile;
+use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_config::automation_file::AutomationsFile;
 use appytappy_config::rule::Rule;
 use appytappy_config::signal::SignalName;
@@ -46,6 +46,9 @@ pub(crate) struct AppPlan {
     pub(crate) rules: Arc<[Rule]>,
     /// Each rule's automation's name, in the same order.
     pub(crate) automations: Vec<String>,
+    /// The build its values were last checked against, if the setup app
+    /// recorded one.
+    pub(crate) checked: Option<BuildDef>,
 }
 
 /// A value an automation watches.
@@ -189,6 +192,7 @@ pub(crate) fn compile(
                 values: draft.values,
                 rules: draft.rules.into(),
                 automations: draft.automations,
+                checked: file.checked.as_ref().map(|checked| checked.build.clone()),
             };
             Some((id.to_owned(), Arc::new(plan)))
         })
@@ -256,6 +260,7 @@ mod tests {
             },
             anti_cheat: AntiCheatDef::None,
             overlay: None,
+            checked: None,
             values,
             references: Vec::new(),
         }

@@ -93,6 +93,7 @@ pub(crate) fn save(
             window: spec.window.clone(),
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
+            checked: None,
             values: Vec::new(),
             references: Vec::new(),
         };

@@ -290,6 +290,26 @@ as `Example.exe`, against the file names in the snapshot. A reload changes the
 list at once: an application that is no longer watched detaches, and one that
 is newly watched is found by the next snapshot.
 
+#### Build detection
+
+When a session starts, the lifecycle thread reads which build of the
+application's executable runs, and sends it after the `Started` change as an
+`Identified` change. A build is the executable's file version, its size, and
+when it was written (`appytappy_sources::build`). The Windows adapter
+(`crates/sources/src/win/build.rs`) asks `NtQuerySystemInformation` for the
+process's executable path by its process ID, which needs no process handle, so
+it is allowed for every anti-cheat class, and turns the device path it gives
+into a drive or network path with `QueryDosDeviceW`. Then it reads the file's
+version resource, size, and write time from disk.
+
+The owner logs a line when the build differs from the one the application's
+values were checked against, the `checked` that its file records, or when it
+cannot be read. Either way the values are still read: the line tells the user to
+check them in the setup app, whose Values page shows the same warning from the
+build of the process behind the window it matched. The setup app reads the
+build the same way and records it as described in
+[Saved files](Setup-app.md#saved-files).
+
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
 second copy that finds it logs that and exits at once, and the setup app can
 open it to learn whether the runtime runs.
@@ -404,8 +424,9 @@ changing.
 - A **signal** is a named, typed value an application exposes, such as
   `progress`. An app definition binds each signal to a source primitive
   per application version. The format belongs to
-  [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6), and version
-  changes to [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7).
+  [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6). The runtime and
+  the setup app tell which build of an application runs, as [Build
+  detection](#build-detection) describes.
 - A **rule** says when to act: a trigger on signals or application events, with
   conditions, a cooldown, and re-arming. The engine evaluates rules as a pure
   function with no I/O, so its tests need no application and no Windows.
@@ -467,9 +488,11 @@ changing.
   it cannot remove an application or delete a value, because it checks the
   file to see whether an automation still uses them.
 - **Application versions.** A saved value has one binding for every version of
-  its application. Detecting the version and keeping a binding per version are
-  not built; [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7) tracks
-  them.
+  its application. `app.json` records the build its values were checked
+  against, and both programs warn when another build runs, as [Build
+  detection](#build-detection) describes. Keeping a memory binding per
+  version is not built;
+  [#158](https://github.com/TheLunchTrae/appy-tappy/issues/158) tracks it.
 
 ## Anti-cheat enforcement
 

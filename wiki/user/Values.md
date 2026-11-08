@@ -124,6 +124,24 @@ While the window is closed or at a size no value was made at, AppyTappy reads
 nothing. Automations neither run nor undo their changes until it can read
 again.
 
+## When an application updates
+
+An update can move what a value reads, so AppyTappy remembers which build of
+the application its values were checked against: the version of its
+executable, such as `1.4.2.0`, its size, and when it was written. It records
+the build that runs when you save the application's first value.
+
+When the application runs a different build, the Values page says so under the
+application's name, such as **Changed since its values were checked (1.4.2.0
+then, 1.5.0.0 now)**. AppyTappy still reads the values. Check what each one
+reads now, such as with the application's [overlay](Overlay.md), and make any
+that read wrong again. Then select **Mark as checked**, which records the build
+that runs now. The application has to be running for that.
+
+The tray's log says so too, each time the application starts. AppyTappy finds
+the executable without opening the application, so this works whatever the
+application's [anti-cheat](Applications.md#anti-cheat) setting.
+
 ## Delete a value
 
 Select **Delete** next to a value, then confirm. A value that an automation

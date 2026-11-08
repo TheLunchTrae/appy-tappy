@@ -1,12 +1,17 @@
-//! Saved values and applications: listing them with their running windows,
-//! saving and deleting them, and each application's anti-cheat setting.
+//! Saved values and applications: listing them with their running windows
+//! and builds, saving and deleting them, each application's anti-cheat
+//! setting, and the build its values were checked against.
 
-use appytappy_config::app_file::{AntiCheatDef, ScreenDef, SizeDef, ValueDef, value_id};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use appytappy_config::app_file::{
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, value_id,
+};
 
 use crate::automations;
 use crate::check_spec;
 use crate::stores::Stores;
-use crate::window_list;
+use crate::window_list::{self, WindowChoice};
 
 use super::Owner;
 use super::host::Host;
@@ -36,7 +41,7 @@ impl<H: Host> Owner<H> {
                     Ok(file) => (Some(file), None),
                     Err(error) => (None, Some(error)),
                 };
-                let matched = file
+                let matched: Vec<u64> = file
                     .as_ref()
                     .map(|file| {
                         window_list::matching(&windows, &file.window)
@@ -45,11 +50,14 @@ impl<H: Host> Owner<H> {
                             .collect()
                     })
                     .unwrap_or_default();
+                // A build that cannot be read only leaves the warning out.
+                let running = self.build_of(&windows, &matched).ok().flatten();
                 AppSummary {
                     id: app.id,
                     file,
                     error,
                     windows: matched,
+                    running,
                 }
             })
             .collect())
@@ -93,11 +101,72 @@ impl<H: Host> Owner<H> {
                 check: saved.check,
             },
         });
+        // The first value saved is checked against the build that runs
+        // now; later ones leave that to Mark as checked, since one new value
+        // says nothing about the others.
+        if file.checked.is_none() {
+            file.checked = self.running_build(&file).ok().flatten().map(checked_now);
+        }
         stores
             .apps
             .save(&app, &file, &saved.pictures)
             .map_err(|error| error.to_string())?;
         Ok(SavedValue { app, value: id })
+    }
+
+    /// The build that the best fit for `file`'s window runs, or `None`
+    /// while no window fits.
+    fn running_build(&self, file: &AppFile) -> Result<Option<BuildDef>, String> {
+        let windows = self.window_list()?.windows;
+        let matched: Vec<u64> = window_list::matching(&windows, &file.window)
+            .into_iter()
+            .map(|fit| fit.handle)
+            .collect();
+        self.build_of(&windows, &matched)
+    }
+
+    /// The build of the first of `matched`, which name windows of `windows`.
+    fn build_of(
+        &self,
+        windows: &[WindowChoice],
+        matched: &[u64],
+    ) -> Result<Option<BuildDef>, String> {
+        let Some(best) = matched
+            .first()
+            .and_then(|&handle| windows.iter().find(|window| window.handle == handle))
+        else {
+            return Ok(None);
+        };
+        self.host
+            .executable_build(best.process)
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Saves the build the application `app` runs now as the one its values
+    /// were checked against.
+    pub(super) fn mark_checked(&self, app: &str) -> Result<(), String> {
+        let stores = self.stores()?;
+        let mut file = stores.app_file(app)?;
+        let build = self
+            .running_build(&file)
+            .map_err(|error| {
+                format!(
+                    "AppyTappy Setup cannot tell which build of {} runs: {error}",
+                    file.name
+                )
+            })?
+            .ok_or_else(|| {
+                format!(
+                    "Start {} first, so AppyTappy Setup can tell which build runs.",
+                    file.name
+                )
+            })?;
+        file.checked = Some(checked_now(build));
+        stores
+            .apps
+            .save(app, &file, &[])
+            .map_err(|error| error.to_string())
     }
 
     pub(super) fn delete(&self, app: &str, value: &str) -> Result<(), String> {
@@ -128,6 +197,15 @@ impl<H: Host> Owner<H> {
     }
 }
 
+/// `build` as checked now.
+fn checked_now(build: BuildDef) -> CheckedDef {
+    // A clock set before 1970 counts as its start.
+    let at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    CheckedDef { build, at }
+}
+
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::WindowDef;
@@ -136,8 +214,8 @@ mod tests {
 
     use crate::owner::messages::Request;
     use crate::owner::test_support::{
-        BAR, Harness, STATE, add_example_app, frame_image, harness, harness_with, scratch_store,
-        spec,
+        BAR, Harness, STATE, add_example_app, example_build, frame_image, harness, harness_with,
+        scratch_store, spec, with_saved_bar,
     };
 
     use super::*;
@@ -379,6 +457,86 @@ mod tests {
                 reply,
             }),
             Err("That application is no longer saved.".to_owned())
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_first_value_records_the_running_build_until_marked_checked_again() {
+        let (mut harness, root) = with_saved_bar("checked");
+        let checked = |harness: &mut Harness| {
+            harness.ask(Request::ListApps).expect("lists")[0]
+                .file
+                .as_ref()
+                .and_then(|file| file.checked.clone())
+        };
+        let first = checked(&mut harness).expect("the first value records the build");
+        assert_eq!(first.build, example_build());
+        assert!(first.at > 0);
+        let updated = BuildDef {
+            version: Some("1.5.0.0".to_owned()),
+            ..example_build()
+        };
+        harness.owner.host.build = Some(updated.clone());
+        let apps = harness.ask(Request::ListApps).expect("lists");
+        assert_eq!(apps[0].running.as_ref(), Some(&updated));
+        harness
+            .ask(|reply| Request::SaveValue {
+                spec: Box::new(spec("example", "Icon visible", STATE)),
+                reply,
+            })
+            .expect("saves");
+        assert_eq!(
+            checked(&mut harness).map(|checked| checked.build),
+            Some(example_build()),
+            "a later value leaves the checked build alone"
+        );
+        let mark = |harness: &mut Harness, app: &str| {
+            harness.ask(|reply| Request::MarkChecked {
+                app: app.to_owned(),
+                reply,
+            })
+        };
+        assert_eq!(mark(&mut harness, "example"), Ok(()));
+        assert_eq!(
+            checked(&mut harness).map(|checked| checked.build),
+            Some(updated.clone())
+        );
+
+        harness.owner.host.build = None;
+        let apps = harness.ask(Request::ListApps).expect("lists");
+        assert_eq!(
+            apps[0].running, None,
+            "an unreadable build only goes unshown"
+        );
+        assert_eq!(
+            mark(&mut harness, "example"),
+            Err(
+                "AppyTappy Setup cannot tell which build of Example App runs: unreadable here"
+                    .to_owned()
+            )
+        );
+        let other = harness.ask(|reply| Request::SaveApp {
+            existing: None,
+            spec: crate::applications::AppSpec {
+                name: "Other App".to_owned(),
+                window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                    title: "Other App",
+                    class: "OtherWindow",
+                    executable: "Other.exe",
+                }),
+            },
+            reply,
+        });
+        assert_eq!(other, Ok("other".to_owned()));
+        assert_eq!(
+            mark(&mut harness, "other"),
+            Err("Start Other App first, so AppyTappy Setup can tell which build runs.".to_owned())
+        );
+        assert_eq!(
+            checked(&mut harness).map(|checked| checked.build),
+            Some(updated),
+            "a failed mark keeps the build"
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
 use appytappy_config::store::{AppStore, AutomationStore};
 use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, WindowWatch};
@@ -146,6 +147,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             || detect.processes(),
             || detect.windows(),
             |window| shows(detect.window_place(window)),
+            |process| detect.executable_build(process),
         );
         #[expect(
             clippy::let_underscore_must_use,
@@ -536,7 +538,9 @@ fn order_line(order: &Order) -> Option<String> {
 fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
     match event {
         Event::Detected(change) => {
-            note(log, &describe(&change));
+            if let Some(line) = describe(model, &change) {
+                note(log, &line);
+            }
             let before = model.state();
             let orders = model.apply(change, Instant::now());
             let after = model.state();
@@ -612,17 +616,59 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
     }
 }
 
-fn describe(change: &Change) -> String {
-    match change {
+/// The log line for an app named `name` that runs `running` while its
+/// values were checked against `checked`, or `None` when that needs no
+/// line: the builds match, or no build was checked.
+fn build_change(
+    name: &str,
+    checked: Option<&BuildDef>,
+    running: &Result<BuildDef, String>,
+) -> Option<String> {
+    let checked = checked?;
+    match running {
+        Ok(running) if running == checked => None,
+        Ok(running) => Some(format!(
+            "{name}: its executable changed since its values were checked ({}). Its values are \
+             still read; check them in AppyTappy Setup",
+            build_difference(checked, running)
+        )),
+        Err(error) => Some(format!(
+            "{name}: which build of its executable runs cannot be read, so a change since its \
+             values were checked goes unnoticed: {error}"
+        )),
+    }
+}
+
+/// How `running` differs from the `checked` build, in a few words: both
+/// versions when they differ, and otherwise that the file does.
+fn build_difference(checked: &BuildDef, running: &BuildDef) -> String {
+    let version = |build: &BuildDef| build.version.as_deref().unwrap_or("no version").to_owned();
+    match (&checked.version, &running.version) {
+        (then, now) if then != now => {
+            format!("{} then, {} now", version(checked), version(running))
+        },
+        (Some(both), _) => format!("still {both}, but another file"),
+        (None, _) => "another file, with no version either time".to_owned(),
+    }
+}
+
+/// The log line for `change`, if it needs one.
+fn describe(model: &Model, change: &Change) -> Option<String> {
+    let line = match change {
         Change::Started {
             app,
             process,
             executable,
         } => format!("{app} started as {executable} (process {process}): attached"),
         Change::Exited { app, process } => format!("{app} exited (process {process}): detached"),
+        Change::Identified { app, build } => {
+            let plan = model.plan(app)?;
+            return build_change(&plan.name, plan.checked.as_ref(), build);
+        },
         Change::ScanFailed(problem) => format!("process snapshots fail: {problem}"),
         Change::ScanRestored => "process snapshots work again".to_owned(),
-    }
+    };
+    Some(line)
 }
 
 #[cfg(test)]
@@ -769,7 +815,7 @@ mod tests {
             Change::ScanFailed("denied".to_owned()),
             Change::ScanRestored,
         ]
-        .map(|change| describe(&change));
+        .map(|change| describe(&Model::default(), &change));
         assert_eq!(
             lines,
             [
@@ -778,7 +824,92 @@ mod tests {
                 "process snapshots fail: denied",
                 "process snapshots work again",
             ]
+            .map(|line| Some(line.to_owned()))
         );
+    }
+
+    #[test]
+    fn a_build_difference_names_both_versions_or_the_file() {
+        let build = |version: Option<&str>, size| BuildDef {
+            version: version.map(str::to_owned),
+            size,
+            modified: 1_762_588_800,
+        };
+        assert_eq!(
+            build_difference(&build(Some("1.4.2.0"), 1), &build(Some("1.5.0.0"), 1)),
+            "1.4.2.0 then, 1.5.0.0 now"
+        );
+        assert_eq!(
+            build_difference(&build(None, 1), &build(Some("1.5.0.0"), 1)),
+            "no version then, 1.5.0.0 now"
+        );
+        assert_eq!(
+            build_difference(&build(Some("1.4.2.0"), 1), &build(Some("1.4.2.0"), 2)),
+            "still 1.4.2.0, but another file"
+        );
+        assert_eq!(
+            build_difference(&build(None, 1), &build(None, 2)),
+            "another file, with no version either time"
+        );
+    }
+
+    #[test]
+    fn a_build_other_than_the_checked_one_gets_a_log_line() {
+        let build = |version: Option<&str>, size| BuildDef {
+            version: version.map(str::to_owned),
+            size,
+            modified: 1_762_588_800,
+        };
+        let checked = build(Some("1.4.2.0"), 1_024);
+        let mut model = Model::default();
+        let mut plan = app_plan("Example App", &["Pause music"]);
+        Arc::get_mut(&mut plan).expect("unshared").checked = Some(checked.clone());
+        model.replan(BTreeMap::from([
+            ("example".to_owned(), plan),
+            ("unchecked".to_owned(), app_plan("Unchecked", &["Mute"])),
+        ]));
+        let line = |app: &str, running: Result<BuildDef, String>| {
+            describe(
+                &model,
+                &Change::Identified {
+                    app: app.to_owned(),
+                    build: running,
+                },
+            )
+        };
+        assert_eq!(line("example", Ok(checked.clone())), None);
+        assert_eq!(
+            line("example", Ok(build(Some("1.5.0.0"), 1_024))).as_deref(),
+            Some(
+                "Example App: its executable changed since its values were checked (1.4.2.0 \
+                 then, 1.5.0.0 now). Its values are still read; check them in AppyTappy Setup"
+            )
+        );
+        // The same version in a file of another size is another build.
+        assert_eq!(
+            line("example", Ok(build(Some("1.4.2.0"), 2_048))).as_deref(),
+            Some(
+                "Example App: its executable changed since its values were checked (still \
+                 1.4.2.0, but another file). Its values are still read; check them in \
+                 AppyTappy Setup"
+            )
+        );
+        assert_eq!(
+            line("example", Ok(build(None, 2_048))).as_deref(),
+            Some(
+                "Example App: its executable changed since its values were checked (1.4.2.0 \
+                 then, no version now). Its values are still read; check them in AppyTappy Setup"
+            )
+        );
+        assert_eq!(
+            line("example", Err("access denied".to_owned())).as_deref(),
+            Some(
+                "Example App: which build of its executable runs cannot be read, so a change \
+                 since its values were checked goes unnoticed: access denied"
+            )
+        );
+        assert_eq!(line("unchecked", Ok(checked.clone())), None);
+        assert_eq!(line("gone", Ok(checked)), None);
     }
 
     /// An app plan named `name` whose automations are only names.
@@ -798,6 +929,7 @@ mod tests {
             values: Vec::new(),
             rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
             automations: automations.iter().map(|&name| name.to_owned()).collect(),
+            checked: None,
         })
     }
 

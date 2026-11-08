@@ -68,8 +68,9 @@ const apps: readonly AppSummary[] = [
     },
     error: null,
     windows: [7],
+    running: null,
   },
-  { id: 'broken', file: null, error: 'the file is not valid', windows: [] },
+  { id: 'broken', file: null, error: 'the file is not valid', windows: [], running: null },
 ];
 
 const choices = valueChoices(apps);
