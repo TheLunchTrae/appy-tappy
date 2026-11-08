@@ -104,7 +104,9 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
   tells it to stop, over a second channel with no limit, so the owner never
   waits for the writer, even when its buffer is full. The writer takes them
   before each record, and a session's plan is sent before its reader starts,
-  so every row of the session is named.
+  so every row of the session is named. After each reload, the owner hands
+  it each running session's newest plan too, so a rename shows in the trace
+  without starting the reader over.
 - **Files.** Once a trace starts, and at each new part, the writer deletes the
   oldest trace files past the number to keep. A file it cannot delete, as one
   open in a spreadsheet, stays and is tried again at the next part or
