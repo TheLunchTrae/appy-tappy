@@ -1,5 +1,6 @@
-import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
+import { Question, useQuestion } from '../components/Question.tsx';
 import {
   type AntiCheat,
   type AppSummary,
@@ -29,81 +30,32 @@ interface AntiCheatCellProps {
 
 /**
  * An application's anti-cheat, picked from a menu. None lets automations
- * press keys into it, so picking None asks first.
+ * press keys into it, so picking None asks first, in the menu's place.
  */
 function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet }: AntiCheatCellProps) {
-  const keep = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLSelectElement>(null);
-  const question = useRef<HTMLSpanElement>(null);
-  // Whether focus was in the question when it went, so it comes back to the menu only then.
-  const hadFocus = useRef(false);
-  const warning = useId();
-  // The question takes the menu's place, so focus moves to its safe answer, and back to the menu after.
-  useEffect(() => {
-    if (confirming) {
-      keep.current?.focus();
-    } else if (hadFocus.current) {
-      hadFocus.current = false;
-      menu.current?.focus();
-    }
-  }, [confirming]);
-  const answer = (set: boolean): void => {
-    hadFocus.current = question.current?.contains(document.activeElement) ?? false;
-    if (set) {
-      onSet('none');
-    } else {
-      onConfirm(false);
-    }
-  };
-  // Escape is the same as Keep, on either answer.
-  const escape = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      answer(false);
-    }
-  };
+  const { control, refs } = useQuestion<HTMLSelectElement>(confirming);
   if (confirming) {
     return (
-      <span
-        ref={question}
-        className="confirm-none"
-        role="alertdialog"
-        aria-label={`Set ${name}'s anti-cheat to None?`}
-        aria-describedby={warning}
+      <Question
+        refs={refs}
+        label={`Set ${name}'s anti-cheat to None?`}
+        keepLabel={`Keep ${ANTI_CHEAT_NAMES[antiCheat]}`}
+        actLabel="Set to None"
+        onKeep={() => {
+          onConfirm(false);
+        }}
+        onAct={() => {
+          onSet('none');
+        }}
       >
-        <span id={warning} className="warn">
-          Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat can get your
-          account banned.
-        </span>
-        <span className="confirm">
-          <button
-            ref={keep}
-            type="button"
-            className="btn small"
-            onKeyDown={escape}
-            onClick={() => {
-              answer(false);
-            }}
-          >
-            Keep {ANTI_CHEAT_NAMES[antiCheat]}
-          </button>
-          <button
-            type="button"
-            className="btn small danger"
-            onKeyDown={escape}
-            onClick={() => {
-              answer(true);
-            }}
-          >
-            Set to None
-          </button>
-        </span>
-      </span>
+        Only pick None if {name} has no anti-cheat. Pressing keys into an application with anti-cheat can get your
+        account banned.
+      </Question>
     );
   }
   return (
     <select
-      ref={menu}
+      ref={control}
       className="input"
       aria-label={`${name}: anti-cheat`}
       value={antiCheat}
@@ -152,78 +104,29 @@ interface RemoveCellProps {
   readonly busy: boolean;
 }
 
-/** Removing an application, which asks first since its values go with it. */
+/** Removing an application, which asks first, in the button's place, since its values go with it. */
 function RemoveCell({ name, loses, confirming, onConfirm, onRemove, busy }: RemoveCellProps) {
-  const keep = useRef<HTMLButtonElement>(null);
-  const remove = useRef<HTMLButtonElement>(null);
-  const hadFocus = useRef(false);
-  const question = useRef<HTMLSpanElement>(null);
-  const warning = useId();
-  useEffect(() => {
-    if (confirming) {
-      keep.current?.focus();
-    } else if (hadFocus.current) {
-      hadFocus.current = false;
-      remove.current?.focus();
-    }
-  }, [confirming]);
-  const answer = (removing: boolean): void => {
-    hadFocus.current = question.current?.contains(document.activeElement) ?? false;
-    if (removing) {
-      onRemove();
-    } else {
-      onConfirm(false);
-    }
-  };
-  const escape = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      answer(false);
-    }
-  };
+  const { control, refs } = useQuestion<HTMLButtonElement>(confirming);
   if (confirming) {
     return (
-      <span
-        ref={question}
-        className="confirm-none"
-        role="alertdialog"
-        aria-label={`Remove ${name}?`}
-        aria-describedby={warning}
+      <Question
+        refs={refs}
+        label={`Remove ${name}?`}
+        keepLabel="Keep"
+        actLabel="Remove"
+        busy={busy}
+        onKeep={() => {
+          onConfirm(false);
+        }}
+        onAct={onRemove}
       >
-        <span id={warning} className="warn">
-          Remove {name}? {loses}
-        </span>
-        <span className="confirm">
-          <button
-            ref={keep}
-            type="button"
-            className="btn small"
-            disabled={busy}
-            onKeyDown={escape}
-            onClick={() => {
-              answer(false);
-            }}
-          >
-            Keep
-          </button>
-          <button
-            type="button"
-            className="btn small danger"
-            disabled={busy}
-            onKeyDown={escape}
-            onClick={() => {
-              answer(true);
-            }}
-          >
-            Remove
-          </button>
-        </span>
-      </span>
+        Remove {name}? {loses}
+      </Question>
     );
   }
   return (
     <button
-      ref={remove}
+      ref={control}
       type="button"
       className="btn small"
       disabled={busy}
