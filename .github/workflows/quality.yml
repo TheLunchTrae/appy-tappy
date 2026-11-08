@@ -159,7 +159,7 @@ jobs:
           install: true
           install_args: rust github:nextest-rs/nextest bun
           cache: true
-      # The same build cache as the quality job.
+      # The same build cache setup as the quality job, kept per job.
       - name: Restore the Rust build cache
         id: rust-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -229,7 +229,7 @@ jobs:
           install: true
           install_args: rust
           cache: true
-      # The same build cache as the quality job.
+      # The same build cache setup as the quality job, kept per job.
       - name: Restore the Rust build cache
         id: rust-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
