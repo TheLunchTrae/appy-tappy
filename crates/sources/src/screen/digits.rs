@@ -145,9 +145,13 @@ impl DigitReader {
     }
 
     /// Reads the first number in `image`: an optional `-`, digits, and an
-    /// optional `.` with more digits. Other learned characters, such as `%`,
-    /// separate numbers. With `whole`, the number ends at the `.`, so the
-    /// digits after it are ignored and need no glyphs: `87.5%` reads as 87.
+    /// optional `.` with more digits. A number that starts with its `.`
+    /// reads as `0.`, so `-.5` reads as -0.5. A `,` between groups of three
+    /// digits is skipped, so `1,234` reads as 1234; any other `,`, and other
+    /// learned characters such as `%` or `/`, separate numbers, so `12,5`
+    /// and `12/50` read as 12. With `whole`, the number ends at the `.`, so
+    /// the digits after it are ignored and need no glyphs: `87.5%` reads as
+    /// 87.
     ///
     /// # Errors
     ///
@@ -354,6 +358,14 @@ struct NumberText {
     digits: bool,
     ended: bool,
     point: Point,
+    /// Whether a character that is not part of a number came before, such
+    /// as the letters of `Lv.5`, so a `.` there is not the number's.
+    skipped: bool,
+    /// The length of `text` at the last `,` between digit groups, while
+    /// the digits after it may still turn out not to be a group of three.
+    group: Option<usize>,
+    /// The digits since the number started or since its last `,`.
+    run: usize,
 }
 
 /// What a `.` after the digits does to a number being read.
@@ -379,24 +391,45 @@ impl NumberText {
         if self.ended {
             return;
         }
+        if character != ',' && !character.is_ascii_digit() && !self.close_groups() {
+            self.ended = true;
+            return;
+        }
         let accepted = match character {
             '0'..='9' => {
                 self.digits = true;
+                self.run = self.run.saturating_add(1);
                 true
             },
             '-' => self.len == 0,
+            // A number that starts with its point, such as `.5`, reads as
+            // `0.5`.
+            '.' if !self.digits && !self.skipped => {
+                self.push('0');
+                self.push('.');
+                return;
+            },
             '.' if self.digits && self.point == Point::Starts => {
                 self.point = Point::Taken;
                 true
+            },
+            ',' if self.starts_group() => {
+                self.group = Some(self.len);
+                self.run = 0;
+                return;
             },
             // Any other character, or a `.` once the fraction is taken or
             // for a whole number, ends the number after its digits.
             _ => false,
         };
         if !accepted {
+            if character == ',' {
+                self.close_groups();
+            }
             self.ended = self.digits;
             if !self.digits {
                 self.len = 0;
+                self.skipped = true;
             }
             return;
         }
@@ -412,11 +445,39 @@ impl NumberText {
         }
     }
 
+    /// Whether a `,` here separates digit groups, as in `1,234`: it comes
+    /// after one to three digits, or after a whole group of three, and
+    /// before the point.
+    fn starts_group(&self) -> bool {
+        let group_before = match self.group {
+            Some(_) => self.run == 3,
+            None => (1..=3).contains(&self.run),
+        };
+        self.digits && self.point != Point::Taken && group_before
+    }
+
+    /// Ends the digit groups before a character that is not a digit or a
+    /// `,`. When the digits after the last `,` are not a group of three, as
+    /// in `12,5`, the number ends at that `,` and this returns false.
+    fn close_groups(&mut self) -> bool {
+        match self.group.take() {
+            Some(start) if self.run != 3 => {
+                self.len = start;
+                false
+            },
+            _ => true,
+        }
+    }
+
     fn parse(&self) -> Option<Number> {
         if !self.digits {
             return None;
         }
-        let text = std::str::from_utf8(self.text.get(..self.len)?).ok()?;
+        let len = match self.group {
+            Some(start) if self.run != 3 => start,
+            _ => self.len,
+        };
+        let text = std::str::from_utf8(self.text.get(..len)?).ok()?;
         Number::new(text.trim_end_matches('.').parse().ok()?)
     }
 }
@@ -612,10 +673,10 @@ mod tests {
         assert_eq!(parsed("90.5%"), Number::new(90.5));
         assert_eq!(parsed("-12"), Number::new(-12.0));
         assert_eq!(parsed("%12/50"), Number::new(12.0));
+        assert_eq!(parsed("12/50"), Number::new(12.0));
         assert_eq!(parsed("1.2.3"), Number::new(1.2));
         assert_eq!(parsed("7."), Number::new(7.0));
         assert_eq!(parsed("-%5"), Number::new(5.0));
-        assert_eq!(parsed(".5"), Number::new(5.0));
         assert_eq!(parsed("%-"), None);
         assert_eq!(parsed("1-2"), Number::new(1.0));
         let longest = "9".repeat(MAX_NUMBER_LEN);
@@ -626,12 +687,50 @@ mod tests {
     }
 
     #[test]
+    fn a_number_that_starts_with_its_point_reads_as_zero_point() {
+        let parsed = |characters| text(characters).parse();
+        assert_eq!(parsed(".5"), Number::new(0.5));
+        assert_eq!(parsed("-.5"), Number::new(-0.5));
+        assert_eq!(parsed(".25%"), Number::new(0.25));
+        assert_eq!(parsed("-.5.5"), Number::new(-0.5));
+        // After other characters, such as the letters of a level label, a
+        // `.` is not the number's.
+        assert_eq!(parsed("x.5"), Number::new(5.0));
+        assert_eq!(parsed("-x.5"), Number::new(5.0));
+    }
+
+    #[test]
+    fn a_comma_is_skipped_only_between_groups_of_three_digits() {
+        let parsed = |characters| text(characters).parse();
+        assert_eq!(parsed("1,234"), Number::new(1234.0));
+        assert_eq!(parsed("-12,345.5%"), Number::new(-12345.5));
+        assert_eq!(parsed("1,234,567"), Number::new(1_234_567.0));
+        assert_eq!(parsed("999,000/1,000"), Number::new(999_000.0));
+        // Anything else ends the number at the comma.
+        assert_eq!(parsed("12,5"), Number::new(12.0));
+        assert_eq!(parsed("12,5%"), Number::new(12.0));
+        assert_eq!(parsed("1,2345"), Number::new(1.0));
+        assert_eq!(parsed("1,234,56"), Number::new(1234.0));
+        assert_eq!(parsed("1,23,456"), Number::new(1.0));
+        assert_eq!(parsed("1234,567"), Number::new(1234.0));
+        assert_eq!(parsed("1,"), Number::new(1.0));
+        assert_eq!(parsed("1,,234"), Number::new(1.0));
+        assert_eq!(parsed("1,.5"), Number::new(1.0));
+        assert_eq!(parsed("1.5,000"), Number::new(1.5));
+        assert_eq!(parsed(",5"), Number::new(5.0));
+        let whole = |characters| number_text(characters, true).parse();
+        assert_eq!(whole("1,234.5"), Number::new(1234.0));
+        assert_eq!(whole("1,23.5"), Number::new(1.0));
+    }
+
+    #[test]
     fn a_whole_number_ends_at_its_point() {
         let whole = |characters| number_text(characters, true).parse();
         assert_eq!(whole("90.5%"), Number::new(90.0));
         assert_eq!(whole("-7.9"), Number::new(-7.0));
         assert_eq!(whole("12"), Number::new(12.0));
-        assert_eq!(whole(".5"), Number::new(5.0));
+        assert_eq!(whole(".5"), Number::new(0.0));
+        assert_eq!(whole("-.5"), Number::new(-0.0));
         assert!(number_text("3.", true).ended);
         assert!(!number_text("3.", false).ended);
     }

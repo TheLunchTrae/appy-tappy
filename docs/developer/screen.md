@@ -22,7 +22,13 @@ the same answer on every system, and allocate nothing per read.
   which it learns each character's shape. Several values read with one
   reference, and each says whether only the whole part counts: a whole value
   ends the number at its `.`, so `87.5%` reads as 87 and needs no glyphs
-  after the point. A read finds the ink (pixels near the
+  after the point. A number that starts with its point reads as `0.`, so
+  `.5` reads as 0.5 and `-.5` as -0.5, unless other characters came first,
+  as in `Lv.5`, which reads as 5. A learned `,` is skipped between groups of
+  three digits, so `1,234,567` reads as 1234567. Any other character ends
+  the number, so `12/50` reads as 12, and so does a `,` that is not followed
+  by exactly three digits, so `12,5` reads as 12 rather than guessing that
+  the `,` is a decimal point. A read finds the ink (pixels near the
   text color), splits it into characters at blank columns, scales each one to
   a fixed grid, and picks the closest learned shape. The text line is the
   band of rows with the most ink, so a stray speck elsewhere in the region
