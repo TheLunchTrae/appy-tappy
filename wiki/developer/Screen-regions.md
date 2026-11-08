@@ -149,4 +149,7 @@ APPYTAPPY_BENCH_WINDOW="Example App" APPYTAPPY_BENCH_REGION="0,0,200,20" mise ru
 ```
 
 The capture asks Windows to drop the yellow border that marks a captured
-window. Windows versions without that option keep the border.
+window. Windows versions without that option keep the border. Leave to drop
+it holds for the whole process, so only a process's first capture asks for
+it: asking on every capture left handles open after each detach. A capture
+that stops closes its Direct3D device too.

@@ -21,6 +21,7 @@
 use std::io;
 use std::ptr;
 use std::slice;
+use std::sync::Once;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -580,7 +581,9 @@ impl Capturer {
         Ok(texture)
     }
 
-    /// Ends the capture and releases the system's objects.
+    /// Ends the capture and releases the system's objects. Closing the
+    /// Direct3D device's WinRT wrapper releases the device it holds even if
+    /// the system still holds the wrapper.
     fn stop(self) {
         #[expect(
             clippy::let_underscore_must_use,
@@ -591,14 +594,34 @@ impl Capturer {
             self.item.RemoveClosed(self.closed),
             self.session.Close(),
             self.pool.Close(),
+            self.winrt_device.Close(),
         );
     }
 }
+
+/// Whether this process has asked for borderless captures yet.
+static BORDERLESS: Once = Once::new();
 
 /// Asks for a borderless capture without the cursor. Each setting is
 /// optional: older Windows versions lack some, and the capture works without
 /// them.
 fn configure(session: &GraphicsCaptureSession) {
+    BORDERLESS.call_once(ask_borderless);
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "each setting is optional and missing on older Windows versions"
+    )]
+    let _ = (
+        session.SetIsBorderRequired(false),
+        session.SetIsCursorCaptureEnabled(false),
+    );
+}
+
+/// Asks Windows for leave to drop the yellow capture border. Windows
+/// answers through its capability access service, and asking on every
+/// capture left handles open after each detach. The answer holds for the
+/// whole process, so the first capture asks and the rest rely on it.
+fn ask_borderless() {
     if let Ok(request) =
         GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless)
     {
@@ -608,14 +631,6 @@ fn configure(session: &GraphicsCaptureSession) {
         )]
         let _ = request.join();
     }
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "each setting is optional and missing on older Windows versions"
-    )]
-    let _ = (
-        session.SetIsBorderRequired(false),
-        session.SetIsCursorCaptureEnabled(false),
-    );
 }
 
 /// Asks the system for at most one frame every `interval`. Older Windows
