@@ -132,15 +132,15 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
 
 Off, the trace costs one check of an empty handle at each place that could
 record. On, the trace holds its buffer of `BUFFER` records in memory until it
-stops: 8,192 slots of 152 bytes, about 1.2 MB, all allocated and written when
-the trace starts. Each recorded row costs a clock read and a send into the
-buffer; the formatting and the disk writes happen on the writer thread, at the
-lowest priority. `readings` adds a row and a clock read for every read of every
-value, so it costs the most, and the files grow fastest. A record dropped just
-before the trace stops, or before its thread gets a new trace, is not counted,
-since no later record of that thread carries the count. A trace measures a
-runtime that also records, so compare timings between traces that record the
-same categories.
+stops: 152 bytes a slot, about 1.2 MB, all allocated and written when the trace
+starts. Each recorded row costs a clock read and a send into the buffer; the
+formatting and the disk writes happen on the writer thread, at the lowest
+priority. `readings` adds a row and a clock read for every read of every value,
+so it costs the most, and the files grow fastest. A record dropped just before
+the trace stops, or before its thread gets a new trace, is not counted, since
+no later record of that thread carries the count. A trace measures a runtime
+that also records, so compare timings between traces that record the same
+categories.
 
 The [footprint](Architecture.md#footprint) run measures that cost on
 Windows. It runs the runtime under a window that repaints every 16 ms, first
@@ -149,17 +149,16 @@ reports the memory and CPU the trace added, the size of the files, the rows
 recorded each second, and any records dropped. The trace phase has no target,
 so a costlier trace shows in the summary without failing the run.
 
-With every category recorded, three values in the probe's window, and the
-8,192-record buffer, the run on 2026-11-08 measured:
+With every category recorded and three values in the probe's window, the
+trace adds:
 
-- **Memory:** 1.08 MB more, 4.28 MB in all against 3.20 MB with the trace
-  off. Nearly all of it is the buffer, and the idle phase after the trace
-  stops is back to its usual size.
-- **CPU:** 0.26 % of one core more. Three runs that day measured from 0.05 %
-  less to 0.78 % more, so the trace's CPU cost is within the runner's noise.
-- **Files:** about 130 rows a second, 0.29 MB for 35 seconds, so close to
-  30 MB an hour.
+- **Memory:** about 1.1 MB, close to the buffer's size: the runtime's
+  commit size grows by about 1.2 MB. Idle after, with the trace stopped,
+  stays within its target.
+- **CPU:** from 0.05 % less to 0.78 % more of one core across runs, within
+  the runner's noise.
+- **Files:** about 130 rows a second, which comes to close to 30 MB an hour.
+  An application with more values, or a faster read interval, records more.
 - **Dropped records:** none.
 
-An earlier run with a 65,536-record buffer added 9.66 MB, which is why the
-buffer holds 8,192.
+A buffer of 65,536 records adds about 9.7 MB, so `BUFFER` holds fewer.

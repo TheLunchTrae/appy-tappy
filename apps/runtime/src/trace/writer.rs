@@ -30,8 +30,10 @@ use crate::workers::reader::SessionId;
 
 /// How many records the buffer holds. It is allocated once, when the trace
 /// starts, at about 150 bytes a record, so it is the trace's largest cost.
-/// The footprint run records about 160 rows a second with every category on,
-/// so this holds close to a minute of them while the writer waits for time.
+/// The footprint run's three values make about 160 rows a second with every
+/// category on, so this holds close to a minute of them while the writer
+/// waits for time; more values, or a faster read interval, fill it sooner,
+/// and the file counts what is dropped.
 pub(crate) const BUFFER: usize = 8_192;
 
 /// How often the writer flushes what it wrote.
