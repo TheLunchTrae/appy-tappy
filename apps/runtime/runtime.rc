@@ -1,0 +1,6 @@
+// The runtime's Windows resources, linked into appytappy-runtime.exe by
+// build.rs. Icon 1 is the lowest ID, so Explorer shows it as the program's
+// icon, and the tray loads it as APP_ICON in
+// crates/platform/src/win/tray.rs. It is the setup app's icon, so both programs
+// change together.
+1 ICON "../setup/src-tauri/icons/icon.ico"

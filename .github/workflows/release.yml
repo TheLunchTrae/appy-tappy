@@ -18,6 +18,10 @@ on:
       - apps/setup/src-tauri/tauri.conf.json
       - apps/setup/src-tauri/tauri.installer.conf.json
       - apps/setup/src-tauri/windows/**
+      # The runtime links the setup app's icon in its build script.
+      - apps/runtime/build.rs
+      - apps/runtime/runtime.rc
+      - apps/setup/src-tauri/icons/**
       # The installer hooks find the runtime's tray window by the class and
       # title in win/tray.rs, and the uninstaller removes the autostart value
       # that autostart.rs names.

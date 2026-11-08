@@ -22,9 +22,10 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, EndMenu, GetMessageW, HMENU, IDI_APPLICATION, LoadIconW, MENU_ITEM_FLAGS,
-    MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, TPM_NONOTIFY,
+    DispatchMessageW, EndMenu, GetMessageW, GetSystemMetrics, HICON, HMENU, IDI_APPLICATION,
+    IMAGE_ICON, LR_SHARED, LoadIconW, LoadImageW, MENU_ITEM_FLAGS, MF_CHECKED, MF_GRAYED, MF_POPUP,
+    MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
+    RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow, TPM_NONOTIFY,
     TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WINDOW_EX_STYLE, WM_APP, WM_CLOSE,
     WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_NULL, WNDCLASSW, WS_OVERLAPPED,
 };
@@ -296,6 +297,43 @@ impl Drop for TrayWindow {
     }
 }
 
+/// The program's icon resource, which `apps/runtime/runtime.rc` defines.
+const APP_ICON: u16 = 1;
+
+/// The tray's icon at the system's small-icon size: the program's own icon,
+/// or Windows' generic one in a program built without it, such as a test.
+/// Both are shared icons, which are never destroyed.
+fn app_icon() -> io::Result<HICON> {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: no module name asks for the running program's own module.
+    let module = unsafe { GetModuleHandleW(None) }?;
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call only reads a system metric.
+    let (width, height) = unsafe { (GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)) };
+    // A resource ID goes in the name's pointer, as MAKEINTRESOURCE does.
+    let name = PCWSTR(ptr::without_provenance(usize::from(APP_ICON)));
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: `module` is this program's module and `name` an integer resource
+    // ID, which LoadImageW never dereferences.
+    let loaded = unsafe {
+        LoadImageW(
+            Some(module.into()),
+            name,
+            IMAGE_ICON,
+            width,
+            height,
+            LR_SHARED,
+        )
+    };
+    if let Ok(icon) = loaded {
+        return Ok(HICON(icon.0));
+    }
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: no module and a predefined icon name load a shared system icon.
+    let icon = unsafe { LoadIconW(None, IDI_APPLICATION) }?;
+    Ok(icon)
+}
+
 /// The icon on the taskbar, removed on drop.
 struct TrayIcon {
     data: NOTIFYICONDATAW,
@@ -304,10 +342,7 @@ struct TrayIcon {
 
 impl TrayIcon {
     fn new(window: HWND) -> io::Result<Self> {
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: no module and a predefined icon name load a shared system icon,
-        // which is never destroyed.
-        let icon = unsafe { LoadIconW(None, IDI_APPLICATION) }?;
+        let icon = app_icon()?;
         let mut data = NOTIFYICONDATAW {
             cbSize: u32::try_from(size_of::<NOTIFYICONDATAW>()).map_err(io::Error::other)?,
             hWnd: window,

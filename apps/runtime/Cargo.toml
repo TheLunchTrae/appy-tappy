@@ -20,5 +20,15 @@ appytappy-sources = { version = "=0.1.0", path = "../../crates/sources" }
 # nothing.
 mutants = "0.0.4"
 
+[build-dependencies]
+# Compiles runtime.rc, the program's icon, and links it into the program on
+# Windows.
+embed-resource = "=3.0.12"
+
 [lints]
 workspace = true
+
+# cargo-machete reads only the package's library and binary sources, so it
+# misses build.rs, which calls embed-resource.
+[package.metadata.cargo-machete]
+ignored = ["embed-resource"]

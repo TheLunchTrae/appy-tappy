@@ -109,6 +109,7 @@ dependencies = [
  "appytappy-engine",
  "appytappy-platform",
  "appytappy-sources",
+ "embed-resource",
  "mutants",
 ]
 
