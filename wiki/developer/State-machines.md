@@ -674,37 +674,3 @@ A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 run left and that have not changed for ten minutes, such as one a crash left
 between the write and the rename. A failed delete does not fail the save, and
 the next save tries again.
-
-## MCP investigation server
-
-The [MCP investigation server](MCP-investigation-server.md) answers one request
-at a time. Its `Session` in `apps/mcp/src/tools.rs` keeps the executables the
-user refused, and at most one attached process with its memory scan.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Detached
-    Detached --> Attached: process_attach, the user allows it
-    Attached --> Attached: process_attach for another process
-    Attached --> Attached: process_attach fails
-    Attached --> Scanning: memory_scan_first
-    Scanning --> Scanning: memory_scan_next
-    Scanning --> Scanning: memory_scan_first starts over
-    Scanning --> Scanning: process_attach fails
-    Attached --> Detached: process_detach
-    Scanning --> Detached: process_detach
-    Scanning --> Attached: process_attach for another process
-    Scanning --> Attached: memory_scan_first fails
-```
-
-A program the user refuses is refused again without asking for the rest of the
-session, whatever its process ID.
-
-- **An attach that fails** leaves the session as it was. `open_attachment`
-  opens and checks the new process, and only once that works does
-  `process_attach` replace the attached one. The error says which process is
-  still attached, unless the user refused that process's own program.
-- **A first scan that fails** has already dropped the previous scan, on
-  purpose: an unknown-value scan can copy up to 2 GiB of memory, and keeping
-  the old one too could double that. Its error says the previous scan was
-  dropped.

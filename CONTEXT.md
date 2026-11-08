@@ -9,20 +9,18 @@ parts fit.
 - **Anti-cheat class.** How an application protects itself from other
   programs: `none`, `user-mode`, `kernel-level`, or `unknown`. A protected
   application is one whose class is not `none`, such as one with anti-cheat.
-  Only `none` permits memory sources, input-injection actions, and anything
-  else that opens the application's process.
+  Only `none` permits input-injection actions.
 - **App definition.** Data, never code, that says how to recognize one
   application, detect its version, and read its signals.
 - **Application.** Any program AppyTappy watches: a game, a media player, a
   browser, or anything else with a window. Code and short UI labels call it
   an app.
 - **Binding.** The concrete way to read one signal for one application
-  version: a source primitive and its parameters, such as a pointer chain.
+  version: a source primitive and its parameters, such as a screen region and
+  its check.
 - **Check.** How a screen region binding turns a region's pixels into a value:
   a number read with a reference, a bar's fill, a color match, or a match
   with a saved image.
-- **Process-access permit.** The value `config` issues for an application of
-  class `none`; every path that opens an application's process requires one.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
 - **Read interval.** The minimum and maximum time between a source's reads.
@@ -54,8 +52,7 @@ parts fit.
   and save its files.
 - **Signal.** A named, typed value an application exposes, such as `progress`
   or `icon_visible`.
-- **Source primitive.** One kind of state reader the runtime ships: memory
-  pointer chain, screen region, log file, local API, or process and window
-  events.
+- **Source primitive.** One kind of state reader the runtime ships: screen
+  region, log file, local API, or process and window events.
 - **Trigger.** The condition on signals or application events that makes a
   rule fire.

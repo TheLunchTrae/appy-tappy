@@ -45,9 +45,9 @@ To get an installer of a branch without a release, use one of these:
 - [Installer](Installer.md): what the installer does, builds, and the release
   workflow.
 - [MCP investigation server](MCP-investigation-server.md): the local server an
-  AI agent uses to find how an application exposes a value.
+  AI agent uses to find how an application shows a value.
 - [State machines](State-machines.md): the implicit state machines in the
-  runtime, the setup app, and the MCP server, and where each can fail.
+  runtime and the setup app, and where each can fail.
 - [Rust standards](Rust-standards.md): how the Rust checks work, mutation
   testing, and their limits.
 - [Wiki](Wiki.md): how `wiki/` publishes to the GitHub wiki, and what that

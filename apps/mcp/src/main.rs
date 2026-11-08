@@ -1,5 +1,5 @@
 //! `appytappy-mcp`: a local MCP server that gives an AI agent read-only tools
-//! to investigate how an app stores its state.
+//! to investigate how an app shows its state.
 //!
 //! The agent launches it and talks MCP over stdin and stdout. See
 //! `wiki/developer/MCP-investigation-server.md` for setup and the tool workflow.
@@ -12,6 +12,6 @@ mod tools;
 use std::io;
 
 fn main() -> io::Result<()> {
-    let mut session = tools::Session::new(appytappy_sources::HostSystem::default());
-    protocol::serve(io::stdin().lock(), io::stdout().lock(), &mut session)
+    let session = tools::Session::new(appytappy_sources::HostSystem::default());
+    protocol::serve(io::stdin().lock(), io::stdout().lock(), &session)
 }

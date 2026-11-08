@@ -1,20 +1,15 @@
-//! The operating system services the guided scan needs.
-//!
-//! They are process and window discovery that never opens a process, the
-//! user's answer before memory access, opening a process under a permit, and
-//! screen pixels.
+//! The operating system services the runtime, the setup app, and the MCP
+//! server read: process and window discovery that never opens a process, an
+//! executable's build, and screen pixels.
 
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
-use std::convert::Infallible;
 use std::io;
 
-use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
+use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::{WindowFacts, WindowMatch};
-
-use crate::memory::ProcessMemory;
 
 /// A running process, as a system-wide snapshot reports it without opening
 /// the process.
@@ -83,20 +78,9 @@ pub struct Rgb {
     pub blue: u8,
 }
 
-/// The user's answer to a request to read a process's memory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccessAnswer {
-    /// The user confirmed that the app has no anti-cheat.
-    Allowed,
-    /// The user refused, or closed the prompt.
-    Refused,
-}
-
-/// The operating system services the guided scan uses.
+/// The operating system services that read processes, windows, and the
+/// screen.
 pub trait System {
-    /// An opened process.
-    type Process: ProcessMemory;
-
     /// Lists running processes without opening any of them.
     ///
     /// # Errors
@@ -129,25 +113,6 @@ pub trait System {
     /// exited or a file it cannot read.
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef>;
 
-    /// Asks the user, outside the agent's reach, whether `process` may be
-    /// read. `anti_cheat` names anti-cheat products that are running.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error when the prompt cannot be shown.
-    fn ask_memory_access(
-        &self,
-        process: &ProcessEntry,
-        anti_cheat: &[&str],
-    ) -> io::Result<AccessAnswer>;
-
-    /// Opens the permitted process for reading only.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn open(&self, permit: &ProcessAccessPermit) -> io::Result<Self::Process>;
-
     /// Reads one pixel of the screen.
     ///
     /// # Errors
@@ -161,10 +126,6 @@ pub trait System {
 #[derive(Debug, Default)]
 pub struct Unsupported;
 
-/// The process type of [`Unsupported`], which cannot be constructed.
-#[derive(Debug)]
-pub struct NoProcess(Infallible);
-
 fn unsupported<T>() -> io::Result<T> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -172,38 +133,7 @@ fn unsupported<T>() -> io::Result<T> {
     ))
 }
 
-// `NoProcess` holds `Infallible`, so no value exists and these bodies never
-// run. No test can call them, so mutating them cannot be caught.
-impl ProcessMemory for NoProcess {
-    #[mutants::skip]
-    fn regions(&self) -> io::Result<Vec<crate::memory::Region>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn read(&self, _address: u64, _buffer: &mut [u8]) -> io::Result<()> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn modules(&self) -> io::Result<Vec<crate::memory::Module>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn pointer_width(&self) -> crate::memory::PointerWidth {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn image_name(&self) -> io::Result<String> {
-        match self.0 {}
-    }
-}
-
 impl System for Unsupported {
-    type Process = NoProcess;
-
     fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
         unsupported()
     }
@@ -217,18 +147,6 @@ impl System for Unsupported {
     }
 
     fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
-        unsupported()
-    }
-
-    fn ask_memory_access(
-        &self,
-        _process: &ProcessEntry,
-        _anti_cheat: &[&str],
-    ) -> io::Result<AccessAnswer> {
-        unsupported()
-    }
-
-    fn open(&self, _permit: &ProcessAccessPermit) -> io::Result<NoProcess> {
         unsupported()
     }
 
@@ -335,8 +253,6 @@ pub fn shows(place: io::Result<Option<WindowPlace>>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::anti_cheat::AntiCheatClass;
-
     use super::*;
 
     fn process(id: u32, executable: &str) -> ProcessEntry {
@@ -493,24 +409,14 @@ mod tests {
     #[test]
     fn unsupported_system_fails_every_call() {
         let system = Unsupported;
-        let entry = ProcessEntry {
-            id: ProcessId::new(1),
-            parent: ProcessId::new(0),
-            executable: "example.exe".to_owned(),
-            threads: 1,
-        };
-        let permit = ProcessAccessPermit::issue(entry.id, AntiCheatClass::None)
-            .expect("class none permits access");
         let kinds = [
             system.processes().map(drop),
             system.windows().map(drop),
             system.window_place(7).map(drop),
-            system.executable_build(entry.id).map(drop),
-            system.ask_memory_access(&entry, &[]).map(drop),
-            system.open(&permit).map(drop),
+            system.executable_build(ProcessId::new(1)).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 7]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 5]);
     }
 }

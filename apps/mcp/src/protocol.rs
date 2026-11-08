@@ -2,7 +2,7 @@
 //!
 //! The server answers `initialize`, `ping`, `tools/list`, and `tools/call`,
 //! ignores notifications and the client's responses, and handles one message
-//! at a time, so the session has a single owner.
+//! at a time.
 
 use std::io::{self, BufRead, Write};
 
@@ -22,17 +22,10 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
 /// What the server tells the agent when it connects.
-const INSTRUCTIONS: &str = "AppyTappy investigates how a Windows application exposes a value, \
-such as a number shown in one spot of its window, so the user can automate on it. Every tool \
-only reads. Prefer sources that do not touch the application: windows, screen pixels. To find a \
-value in memory: process_list, then process_attach (the user must allow it in a dialog; if they \
-refuse, do not retry and use another source), then memory_scan_first, then ask the user to make \
-the value change and run memory_scan_next until few candidates remain, then memory_scan_results. \
-Addresses change when the application restarts, so find a stable pointer chain before relying on \
-one: inspect the structure around the value with memory_read_bytes, scan for pointer-sized \
-values in a range just below the address to find what points at it, repeat until a result has a \
-module_offset, then check the chain with memory_follow_pointer after the user restarts the \
-application.";
+const INSTRUCTIONS: &str = "AppyTappy investigates how a Windows application shows a value, \
+such as a number in one spot of its window, so the user can automate on it. Every tool only \
+reads, and none opens the application's process: use process_list and window_list to find the \
+application's window and its bounds, then screen_sample to read pixel colors inside it.";
 
 /// Reads messages from `input` and writes each response to `output` until
 /// the input ends.
@@ -43,7 +36,7 @@ application.";
 pub(crate) fn serve<S: System>(
     mut input: impl BufRead,
     mut output: impl Write,
-    session: &mut Session<S>,
+    session: &Session<S>,
 ) -> io::Result<()> {
     let mut line = Vec::new();
     loop {
@@ -65,7 +58,7 @@ pub(crate) fn serve<S: System>(
 }
 
 /// Handles one message and returns the response, if it needs one.
-fn handle<S: System>(session: &mut Session<S>, line: &str) -> Option<Value> {
+fn handle<S: System>(session: &Session<S>, line: &str) -> Option<Value> {
     let message: Value = match serde_json::from_str(line) {
         Ok(message) => message,
         Err(error) => return Some(failure(&Value::Null, PARSE_ERROR, &error.to_string())),
@@ -104,7 +97,7 @@ fn handle<S: System>(session: &mut Session<S>, line: &str) -> Option<Value> {
 }
 
 fn dispatch<S: System>(
-    session: &mut Session<S>,
+    session: &Session<S>,
     method: &str,
     params: &Value,
 ) -> Result<Value, (i64, String)> {
@@ -170,9 +163,9 @@ mod tests {
     use super::*;
 
     fn exchange(input: &str) -> Vec<Value> {
-        let mut session = Session::new(Unsupported);
+        let session = Session::new(Unsupported);
         let mut output = Vec::new();
-        serve(input.as_bytes(), &mut output, &mut session).unwrap();
+        serve(input.as_bytes(), &mut output, &session).unwrap();
         String::from_utf8(output)
             .unwrap()
             .lines()
@@ -199,10 +192,10 @@ mod tests {
 
     #[test]
     fn reports_a_line_that_is_not_utf8_and_keeps_serving() {
-        let mut session = Session::new(Unsupported);
+        let session = Session::new(Unsupported);
         let mut output = Vec::new();
         let input: &[u8] = b"\xff\xfe\n{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}";
-        serve(input, &mut output, &mut session).unwrap();
+        serve(input, &mut output, &session).unwrap();
         let responses: Vec<Value> = String::from_utf8(output)
             .unwrap()
             .lines()
