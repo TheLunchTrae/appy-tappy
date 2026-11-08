@@ -317,14 +317,16 @@ pub(crate) fn to_saved_reference(
     for shown in new {
         let (image, text) = shown?;
         // The next number no sample's picture has, even when a file edited
-        // by hand left a gap. There are finitely many samples, so one is free.
-        let name = loop {
-            number = number.saturating_add(1);
-            let name = sample_name(id, number);
-            if samples.iter().all(|sample| sample.image != name) {
-                break name;
-            }
-        };
+        // by hand left a gap. Of the next `samples.len() + 1` numbers at
+        // least one is free; past them all is free too.
+        number = (1..=samples.len().saturating_add(1))
+            .map(|step| number.saturating_add(step))
+            .find(|&next| {
+                let name = sample_name(id, next);
+                samples.iter().all(|sample| sample.image != name)
+            })
+            .unwrap_or_else(|| number.saturating_add(samples.len()).saturating_add(1));
+        let name = sample_name(id, number);
         pictures.push((
             name.clone(),
             image.encode_png().map_err(|_encode| SpecError::Picture)?,
