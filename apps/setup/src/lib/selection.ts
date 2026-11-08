@@ -1,7 +1,7 @@
 // Selecting the thing a state check looks for: the steps the user takes on
 // a screenshot, and which pixels of the region the selection leaves out.
 
-import type { Rect } from './region.ts';
+import { type Rect, bounding, sameRect } from './region.ts';
 
 /** How the user marks the region: by hand, by snapping a rough box, or by clicking the thing. */
 export type SelectTool = 'box' | 'snap' | 'click';
@@ -37,6 +37,67 @@ export interface SelectionView {
   readonly region: Rect;
   /** The runs of selected pixels in the box, each from its first pixel's index to the one after its last. */
   readonly spans: readonly (readonly [number, number])[];
+}
+
+/** A selection made for a state's steps, at a color match. */
+export interface Selection {
+  readonly steps: readonly SelectStep[];
+  readonly colorMatch: number;
+  readonly view: SelectionView | null;
+}
+
+/** What a state's selection leaves of the region. */
+export interface Masking {
+  /** Whether its last steps selected anything. */
+  readonly found: boolean;
+  /** How many of the region's pixels are compared, or null until its selection is made. */
+  readonly kept: number | null;
+}
+
+/** Where a selection is made: the screenshot it is taken from, and the steps taken on it. */
+interface Selecting {
+  readonly screenshot: number;
+  readonly steps: readonly SelectStep[];
+}
+
+/** The selection made for `state`'s steps at `colorMatch`, or null while none is. */
+export function madeFor(
+  selections: ReadonlyMap<number, Selection>,
+  state: Selecting,
+  colorMatch: number,
+): Selection | null {
+  const made = selections.get(state.screenshot);
+  return made !== undefined && made.steps === state.steps && made.colorMatch === colorMatch ? made : null;
+}
+
+/** The box the region was last fitted to, and the steps it came from. */
+export interface Fitted {
+  readonly steps: ReadonlySet<readonly SelectStep[]>;
+  readonly region: Rect;
+}
+
+/**
+ * The fit after `made`, the selections every state has now, when the region was last fitted as `last` and shows
+ * `shown`, and the region to show, or null to leave it. Steps that select something new refit the region even over
+ * a hand edit; steps that select nothing, or a new color match for steps seen before, refit only a region the user
+ * has not changed.
+ */
+export function refit(
+  made: readonly Selection[],
+  last: Fitted | null,
+  shown: Rect | null,
+): { readonly fitted: Fitted | null; readonly region: Rect | null } {
+  const region = bounding(made.flatMap((selection) => (selection.view === null ? [] : [selection.view.region])));
+  const fresh = made.some((selection) => selection.view !== null && last?.steps.has(selection.steps) !== true);
+  if (region !== null && (last === null || fresh || sameRect(shown, last.region))) {
+    return { fitted: { steps: new Set(made.map((selection) => selection.steps)), region }, region };
+  }
+  if (last === null) {
+    return { fitted: null, region: null };
+  }
+  // The region stays, but these steps are no longer new to it.
+  const steps = new Set([...last.steps, ...made.map((selection) => selection.steps)]);
+  return { fitted: { steps, region: last.region }, region: null };
 }
 
 /** The color match a selection starts with. */

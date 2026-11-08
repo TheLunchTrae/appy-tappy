@@ -2,15 +2,9 @@
 
 import type { Reading } from '../lib/api.ts';
 import { readingText } from '../lib/automation.ts';
+import type { CheckState } from '../lib/check.ts';
 import { type Color, hex } from '../lib/pixels.ts';
 import type { Rect } from '../lib/region.ts';
-
-/** Whether the check being set up was tried on the live window yet, and how it went. */
-export type CheckState =
-  | { readonly kind: 'idle' }
-  | { readonly kind: 'pending' }
-  | { readonly kind: 'set' }
-  | { readonly kind: 'error'; readonly message: string };
 
 /** The tolerance's highest value, as a color channel's. */
 const MAX_TOLERANCE = 255;

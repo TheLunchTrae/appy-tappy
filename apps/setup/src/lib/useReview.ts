@@ -1,0 +1,167 @@
+// Reviewing a recording's readings before they teach a reference.
+
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+
+import { type RecordedLabel, type RecordingView, type ReferenceRef, errorText, reviewProblems } from './api.ts';
+import { type Draft, reviewSpec } from './check.ts';
+import { type ReviewEntry, editAll, entries, flaggedReadings, keepBlocked, keptLabels } from './review.ts';
+
+/** How long review waits after the last edit before it asks which readings the check cannot learn. */
+const REVIEW_DELAY_MS = 200;
+
+/** Moves focus to the inspector's recording part once it shows again, after the button that had focus went. */
+function focusRecordPanel(): void {
+  requestAnimationFrame(() => {
+    document.getElementById('record-title')?.focus();
+  });
+}
+
+/**
+ * Review of `recording`'s readings for the reference `draft` teaches, which adds to `reference`, if any: the user's
+ * edits, and which kept readings the check cannot learn. Keep puts the kept readings on the draft.
+ */
+export function useReview(
+  recording: RecordingView | null,
+  draft: Draft,
+  setDraft: Dispatch<SetStateAction<Draft>>,
+  reference: ReferenceRef | null,
+): {
+  readonly reviewing: boolean;
+  /** Opens or closes review, leaving focus where it is. */
+  readonly show: (reviewing: boolean) => void;
+  /** Leaves review without keeping, and moves focus to the recording part; its edits stay for the next review. */
+  readonly close: () => void;
+  /** Each reading's entry: the user's edit where there is one, or its start. */
+  readonly entries: readonly ReviewEntry[];
+  /** The readings Keep would keep, with their text. */
+  readonly keeping: readonly RecordedLabel[];
+  /** Why the check cannot learn each flagged reading, by its index. */
+  readonly flagged: ReadonlyMap<number, string>;
+  /** Why Keep waits, or null. */
+  readonly keepBlocked: string | null;
+  /** Why the readings could not be checked, until they next are or the recording is discarded. */
+  readonly error: string | null;
+  readonly edit: (index: number, entry: ReviewEntry) => void;
+  /** Keep all, or with false Keep none. */
+  readonly keepAll: (keep: boolean) => void;
+  /** Puts the kept readings on the draft and closes review. Its edits stay, so reviewing again starts from them. */
+  readonly keep: () => void;
+  /** Forgets the edits and the kept readings, for a new recording. */
+  readonly forget: () => void;
+  /** Forgets everything review holds once the recording is discarded, and moves focus to the recording part. */
+  readonly discarded: () => void;
+} {
+  const [reviewing, setReviewing] = useState(false);
+  const [edits, setEdits] = useState<ReadonlyMap<number, ReviewEntry>>(new Map());
+  // Why the check cannot learn each flagged reading, for the review spec they were found on.
+  const [problems, setProblems] = useState<{ readonly spec: string; readonly found: ReadonlyMap<number, string> }>({
+    spec: '',
+    found: new Map(),
+  });
+  // Clears only when asking review's problems next succeeds, or on a discard.
+  const [error, setError] = useState<string | null>(null);
+
+  const all = useMemo(
+    () => entries(recording?.readings ?? [], edits, draft.recorded),
+    [recording, edits, draft.recorded],
+  );
+  const keeping = useMemo(() => keptLabels(all), [all]);
+  const toReview = useMemo(() => reviewSpec(draft, keeping, reference), [draft, keeping, reference]);
+  const reviewKey = toReview === null ? '' : JSON.stringify(toReview);
+  // The effect below runs when the spec's contents change, not on each new
+  // object with the same contents, so it reads the spec through a ref.
+  const reviewSpecRef = useRef(toReview);
+  reviewSpecRef.current = toReview;
+  // Asks which kept readings the check cannot learn, such as one whose shape
+  // a labeled screenshot or an earlier reading gave to another character.
+  useEffect(() => {
+    const toReview = reviewSpecRef.current;
+    if (!reviewing || toReview === null) {
+      return undefined;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      reviewProblems(toReview)
+        .then((answers) => {
+          if (!current) {
+            return;
+          }
+          setProblems({ spec: reviewKey, found: flaggedReadings(toReview.recorded, answers) });
+          setError(null);
+        })
+        .catch((error: unknown) => {
+          if (current) {
+            // Saving checks the readings again, so a failed check flags none
+            // rather than leaving Keep waiting for an answer that never comes.
+            setProblems({ spec: reviewKey, found: new Map() });
+            setError(errorText(error));
+          }
+        });
+    }, REVIEW_DELAY_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [reviewing, reviewKey]);
+  // Flags found on another spec are stale: none show, and Keep waits for the answer.
+  const checked = problems.spec === reviewKey;
+  const flagged = checked ? problems.found : new Map<number, string>();
+
+  const close = (): void => {
+    if (!reviewing) {
+      return;
+    }
+    setReviewing(false);
+    focusRecordPanel();
+  };
+
+  // Escape leaves review without keeping; its edits stay for the next review.
+  useEffect(() => {
+    if (!reviewing) {
+      return undefined;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        close();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  });
+
+  const forget = (): void => {
+    setEdits(new Map());
+    setDraft((current) => ({ ...current, recorded: new Map() }));
+  };
+
+  return {
+    reviewing,
+    show: setReviewing,
+    close,
+    entries: all,
+    keeping,
+    flagged,
+    keepBlocked: keepBlocked(keeping, flagged, checked),
+    error,
+    edit: (index, entry) => {
+      setEdits((current) => new Map(current).set(index, entry));
+    },
+    keepAll: (keep) => {
+      setEdits((current) => editAll(current, all, recording?.readings ?? [], keep));
+    },
+    keep: () => {
+      setDraft((current) => ({ ...current, recorded: new Map(keeping.map((label) => [label.reading, label.text])) }));
+      close();
+    },
+    forget,
+    discarded: () => {
+      setError(null);
+      setReviewing(false);
+      // Discarding removes the button that had focus, wherever it was.
+      focusRecordPanel();
+      forget();
+    },
+  };
+}

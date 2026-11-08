@@ -14,16 +14,9 @@ import {
 } from '../lib/check.ts';
 import { type Picture, cropPicture } from '../lib/pixels.ts';
 import type { Rect } from '../lib/region.ts';
+import type { Masking } from '../lib/selection.ts';
 import { PictureCanvas } from './canvas.tsx';
 import { ToleranceField } from './Fields.tsx';
-
-/** What a state's selection leaves of the region. */
-export interface Masking {
-  /** Whether its last steps selected anything. */
-  readonly found: boolean;
-  /** How many of the region's pixels are compared, or null until its selection is made. */
-  readonly kept: number | null;
-}
 
 interface Props {
   readonly draft: Draft;
