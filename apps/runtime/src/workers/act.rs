@@ -357,7 +357,7 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use appytappy_actions::{MEDIA_RETRY, MediaSession, Stroke, Volume};
+    use appytappy_actions::{MEDIA_RETRY, MediaSession, Press, Stroke, Volume};
     use appytappy_config::action::{
         MediaCommand, MediaTarget, Modifier, OpenTarget, VolumeLevel, VolumeTarget,
     };
@@ -443,6 +443,30 @@ mod tests {
 
         fn send_strokes(&mut self, strokes: &[Stroke]) -> io::Result<usize> {
             Ok(strokes.len())
+        }
+
+        fn front_window(&mut self) -> io::Result<Option<u64>> {
+            Ok(None)
+        }
+
+        fn window_at(&mut self, _x: i32, _y: i32) -> io::Result<Option<u64>> {
+            Ok(None)
+        }
+
+        fn bring_to_front(&mut self, _window: u64) -> io::Result<bool> {
+            Ok(false)
+        }
+
+        fn cursor(&mut self) -> io::Result<(i32, i32)> {
+            Ok((0, 0))
+        }
+
+        fn move_cursor(&mut self, _x: i32, _y: i32) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_presses(&mut self, presses: &[Press]) -> io::Result<usize> {
+            Ok(presses.len())
         }
 
         fn hold(&mut self, _time: Duration) {}

@@ -453,6 +453,36 @@ impl appytappy_actions::Controls for NoControls {
     }
 
     #[mutants::skip]
+    fn front_window(&mut self) -> io::Result<Option<u64>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn window_at(&mut self, _x: i32, _y: i32) -> io::Result<Option<u64>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn bring_to_front(&mut self, _window: u64) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn cursor(&mut self) -> io::Result<(i32, i32)> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn move_cursor(&mut self, _x: i32, _y: i32) -> io::Result<()> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn send_presses(&mut self, _presses: &[appytappy_actions::Press]) -> io::Result<usize> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
     fn hold(&mut self, _time: std::time::Duration) {
         match self.0 {}
     }

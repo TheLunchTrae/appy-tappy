@@ -10,6 +10,7 @@
 //! See `wiki/developer/Architecture.md` for this crate's boundaries.
 
 mod backoff;
+mod click;
 mod controls;
 mod error;
 mod journal;
@@ -18,6 +19,7 @@ mod keys;
 pub mod win;
 
 pub use backoff::Backoff;
+pub use click::{CLICK_HOLD, MouseButton, PlacedClick, Press, presses};
 pub use controls::{Controls, MediaSession, Volume};
 pub use error::ActionError;
 pub use journal::{Actions, MEDIA_RETRY, Watched};

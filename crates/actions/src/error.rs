@@ -25,6 +25,30 @@ pub enum ActionError {
     },
     /// Windows did not start playing the sound file.
     SoundNotPlayed,
+    /// A click did not click, because neither the watched application nor
+    /// the one it clicks in had the keyboard focus.
+    ClickNotInFront {
+        /// The watched application's executable.
+        watched: String,
+        /// The application it clicks in.
+        target: String,
+    },
+    /// A click did not click, because another window covers its place in
+    /// the named application's window.
+    Covered(String),
+    /// The operating system took only `sent` of `of` mouse button events.
+    ButtonsDropped {
+        /// How many it took.
+        sent: usize,
+        /// How many there were.
+        of: usize,
+    },
+    /// A click reached the journal without a place: the runtime places
+    /// clicks and runs them through [`crate::Actions::click`].
+    Unplaced,
+    /// The click landed, but the window that was in front did not get the
+    /// focus back.
+    FocusNotReturned,
     /// The operating system failed.
     Os(io::Error),
 }
@@ -45,6 +69,21 @@ impl fmt::Display for ActionError {
             Self::SoundNotPlayed => formatter.write_str(
                 "the sound did not play: the file is missing or Windows could not play it",
             ),
+            Self::ClickNotInFront { watched, target } => write!(
+                formatter,
+                "the click did not click, because neither {watched} nor {target} was the window in front"
+            ),
+            Self::Covered(target) => write!(
+                formatter,
+                "the click did not click, because another window covers its place in {target}"
+            ),
+            Self::ButtonsDropped { sent, of } => {
+                write!(formatter, "Windows took only {sent} of {of} mouse button events")
+            },
+            Self::Unplaced => formatter.write_str("the click was not placed on the screen"),
+            Self::FocusNotReturned => formatter.write_str(
+                "the click landed, but Windows did not give the focus back to the window that was in front",
+            ),
             Self::Os(error) => write!(formatter, "the operating system failed: {error}"),
         }
     }
@@ -59,7 +98,12 @@ impl Error for ActionError {
             | Self::NoAudio
             | Self::NotInFront(_)
             | Self::KeysDropped { .. }
-            | Self::SoundNotPlayed => None,
+            | Self::SoundNotPlayed
+            | Self::ClickNotInFront { .. }
+            | Self::Covered(_)
+            | Self::ButtonsDropped { .. }
+            | Self::Unplaced
+            | Self::FocusNotReturned => None,
         }
     }
 }
@@ -84,6 +128,23 @@ mod tests {
             (ActionError::Refused, "did not take"),
             (ActionError::NoAudio, "no audio session"),
             (ActionError::SoundNotPlayed, "did not play"),
+            (
+                ActionError::ClickNotInFront {
+                    watched: "Watched.exe".to_owned(),
+                    target: "Target App".to_owned(),
+                },
+                "neither Watched.exe nor Target App",
+            ),
+            (
+                ActionError::Covered("Target App".to_owned()),
+                "covers its place in Target App",
+            ),
+            (
+                ActionError::ButtonsDropped { sent: 1, of: 4 },
+                "only 1 of 4 mouse",
+            ),
+            (ActionError::FocusNotReturned, "focus back"),
+            (ActionError::Unplaced, "not placed"),
         ] {
             assert!(error.to_string().contains(words), "{error}");
             assert!(error.source().is_none());
