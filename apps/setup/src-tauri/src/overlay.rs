@@ -3,8 +3,8 @@
 //!
 //! The capture reads the values on its own thread and sends only their
 //! readings, so no frame is copied here. Like the runtime, it reads the
-//! values drawn at the window's current size and captures only the smallest
-//! part of the window that holds them. Nothing is sent into the application:
+//! values drawn at the window's current size and copies only their regions,
+//! packed by a [`Layout`]. Nothing is sent into the application:
 //! the capture is the same one the automation editor uses, and the overlay
 //! is a window of the setup app's own (see [`window`]).
 
@@ -19,7 +19,7 @@ use appytappy_config::app_file::{AppFile, OverlayDef, OverlayModeDef, PanelDef};
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved::{self, SavedCheck};
 use appytappy_sources::screen::{
-    CaptureSession, Crop, Frame, FrameHandler, OutsideWindow, Region, Size,
+    CaptureSession, Crop, Frame, FrameHandler, Layout, OutsideWindow, Region, Size,
 };
 use appytappy_sources::system::{WindowPlace, best_window};
 use serde::Serialize;
@@ -130,7 +130,7 @@ pub(crate) struct OverlayWindow {
 /// A value the overlay reads.
 #[derive(Debug, Clone)]
 struct Readable {
-    /// The region, relative to the part of the window the capture takes.
+    /// Where the value sits in the captured image.
     region: Region,
     /// The check that reads it.
     check: Check,
@@ -421,24 +421,13 @@ fn open<S>(
     })
 }
 
-/// The smallest region that holds both `a` and `b`.
-fn union(a: Region, b: Region) -> Region {
-    let x = a.x().min(b.x());
-    let y = a.y().min(b.y());
-    let right = a.right().max(b.right());
-    let bottom = a.bottom().max(b.bottom());
-    // Both regions are inside the `u32` range, so their union is too, and
-    // it is no smaller than either.
-    Region::new(x, y, right.saturating_sub(x), bottom.saturating_sub(y)).unwrap_or(a)
-}
-
-/// The part of the window to capture for the values drawn at `size`, and
-/// each value's region within it, or `None` for a value drawn at another
-/// size or that cannot be read.
+/// What to capture for the values drawn at `size`, and where each value sits
+/// in the captured image, or `None` for a value drawn at another size or that
+/// cannot be read.
 fn crop_for(
     values: &[(String, Result<SavedCheck, String>)],
     size: Size,
-) -> Option<(Region, Vec<Option<Readable>>)> {
+) -> Option<(Layout, Vec<Option<Readable>>)> {
     let drawn = || {
         values.iter().map(move |(_, check)| {
             check
@@ -447,22 +436,17 @@ fn crop_for(
                 .filter(|check| check.window_size == size)
         })
     };
-    let crop = drawn().flatten().map(|check| check.region).reduce(union)?;
+    let layout = Layout::new(drawn().map(|check| check.map(|check| check.region)))?;
     let readables = drawn()
-        .map(|check| {
-            let check = check?;
+        .enumerate()
+        .map(|(position, check)| {
             Some(Readable {
-                region: Region::new(
-                    check.region.x().saturating_sub(crop.x()),
-                    check.region.y().saturating_sub(crop.y()),
-                    check.region.size().width,
-                    check.region.size().height,
-                )?,
-                check: check.check.clone(),
+                region: layout.packed(position)?,
+                check: check?.check.clone(),
             })
         })
         .collect();
-    Some((crop, readables))
+    Some((layout, readables))
 }
 
 /// Finds `overlay`'s window and starts reading it with `generation`.
@@ -504,7 +488,7 @@ fn start<H: Host>(
         OVERLAY_INTERVAL
     });
     let session = host
-        .capture(window, Crop::Region(crop), OVERLAY_INTERVAL, handler)
+        .capture(window, Crop::Layout(crop), OVERLAY_INTERVAL, handler)
         .map_err(|error| error.to_string())?;
     overlay.generation = generation;
     overlay.size = Some(size);

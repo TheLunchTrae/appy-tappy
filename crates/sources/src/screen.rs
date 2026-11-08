@@ -16,6 +16,8 @@ pub mod select;
 
 mod capture;
 mod image;
+mod layout;
 
 pub use capture::{Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession};
 pub use image::{FrameBuffer, Image, ImageError, OutsideWindow, Region, Size};
+pub use layout::{Layout, Placement};

@@ -4,8 +4,9 @@ A screen region source reads a signal from part of an application's window, such
 as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
-`screen/image.rs` holds images and regions, `screen/capture.rs` the capture
-trait, `screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
+`screen/image.rs` holds images and regions, `screen/layout.rs` where a
+capture packs the regions it copies, `screen/capture.rs` the capture trait,
+`screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
 the saved checks, and `schedule.rs` the read interval.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
@@ -125,8 +126,9 @@ only implementation. The system pushes a frame when the window's content
 changes, so a window that does not change costs nothing, and the capture also
 asks the system for no more than one frame per minimum interval. Between reads
 the capture keeps only the newest frame and copies nothing. When a read is
-due, the graphics card copies just the region into a small texture the CPU can
-read, and those rows land in a buffer that is reused for every frame. When
+due, the graphics card copies just the values' regions into a small texture
+the CPU can read, stacked one under another as the capture's `Layout` places
+them, and those rows land in a buffer that is reused for every frame. When
 the window closes, the capture tells its handler and stops. It does the same
 when it can no longer produce frames: when the graphics device is lost, such
 as after a driver reset or update, and when it cannot follow the window to a
