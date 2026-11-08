@@ -28,8 +28,9 @@ AppyTappy ships for Windows only. CI runs these jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check` on
 Linux and is the required gate. `windows` runs `rust:lint`, `rust:doc`, and
 `rust:test:members` on Windows, and also `rust:bench` on pushes to main and
-manual runs. `footprint` runs `rust:footprint` on Windows, and `mutants` shares
-the full mutation sweep with `quality` on pushes to main and manual runs.
+manual runs. `footprint` runs `rust:footprint` on Windows.
+`.github/workflows/mutants.yml` runs the full mutation sweep nightly on main,
+split across eight `mutants` shards, and on demand for any branch.
 `quality`, `windows`, and `footprint` restore a Rust build cache that only
 pushes to main save, once for each set of manifests, `Cargo.lock` and
 toolchain.
@@ -371,8 +372,8 @@ dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
-Mutation evidence covers the code a pull request changes and, on pushes to main,
-the whole workspace. `.cargo/mutants.toml` excludes the Windows `win.rs`
+Mutation evidence covers the code each pull request and each push to main
+changes, and the nightly sweep covers the whole workspace. `.cargo/mutants.toml` excludes the Windows `win.rs`
 adapters with the owner's approval, because the Linux gate compiles them out.
 Read [mutation operation](wiki/developer/Rust-standards.md#mutation-testing)
 before changing report paths, mutation selection, or transaction handling.

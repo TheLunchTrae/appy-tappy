@@ -11,3 +11,8 @@ exclude_globs = [
     "apps/setup/src-tauri/src/main.rs",
     "apps/setup/src-tauri/src/commands.rs",
 ]
+
+# cargo-mutants builds in its own copy of the tree and leaves target/ out of it
+# by default, so every baseline would start cold. Copying target/ lets the
+# baseline reuse the dependency builds that CI restores from its build cache.
+copy_target = true

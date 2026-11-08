@@ -103,18 +103,30 @@ then local `main`, so it needs full Git history. Untracked files fail the
 lane; stage them with `git add -N`. A diff that selects no mutants passes.
 
 `rust:standards:check` runs `rust:mutants:gate`, which picks the lane from
-`MUTANTS_LANE`: `full`, the default, or `diff`. CI runs the `diff` lane for
-pull requests and merge groups, against the base that
-`.github/workflows/quality.yml` sets, so the quality job fits its time limit.
-Pushes to main and manual runs take the full sweep, split into shards across
-the `quality` and `mutants` jobs:
-`MUTANTS_SHARD=k/n` makes `rust:mutants` run shard `k` of `n`, counted from
-zero, and `.github/workflows/quality.yml` sets the shard count.
+`MUTANTS_LANE`: `full`, the default, or `diff`. The quality workflow runs the
+`diff` lane for every event, against the base that
+`.github/workflows/quality.yml` sets, so the quality job fits its time limit. A
+pull request diffs against its base branch and a push to main against the
+previous tip, which with squash merges is exactly the merged pull request.
+
+`.github/workflows/mutants.yml` runs the full sweep nightly on main, split into
+shards: `MUTANTS_SHARD=k/n` makes `rust:mutants` run shard `k` of `n`, counted
+from zero, and the workflow sets the shard count. A mutant that survives only
+once two merged changes meet shows up in the next nightly sweep.
 
 The diff lane mutates only changed source lines, so a pull request that only
 removes or weakens tests, or changes only mutation configuration, selects no
-mutants. Run the workflow manually on its branch to check the whole workspace
-before merging it.
+mutants. Run the mutation sweep workflow manually on its branch to check the
+whole workspace before merging it.
+
+Both lanes run two mutants at once (`--jobs=2`), since each mutant's build
+waits on its linker most of the time. `.cargo/mutants.toml` sets
+`copy_target = true`, so cargo-mutants copies `target/` into its build
+directories and the baseline reuses the dependency builds that CI restores.
+Both lanes also run every workspace package's tests against each mutant
+(`--test-workspace=true`), because a mutant in one crate can be caught by
+another crate's tests. Whether testing only the mutated package catches the
+same mutants is still to be measured.
 
 `rust:mutants` requires at least one mutant to run. Both lanes clear and rewrite
 `mutants.out/` and validate its JSON, so stale evidence cannot pass. A report in

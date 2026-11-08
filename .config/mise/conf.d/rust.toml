@@ -102,6 +102,8 @@ description = "Validate Rust package contents"
 wait_for = ["rust:test"]
 run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 
+# Both mutation lanes test two mutants at once: each mutant's build waits on
+# its linker most of the time, so a second build uses the idle cores.
 # MUTANTS_SHARD=k/n runs only shard k of n (counting from 0), so CI can split
 # the sweep across runners; unset, it runs every mutant. Round-robin sharding
 # spreads each crate's mutants across the shards, so they take similar time.
@@ -124,7 +126,7 @@ trap 'exit 143' TERM
 
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --cargo-arg=--locked "$@"
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --cargo-arg=--locked "$@"
 run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
 """
 
@@ -182,7 +184,7 @@ trap 'exit 143' TERM
 
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
-run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --cargo-arg=--locked --in-diff "$diff_file"
+run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --cargo-arg=--locked --in-diff "$diff_file"
 if [ ! -d mutants.out ]; then
   echo "The diff selects no mutants; nothing to verify."
   exit 0
