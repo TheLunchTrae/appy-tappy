@@ -212,7 +212,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let reports = sender.clone();
     let acting = Arc::clone(&system);
     let actor = spawn("actions", move || {
-        act::run(|| controls(&acting), &job_events, &reports);
+        act::run(|| controls(&acting), acting.as_ref(), &job_events, &reports);
     });
     let (detector, actor) = match (detector, actor) {
         (Ok(detector), Ok(actor)) => (detector, actor),
@@ -1414,6 +1414,7 @@ mod tests {
                 },
                 values: Vec::new(),
                 rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
+                clicks: Arc::default(),
             },
         })
     }
@@ -1980,6 +1981,7 @@ mod tests {
                     executable: "Example.exe".to_owned(),
                 },
                 actions: Box::new([]),
+                clicks: Arc::default(),
                 restore: appytappy_config::rule::Restore::OnRelease,
                 cause: None,
             }),

@@ -178,6 +178,9 @@ Each thread below is a plain `std::thread`, and each channel is a
   even when several rules changed the same thing. A restore that fails is
   tried again, and controls that cannot be made are made again when a later
   automation fires (see [Actions](Actions.md#when-the-controls-cannot-start)).
+  It places each click just before it runs, finding the target's window and,
+  for a picture, grabbing one frame of its area (see
+  [Actions](Actions.md#clicks)).
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save that changes what the runtime runs, and
   sends `Reload`. The owner reads the settings, then the saved applications
@@ -542,7 +545,8 @@ changing.
     roam with the user's profile. Each application has a folder in `apps\`,
     named by its ID, that holds its `app.json` and the pictures its references
     learned from and its state checks compare against. Every automation is in
-    one file, `automations.json`, and the settings in `settings.json`.
+    one file, `automations.json`, with the pictures its clicks look for in
+    `clicks\` beside it, and the settings in `settings.json`.
     [Setup app](Setup-app.md#saved-files) describes each file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)

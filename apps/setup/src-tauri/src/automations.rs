@@ -192,6 +192,8 @@ pub(crate) fn save(
                     *keys = chord.to_string();
                 }
             },
+            // A click holds only names and numbers the setup app chose.
+            ActionDef::Click { .. } => {},
         }
     }
     draft.validate().map_err(|problem| sentence(&problem))?;

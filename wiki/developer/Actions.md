@@ -19,6 +19,9 @@ calls that crate; the engine only says which rule fired.
 - **Open:** a program or a file by its full path, or an `http` or `https`
   link. See [Opening](#opening).
 - **Play a sound:** a WAV file by its full path. See [Sounds](#sounds).
+- **Click in another application:** a left, right, or double click at a spot
+  in a saved application's window, or on a picture wherever it shows in an
+  area of that window. See [Clicks](#clicks).
 
 An app is named the way Windows reports it, ignoring ASCII case. For media, that
 is the session's app ID: usually the executable name, such as `Player.exe`, for
@@ -132,6 +135,61 @@ input or touches the watched application's process. A program an open action
 starts can send input of its own, which anti-cheat may count against the user;
 the user guide says so.
 
+## Clicks
+
+A click names the saved application it clicks in, by its ID, and says where
+in that application's window it lands:
+
+- **A spot:** a distance across and down from one corner of the window, so a
+  spot near the right edge stays put when the window gets wider.
+- **A picture:** a PNG in the `clicks` folder beside `automations.json`, with
+  the area of the window it is looked for in, the window's size when it was
+  taken, where on it to press, and a tolerance. Its transparent pixels are
+  not compared. The pictures cannot live in the target application's folder,
+  because saving that application removes the pictures its own `app.json`
+  does not name.
+
+The runtime places a click just before it runs, on the action thread, because
+where it lands depends on where the window is now. It finds the target's
+window the way the reader does, with the application's window match. A
+window that is not open, is minimized, or is hidden is not clicked. The
+place is measured in the window's frame as the screen shows it, which the
+desktop window manager reports without the invisible borders that the
+window's own bounds take in, so it matches what a capture of the window
+shows. For a picture, the window must have the size the picture was taken
+at; the runtime then grabs one frame of the area, waits up to a second for
+it, and looks for the picture there (see
+[Screen regions](Screen-regions.md)). Nothing is clicked when it is not
+found, and the log says why.
+
+The search compares the picture's kept pixels with each place it fits in the
+area and takes the closest place within its tolerance: the average distance
+of each compared pixel's red, green, and blue from the picture's. Before it
+compares a place pixel by pixel, it checks a bound from each row's summed
+channels, which running sums of the area give in a few steps, and it stops
+comparing a place once that place cannot beat the best so far. A 40×20
+picture in a 180×120 area takes about 8 ms, so the setup app draws the area
+around where the picture shows rather than across the whole window.
+
+A click clicks only while the watched application or the application it
+clicks in has the keyboard focus, because anti-cheat was checked for those
+two, and only when the click's window is the one that shows at its place,
+so it never lands in a window that covers it. It then moves the cursor
+there with `SetCursorPos`, presses through `SendInput`, waits 40 ms so an
+application that reads the cursor once a frame still sees it there, and
+moves the cursor back. A double click is two presses in one call, well
+inside the double-click time. When Windows drops some presses, a button that
+went down goes up again. With return focus on, which is the default, the
+window that was in front asks for the focus back. Windows may refuse that
+while another program holds the foreground; the log then says the click
+landed but the focus did not go back.
+
+Both applications need the anti-cheat class `none`, the watched one and the
+one it clicks in, because a click is injected input too. Saving an
+automation checks this, and so does the runtime whenever it reads the
+automations. A click cannot be undone, so a rule that restores needs another
+action that can.
+
 ## Restoring
 
 A rule that restores on release undoes its actions when it is released (see
@@ -143,8 +201,8 @@ it touched, just before it acted:
 - **Set volume** puts back each audio session's own level, or the device's.
   A restore goes to the same device or session the action changed, even if
   the default device has changed since.
-- **Next**, **previous**, **press keys**, **open**, and **play a sound**
-  cannot be undone. A rule that restores needs at least one action that can.
+- **Next**, **previous**, **press keys**, **open**, **play a sound**, and
+  **click** cannot be undone. A rule that restores needs at least one action that can.
 
 A rule's actions are undone newest first. When several restoring rules change
 the same session or volume, the original state comes back only when the last
@@ -202,6 +260,10 @@ release has nothing to undo.
 - **Sending keys to another application:** keys go only to the watched
   application while it is in front, so a hotkey meant for another application
   cannot be sent.
+- **Clicking without moving the cursor or the focus:** a click moves the real
+  cursor and may bring its window forward for a moment. Posting the click to
+  the window instead works only for some applications
+  ([#139](https://github.com/TheLunchTrae/appy-tappy/issues/139)).
 - **Arguments for a program, and links other than `http` and `https`:** see
   [Opening](#opening).
 - **HTTP and WebSocket calls** (to streaming or smart-home software): useful,
@@ -226,3 +288,10 @@ resumes only after both are released, which also checks that Windows keeps
 identifying the player's session the same way. The other lowers the player's
 volume and puts it back. Each puts the player back before checking anything,
 so a failed check leaves it as it was.
+
+A click is checked by hand. Save a click on a spot and one on a picture in
+another application's window, with both applications' anti-cheat set to
+none, and check that each lands where the setup app showed it, on a window
+with and without a title bar and on a second monitor with another scale;
+that a window covering the place stops the click; and that the focus goes
+back to the watched application.

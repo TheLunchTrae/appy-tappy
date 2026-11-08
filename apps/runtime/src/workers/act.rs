@@ -14,8 +14,12 @@
 //! fails is tried again: a media restore once, after a short wait, and a
 //! volume restore after each later job and every few seconds until it
 //! works. When the jobs stop, every restore still pending gets a last try.
+//!
+//! A click is placed on the screen here, just before it clicks, because
+//! where it lands depends on where its target's window is now.
 
 use std::io;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
@@ -23,7 +27,10 @@ use appytappy_actions::{ActionError, Actions, Backoff, Controls, Watched};
 use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
 use appytappy_engine::RuleIndex;
+use appytappy_sources::screen::Capture;
+use appytappy_sources::system::System;
 
+use crate::click::{self, ClickTargets};
 use crate::trace::{Detail, Record, Trace, What};
 use crate::workers::reader::SessionId;
 
@@ -48,6 +55,8 @@ pub(crate) enum Job {
         watched: Watched,
         /// Its actions.
         actions: Box<[Action]>,
+        /// What placing its clicks needs.
+        clicks: Arc<ClickTargets>,
         /// Whether its changes are undone when it is released.
         restore: Restore,
         /// When the frame arrived whose reading fired it, for the trace.
@@ -103,14 +112,16 @@ pub(crate) enum ActionReport {
 /// still pending a last try. `controls` makes the operating system's
 /// controls on this thread; when it fails, the jobs that come meanwhile are
 /// reported as not run, and it is called again after a wait that grows
-/// with each failure. Each note, and each change in whether actions can
-/// run, goes to `reports`.
-pub(crate) fn run<C, E>(
+/// with each failure. Clicks find their windows on `screen`. Each note, and
+/// each change in whether actions can run, goes to `reports`.
+pub(crate) fn run<C, S, E>(
     controls: impl FnMut() -> io::Result<C>,
+    screen: &S,
     jobs: &Receiver<Job>,
     reports: &Sender<E>,
 ) where
     C: Controls,
+    S: System + Capture,
     E: From<ActionReport>,
 {
     let mut told = true;
@@ -157,7 +168,7 @@ pub(crate) fn run<C, E>(
                         ..record
                     });
                 }
-                let done = worker.job(job, Instant::now());
+                let done = worker.job(job, screen, Instant::now());
                 if let Some(((session, rule), cause)) = traced {
                     trace.record(What::Done, |record| Record {
                         session: Some(session),
@@ -225,7 +236,7 @@ where
     /// They come after the job, so a pending restore of a target the job
     /// changes is taken over by the job instead of being sent just before
     /// it.
-    fn job(&mut self, job: Job, now: Instant) -> Done {
+    fn job<S: System + Capture>(&mut self, job: Job, screen: &S, now: Instant) -> Done {
         let mut notes = self.make_again(now);
         let actions = match &mut self.actions {
             Ok(actions) => actions,
@@ -248,6 +259,7 @@ where
                 automation,
                 watched,
                 actions: steps,
+                clicks,
                 restore,
                 ..
             } => {
@@ -255,7 +267,18 @@ where
                     .iter()
                     .enumerate()
                     .filter_map(|(position, step)| {
-                        let error = actions.perform(owner, step, restore, &watched).err()?;
+                        let error = match step {
+                            Action::Click(wanted) => click::place(screen, wanted, &clicks)
+                                .and_then(|placed| {
+                                    actions
+                                        .click(&placed, &watched)
+                                        .map_err(|error| error.to_string())
+                                }),
+                            step => actions
+                                .perform(owner, step, restore, &watched)
+                                .map_err(|error| error.to_string()),
+                        }
+                        .err()?;
                         Some(format!(
                             "{automation}: action {} failed: {error}",
                             position.saturating_add(1)
@@ -362,6 +385,8 @@ mod tests {
         MediaCommand, MediaTarget, Modifier, OpenTarget, VolumeLevel, VolumeTarget,
     };
     use appytappy_config::anti_cheat::ProcessId;
+
+    use appytappy_sources::system::Unsupported;
 
     use super::*;
 
@@ -510,6 +535,7 @@ mod tests {
                 executable: "Example.exe".to_owned(),
             },
             actions,
+            clicks: Arc::default(),
             restore: Restore::OnRelease,
             cause: None,
         }
@@ -537,7 +563,12 @@ mod tests {
         jobs.send(release()).expect("send");
         drop(jobs);
         let (commands, sent) = mpsc::channel();
-        run(once(OnePlayer::new(commands)), &received, &failures);
+        run(
+            once(OnePlayer::new(commands)),
+            &Unsupported,
+            &received,
+            &failures,
+        );
         assert_eq!(
             sent.try_iter().collect::<Vec<_>>(),
             [MediaCommand::Pause, MediaCommand::Play],
@@ -578,7 +609,12 @@ mod tests {
         drop(jobs);
         let (reports, _reported) = mpsc::channel::<ActionReport>();
         let (commands, _sent) = mpsc::channel();
-        run(once(OnePlayer::new(commands)), &received, &reports);
+        run(
+            once(OnePlayer::new(commands)),
+            &Unsupported,
+            &received,
+            &reports,
+        );
         let rows: Vec<_> = crate::trace::sent(&entries)
             .into_iter()
             .map(|record| {
@@ -657,20 +693,20 @@ mod tests {
             (6, &not_run[..]),
         ] {
             assert_eq!(
-                worker.job(fire(pause()), at(seconds)).notes,
+                worker.job(fire(pause()), &Unsupported, at(seconds)).notes,
                 expected,
                 "at {seconds}s"
             );
         }
         assert_eq!(
-            worker.job(release(), at(6)).notes,
+            worker.job(release(), &Unsupported, at(6)).notes,
             Vec::<String>::new(),
             "nothing to undo"
         );
         assert_eq!(worker.retry_in(at(6)), Some(Duration::from_secs(1)));
         assert_eq!(worker.retry(at(6)), Vec::<String>::new(), "not due yet");
         assert_eq!(
-            worker.job(fire(pause()), at(7)).notes,
+            worker.job(fire(pause()), &Unsupported, at(7)).notes,
             ["actions can run now"],
             "the fourth try works, at 1 + 2 + 4 seconds"
         );
@@ -694,7 +730,7 @@ mod tests {
             }
             player.take().ok_or_else(|| io::Error::other("made twice"))
         };
-        let actor = std::thread::spawn(move || run(make, &received, &reports));
+        let actor = std::thread::spawn(move || run(make, &Unsupported, &received, &reports));
         // No automation fires: the wait alone makes the controls again.
         let patience = Duration::from_secs(5);
         let heard: Vec<ActionReport> = (0..4)
@@ -732,9 +768,12 @@ mod tests {
         let start = Instant::now();
         let (mut worker, notes) = Worker::start(once(player), start);
         assert_eq!(notes, Vec::<String>::new());
-        assert_eq!(worker.job(fire(pause()), start).notes, Vec::<String>::new());
         assert_eq!(
-            worker.job(release(), start).notes,
+            worker.job(fire(pause()), &Unsupported, start).notes,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            worker.job(release(), &Unsupported, start).notes,
             [
                 "Pause near the end: undoing failed, so it is tried again: the media session did not take the command"
             ]
@@ -772,7 +811,7 @@ mod tests {
             target: VolumeTarget::System,
             level: percent(0),
         }]);
-        worker.job(fire(pause()), start);
+        worker.job(fire(pause()), &Unsupported, start);
         worker.job(
             Job::Run {
                 owner: other,
@@ -782,13 +821,15 @@ mod tests {
                     executable: "Example.exe".to_owned(),
                 },
                 actions: mute,
+                clicks: Arc::default(),
                 restore: Restore::OnRelease,
                 cause: None,
             },
+            &Unsupported,
             start,
         );
         assert_eq!(
-            worker.job(release(), start).notes.len(),
+            worker.job(release(), &Unsupported, start).notes.len(),
             1,
             "the play is refused"
         );
@@ -798,7 +839,10 @@ mod tests {
             automation: "Mute".to_owned(),
             cause: None,
         };
-        assert_eq!(worker.job(undo_other, soon).notes, Vec::<String>::new());
+        assert_eq!(
+            worker.job(undo_other, &Unsupported, soon).notes,
+            Vec::<String>::new()
+        );
         assert_eq!(
             sent.try_iter().collect::<Vec<_>>(),
             [MediaCommand::Pause, MediaCommand::Play],
@@ -820,21 +864,27 @@ mod tests {
         player.refusals = 1;
         let start = Instant::now();
         let (mut worker, _notes) = Worker::start(once(player), start);
-        worker.job(fire(pause()), start);
+        worker.job(fire(pause()), &Unsupported, start);
         assert_eq!(
-            worker.job(release(), start).notes.len(),
+            worker.job(release(), &Unsupported, start).notes.len(),
             1,
             "the play is refused"
         );
         let due = start + MEDIA_RETRY;
-        assert_eq!(worker.job(fire(pause()), due).notes, Vec::<String>::new());
+        assert_eq!(
+            worker.job(fire(pause()), &Unsupported, due).notes,
+            Vec::<String>::new()
+        );
         assert_eq!(
             sent.try_iter().collect::<Vec<_>>(),
             [MediaCommand::Pause, MediaCommand::Play],
             "the pause that comes is not undone just before it"
         );
         assert_eq!(worker.retry_in(due), None, "the job took the restore over");
-        assert_eq!(worker.job(release(), due).notes, Vec::<String>::new());
+        assert_eq!(
+            worker.job(release(), &Unsupported, due).notes,
+            Vec::<String>::new()
+        );
         assert_eq!(sent.try_iter().collect::<Vec<_>>(), [MediaCommand::Play]);
     }
 
@@ -848,7 +898,7 @@ mod tests {
         jobs.send(fire(pause())).expect("send");
         jobs.send(release()).expect("send");
         drop(jobs);
-        run(once(player), &received, &failures);
+        run(once(player), &Unsupported, &received, &failures);
         assert_eq!(
             sent.try_iter().collect::<Vec<_>>(),
             [MediaCommand::Pause, MediaCommand::Play, MediaCommand::Play],
@@ -864,6 +914,29 @@ mod tests {
                     "a restore failed on its last try, as actions stop: the media session did not take the command".to_owned()
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn a_click_is_placed_before_it_clicks_and_says_why_it_was_not() {
+        use appytappy_config::click::{Click, ClickAt, ClickButton, Corner, Spot};
+
+        let (commands, _sent) = mpsc::channel();
+        let (mut worker, _notes) = Worker::start(once(OnePlayer::new(commands)), Instant::now());
+        let click = Click::new(
+            "target",
+            ClickButton::Left,
+            true,
+            ClickAt::Spot(Spot::new(Corner::TopLeft, 1, 1).expect("valid")),
+        )
+        .expect("valid");
+        let steps = Box::new([Action::Click(click), pause()[0].clone()]);
+        assert_eq!(
+            worker.job(fire(steps), &Unsupported, Instant::now()).notes,
+            [format!(
+                "{AUTOMATION}: action 1 failed: the application it clicks in is no longer saved"
+            )],
+            "the click is not placed, and the pause still runs"
         );
     }
 
@@ -889,12 +962,15 @@ mod tests {
             }])
         };
         assert_eq!(
-            worker.job(fire(mute()), Instant::now()).notes,
+            worker.job(fire(mute()), &Unsupported, Instant::now()).notes,
             Vec::<String>::new()
         );
         controls(&mut worker).unplugged = true;
         assert_eq!(
-            worker.job(release(), Instant::now()).notes.len(),
+            worker
+                .job(release(), &Unsupported, Instant::now())
+                .notes
+                .len(),
             1,
             "the failed undo is logged"
         );
@@ -911,7 +987,10 @@ mod tests {
             automation: "Another".to_owned(),
             cause: None,
         };
-        assert_eq!(worker.job(next, Instant::now()).notes, Vec::<String>::new());
+        assert_eq!(
+            worker.job(next, &Unsupported, Instant::now()).notes,
+            Vec::<String>::new()
+        );
         assert_eq!(
             controls(&mut worker).volume,
             Some(percent(80)),
@@ -929,7 +1008,8 @@ mod tests {
         player.refusals = 1;
         jobs.send(fire(pause())).expect("send");
         jobs.send(release()).expect("send");
-        let actor = std::thread::spawn(move || run(once(player), &received, &failures));
+        let actor =
+            std::thread::spawn(move || run(once(player), &Unsupported, &received, &failures));
         let patience = MEDIA_RETRY.saturating_mul(3);
         for expected in [MediaCommand::Pause, MediaCommand::Play, MediaCommand::Play] {
             assert_eq!(sent.recv_timeout(patience), Ok(expected));

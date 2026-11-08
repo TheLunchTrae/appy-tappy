@@ -9,6 +9,7 @@
 
 mod autostart;
 mod cli;
+mod click;
 mod lifecycle;
 mod log;
 mod model;
