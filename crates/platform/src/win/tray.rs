@@ -10,9 +10,15 @@
 //! A request to close and the end of the session cannot wait for the loop,
 //! because a menu's loop would drop the one and Windows may end the process
 //! once the procedure returns from the other. The procedure tells the owner
-//! about both itself, through the [`Owner`] the tray thread attaches to the
+//! about both itself, through the [`Closing`] the tray thread attaches to the
 //! window, and at the end of the session it waits until [`Tray::stop`] says
 //! the owner is done.
+//!
+//! The window is hidden, and Windows ends a program with no visible window
+//! that takes more than 5 seconds over the end of the session, unless it
+//! gave a reason with `ShutdownBlockReasonCreate`. So the procedure gives
+//! one as soon as Windows asks whether the session may end, agrees, and
+//! takes the reason back once the session ends or Windows calls it off.
 
 use std::io;
 use std::mem::size_of;
@@ -63,11 +69,14 @@ const MENU_CHANGED: u32 = WM_APP + 5;
 const STOP_TRAY: u32 = WM_APP + 6;
 
 /// The longest the window procedure holds the end of the session while the
-/// owner undoes what the automations changed. Windows shows the reason
-/// below after 5 seconds, and the user can end the session anyway.
+/// owner undoes what the automations changed. With a reason given, Windows
+/// treats the hidden window like a visible one, which may take longer than
+/// 5 seconds, and after 5 seconds it can show the reason and let the user
+/// end the session anyway.
 const END_SESSION_WAIT: Duration = Duration::from_secs(10);
 
-/// What Windows shows while the runtime holds the end of the session.
+/// The reason Windows can show while the runtime holds the end of the
+/// session.
 const END_SESSION_REASON: PCWSTR = w!("Restoring what automations changed");
 
 /// The exit code of the tray loop's `WM_QUIT` when [`Tray::stop`] ended it.
@@ -179,9 +188,9 @@ enum TrayExit {
 }
 
 /// What the window procedure reaches through the window: how to tell the
-/// owner that Windows asks the program to close, and the end of
-/// [`Tray::stop`]'s sender, which says the owner is done.
-struct Owner<'a> {
+/// owner thread that Windows asks the program to close, and the end of
+/// [`Tray::stop`]'s sender, which says the owner thread is done.
+struct Closing<'a> {
     /// Sends [`TrayEvent::CloseRequested`] and returns whether anyone
     /// received it.
     close: &'a dyn Fn() -> bool,
@@ -189,36 +198,46 @@ struct Owner<'a> {
     done: &'a Receiver<()>,
 }
 
-impl Owner<'_> {
-    /// Tells the owner that the session ends and waits, at most
-    /// [`END_SESSION_WAIT`], until it is done, so Windows does not end the
-    /// process while the owner undoes what the automations changed.
-    fn hold_end_of_session(&self, window: HWND) {
-        if !(self.close)() {
-            return;
-        }
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: this thread made the window, and the reason is a static wide
-        // string.
-        let blocking = unsafe { ShutdownBlockReasonCreate(window, END_SESSION_REASON) };
-        // Every outcome, the owner's word included, ends the wait; the
-        // owner never sends, it only drops the sender.
+/// Tells the owner thread that the session ends and waits, at most
+/// [`END_SESSION_WAIT`], until it is done, so Windows does not end the
+/// process while the owner thread undoes what the automations changed.
+fn hold_end_of_session(closing: &Closing<'_>) {
+    if (closing.close)() {
+        // Every outcome, the owner thread's word included, ends the wait; it
+        // never sends, it only drops the sender.
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "a disconnect is the owner's word and a timeout the bound; both end the wait the same way"
+            reason = "a disconnect is the owner thread's word and a timeout the bound; both end the wait the same way"
         )]
-        let _ = self.done.recv_timeout(END_SESSION_WAIT);
-        if blocking.is_ok() {
-            #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: this thread made the window and set its reason above.
-            let unblocked = unsafe { ShutdownBlockReasonDestroy(window) };
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "the session ends either way, and the reason goes with the window"
-            )]
-            let _ = unblocked;
-        }
+        let _ = closing.done.recv_timeout(END_SESSION_WAIT);
     }
+}
+
+/// Gives Windows the reason the runtime may hold the end of the session.
+fn give_reason(window: HWND) {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: this thread made the window, and the reason is a static wide
+    // string.
+    let given = unsafe { ShutdownBlockReasonCreate(window, END_SESSION_REASON) };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "without the reason Windows allows 5 seconds, and the session ends either way"
+    )]
+    let _ = given;
+}
+
+/// Takes the reason back, so a later end of the session that something
+/// else holds does not name the runtime.
+fn take_reason_back(window: HWND) {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: this thread made the window; a window with no reason fails
+    // without effect.
+    let taken = unsafe { ShutdownBlockReasonDestroy(window) };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "it fails when no reason was given, and the reason goes with the window anyway"
+    )]
+    let _ = taken;
 }
 
 /// The tray thread: creates the window and the icon, reports the start, and
@@ -232,15 +251,15 @@ fn run_tray<E: From<TrayEvent>>(
     ready: &SyncSender<io::Result<usize>>,
 ) -> io::Result<TrayExit> {
     let close = || events.send(E::from(TrayEvent::CloseRequested)).is_ok();
-    // The owner is declared before the window, so it outlives every call of
-    // the window's procedure.
-    let owner = Owner {
+    // It is declared before the window, so it outlives every call of the
+    // window's procedure.
+    let closing = Closing {
         close: &close,
         done,
     };
     // The icon is declared after the window, so it is removed before the
     // window is destroyed.
-    let window = match TrayWindow::create(&owner) {
+    let window = match TrayWindow::create(&closing) {
         Ok(window) => window,
         Err(error) => {
             ready.send(Err(error)).map_err(io::Error::other)?;
@@ -318,9 +337,9 @@ fn run_tray<E: From<TrayEvent>>(
 struct TrayWindow(HWND);
 
 impl TrayWindow {
-    /// Makes the window and attaches `owner` to it, which must outlive the
+    /// Makes the window and attaches `closing` to it, which must outlive the
     /// window.
-    fn create(owner: &Owner<'_>) -> io::Result<Self> {
+    fn create(closing: &Closing<'_>) -> io::Result<Self> {
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: no module name asks for the running program's own module.
         let module = unsafe { GetModuleHandleW(None) }?;
@@ -361,10 +380,10 @@ impl TrayWindow {
                 None,
             )
         }?;
-        // Until the owner is attached, the procedure sees only the creation
-        // notices, which it leaves to Windows.
+        // Until it is attached, the procedure sees only the creation notices,
+        // which it leaves to Windows.
         let window = Self(window);
-        let address = ptr::from_ref(owner).expose_provenance();
+        let address = ptr::from_ref(closing).expose_provenance();
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: this thread made the window; the call only stores an integer.
         unsafe {
@@ -502,29 +521,34 @@ fn notify(action: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> bool {
     done.as_bool()
 }
 
-/// The [`Owner`] that [`TrayWindow::create`] attached to `window`, once it
-/// has.
-fn owner<'a>(window: HWND) -> Option<&'a Owner<'a>> {
+/// Calls `act` with the [`Closing`] that [`TrayWindow::create`] attached to
+/// `window`, once it has. The reference lives only for the call, inside one
+/// call of the window's procedure.
+fn with_closing(window: HWND, act: impl FnOnce(&Closing<'_>)) {
     #[expect(unsafe_code, reason = "a Win32 call")]
     // SAFETY: the call takes this thread's window handle and reads an integer.
     let address = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) };
-    let address = usize::try_from(address)
+    let Some(address) = usize::try_from(address)
         .ok()
-        .filter(|&address| address != 0)?;
-    let owner = ptr::with_exposed_provenance::<Owner<'a>>(address);
+        .filter(|&address| address != 0)
+    else {
+        return;
+    };
+    let closing = ptr::with_exposed_provenance::<Closing<'_>>(address);
     #[expect(unsafe_code, reason = "a pointer the window holds")]
-    // SAFETY: only TrayWindow::create stores this value, from an Owner that
+    // SAFETY: only TrayWindow::create stores this value, from a Closing that
     // outlives the window, and the procedure runs on the thread that holds it,
     // which only reads it.
-    unsafe {
-        owner.as_ref()
+    if let Some(closing) = unsafe { closing.as_ref() } {
+        act(closing);
     }
 }
 
 /// The tray window's procedure. A right-click on the icon and a restarted
 /// taskbar become messages posted to the window, which the tray thread's loop
-/// handles. A request to close and the end of the session go to the
-/// [`Owner`] at once. It never panics, because it runs inside a Windows call.
+/// handles. A request to close and the end of the session go to the owner
+/// thread at once, through [`Closing`]. It never panics, because it runs
+/// inside a Windows call.
 extern "system" fn on_tray_message(
     window: HWND,
     message: u32,
@@ -541,22 +565,25 @@ extern "system" fn on_tray_message(
         // with no menu; the owner decides what it means. A post would be lost
         // while the menu is open, so the owner hears it from here.
         WM_CLOSE => {
-            // An owner that is gone is already stopping.
-            if let Some(owner) = owner(window) {
-                (owner.close)();
-            }
+            // An owner thread that is gone is already stopping.
+            with_closing(window, |closing| {
+                (closing.close)();
+            });
             return LRESULT(0);
         },
-        // Any session may end; the next message says whether this one does.
-        WM_QUERYENDSESSION => return LRESULT(1),
+        // The session may end, and the undo waits until it really does; the
+        // reason lets it take longer than 5 seconds then.
+        WM_QUERYENDSESSION => {
+            give_reason(window);
+            return LRESULT(1);
+        },
         // A non-zero `wparam` means the session really ends, and Windows may
-        // end the process once this returns.
+        // end the process once this returns; zero means it was called off.
         WM_ENDSESSION => {
-            if wparam.0 != 0
-                && let Some(owner) = owner(window)
-            {
-                owner.hold_end_of_session(window);
+            if wparam.0 != 0 {
+                with_closing(window, hold_end_of_session);
             }
+            take_reason_back(window);
             return LRESULT(0);
         },
         STOP_TRAY => {
@@ -832,10 +859,15 @@ mod tests {
         // this thread does.
         let windows = thread::spawn(move || {
             let window = HWND(ptr::without_provenance_mut(address));
-            #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: the call takes the tray's window handle and integers.
-            let answer =
-                unsafe { SendMessageW(window, WM_ENDSESSION, Some(WPARAM(1)), Some(LPARAM(0))) };
+            #[expect(unsafe_code, reason = "Win32 calls")]
+            // SAFETY: the calls take the tray's window handle and integers.
+            let (agreed, answer) = unsafe {
+                (
+                    SendMessageW(window, WM_QUERYENDSESSION, Some(WPARAM(0)), Some(LPARAM(0))),
+                    SendMessageW(window, WM_ENDSESSION, Some(WPARAM(1)), Some(LPARAM(0))),
+                )
+            };
+            assert_eq!(agreed.0, 1, "the session may end");
             returned.send(answer.0).expect("report the answer");
         });
         let event = received

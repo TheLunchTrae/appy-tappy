@@ -52,9 +52,9 @@ pub enum TrayEvent {
     Picked(NonZeroU16),
     /// Windows asked the program to close, as `taskkill` without `/F`, an
     /// installer that replaces the program, or signing out does. When the
-    /// session ends, Windows waits until [`Tray::stop`], for at most 10
-    /// seconds, so the owner stops the tray only once it has undone what it
-    /// changed.
+    /// session ends, the tray holds it until [`Tray::stop`], for at most 10
+    /// seconds and only as long as Windows waits, so the owner stops the
+    /// tray only once it has undone what it changed.
     CloseRequested,
     /// The tray stopped before [`Tray::stop`] for this reason, and its icon
     /// is gone.
