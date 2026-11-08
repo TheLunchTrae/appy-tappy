@@ -14,17 +14,18 @@ Point at the icon to see what AppyTappy is doing:
   It keeps trying, and recovers by itself once Windows answers again.
 - **AppyTappy: disabled.** You turned automations off from the menu.
 
-While the media and audio controls in Windows are not ready, as can happen right
-after you sign in, the tooltip adds **actions cannot run**, as in
-**AppyTappy: attached, actions cannot run**. Your automations still watch
-their applications, but their actions do nothing until the controls are
-ready. AppyTappy keeps trying, and the text goes away by itself once actions
-can run.
+If AppyTappy cannot start the audio controls in Windows, no action can run,
+and the tooltip adds **actions cannot run yet**, as in
+**AppyTappy: attached, actions cannot run yet**. Your automations still watch
+their applications, but their actions do nothing. AppyTappy keeps trying, and
+the text goes away by itself once actions can run. While automations are off,
+the tooltip says only **AppyTappy: disabled**, and the menu still shows the
+warning.
 
 ## The menu
 
 Right-click the icon to open its menu. While actions cannot run, a grayed
-**Actions cannot run** line comes first.
+**Actions cannot run yet** line comes first.
 
 - **Enabled** turns all automations off and on. Turning them off undoes what
   they changed, such as a paused song or a lowered volume. AppyTappy starts

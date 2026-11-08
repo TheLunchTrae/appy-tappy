@@ -32,14 +32,14 @@ pub(crate) enum Command {
 }
 
 /// What the tray says while the action thread cannot run actions.
-const CANNOT_RUN: &str = "Actions cannot run";
+const CANNOT_RUN: &str = "Actions cannot run yet";
 
 /// The tooltip and menu for `model`.
 pub(crate) fn menu(model: &Model) -> TrayMenu {
     let tooltip = match (model.enabled(), model.actions_can_run()) {
         (false, _) => "AppyTappy: disabled".to_owned(),
         (true, true) => format!("AppyTappy: {}", model.state()),
-        (true, false) => format!("AppyTappy: {}, actions cannot run", model.state()),
+        (true, false) => format!("AppyTappy: {}, actions cannot run yet", model.state()),
     };
     let warning = if model.actions_can_run() {
         Vec::new()
@@ -156,12 +156,12 @@ mod tests {
         let mut model = Model::default();
         model.set_actions_can_run(false);
         let cannot = menu(&model);
-        assert_eq!(cannot.tooltip, "AppyTappy: idle, actions cannot run");
+        assert_eq!(cannot.tooltip, "AppyTappy: idle, actions cannot run yet");
         assert_eq!(
             cannot.items.get(..3),
             Some(
                 &[
-                    MenuItem::Inactive("Actions cannot run".to_owned()),
+                    MenuItem::Inactive("Actions cannot run yet".to_owned()),
                     MenuItem::Separator,
                     MenuItem::Action {
                         id: DISABLE,
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(disabled.tooltip, "AppyTappy: disabled");
         assert_eq!(
             disabled.items.first(),
-            Some(&MenuItem::Inactive("Actions cannot run".to_owned())),
+            Some(&MenuItem::Inactive("Actions cannot run yet".to_owned())),
             "the menu still says so while automations are off"
         );
         model.set_enabled(true);
