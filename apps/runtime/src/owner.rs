@@ -17,7 +17,7 @@ use appytappy_sources::system::{System, shows};
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
 use crate::log::Log;
 use crate::model::{Model, Order};
-use crate::workers::act::ActionFailed;
+use crate::workers::act::ActionReport;
 use crate::workers::reader::{Reader, Reading, SessionId};
 use crate::workers::{act, join, spawn};
 use crate::{lifecycle, note, plan, tray};
@@ -35,8 +35,9 @@ enum Event {
     Reload,
     /// A reader read a value or met a problem.
     Reading(Reading),
-    /// An action could not run.
-    ActionFailed(ActionFailed),
+    /// The action thread noted something for the log, or said whether
+    /// actions can run.
+    Actions(ActionReport),
     /// An automation that its cooldown held back is due, and no event came
     /// before.
     Due,
@@ -66,9 +67,9 @@ impl From<Reading> for Event {
     }
 }
 
-impl From<ActionFailed> for Event {
-    fn from(failed: ActionFailed) -> Self {
-        Self::ActionFailed(failed)
+impl From<ActionReport> for Event {
+    fn from(report: ActionReport) -> Self {
+        Self::Actions(report)
     }
 }
 
@@ -154,9 +155,9 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         let _ = changes.send(Event::DetectionEnded);
     });
     let (jobs, job_events) = mpsc::channel();
-    let failures = sender.clone();
+    let reports = sender.clone();
     let actor = spawn("actions", move || {
-        act::run(controls, &job_events, &failures);
+        act::run(controls, &job_events, &reports);
     });
     let (detector, actor) = match (detector, actor) {
         (Ok(detector), Ok(actor)) => (detector, actor),
@@ -614,8 +615,12 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
             model.forget(session);
             Step::Carry(Vec::new())
         },
-        Event::ActionFailed(ActionFailed(message)) => {
+        Event::Actions(ActionReport::Note(message)) => {
             note(log, &message);
+            Step::Carry(Vec::new())
+        },
+        Event::Actions(ActionReport::CanRun(can_run)) => {
+            model.set_actions_can_run(can_run);
             Step::Carry(Vec::new())
         },
         Event::Due => Step::Carry(model.recheck(Instant::now())),
@@ -673,15 +678,21 @@ mod tests {
             session: SessionId(3),
             problem: "dropped, because no session 3 runs".to_owned(),
         });
-        let failed = Event::from(ActionFailed("Pause: action 1 failed: no player".to_owned()));
+        let failed = Event::from(ActionReport::Note(
+            "Pause: action 1 failed: no player".to_owned(),
+        ));
+        let cannot_run = Event::from(ActionReport::CanRun(false));
         let disable = Event::from(TrayEvent::Picked(tray::DISABLE));
         let unknown = Event::from(TrayEvent::Picked(NonZeroU16::MAX));
         let ended = Event::from(TrayEvent::Ended("its window was destroyed".to_owned()));
         let mut steps = Vec::new();
-        for event in [started, problem, failed, disable, unknown, ended] {
+        for event in [
+            started, problem, failed, cannot_run, disable, unknown, ended,
+        ] {
             steps.push(handle(&mut model, &mut log, event));
         }
         let disabled = model.enabled();
+        let could_run = model.actions_can_run();
         let ends = [
             Event::from(TrayEvent::Picked(tray::ENABLE)),
             Event::from(ReloadRequest),
@@ -705,12 +716,14 @@ mod tests {
                 carry(),
                 carry(),
                 carry(),
+                carry(),
                 Step::Reload,
                 Step::Stop,
                 Step::Stop,
                 Step::Stop,
             ]
         );
+        assert!(!could_run, "the action thread said actions cannot run");
         assert!(!disabled, "Disable disables");
         assert!(model.enabled(), "Enable enables again");
         assert_eq!(model.state(), model::State::Attached);

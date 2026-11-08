@@ -1,6 +1,7 @@
 //! The root model on the owner thread: which apps are attached, what
 //! problem, if any, stops the runtime from watching, whether automations
-//! are enabled, and the rule session of each app whose automations run.
+//! are enabled, whether their actions can run, and the rule session of
+//! each app whose automations run.
 //!
 //! The model does no I/O. Each change returns the [`Order`]s that carry it
 //! out: start or stop a reader, and run or undo an automation's actions.
@@ -84,6 +85,10 @@ pub(crate) struct Model {
     /// Whether rules may fire. Turning it off from the tray keeps detection
     /// running, so turning it back on finds the apps already attached.
     enabled: bool,
+    /// Whether the action thread can run actions, as it last said. It is
+    /// false while the operating system's controls cannot be made: rules
+    /// still fire, but their actions do not run.
+    actions_can_run: bool,
     /// What each app with automations runs, by app ID.
     plan: BTreeMap<String, Arc<AppPlan>>,
     /// The apps whose automations run now, by app ID.
@@ -98,6 +103,7 @@ impl Default for Model {
             attached: BTreeMap::new(),
             problem: None,
             enabled: true,
+            actions_can_run: true,
             plan: BTreeMap::new(),
             running: BTreeMap::new(),
             next: 0,
@@ -109,6 +115,16 @@ impl Model {
     /// Whether rules may fire.
     pub(crate) const fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// Whether actions can run, as the action thread last said.
+    pub(crate) const fn actions_can_run(&self) -> bool {
+        self.actions_can_run
+    }
+
+    /// Records what the action thread said about whether actions can run.
+    pub(crate) const fn set_actions_can_run(&mut self, can_run: bool) {
+        self.actions_can_run = can_run;
     }
 
     /// The current state.
