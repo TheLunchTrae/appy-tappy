@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-engine"
-description = "The rule evaluator: a pure transition from signal and app events to action requests."
+description = "The rule evaluator: a pure transition from signal values to action requests."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
