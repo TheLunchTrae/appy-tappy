@@ -8,6 +8,8 @@ import {
   fromReference,
   MAX_STATES,
   newestOfSize,
+  recordBlocked,
+  regionScreenshot,
   reviewSpec,
   settingsDiffer,
   stateOn,
@@ -332,4 +334,25 @@ describe('a stopped recording', () => {
     expect(newestOfSize(screenshots, { ...big })).toBe(2);
     expect(newestOfSize(screenshots, { width: 800, height: 600 })).toBeNull();
   });
+});
+
+test('the region shows over the screenshot shown, else the one it was drawn on, else the newest', () => {
+  const full = new Map([
+    [1, null],
+    [2, null],
+  ]);
+  expect(regionScreenshot(1, 2, full, 3)).toBe(1);
+  // A screenshot whose pixels have not arrived yet does not count.
+  expect(regionScreenshot(3, 2, full, 3)).toBe(2);
+  expect(regionScreenshot(null, 2, full, 3)).toBe(2);
+  expect(regionScreenshot(null, 4, full, 3)).toBe(3);
+  expect(regionScreenshot(null, null, new Map(), null)).toBeNull();
+});
+
+test("recording waits for a drawn region and the characters' color", () => {
+  const ready = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red };
+  expect(recordBlocked(ready)).toBeNull();
+  expect(recordBlocked({ ...ready, region: null })).toBe('Draw the region on a screenshot to record it.');
+  expect(recordBlocked({ ...ready, drawnOn: null })).toBe('Draw the region on a screenshot to record it.');
+  expect(recordBlocked({ ...ready, ink: null })).toBe("Pick the characters' color to record.");
 });

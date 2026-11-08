@@ -68,3 +68,52 @@ export function tileNote(reading: RecordedReading, entry: ReviewEntry, problem: 
         : null;
   }
 }
+
+/** The kept readings the check cannot learn, each by its index with why, from `answers` in the order of `recorded`. */
+export function flaggedReadings(
+  recorded: readonly RecordedLabel[],
+  answers: readonly (string | null)[],
+): ReadonlyMap<number, string> {
+  const found = new Map<number, string>();
+  answers.forEach((answer, position) => {
+    const label = recorded[position];
+    if (answer !== null && label !== undefined) {
+      found.set(label.reading, answer);
+    }
+  });
+  return found;
+}
+
+/**
+ * `edits` after Keep all or Keep none: each reading kept with its text, or left out. A reading still being read
+ * gets no edit, so its text and keep come from the reader once it answers.
+ */
+export function editAll(
+  edits: ReadonlyMap<number, ReviewEntry>,
+  all: readonly ReviewEntry[],
+  readings: readonly RecordedReading[],
+  keep: boolean,
+): ReadonlyMap<number, ReviewEntry> {
+  const next = new Map(edits);
+  all.forEach((entry, index) => {
+    if (readings[index]?.text.kind !== 'pending' || edits.has(index)) {
+      next.set(index, { ...entry, keep: keep && entry.text.trim() !== '' });
+    }
+  });
+  return next;
+}
+
+/**
+ * Why Keep waits, or null when it can keep `kept`: a flagged reading is kept, or the readings were not checked yet
+ * for what review shows now.
+ */
+export function keepBlocked(
+  kept: readonly RecordedLabel[],
+  flagged: ReadonlyMap<number, string>,
+  checked: boolean,
+): string | null {
+  if (kept.some((label) => flagged.has(label.reading))) {
+    return 'Fix or leave out the flagged readings to keep them.';
+  }
+  return checked ? null : 'Checking the readings…';
+}

@@ -121,6 +121,41 @@ export function newestOfSize(screenshots: readonly (readonly [number, Size])[], 
   return found?.[0] ?? null;
 }
 
+/**
+ * The screenshot the region shows over: the one shown, once its pixels are in `full`, or else the one it was drawn
+ * on, or else `newest`, the newest screenshot. So while the live view shows, the region keeps the size of the
+ * screenshot it was drawn on.
+ */
+export function regionScreenshot(
+  selected: number | null,
+  drawnOn: number | null,
+  full: ReadonlyMap<number, unknown>,
+  newest: number | null,
+): number | null {
+  if (selected !== null && full.has(selected)) {
+    return selected;
+  }
+  return drawnOn !== null && full.has(drawnOn) ? drawnOn : newest;
+}
+
+/** Why the reference editor cannot record `draft`'s region yet, or null when it can. */
+export function recordBlocked(draft: Draft): string | null {
+  if (draft.region === null || draft.drawnOn === null) {
+    return 'Draw the region on a screenshot to record it.';
+  }
+  if (draft.ink === null) {
+    return "Pick the characters' color to record.";
+  }
+  return null;
+}
+
+/** Whether the check being set up was tried on the live window yet, and how it went. */
+export type CheckState =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'pending' }
+  | { readonly kind: 'set' }
+  | { readonly kind: 'error'; readonly message: string };
+
 /** The draft's check, or what the user still has to do. */
 export type Built<Spec = CheckSpec> =
   | { readonly ok: true; readonly spec: Spec }
