@@ -15,6 +15,7 @@
 
 mod automations;
 mod capture;
+mod clicks;
 mod fixes;
 mod host;
 mod messages;
@@ -44,6 +45,7 @@ use crate::recording::{Recording, ocr};
 use crate::stores::Stores;
 use crate::updates::Downloaded;
 
+pub(crate) use self::clicks::{ClickPictureView, FoundClick};
 pub(crate) use self::host::Host;
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{

@@ -15,6 +15,7 @@ use std::fs;
 use std::io;
 use std::sync::Arc;
 
+use appytappy_config::action::Action;
 use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_config::automation_file::{AutomationsFile, Compiled};
 use appytappy_config::rule::Rule;
@@ -23,6 +24,7 @@ use appytappy_config::store::{AppStore, AutomationStore, StoredApp};
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::saved::{self, SavedValue};
 
+use crate::click::ClickTargets;
 use crate::lifecycle::Watchlist;
 
 /// What the runtime runs.
@@ -72,6 +74,8 @@ pub(crate) struct Runs {
     pub(crate) values: Vec<ValuePlan>,
     /// One rule for each automation that can run.
     pub(crate) rules: Arc<[Rule]>,
+    /// What placing the rules' clicks needs.
+    pub(crate) clicks: Arc<ClickTargets>,
 }
 
 /// A value an automation watches.
@@ -119,9 +123,12 @@ pub(crate) fn load(apps: &AppStore, automations: &AutomationStore) -> Result<Pla
     let file = automations
         .load()
         .map_err(|error| format!("the automations cannot be read: {error}"))?;
-    Ok(compile(&stored, &file, |app, name| {
-        fs::read(apps.folder(app).join(name))
-    }))
+    Ok(compile(
+        &stored,
+        &file,
+        |app, name| fs::read(apps.folder(app).join(name)),
+        |name| automations.picture(name),
+    ))
 }
 
 /// An application's part of the plan while it is being compiled.
@@ -132,20 +139,28 @@ struct Draft<'apps> {
     value_names: Vec<String>,
     rules: Vec<Rule>,
     automations: Vec<String>,
+    clicks: ClickTargets,
 }
 
 /// Compiles `automations` against the saved applications `apps`. `picture`
 /// returns the bytes of a picture in an application's folder, given the
-/// application's ID and the picture's file name.
+/// application's ID and the picture's file name, and `click_picture` the
+/// bytes of a click picture, given its file name.
 pub(crate) fn compile(
     apps: &[StoredApp],
     automations: &AutomationsFile,
     mut picture: impl FnMut(&str, &str) -> io::Result<Vec<u8>>,
+    mut click_picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Plan {
     let mut drafts: BTreeMap<&str, Draft<'_>> = BTreeMap::new();
     // Each value's check is built once, however many automations watch it.
     let mut built: BTreeMap<(&str, &str), Result<(), String>> = BTreeMap::new();
     let mut problems = Vec::new();
+    // The applications whose files read, which clicks find their targets in.
+    let readable: Vec<(&str, &AppFile)> = apps
+        .iter()
+        .filter_map(|app| app.file.as_ref().ok().map(|file| (app.id.as_str(), file)))
+        .collect();
     for automation in automations
         .automations
         .iter()
@@ -167,12 +182,24 @@ pub(crate) fn compile(
                 continue;
             },
         };
+        // The clicks are checked before the value is built, so one that
+        // cannot run adds no value check for the runtime to read.
+        let mut clicks = ClickTargets::default();
+        let wanted = rule.actions().iter().filter_map(|action| match action {
+            Action::Click(click) => Some(click),
+            _ => None,
+        });
+        if let Err(reason) = clicks.add(wanted, &readable, &mut click_picture) {
+            problem(&reason);
+            continue;
+        }
         let draft = drafts.entry(app_id).or_insert_with(|| Draft {
             file: app,
             values: Vec::new(),
             value_names: Vec::new(),
             rules: Vec::new(),
             automations: Vec::new(),
+            clicks: ClickTargets::default(),
         });
         let ready = built.entry((app_id, value.id.as_str())).or_insert_with(|| {
             let check = saved::build(&value.screen, &app.references, app.size_changes, |name| {
@@ -187,6 +214,9 @@ pub(crate) fn compile(
             problem(reason);
             continue;
         }
+        // Kept only once the value check is built too, so a rejected
+        // automation leaves neither a click target nor a value check behind.
+        draft.clicks.merge(clicks);
         draft.rules.push(rule);
         draft.automations.push(automation.name.clone());
     }
@@ -206,6 +236,7 @@ pub(crate) fn compile(
                     window: file.window.to_match(),
                     values: draft.values,
                     rules: draft.rules.into(),
+                    clicks: Arc::new(draft.clicks),
                 },
             };
             (id.to_owned(), Arc::new(plan))
@@ -307,6 +338,7 @@ pub(crate) mod examples {
                     },
                 }],
                 rules: Arc::from(vec![rule]),
+                clicks: Arc::default(),
             },
         })
     }
@@ -441,6 +473,10 @@ mod tests {
         Err(io::Error::from(io::ErrorKind::NotFound))
     }
 
+    fn no_click_pictures(_name: &str) -> io::Result<Vec<u8>> {
+        Err(io::Error::from(io::ErrorKind::NotFound))
+    }
+
     #[test]
     fn each_enabled_automation_becomes_a_rule_of_its_application() {
         let apps = [
@@ -460,7 +496,7 @@ mod tests {
             off,
             automation("second", "example", "progress", TargetDef::Number(10.0)),
         ]);
-        let plan = compile(&apps, &automations, no_pictures);
+        let plan = compile(&apps, &automations, no_pictures, no_click_pictures);
         assert_eq!(plan.problems, Vec::<String>::new());
         assert_eq!(plan.apps.keys().collect::<Vec<_>>(), ["example"]);
         let example = plan.apps.get("example").expect("planned");
@@ -529,7 +565,7 @@ mod tests {
                 ..automation("empty", "example", "progress", TargetDef::Number(90.0))
             },
         ]);
-        let plan = compile(&apps, &automations, no_pictures);
+        let plan = compile(&apps, &automations, no_pictures, no_click_pictures);
         assert_eq!(
             plan.problems,
             [
@@ -567,7 +603,7 @@ mod tests {
             automation
         };
         let automations = file(vec![press("free", "free"), press("protected", "protected")]);
-        let plan = compile(&apps, &automations, no_pictures);
+        let plan = compile(&apps, &automations, no_pictures, no_click_pictures);
         assert_eq!(
             plan.problems,
             [
@@ -576,6 +612,116 @@ mod tests {
             ]
         );
         assert_eq!(plan.apps.keys().collect::<Vec<_>>(), ["free"]);
+    }
+
+    #[test]
+    fn clicks_keep_their_targets_and_pictures() {
+        use appytappy_config::automation_file::{ClickAtDef, ClickButtonDef, CornerDef, PointDef};
+
+        let apps = [
+            stored(
+                "example",
+                Ok(app("Example App", vec![value("progress", bar())])),
+            ),
+            stored("target", Ok(app("Target App", Vec::new()))),
+        ];
+        let click = |id: &str, at: ClickAtDef| {
+            let mut automation = automation(id, "example", "progress", TargetDef::Number(90.0));
+            automation.actions = vec![ActionDef::Click {
+                app: "target".to_owned(),
+                button: ClickButtonDef::Left,
+                return_focus: true,
+                at,
+            }];
+            automation.undo = false;
+            automation
+        };
+        let spot = ClickAtDef::Spot {
+            corner: CornerDef::TopLeft,
+            x: 1,
+            y: 1,
+        };
+        let picture = |image: &str| ClickAtDef::Picture {
+            image: image.to_owned(),
+            window_size: SizeDef {
+                width: 800,
+                height: 600,
+            },
+            search: RegionDef {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            press: PointDef { x: 0, y: 0 },
+            tolerance: 10,
+        };
+        let png = Image::new(
+            Size {
+                width: 2,
+                height: 2,
+            },
+            vec![9; 16],
+        )
+        .expect("matching length")
+        .encode_png()
+        .expect("encodes");
+        let automations = file(vec![
+            click("spot", spot.clone()),
+            click("picture", picture("button-1.png")),
+            click("missing", picture("gone-1.png")),
+        ]);
+        let mut asked = Vec::new();
+        let plan = compile(&apps, &automations, no_pictures, |name| {
+            asked.push(name.to_owned());
+            if name == "button-1.png" {
+                Ok(png.clone())
+            } else {
+                Err(io::Error::from(io::ErrorKind::NotFound))
+            }
+        });
+        assert_eq!(asked, ["button-1.png", "gone-1.png"]);
+        assert_eq!(plan.problems.len(), 1, "{:?}", plan.problems);
+        assert!(
+            plan.problems[0].starts_with(
+                "Automation missing cannot run: its picture gone-1.png cannot be read: "
+            ),
+            "{:?}",
+            plan.problems
+        );
+        let example = &plan.apps["example"];
+        assert_eq!(
+            example.labels.automations,
+            ["Automation spot", "Automation picture"]
+        );
+        let mut expected = ClickTargets::default();
+        let target = app("Target App", Vec::new());
+        let at = |at: ClickAtDef| {
+            ActionDef::Click {
+                app: "target".to_owned(),
+                button: ClickButtonDef::Left,
+                return_focus: true,
+                at,
+            }
+            .to_action()
+            .expect("valid")
+        };
+        let clicks: Vec<Action> = vec![at(spot), at(picture("button-1.png"))];
+        expected
+            .add(
+                clicks.iter().filter_map(|action| match action {
+                    Action::Click(click) => Some(click),
+                    _ => None,
+                }),
+                &[("target", &target)],
+                |_| Ok(png.clone()),
+            )
+            .expect("adds");
+        assert_eq!(*example.runs.clicks, expected);
+
+        let only_missing = file(vec![click("missing", picture("gone-1.png"))]);
+        let plan = compile(&apps, &only_missing, no_pictures, no_click_pictures);
+        assert_eq!(plan.apps.len(), 0, "a value only it watches is not read");
     }
 
     #[test]
@@ -603,10 +749,15 @@ mod tests {
         )];
         let automations = file(vec![automation("on", "example", "icon", state("Shown"))]);
         let mut asked = Vec::new();
-        let plan = compile(&apps, &automations, |app, name| {
-            asked.push(format!("{app}/{name}"));
-            Ok(picture.clone())
-        });
+        let plan = compile(
+            &apps,
+            &automations,
+            |app, name| {
+                asked.push(format!("{app}/{name}"));
+                Ok(picture.clone())
+            },
+            no_click_pictures,
+        );
         assert_eq!(asked, ["example/icon.png"]);
         assert_eq!(plan.problems, Vec::<String>::new());
         assert!(plan.apps.contains_key("example"));
@@ -657,10 +808,16 @@ mod tests {
                 asked.push(format!("{app}/{name}"));
                 Ok(picture.clone())
             },
+            no_click_pictures,
         );
         assert_eq!(asked, ["example/ref-digits-1.png"]);
         assert_eq!(plan.problems, Vec::<String>::new());
-        let plan = compile(&[stored("example", Ok(missing))], &automations, no_pictures);
+        let plan = compile(
+            &[stored("example", Ok(missing))],
+            &automations,
+            no_pictures,
+            no_click_pictures,
+        );
         assert_eq!(
             plan.problems,
             [

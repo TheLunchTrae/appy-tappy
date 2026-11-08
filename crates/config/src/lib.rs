@@ -9,6 +9,7 @@ pub mod action;
 pub mod anti_cheat;
 pub mod app_file;
 pub mod automation_file;
+pub mod click;
 pub mod paths;
 pub mod rule;
 pub mod settings_file;

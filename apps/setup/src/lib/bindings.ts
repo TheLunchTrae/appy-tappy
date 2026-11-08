@@ -38,7 +38,23 @@ target: string, } | { "kind": "sound",
 /**
  * The file's full path; [`SoundFile::parse`] reads it.
  */
-file: string, }>;
+file: string, } | { "kind": "click",
+/**
+ * The ID of the saved application it clicks in.
+ */
+app: string,
+/**
+ * Which button, and how many times.
+ */
+button: ClickButtonDef,
+/**
+ * Whether the window that was in front gets the focus back after.
+ */
+returnFocus: boolean,
+/**
+ * Where it clicks.
+ */
+at: ClickAtDef, }>;
 
 /**
  * [`AntiCheatClass`] as the file spells it.
@@ -290,6 +306,66 @@ build: BuildDef,
 at: number, }>;
 
 /**
+ * Where a click lands, as the file spells it.
+ */
+export type ClickAtDef = DeepReadonly<{ "kind": "spot",
+/**
+ * The corner it is measured from.
+ */
+corner: CornerDef,
+/**
+ * How far across from the corner, in pixels.
+ */
+x: number,
+/**
+ * How far up or down from the corner, in pixels.
+ */
+y: number, } | { "kind": "picture",
+/**
+ * The picture's file name among the click pictures.
+ */
+image: string,
+/**
+ * The window's size when the picture was taken.
+ */
+windowSize: SizeDef,
+/**
+ * The area of the window the picture is looked for in.
+ */
+search: RegionDef,
+/**
+ * Where on the picture to press, from its top-left corner.
+ */
+press: PointDef,
+/**
+ * How far, on average, each compared pixel's red, green, and blue
+ * may be from the picture's.
+ */
+tolerance: number, }>;
+
+/**
+ * [`ClickButton`] as the file spells it.
+ */
+export type ClickButtonDef = DeepReadonly<"left" | "right" | "double">;
+
+/**
+ * A click picture just kept, and the size of the window it was taken on.
+ */
+export type ClickPictureView = DeepReadonly<{
+/**
+ * Its file name among the click pictures.
+ */
+image: string,
+/**
+ * The window's width when it was taken.
+ */
+windowWidth: number,
+/**
+ * The window's height when it was taken.
+ */
+windowHeight: number, }>;
+
+/**
  * A color.
  */
 export type ColorDef = DeepReadonly<{
@@ -325,6 +401,11 @@ export type Combine = DeepReadonly<"replace" | "add" | "remove">;
  * [`Comparison`] as the file spells it.
  */
 export type ComparisonDef = DeepReadonly<"below" | "atMost" | "equals" | "notEquals" | "atLeast" | "above">;
+
+/**
+ * [`Corner`] as the file spells it.
+ */
+export type CornerDef = DeepReadonly<"topLeft" | "topRight" | "bottomLeft" | "bottomRight">;
 
 /**
  * [`WindowMatch::fallback`] as the file spells it.
@@ -377,6 +458,24 @@ check: CheckSpec,
  * The screenshot the region was drawn on, whose size the fix is for.
  */
 screenshot: number, }>;
+
+/**
+ * Where a click would land in the window, from its top-left corner, and
+ * for a picture how alike the place found is.
+ */
+export type FoundClick = DeepReadonly<{
+/**
+ * Across, in pixels.
+ */
+x: number,
+/**
+ * Down, in pixels.
+ */
+y: number,
+/**
+ * From 0 to 100 percent; `None` for a spot.
+ */
+likeness: number | null, }>;
 
 /**
  * What one screenshot's region shows, typed by the user so a reference
@@ -503,6 +602,19 @@ height: number, }>;
  * left, center or right.
  */
 export type PinDef = DeepReadonly<"topLeft" | "topCenter" | "topRight" | "middleLeft" | "center" | "middleRight" | "bottomLeft" | "bottomCenter" | "bottomRight">;
+
+/**
+ * A point in pixels.
+ */
+export type PointDef = DeepReadonly<{
+/**
+ * Across.
+ */
+x: number,
+/**
+ * Down.
+ */
+y: number, }>;
 
 /**
  * How often the runtime reads a value: as often as `fastest_ms` allows while
@@ -1183,6 +1295,7 @@ export const KEY_NAMES = {
 /** Whether each kind of action sends input, and whether undo can put it back, by kind and a media action's command. */
 export const ACTIONS = {
   "injectsInput": {
+    "click": true,
     "keys": true,
     "media": false,
     "open": false,
@@ -1190,6 +1303,7 @@ export const ACTIONS = {
     "volume": false
   },
   "undoable": {
+    "click": false,
     "keys": false,
     "media.next": false,
     "media.pause": true,

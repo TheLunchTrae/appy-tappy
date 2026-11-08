@@ -17,9 +17,10 @@ use appytappy_config::action::KeyChord;
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
 };
+use appytappy_config::click::{ClickAt, ClickPicture};
 use appytappy_config::signal::SignalName;
-use appytappy_config::store::{AppStore, StoredApp};
-use appytappy_sources::screen::saved;
+use appytappy_config::store::StoredApp;
+use appytappy_sources::screen::{Image, saved};
 use serde::Serialize;
 
 use crate::stores::Stores;
@@ -88,23 +89,34 @@ fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
 }
 
 /// What stops `automation` from running with the applications in `apps`,
-/// whose folders `store` holds, if anything, as a sentence: the same answer
-/// the runtime gets. The runtime also builds the check of the value it
-/// watches, so a value a hand edit broke shows here too.
-fn problem(automation: &AutomationDef, apps: &[StoredApp], store: &AppStore) -> Option<String> {
+/// if anything, as a sentence: the same answer the runtime gets. The runtime
+/// also builds the check of the value it watches and reads each click's
+/// picture, so a value or a picture a hand edit broke shows here too.
+fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> Option<String> {
     let compiled = match automation.compile(apps) {
         Ok(compiled) => compiled,
         Err(problem) => return Some(sentence(&problem)),
     };
-    let folder = store.folder(compiled.app_id);
-    saved::build(
+    let folder = stores.apps.folder(compiled.app_id);
+    if let Err(error) = saved::build(
         &compiled.value.screen,
         &compiled.app.references,
         compiled.app.size_changes,
         |name| fs::read(folder.join(name)),
-    )
-    .err()
-    .map(|error| format!("{} cannot be read: {error}.", compiled.value.name))
+    ) {
+        return Some(format!("{} cannot be read: {error}.", compiled.value.name));
+    }
+    automation
+        .actions
+        .iter()
+        .zip(1_usize..)
+        .find_map(|(action, number)| match action {
+            ActionDef::Click { at, .. } => match at.to_at() {
+                Ok(ClickAt::Picture(wanted)) => check_picture(stores, &wanted, number).err(),
+                Ok(ClickAt::Spot(_)) | Err(_) => None,
+            },
+            _ => None,
+        })
 }
 
 /// Every automation, with what stops each one from running.
@@ -116,7 +128,7 @@ pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
         .iter()
         .map(|automation| AutomationSummary {
             automation: automation.clone(),
-            problem: problem(automation, &apps, &stores.apps),
+            problem: problem(automation, &apps, stores),
         })
         .collect())
 }
@@ -149,9 +161,11 @@ pub(crate) fn save(
                     *keys = chord.to_string();
                 }
             },
+            // A click holds only names and numbers the setup app chose.
+            ActionDef::Click { .. } => {},
         }
     }
-    if let Some(problem) = problem(&draft, &apps(stores)?, &stores.apps) {
+    if let Some(problem) = problem(&draft, &apps(stores)?, stores) {
         return Err(problem);
     }
     let mut file = load(stores)?;
@@ -188,7 +202,39 @@ pub(crate) fn save(
         .automations
         .save(&file)
         .map_err(|error| error.to_string())?;
+    prune_pictures(stores, &file);
     Ok(id)
+}
+
+/// Checks that the picture a click on `wanted`, action `number`, clicks on
+/// is kept and readable, fits the area it is looked for in, and holds the
+/// place it presses, as the runtime checks before it clicks.
+fn check_picture(stores: &Stores, wanted: &ClickPicture, number: usize) -> Result<(), String> {
+    let size = stores
+        .automations
+        .picture(&wanted.image)
+        .ok()
+        .and_then(|bytes| Image::decode_png_masked(&bytes).ok())
+        .map(|(picture, _mask)| picture.size())
+        .ok_or_else(|| {
+            format!("The picture action {number} clicks on is gone. Set up its target again.")
+        })?;
+    wanted
+        .fits_picture(size.width, size.height)
+        .map_err(|misfit| {
+            format!("Action {number}'s target cannot be used: {misfit}. Set up its target again.")
+        })
+}
+
+/// Removes the click pictures no automation in `file` names, such as those
+/// taken for a target the user did not keep.
+fn prune_pictures(stores: &Stores, file: &AutomationsFile) {
+    // A picture left behind costs a little disk until the next save.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the save worked; an unused picture that stays is harmless"
+    )]
+    let _ = stores.automations.prune_pictures(file);
 }
 
 /// Turns the automation `id` on or off. One that cannot run as saved stays
@@ -206,7 +252,7 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
     )]
     {
         let automation = &file.automations[position];
-        if enabled && let Some(problem) = problem(automation, &apps(stores)?, &stores.apps) {
+        if enabled && let Some(problem) = problem(automation, &apps(stores)?, stores) {
             return Err(format!(
                 "{} cannot run until it is fixed. {problem}",
                 automation.name
@@ -227,7 +273,9 @@ pub(crate) fn delete(stores: &Stores, id: &str) -> Result<(), String> {
     stores
         .automations
         .save(&file)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    prune_pictures(stores, &file);
+    Ok(())
 }
 
 /// Fails, naming the automations that watch the value `value` of the
@@ -243,7 +291,7 @@ pub(crate) fn check_unused(
 }
 
 /// Fails, naming the automations that watch any value of the application
-/// `app`, unless none does. `name` is the application's name.
+/// `app` or click in it, unless none does. `name` is the application's name.
 pub(crate) fn check_app_unused(stores: &Stores, app: &str, name: &str) -> Result<(), String> {
     let file = load(stores)?;
     unused(
@@ -251,6 +299,14 @@ pub(crate) fn check_app_unused(stores: &Stores, app: &str, name: &str) -> Result
             .iter()
             .filter(|automation| automation.when.app == app),
         &format!("a value of {name}"),
+    )?;
+    unused(
+        file.automations.iter().filter(|automation| {
+            automation.actions.iter().any(
+                |action| matches!(action, ActionDef::Click { app: target, .. } if target == app),
+            )
+        }),
+        &format!("{name} as the application it clicks in"),
     )
 }
 
@@ -281,10 +337,13 @@ mod tests {
         SizeDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
-        ActionDef, ComparisonDef, FORMAT as AUTOMATIONS_FORMAT, MediaCommandDef, TargetDef, WhenDef,
+        ActionDef, ClickAtDef, ClickButtonDef, ComparisonDef, FORMAT as AUTOMATIONS_FORMAT,
+        MediaCommandDef, PointDef, TargetDef, WhenDef,
     };
+    use appytappy_config::click::InvalidClick;
     use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
     use appytappy_config::window_match::WindowFacts;
+    use appytappy_sources::screen::Size;
 
     use super::*;
 
@@ -693,6 +752,150 @@ mod tests {
         );
         assert!(list(&stores).is_err());
         assert!(save(&stores, None, draft("New")).is_err());
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    /// A draft that clicks on the click picture `image` in `example`, whose
+    /// anti-cheat is set to none so it can click.
+    fn clicking(stores: &Stores, name: &str, image: &str) -> AutomationDef {
+        let mut app = stores.app_file("example").expect("saved");
+        app.anti_cheat = AntiCheatDef::None;
+        stores.apps.save("example", &app, &[]).expect("saves");
+        let mut clicking = draft(name);
+        clicking.undo = false;
+        clicking.actions = vec![ActionDef::Click {
+            app: "example".to_owned(),
+            button: ClickButtonDef::Left,
+            return_focus: true,
+            at: ClickAtDef::Picture {
+                image: image.to_owned(),
+                window_size: SizeDef {
+                    width: 100,
+                    height: 50,
+                },
+                search: RegionDef {
+                    x: 0,
+                    y: 0,
+                    width: 20,
+                    height: 20,
+                },
+                press: PointDef { x: 1, y: 1 },
+                tolerance: 20,
+            },
+        }];
+        clicking
+    }
+
+    /// A 4 by 4 picture's PNG bytes, every pixel `shade`.
+    fn png(shade: u8) -> Vec<u8> {
+        let size = Size {
+            width: 4,
+            height: 4,
+        };
+        Image::new(size, [shade, shade, shade, 255].repeat(16))
+            .expect("fits")
+            .encode_png()
+            .expect("encodes")
+    }
+
+    #[test]
+    fn clicks_keep_their_pictures_and_the_rest_go() {
+        let (stores, folder) = stores("click-pictures");
+        assert_eq!(
+            save(&stores, None, clicking(&stores, "Click", "click-1.png")),
+            Err("The picture action 1 clicks on is gone. Set up its target again.".to_owned())
+        );
+        let kept = stores.automations.add_picture(&png(1)).expect("adds");
+        let dropped = stores.automations.add_picture(&png(2)).expect("adds");
+        let id = save(&stores, None, clicking(&stores, "Click", &kept)).expect("saves");
+        assert!(stores.automations.picture(&kept).is_ok());
+        assert!(stores.automations.picture(&dropped).is_err(), "pruned");
+        let another = stores.automations.add_picture(&png(3)).expect("adds");
+        delete(&stores, &id).expect("deletes");
+        assert!(stores.automations.picture(&kept).is_err(), "pruned");
+        assert!(stores.automations.picture(&another).is_err(), "pruned");
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_click_s_picture_fits_its_area_and_holds_its_press() {
+        let (stores, folder) = stores("click-fit");
+        let picture = stores.automations.add_picture(&png(5)).expect("adds");
+        let unreadable = stores.automations.add_picture(b"not a png").expect("adds");
+        assert_eq!(
+            save(&stores, None, clicking(&stores, "Unreadable", &unreadable)),
+            Err("The picture action 1 clicks on is gone. Set up its target again.".to_owned())
+        );
+        let mut small = clicking(&stores, "Small", &picture);
+        let mut off = clicking(&stores, "Off", &picture);
+        if let [
+            ActionDef::Click {
+                at: ClickAtDef::Picture { search, .. },
+                ..
+            },
+        ] = small.actions.as_mut_slice()
+        {
+            search.width = 3;
+        }
+        if let [
+            ActionDef::Click {
+                at: ClickAtDef::Picture { press, .. },
+                ..
+            },
+        ] = off.actions.as_mut_slice()
+        {
+            press.x = 4;
+        }
+        assert_eq!(
+            save(&stores, None, small),
+            Err(format!(
+                "Action 1's target cannot be used: {}. Set up its target again.",
+                InvalidClick::LargePicture
+            ))
+        );
+        assert_eq!(
+            save(&stores, None, off),
+            Err(format!(
+                "Action 1's target cannot be used: {}. Set up its target again.",
+                InvalidClick::PressOutside
+            ))
+        );
+        // A picture removed outside the app shows on the list, and the
+        // automation cannot be turned back on, as the runtime would refuse it.
+        let mut kept = clicking(&stores, "Kept", &picture);
+        kept.enabled = false;
+        let id = save(&stores, None, kept).expect("saves");
+        fs::remove_file(stores.automations.pictures().join(&picture)).expect("removes");
+        let gone = "The picture action 1 clicks on is gone. Set up its target again.".to_owned();
+        let listed = list(&stores).expect("lists");
+        assert_eq!(
+            listed.first().and_then(|summary| summary.problem.clone()),
+            Some(gone.clone())
+        );
+        assert_eq!(
+            set_enabled(&stores, &id, true),
+            Err(format!("Kept cannot run until it is fixed. {gone}"))
+        );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn an_application_clicked_in_names_its_automations() {
+        let (stores, folder) = stores("clicked-in");
+        let picture = stores.automations.add_picture(&png(4)).expect("adds");
+        let mut clicks = clicking(&stores, "Click", &picture);
+        clicks.when.app = "other".to_owned();
+        let mut file = load(&stores).expect("loads");
+        file.automations.push(clicks);
+        stores.automations.save(&file).expect("saves");
+        assert_eq!(
+            check_app_unused(&stores, "example", "Example App"),
+            Err(
+                "Click uses Example App as the application it clicks in. Change or delete it \
+                 first."
+                    .to_owned()
+            )
+        );
         fs::remove_dir_all(folder).expect("clean up");
     }
 }

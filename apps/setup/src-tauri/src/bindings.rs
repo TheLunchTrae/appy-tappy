@@ -31,7 +31,8 @@ use appytappy_config::action::{
 };
 use appytappy_config::app_file::{AntiCheatDef, MAX_STATES, OverlayModeDef, WindowDef};
 use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, MAX_COOLDOWN_MS, MediaCommandDef, WhenDef,
+    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, CornerDef, MAX_COOLDOWN_MS,
+    MediaCommandDef, WhenDef,
 };
 use appytappy_config::settings_file::{
     FASTEST_READ_MS, MAX_TRACE_FILE_MB, MAX_TRACE_FILES, SLOWEST_READ_MS, SettingsFile,
@@ -47,7 +48,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayView;
 use crate::owner::{
-    AppSummary, FixSpec, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, ClickPictureView, FixSpec, FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec,
+    SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -114,8 +116,11 @@ fn declarations() -> String {
     found.visit::<AutomationDef>();
     found.visit::<AutomationSummary>();
     found.visit::<CheckSpec>();
+    found.visit::<ClickAtDef>();
+    found.visit::<ClickPictureView>();
     found.visit::<ColorSpec>();
     found.visit::<FixSpec>();
+    found.visit::<FoundClick>();
     found.visit::<Live>();
     found.visit::<OverlayModeDef>();
     found.visit::<OverlayView>();
@@ -191,6 +196,16 @@ fn sample_actions() -> Vec<ActionDef> {
         },
         ActionDef::Sound {
             file: "C:\\Ding.wav".to_owned(),
+        },
+        ActionDef::Click {
+            app: "app".to_owned(),
+            button: ClickButtonDef::Left,
+            return_focus: true,
+            at: ClickAtDef::Spot {
+                corner: CornerDef::TopLeft,
+                x: 0,
+                y: 0,
+            },
         },
     ]);
     actions

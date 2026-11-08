@@ -63,6 +63,7 @@ name = "appytappy-actions"
 version = "0.1.0"
 dependencies = [
  "appytappy-config",
+ "appytappy-sources",
  "windows",
  "windows-future",
 ]

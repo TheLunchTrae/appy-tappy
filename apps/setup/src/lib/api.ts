@@ -10,8 +10,11 @@ import type {
   AutomationDef,
   AutomationSummary,
   CheckSpec,
+  ClickAtDef,
+  ClickPictureView,
   ColorSpec,
   FixSpec,
+  FoundClick,
   Live,
   OverlayModeDef,
   OverlayView,
@@ -142,6 +145,28 @@ export async function stopWatching(watch: number): Promise<void> {
 /** The running windows `window` takes, the best fit first. */
 export async function matchWindows(window: WindowDef): Promise<readonly WindowFit[]> {
   return invoke<readonly WindowFit[]>('match_windows', { window });
+}
+
+/**
+ * Keeps `region` of screenshot `index` as a new click picture, comparing only what `selection` picks when it is given.
+ * One that no saved automation names goes the next time automations are saved.
+ */
+export async function addClickPicture(
+  index: number,
+  region: RegionSpec,
+  selection: SelectionSpec | null,
+): Promise<ClickPictureView> {
+  return invoke<ClickPictureView>('add_click_picture', { screenshot: index, region, selection });
+}
+
+/** The click picture `image`, at most `maxWidth` wide. */
+export async function clickPicture(image: string, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('click_picture', { image, maxWidth }));
+}
+
+/** Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere. */
+export async function findClick(at: ClickAtDef): Promise<FoundClick> {
+  return invoke<FoundClick>('find_click', { at });
 }
 
 export async function listApps(): Promise<readonly AppSummary[]> {
