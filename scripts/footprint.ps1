@@ -33,6 +33,7 @@ $Settle = 5
 $Sample = 30
 
 $ProbeTitle = 'AppyTappy footprint probe'
+$ProbeExecutable = 'appytappy-footprint-probe.exe'
 $Failures = New-Object System.Collections.Generic.List[string]
 $Rows = New-Object System.Collections.Generic.List[string]
 
@@ -65,18 +66,18 @@ $appFolder = Join-Path $roaming 'AppyTappy\apps\probe'
 New-Item -ItemType Directory -Force -Path $appFolder, $local | Out-Null
 $log = Join-Path $local 'AppyTappy\logs\runtime.log'
 
-# Three values in the probe window: two color checks and a bar fill.
+# Three values in the probe's window: two color checks and a bar fill.
 $region = { param($x, $y, $width, $height) @{ windowSize = @{ width = 400; height = 300 }; region = @{ x = $x; y = $y; width = $width; height = $height } } }
 $light = & $region 10 10 120 40
 $light.check = @{ kind = 'color'; color = @{ red = 192; green = 192; blue = 192 }; tolerance = 8 }
 $green = & $region 140 10 120 40
 $green.check = @{ kind = 'color'; color = @{ red = 0; green = 255; blue = 0 }; tolerance = 0 }
 $fill = & $region 10 60 250 20
-$fill.check = @{ kind = 'barFill'; filled = @{ red = 255; green = 0; blue = 0 }; empty = @{ red = 0; green = 0; blue = 255 } }
+$fill.check = @{ kind = 'barFill'; filled = @{ red = 192; green = 192; blue = 192 }; empty = @{ red = 105; green = 105; blue = 105 } }
 $app = @{
     format = 1
     name = 'Footprint probe'
-    window = @{ title = $ProbeTitle; class = '*'; executable = 'powershell.exe'; mustMatch = @{ title = $true; class = $false }; fallback = 'none' }
+    window = @{ title = $ProbeTitle; class = '*'; executable = $ProbeExecutable; mustMatch = @{ title = $true; class = $false }; fallback = 'none' }
     antiCheat = 'none'
     values = @(
         @{ id = 'light'; name = 'Light'; screen = $light },
@@ -86,9 +87,10 @@ $app = @{
     references = @()
 }
 $nothing = @(@{ kind = 'volume'; percent = 50; app = 'AppyTappyFootprintNoSuchProgram.exe' })
-# Silver fills the light region on every other frame, so `light` fires once
-# and its hour-long cooldown keeps it from firing again; the other two never
-# hold.
+# The probe alternates silver and dim gray, so `light` fires on the first
+# silver frame and its hour-long cooldown keeps it from firing again, and
+# the bar reads full or empty, never above 1000. The green check never
+# holds.
 $automations = @{
     format = 1
     automations = @(
@@ -101,27 +103,39 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [IO.File]::WriteAllText((Join-Path $appFolder 'app.json'), (ConvertTo-Json $app -Depth 10), $utf8)
 [IO.File]::WriteAllText((Join-Path $roaming 'AppyTappy\automations.json'), (ConvertTo-Json $automations -Depth 10), $utf8)
 
-# The probe: a borderless 400 by 300 window, DPI aware so its size is in
-# physical pixels at any display scale, that repaints every 16 ms.
-$probeScript = Join-Path $scratch 'probe.ps1'
-[IO.File]::WriteAllText($probeScript, @"
-Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-Add-Type -Namespace Footprint -Name Dpi -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
-[void][Footprint.Dpi]::SetProcessDPIAware()
-`$form = New-Object System.Windows.Forms.Form
-`$form.Text = '$ProbeTitle'
-`$form.FormBorderStyle = 'None'
-`$form.StartPosition = 'Manual'
-`$form.Location = New-Object System.Drawing.Point(40, 40)
-`$form.ClientSize = New-Object System.Drawing.Size(400, 300)
-`$colors = @([System.Drawing.Color]::Silver, [System.Drawing.Color]::DimGray)
-`$script:frame = 0
-`$timer = New-Object System.Windows.Forms.Timer
-`$timer.Interval = 16
-`$timer.add_Tick({ `$script:frame = 1 - `$script:frame; `$form.BackColor = `$colors[`$script:frame] })
-`$timer.Start()
-[System.Windows.Forms.Application]::Run(`$form)
-"@, $utf8)
+# The probe: a program of its own, so no other process shares its
+# executable's name, that shows a borderless 400 by 300 window and repaints
+# it every 16 ms. It is DPI aware, so its size is in physical pixels at any
+# display scale.
+$probeExe = Join-Path $scratch $ProbeExecutable
+Add-Type -OutputType WindowsApplication -OutputAssembly $probeExe -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+public static class Probe {
+    [DllImport("user32.dll")]
+    static extern bool SetProcessDPIAware();
+
+    [System.STAThread]
+    public static void Main(string[] arguments) {
+        SetProcessDPIAware();
+        var form = new Form {
+            Text = arguments[0],
+            FormBorderStyle = FormBorderStyle.None,
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(40, 40),
+            ClientSize = new Size(400, 300),
+        };
+        var colors = new[] { Color.Silver, Color.DimGray };
+        var frame = 0;
+        var timer = new Timer { Interval = 16 };
+        timer.Tick += (sender, tick) => { frame = 1 - frame; form.BackColor = colors[frame]; };
+        timer.Start();
+        Application.Run(form);
+    }
+}
+'@
 
 function Wait-Log([string]$Line, [int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
@@ -166,7 +180,7 @@ try {
 
     Measure-Phase 'Idle' $IdleMemoryLimit $IdleCpuLimit
 
-    $probe = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $probeScript -PassThru
+    $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
     Wait-Log 'attached' 30
     Wait-Log 'Light: runs' 30
     Measure-Phase 'Active' $ActiveMemoryLimit $ActiveCpuLimit
