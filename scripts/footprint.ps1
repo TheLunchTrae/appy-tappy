@@ -163,6 +163,101 @@ function Get-ThreadStarts {
     ($counts.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name) $($_.Value)" }) -join ', '
 }
 
+# The runtime's handles counted by object type, such as Event or Section,
+# read from the system's handle list. A type is named by copying one of its
+# handles into this script and asking for its type; a type whose handle
+# cannot be copied shows by its number.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+
+public static class HandleTypes {
+    [DllImport("ntdll.dll")]
+    static extern int NtQuerySystemInformation(int kind, IntPtr buffer, int size, out int needed);
+    [DllImport("ntdll.dll")]
+    static extern int NtQueryObject(IntPtr handle, int kind, IntPtr buffer, int size, out int needed);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr OpenProcess(uint access, bool inherit, int id);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")]
+    static extern bool DuplicateHandle(IntPtr source, IntPtr handle, IntPtr target, out IntPtr copy, uint access, bool inherit, uint options);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+
+    static readonly Dictionary<int, string> names = new Dictionary<int, string>();
+
+    // SystemExtendedHandleInformation: a count, then one 40-byte entry per
+    // handle with its process ID at 8, value at 16 and type at 30.
+    public static string Of(int process) {
+        int size = 1 << 20;
+        IntPtr buffer = IntPtr.Zero;
+        try {
+            while (true) {
+                buffer = Marshal.AllocHGlobal(size);
+                int needed;
+                int status = NtQuerySystemInformation(64, buffer, size, out needed);
+                if (status == 0) { break; }
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+                // STATUS_INFO_LENGTH_MISMATCH
+                if (status != unchecked((int)0xC0000004)) { return "unreadable"; }
+                size = Math.Max(size * 2, needed + (1 << 16));
+            }
+            long count = Marshal.ReadInt64(buffer);
+            var counts = new Dictionary<int, int>();
+            var samples = new Dictionary<int, long>();
+            for (long i = 0; i < count; i++) {
+                IntPtr entry = IntPtr.Add(buffer, (int)(16 + i * 40));
+                if (Marshal.ReadInt64(entry, 8) != process) { continue; }
+                int kind = Marshal.ReadInt16(entry, 30);
+                int seen;
+                counts.TryGetValue(kind, out seen);
+                counts[kind] = seen + 1;
+                if (!samples.ContainsKey(kind)) { samples[kind] = Marshal.ReadInt64(entry, 16); }
+            }
+            IntPtr owner = OpenProcess(0x0040, false, process); // PROCESS_DUP_HANDLE
+            try {
+                return string.Join(", ", counts
+                    .Select(pair => new { Name = Name(owner, pair.Key, samples[pair.Key]), Count = pair.Value })
+                    .OrderBy(pair => pair.Name)
+                    .Select(pair => pair.Name + " " + pair.Count));
+            }
+            finally { if (owner != IntPtr.Zero) { CloseHandle(owner); } }
+        }
+        finally { if (buffer != IntPtr.Zero) { Marshal.FreeHGlobal(buffer); } }
+    }
+
+    static string Name(IntPtr owner, int kind, long sample) {
+        string name;
+        if (names.TryGetValue(kind, out name)) { return name; }
+        name = "type " + kind;
+        IntPtr copy;
+        // DUPLICATE_SAME_ACCESS
+        if (owner != IntPtr.Zero && DuplicateHandle(owner, new IntPtr(sample), GetCurrentProcess(), out copy, 0, false, 2)) {
+            IntPtr buffer = Marshal.AllocHGlobal(4096);
+            try {
+                int needed;
+                // ObjectTypeInformation starts with the type's name.
+                if (NtQueryObject(copy, 2, buffer, 4096, out needed) == 0) {
+                    int length = Marshal.ReadInt16(buffer);
+                    name = Marshal.PtrToStringUni(Marshal.ReadIntPtr(buffer, 8), length / 2);
+                }
+            }
+            finally { Marshal.FreeHGlobal(buffer); CloseHandle(copy); }
+        }
+        names[kind] = name;
+        return name;
+    }
+}
+'@
+
+function Get-HandleTypes {
+    [HandleTypes]::Of($script:process.Id)
+}
+
 # The runtime's thread and handle counts, and where its threads started.
 function Get-Threads {
     $script:process.Refresh()
@@ -362,6 +457,7 @@ public static class Probe {
     Wait-Log 'automations run for Footprint probe' 10
 
     Measure-Phase 'Idle' $IdleSample $IdleMemoryLimit $IdleCpuLimit
+    $script:details += "Handles at idle: $(Get-HandleTypes)"
 
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
     $null = $probe.Handle
@@ -429,6 +525,7 @@ public static class Probe {
     Wait-Log '): detached' 10 3
 
     $script:details += "Just after the third detach: $(Get-Threads)"
+    $script:details += "Handles just after the third detach: $(Get-HandleTypes)"
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
     Add-Measure 'Idle after threads' "$($script:threads['Idle after']), $($script:threads['Idle']) at idle"
     Add-Measure 'Idle after handles' "$($script:handles['Idle after']), $($script:handles['Idle']) at idle"
@@ -454,6 +551,7 @@ public static class Probe {
     }
     Start-Sleep -Seconds $LongIdle
     $script:details += "$LongIdle s after detach $(3 + $MoreCycles): $(Get-Threads)"
+    $script:details += "Handles then: $(Get-HandleTypes)"
 }
 catch {
     $Failures.Add($_.Exception.Message)
