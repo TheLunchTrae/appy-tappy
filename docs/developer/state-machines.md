@@ -526,7 +526,7 @@ Open problems:
 
 ### Text reader
 
-The text reader (`apps/setup/src-tauri/src/ocr.rs`) runs on its own thread. It
+The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
 loads its model on the first reading it gets, then reads each reading and sends
 the text back with the recording's ID and the reading's index. The owner drops
 text for a recording that is gone. If the thread has stopped, the owner marks
