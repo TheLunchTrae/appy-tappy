@@ -43,8 +43,8 @@ days, without publishing.
   does not exist, or that matches a file only in another case, fails the
   build, and so does a link the build cannot read, such as one with a title in
   single quotes. Links in code stay as written.
-- Each page other than the sidebar ends with a link to the file in `wiki/` to
-  edit.
+- Each page other than the sidebar and the footer ends with a link to the file
+  in `wiki/` to edit.
 
 Write links between pages as relative links to the `.md` files, as the rest of
 `wiki/` does, so they work in the repository and in the wiki.

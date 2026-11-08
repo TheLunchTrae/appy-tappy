@@ -46,6 +46,8 @@ REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^<>\n]*>|
 # What is left of a link that the patterns above do not read, including an
 # HTML link to a relative address, which the build does not rewrite.
 UNREAD_LINK = re.compile(r"\]\(|^ {0,3}\[(?!\^)[^\]\n]+\]:|href=[\"']?(?![\"']?(?:#|[A-Za-z][A-Za-z0-9+.-]*:))", re.M)
+# A full, collapsed, or shortcut reference link: [text][label], [text][], or [text].
+REFERENCE = re.compile(r"(?<![\\!\]])\[((?:[^\[\]]|\[[^\[\]]*\])+)\](?:\[([^\[\]]*)\])?(?![(:])")
 HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
 INDENTED_CODE = re.compile(r"^(?: {4}|\t)(?![ \t]*(?:[-*+]|\d+[.)])[ \t]).*$", re.M)
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -142,21 +144,34 @@ def check_sidebar(root: Path, pages: list[Page], by_source: dict, repo: str, ref
 
 
 def shown_links(path: Path) -> list[re.Match]:
-    """The inline links and link definitions in a file that a reader sees.
+    """The inline links, and the link definitions a reference uses, that a reader sees.
 
     Links in code, in an indented code block, or in an HTML comment are not
-    shown, so they do not count. A line indented four spaces is taken as code
-    unless it is a list item, so nested lists still count.
+    shown, so they do not count, and neither does a definition that no
+    reference uses. A line indented four spaces is taken as code unless it is a
+    list item, so nested lists still count.
     """
     text = "".join(chunk for code, chunk in chunks(path.read_text(encoding="utf-8")) if not code)
     text = HTML_COMMENT.sub("", text)
     text = INDENTED_CODE.sub("", text)
     matches: list[re.Match] = []
+    definitions: list[re.Match] = []
+    used: set[str] = set()
     for paragraph in PARAGRAPH_BREAK.split(text):
         paragraph = CODE_SPAN.sub(lambda match: " " * len(match.group(0)), paragraph)
         matches += INLINE_LINK.finditer(paragraph)
-        matches += REFERENCE_DEFINITION.finditer(paragraph)
-    return matches
+        found = list(REFERENCE_DEFINITION.finditer(paragraph))
+        definitions += found
+        for match in found:
+            paragraph = paragraph.replace(match.group(0), "")
+        for match in REFERENCE.finditer(paragraph):
+            used.add(label(match.group(2) or match.group(1)))
+    return matches + [match for match in definitions if label(match.group(0)[: match.group(0).index("]:")]) in used]
+
+
+def label(text: str) -> str:
+    """A reference label as Markdown matches it: case and runs of space ignored."""
+    return " ".join(text.strip().lstrip(" [").split()).casefold()
 
 
 def outside_fences(text: str) -> list[str]:

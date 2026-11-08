@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import wiki
@@ -166,6 +167,34 @@ class WikiBuildTest(unittest.TestCase):
         self.assertIn("    - [Extra](Extra)\n", sidebar)
         self.assertIn("[more]: More\n", sidebar)
         self.assertIn("- [Most](<Most>)\n", sidebar)
+
+    def test_a_link_definition_no_reference_uses_does_not_count(self) -> None:
+        self.write("wiki/user/Extra.md", "# Extra\n")
+        with open(self.root / "wiki/_Sidebar.md", "a", encoding="utf-8") as sidebar:
+            sidebar.write("\n[extra]: user/Extra.md\n")
+        with self.assertRaisesRegex(wiki.BuildError, "does not link wiki/user/Extra.md"):
+            self.build()
+        with open(self.root / "wiki/_Sidebar.md", "a", encoding="utf-8") as sidebar:
+            sidebar.write("\nSee also [Extra].\n")
+        self.build()
+
+    def test_a_failed_build_writes_nothing(self) -> None:
+        self.write("wiki/user/Extra.md", "# Extra\n")
+        with self.assertRaises(wiki.BuildError):
+            self.build()
+        self.assertFalse(self.output.exists())
+
+    def test_a_link_in_the_wrong_case_fails_on_a_system_that_ignores_case(self) -> None:
+        self.write("wiki/user/Troubleshooting.md", "# Troubleshooting\n\n![shot](images/Window.png)\n")
+        real = wiki.Path.exists
+
+        def exists_ignoring_case(path: Path, **kwargs) -> bool:
+            return real(path, **kwargs) or real(path.with_name(path.name.lower()), **kwargs)
+
+        with unittest.mock.patch.object(wiki.Path, "exists", exists_ignoring_case):
+            self.assertTrue((self.root / "wiki/user/images/Window.png").exists())
+            with self.assertRaisesRegex(wiki.BuildError, "names no file in the repository"):
+                self.build()
 
     def test_a_link_in_the_wrong_case_fails_the_build(self) -> None:
         self.write("wiki/user/Troubleshooting.md", "# Troubleshooting\n\nSee [it](install.md).\n")
