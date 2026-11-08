@@ -334,9 +334,11 @@ UPDATE_BINDINGS=1 cargo test -p appytappy-setup bindings
 ```
 
 Every generated type is readonly all the way down. A `u64`, such as a window
-handle or a time, reaches the page as a `number` through
-`#[ts(type = "number")]`, and the test fails when a field would become a
-`bigint`, which JSON does not carry. A new command still needs its call in
+handle or a time, reaches the page as a `number`, and the test fails when a
+field would become a `bigint`, which JSON does not carry. The field says so
+with `#[cfg_attr(test, ts(type = "number"))]` in the setup app, or
+`#[cfg_attr(feature = "ts", ts(type = "number"))]` in `appytappy-config`,
+because only those builds derive the types. A new command still needs its call in
 `api.ts`, and a type that it takes or answers and that no other one reaches
 needs a line in the test's list. The page imports the types from
 `bindings.ts` and calls the commands through `api.ts`.

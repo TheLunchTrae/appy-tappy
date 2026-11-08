@@ -23,7 +23,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::iter;
 use std::path::PathBuf;
 
 use appytappy_config::action::{
@@ -219,17 +218,29 @@ fn action_facts() -> serde_json::Value {
     json!({ "injectsInput": injects_input, "undoable": undoable })
 }
 
-/// Every trace category, in the order the page lists them. A category added
-/// to [`TraceCategory`] stops the match compiling until it has a place.
-fn trace_categories() -> Vec<TraceCategory> {
-    let after = |category: &TraceCategory| match category {
-        TraceCategory::Readings => Some(TraceCategory::Changes),
-        TraceCategory::Changes => Some(TraceCategory::Rules),
-        TraceCategory::Rules => Some(TraceCategory::Actions),
-        TraceCategory::Actions => Some(TraceCategory::Lifecycle),
-        TraceCategory::Lifecycle => None,
-    };
-    iter::successors(Some(TraceCategory::Readings), after).collect()
+/// Every trace category, in the order the page lists them. The list is
+/// checked against the variants the `TS` derive reads from
+/// [`TraceCategory`] itself, so a category added there and left out here
+/// fails the bindings test.
+fn trace_categories() -> [TraceCategory; 5] {
+    let all = [
+        TraceCategory::Readings,
+        TraceCategory::Changes,
+        TraceCategory::Rules,
+        TraceCategory::Actions,
+        TraceCategory::Lifecycle,
+    ];
+    let listed: BTreeSet<String> = all.iter().map(spelled).collect();
+    let declared: BTreeSet<String> = TraceCategory::inline(&Config::new())
+        .split(" | ")
+        .map(|variant| variant.trim_matches('"').to_owned())
+        .collect();
+    assert_eq!(
+        listed, declared,
+        "the trace categories in bindings.rs differ from TraceCategory's variants"
+    );
+    assert_eq!(listed.len(), all.len(), "a trace category is listed twice");
+    all
 }
 
 /// A path of exactly `bytes` bytes, ending in `end`, with two two-byte
@@ -279,6 +290,8 @@ fn parse_cases() -> serde_json::Value {
         "\u{a0}C:\\Timer.exe\u{3000}",
         "https://example.com/a?b=c",
         "HTTP://example.com",
+        "http://x",
+        r"C:\",
         "https://a\u{feff}b",
         "",
         "   ",
@@ -309,7 +322,9 @@ fn parse_cases() -> serde_json::Value {
     let mut sound = strings(&[
         r"C:\Sounds\Ding.wav",
         " c:/sounds/ding.WAV ",
+        r"C:\.wav",
         "",
+        "   ",
         ".wav",
         "Ding.wav",
         r"C:\Sounds\Ding.mp3",
@@ -354,6 +369,15 @@ fn parse_cases() -> serde_json::Value {
         "Bac\u{212a}space",
         "\u{17f}hift+M",
         "\u{feff}F9",
+        "M+",
+        "+M",
+        "Ctrl++M",
+        "F",
+        "F9x",
+        "F1+F2",
+        "Up",
+        "ArrowUp",
+        "Control+M",
     ]);
     let mut app = strings(&[
         "Player.exe",
@@ -463,7 +487,7 @@ fn bindings_match_the_rust_types() {
     let rendered = render();
     assert!(
         !rendered.contains("bigint"),
-        "a u64 or i64 reaches the page as a bigint, which JSON does not carry; give its field #[ts(type = \"number\")]"
+        "a u64 or i64 reaches the page as a bigint, which JSON does not carry; give its field #[cfg_attr(test, ts(type = \"number\"))], or #[cfg_attr(feature = \"ts\", ts(type = \"number\"))] in appytappy-config"
     );
     if env::var_os("UPDATE_BINDINGS").is_some() {
         fs::write(path(), &rendered).expect("bindings.ts can be written");
