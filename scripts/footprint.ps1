@@ -250,8 +250,8 @@ public static class Probe {
     # Settle: `light` turns true in the probe's last repaint, while the
     # capture asks for a frame only every half second. If Windows drops that
     # repaint rather than delivering it once the interval passes, it is never
-    # read. The check first makes sure the repaint comes after the runtime
-    # attached and read for a while, or it would test nothing.
+    # read. The check first makes sure the repaint comes at least two seconds
+    # after the runtime attached, or it would test nothing.
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"", 'settle' -PassThru
     $null = $probe.Handle
     Wait-Log '): attached' 30 3
