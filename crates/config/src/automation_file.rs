@@ -25,7 +25,8 @@ use crate::action::{
     VolumeTarget,
 };
 use crate::anti_cheat::{AntiCheatClass, allows_input};
-use crate::app_file::{AppFile, ValueKind, id_from_name};
+use crate::app_file::{AppFile, RegionDef, SizeDef, ValueKind, id_from_name};
+use crate::click::{Area, Click, ClickAt, ClickButton, ClickPicture, Corner, InvalidClick, Spot};
 use crate::rule::{Comparison, Condition, Rearm, Restore, Rule, RuleError, Trigger};
 use crate::signal::{NO_STATE, Number, SignalName, StateName, Value};
 
@@ -235,6 +236,153 @@ pub enum ActionDef {
         /// The file's full path; [`SoundFile::parse`] reads it.
         file: String,
     },
+    /// Clicks in a window of another saved application.
+    #[serde(rename_all = "camelCase")]
+    Click {
+        /// The ID of the saved application it clicks in.
+        app: String,
+        /// Which button, and how many times.
+        button: ClickButtonDef,
+        /// Whether the window that was in front gets the focus back after.
+        #[serde(default = "yes")]
+        return_focus: bool,
+        /// Where it clicks.
+        at: ClickAtDef,
+    },
+}
+
+/// The default of [`ActionDef::Click`]'s `return_focus`.
+const fn yes() -> bool {
+    true
+}
+
+/// [`ClickButton`] as the file spells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClickButtonDef {
+    /// [`ClickButton::Left`].
+    Left,
+    /// [`ClickButton::Right`].
+    Right,
+    /// [`ClickButton::Double`].
+    Double,
+}
+
+impl From<ClickButtonDef> for ClickButton {
+    fn from(button: ClickButtonDef) -> Self {
+        match button {
+            ClickButtonDef::Left => Self::Left,
+            ClickButtonDef::Right => Self::Right,
+            ClickButtonDef::Double => Self::Double,
+        }
+    }
+}
+
+/// [`Corner`] as the file spells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CornerDef {
+    /// [`Corner::TopLeft`].
+    TopLeft,
+    /// [`Corner::TopRight`].
+    TopRight,
+    /// [`Corner::BottomLeft`].
+    BottomLeft,
+    /// [`Corner::BottomRight`].
+    BottomRight,
+}
+
+impl From<CornerDef> for Corner {
+    fn from(corner: CornerDef) -> Self {
+        match corner {
+            CornerDef::TopLeft => Self::TopLeft,
+            CornerDef::TopRight => Self::TopRight,
+            CornerDef::BottomLeft => Self::BottomLeft,
+            CornerDef::BottomRight => Self::BottomRight,
+        }
+    }
+}
+
+/// A point in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointDef {
+    /// Across.
+    pub x: u32,
+    /// Down.
+    pub y: u32,
+}
+
+/// Where a click lands, as the file spells it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum ClickAtDef {
+    /// The same place every time, measured from a corner of the window.
+    #[serde(rename_all = "camelCase")]
+    Spot {
+        /// The corner it is measured from.
+        corner: CornerDef,
+        /// How far across from the corner, in pixels.
+        x: u32,
+        /// How far up or down from the corner, in pixels.
+        y: u32,
+    },
+    /// A place on a picture, wherever it is found in an area of the window.
+    #[serde(rename_all = "camelCase")]
+    Picture {
+        /// The picture's file name among the click pictures.
+        image: String,
+        /// The window's size when the picture was taken.
+        window_size: SizeDef,
+        /// The area of the window the picture is looked for in.
+        search: RegionDef,
+        /// Where on the picture to press, from its top-left corner.
+        press: PointDef,
+        /// How far, on average, each compared pixel's red, green, and blue
+        /// may be from the picture's.
+        tolerance: u8,
+    },
+}
+
+impl ClickAtDef {
+    /// Where this says to click.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidClick`] when a spot is too far from its corner, or a
+    /// picture's name or area is not usable.
+    pub fn to_at(&self) -> Result<ClickAt, InvalidClick> {
+        Ok(match self {
+            Self::Spot { corner, x, y } => ClickAt::Spot(Spot::new((*corner).into(), *x, *y)?),
+            Self::Picture {
+                image,
+                window_size,
+                search,
+                press,
+                tolerance,
+            } => ClickAt::Picture(ClickPicture::new(
+                image,
+                (window_size.width, window_size.height),
+                Area {
+                    x: search.x,
+                    y: search.y,
+                    width: search.width,
+                    height: search.height,
+                },
+                (press.x, press.y),
+                *tolerance,
+            )?),
+        })
+    }
+
+    /// The picture's file name, for a click on a picture.
+    #[must_use]
+    pub fn image(&self) -> Option<&str> {
+        match self {
+            Self::Spot { .. } => None,
+            Self::Picture { image, .. } => Some(image),
+        }
+    }
 }
 
 impl ActionDef {
@@ -245,7 +393,8 @@ impl ActionDef {
     /// Returns the problem as a sentence: an executable name that is empty or
     /// too long, a volume over 100, keys that do not read as a key press, a
     /// target to open that is not a full path or a web link, or a sound that
-    /// is not a full path to a WAV file.
+    /// is not a full path to a WAV file, or a click whose application ID,
+    /// spot, or picture cannot be used.
     pub fn to_action(&self) -> Result<Action, String> {
         let app = |name: &Option<String>| {
             name.as_deref()
@@ -276,6 +425,16 @@ impl ActionDef {
             Self::Sound { file } => {
                 Action::PlaySound(SoundFile::parse(file).map_err(|invalid| invalid.to_string())?)
             },
+            Self::Click {
+                app,
+                button,
+                return_focus,
+                at,
+            } => Action::Click(
+                at.to_at()
+                    .and_then(|at| Click::new(app, (*button).into(), *return_focus, at))
+                    .map_err(|invalid| invalid.to_string())?,
+            ),
         })
     }
 }
@@ -346,8 +505,9 @@ impl AutomationDef {
 
     /// Checks the automation against the saved applications: its value must
     /// exist, its target must be the kind of value the value's check reads,
-    /// and it may press keys only when its application's anti-cheat class is
-    /// none, as the policy in [`allows_input`] says. Both the setup app's
+    /// and it may press keys or click only when its application's anti-cheat
+    /// class is none, as the policy in [`allows_input`] says. A click also
+    /// needs the application it clicks in to be saved with the class none. Both the setup app's
     /// save and the runtime, each time it reads the saved files, check this,
     /// so an application whose class changes later stops running such
     /// automations.
@@ -359,7 +519,8 @@ impl AutomationDef {
         &self,
         apps: impl IntoIterator<Item = (&'file str, &'file AppFile)>,
     ) -> Result<(), String> {
-        let Some((_, app)) = apps.into_iter().find(|(id, _)| *id == self.when.app) else {
+        let apps: Vec<(&str, &AppFile)> = apps.into_iter().collect();
+        let Some(&(_, app)) = apps.iter().find(|(id, _)| *id == self.when.app) else {
             return Err("its application is no longer saved".to_owned());
         };
         let Some(value) = app.values.iter().find(|value| value.id == self.when.value) else {
@@ -367,17 +528,42 @@ impl AutomationDef {
         };
         // Read from the action itself, so a new kind of action that sends
         // input is covered as soon as `Action::injects_input` names it.
-        if self.actions.iter().any(|action| {
-            action
-                .to_action()
-                .is_ok_and(|action| action.injects_input())
-        }) && !allows_input(AntiCheatClass::from(app.anti_cheat))
+        let actions: Vec<Action> = self
+            .actions
+            .iter()
+            .filter_map(|action| action.to_action().ok())
+            .collect();
+        if actions.iter().any(Action::injects_input)
+            && !allows_input(AntiCheatClass::from(app.anti_cheat))
         {
+            let what = if actions
+                .iter()
+                .any(|action| matches!(action, Action::PressKeys(_)))
+            {
+                "presses keys"
+            } else {
+                "clicks"
+            };
             return Err(format!(
-                "it presses keys, which anti-cheat can treat as cheating, so it can run only once \
+                "it {what}, which anti-cheat can treat as cheating, so it can run only once \
                  {}'s anti-cheat is set to none",
                 app.name
             ));
+        }
+        for action in &actions {
+            let Action::Click(click) = action else {
+                continue;
+            };
+            let Some((_, target)) = apps.iter().find(|(id, _)| *id == click.app) else {
+                return Err("the application it clicks in is no longer saved".to_owned());
+            };
+            if !allows_input(AntiCheatClass::from(target.anti_cheat)) {
+                return Err(format!(
+                    "it clicks in {}, which anti-cheat can treat as cheating, so it can run \
+                     only once {}'s anti-cheat is set to none",
+                    target.name, target.name
+                ));
+            }
         }
         let check = &value.screen.check;
         match (check.reads(), &self.when.target) {
@@ -979,6 +1165,192 @@ mod tests {
             pause_music().check_against([("example", &app)]),
             Ok(()),
             "other actions run whatever the class"
+        );
+    }
+
+    fn click_on(app: &str) -> ActionDef {
+        ActionDef::Click {
+            app: app.to_owned(),
+            button: ClickButtonDef::Left,
+            return_focus: true,
+            at: ClickAtDef::Spot {
+                corner: CornerDef::TopRight,
+                x: 120,
+                y: 40,
+            },
+        }
+    }
+
+    #[test]
+    fn clicks_are_saved_as_written_and_read_as_actions() {
+        let spot = r#"{"kind":"click","app":"streaming_app","button":"left","returnFocus":true,"at":{"kind":"spot","corner":"topRight","x":120,"y":40}}"#;
+        let picture = r#"{"kind":"click","app":"streaming_app","button":"double","returnFocus":false,"at":{"kind":"picture","image":"click-1.png","windowSize":{"width":1920,"height":1080},"search":{"x":1500,"y":60,"width":180,"height":120},"press":{"x":40,"y":20},"tolerance":20}}"#;
+        let spot_action = Action::Click(
+            Click::new(
+                "streaming_app",
+                ClickButton::Left,
+                true,
+                ClickAt::Spot(Spot::new(Corner::TopRight, 120, 40).expect("valid")),
+            )
+            .expect("valid"),
+        );
+        let picture_action = Action::Click(
+            Click::new(
+                "streaming_app",
+                ClickButton::Double,
+                false,
+                ClickAt::Picture(
+                    ClickPicture::new(
+                        "click-1.png",
+                        (1920, 1080),
+                        Area {
+                            x: 1500,
+                            y: 60,
+                            width: 180,
+                            height: 120,
+                        },
+                        (40, 20),
+                        20,
+                    )
+                    .expect("valid"),
+                ),
+            )
+            .expect("valid"),
+        );
+        for (json, action, image) in [
+            (spot, spot_action, None),
+            (picture, picture_action, Some("click-1.png")),
+        ] {
+            let def: ActionDef = serde_json::from_str(json).expect("valid");
+            assert_eq!(def.to_action(), Ok(action), "{json}");
+            assert_eq!(serde_json::to_string(&def).expect("serializes"), json);
+            let ActionDef::Click { at, .. } = &def else {
+                panic!("a click");
+            };
+            assert_eq!(at.image(), image);
+        }
+        let right: ActionDef = serde_json::from_str(
+            r#"{"kind":"click","app":"a","button":"right","at":{"kind":"spot","corner":"bottomLeft","x":1,"y":2}}"#,
+        )
+        .expect("valid");
+        assert_eq!(
+            right,
+            ActionDef::Click {
+                app: "a".to_owned(),
+                button: ClickButtonDef::Right,
+                return_focus: true,
+                at: ClickAtDef::Spot {
+                    corner: CornerDef::BottomLeft,
+                    x: 1,
+                    y: 2
+                },
+            },
+            "the focus goes back unless the file says otherwise"
+        );
+        for (corner, read) in [
+            ("topLeft", Corner::TopLeft),
+            ("bottomRight", Corner::BottomRight),
+        ] {
+            let def: ActionDef = serde_json::from_str(&format!(
+                r#"{{"kind":"click","app":"a","button":"left","at":{{"kind":"spot","corner":"{corner}","x":1,"y":2}}}}"#
+            ))
+            .expect("valid");
+            let Ok(Action::Click(click)) = def.to_action() else {
+                panic!("a click");
+            };
+            assert_eq!(
+                click.at,
+                ClickAt::Spot(Spot::new(read, 1, 2).expect("valid"))
+            );
+        }
+    }
+
+    #[test]
+    fn a_click_that_cannot_be_used_says_why() {
+        let mut bad_app = click_on("Streaming App");
+        assert_eq!(
+            bad_app.to_action(),
+            Err("a click needs the application it clicks in".to_owned())
+        );
+        bad_app = click_on("streaming_app");
+        if let ActionDef::Click { at, .. } = &mut bad_app {
+            *at = ClickAtDef::Picture {
+                image: "click-1.png".to_owned(),
+                window_size: SizeDef {
+                    width: 100,
+                    height: 100,
+                },
+                search: RegionDef {
+                    x: 90,
+                    y: 0,
+                    width: 20,
+                    height: 10,
+                },
+                press: PointDef { x: 0, y: 0 },
+                tolerance: 20,
+            };
+        }
+        assert!(
+            bad_app
+                .to_action()
+                .is_err_and(|problem| problem.contains("inside the window"))
+        );
+    }
+
+    #[test]
+    fn a_click_needs_both_applications_without_anti_cheat() {
+        let mut click = pause_music();
+        click.actions = vec![click_on("streaming_app")];
+        let check = |click: &AutomationDef, watched: AntiCheatDef, target: Option<AntiCheatDef>| {
+            let mut app = app();
+            app.anti_cheat = watched;
+            let mut other = app.clone();
+            other.name = "Streaming App".to_owned();
+            if let Some(target) = target {
+                other.anti_cheat = target;
+                click.check_against([("example", &app), ("streaming_app", &other)])
+            } else {
+                click.check_against([("example", &app)])
+            }
+        };
+        assert_eq!(
+            check(&click, AntiCheatDef::None, Some(AntiCheatDef::None)),
+            Ok(())
+        );
+        assert_eq!(
+            check(&click, AntiCheatDef::UserMode, Some(AntiCheatDef::None)),
+            Err(
+                "it clicks, which anti-cheat can treat as cheating, so it can run only once \
+                 Example App's anti-cheat is set to none"
+                    .to_owned()
+            )
+        );
+        for class in [
+            AntiCheatDef::Unknown,
+            AntiCheatDef::UserMode,
+            AntiCheatDef::KernelLevel,
+        ] {
+            assert_eq!(
+                check(&click, AntiCheatDef::None, Some(class)),
+                Err(
+                    "it clicks in Streaming App, which anti-cheat can treat as cheating, so it \
+                     can run only once Streaming App's anti-cheat is set to none"
+                        .to_owned()
+                ),
+                "{class:?}"
+            );
+        }
+        assert_eq!(
+            check(&click, AntiCheatDef::None, None),
+            Err("the application it clicks in is no longer saved".to_owned())
+        );
+        click.actions.push(ActionDef::Keys {
+            keys: "F9".to_owned(),
+        });
+        assert!(
+            check(&click, AntiCheatDef::Unknown, Some(AntiCheatDef::None))
+                .is_err_and(|problem| problem.starts_with("it presses keys,")),
+            "keys are named first"
         );
     }
 
