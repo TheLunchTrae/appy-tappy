@@ -104,8 +104,8 @@ impl Default for TraceDef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TraceCategory {
-    /// Every read of every value: how old the frame was, how long the check
-    /// took, and what it read.
+    /// Every read of every value: how long the check took, what it read,
+    /// and when its frame arrived.
     Readings,
     /// Each value change a reader sends, and when the owner received it.
     Changes,
@@ -204,6 +204,11 @@ impl SettingsFile {
         if fastest_ms > slowest_ms {
             return Err(SettingsError::Setting(
                 "The fastest read cannot wait longer than the slowest.".to_owned(),
+            ));
+        }
+        if self.trace.record.is_empty() {
+            return Err(SettingsError::Setting(
+                "A trace must record at least one thing.".to_owned(),
             ));
         }
         if !(1..=MAX_TRACE_FILE_MB).contains(&self.trace.file_limit_mb) {
@@ -478,6 +483,23 @@ mod tests {
                 "{limit} {keep}"
             );
         }
+    }
+
+    #[test]
+    fn a_trace_records_something() {
+        let nothing = SettingsFile {
+            trace: TraceDef {
+                record: BTreeSet::new(),
+                ..TraceDef::default()
+            },
+            ..SettingsFile::default()
+        };
+        assert_eq!(
+            nothing.check(),
+            Err(SettingsError::Setting(
+                "A trace must record at least one thing.".to_owned()
+            ))
+        );
     }
 
     #[test]

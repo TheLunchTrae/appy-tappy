@@ -275,7 +275,7 @@ mod tests {
             .try_iter()
             .filter_map(|entry| match entry {
                 writer::Entry::Record(record) => Some(record),
-                writer::Entry::Names(..) | writer::Entry::Stop => None,
+                writer::Entry::Wake => None,
             })
             .collect()
     }

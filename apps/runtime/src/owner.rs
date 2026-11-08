@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use appytappy_config::paths::Locations;
-use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile};
+use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile, TraceCategory};
 use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, WindowWatch};
 use appytappy_sources::HostSystem;
@@ -249,9 +249,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         let Some(event) = next(&events, due) else {
             break;
         };
-        let received = Instant::now();
+        // Off, the trace reads no clock here.
+        let received = crew.trace.wants(TraceCategory::Rules).then(Instant::now);
         let (kind, cause) = (event.kind(), event.cause());
-        receive(&mut crew.trace, &model, &event, received);
+        receive(&mut crew.trace, &model, &event);
         let read = match handle(&mut model, log, event) {
             Step::Carry(orders) => {
                 carry(orders, &mut crew, log);
@@ -274,7 +275,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             retrace(trace, &mut model, &mut crew, log);
         }
         if let Some(read) = read {
-            let started = Instant::now();
+            let started = crew
+                .trace
+                .wants(TraceCategory::Lifecycle)
+                .then(Instant::now);
             let saved = read_saved(
                 &stores,
                 log,
@@ -291,15 +295,13 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 break;
             }
             carry(saved.orders, &mut crew, log);
-            let took = started.elapsed();
             crew.trace.record(What::Reloaded, |record| Record {
-                took: Some(took),
+                took: started.map(|started| record.at.saturating_duration_since(started)),
                 ..record
             });
         }
-        let took = received.elapsed();
         crew.trace.record(What::Handled, |record| Record {
-            took: Some(took),
+            took: received.map(|received| record.at.saturating_duration_since(received)),
             cause,
             detail: Detail::Note(kind),
             ..record
@@ -695,9 +697,14 @@ fn unix_ms() -> u64 {
 #[mutants::skip] // Starts and stops threads; the switch and the model are tested.
 fn retrace(trace: Trace, model: &mut Model, crew: &mut Crew, log: &mut Log) {
     tell(trace.clone(), crew);
-    model.set_reading(model.interval(), trace);
-    let orders = model.restart_readers();
+    let orders = reread(trace, model);
     carry(orders, crew, log);
+}
+
+/// The orders that start every reader over with `trace`.
+fn reread(trace: Trace, model: &mut Model) -> Vec<Order> {
+    model.set_reading(model.interval(), trace);
+    model.restart_readers()
 }
 
 /// Gives the owner, the action thread, and detection `trace`. The readers
@@ -715,8 +722,8 @@ fn tell(trace: Trace, crew: &mut Crew) {
     crew.trace = trace;
 }
 
-/// Records that the owner received a changed value, `event`, at `now`.
-fn receive(trace: &mut Trace, model: &Model, event: &Event, now: Instant) {
+/// Records that the owner received a changed value, `event`, now.
+fn receive(trace: &mut Trace, model: &Model, event: &Event) {
     if let Event::Reading(Reading::Sample {
         session,
         signal,
@@ -725,11 +732,10 @@ fn receive(trace: &mut Trace, model: &Model, event: &Event, now: Instant) {
     }) = event
     {
         trace.record(What::Received, |record| Record {
-            at: now,
             session: Some(*session),
             item: model.value_position(*session, signal),
             value: Some(value.clone()),
-            took: Some(now.saturating_duration_since(*at)),
+            took: Some(record.at.saturating_duration_since(*at)),
             cause: Some(*at),
             ..record
         });
@@ -815,13 +821,13 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                 let id = job.session;
                 let name = job.plan.name.clone();
                 crew.tracing.name(id, &job.plan);
-                crew.trace.record(What::Reading, |record| Record {
-                    session: Some(id),
-                    ..record
-                });
                 match Reader::start(Arc::clone(&crew.system), job, crew.events.clone()) {
                     Ok(reader) => {
                         crew.readers.insert(id, reader);
+                        crew.trace.record(What::Reading, |record| Record {
+                            session: Some(id),
+                            ..record
+                        });
                     },
                     Err(error) => note(log, &format!("{name} cannot be read: {error}")),
                 }
@@ -1393,6 +1399,56 @@ mod tests {
         let written = scratch.log();
         assert!(written.contains("the trace records to "), "{written:?}");
         assert!(written.contains("the trace stopped\n"), "{written:?}");
+    }
+
+    #[test]
+    fn a_trace_that_ends_on_its_own_starts_the_readers_over_without_it() {
+        let mut scratch = Scratch::new("trace-ends");
+        scratch.write(
+            "settings.json",
+            r#"{"format":1,"trace":{"on":true,"until":9999999999999}}"#,
+        );
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            app_plan("Example App", &["Mute"]),
+        )]));
+        model.apply(
+            Change::Started {
+                app: "a".to_owned(),
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
+            Instant::now(),
+        );
+        let mut reloads = Reloads::default();
+        let on = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
+        assert!(on.trace.is_some_and(|trace| trace != Trace::OFF));
+        let until = scratch.tracing.until().expect("an end time");
+        let ended = scratch
+            .tracing
+            .expire(until, &mut scratch.log)
+            .expect("the trace's time is up");
+        assert_eq!(ended, Trace::OFF);
+        let restarted: Vec<_> = reread(ended, &mut model)
+            .iter()
+            .map(|order| match order {
+                Order::StopReading(id, _) => format!("stop {}", id.0),
+                Order::Read(job) => format!("read {} {}", job.session.0, job.trace == Trace::OFF),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(restarted, ["stop 0", "read 0 true"]);
+        assert_eq!(
+            *model.trace(),
+            Trace::OFF,
+            "readers that start later get none"
+        );
+        assert_eq!(
+            scratch.tracing.failed(1, &mut scratch.log),
+            None,
+            "a late failure report from the trace that ended changes nothing"
+        );
     }
 
     #[test]

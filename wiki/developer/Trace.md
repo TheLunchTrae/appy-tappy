@@ -51,7 +51,8 @@ time_ns,thread,event,app,item,value,took_ns,cause,detail
 - `cause`: when the frame arrived whose reading led to this row, in
   nanoseconds since the trace started. Every row one reading causes has the
   same `cause`, so a filter on it follows one change from the frame to the
-  action it ran.
+  action it ran. A frame from before the trace started, as from a reader the
+  trace started over, leaves it empty.
 - `detail`: a word or a count, where the event says.
 
 A field the event leaves out is empty. A field with a comma or a quote is
@@ -71,11 +72,15 @@ quoted, with its quotes doubled.
 | Lifecycle | `reading`, `stopped`        | owner     |                         |                   |
 | Lifecycle | `reloaded`                  | owner     | reading the saved files |                   |
 
-`held` is a rule that would have fired, but its cooldown held it back. The
+`held` is a rule that would have fired, but its cooldown held it back. A rule
+held back is checked again at every change of its application's values until
+its cooldown ends, so one rule can make many `held` rows. The
 trace's own rows are `start`, the first row, whose detail is the local time
 and the runtime's version; `part`, the first row of each later part, whose
 `value` is the part's number; and `dropped`, whose `value` counts the records
-dropped before the next row, as [Overhead](#overhead) describes.
+dropped before the next row, as [Overhead](#overhead) describes. A `read`
+row's `time_ns` minus its `took_ns` and its `cause` is how old the frame was
+when the check started.
 
 ## How it works
 
@@ -95,7 +100,15 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
   lost. The writer runs at the lowest thread priority, so it takes only time
   that nothing else wants, and flushes what it wrote about once a second. It
   turns each session and position into names from the plans the owner gives
-  it, so names are looked up only there.
+  it, so names are looked up only there. The owner hands it those plans, and
+  tells it to stop, over a second channel with no limit, so the owner never
+  waits for the writer, even when its buffer is full. The writer takes them
+  before each record, and a session's plan is sent before its reader starts,
+  so every row of the session is named.
+- **Files.** Once a trace starts, and at each new part, the writer deletes the
+  oldest trace files past the number to keep. A file it cannot delete, as one
+  open in a spreadsheet, stays and is tried again at the next part or
+  trace.
 - **Switch.** The owner thread holds the `Switch`, in `trace/switch.rs`. Each
   time it reads the settings, the switch starts a trace, keeps the one that
   runs, or stops it. A new end time keeps the trace that runs. Other changes,
@@ -108,10 +121,12 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
   are read before the saved applications and automations, so a reader the new
   plan starts gets the new trace, and no reader starts twice.
 - **Stopping.** The owner wakes when the trace's end time comes and stops it.
-  When a file cannot be written, as when the disk is full, the writer logs why,
-  tells the owner, and stops; every handle turns itself off at its next record.
-  The runtime stops the trace last when it quits, so the file holds what the
-  other threads did up to their end.
+  A stopped trace's writer writes what its buffer held and ends on its own
+  time, so a stop never waits for it. When a file cannot be written, as when
+  the disk is full, the writer tells the owner why and stops, the owner logs
+  it, and every handle turns itself off at its next record. The runtime stops
+  the trace last when it quits, and waits for every writer, so the file holds
+  what the other threads did up to their end.
 
 ## Overhead
 
@@ -119,6 +134,8 @@ Off, the trace costs one check of an empty handle at each place that could
 record. On, each recorded row costs a clock read and a send into the buffer;
 the formatting and the disk writes happen on the writer thread, at the lowest
 priority. `readings` adds a row and a clock read for every read of every
-value, so it costs the most, and the files grow fastest. A trace measures a
-runtime that also records, so compare timings between traces that record the
-same categories.
+value, so it costs the most, and the files grow fastest. A record dropped
+just before the trace stops, or before its thread gets a new trace, is not
+counted, since no later record of that thread carries the count. A trace
+measures a runtime that also records, so compare timings between traces that
+record the same categories.

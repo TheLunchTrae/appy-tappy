@@ -8,13 +8,16 @@
 //! limit ends and the trace continues in a new one, and only the newest
 //! files are kept. When a file cannot be written, it tells the owner and
 //! stops, and every trace handle turns itself off at its next record.
+//!
+//! The owner hands it names and tells it to stop over a second channel that
+//! has no limit, so the owner never waits for the writer.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -35,15 +38,22 @@ const FLUSH_EVERY: Duration = Duration::from_secs(1);
 /// The header row of every trace file.
 pub(crate) const HEADER: &str = "time_ns,thread,event,app,item,value,took_ns,cause,detail";
 
-/// What reaches the writer thread.
+/// What reaches the writer thread through the buffer.
 #[derive(Debug)]
 pub(crate) enum Entry {
     /// A row to write.
     Record(Record),
+    /// Look at the orders: the owner sent one.
+    Wake,
+}
+
+/// What the owner tells the writer thread, over a channel with no limit.
+#[derive(Debug)]
+enum Order {
     /// The plan of a session, which names its application, values, and
     /// automations in the rows that follow.
     Names(SessionId, Arc<AppPlan>),
-    /// Write what is left and stop.
+    /// Write what the buffer holds and stop.
     Stop,
 }
 
@@ -78,9 +88,30 @@ pub(crate) struct Options {
 #[derive(Debug)]
 pub(crate) struct Writer {
     entries: SyncSender<Entry>,
+    orders: Sender<Order>,
     thread: JoinHandle<()>,
     /// The first file's name, for the log.
     file: String,
+}
+
+/// A writer told to stop, which may still be writing what its buffer held.
+#[derive(Debug)]
+pub(crate) struct Stopping(JoinHandle<()>);
+
+impl Stopping {
+    /// Whether the writer is done, so [`Self::join`] does not wait.
+    pub(crate) fn is_finished(&self) -> bool {
+        self.0.is_finished()
+    }
+
+    /// Waits for the writer to finish.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the writer thread panicked.
+    pub(crate) fn join(self) -> io::Result<()> {
+        crate::workers::join(self.0)
+    }
 }
 
 impl Writer {
@@ -109,6 +140,7 @@ impl Writer {
         let file = files.name();
         files.row(&start_row(LocalTime::now()))?;
         let (entries, received) = mpsc::sync_channel(BUFFER);
+        let (orders, ordered) = mpsc::channel();
         let categories = options.categories;
         let thread = crate::workers::spawn("trace", move || {
             // A thread that keeps its priority still writes the trace.
@@ -117,7 +149,10 @@ impl Writer {
                 reason = "the trace is written either way, only sooner"
             )]
             let _ = appytappy_platform::lower_thread_priority();
-            if let Err(error) = write(&received, &mut files) {
+            // Old files go here rather than on the thread that starts the
+            // trace, which is the owner.
+            files.prune();
+            if let Err(error) = write(&received, &ordered, &mut files) {
                 #[expect(
                     clippy::let_underscore_must_use,
                     reason = "a failed send means the owner already stopped"
@@ -137,6 +172,7 @@ impl Writer {
         Ok((
             Self {
                 entries,
+                orders,
                 thread,
                 file,
             },
@@ -149,14 +185,33 @@ impl Writer {
         &self.file
     }
 
-    /// Hands the writer `plan`, which names `session`'s rows. It waits for
-    /// room, so no name is lost; the writer drains the buffer meanwhile.
+    /// Hands the writer `plan`, which names `session`'s rows. It never
+    /// waits: the writer takes the names before the next record it writes,
+    /// so every row the session records after this is named.
     pub(crate) fn name(&self, session: SessionId, plan: Arc<AppPlan>) {
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a writer that stopped has reported why, and needs no names"
         )]
-        let _ = self.entries.send(Entry::Names(session, plan));
+        let _ = self.orders.send(Order::Names(session, plan));
+    }
+
+    /// Tells the writer to write what its buffer holds, close the file, and
+    /// stop. It never waits for the writer.
+    pub(crate) fn retire(self) -> Stopping {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a writer that stopped has reported why, and its join says how it ended"
+        )]
+        let _ = self.orders.send(Order::Stop);
+        // A full buffer means the writer is busy and looks at its orders
+        // soon anyway.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a writer that is busy or gone needs no wake"
+        )]
+        let _ = self.entries.try_send(Entry::Wake);
+        Stopping(self.thread)
     }
 
     /// Writes what is left, closes the file, and waits for the thread.
@@ -164,42 +219,60 @@ impl Writer {
     /// # Errors
     ///
     /// Returns an error when the writer thread panicked.
+    #[cfg(test)]
     pub(crate) fn stop(self) -> io::Result<()> {
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "a writer that stopped has reported why, and the join below says how it ended"
-        )]
-        let _ = self.entries.send(Entry::Stop);
-        crate::workers::join(self.thread)
+        self.retire().join()
     }
 }
 
 /// The writer loop: writes each record until it is told to stop or every
-/// handle is gone, flushing about once a second.
-fn write(received: &Receiver<Entry>, files: &mut Files) -> io::Result<()> {
-    let started = files.started;
+/// handle is gone, flushing about once a second. Told to stop, it writes at
+/// most a buffer's worth more, which is what the buffer held, and ends.
+fn write(
+    received: &Receiver<Entry>,
+    orders: &Receiver<Order>,
+    files: &mut Files,
+) -> io::Result<()> {
     let mut names: BTreeMap<SessionId, Arc<AppPlan>> = BTreeMap::new();
     let mut flushed = Instant::now();
     loop {
-        match received.recv_timeout(FLUSH_EVERY) {
-            Ok(Entry::Record(record)) => {
-                if record.dropped > 0 {
-                    files.row(&dropped_row(&record, started))?;
-                }
-                files.row(&row(&record, started, &names))?;
-            },
-            Ok(Entry::Names(session, plan)) => {
-                names.insert(session, plan);
-            },
-            Ok(Entry::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) => {},
+        let entry = received.recv_timeout(FLUSH_EVERY);
+        // The names a record needs were sent before it, so they are here.
+        let going = take_orders(orders, &mut names);
+        match entry {
+            Ok(Entry::Record(record)) => files.record(&record, &names)?,
+            Ok(Entry::Wake) | Err(RecvTimeoutError::Timeout) => {},
+            Err(RecvTimeoutError::Disconnected) => return files.flush(),
+        }
+        if !going {
+            break;
         }
         if flushed.elapsed() >= FLUSH_EVERY {
             files.flush()?;
             flushed = Instant::now();
         }
     }
+    for entry in received.try_iter().take(BUFFER) {
+        if let Entry::Record(record) = entry {
+            take_orders(orders, &mut names);
+            files.record(&record, &names)?;
+        }
+    }
     files.flush()
+}
+
+/// Takes the orders that wait into `names`. Returns false when the writer
+/// should stop: it was told to, or the owner is gone.
+fn take_orders(orders: &Receiver<Order>, names: &mut BTreeMap<SessionId, Arc<AppPlan>>) -> bool {
+    loop {
+        match orders.try_recv() {
+            Ok(Order::Names(session, plan)) => {
+                names.insert(session, plan);
+            },
+            Ok(Order::Stop) | Err(TryRecvError::Disconnected) => return false,
+            Err(TryRecvError::Empty) => return true,
+        }
+    }
 }
 
 /// The open trace file, and the parts before it.
@@ -250,7 +323,6 @@ impl Files {
             started,
         };
         files.header()?;
-        prune(&files.folder, files.keep)?;
         Ok(files)
     }
 
@@ -280,6 +352,19 @@ impl Files {
         Ok(())
     }
 
+    /// Writes `record`'s row, after a row that counts the records dropped
+    /// before it, if any.
+    fn record(
+        &mut self,
+        record: &Record,
+        names: &BTreeMap<SessionId, Arc<AppPlan>>,
+    ) -> io::Result<()> {
+        if record.dropped > 0 {
+            self.row(&dropped_row(record, self.started))?;
+        }
+        self.row(&row(record, self.started, names))
+    }
+
     fn header(&mut self) -> io::Result<()> {
         self.line(HEADER)
     }
@@ -294,7 +379,13 @@ impl Files {
         self.header()?;
         let at = nanos(self.started.elapsed());
         self.line(&format!("{at},trace,part,,,{},,,", self.part))?;
-        prune(&self.folder, self.keep)
+        self.prune();
+        Ok(())
+    }
+
+    /// Deletes the oldest trace files past the number to keep.
+    fn prune(&self) {
+        prune(&self.folder, self.keep);
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -307,26 +398,31 @@ fn create(path: &Path) -> io::Result<File> {
     OpenOptions::new().write(true).create_new(true).open(path)
 }
 
-/// Deletes the oldest trace files in `folder` past the newest `keep`.
-fn prune(folder: &Path, keep: usize) -> io::Result<()> {
-    let mut traces = Vec::new();
-    for entry in fs::read_dir(folder)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let csv = Path::new(&name)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"));
-        if name.starts_with("trace-") && csv {
-            let modified = entry.metadata()?.modified()?;
-            traces.push((modified, name, entry.path()));
-        }
-    }
+/// Deletes the oldest trace files in `folder` past the newest `keep`. It
+/// does what it can: a file it cannot delete, as one another program has
+/// open, or cannot read the time of, stays, and the next part or trace
+/// tries again.
+fn prune(folder: &Path, keep: usize) {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return;
+    };
+    let mut traces: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let csv = Path::new(&name)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"));
+            let modified = entry.metadata().and_then(|meta| meta.modified()).ok()?;
+            (name.starts_with("trace-") && csv).then(|| (modified, name, entry.path()))
+        })
+        .collect();
     traces.sort();
     let extra = traces.len().saturating_sub(keep);
     for (_, _, path) in traces.into_iter().take(extra) {
-        fs::remove_file(path)?;
+        // A file that stays is deleted at a later try.
+        drop(fs::remove_file(path));
     }
-    Ok(())
 }
 
 /// The first file's name without `.csv`, from the local time the trace
@@ -379,9 +475,12 @@ fn row(record: &Record, started: Instant, names: &BTreeMap<SessionId, Arc<AppPla
         .took
         .map(|took| nanos(took).to_string())
         .unwrap_or_default();
+    // A frame from before the trace started, as a late sample from a reader
+    // the new trace restarted, has no cause in this trace.
     let cause = record
         .cause
-        .map(|cause| nanos(cause.saturating_duration_since(started)).to_string())
+        .and_then(|cause| cause.checked_duration_since(started))
+        .map(|cause| nanos(cause).to_string())
         .unwrap_or_default();
     let detail = match record.detail {
         Detail::None => String::new(),
@@ -595,6 +694,61 @@ mod tests {
         let part = lines.next().expect("part row");
         assert!(part.contains(",trace,part,,,"), "{part}");
         fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_deleted_stays_and_the_trace_goes_on() {
+        let folder = folder("stuck");
+        fs::create_dir_all(&folder).expect("make");
+        // A folder named like a trace file cannot be deleted as a file, as a
+        // file another program has open cannot.
+        fs::create_dir(folder.join("trace-0-stuck.csv")).expect("make the stuck one");
+        fs::write(folder.join("trace-1-old.csv"), HEADER).expect("write an old one");
+        let (reports, received) = mpsc::channel::<TraceReport>();
+        let (writer, mut trace) =
+            Writer::start(1, options(&folder, 200, 1), reports).expect("start");
+        for _ in 0..20 {
+            trace.record(What::Queued, |record| record);
+        }
+        writer.stop().expect("stop");
+        assert_eq!(received.try_iter().count(), 0, "the trace did not fail");
+        let names = files(&folder);
+        assert!(names.contains(&"trace-0-stuck.csv".to_owned()), "{names:?}");
+        assert!(!names.contains(&"trace-1-old.csv".to_owned()), "{names:?}");
+        assert!(names.iter().any(|name| name.contains("-part")), "{names:?}");
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_writer_told_to_stop_writes_what_it_was_sent() {
+        let folder = folder("retire");
+        let (reports, _received) = mpsc::channel::<TraceReport>();
+        let (writer, mut trace) =
+            Writer::start(1, options(&folder, 1 << 20, 5), reports).expect("start");
+        for _ in 0..100 {
+            trace.record(What::Queued, |record| record);
+        }
+        let name = writer.file().to_owned();
+        writer.retire().join().expect("join");
+        let text = fs::read_to_string(folder.join(name)).expect("read");
+        assert_eq!(
+            text.lines().count(),
+            102,
+            "the header, the start, and each record"
+        );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_frame_from_before_the_trace_has_no_cause() {
+        let before = Instant::now();
+        let record = Record {
+            cause: Some(before),
+            ..Record::now(What::Fired)
+        };
+        let started = record.at;
+        let line = row(&record, started, &BTreeMap::new());
+        assert!(line.ends_with(",owner,fired,,,,,,"), "{line}");
     }
 
     #[test]

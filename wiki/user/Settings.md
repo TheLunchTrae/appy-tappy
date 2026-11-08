@@ -56,5 +56,7 @@ developer. It is off at first.
   Explorer.
 
 Changing what the trace records, or its files' size or number, while it records
-starts a new trace in a new file. The files are CSV, which a spreadsheet opens;
+starts a new trace in a new file. A trace that cannot write, as when the disk
+is full, stops, and the runtime's log says why; the page still says it
+records, because it cannot tell. The files are CSV, which a spreadsheet opens;
 [Trace](../developer/Trace.md) describes their columns.

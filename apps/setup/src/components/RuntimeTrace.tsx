@@ -43,6 +43,37 @@ const LENGTHS: readonly { readonly length: TraceLength; readonly name: string }[
   { length: 'off', name: 'Until I turn it off' },
 ];
 
+/** Where the page keeps the length picked last, which the settings file has no place for. */
+const LENGTH_KEY = 'trace-length';
+
+/** The length picked last, if one is kept and is still offered. */
+function keptLength(): TraceLength | null {
+  try {
+    const kept = window.localStorage.getItem(LENGTH_KEY);
+    return LENGTHS.find((each) => String(each.length) === kept)?.length ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps `length` for the next time the page opens; the page works without it. */
+function keepLength(length: TraceLength): void {
+  try {
+    window.localStorage.setItem(LENGTH_KEY, String(length));
+  } catch {
+    // A page that cannot keep it starts at 1 hour next time.
+  }
+}
+
+/** The length the page shows first: the one the saved trace runs for, or the one picked last. */
+function firstLength(on: boolean, until: number | null): TraceLength {
+  if (on && until === null) {
+    return 'off';
+  }
+  const kept = keptLength();
+  return kept === null || (on && kept === 'off') ? 60 : kept;
+}
+
 /** `until` as the user reads it: the time, with the day when it is not today. */
 function endText(until: number): string {
   const end = new Date(until);
@@ -137,7 +168,7 @@ export function RuntimeTrace() {
   const { trace } = settings;
   const now = useNowUntil(trace.on ? trace.until : null);
   const recording = traceRecords(trace, now);
-  const [length, setLength] = useState<TraceLength>(trace.on && trace.until === null ? 'off' : 60);
+  const [length, setLength] = useState<TraceLength>(() => firstLength(trace.on, trace.until));
   const [error, setError] = useState<string | null>(null);
   const save = (update: (current: Settings) => Settings | { readonly problem: string }): void => {
     change(update).then(
@@ -206,6 +237,7 @@ export function RuntimeTrace() {
               return;
             }
             setLength(picked.length);
+            keepLength(picked.length);
             if (recording) {
               save((current) => ({
                 ...current,

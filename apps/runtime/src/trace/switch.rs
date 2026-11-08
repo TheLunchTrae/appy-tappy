@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use appytappy_config::settings_file::TraceDef;
 
 use super::Trace;
-use super::writer::{Options, TraceReport, Writer};
+use super::writer::{Options, Stopping, TraceReport, Writer};
 use crate::log::Log;
 use crate::note;
 use crate::plan::AppPlan;
@@ -30,6 +30,9 @@ pub(crate) struct Switch {
     folder: PathBuf,
     /// The trace that runs.
     running: Option<Running>,
+    /// Writers told to stop that may still be writing what their buffer
+    /// held. The owner never waits for them, except when the runtime ends.
+    stopping: Vec<Stopping>,
     /// The number the next trace gets.
     next: u64,
 }
@@ -52,6 +55,7 @@ impl Switch {
         Self {
             folder,
             running: None,
+            stopping: Vec::new(),
             next: 1,
         }
     }
@@ -82,6 +86,7 @@ impl Switch {
     where
         E: From<TraceReport> + Send + 'static,
     {
+        self.reap(log);
         let until = match saved.on.then(|| end(saved.until, now, unix_ms)) {
             Some(End::Never) => None,
             Some(End::At(at)) => Some(at),
@@ -120,6 +125,7 @@ impl Switch {
     /// Stops the trace when its end time has passed at `now`. Returns
     /// [`Trace::OFF`] when it stopped.
     pub(crate) fn expire(&mut self, now: Instant, log: &mut Log) -> Option<Trace> {
+        self.reap(log);
         if self.until().is_some_and(|until| until <= now) {
             self.stop(log, "the trace's time is up, so it stopped")
         } else {
@@ -150,23 +156,49 @@ impl Switch {
     }
 
     /// Stops the trace that runs, if any, and logs `line`. Returns
-    /// [`Trace::OFF`] when one ran.
+    /// [`Trace::OFF`] when one ran. Its writer finishes what its buffer
+    /// holds on its own time.
     fn stop(&mut self, log: &mut Log, line: &str) -> Option<Trace> {
         let running = self.running.take()?;
-        match running.writer.stop() {
-            Ok(()) => note(log, line),
-            Err(error) => note(log, &format!("the trace stopped badly: {error}")),
-        }
+        self.stopping.push(running.writer.retire());
+        note(log, line);
         Some(Trace::OFF)
     }
 
-    /// Stops the trace at the end of the runtime.
+    /// Waits for the writers that are done stopping, which takes no time,
+    /// and logs any that ended badly.
+    fn reap(&mut self, log: &mut Log) {
+        let (done, writing) = std::mem::take(&mut self.stopping)
+            .into_iter()
+            .partition(Stopping::is_finished);
+        self.stopping = writing;
+        for stopping in done {
+            ended(stopping.join(), log);
+        }
+    }
+
+    /// Stops the trace at the end of the runtime, and waits for every writer
+    /// to finish.
     ///
     /// # Errors
     ///
-    /// Returns an error when the writer thread panicked.
+    /// Returns an error when a writer thread panicked.
     pub(crate) fn finish(self) -> io::Result<()> {
-        self.running.map_or(Ok(()), |running| running.writer.stop())
+        let last = self.running.map(|running| running.writer.retire());
+        self.stopping
+            .into_iter()
+            .chain(last)
+            .map(Stopping::join)
+            .fold(Ok(()), Result::and)
+    }
+
+    /// Waits for every writer told to stop, for the tests that read their
+    /// files.
+    #[cfg(test)]
+    fn settle(&mut self, log: &mut Log) {
+        for stopping in std::mem::take(&mut self.stopping) {
+            ended(stopping.join(), log);
+        }
     }
 
     /// How a trace with the `saved` settings writes.
@@ -177,6 +209,13 @@ impl Switch {
             file_limit: u64::from(saved.file_limit_mb).saturating_mul(MEGABYTE),
             keep_files: usize::try_from(saved.keep_files).unwrap_or(usize::MAX),
         }
+    }
+}
+
+/// Logs how a writer that was told to stop ended, when it ended badly.
+fn ended(joined: io::Result<()>, log: &mut Log) {
+    if let Err(error) = joined {
+        note(log, &format!("the trace stopped badly: {error}"));
     }
 }
 
@@ -321,6 +360,8 @@ mod tests {
             Some(Trace::OFF)
         );
         assert_eq!(switch.running(), None);
+        switch.settle(&mut scratch.log);
+        assert!(switch.stopping.is_empty(), "every writer finished");
         let lines = scratch.lines();
         assert_eq!(lines.len(), 4, "{lines:?}");
         assert!(

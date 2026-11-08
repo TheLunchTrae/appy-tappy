@@ -514,9 +514,13 @@ stateDiagram-v2
 - **Its time is up.** The owner wakes at the end time (`wake`) and stops the
   trace. The settings still say `on`; the setup app shows the trace stopped,
   and turning it on again sets a new end time.
-- **Writer failure.** The writer logs why and ends. Each handle that sends to
-  it after that turns itself off, and the owner stops the trace when the
-  writer's report arrives.
+- **Stopping.** A stopped trace's writer writes what its buffer held and ends
+  on its own time; the owner tells it to stop and never waits for it, and
+  checks on it at its next settings read or wake (`Switch::reap`). Only
+  quitting waits for every writer.
+- **Writer failure.** The writer tells the owner why and ends, and the owner
+  logs it and stops the trace. Each handle that sends to the writer after that
+  turns itself off.
 - **Quitting.** The trace stops after every other thread, so it holds what
   they did up to their end.
 
