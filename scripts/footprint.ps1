@@ -109,10 +109,41 @@ function Wait-Log([string]$Line, [int]$Seconds, [int]$Count = 1) {
     throw "the runtime's log did not say '$Line' within $Seconds seconds"
 }
 
-# The runtime's threads, counted by the module each one started in: its own
-# executable for the threads it spawns, ntdll.dll for Windows' thread pool,
-# and a graphics DLL for a driver's own threads. A thread that starts at an
-# address no module holds counts as unknown.
+# Each thread's own start address. The Threads list's StartAddress is the
+# thunk that every thread starts in, inside ntdll.dll, so this asks Windows
+# for the address the thread was created to run instead.
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class ThreadStart {
+    [DllImport("kernel32.dll")]
+    static extern IntPtr OpenThread(uint access, bool inherit, uint id);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+    [DllImport("ntdll.dll")]
+    static extern int NtQueryInformationThread(IntPtr thread, int kind, out IntPtr start, int size, IntPtr written);
+
+    // 0 when the thread has gone or Windows will not say.
+    public static long Of(int id) {
+        // THREAD_QUERY_INFORMATION, and ThreadQuerySetWin32StartAddress.
+        IntPtr thread = OpenThread(0x0040, false, (uint)id);
+        if (thread == IntPtr.Zero) { return 0; }
+        try {
+            IntPtr start;
+            return NtQueryInformationThread(thread, 9, out start, IntPtr.Size, IntPtr.Zero) == 0 ? start.ToInt64() : 0;
+        }
+        finally { CloseHandle(thread); }
+    }
+}
+'@
+
+# The runtime's threads, counted by where each one starts: a module and the
+# offset into it, so two kinds of thread from one module count apart. The
+# runtime's own threads start in its executable, Windows' thread pool workers
+# at one offset in ntdll.dll, and a driver's threads in a graphics DLL. A
+# thread whose start Windows will not give, or that no module holds, counts
+# as unknown.
 function Get-ThreadStarts {
     $script:process.Refresh()
     $modules = @($script:process.Modules | ForEach-Object {
@@ -121,10 +152,9 @@ function Get-ThreadStarts {
         })
     $counts = @{}
     foreach ($thread in $script:process.Threads) {
-        $address = 0
-        try { $address = $thread.StartAddress.ToInt64() } catch { $address = 0 }
+        $address = [ThreadStart]::Of($thread.Id)
         $owner = $modules | Where-Object { $address -ge $_.Start -and $address -lt $_.End } | Select-Object -First 1
-        $name = if ($null -eq $owner) { 'unknown' } else { $owner.Name }
+        $name = if ($null -eq $owner) { 'unknown' } else { '{0}+0x{1:x}' -f $owner.Name, ($address - $owner.Start) }
         $counts[$name] = 1 + [int]$counts[$name]
     }
     ($counts.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name) $($_.Value)" }) -join ', '
@@ -358,6 +388,7 @@ public static class Probe {
     $probe.WaitForExit()
     $probe = $null
     Wait-Log '): detached' 10
+    $script:details += "Just after the first detach: $(Get-Threads)"
 
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"", 'steady' -PassThru
     $null = $probe.Handle
@@ -372,6 +403,7 @@ public static class Probe {
     $probe.WaitForExit()
     $probe = $null
     Wait-Log '): detached' 10 2
+    $script:details += "Just after the second detach: $(Get-Threads)"
 
     # Settle: `light` turns true in the probe's last repaint, while the
     # capture asks for a frame only every half second. If Windows drops that
@@ -393,7 +425,7 @@ public static class Probe {
     $probe = $null
     Wait-Log '): detached' 10 3
 
-    $script:details += "Just after the last detach: $(Get-Threads)"
+    $script:details += "Just after the third detach: $(Get-Threads)"
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
     Add-Measure 'Idle after threads' "$($script:threads['Idle after']), $($script:threads['Idle']) at idle"
     Add-Measure 'Idle after handles' "$($script:handles['Idle after']), $($script:handles['Idle']) at idle"
