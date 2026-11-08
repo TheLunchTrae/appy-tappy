@@ -166,11 +166,6 @@ stateDiagram-v2
   calls `forget_values`. The rules keep their state, so a rule that fired stays
   fired until new readings decide its condition.
 
-Open problems:
-
-- [#92](https://github.com/TheLunchTrae/appy-tappy/issues/92): a store-level read
-  error, or one invalid automation, makes the next plan empty.
-
 ### Reader thread
 
 Each running application has a reader thread (`read` in
