@@ -59,18 +59,15 @@ impl Default for ReadInterval {
 pub enum Activity {
     /// The value differs from the previous read.
     Changed,
-    /// The value is close to where a rule would fire, so the next change
-    /// matters.
-    NearThreshold,
-    /// The value is the same as the previous read and far from any rule.
+    /// The value is the same as the previous read.
     Steady,
 }
 
 /// The adaptive wait between reads within a [`ReadInterval`].
 ///
-/// After a change, or near a rule's threshold, the wait drops to the
-/// minimum. Each steady read doubles it, up to the maximum, so a value that
-/// holds still for a while is read rarely and a moving one at full speed.
+/// After a change, the wait drops to the minimum. Each steady read doubles
+/// it, up to the maximum, so a value that holds still for a while is read
+/// rarely and a moving one at full speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadSchedule {
     interval: ReadInterval,
@@ -94,7 +91,7 @@ impl ReadSchedule {
     /// The wait until the next read, given what the read just taken showed.
     pub fn after_read(&mut self, activity: Activity) -> Duration {
         self.wait = match activity {
-            Activity::Changed | Activity::NearThreshold => self.interval.min,
+            Activity::Changed => self.interval.min,
             Activity::Steady => self
                 .wait
                 .saturating_mul(2)
@@ -141,6 +138,24 @@ impl ReadClock {
     }
 }
 
+/// The shortest wait a capture asks the system to match. Below it, the
+/// capture keeps its throttle, so a value that changes on every other read
+/// does not change the capture's setting on every read.
+pub const SHORTEST_PACED_WAIT: Duration = Duration::from_millis(64);
+
+/// The least time between frames a capture asks the system for.
+///
+/// After a read that asked to wait `wait`, it is the wait itself, cut to
+/// [`LONGEST_WAIT`] and never below `throttle`, or just `throttle` for a wait
+/// under [`SHORTEST_PACED_WAIT`].
+#[must_use]
+pub fn frame_interval(wait: Duration, throttle: Duration) -> Duration {
+    if wait < SHORTEST_PACED_WAIT {
+        return throttle;
+    }
+    wait.min(LONGEST_WAIT).max(throttle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +188,39 @@ mod tests {
     }
 
     #[test]
+    fn a_capture_asks_for_frames_as_often_as_it_reads_them() {
+        let throttle = millis(16);
+        assert_eq!(frame_interval(millis(500), throttle), millis(500));
+        assert_eq!(
+            frame_interval(SHORTEST_PACED_WAIT, throttle),
+            SHORTEST_PACED_WAIT
+        );
+        assert_eq!(frame_interval(Duration::MAX, throttle), LONGEST_WAIT);
+    }
+
+    #[test]
+    fn a_short_wait_keeps_the_throttle() {
+        let throttle = millis(16);
+        assert_eq!(frame_interval(Duration::ZERO, throttle), throttle);
+        assert_eq!(frame_interval(millis(32), throttle), throttle);
+        assert_eq!(
+            frame_interval(
+                SHORTEST_PACED_WAIT.checked_sub(millis(1)).unwrap(),
+                throttle
+            ),
+            throttle
+        );
+        assert_eq!(frame_interval(millis(32), Duration::ZERO), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_capture_never_asks_for_frames_faster_than_its_throttle() {
+        assert_eq!(frame_interval(millis(100), millis(200)), millis(200));
+        let slow = LONGEST_WAIT.checked_mul(2).unwrap();
+        assert_eq!(frame_interval(Duration::MAX, slow), slow);
+    }
+
+    #[test]
     fn the_minimum_cannot_exceed_the_maximum() {
         assert_eq!(ReadInterval::new(millis(2), millis(1)), None);
         let interval = ReadInterval::new(millis(1), millis(1)).unwrap();
@@ -188,7 +236,7 @@ mod tests {
             Activity::Steady,
             Activity::Changed,
             Activity::Steady,
-            Activity::NearThreshold,
+            Activity::Changed,
         ]
         .into_iter()
         .map(|activity| schedule.after_read(activity))

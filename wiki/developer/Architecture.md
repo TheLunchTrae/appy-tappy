@@ -145,10 +145,12 @@ Each thread below is a plain `std::thread`, and each channel is a
   [Lifecycle](#lifecycle) describes when it takes a snapshot.
 - **Readers.** One per attached application that has automations. Each finds the
   application's window with its [window match](Setup-app.md#window-matching),
-  captures the smallest rectangle that covers the values drawn at the window's
-  current size, and reads each value from its own region of each frame. It
-  sends a `Sample` only when a value changes, and reads less often while
-  nothing changes. When the window closes or changes size, it sends `Unseen`,
+  copies only the regions of the values drawn at the window's current size,
+  packed one under another, and reads each value from its place in that
+  packed image. A `Layout` in `appytappy-sources::screen` says where each
+  region goes, and copies the one rectangle around them instead when that is
+  smaller, such as for values that overlap. It sends a `Sample` only when a
+  value changes, and reads less often while nothing changes. When the window closes or changes size, it sends `Unseen`,
   and the owner forgets the application's values, so no rule acts on a value
   nobody can see. Each rule stays as it was, run or not, until the values read
   next decide its condition. When the window closes, when the capture cannot
@@ -448,7 +450,7 @@ the top of the script.
 
 The script gives the runtime scratch app data folders that hold one
 application with three values, two color checks and a bar fill, and an
-automation on each. It runs the runtime through four phases:
+automation on each. It runs the runtime through five phases:
 
 1. **Idle.** The application is not running.
 2. **Active.** A probe program the script compiles shows the application's
@@ -463,10 +465,25 @@ automation on each. It runs the runtime through four phases:
    does, and turns the trace off again at the end of the phase. This phase has
    no targets: it reports what recording costs, as
    [Overhead](Trace.md#overhead) describes.
-4. **Idle after.** The trace has stopped, the probe has exited, and the
+4. **Steady.** The probe starts again and keeps repainting every 16 ms, but
+   only a strip below the values, so the window changes while its values hold
+   still. The runtime's reads back off to their slowest, and its capture asks
+   Windows for frames only that often. Most of what that saves is the
+   compositor's work, which this script does not measure; the runtime's own
+   CPU and memory share the active targets.
+5. **Idle after.** The trace has stopped, the probe has exited, and the
    runtime has detached. The trace's buffer is freed once its last handle
    and its writer end, so a handle left behind shows here as memory over the
    target.
+
+Before the last phase, a settle check measures nothing but has to pass. The
+probe starts once more with its values dim gray and repaints the strip for
+eight seconds after its window shows, so the capture asks for a frame only every
+half second. Then it turns the values silver in one last repaint and draws
+nothing more. The check fails if the runtime never reads that change, as
+happens if Windows drops a frame drawn inside the interval. It also fails if
+the change comes less than two seconds after the runtime attached, since it
+would then test nothing.
 
 It checks these against their targets:
 
@@ -477,8 +494,8 @@ It checks these against their targets:
   the Universal C runtime to the copy in Windows.
 - **Memory.** The private working set at the end of each phase, which Task
   Manager's Details tab shows as Memory. It leaves out the pages of Windows
-  DLLs that every program shares. Idle has its own target; active and idle
-  after share a larger one.
+  DLLs that every program shares. Idle has its own target; active, steady and
+  idle after share a larger one.
 - **CPU.** The share of one core over each phase's sample. Task Manager shows
   the share of all cores, which is smaller by the number of cores. Both idle
   phases share one target. Windows charges CPU time in ticks of about 16 ms,
@@ -664,10 +681,10 @@ The overlay ([#36](https://github.com/TheLunchTrae/appy-tappy/issues/36))
 is more windows of the setup app, one for each application whose overlay is
 on, so nothing is hooked or injected into the application. Each window loads
 the same UI, which renders only the readings when its label names an
-application. The owner thread keeps one capture for each overlay, of the
-smallest region that holds the values drawn at the window's current size, and
-the capture thread reads them from each frame, so only the readings cross to
-the owner. The window over the application is transparent, lets clicks
+application. The owner thread keeps one capture for each overlay, which
+copies the values drawn at the window's current size with the same `Layout`
+as a reader, and the capture thread reads them from each frame, so only the
+readings cross to the owner. The window over the application is transparent, lets clicks
 through, and cannot take the focus. Tauri's window library activates a window
 it shows, so `platform` shows it once, off the screen, without activating it.
 From then on a thread of its own asks the owner over the channel where it goes
