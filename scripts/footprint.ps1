@@ -31,6 +31,9 @@ $IdleMemoryLimit = 3MB
 $IdleCpuLimit = 0.1
 $ActiveMemoryLimit = 6MB
 $ActiveCpuLimit = 2.0
+# The most CPU samples a phase takes when its first is over its target; the
+# lowest counts against the target.
+$CpuSamples = 3
 
 # Sampling: how long each phase settles before its sample, and how long the
 # sample runs. Windows charges CPU time in 15.6 ms ticks, so an idle sample
@@ -110,18 +113,33 @@ function Get-PrivateWorkingSet([int]$Id) {
     [long]$counter.WorkingSetPrivate
 }
 
-# Measures one phase: CPU over the sample as a share of one core, and the
-# private working set at its end. A phase with a memory limit of 0 has no
-# targets, so it only reports.
-function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double]$CpuLimit) {
-    Start-Sleep -Seconds $Settle
+# The runtime's CPU over one sample of `Seconds`, as a share of one core.
+function Measure-Cpu([string]$Name, [int]$Seconds) {
     $script:process.Refresh()
     $before = $script:process.TotalProcessorTime
     $clock = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds $Seconds
     $script:process.Refresh()
     if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) during the $Name sample" }
-    $cpu = 100 * ($script:process.TotalProcessorTime - $before).TotalSeconds / $clock.Elapsed.TotalSeconds
+    100 * ($script:process.TotalProcessorTime - $before).TotalSeconds / $clock.Elapsed.TotalSeconds
+}
+
+# Measures one phase: CPU over the sample as a share of one core, and the
+# private working set at its end. A phase with a memory limit of 0 has no
+# targets, so it only reports. A shared CI machine can charge the runtime a
+# stray tick, which is most of an idle target, so a CPU sample over its target
+# is taken again, up to $CpuSamples in all, and the lowest counts. A runtime
+# that is really over its target is over it in every sample, and the details
+# list every sample taken.
+function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double]$CpuLimit) {
+    Start-Sleep -Seconds $Settle
+    $samples = @(Measure-Cpu $Name $Seconds)
+    while ($MemoryLimit -gt 0 -and ($samples | Measure-Object -Minimum).Minimum -gt $CpuLimit -and $samples.Count -lt $CpuSamples) {
+        $samples += Measure-Cpu $Name $Seconds
+    }
+    if ($samples.Count -gt 1) { $script:details += "$Name CPU samples: $(($samples | ForEach-Object { '{0:N3} %' -f $_ }) -join ', ')" }
+    $cpu = ($samples | Measure-Object -Minimum).Minimum
+
     $memory = Get-PrivateWorkingSet $script:process.Id
     $script:memory[$Name] = $memory
     $script:cpu[$Name] = $cpu

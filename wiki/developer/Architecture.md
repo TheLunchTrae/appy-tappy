@@ -499,7 +499,11 @@ It checks these against their targets:
 - **CPU.** The share of one core over each phase's sample. Task Manager shows
   the share of all cores, which is smaller by the number of cores. Both idle
   phases share one target. Windows charges CPU time in ticks of about 16 ms,
-  so an idle sample runs long enough that its target spans several ticks.
+  so an idle sample runs long enough that its target spans several ticks. A
+  shared CI machine can still charge a stray tick, so a phase whose sample is
+  over its CPU target samples again, up to three samples in all, and the
+  lowest counts. A runtime that really is over the target fails every sample,
+  and the details list each one.
 
 The script also prints each phase's full working set, commit size, threads,
 and handles, and the CI job shows the table in its run summary. For the trace

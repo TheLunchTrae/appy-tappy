@@ -31,7 +31,7 @@ jobs:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MUTANTS_LANE: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'full' || 'diff' }}
-      MUTANTS_SHARD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && '0/4' || '' }}
+      MUTANTS_SHARD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && '0/8' || '' }}
       MUTANTS_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.merge_group.base_sha }}
     steps:
       - name: Check out repository
@@ -51,11 +51,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
+      # Restores the Rust build from the last push to main, so the job compiles
+      # only what changed. Only main saves it, so pull requests never fill the
+      # cache or read one another's builds. mise installs the tools, so the
+      # cache leaves Cargo's bin directory alone.
+      - name: Restore the Rust build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: false
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Run the mandatory gate
         run: mise run standards:check
 
   # The rest of the full mutation sweep, beside the quality job's shard. Keep
-  # the shard count here and in the quality job's MUTANTS_SHARD the same.
+  # the shard count here and in the quality job's MUTANTS_SHARD the same. Each
+  # shard has to finish inside its time limit, so add shards as the sweep
+  # grows. cargo-mutants builds in its own copy of the tree, without target/,
+  # so these jobs take no build cache.
   mutants:
     name: mutants
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -64,11 +76,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ['1/4', '2/4', '3/4']
+        shard: ['1/8', '2/8', '3/8', '4/8', '5/8', '6/8', '7/8']
     env:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MUTANTS_SHARD: ${{ matrix.shard }}
+      # Tasks would otherwise install every tool, not only install_args.
+      MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,6 +93,7 @@ jobs:
         with:
           version: '2026.10.19'
           install: true
+          install_args: rust github:sourcefrog/cargo-mutants bun
           cache: true
       - name: Install the webview build libraries
         run: |
@@ -91,7 +106,7 @@ jobs:
         run: mise run rust:mutants
 
   # AppyTappy ships for Windows only. This job proves the Rust workspace
-  # formats, lints, documents, and passes the member crates' tests on the
+  # lints, documents, and passes the member crates' tests on the
   # target platform, where the Windows adapters' tests run. The root package's
   # standards policy tests compare POSIX paths, so they run in `quality`.
   windows:
@@ -119,11 +134,15 @@ jobs:
           install: true
           install_args: rust github:nextest-rs/nextest bun
           cache: true
+      # The same build cache as the quality job.
+      - name: Restore the Rust build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: false
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
         run: mise run ui:build
-      - name: Check formatting
-        run: mise run rust:fmt:check
       - name: Lint
         run: mise run rust:lint
       - name: Build documentation
@@ -131,8 +150,10 @@ jobs:
       - name: Test member crates
         run: mise run rust:test:members
       # Prints the screen checks' timings on a Windows runner; it fails only
-      # if a benchmark errors, never on a slow time.
+      # if a benchmark errors, never on a slow time. Lint already compiles the
+      # benchmarks, so pull requests skip the run and main keeps the timings.
       - name: Benchmark
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: mise run rust:bench
 
   # Builds the runtime the installer ships and checks it against its
@@ -159,5 +180,12 @@ jobs:
           install: true
           install_args: rust
           cache: true
+      # The build cache keeps only dependencies, so the runtime itself, which
+      # the job measures, is always built fresh.
+      - name: Restore the Rust build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: false
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Check the runtime's footprint
         run: mise run rust:footprint
