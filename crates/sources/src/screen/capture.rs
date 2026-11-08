@@ -44,6 +44,8 @@ impl Frame<'_> {
 }
 
 /// Receives a capture's newest frame, or the error that stopped one frame.
+/// A [`io::ErrorKind::NotConnected`] error says the capture ended, such as
+/// when the window closed, and no frame follows it.
 ///
 /// It returns how long to wait before handling another, such as the wait a
 /// [`crate::schedule::ReadSchedule`] gives, and runs on the capture's own

@@ -21,7 +21,7 @@ on, so it must stay small. Every design choice below follows from that split.
   │ React UI ── Tauri commands ── owner thread              │
   │             windows, capture, values, automations       │
   └───────────────┬──────────────────────────┬──────────────┘
-    reads, writes │                          │ sets after each save
+    reads, writes │                          │ sets after saves the runtime uses
      saved files  ▼                          ▼
           applications, automations    Reload event
                   │ read at start          │
@@ -32,7 +32,7 @@ on, so it must stay small. Every design choice below follows from that split.
   │ reload watch ─ reload ──────────┐                       │
   │ lifecycle ─ started, exited ────┤                       │
   │ readers ─ samples, problems ────┼─► owner thread:       │
-  │ action thread ─ failures ───────┤   model + engine      │
+  │ action thread ─ notes, can run ─┤   model + engine      │
   │ tray ─ enable, disable, quit ───┘           │           │
   │ ◄── actions, undos, readers started, stopped┘           │
   └─────────────────────────────────────────────────────────┘
@@ -41,15 +41,16 @@ on, so it must stay small. Every design choice below follows from that split.
 1. The setup app saves each application, with the values drawn on its
    window, and each automation as files. [Setup app](Setup-app.md#saved-files)
    describes them.
-2. After each save it sets the named event `Local\AppyTappy.Reload`.
+2. After each save that changes what the runtime runs, it sets the named event
+   `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
 4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`.
 
 Apart from that one event, the two programs share only files: no sockets,
-pipes, or shared memory. A compiled config with a
-status file, described under [Files and handoff](#files-and-handoff), stays
-planned in [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
+pipes, or shared memory. The runtime reads the same files the setup app saves;
+[Files and handoff](#files-and-handoff) describes how each side writes and
+reads them.
 
 ## Workspace layout
 
@@ -61,9 +62,9 @@ Cargo.toml       workspace root; hosts the standards policy tests
 apps/
   mcp/           appytappy-mcp: the local MCP investigation server
   runtime/       appytappy-runtime: the always-on binary
-  setup/         the Tauri setup app (#16); its Rust side is in src-tauri/
+  setup/         the Tauri setup app; its Rust side is in src-tauri/
 crates/
-  config/        appytappy-config: formats, validation, compile step, paths
+  config/        appytappy-config: formats, validation, saved files, paths
   engine/        appytappy-engine: the rule evaluator
   sources/       appytappy-sources: Windows source primitives
   actions/       appytappy-actions: Windows actions
@@ -81,7 +82,7 @@ crates/
 | `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform` | —              |
 | setup app            | Windows  | `config`, `sources`, `tauri`, `tokio`, `serde`       | —              |
 
-Each crate's owning issue adds its code and its dependencies. Where issues #6, #8,
+Each crate's owning issue adds its code and its dependencies. Where issues #6
 and #11 say "the core crate", they mean `appytappy-config` for formats, validation,
 and policy, and `appytappy-engine` for rule evaluation. `config` owns what a
 condition means, so the setup app and the runtime agree on it; `engine` owns
@@ -145,14 +146,27 @@ Each thread below is a plain `std::thread`, and each channel is a
 - **Readers.** One per attached application that has automations. Each finds the
   application's window with its [window match](Setup-app.md#window-matching),
   captures the smallest rectangle that covers the values drawn at the window's
-  current size, and reads each value from its own region of each frame. It sends
-  a `Sample` only when a value changes, and reads less often while nothing
-  changes. When the window closes or changes size, it sends `Unseen`, and the
-  owner forgets the application's values, so no rule acts on a value nobody can
-  see. Each rule stays as it was, run or not, until the values read next decide
-  its condition. When the window closes it looks for one again, once a second,
-  until the application exits. Other kinds of source, such as a log tail or a
-  memory read, join them later
+  current size, and reads each value from its own region of each frame. It
+  sends a `Sample` only when a value changes, and reads less often while
+  nothing changes. When the window closes or changes size, it sends `Unseen`,
+  and the owner forgets the application's values, so no rule acts on a value
+  nobody can see. Each rule stays as it was, run or not, until the values read
+  next decide its condition. When the window closes, when the capture cannot
+  go on, such as after the graphics device was lost, and after
+  `RESTART_AFTER` frames in a row fail, it sends `Unseen` and looks for the
+  window again. After a capture ends that way it waits first, from
+  `FIND_AGAIN`, doubling up to `RESTART_WAIT_MAX` while each new capture ends
+  before reading a frame, and it logs why once until the reason changes.
+  Every `CHECK_AGAIN` it checks that the window still shows and that no other
+  window fits better, such as the main window opening after a launcher's,
+  and looks again if not. It reads only a window of the process the session
+  follows, picked among the windows that fit equally well as
+  [Lifecycle](#lifecycle) describes: one that shows over a minimized one.
+  While no window fits, the window it would read is minimized, or the window
+  that fits best is another process's, it looks every `FIND_AGAIN`, until
+  the application exits. The constants are in
+  `apps/runtime/src/workers/reader.rs`.
+  Other kinds of source, such as a log tail or a memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
   back what failed. It makes the media and audio controls on its own thread,
@@ -163,7 +177,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   tried again, and controls that cannot be made are made again when a later
   automation fires (see [Actions](Actions.md#when-the-controls-cannot-start)).
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
-  the setup app sets after each save, and sends `Reload`. The owner reads the
+  the setup app sets after each save that changes what the runtime runs, and
+  sends `Reload`. The owner reads the
   saved applications and automations again. An application whose automations
   did not change keeps running untouched; one whose automations changed starts
   over, undoing what they changed first. An automation that cannot run, such
@@ -172,10 +187,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   automations' file cannot be read as a whole, such as while another program
   holds the file, the runtime logs it, keeps running the plan it has, and
   reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
-  `apps/runtime/src/owner.rs` set, before it waits for the next save. The runtime
-  reads the setup app's files directly; the compiled config under
-  [Files and handoff](#files-and-handoff) stays planned in
-  [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
+  `apps/runtime/src/owner.rs` set, before it waits for the next save.
+  [Files and handoff](#files-and-handoff) describes what it reads.
 - **Tray thread.** Owns the hidden window behind the tray icon, runs its
   Windows message loop, and sends the user's menu picks, Windows' requests
   to close, and its own early end to the owner.
@@ -244,9 +257,27 @@ runtime, turns those events into snapshots:
   found.
 
 Each snapshot ends the session of an application whose process is gone, then
-starts one for an application that runs without one. A session follows the
-running process with the lowest ID, so a second copy of an application starts no
-second session, and it takes over when the first exits. A process ID that
+starts one for an application that runs without one. When several running
+processes fit the application's executable pattern, such as two copies or a
+helper beside the application, the snapshot also lists the windows and
+checks which show, and the session follows the process that owns the window
+the reader reads. Both pick it the same way (`read_window` in
+`crates/sources/src/system.rs`) among the windows the application's
+[window match](Setup-app.md#window-matching) fits best: one of the session's
+own process while it owns one, and otherwise the first that is not
+minimized, then the first. So the values, the session, and the check that a
+key press goes to the application in front all agree on one process. When
+the session's process owns no such window and another does, such as the
+application opening its window after a helper started first, the session
+ends and starts again on that process. A process that owned such a window
+keeps the session for `OWNER_GRACE` (`apps/runtime/src/lifecycle.rs`) after
+it owns none, because an application that switches to full screen replaces
+its window, and the snapshot after the old one closed may not list the new
+one yet; only after that does another copy that owns one take over. While no
+window fits, a session keeps its process, and a new one follows the process
+with the lowest ID. So a second copy of an application starts no second
+session, and it takes over when the first exits or has shown no window
+that fits for that long. A process ID that
 Windows reused for another executable ends the session. An application
 relaunched within 5 seconds that gets its old process ID back keeps its session,
 because a snapshot cannot tell the two processes apart. A crashed application is
@@ -296,7 +327,12 @@ as the user sees it. The runtime shows an icon in the taskbar's notification
 area: the setup app's icon, which the runtime's build script also links into its
 program file from `apps/runtime/runtime.rc`. Pointing at it shows a tooltip with
 the state, such as `AppyTappy: idle`, or `AppyTappy: disabled` while automations
-are off. Right-clicking it opens a small menu:
+are off. While the action thread cannot make the media and audio controls, the
+tooltip adds `actions cannot run yet`, as in
+`AppyTappy: attached, actions cannot run yet`, and the menu starts with a grayed
+`Actions cannot run yet` line; see
+[When the controls cannot start](Actions.md#when-the-controls-cannot-start).
+Right-clicking it opens a small menu:
 
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
   fire, the readers stop, and what the automations changed is undone, but
@@ -428,39 +464,60 @@ changing.
 
 ## Files and handoff
 
-- **Locations.** One function in `config` resolves every path, and both
-  programs call it. The setup app does not use Tauri's path resolver, which
-  names folders after the app's bundle identifier.
-  - `%APPDATA%\AppyTappy\` holds the authoring files, which are small and can
+- **Locations.** `Locations` in `crates/config/src/paths.rs` resolves every
+  path, and both programs use it. The setup app does not use Tauri's path
+  resolver, which names folders after the app's bundle identifier.
+  - `%APPDATA%\AppyTappy\` holds the saved files, which are small and can
     roam with the user's profile. Each application has a folder in `apps\`,
     named by its ID, that holds its `app.json` and the pictures its references
-    learned from and its state checks compare against; [Setup
-    app](Setup-app.md#saved-files) describes the file.
-  - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine: the
-    compiled config in `compiled\`, the status file, scan caches, and logs in
-    `logs\`. The compiled config names install paths and memory layouts that
-    can differ between machines.
-- **What is resolved at compile time.** Each signal resolves to the concrete
-  binding for each known application version, and every rule and action is
-  validated. The runtime only picks the binding for the version it detects.
-  It detects the version from the application's executable file on disk, at the
-  install path the compiled config records, such as its file version. Reading
-  that file is allowed for every anti-cheat class.
-- **Writing.** The setup app writes the compiled config to a uniquely named
-  temporary file in `compiled\`, flushes it to disk with `sync_all`, and
-  renames it over the old file. A rename within one folder replaces the file
-  in one step, so the runtime never reads a half-written config. Antivirus or
-  backup tools can hold the old file open for a moment, so the setup app
-  retries a failed rename a few times and then tells the user that it failed.
-- **Reading.** The runtime validates everything again before use, because the
-  file is outside its control.
-- **Status file.** The runtime writes it the same way, temporary file then
-  rename, so the setup app never reads it half-written.
-- **Format.** The file carries a format version. A runtime that meets a version
-  it does not know keeps its current config and records the problem in the
-  status file, so the setup app can tell the user to update the runtime.
-  Encoding, integrity checks, and version policy belong to
-  [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
+    learned from and its state checks compare against. Every automation is in
+    one file, `automations.json`. [Setup app](Setup-app.md#saved-files)
+    describes `app.json` and `automations.json`.
+  - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
+    the installed programs, as [Installer](Installer.md#what-it-does)
+    describes, and the runtime's log in `logs\`.
+- **Writing.** Only the setup app writes the saved files, through
+  `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
+  file beside the old one, is flushed to disk with `sync_all`, and is renamed
+  over the old file. A rename within one folder replaces the file in one step,
+  so the runtime never reads half a file. In an application's folder the
+  pictures are written before `app.json`, so `app.json` never names a picture
+  that is not there yet. Antivirus or backup tools can hold the old file open
+  for a moment, so a failed rename is tried again a few times, as
+  `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
+  setup app shows the error.
+- **Reloading.** After each request that saves an application, a value, a
+  reference, an anti-cheat class, or an automation, the setup app sets the
+  named event `Local\AppyTappy.Reload`, and the runtime reads every `app.json`
+  and `automations.json` again, as the [reload watch](#the-runtime) describes.
+  `Request::saves` in `apps/setup/src-tauri/src/owner/messages.rs` lists those
+  requests. Turning an overlay on or off, changing its mode, and moving its
+  panel also write `app.json`, but they do not set the event, because the
+  runtime does not use the overlay. A runtime that is not running reads the
+  files when it starts, so the setup app ignores a failure to set the event.
+- **Reading.** The runtime reads the files with the same `config` code the
+  setup app uses, and checks everything again before use, because the files
+  are outside its control and a person can edit them by hand. Each `app.json`
+  must parse and pass `AppFile::parse`'s checks, each automation must pass
+  `AutomationsFile::problem` on its own and `AutomationDef::check_against`
+  against the saved applications, and each value it watches must build a
+  check from its pictures. `apps/runtime/src/plan.rs` turns what passes into
+  the plan the runtime runs, in memory; nothing it builds is written to disk.
+  An automation that fails a check is logged and left out, and the rest run.
+- **Format.** `app.json` and `automations.json` each carry a `format` number,
+  and the `FORMAT` constant in `app_file.rs` and `automation_file.rs` sets the
+  one version this build reads and writes. Neither program converts another
+  version. An `app.json` with another version counts as unreadable, so its
+  application's automations do not run, and the log names its folder. An
+  `automations.json` with another version cannot be read as a whole: the
+  runtime keeps running what it ran, or runs nothing if it has not read the
+  files yet. Until the file is fixed, the setup app saves no automations, and
+  it cannot remove an application or delete a value, because it checks the
+  file to see whether an automation still uses them.
+- **Application versions.** A saved value has one binding for every version of
+  its application. Detecting the version and keeping a binding per version are
+  not built; [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7) tracks
+  them.
 
 ## Anti-cheat enforcement
 
@@ -471,13 +528,25 @@ input-injection actions, and anything else that opens the application's process.
 Screen, log, local API, and process and window event sources stay allowed. The
 design enforces the block in four places:
 
-1. The compile step in `config` refuses a blocked binding or action.
-2. The runtime applies the same check when it loads the compiled config.
-3. Parsing and validation produce different types. Reading a file gives a raw
-   type that nothing else accepts; only `config` validation turns it into the
-   validated type that sources and actions take. The validated type has
-   private fields and no `Deserialize` or `Default`, so code that skips
-   validation does not compile.
+1. The setup app refuses to save or turn on an automation whose actions the
+   application's class blocks. The saved files hold no memory source, so the
+   one blocked item they can hold is a key press action, which
+   `AutomationDef::check_against` refuses unless the class is `none`.
+2. The runtime runs the same check each time it reads the saved files, so an
+   automation that a hand edit or a later change to the application's class
+   made blocked does not run.
+3. For rules and actions, parsing and validation produce different types.
+   Reading `automations.json` gives `AutomationDef` and `ActionDef`, which the
+   engine and the action worker do not accept; only `AutomationDef::to_rule`
+   and `ActionDef::to_action` in `config` turn them into a `Rule` and its
+   `Action`s, and `check_against` uses `ActionDef::to_action` to find a key
+   press. `Rule` has private
+   fields, an action's values such as a key chord or a volume level are types
+   that only their checked constructors make, and neither has `Deserialize` or
+   `Default`, so code that skips validation does not compile. The screen
+   source has no such split: `saved::build` in `appytappy-sources` takes the
+   raw `ScreenDef` and `ReferenceDef` from `app.json` and checks them as it
+   builds the check it reads with.
 4. Every path that opens an application's process needs a process-access permit,
    including the guided memory scan
    ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any version
@@ -489,11 +558,10 @@ design enforces the block in four places:
 
 The setup app is a Tauri v2 app with a React and TypeScript frontend, in
 `apps/setup/`. The owner chose Tauri, which settles the framework question in
-[#16](https://github.com/TheLunchTrae/appy-tappy/issues/16); the shell and its
-screens stay with that issue.
+[#16](https://github.com/TheLunchTrae/appy-tappy/issues/16).
 
 Its Rust side exposes Tauri commands and holds no logic of its own: discovery,
-scanning, preview, and compiling come from the shared crates. It follows the
+scanning, preview, and saving come from the shared crates. It follows the
 same ownership rule as the runtime. One owner thread holds the setup app's
 state, and Tauri keeps only that thread's `Sender`, never state behind a
 `Mutex`. Each command is `async`: it sends a request with a
@@ -607,8 +675,7 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
 - **[`serde`](https://serde.rs/).** Converts Rust types to and from data
   formats. Every format crate builds on it.
 - **[`serde_json`](https://docs.rs/serde_json).** JSON support for `serde`;
-  the likely first encoding for the compiled config
-  ([#8](https://github.com/TheLunchTrae/appy-tappy/issues/8)).
+  the encoding of the saved files.
 - **[`windows`](https://github.com/microsoft/windows-rs).** Microsoft's
   official Rust bindings for Windows APIs, generated from Windows metadata.
   Its features select which APIs compile, which mainly keeps build times down.
@@ -632,6 +699,6 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   named mutex like the runtime's would find the running copy too, but bringing
   its window forward would also need a message between the two processes.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
-  many random inputs to check a property, such as "a compiled config reads back
-  to the same value". The standards require it at trust boundaries such as file
-  formats.
+  many random inputs to check a property. `appytappy-sources` uses it to check
+  that a picture encoded as PNG decodes back the same. The standards
+  require it at trust boundaries such as file formats.

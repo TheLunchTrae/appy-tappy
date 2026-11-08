@@ -5,8 +5,9 @@ application's window and what to do about it. It is a Tauri v2 program:
 the UI is React and TypeScript in `apps/setup/src`, and the Rust side in
 `apps/setup/src-tauri` holds the capture and the checks.
 [Architecture](Architecture.md#the-setup-app) explains why it is built this
-way. Issues [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16) and
-[#17](https://github.com/TheLunchTrae/appy-tappy/issues/17) track it.
+way. Launching a program, opening a file or URL, and playing a sound are
+actions it does not offer yet;
+[#30](https://github.com/TheLunchTrae/appy-tappy/issues/30) tracks them.
 
 The user guide owns the pages and flows as the user sees them:
 [Applications](../user/Applications.md), [Values](../user/Values.md),
@@ -146,26 +147,27 @@ it beside the debug build.
 
 ## Window matching
 
-[How AppyTappy finds the
-window](../user/Applications.md#how-appytappy-finds-the-window) gives the
-patterns, the must-match fields, and the fallback. The file stores them as
-`mustMatch`, with a flag for the title and the class, and `fallback`: `none` or
-`executable`. The executable always has to match, because the runtime attaches
-to an application by its process's executable. A window qualifies when its
-executable and every required field match. Fallback windows count only when no
-window qualifies. Windows rank by fewer missed fields, then by the title
-matching. On a tie the runtime takes the window Windows lists first, usually the
-front-most, so the setup app marks every window that ties for the best fit as a
-best match. The setup app uses the match to show which applications are running,
-and the runtime finds each application's window with the same rules. A value's
-region means something only while the window has the size it had when the region
-was drawn. Values can be drawn at more than one size, and the runtime reads the
-ones drawn at the window's current size. When the window closes or changes size,
-the runtime forgets the values it read. Each automation stays as it was until
-the values read next show whether its condition still holds, so it neither runs
-again nor undoes what it changed while the window is out of sight. When the
-window has a size no value was drawn at, the runtime reads nothing and logs that
-the window should be resized or the value drawn again.
+[How AppyTappy finds the window](../user/Applications.md#how-appytappy-finds-the-window)
+gives the patterns, the must-match fields, and the fallback. The file stores
+them as `mustMatch`, with a flag for the title and the class, and `fallback`:
+`none` or `executable`. The executable always has to match, because the
+runtime attaches to an application by its process's executable. A window
+qualifies when its executable and every required field match. Fallback
+windows count only when no window qualifies. Windows rank by fewer missed
+fields, then by the title matching. On a tie the runtime keeps a window of
+the process its session already follows, and otherwise takes the first that
+Windows lists, usually the front-most, that is not minimized, so the setup
+app marks every window that ties for the best fit as a best match.
+The setup app uses the match to show which applications are running, and the
+runtime finds each application's window with the same rules. A value's region
+means something only while the window has the size it had when the region was
+drawn. Values can be drawn at more than one size, and the runtime reads the
+ones drawn at the window's current size. When the window closes or changes
+size, the runtime forgets the values it read. Each automation stays as it was
+until the values read next show whether its condition still holds, so it
+neither runs again nor undoes what it changed while the window is out of sight.
+When the window has a size no value was drawn at, the runtime reads nothing and
+logs that the window should be resized or the value drawn again.
 
 ## Saved files
 
@@ -262,22 +264,23 @@ An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`) and
-the files (`store.rs`). Each save writes a temporary file and renames it over the old
-one, so a crash never leaves half a file; a later save in that folder removes a
-temporary file that a crash left between the two steps, once it is ten minutes
-old. A file that cannot be read is listed with the reason and left alone; an
-automations file that cannot be read as a whole, such as one with another
-format version, stops automations from being saved until it is fixed, rather
-than being replaced. One automation that breaks a rule on its own, such as
-after a hand edit, is kept in the file and listed with its problem, and nothing
-runs it; the user can turn it off or delete it, and the others keep working. An
-ID that a hand edit made invalid, or gave to more than one automation, is
-listed as a problem on each of them. When the setup app reads the file, it
-gives a new ID, made from the name, to each automation whose ID is invalid or
-held by one before it, the same way each time, so every row can be edited or
-deleted on its own; the next save writes the new IDs. A new application's
-anti-cheat class starts as `unknown`, which blocks key press actions until the
-user sets it
+the files (`store.rs`). Each save writes a temporary file and renames it over
+the old one, so a crash never leaves half a file; a later save in that folder
+removes a temporary file that a crash left between the two steps, once it is ten
+minutes old. A file that cannot be read is listed with the reason and left
+alone; an automations file that cannot be read as a whole, such as one with
+another format version, is not replaced: until it is fixed, the setup app saves
+no automations, removes no application, and deletes no value, because it checks
+that file to see whether an automation still uses the application or value. One
+automation that breaks a rule on its own, such as after a hand edit, is kept in
+the file and listed with its problem, and nothing runs it; the user can turn it
+off or delete it, and the others keep working. An ID that a hand edit made
+invalid, or gave to more than one automation, is listed as a problem on each of
+them. When the setup app reads the file, it gives a new ID, made from the name,
+to each automation whose ID is invalid or held by one before it, the same way
+each time, so every row can be edited or deleted on its own; the next save
+writes the new IDs. A new application's anti-cheat class starts as `unknown`,
+which blocks key press actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
 ## Running it

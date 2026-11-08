@@ -1,4 +1,5 @@
-//! The reload requests the setup app sends the runtime after each save.
+//! The reload requests the setup app sends the runtime after each save that
+//! changes what the runtime runs.
 
 use std::io;
 use std::sync::mpsc::Sender;
@@ -6,8 +7,8 @@ use std::sync::mpsc::Sender;
 use crate::host;
 
 /// The name of the event the runtime waits on for reload requests. The
-/// setup app sets it after each save, so the runtime reads the saved files
-/// again.
+/// setup app sets it after each save that changes what the runtime runs, so
+/// the runtime reads the saved files again.
 pub const RELOAD: &str = r"Local\AppyTappy.Reload";
 
 /// A request to read the saved files again.

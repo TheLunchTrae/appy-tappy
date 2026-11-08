@@ -99,21 +99,23 @@ mask of any region, as after the user adjusts the box by hand.
 
 ## Read interval
 
-Each screen binding has a read interval: a minimum and a maximum time between
-reads. The defaults are 16 ms and 500 ms. A shorter minimum notices changes
-sooner; a longer maximum saves CPU while nothing changes. Reads happen only on
-frames the window draws, so a window that draws nothing new is not read at
-all.
+The runtime reads an application's values in one pass of its reader, so each
+reader keeps one read interval for all of them: a minimum and a maximum time
+between reads. The defaults are 16 ms and 500 ms. A shorter minimum notices
+changes sooner; a longer maximum saves CPU while nothing changes. Reads happen
+only on frames the window draws, so a window that draws nothing new is not read
+at all.
 
-Between the two, the source adapts. After a read that changed the value, or
+Between the two, the reader adapts. After a read that changed a value, or
 that came close to where a rule would fire, it waits the minimum. Each read
 that changed nothing doubles the wait, up to the maximum. A bar that holds
 still, in a window that keeps drawing, is read about twice a second; one that
 moves is read at full speed.
 
-The config format, with a default for all bindings and an override for one,
-belongs to [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6) and
-[#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
+The saved files do not set a read interval, so every reader uses
+`ReadInterval::DEFAULT`. A setting in the app definition, with a default for all
+bindings and an override for one, belongs to
+[#6](https://github.com/TheLunchTrae/appy-tappy/issues/6).
 
 ## Capture
 
@@ -125,7 +127,12 @@ asks the system for no more than one frame per minimum interval. Between reads
 the capture keeps only the newest frame and copies nothing. When a read is
 due, the graphics card copies just the region into a small texture the CPU can
 read, and those rows land in a buffer that is reused for every frame. When
-the window closes, the capture tells its handler and stops.
+the window closes, the capture tells its handler and stops. It does the same
+when it can no longer produce frames: when the graphics device is lost, such
+as after a driver reset or update, and when it cannot follow the window to a
+new size. A lost device can stop frames altogether, so while no frame comes,
+the capture checks its device every `DEVICE_CHECK`
+(`crates/sources/src/win/capture.rs`).
 
 Each frame carries the time since the system composed it. The benchmark uses
 that to report capture-to-decision latency on a live window:

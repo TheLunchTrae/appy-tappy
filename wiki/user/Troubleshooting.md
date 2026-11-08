@@ -32,7 +32,9 @@ Check these in order:
 4. **Does the value read?** Turn on the [overlay](Overlay.md) to see what
    AppyTappy reads. A value reads only while the window is the
    [size it was made at](Values.md#window-size). If the window has a size no
-   value was made at, the log says so.
+   value was made at, the log says so. A value also reads only while its
+   window shows: while the window is minimized, AppyTappy waits, and reads
+   the values again when it shows.
 5. **Did it already run?** An automation runs once each time its condition
    becomes true. It runs again only after the condition has stopped being
    true, and after its wait.
@@ -68,7 +70,11 @@ window. Switch it to borderless or windowed fullscreen, or use
 - Volume actions change only the default playback device.
 - The log names each action that failed, and why.
 - Right after you sign in to Windows, the media controls may not be ready
-  yet. AppyTappy tries again when an automation fires, waiting longer between
-  tries, and the log says when actions can run.
+  yet. Media actions then fail, and the log names each one, while volume and
+  key press actions still run. AppyTappy asks for the media controls again,
+  waiting longer between tries.
+- If the tray icon says **actions cannot run yet**, AppyTappy could not start
+  the audio controls in Windows, so no action runs. It keeps trying, and the
+  text goes away once actions can run.
 - When putting the volume back fails, for example because your headset was
   unplugged, AppyTappy keeps trying and puts it back once the headset returns.

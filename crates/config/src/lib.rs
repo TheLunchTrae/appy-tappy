@@ -1,4 +1,5 @@
-//! App definition, rule, and compiled config formats, their validation, and the compile step.
+//! The saved files' formats, rules, their validation, and where the files live and how they are
+//! written.
 //!
 //! See `wiki/developer/Architecture.md` for this crate's boundaries.
 
