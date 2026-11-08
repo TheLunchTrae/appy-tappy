@@ -10,6 +10,7 @@ import {
   syncOverlays,
 } from './lib/api.ts';
 import { Question, useQuestion } from './components/Question.tsx';
+import { UpdateNotice } from './components/UpdateNotice.tsx';
 import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
@@ -295,6 +296,7 @@ export function App() {
             {LOST[flow.kind]}
           </Question>
         )}
+        <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />
       </nav>
       {content}
     </div>

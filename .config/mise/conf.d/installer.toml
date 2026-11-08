@@ -55,6 +55,22 @@ else
   [ -z "$(git status --porcelain)" ] || build="$build.dirty"
   version="$release-dev+$build"
 fi
+# With UPDATER_PUBLIC_KEY, the update key's public half, the setup app checks
+# for updates and installs them only when they carry that key's signature
+# (wiki/developer/Installer.md#updates). Without it, the build never updates.
+# A pasted key can end in a line break, which is not part of it.
+set --
+pubkey=$(printf '%s' "${UPDATER_PUBLIC_KEY:-}" | tr -d '[:space:]')
+if [ -n "$pubkey" ]; then
+  case "$pubkey" in
+    *[!A-Za-z0-9+/=]*)
+      echo "UPDATER_PUBLIC_KEY is not the public key that tauri signer generate writes" >&2
+      exit 1
+      ;;
+  esac
+  set -- --config src-tauri/tauri.updater.conf.json \
+    --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$pubkey\"}}}"
+fi
 host=$(rustc -vV | sed -n 's/^host: //p')
 cargo build --profile dist --locked -p appytappy-runtime
 mkdir -p apps/setup/src-tauri/binaries
@@ -63,5 +79,66 @@ cd apps/setup
 bun run tauri build --ci \
   --config src-tauri/tauri.installer.conf.json \
   --config "{\"version\":\"$version\"}" \
+  "$@" \
   -- --profile dist --locked
+'''
+
+[tasks."update:sign"]
+description = "Sign a release installer for the updater and write the latest.json that announces it"
+run = '''
+set -eu
+# The release workflow runs this on the installer of a v* tag, in a job of
+# its own that alone gets the update key's private half
+# (wiki/developer/Installer.md#updates). It signs with the Tauri CLI that
+# `mise run ui:install` installs; that install runs in a step of its own, so
+# no install script sees the key. The signature binds the version, which
+# the setup app's updater requires, and latest.json, beside the installer,
+# tells the updater where the release is.
+installer=${UPDATE_INSTALLER:?set UPDATE_INSTALLER to the installer to sign}
+tag=${INSTALLER_TAG:?set INSTALLER_TAG to the release tag}
+: "${UPDATER_PUBLIC_KEY:?set UPDATER_PUBLIC_KEY to the update key public half}"
+: "${TAURI_SIGNING_PRIVATE_KEY:?set TAURI_SIGNING_PRIVATE_KEY to the update key private half}"
+version=${tag#v}
+dir=$(cd "$(dirname "$installer")" && pwd)
+name=$(basename "$installer")
+(cd apps/setup && bun run tauri signer sign --app-version "$version" "$dir/$name") >/dev/null
+signature=$(cat "$dir/$name.sig")
+# Both halves carry the key's 8-byte ID after a 2-byte algorithm, in the second
+# line of their base64 text. A signature from another key would fail every
+# update, so the release stops here instead.
+key_id() {
+  printf '%s' "$1" | base64 -d | sed -n 2p | base64 -d | od -An -tx1 -j2 -N8 | tr -d ' \n'
+}
+if [ "$(key_id "$signature")" != "$(key_id "$UPDATER_PUBLIC_KEY")" ]; then
+  echo "TAURI_SIGNING_PRIVATE_KEY is not the private half of UPDATER_PUBLIC_KEY" >&2
+  exit 1
+fi
+url="https://github.com/TheLunchTrae/appy-tappy/releases/download/$tag/$name"
+printf '{\n  "version": "%s",\n  "pub_date": "%s",\n  "platforms": {\n    "windows-x86_64": { "signature": "%s", "url": "%s" }\n  }\n}\n' \
+  "$version" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$signature" "$url" > "$dir/latest.json"
+'''
+
+[tasks."winget:manifest"]
+description = "Write the winget manifests of a published release into artifacts/winget"
+run = '''
+set -eu
+# Fills apps/setup/src-tauri/winget's templates for the release that
+# WINGET_VERSION names, such as 0.1.0, with its installer's SHA-256 from the
+# published release. wiki/developer/Installer.md#winget says how to submit them.
+version=${WINGET_VERSION:?set WINGET_VERSION to a published release, such as 0.1.0}
+case "$version" in
+  *[!0-9A-Za-z.+-]*) echo "WINGET_VERSION is not a version: $version" >&2; exit 1 ;;
+esac
+out="artifacts/winget/$version"
+mkdir -p "$out"
+url="https://github.com/TheLunchTrae/appy-tappy/releases/download/v$version/AppyTappy_${version}_x64-setup.exe"
+curl -fsSL --retry 3 -o "$out/installer.exe" "$url"
+sha=$(sha256sum "$out/installer.exe" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
+rm "$out/installer.exe"
+# The templates' own comments stay out; the schema line stays in.
+for template in apps/setup/src-tauri/winget/*.yaml; do
+  sed -e '/^# yaml-language-server/!{/^#/d;}' -e "s/{{version}}/$version/g" -e "s/{{sha256}}/$sha/g" \
+    "$template" > "$out/$(basename "$template")"
+done
+echo "$out"
 '''

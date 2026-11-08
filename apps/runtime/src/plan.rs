@@ -33,23 +33,44 @@ pub(crate) struct Plan {
     pub(crate) problems: Vec<String>,
 }
 
-/// One application's part of the plan.
+/// One application's part of the plan: what runs, and what the log and the
+/// tray call it. A reload restarts an application's automations only when
+/// what runs changed, so renaming the application, a value or an
+/// automation, or marking its values as checked, restarts nothing.
 #[derive(Debug, PartialEq)]
 pub(crate) struct AppPlan {
+    /// What the log and the tray call the application and its parts.
+    pub(crate) labels: Labels,
+    /// What runs.
+    pub(crate) runs: Runs,
+}
+
+/// What the log and the tray call an application and its parts. A change to
+/// them alone restarts nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Labels {
     /// The application's name, such as `Example App`.
     pub(crate) name: String,
+    /// Each rule's automation's name, in the order of [`Runs::rules`].
+    pub(crate) automations: Vec<String>,
+    /// Each value's name, such as `Progress`, in the order of
+    /// [`Runs::values`].
+    pub(crate) values: Vec<String>,
+    /// The build its values were last checked against, if the setup app
+    /// recorded one.
+    pub(crate) checked: Option<BuildDef>,
+}
+
+/// What runs for an application. A change to it restarts the application's
+/// automations.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Runs {
     /// How to find its window.
     pub(crate) window: WindowMatch,
     /// The values its automations watch.
     pub(crate) values: Vec<ValuePlan>,
     /// One rule for each automation that can run.
     pub(crate) rules: Arc<[Rule]>,
-    /// Each rule's automation's name, in the same order.
-    pub(crate) automations: Vec<String>,
-    /// The build its values were last checked against, if the setup app
-    /// recorded one. Only the log reads it, from the newest plan: a change to
-    /// it restarts nothing, so a running session may hold an older one.
-    pub(crate) checked: Option<BuildDef>,
 }
 
 /// A value an automation watches.
@@ -58,30 +79,17 @@ pub(crate) struct ValuePlan {
     /// The signal the rules compare: the value's ID, which is unique within
     /// its application.
     pub(crate) signal: SignalName,
-    /// The value's name, such as `Progress`, for the log.
-    pub(crate) name: String,
     /// Where it is read and how.
     pub(crate) check: SavedCheck,
 }
 
 impl AppPlan {
-    /// Whether the application runs the same under `other`: everything but
-    /// the build its values were checked against, which only the log reads,
-    /// so marking values as checked restarts nothing.
-    pub(crate) fn runs_as(&self, other: &Self) -> bool {
-        let Self {
-            name,
-            window,
-            values,
-            rules,
-            automations,
-            checked: _,
-        } = self;
-        *name == other.name
-            && *window == other.window
-            && *values == other.values
-            && *rules == other.rules
-            && *automations == other.automations
+    /// The name of the value at `position`, for the log.
+    pub(crate) fn value_name(&self, position: usize) -> &str {
+        self.labels
+            .values
+            .get(position)
+            .map_or("a value", String::as_str)
     }
 }
 
@@ -91,7 +99,7 @@ impl Plan {
         Watchlist::new(
             self.apps
                 .iter()
-                .map(|(id, app)| (id.clone(), app.window.clone())),
+                .map(|(id, app)| (id.clone(), app.runs.window.clone())),
         )
     }
 }
@@ -119,6 +127,7 @@ pub(crate) fn load(apps: &AppStore, automations: &AutomationStore) -> Result<Pla
 #[derive(Default)]
 struct Draft {
     values: Vec<ValuePlan>,
+    value_names: Vec<String>,
     rules: Vec<Rule>,
     automations: Vec<String>,
 }
@@ -189,11 +198,8 @@ pub(crate) fn compile(
                 picture(app_id, name)
             })
             .map_err(|error| format!("{} of {}: {error}", value.name, file.name))?;
-            draft.values.push(ValuePlan {
-                signal,
-                name: value.name.clone(),
-                check,
-            });
+            draft.values.push(ValuePlan { signal, check });
+            draft.value_names.push(value.name.clone());
             Ok(())
         });
         if let Err(reason) = ready {
@@ -209,12 +215,17 @@ pub(crate) fn compile(
         .filter_map(|(id, draft)| {
             let (_, file) = good.iter().find(|(good_id, _)| *good_id == id)?;
             let plan = AppPlan {
-                name: file.name.clone(),
-                window: file.window.to_match(),
-                values: draft.values,
-                rules: draft.rules.into(),
-                automations: draft.automations,
-                checked: file.checked.as_ref().map(|checked| checked.build.clone()),
+                labels: Labels {
+                    name: file.name.clone(),
+                    automations: draft.automations,
+                    values: draft.value_names,
+                    checked: file.checked.as_ref().map(|checked| checked.build.clone()),
+                },
+                runs: Runs {
+                    window: file.window.to_match(),
+                    values: draft.values,
+                    rules: draft.rules.into(),
+                },
             };
             Some((id.to_owned(), Arc::new(plan)))
         })
@@ -371,30 +382,30 @@ mod tests {
         assert_eq!(plan.problems, Vec::<String>::new());
         assert_eq!(plan.apps.keys().collect::<Vec<_>>(), ["example"]);
         let example = plan.apps.get("example").expect("planned");
-        assert_eq!(example.name, "Example App");
-        assert_eq!(example.window.executable, Pattern::new("Example*.exe"));
+        assert_eq!(example.labels.name, "Example App");
+        assert_eq!(example.runs.window.executable, Pattern::new("Example*.exe"));
         assert_eq!(
-            example.automations,
+            example.labels.automations,
             ["Automation first", "Automation second"]
         );
-        assert_eq!(example.rules.len(), 2);
-        let values: Vec<&str> = example
-            .values
-            .iter()
-            .map(|value| value.name.as_str())
-            .collect();
+        assert_eq!(example.runs.rules.len(), 2);
+        let values: Vec<&str> = example.labels.values.iter().map(String::as_str).collect();
         assert_eq!(
             values,
             ["The progress"],
             "only watched values are read, once each"
         );
         assert_eq!(
-            example.values.first().map(|value| value.signal.clone()),
+            example
+                .runs
+                .values
+                .first()
+                .map(|value| value.signal.clone()),
             SignalName::new("progress").ok()
         );
         assert_eq!(
             plan.watchlist(),
-            Watchlist::new([("example".to_owned(), example.window.clone())])
+            Watchlist::new([("example".to_owned(), example.runs.window.clone())])
         );
     }
 
@@ -444,8 +455,8 @@ mod tests {
             ]
         );
         let example = plan.apps.get("example").expect("the good automation runs");
-        assert_eq!(example.automations, ["Automation good"]);
-        assert_eq!(example.values.len(), 1);
+        assert_eq!(example.labels.automations, ["Automation good"]);
+        assert_eq!(example.runs.values.len(), 1);
     }
 
     #[test]

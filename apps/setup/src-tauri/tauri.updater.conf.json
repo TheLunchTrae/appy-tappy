@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/TheLunchTrae/appy-tappy/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

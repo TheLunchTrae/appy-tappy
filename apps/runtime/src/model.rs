@@ -142,7 +142,7 @@ impl Model {
     pub(crate) fn active_automations(&self) -> Vec<&str> {
         self.running
             .values()
-            .flat_map(|running| running.plan.automations.iter().map(String::as_str))
+            .flat_map(|running| running.plan.labels.automations.iter().map(String::as_str))
             .collect()
     }
 
@@ -153,10 +153,15 @@ impl Model {
 
     /// The name of the app a session reads, for the log.
     pub(crate) fn app_name(&self, id: SessionId) -> Option<&str> {
+        self.session_plan(id).map(|plan| plan.labels.name.as_str())
+    }
+
+    /// The newest plan of the application that session `id` runs.
+    pub(crate) fn session_plan(&self, id: SessionId) -> Option<&AppPlan> {
         self.running
             .values()
             .find(|running| running.id == id)
-            .map(|running| running.plan.name.as_str())
+            .map(|running| &*running.plan)
     }
 
     /// Applies what detection found at `at`.
@@ -214,16 +219,21 @@ impl Model {
             .collect()
     }
 
-    /// Switches to a new plan. An app whose part runs differently, as
-    /// [`AppPlan::runs_as`] compares them, starts over with it, undoing what
-    /// its automations changed; any other app keeps running untouched.
+    /// Switches to a new plan. An app whose part runs differently starts
+    /// over with it, undoing what its automations changed. An app that runs
+    /// the same keeps running untouched and only takes the new plan's labels,
+    /// so renaming it or its parts, or marking its values as checked,
+    /// restarts nothing.
     pub(crate) fn replan(&mut self, plan: BTreeMap<String, Arc<AppPlan>>) -> Vec<Order> {
-        let changed: Vec<String> = self
-            .running
-            .iter()
-            .filter(|(app, running)| plan.get(*app).is_none_or(|new| !new.runs_as(&running.plan)))
-            .map(|(app, _)| app.clone())
-            .collect();
+        let mut changed = Vec::new();
+        for (app, running) in &mut self.running {
+            match plan.get(app) {
+                Some(new) if new.runs == running.plan.runs => {
+                    running.plan = Arc::clone(new);
+                },
+                _ => changed.push(app.clone()),
+            }
+        }
         let mut orders: Vec<Order> = changed
             .iter()
             .flat_map(|app| self.stop(app, Stop::Paused))
@@ -293,7 +303,7 @@ impl Model {
         }
         let id = SessionId(self.next);
         self.next = self.next.wrapping_add(1);
-        let rules = Arc::clone(&plan.rules);
+        let rules = Arc::clone(&plan.runs.rules);
         let (session, effects) = match start {
             Start::Fresh(at) => Session::start(rules, at),
             Start::Resume => (Session::resume(rules), Vec::new()),
@@ -331,7 +341,7 @@ impl Model {
             Stop::Exited(at) => running.session.end(at),
             Stop::Paused => running.session.stop(),
         };
-        let name = running.plan.name.clone();
+        let name = running.plan.labels.name.clone();
         let mut orders = vec![Order::StopReading(running.id, name)];
         orders.extend(acts(running.id, &running.plan, &running.watched, effects));
         orders
@@ -364,11 +374,11 @@ fn acts(id: SessionId, plan: &AppPlan, watched: &Watched, effects: Vec<Effect>) 
         .into_iter()
         .filter_map(|effect| {
             let (Effect::Fire(rule) | Effect::Release(rule)) = effect;
-            let automation = plan.automations.get(rule.0)?.clone();
+            let automation = plan.labels.automations.get(rule.0)?.clone();
             let owner = (id, rule);
             let job = match effect {
                 Effect::Fire(_) => {
-                    let fired = plan.rules.get(rule.0)?;
+                    let fired = plan.runs.rules.get(rule.0)?;
                     Job::Run {
                         owner,
                         automation,
@@ -401,7 +411,7 @@ mod tests {
     use appytappy_sources::system::Rgb;
 
     use super::*;
-    use crate::plan::ValuePlan;
+    use crate::plan::{Labels, Runs, ValuePlan};
 
     fn signal() -> SignalName {
         SignalName::new("progress").expect("valid")
@@ -444,32 +454,36 @@ mod tests {
             blue: 255,
         };
         Arc::new(AppPlan {
-            name: name.to_owned(),
-            window: WindowMatch {
-                title: Pattern::new("*"),
-                class: Pattern::new("*"),
-                executable: Pattern::new("Example.exe"),
-                must_match: MustMatch {
-                    title: false,
-                    class: false,
-                },
-                fallback: false,
+            labels: Labels {
+                name: name.to_owned(),
+                automations: vec![format!("Pause {name}")],
+                values: vec!["Progress".to_owned()],
+                checked: None,
             },
-            values: vec![ValuePlan {
-                signal: signal(),
-                name: "Progress".to_owned(),
-                check: SavedCheck {
-                    window_size: Size {
-                        width: 800,
-                        height: 600,
+            runs: Runs {
+                window: WindowMatch {
+                    title: Pattern::new("*"),
+                    class: Pattern::new("*"),
+                    executable: Pattern::new("Example.exe"),
+                    must_match: MustMatch {
+                        title: false,
+                        class: false,
                     },
-                    region: Region::new(0, 0, 10, 2).expect("not empty"),
-                    check: Check::BarFill(BarFill::new(white, black).expect("different")),
+                    fallback: false,
                 },
-            }],
-            rules: Arc::from(vec![rule]),
-            automations: vec![format!("Pause {name}")],
-            checked: None,
+                values: vec![ValuePlan {
+                    signal: signal(),
+                    check: SavedCheck {
+                        window_size: Size {
+                            width: 800,
+                            height: 600,
+                        },
+                        region: Region::new(0, 0, 10, 2).expect("not empty"),
+                        check: Check::BarFill(BarFill::new(white, black).expect("different")),
+                    },
+                }],
+                rules: Arc::from(vec![rule]),
+            },
         })
     }
 
@@ -499,7 +513,7 @@ mod tests {
         orders
             .iter()
             .map(|order| match order {
-                Order::Read(job) => format!("read {} {}", job.session.0, job.plan.name),
+                Order::Read(job) => format!("read {} {}", job.session.0, job.plan.labels.name),
                 Order::StopReading(id, name) => format!("stop {} {name}", id.0),
                 Order::Act(Job::Run {
                     owner, automation, ..
@@ -588,12 +602,15 @@ mod tests {
         .expect("valid");
         let base = plan("A", 90.0);
         let a = Arc::new(AppPlan {
-            name: base.name.clone(),
-            window: base.window.clone(),
-            values: Vec::new(),
-            rules: Arc::from(vec![rule]),
-            automations: base.automations.clone(),
-            checked: None,
+            labels: Labels {
+                values: Vec::new(),
+                ..base.labels.clone()
+            },
+            runs: Runs {
+                window: base.runs.window.clone(),
+                values: Vec::new(),
+                rules: Arc::from(vec![rule]),
+            },
         });
         let mut model = Model::default();
         let now = Instant::now();
@@ -641,12 +658,15 @@ mod tests {
         .expect("valid");
         let base = plan("A", 90.0);
         let a = Arc::new(AppPlan {
-            name: base.name.clone(),
-            window: base.window.clone(),
-            values: Vec::new(),
-            rules: Arc::from(vec![rule]),
-            automations: base.automations.clone(),
-            checked: None,
+            labels: Labels {
+                values: Vec::new(),
+                ..base.labels.clone()
+            },
+            runs: Runs {
+                window: base.runs.window.clone(),
+                values: Vec::new(),
+                rules: Arc::from(vec![rule]),
+            },
         });
         let mut model = Model::default();
         let now = Instant::now();
@@ -746,6 +766,31 @@ mod tests {
     }
 
     #[test]
+    fn renaming_restarts_nothing_and_the_new_names_show_at_once() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7), now);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        let mut renamed = plan("A", 90.0);
+        let labels = &mut Arc::get_mut(&mut renamed).expect("unshared").labels;
+        labels.name = "Renamed".to_owned();
+        labels.automations = vec!["Pause renamed".to_owned()];
+        labels.values = vec!["Renamed progress".to_owned()];
+        assert_eq!(
+            model.replan(plans(&[("a", &renamed)])),
+            [],
+            "the automation that fired stays fired"
+        );
+        assert_eq!(model.active_automations(), ["Pause renamed"]);
+        assert_eq!(model.app_name(SessionId(0)), Some("Renamed"));
+        assert_eq!(
+            kinds(&model.sample(SessionId(0), signal(), number(50.0), now)),
+            ["undo 0 Pause renamed"]
+        );
+    }
+
+    #[test]
     fn a_new_checked_build_restarts_nothing_but_is_what_the_log_reads() {
         let mut model = Model::default();
         let now = Instant::now();
@@ -757,10 +802,12 @@ mod tests {
             size: 1,
             modified: 2,
         };
-        Arc::get_mut(&mut checked).expect("unshared").checked = Some(build.clone());
+        Arc::get_mut(&mut checked).expect("unshared").labels.checked = Some(build.clone());
         assert_eq!(model.replan(plans(&[("a", &checked)])), []);
         assert_eq!(
-            model.plan("a").and_then(|plan| plan.checked.as_ref()),
+            model
+                .plan("a")
+                .and_then(|plan| plan.labels.checked.as_ref()),
             Some(&build)
         );
     }
