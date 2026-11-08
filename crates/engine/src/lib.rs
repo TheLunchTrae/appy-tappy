@@ -506,6 +506,49 @@ mod tests {
         feed(&mut session, &clock, 1, &[95.0, 10.0, 95.0, 10.0]);
         assert_eq!(session.next_due(), None);
         assert_eq!(session.recheck(clock.at(20)), []);
+        // Held again, then the value can no longer be seen: unknown is not
+        // holding either.
+        feed(&mut session, &clock, 21, &[95.0, 10.0, 95.0]);
+        assert_eq!(session.next_due(), Some(clock.at(31)));
+        session.forget_values();
+        assert_eq!(session.next_due(), None);
+        assert_eq!(session.recheck(clock.at(40)), []);
+    }
+
+    #[test]
+    fn only_becomes_rules_wait_out_their_cooldown() {
+        let clock = Clock::new();
+        let cooldown = Duration::from_millis(10);
+        let changes = Rule::new(
+            Trigger::Changes {
+                signal: name("progress"),
+                guard: None,
+            },
+            pause(),
+            cooldown,
+            Restore::Never,
+        )
+        .expect("valid");
+        let focused = Rule::new(
+            Trigger::On {
+                event: AppEvent::Focused,
+                guard: None,
+            },
+            pause(),
+            cooldown,
+            Restore::Never,
+        )
+        .expect("valid");
+        let mut session = start(vec![changes, focused], &clock);
+        assert_eq!(
+            feed(&mut session, &clock, 1, &[1.0, 2.0, 3.0]),
+            [Effect::Fire(FIRST)]
+        );
+        assert_eq!(session.focus(true, clock.at(4)), [Effect::Fire(SECOND)]);
+        assert_eq!(session.focus(false, clock.at(5)), []);
+        assert_eq!(session.focus(true, clock.at(6)), []);
+        assert_eq!(session.next_due(), None, "their events were dropped");
+        assert_eq!(session.recheck(clock.at(20)), []);
     }
 
     #[test]
