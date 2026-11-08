@@ -34,6 +34,7 @@ import {
   withSource,
 } from '../lib/automation.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
+import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
 
 /** The action menu's choices: each media command, then setting a volume, then pressing keys. */
@@ -344,14 +345,18 @@ interface Props {
   readonly existing: AutomationDef | null;
   readonly onCancel: () => void;
   readonly onSaved: () => void;
+  /** Hears what leaving the editor would lose. */
+  readonly onHeld: (held: Held) => void;
 }
 
 /** Making or changing an automation: the value it watches, the actions it runs, and whether it undoes them. */
-export function AutomationEditor({ apps, existing, onCancel, onSaved }: Props) {
-  const [draft, setDraft] = useState<Draft>(() => (existing === null ? EMPTY_DRAFT : toDraft(existing)));
+export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: Props) {
+  const [start] = useState<Draft>(() => (existing === null ? EMPTY_DRAFT : toDraft(existing)));
+  const [draft, setDraft] = useState<Draft>(start);
   const [nextKey, setNextKey] = useState(() => draft.actions.length);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  useReportHeld(onHeld, held(saving, start, draft));
   const [executables, setExecutables] = useState<readonly string[]>([]);
 
   // The running applications' executables, offered as the applications an action can target.

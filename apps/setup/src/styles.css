@@ -81,6 +81,24 @@ select {
   cursor: pointer;
 }
 
+.tab:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* A question in the nav or the capture bar keeps to one line beside the controls. */
+.nav .confirm-none,
+.bar .confirm-none {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  max-width: none;
+}
+
+.nav .confirm-none {
+  margin-left: auto;
+}
+
 .tab[aria-current='page'] {
   color: var(--text);
   border-bottom-color: var(--capture);
@@ -771,7 +789,7 @@ select {
 
 .switch[aria-disabled='true'] {
   cursor: progress;
-  opacity: 0.6;
+  opacity: 0.45;
 }
 
 .switch:checked,

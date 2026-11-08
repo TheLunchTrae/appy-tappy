@@ -29,6 +29,14 @@ This page covers what the user guide leaves out.
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
+- **Leaving a flow.** Each flow reports what leaving it would lose
+  (`lib/unsaved.ts`): nothing while what it shows has the same content as
+  what it started with, unsaved work otherwise, or a save under way. A
+  capture counts its screenshots and recording too, since only the session
+  has them. The page tabs ask before they drop unsaved work and wait while a
+  save runs, and **Change window** asks the same. A save closes its flow only
+  while that flow is still open, so one that finishes after the user moved on
+  leaves the next flow alone. Leaving a capture stops its recording.
 - **Selection.** An image check's selection travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner
