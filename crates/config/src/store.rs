@@ -54,8 +54,8 @@ impl AppStore {
 
     /// Every application folder, sorted by ID. A folder whose file is
     /// missing or broken is listed with the reason, so the setup app can
-    /// show it rather than hide it. A store that does not exist yet holds no
-    /// applications.
+    /// show it rather than hide it. An entry whose type cannot be read is
+    /// left out. A store that does not exist yet holds no applications.
     ///
     /// # Errors
     ///
@@ -68,11 +68,13 @@ impl AppStore {
         };
         let mut apps = Vec::new();
         for entry in entries {
+            // An error here fails the listing: on Windows the next call can
+            // fail the same way forever, so skipping it would never end.
             let entry = entry?;
             let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if !entry.file_type()?.is_dir() || !is_app_id(&id) {
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) || !is_app_id(&id) {
                 continue;
             }
             let file = fs::read_to_string(entry.path().join(APP_FILE))
@@ -169,12 +171,14 @@ impl AutomationStore {
         Self { path }
     }
 
-    /// The automations. A file that does not exist yet holds none.
+    /// The automations. A file that does not exist yet holds none. An
+    /// automation that breaks a rule is kept, and
+    /// [`AutomationsFile::problem`] says why.
     ///
     /// # Errors
     ///
     /// Returns the error from reading the file, or an invalid-data error
-    /// saying why the file is broken.
+    /// saying why the file as a whole is broken.
     pub fn load(&self) -> io::Result<AutomationsFile> {
         match fs::read_to_string(&self.path) {
             Ok(json) => AutomationsFile::parse(&json)
@@ -185,7 +189,9 @@ impl AutomationStore {
     }
 
     /// Replaces the automations with `file`, creating the folder it lives
-    /// in.
+    /// in. An automation that has a problem is written as it is, so an edit
+    /// of another one keeps it; the caller checks the automations it
+    /// changes.
     ///
     /// # Errors
     ///
@@ -509,9 +515,19 @@ mod tests {
 
         let mut broken = file.clone();
         broken.automations[0].actions.clear();
-        let refused = store.save(&broken).expect_err("no actions");
+        store
+            .save(&broken)
+            .expect("an automation with a problem is kept");
+        let loaded = store.load().expect("one automation's problem is its own");
+        assert_eq!(
+            loaded.problem(&loaded.automations[0]),
+            Some("add an action".to_owned())
+        );
+        let mut other = file;
+        other.format = 2;
+        let refused = store.save(&other).expect_err("another format");
         assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
-        assert_eq!(store.load().expect("unchanged"), file);
+        assert_eq!(store.load().expect("unchanged"), broken);
 
         fs::write(root.join("roaming").join("automations.json"), b"{").expect("write");
         let error = store.load().expect_err("broken");

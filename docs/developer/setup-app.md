@@ -202,9 +202,18 @@ the whole system's volume.
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`) and
 the files (`store.rs`). Each save writes a temporary file and renames it over the old
 one, so a crash never leaves half a file. A file that cannot be read is listed
-with the reason and left alone; an automations file that cannot be read stops
-automations from being saved until it is fixed, rather than being replaced. A new application's anti-cheat class starts
-as `unknown`, which blocks key press actions until the user sets it
+with the reason and left alone; an automations file that cannot be read as a
+whole, such as one with another format version, stops automations from being
+saved until it is fixed, rather than being replaced. One automation that
+breaks a rule on its own, such as after a hand edit, is kept in the file and
+listed with its problem, and nothing runs it; the user can turn it off or
+delete it, and the others keep working. An ID that a hand edit made invalid,
+or gave to more than one automation, is listed as a problem on each of them.
+When the setup app reads the file, it gives a new ID, made from the name, to
+each automation whose ID is invalid or held by one before it, the same way
+each time, so every row can be edited or deleted on its own; the next save
+writes the new IDs. A new application's anti-cheat class starts as
+`unknown`, which blocks key press actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
 ## Running it
