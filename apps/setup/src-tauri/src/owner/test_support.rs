@@ -13,8 +13,8 @@ use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 use tokio::sync::oneshot;
 
 use crate::applications::AppSpec;
-use crate::automations::Stores;
 use crate::recording::ocr;
+use crate::stores::Stores;
 
 use super::host::Host;
 use super::messages::{Message, Reply, Request, SaveSpec};
