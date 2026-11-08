@@ -123,8 +123,12 @@ bindings and an override for one, belongs to
 Capture is the one part that needs the operating system, so it sits behind the
 `Capture` trait. Windows Graphics Capture, the API screen recorders use, is the
 only implementation. The system pushes a frame when the window's content
-changes, so a window that does not change costs nothing, and the capture also
-asks the system for no more than one frame per minimum interval. Between reads
+changes, so a window that does not change costs nothing. The capture also
+asks the system for no more frames than its handler reads: after each read it
+sets the session's minimum update interval to the handler's wait, never below
+the throttle it started with, so a game that repaints all the time while its
+values hold still is copied into the frame pool about as often as it is read.
+Between reads
 the capture keeps only the newest frame and copies nothing. When a read is
 due, the graphics card copies just the values' regions into a small texture
 the CPU can read, stacked one under another as the capture's `Layout` places

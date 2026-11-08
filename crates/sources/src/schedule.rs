@@ -59,10 +59,7 @@ impl Default for ReadInterval {
 pub enum Activity {
     /// The value differs from the previous read.
     Changed,
-    /// The value is close to where a rule would fire, so the next change
-    /// matters.
-    NearThreshold,
-    /// The value is the same as the previous read and far from any rule.
+    /// The value is the same as the previous read.
     Steady,
 }
 
@@ -94,7 +91,7 @@ impl ReadSchedule {
     /// The wait until the next read, given what the read just taken showed.
     pub fn after_read(&mut self, activity: Activity) -> Duration {
         self.wait = match activity {
-            Activity::Changed | Activity::NearThreshold => self.interval.min,
+            Activity::Changed => self.interval.min,
             Activity::Steady => self
                 .wait
                 .saturating_mul(2)
@@ -188,7 +185,7 @@ mod tests {
             Activity::Steady,
             Activity::Changed,
             Activity::Steady,
-            Activity::NearThreshold,
+            Activity::Changed,
         ]
         .into_iter()
         .map(|activity| schedule.after_read(activity))

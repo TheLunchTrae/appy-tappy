@@ -280,8 +280,9 @@ stateDiagram-v2
 
 The reader always uses `ReadInterval::DEFAULT`, so **Fast** is 16 ms and
 **Slow** is 500 ms.
-`Activity::NearThreshold` also resets the wait to the minimum, but the reader
-never reports it, so a value near a rule's threshold backs off like any other.
+After each read the capture asks Windows for frames no more often than the
+wait, never below the minimum, so a window whose values hold still is copied
+into the frame pool about twice a second rather than every time it repaints.
 
 ### Number text
 

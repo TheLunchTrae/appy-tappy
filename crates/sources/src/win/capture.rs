@@ -52,7 +52,7 @@ use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemIntero
 use windows::core::{Interface, factory};
 
 use super::WindowsSystem;
-use crate::schedule::ReadClock;
+use crate::schedule::{LONGEST_WAIT, ReadClock};
 use crate::screen::{
     Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
     Region, Size,
@@ -229,6 +229,10 @@ struct Capturer {
     pool_size: SizeInt32,
     session: GraphicsCaptureSession,
     arrived: i64,
+    /// The least time between two frames that the session may ask for.
+    throttle: Duration,
+    /// The time between frames that the session asks the system for now.
+    asked: Duration,
     staging: Option<(Size, ID3D11Texture2D)>,
     buffer: FrameBuffer,
     ticks_per_second: i128,
@@ -273,7 +277,8 @@ impl Capturer {
             Ok(())
         }))?;
         let session = pool.CreateCaptureSession(&item)?;
-        configure(&session, throttle);
+        configure(&session);
+        ask_interval(&session, throttle);
         session.StartCapture()?;
         let mut frequency = 0;
         #[expect(unsafe_code, reason = "a Win32 call")]
@@ -289,6 +294,8 @@ impl Capturer {
             pool_size,
             session,
             arrived,
+            throttle,
+            asked: throttle,
             staging: None,
             buffer: FrameBuffer::default(),
             ticks_per_second: i128::from(frequency).max(1),
@@ -328,10 +335,24 @@ impl Capturer {
                     break;
                 };
                 clock.after_read(Instant::now(), wait);
+                self.follow(wait);
             }
         }
         if let Some(frame) = held {
             close(&frame.frame);
+        }
+    }
+
+    /// Asks the system for frames no more often than the handler reads
+    /// them, and never more often than the session's throttle, so a window
+    /// whose values hold still costs the system fewer copies too. A frame
+    /// still arrives as soon as that time has passed and the window changed,
+    /// which is when the handler would have read again anyway.
+    fn follow(&mut self, wait: Duration) {
+        let interval = wait.clamp(self.throttle, LONGEST_WAIT.max(self.throttle));
+        if interval != self.asked {
+            self.asked = interval;
+            ask_interval(&self.session, interval);
         }
     }
 
@@ -573,10 +594,10 @@ impl Capturer {
     }
 }
 
-/// Asks for a borderless capture without the cursor, at most one frame per
-/// `throttle`. Each is optional: older Windows versions lack some, and the
-/// capture works without them.
-fn configure(session: &GraphicsCaptureSession, throttle: Duration) {
+/// Asks for a borderless capture without the cursor. Each setting is
+/// optional: older Windows versions lack some, and the capture works without
+/// them.
+fn configure(session: &GraphicsCaptureSession) {
     if let Ok(request) =
         GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless)
     {
@@ -586,7 +607,6 @@ fn configure(session: &GraphicsCaptureSession, throttle: Duration) {
         )]
         let _ = request.join();
     }
-    let ticks = i64::try_from(throttle.as_nanos() / 100).unwrap_or(i64::MAX);
     #[expect(
         clippy::let_underscore_must_use,
         reason = "each setting is optional and missing on older Windows versions"
@@ -594,8 +614,19 @@ fn configure(session: &GraphicsCaptureSession, throttle: Duration) {
     let _ = (
         session.SetIsBorderRequired(false),
         session.SetIsCursorCaptureEnabled(false),
-        session.SetMinUpdateInterval(TimeSpan { Duration: ticks }),
     );
+}
+
+/// Asks the system for at most one frame every `interval`. Older Windows
+/// versions lack the setting, and then frames come as often as the window
+/// changes.
+fn ask_interval(session: &GraphicsCaptureSession, interval: Duration) {
+    let ticks = i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX);
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the setting is optional and missing on older Windows versions"
+    )]
+    let _ = session.SetMinUpdateInterval(TimeSpan { Duration: ticks });
 }
 
 /// The error that tells a handler its capture ended.

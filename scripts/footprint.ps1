@@ -8,8 +8,9 @@
 # it. One automation fires once, which proves the runtime reads the window;
 # its action sets the volume of a program that does not exist, so it changes
 # nothing. The runtime runs idle while the window is closed, active while it
-# is open and repainting every 16 ms the way a game does, and idle again once
-# it closes.
+# is open and repainting every 16 ms the way a game does, steady while the
+# window still repaints but only outside the values, and idle again once it
+# closes.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -74,10 +75,11 @@ $script:process = $null
 $probe = $null
 $peak = $null
 
-function Wait-Log([string]$Line, [int]$Seconds) {
+# Waits until the runtime's log holds `Line` at least `Count` times.
+function Wait-Log([string]$Line, [int]$Seconds, [int]$Count = 1) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch -Quiet -Pattern $Line)) { return }
+        if ((Test-Path $log) -and @(Select-String -Path $log -SimpleMatch -Pattern $Line).Count -ge $Count) { return }
         if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) before its log said '$Line'" }
         Start-Sleep -Milliseconds 250
     }
@@ -149,7 +151,9 @@ try {
     # The probe: a program of its own, so no other process shares its
     # executable's name, that shows a borderless 400 by 300 window and repaints
     # it every 16 ms. It is DPI aware, so its size is in physical pixels at any
-    # display scale.
+    # display scale. Given `steady`, it keeps the values' part silver and
+    # repaints only a strip below them, so the window changes while its
+    # values hold still.
     $probeExe = Join-Path $scratch $ProbeExecutable
     Add-Type -OutputType WindowsApplication -OutputAssembly $probeExe -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System.Drawing;
@@ -171,9 +175,16 @@ public static class Probe {
             ClientSize = new Size(400, 300),
         };
         var colors = new[] { Color.Silver, Color.DimGray };
+        var steady = arguments.Length > 1 && arguments[1] == "steady";
+        var strip = new Panel { Location = new Point(0, 200), Size = new Size(400, 100) };
+        form.Controls.Add(strip);
+        form.BackColor = Color.Silver;
         var frame = 0;
         var timer = new Timer { Interval = 16 };
-        timer.Tick += (sender, tick) => { frame = 1 - frame; form.BackColor = colors[frame]; };
+        timer.Tick += (sender, tick) => {
+            frame = 1 - frame;
+            if (steady) { strip.BackColor = colors[frame]; } else { form.BackColor = colors[frame]; strip.BackColor = colors[frame]; }
+        };
         timer.Start();
         Application.Run(form);
     }
@@ -193,7 +204,7 @@ public static class Probe {
 
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
     $null = $probe.Handle
-    Wait-Log 'attached' 30
+    Wait-Log '): attached' 30
     Wait-Log 'Light: runs' 30
     Measure-Phase 'Active' $ActiveSample $ActiveMemoryLimit $ActiveCpuLimit
     # Every value has to read without a problem, or the active sample
@@ -204,7 +215,19 @@ public static class Probe {
     Stop-Process -Id $probe.Id
     $probe.WaitForExit()
     $probe = $null
-    Wait-Log 'detached' 10
+    Wait-Log '): detached' 10
+
+    $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"", 'steady' -PassThru
+    $null = $probe.Handle
+    Wait-Log '): attached' 30 2
+    Measure-Phase 'Steady' $ActiveSample $ActiveMemoryLimit $ActiveCpuLimit
+    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured', 'capture ended badly'
+    if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
+
+    Stop-Process -Id $probe.Id
+    $probe.WaitForExit()
+    $probe = $null
+    Wait-Log '): detached' 10 2
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
 }
 catch {
