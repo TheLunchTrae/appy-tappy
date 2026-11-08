@@ -84,10 +84,17 @@ $script:process = $null
 $probe = $null
 $peak = $null
 
-function Wait-Log([string]$Line, [int]$Seconds) {
+# How many lines of the log contain `$Line`.
+function Measure-Log([string]$Line) {
+    if (-not (Test-Path $log)) { return 0 }
+    @(Select-String -Path $log -SimpleMatch -Pattern $Line).Count
+}
+
+# Waits until more than `$After` lines of the log contain `$Line`.
+function Wait-Log([string]$Line, [int]$Seconds, [int]$After = 0) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch -Quiet -Pattern $Line)) { return }
+        if ((Measure-Log $Line) -gt $After) { return }
         if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) before its log said '$Line'" }
         Start-Sleep -Milliseconds 250
     }
@@ -146,29 +153,36 @@ function Set-Trace([bool]$On) {
     try { $null = $reload.Set() } finally { $reload.Dispose() }
 }
 
-# Reports the trace files: their size, their rows, the rows recorded each
-# second, and the records the trace dropped because its buffer was full.
-function Measure-Trace {
-    $failed = Select-String -Path $log -SimpleMatch -Pattern 'the trace cannot start', 'the trace stopped badly'
+# A trace that could not start or stopped partway records less than the
+# phase measured, so its numbers would understate what recording costs.
+function Assert-Trace {
+    $failed = Select-String -Path $log -SimpleMatch -Pattern 'the settings cannot be read', 'the trace cannot start', 'the trace cannot be written', 'the trace stopped badly'
     if ($failed) { throw "the trace could not record: $(@($failed)[0].Line)" }
+}
+
+# Reports the trace files: their size, the rows the runtime recorded, those
+# rows each second, and the records the trace dropped because its buffer was
+# full. The trace's own rows, on the trace thread, are left out of the count.
+function Measure-Trace {
+    Assert-Trace
     $files = @(Get-ChildItem -Path $traces -Filter 'trace-*.csv' -ErrorAction SilentlyContinue)
     if ($files.Count -eq 0) { throw "the trace wrote no file to $traces" }
-    $rows = 0
+    $recorded = 0
     $dropped = 0
     $last = 0
     foreach ($file in $files) {
         foreach ($line in [IO.File]::ReadLines($file.FullName)) {
             if ($line.StartsWith('time_ns,')) { continue }
             $fields = $line.Split(',')
-            $rows += 1
             $last = [Math]::Max($last, [long]$fields[0])
-            if ($fields[2] -eq 'dropped') { $dropped += [long]$fields[5] }
+            if ($fields[1] -ne 'trace') { $recorded += 1 }
+            elseif ($fields[2] -eq 'dropped') { $dropped += [long]$fields[5] }
         }
     }
     $bytes = ($files | Measure-Object -Property Length -Sum).Sum
     $seconds = $last / 1e9
     Add-Measure 'Trace files' "$($files.Count), $(Format-Bytes $bytes)"
-    Add-Measure 'Trace rows' ('{0:N0} over {1:N1} s, {2:N0} a second' -f $rows, $seconds, ($rows / [Math]::Max($seconds, 1)))
+    Add-Measure 'Trace rows' ('{0:N0} over {1:N1} s, {2:N0} a second' -f $recorded, $seconds, ($recorded / [Math]::Max($seconds, 1)))
     Add-Measure 'Trace records dropped' ('{0:N0}' -f $dropped)
     Add-Measure 'Trace on adds' ('{0} memory, {1:N3} % CPU' -f (Format-Bytes ($script:memory['Active, trace on'] - $script:memory['Active'])), ($script:cpu['Active, trace on'] - $script:cpu['Active']))
 }
@@ -267,11 +281,13 @@ public static class Probe {
     # The same load with the trace recording every category, which costs the
     # most. Turning it on restarts the readers, which the settle time covers.
     Set-Trace $true
-    Wait-Log 'the trace records to' 10
+    try { Wait-Log 'the trace records to' 10 } catch { Assert-Trace; throw }
     Measure-Phase 'Active, trace on' $ActiveSample 0 0
     Assert-Read
+    Assert-Trace
+    $stops = Measure-Log 'the trace stopped'
     Set-Trace $false
-    Wait-Log 'the trace stopped' 10
+    Wait-Log 'the trace stopped' 10 $stops
 
     Stop-Process -Id $probe.Id
     $probe.WaitForExit()

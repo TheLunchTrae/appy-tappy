@@ -463,7 +463,9 @@ automation on each. It runs the runtime through four phases:
    no targets: it reports what recording costs, as
    [Overhead](Trace.md#overhead) describes.
 4. **Idle after.** The trace has stopped, the probe has exited, and the
-   runtime has detached.
+   runtime has detached. The trace's buffer is freed once its last handle
+   and its writer end, so a handle left behind shows here as memory over the
+   target.
 
 It checks these against their targets:
 
