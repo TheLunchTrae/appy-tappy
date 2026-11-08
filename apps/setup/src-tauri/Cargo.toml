@@ -34,6 +34,9 @@ rten = { version = "=0.26.0", default-features = false, features = ["onnx_format
 rten-imageproc = "=0.26.0"
 # Command arguments and replies cross into the web UI as JSON.
 serde = { version = "=1.0.229", features = ["derive"] }
+# Keeps a downloaded update's release manifest until the user installs it,
+# and the tests feed the commands the JSON the UI sends.
+serde_json = "=1.0.154"
 # The window, the web view, and the bridge between the React UI and Rust.
 tauri = { version = "=2.12.5", features = [] }
 # The screenshot hotkey, which works while the other application has the keyboard focus.
@@ -49,10 +52,6 @@ tauri-plugin-single-instance = "=2.5.5"
 # Each command awaits the owner thread's answer on a oneshot channel, so a
 # slow request never freezes the window; Tauri does not re-export it.
 tokio = { version = "=1.54.1", features = ["sync"] }
-
-[dev-dependencies]
-# The tests feed the commands the JSON the UI sends.
-serde_json = "=1.0.154"
 
 [build-dependencies]
 # Embeds the app's configuration, icon, and Windows manifest.

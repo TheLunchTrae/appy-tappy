@@ -528,8 +528,17 @@ export async function checkForUpdate(): Promise<UpdateOffer | null> {
 }
 
 /**
- * Downloads `version` and runs its installer, which closes AppyTappy Setup and the background part, updates both, and
- * starts them again. It resolves only when the update fails before the installer starts.
+ * Downloads the newest release and checks its signature; AppyTappy Setup keeps it until {@link installUpdate}. The
+ * release it downloaded can be newer than the one offered, if one came out since. It rejects when the check or the
+ * download fails.
+ */
+export async function downloadUpdate(): Promise<UpdateOffer> {
+  return invoke<UpdateOffer>('download_update');
+}
+
+/**
+ * Runs the downloaded installer for `version`, which closes AppyTappy Setup and the background part, updates both,
+ * and starts them again. It rejects when the update fails before the installer starts, and never settles otherwise.
  */
 export async function installUpdate(version: string): Promise<void> {
   await invoke('install_update', { version });

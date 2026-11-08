@@ -113,6 +113,7 @@ fn main() -> ExitCode {
             commands::overlay_state,
             commands::overlay_card,
             updates::check_for_update,
+            updates::download_update,
             updates::install_update,
         ])
         .build(tauri::generate_context!())

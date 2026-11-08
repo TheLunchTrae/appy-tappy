@@ -36,7 +36,10 @@ const GONE: &str = "AppyTappy Setup is closing.";
 
 /// Sends the request `build` makes to the owner thread and awaits its
 /// answer.
-async fn ask<T>(app: &AppHandle, build: impl FnOnce(Reply<T>) -> Request) -> Result<T, String> {
+pub(crate) async fn ask<T>(
+    app: &AppHandle,
+    build: impl FnOnce(Reply<T>) -> Request,
+) -> Result<T, String> {
     let (reply, answer) = oneshot::channel();
     app.state::<Bridge>()
         .0

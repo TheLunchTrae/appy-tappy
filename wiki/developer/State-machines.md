@@ -530,24 +530,33 @@ recording.
 The update notice at the end of the tabs (`apps/setup/src/lib/update.ts`,
 drawn by `apps/setup/src/components/UpdateNotice.tsx`) offers a newer release.
 It checks once, when the main window mounts, and shows nothing until a check
-finds one.
+finds one. The owner thread keeps the downloaded installer until the install
+takes it.
 
 ```mermaid
 stateDiagram-v2
     [*] --> None
     None --> Offered: the check finds a newer release
     None --> [*]: the check finds none or fails
-    Offered --> Asking: Update
-    Asking --> Offered: Not now, Escape, or work starts in a flow
-    Asking --> Installing: Update
-    Installing --> Offered: the download or its signature check fails, the notice shows why
+    Offered --> Downloading: Update or Try again
+    Downloading --> Ready: the download and its signature check finish
+    Downloading --> Offered: the check, the download, or its signature check fails, the notice shows why
+    Ready --> Asking: Install
+    Asking --> Ready: Not now, Escape, or work starts in a flow
+    Asking --> Installing: Install
+    Installing --> Offered: the installer does not start, the notice shows why
     Installing --> [*]: the installer starts and AppyTappy Setup exits
 ```
 
-**Update** is disabled while a flow holds unsaved work or saves, since the
-update closes AppyTappy Setup. While the question to leave a flow has the
-nav's place, the notice is hidden and keeps its state. An event that does not
-fit the state, such as a late check during the download, changes nothing.
+The download names the release it downloaded, so a release that came out
+after the offer waits in **Ready** under its own version, and the question
+names that version. A connection that sends nothing for 30 seconds fails the
+check or the download. **Install** is disabled while a flow holds unsaved work
+or saves, since the install closes AppyTappy Setup. Before the installer ends
+the process, the owner saves where each panel is and stops the capture, as the
+app's own end would. While the question to leave a flow has the nav's place,
+the notice is hidden and keeps its state. An event that does not fit the
+state, such as a late check during the download, changes nothing.
 
 ### Capture slot
 

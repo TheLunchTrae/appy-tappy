@@ -110,22 +110,30 @@ steps cannot sign anything.
 ## Updates
 
 AppyTappy Setup checks for a newer release each time it opens, with Tauri's
-updater (`apps/setup/src-tauri/src/updates.rs`), and installs one only when the
-user agrees. [Update](../user/Install,-update,-and-uninstall.md#update) shows
-what the user sees. The runtime has no updater, so it stays as small and idle
-as it is. One installer holds both programs, so the setup app's update updates
-the runtime too, and the two always come from the same release and read the
-same file formats.
+updater (`apps/setup/src-tauri/src/updates.rs`). It downloads one when the
+user selects **Update**, and installs it only when they agree, with nothing
+left unsaved. [Update](../user/Install,-update,-and-uninstall.md#update) shows
+what the user sees, and the
+[update notice](State-machines.md#update-notice) maps its states. The runtime
+has no updater, so it stays as small and idle as it is. One installer holds
+both programs, so the setup app's update updates the runtime too, and the two
+always come from the same release and read the same file formats.
 
 - **Check.** The updater reads `latest.json` from the newest GitHub release.
   It names the release's version, its installer's address, and the installer's
   signature. A test build of a version counts as older than its release.
-- **Install.** The updater downloads the installer and checks its signature
-  against the update key's public half, which the setup app carries. It also
-  requires the version inside the signature to be the one `latest.json` names
-  (`requireSignedVersion`), so an altered `latest.json` cannot offer an older
-  release as a newer one. Then it runs the installer in passive mode, which
-  shows only its progress, and exits. The installer stops the runtime as
+- **Download.** The updater checks again, downloads the newest release's
+  installer, and checks its signature against the update key's public half,
+  which the setup app carries. It also requires the version inside the
+  signature to be the one `latest.json` names (`requireSignedVersion`), so an
+  altered `latest.json` cannot offer an older release as a newer one. The
+  owner thread keeps the installer and the release's `latest.json` until the
+  install. A connection that sends nothing for 30 seconds fails the check or
+  the download.
+- **Install.** The updater rebuilds the release from the kept `latest.json`,
+  checks the installer's signature again, and has the owner save where each
+  panel is and stop the capture. Then it runs the installer in passive mode,
+  which shows only its progress, and exits. The installer stops the runtime as
   [What it does](#what-it-does) describes, installs, starts the runtime, and
   opens the setup app again.
 - **Builds.** `apps/setup/src-tauri/tauri.updater.conf.json` holds the
@@ -148,9 +156,11 @@ release workflow reads three repository settings:
   `latest.json`. The release job publishes it beside the installer.
 
 Without `UPDATER_PUBLIC_KEY`, the sign job is skipped, the release has no
-`latest.json`, and the release run warns about it. A copy installed from such
-a release never checks for updates, so its user installs the next release by
-hand once.
+`latest.json`, and the release run warns about it. That release becomes the
+newest, so every installed copy, including copies from earlier signed
+releases, finds no `latest.json` and offers nothing until the next signed
+release. A copy installed from an unsigned release has no updater at all, so
+its user installs a later release by hand once.
 
 To set the key up, generate it once on your own PC from `apps/setup`, with a
 password, and keep both files and the password somewhere safe:

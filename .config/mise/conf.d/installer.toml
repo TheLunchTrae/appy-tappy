@@ -58,16 +58,18 @@ fi
 # With UPDATER_PUBLIC_KEY, the update key's public half, the setup app checks
 # for updates and installs them only when they carry that key's signature
 # (wiki/developer/Installer.md#updates). Without it, the build never updates.
+# A pasted key can end in a line break, which is not part of it.
 set --
-if [ -n "${UPDATER_PUBLIC_KEY:-}" ]; then
-  case "$UPDATER_PUBLIC_KEY" in
+pubkey=$(printf '%s' "${UPDATER_PUBLIC_KEY:-}" | tr -d '[:space:]')
+if [ -n "$pubkey" ]; then
+  case "$pubkey" in
     *[!A-Za-z0-9+/=]*)
       echo "UPDATER_PUBLIC_KEY is not the public key that tauri signer generate writes" >&2
       exit 1
       ;;
   esac
   set -- --config src-tauri/tauri.updater.conf.json \
-    --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$UPDATER_PUBLIC_KEY\"}}}"
+    --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$pubkey\"}}}"
 fi
 host=$(rustc -vV | sed -n 's/^host: //p')
 cargo build --profile dist --locked -p appytappy-runtime

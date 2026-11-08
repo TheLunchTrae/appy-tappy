@@ -18,6 +18,7 @@ mod recording;
 mod references;
 #[cfg(test)]
 mod test_support;
+mod update;
 mod values;
 mod watch;
 
@@ -36,6 +37,7 @@ use crate::pixels;
 use crate::recording::{Recording, ocr};
 use crate::selection::{self, SelectionView};
 use crate::stores::Stores;
+use crate::updates::Downloaded;
 use crate::window_list;
 
 pub(crate) use self::host::Host;
@@ -84,6 +86,8 @@ pub(crate) struct Owner<H: Host> {
     watched: Option<Watched>,
     /// The overlays that show, each with a capture of its own.
     overlays: Overlays<H::Session>,
+    /// The update downloaded and checked, until the user installs it.
+    update: Option<Downloaded>,
 }
 
 impl<H: Host> Owner<H> {
@@ -111,6 +115,7 @@ impl<H: Host> Owner<H> {
             ocr,
             watched: None,
             overlays: Overlays::new(),
+            update: None,
         }
     }
 
@@ -270,6 +275,15 @@ impl<H: Host> Owner<H> {
                     .map(|check| self.check = Some(check))
                     .map_err(|error| error.to_string()),
             ),
+            Request::KeepUpdate { update, reply } => {
+                self.update = Some(update);
+                send(reply, ());
+            },
+            Request::TakeUpdate(reply) => send(reply, self.update.take()),
+            Request::CloseForUpdate(reply) => {
+                self.close_for_update();
+                send(reply, ());
+            },
             Request::Stop(reply) => {
                 self.stop();
                 send(reply, ());
