@@ -13,6 +13,7 @@ use appytappy_config::app_file::AppFile;
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
 };
+use appytappy_config::signal::SignalName;
 use appytappy_config::store::StoredApp;
 use serde::Serialize;
 
@@ -149,14 +150,30 @@ pub(crate) fn save(
         ));
     }
     let id = if let Some(id) = existing {
-        let slot = file
+        let position = file
             .automations
-            .iter_mut()
-            .find(|automation| automation.id == id)
+            .iter()
+            .position(|automation| automation.id == id)
             .ok_or_else(|| "That automation is no longer saved.".to_owned())?;
-        id.clone_into(&mut draft.id);
-        *slot = draft;
-        id.to_owned()
+        let others: Vec<&str> = file
+            .automations
+            .iter()
+            .enumerate()
+            .filter(|&(other, _)| other != position)
+            .map(|(_, automation)| automation.id.as_str())
+            .collect();
+        // An ID a hand edit broke, or gave to two automations, is replaced,
+        // because the user has no other way to fix it.
+        draft.id = if SignalName::new(id).is_ok() && !others.contains(&id) {
+            id.to_owned()
+        } else {
+            new_automation_id(&draft.name, &others)
+        };
+        let id = draft.id.clone();
+        if let Some(slot) = file.automations.get_mut(position) {
+            *slot = draft;
+        }
+        id
     } else {
         let taken: Vec<&str> = file
             .automations
@@ -498,6 +515,41 @@ mod tests {
         );
         delete(&stores, "broken").expect("removes");
         assert_eq!(ids(&stores), ["pause_music"]);
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn editing_an_automation_whose_id_a_hand_edit_broke_gives_it_a_new_one() {
+        let (stores, folder) = stores("broken-id");
+        save(&stores, None, draft("Pause music")).expect("saves");
+        let mut file = stores.automations.load().expect("loads");
+        let mut copy = draft("Lower volume");
+        copy.id = "pause_music".to_owned();
+        let mut bad = draft("Skip ahead");
+        bad.id = "Skip ahead".to_owned();
+        file.automations.extend([copy, bad]);
+        fs::write(folder.join("automations.json"), file.to_json()).expect("writes");
+        assert_eq!(
+            save(&stores, Some("Skip ahead"), draft("Skip ahead")),
+            Ok("skip_ahead".to_owned())
+        );
+        assert_eq!(
+            save(&stores, Some("pause_music"), draft("Pause music")),
+            Ok("pause_music_2".to_owned()),
+            "the first of the two takes a new ID"
+        );
+        assert_eq!(ids(&stores), ["pause_music_2", "pause_music", "skip_ahead"]);
+        let problems: Vec<Option<String>> = list(&stores)
+            .expect("lists")
+            .into_iter()
+            .map(|summary| summary.problem)
+            .collect();
+        assert_eq!(problems, [None, None, None]);
+        assert_eq!(
+            save(&stores, Some("pause_music"), draft("Lower volume")),
+            Ok("pause_music".to_owned()),
+            "an ID only it has stays"
+        );
         fs::remove_dir_all(folder).expect("clean up");
     }
 

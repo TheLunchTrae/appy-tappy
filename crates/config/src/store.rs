@@ -54,9 +54,8 @@ impl AppStore {
 
     /// Every application folder, sorted by ID. A folder whose file is
     /// missing or broken is listed with the reason, so the setup app can
-    /// show it rather than hide it. An entry of the store's folder that
-    /// cannot be read is left out. A store that does not exist yet holds no
-    /// applications.
+    /// show it rather than hide it. An entry whose type cannot be read is
+    /// left out. A store that does not exist yet holds no applications.
     ///
     /// # Errors
     ///
@@ -68,7 +67,10 @@ impl AppStore {
             Err(error) => return Err(error),
         };
         let mut apps = Vec::new();
-        for entry in entries.flatten() {
+        for entry in entries {
+            // An error here fails the listing: on Windows the next call can
+            // fail the same way forever, so skipping it would never end.
+            let entry = entry?;
             let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };

@@ -168,8 +168,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   edit, is logged, and the rest run. When the applications' folder or the
   automations' file cannot be read as a whole, such as while another program
   holds the file, the runtime logs it, keeps running the plan it has, and
-  reads them again every 2 seconds, up to 5 times, before it waits for the
-  next save. The runtime
+  reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
+  `apps/runtime/src/owner.rs` set, before it waits for the next save. The runtime
   reads the setup app's files directly; the compiled config under
   [Files and handoff](#files-and-handoff) stays planned in
   [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
