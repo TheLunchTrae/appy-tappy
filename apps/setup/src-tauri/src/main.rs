@@ -11,12 +11,12 @@ mod applications;
 mod automations;
 mod check_spec;
 mod commands;
-mod ocr;
 mod overlay;
 mod owner;
 mod pixels;
 mod recording;
 mod selection;
+mod stores;
 mod window_list;
 
 use std::env;
@@ -28,9 +28,10 @@ use appytappy_config::paths::Locations;
 use appytappy_config::store::{AppStore, AutomationStore};
 use appytappy_sources::HostSystem;
 
-use crate::automations::Stores;
 use crate::commands::Bridge;
 use crate::owner::{Message, Owner};
+use crate::recording::ocr;
+use crate::stores::Stores;
 
 fn main() -> ExitCode {
     // The host system sets the process's DPI awareness, which Windows needs

@@ -9,7 +9,8 @@ use appytappy_config::store::new_app_id;
 use appytappy_config::window_match::Pattern;
 use serde::Deserialize;
 
-use crate::automations::{self, Stores};
+use crate::automations;
+use crate::stores::Stores;
 
 /// An application's name and how to find its window, as the editor sends
 /// them.

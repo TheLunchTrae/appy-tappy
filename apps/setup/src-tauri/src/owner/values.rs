@@ -1,11 +1,12 @@
 //! Saved values and applications: listing them with their running windows,
 //! saving and deleting them, and each application's anti-cheat setting.
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, ScreenDef, SizeDef, ValueDef, value_id};
+use appytappy_config::app_file::{AntiCheatDef, ScreenDef, SizeDef, ValueDef, value_id};
 use appytappy_sources::screen::Image;
 
-use crate::automations::{self, Stores};
+use crate::automations;
 use crate::check_spec::{self, CheckSpec};
+use crate::stores::Stores;
 use crate::window_list;
 
 use super::Owner;
@@ -13,18 +14,6 @@ use super::host::Host;
 use super::messages::{AppSummary, SaveSpec, SavedValue};
 
 impl<H: Host> Owner<H> {
-    /// The saved application `app`, from its file.
-    pub(super) fn app_file(&self, app: &str) -> Result<AppFile, String> {
-        self.stores()?
-            .apps
-            .load()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .find(|stored| stored.id == app)
-            .ok_or_else(|| "That application is no longer saved.".to_owned())?
-            .file
-    }
-
     pub(super) fn stores(&self) -> Result<&Stores, String> {
         self.stores.as_ref().map_err(Clone::clone)
     }
@@ -68,7 +57,7 @@ impl<H: Host> Owner<H> {
     }
 
     pub(super) fn save(&self, spec: &SaveSpec) -> Result<SavedValue, String> {
-        let store = &self.stores()?.apps;
+        let stores = self.stores()?;
         let name = spec.value_name.trim();
         if name.is_empty() {
             return Err("Name the value first.".to_owned());
@@ -83,13 +72,8 @@ impl<H: Host> Owner<H> {
             .get(drawn_on)
             .map(Image::size)
             .ok_or_else(|| "Take a screenshot first.".to_owned())?;
-        let loaded = store.load().map_err(|error| error.to_string())?;
         let app = spec.app.clone();
-        let mut file = loaded
-            .into_iter()
-            .find(|each| each.id == app)
-            .ok_or_else(|| "That application is no longer saved.".to_owned())?
-            .file?;
+        let mut file = stores.app_file(&app)?;
         let id = value_id(name);
         if file.values.iter().any(|value| value.id == id) {
             return Err(format!(
@@ -112,7 +96,8 @@ impl<H: Host> Owner<H> {
                 check: saved.check,
             },
         });
-        store
+        stores
+            .apps
             .save(&app, &file, &saved.pictures)
             .map_err(|error| error.to_string())?;
         Ok(SavedValue { app, value: id })
@@ -121,13 +106,7 @@ impl<H: Host> Owner<H> {
     pub(super) fn delete(&self, app: &str, value: &str) -> Result<(), String> {
         let stores = self.stores()?;
         let store = &stores.apps;
-        let mut file = store
-            .load()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .find(|stored| stored.id == app)
-            .ok_or_else(|| "That application is no longer saved.".to_owned())?
-            .file?;
+        let mut file = stores.app_file(app)?;
         if let Some(saved) = file.values.iter().find(|saved| saved.id == value) {
             automations::check_unused(stores, app, value, &saved.name)?;
         }
@@ -142,16 +121,11 @@ impl<H: Host> Owner<H> {
     /// class other than none stops its automations that press keys, which
     /// the Automations page then shows as unable to run.
     pub(super) fn set_anti_cheat(&self, app: &str, class: AntiCheatDef) -> Result<(), String> {
-        let store = &self.stores()?.apps;
-        let mut file = store
-            .load()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .find(|stored| stored.id == app)
-            .ok_or_else(|| "That application is no longer saved.".to_owned())?
-            .file?;
+        let stores = self.stores()?;
+        let mut file = stores.app_file(app)?;
         file.anti_cheat = class;
-        store
+        stores
+            .apps
             .save(app, &file, &[])
             .map_err(|error| error.to_string())
     }

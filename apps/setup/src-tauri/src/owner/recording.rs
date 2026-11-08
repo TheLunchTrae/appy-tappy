@@ -6,8 +6,7 @@ use std::time::Instant;
 use appytappy_sources::screen::{Image, Region};
 
 use crate::check_spec::{ColorSpec, RegionSpec};
-use crate::ocr;
-use crate::recording::{Recording, Text};
+use crate::recording::{Recording, Text, ocr};
 
 use super::Owner;
 use super::host::Host;
