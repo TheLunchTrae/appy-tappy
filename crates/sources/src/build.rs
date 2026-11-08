@@ -53,7 +53,9 @@ pub fn version_text(high: u32, low: u32) -> Option<String> {
 /// names it, such as `\Device\HarddiskVolume3\Games\Example.exe`.
 ///
 /// `drives` pairs each drive, such as `C:`, with the device it names. A path
-/// on a network share, under `\Device\Mup`, becomes a `\\server\share` path.
+/// on a network share, under `\Device\Mup` or `\Device\LanmanRedirector`,
+/// becomes a `\\server\share` path, without the parts that name a mapped
+/// drive's connection, such as `\;LanmanRedirector\;Z:000000000002a7b1`.
 /// `None` when no drive names the path's device.
 #[must_use]
 pub fn drive_path(device_path: &str, drives: &[(String, String)]) -> Option<PathBuf> {
@@ -65,8 +67,15 @@ pub fn drive_path(device_path: &str, drives: &[(String, String)]) -> Option<Path
             && rest.starts_with('\\'))
         .then_some(rest)
     };
-    if let Some(rest) = under(r"\Device\Mup") {
-        return Some(PathBuf::from(format!(r"\{rest}")));
+    if let Some(rest) = under(r"\Device\Mup").or_else(|| under(r"\Device\LanmanRedirector")) {
+        // A mapped drive's connection names its provider and drive in parts
+        // that start with `;`, before the server.
+        let share: Vec<&str> = rest
+            .split('\\')
+            .skip(1)
+            .skip_while(|part| part.starts_with(';'))
+            .collect();
+        return (share.len() > 1).then(|| PathBuf::from(format!(r"\\{}", share.join(r"\"))));
     }
     drives.iter().find_map(|(drive, device)| {
         under(device).map(|rest| PathBuf::from(format!("{drive}{rest}")))
@@ -131,6 +140,21 @@ mod tests {
             drive_path(r"\Device\Mup\server\share\Example.exe", &drives),
             Some(PathBuf::from(r"\\server\share\Example.exe"))
         );
+        assert_eq!(
+            drive_path(
+                r"\Device\Mup\;LanmanRedirector\;Z:000000000002a7b1\server\share\Example.exe",
+                &drives
+            ),
+            Some(PathBuf::from(r"\\server\share\Example.exe"))
+        );
+        assert_eq!(
+            drive_path(
+                r"\Device\LanmanRedirector\;Z:000000000002a7b1\server\share\Example.exe",
+                &drives
+            ),
+            Some(PathBuf::from(r"\\server\share\Example.exe"))
+        );
+        assert_eq!(drive_path(r"\Device\Mup\;LanmanRedirector\", &drives), None);
         assert_eq!(
             drive_path(r"\Device\HarddiskVolume2\Example.exe", &drives),
             None

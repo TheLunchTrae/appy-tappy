@@ -100,6 +100,15 @@ pub(crate) fn save(
         (new_app_id(&spec.window.executable, &taken), file)
     };
     name.clone_into(&mut file.name);
+    // The build its values were checked against was of the old executable.
+    if !file
+        .window
+        .executable
+        .trim()
+        .eq_ignore_ascii_case(spec.window.executable.trim())
+    {
+        file.checked = None;
+    }
     file.window = spec.window;
     stores
         .apps

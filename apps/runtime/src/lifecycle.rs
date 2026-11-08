@@ -325,13 +325,15 @@ impl Lifecycle {
     }
 }
 
-/// `found` with a [`Change::Identified`] after each [`Change::Started`],
-/// whose build `identify` reads.
-fn identified(
+/// Sends each of `found` with `send`, and after each [`Change::Started`] a
+/// [`Change::Identified`] with the build `identify` reads. The build is read
+/// only once the start is sent, so reading it never holds back a session.
+/// False once `send` fails.
+fn send_identified(
     found: Vec<Change>,
     identify: &mut impl FnMut(ProcessId) -> io::Result<BuildDef>,
-) -> Vec<Change> {
-    let mut changes = Vec::with_capacity(found.len());
+    mut send: impl FnMut(Change) -> bool,
+) -> bool {
     for change in found {
         let started = match &change {
             Change::Started { app, process, .. } => Some((app.clone(), *process)),
@@ -340,13 +342,17 @@ fn identified(
             | Change::ScanFailed(_)
             | Change::ScanRestored => None,
         };
-        changes.push(change);
+        if !send(change) {
+            return false;
+        }
         if let Some((app, process)) = started {
             let build = identify(process).map_err(|error| error.to_string());
-            changes.push(Change::Identified { app, build });
+            if !send(Change::Identified { app, build }) {
+                return false;
+            }
         }
     }
-    changes
+    true
 }
 
 /// The lifecycle thread: runs snapshots when they are due and sends what
@@ -363,9 +369,9 @@ pub(crate) fn run<E: From<Change>>(
     mut identify: impl FnMut(ProcessId) -> io::Result<BuildDef>,
 ) {
     let mut send = |found: Vec<Change>| {
-        identified(found, &mut identify)
-            .into_iter()
-            .all(|change| changes.send(E::from(change)).is_ok())
+        send_identified(found, &mut identify, |change| {
+            changes.send(E::from(change)).is_ok()
+        })
     };
     loop {
         let now = Instant::now();
@@ -771,6 +777,75 @@ mod tests {
             lifecycle.scan(Ok(helper_and_app()), failing, all_shown, now),
             []
         );
+    }
+
+    #[test]
+    fn a_build_is_read_after_its_start_is_sent_and_not_once_sending_fails() {
+        #[derive(Debug, PartialEq)]
+        enum Step {
+            Sent(Change),
+            Read(ProcessId),
+        }
+        let started = |app: &str, process| Change::Started {
+            app: app.to_owned(),
+            process: ProcessId::new(process),
+            executable: "Example.exe".to_owned(),
+        };
+        let exited = || Change::Exited {
+            app: "two".to_owned(),
+            process: ProcessId::new(2),
+        };
+        let found = || vec![started("one", 1), exited(), started("three", 3)];
+        let build = || BuildDef {
+            version: Some("1.0.0.0".to_owned()),
+            size: 6,
+            modified: 1,
+        };
+        let (log, steps) = mpsc::channel();
+        let reads = log.clone();
+        let mut identify = |process: ProcessId| {
+            reads.send(Step::Read(process)).expect("log");
+            if process == ProcessId::new(1) {
+                Ok(build())
+            } else {
+                Err(io::Error::other("unreadable"))
+            }
+        };
+        assert!(send_identified(found(), &mut identify, |change| {
+            log.send(Step::Sent(change)).is_ok()
+        }));
+        let identified = |app: &str, build| {
+            Step::Sent(Change::Identified {
+                app: app.to_owned(),
+                build,
+            })
+        };
+        assert_eq!(
+            steps.try_iter().collect::<Vec<_>>(),
+            [
+                Step::Sent(started("one", 1)),
+                Step::Read(ProcessId::new(1)),
+                identified("one", Ok(build())),
+                Step::Sent(exited()),
+                Step::Sent(started("three", 3)),
+                Step::Read(ProcessId::new(3)),
+                identified("three", Err("unreadable".to_owned())),
+            ]
+        );
+
+        // Once nobody receives, nothing more is read or sent.
+        assert!(!send_identified(found(), &mut identify, |_| false));
+        assert_eq!(steps.try_iter().count(), 0);
+        let mut count = 0;
+        assert!(!send_identified(found(), &mut identify, |_| {
+            count += 1;
+            count < 2
+        }));
+        assert_eq!(
+            steps.try_iter().collect::<Vec<_>>(),
+            [Step::Read(ProcessId::new(1))]
+        );
+        assert_eq!(count, 2, "the build of the first start was the last send");
     }
 
     #[test]

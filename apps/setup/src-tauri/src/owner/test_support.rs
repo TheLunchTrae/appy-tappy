@@ -31,7 +31,9 @@ pub(super) struct FakeHost {
     pub(super) unlisted: bool,
     /// Makes window 7 minimized.
     pub(super) minimized: bool,
-    /// The build each process runs, or `None` for one that cannot be read.
+    /// The process that owns window 7, the example application's.
+    pub(super) process: u32,
+    /// The build that process runs, or `None` when it cannot be read.
     pub(super) build: Option<BuildDef>,
 }
 
@@ -93,7 +95,7 @@ impl Host for FakeHost {
             own,
             WindowEntry {
                 handle: 7,
-                process: ProcessId::new(3),
+                process: ProcessId::new(self.process),
                 title: "Example App".to_owned(),
                 class: "ExampleWindow".to_owned(),
                 visible: true,
@@ -110,7 +112,7 @@ impl Host for FakeHost {
     fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
         Ok(vec![
             ProcessEntry {
-                id: ProcessId::new(3),
+                id: ProcessId::new(self.process),
                 parent: ProcessId::new(0),
                 executable: "Example.exe".to_owned(),
                 threads: 1,
@@ -137,7 +139,10 @@ impl Host for FakeHost {
         }))
     }
 
-    fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
+    fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
+        if process != ProcessId::new(self.process) {
+            return Err(io::Error::other("another process"));
+        }
         self.build
             .clone()
             .ok_or_else(|| io::Error::other("unreadable here"))
@@ -206,6 +211,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         refuse,
         unlisted: false,
         minimized: false,
+        process: 3,
         build: Some(example_build()),
     };
     Harness {

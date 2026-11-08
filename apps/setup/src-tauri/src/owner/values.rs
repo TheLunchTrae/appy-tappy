@@ -22,7 +22,7 @@ impl<H: Host> Owner<H> {
         self.stores.as_ref().map_err(Clone::clone)
     }
 
-    pub(super) fn apps(&self) -> Result<Vec<AppSummary>, String> {
+    pub(super) fn apps(&mut self) -> Result<Vec<AppSummary>, String> {
         let stored = self
             .stores()?
             .apps
@@ -34,6 +34,9 @@ impl<H: Host> Owner<H> {
             .window_list()
             .map(|list| list.windows)
             .unwrap_or_default();
+        // A process that has gone may give its ID to another build.
+        self.builds
+            .retain(|process, _| windows.iter().any(|window| window.process == *process));
         Ok(stored
             .into_iter()
             .map(|app| {
@@ -50,8 +53,12 @@ impl<H: Host> Owner<H> {
                             .collect()
                     })
                     .unwrap_or_default();
-                // A build that cannot be read only leaves the warning out.
-                let running = self.build_of(&windows, &matched).ok().flatten();
+                // Only an application with values shows its build, and one
+                // that cannot be read only leaves the warning out.
+                let running = file
+                    .as_ref()
+                    .filter(|file| !file.values.is_empty())
+                    .and_then(|_| self.build_of(&windows, &matched).ok().flatten());
                 AppSummary {
                     id: app.id,
                     file,
@@ -63,7 +70,7 @@ impl<H: Host> Owner<H> {
             .collect())
     }
 
-    pub(super) fn save(&self, spec: &SaveSpec) -> Result<SavedValue, String> {
+    pub(super) fn save(&mut self, spec: &SaveSpec) -> Result<SavedValue, String> {
         let stores = self.stores()?;
         let name = spec.value_name.trim();
         if name.is_empty() {
@@ -102,12 +109,13 @@ impl<H: Host> Owner<H> {
             },
         });
         // The first value saved is checked against the build that runs
-        // now; later ones leave that to Mark as checked, since one new value
-        // says nothing about the others.
+        // now, as is any value saved while no build is recorded; later ones
+        // leave that to Mark as checked, since one new value says nothing
+        // about the others.
         if file.checked.is_none() {
             file.checked = self.running_build(&file).ok().flatten().map(checked_now);
         }
-        stores
+        self.stores()?
             .apps
             .save(&app, &file, &saved.pictures)
             .map_err(|error| error.to_string())?;
@@ -116,7 +124,7 @@ impl<H: Host> Owner<H> {
 
     /// The build that the best fit for `file`'s window runs, or `None`
     /// while no window fits.
-    fn running_build(&self, file: &AppFile) -> Result<Option<BuildDef>, String> {
+    fn running_build(&mut self, file: &AppFile) -> Result<Option<BuildDef>, String> {
         let windows = self.window_list()?.windows;
         let matched: Vec<u64> = window_list::matching(&windows, &file.window)
             .into_iter()
@@ -126,28 +134,35 @@ impl<H: Host> Owner<H> {
     }
 
     /// The build of the first of `matched`, which name windows of `windows`.
+    /// A build read once is kept for its process, and a failed read is tried
+    /// again next time.
     fn build_of(
-        &self,
+        &mut self,
         windows: &[WindowChoice],
         matched: &[u64],
     ) -> Result<Option<BuildDef>, String> {
-        let Some(best) = matched
+        let Some(process) = matched
             .first()
             .and_then(|&handle| windows.iter().find(|window| window.handle == handle))
+            .map(|window| window.process)
         else {
             return Ok(None);
         };
-        self.host
-            .executable_build(best.process)
-            .map(Some)
-            .map_err(|error| error.to_string())
+        if let Some(build) = self.builds.get(&process) {
+            return Ok(Some(build.clone()));
+        }
+        let build = self
+            .host
+            .executable_build(process)
+            .map_err(|error| error.to_string())?;
+        self.builds.insert(process, build.clone());
+        Ok(Some(build))
     }
 
     /// Saves the build the application `app` runs now as the one its values
     /// were checked against.
-    pub(super) fn mark_checked(&self, app: &str) -> Result<(), String> {
-        let stores = self.stores()?;
-        let mut file = stores.app_file(app)?;
+    pub(super) fn mark_checked(&mut self, app: &str) -> Result<(), String> {
+        let mut file = self.stores()?.app_file(app)?;
         let build = self
             .running_build(&file)
             .map_err(|error| {
@@ -163,7 +178,7 @@ impl<H: Host> Owner<H> {
                 )
             })?;
         file.checked = Some(checked_now(build));
-        stores
+        self.stores()?
             .apps
             .save(app, &file, &[])
             .map_err(|error| error.to_string())
@@ -177,6 +192,11 @@ impl<H: Host> Owner<H> {
             automations::check_unused(stores, app, value, &saved.name)?;
         }
         file.values.retain(|saved| saved.id != value);
+        // Values made again later are checked against the build they are
+        // made on.
+        if file.values.is_empty() {
+            file.checked = None;
+        }
         store
             .save(app, &file, &[])
             .and_then(|()| store.prune(app, &file))
@@ -473,10 +493,12 @@ mod tests {
         let first = checked(&mut harness).expect("the first value records the build");
         assert_eq!(first.build, example_build());
         assert!(first.at > 0);
+        // The application updates and starts again.
         let updated = BuildDef {
             version: Some("1.5.0.0".to_owned()),
             ..example_build()
         };
+        harness.owner.host.process = 4;
         harness.owner.host.build = Some(updated.clone());
         let apps = harness.ask(Request::ListApps).expect("lists");
         assert_eq!(apps[0].running.as_ref(), Some(&updated));
@@ -503,7 +525,11 @@ mod tests {
             Some(updated.clone())
         );
 
+        // A build read once is kept for as long as its process runs.
         harness.owner.host.build = None;
+        let apps = harness.ask(Request::ListApps).expect("lists");
+        assert_eq!(apps[0].running.as_ref(), Some(&updated));
+        harness.owner.host.process = 5;
         let apps = harness.ask(Request::ListApps).expect("lists");
         assert_eq!(
             apps[0].running, None,
@@ -538,6 +564,67 @@ mod tests {
             Some(updated),
             "a failed mark keeps the build"
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn values_made_again_or_another_executable_need_a_new_check() {
+        let (mut harness, root) = with_saved_bar("rechecked");
+        let checked = |harness: &mut Harness| {
+            harness.ask(Request::ListApps).expect("lists")[0]
+                .file
+                .as_ref()
+                .and_then(|file| file.checked.clone())
+                .map(|checked| checked.build)
+        };
+        assert_eq!(checked(&mut harness), Some(example_build()));
+        harness
+            .ask(|reply| Request::DeleteValue {
+                app: "example".to_owned(),
+                value: "progress_bar".to_owned(),
+                reply,
+            })
+            .expect("deletes");
+        assert_eq!(checked(&mut harness), None, "no values, nothing checked");
+        let updated = BuildDef {
+            version: Some("1.5.0.0".to_owned()),
+            ..example_build()
+        };
+        harness.owner.host.process = 4;
+        harness.owner.host.build = Some(updated.clone());
+        harness
+            .ask(|reply| Request::SaveValue {
+                spec: Box::new(spec("example", "Progress bar", BAR)),
+                reply,
+            })
+            .expect("saves");
+        assert_eq!(checked(&mut harness), Some(updated.clone()));
+
+        let rename = |harness: &mut Harness, executable: &str| {
+            harness.ask(|reply| Request::SaveApp {
+                existing: Some("example".to_owned()),
+                spec: crate::applications::AppSpec {
+                    name: "Example App".to_owned(),
+                    window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                        title: "Example App",
+                        class: "ExampleWindow",
+                        executable,
+                    }),
+                },
+                reply,
+            })
+        };
+        assert_eq!(
+            rename(&mut harness, "EXAMPLE.exe"),
+            Ok("example".to_owned())
+        );
+        assert_eq!(
+            checked(&mut harness),
+            Some(updated),
+            "the same executable keeps it"
+        );
+        assert_eq!(rename(&mut harness, "Other.exe"), Ok("example".to_owned()));
+        assert_eq!(checked(&mut harness), None, "another executable drops it");
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import { type AppSummary, type AutomationSummary, deleteValue, errorText, markChecked } from '../lib/api.ts';
 import { usedBy } from '../lib/automation.ts';
-import { buildChange } from '../lib/build.ts';
+import { buildState, checkedText } from '../lib/build.ts';
 import { checkSummary } from '../lib/describe.ts';
 import { hex } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
@@ -40,7 +40,8 @@ function AppRows({ app, automations, confirming, onConfirm, onDelete, onMarkChec
   if (file.values.length === 0) {
     return null;
   }
-  const changed = buildChange(file, app.running);
+  const build = buildState(file, app.running);
+  const checked = checkedText(file, (at) => at.toLocaleDateString(undefined, { dateStyle: 'medium' }));
   return (
     <>
       <tr className="group">
@@ -49,11 +50,14 @@ function AppRows({ app, automations, confirming, onConfirm, onDelete, onMarkChec
           {app.file.name}
           <small>
             {app.file.window.executable} · {running ? 'running' : 'not running'}
+            {checked === null ? null : ` · ${checked}`}
           </small>
-          {changed === null ? null : (
+          {build === null ? null : (
             <div className="changed">
-              <span className="warn">
-                Changed since its values were checked ({changed}). Check that each value still reads right.
+              <span className={build.kind === 'changed' ? 'warn' : 'note'}>
+                {build.kind === 'changed'
+                  ? `Changed since its values were checked (${build.change}). Check that each value still reads right.`
+                  : 'Which build its values were checked against is not recorded yet.'}
               </span>
               <button type="button" className="btn small" onClick={onMarkChecked}>
                 Mark as checked

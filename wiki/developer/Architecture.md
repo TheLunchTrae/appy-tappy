@@ -292,23 +292,32 @@ is newly watched is found by the next snapshot.
 
 #### Build detection
 
-When a session starts, the lifecycle thread reads which build of the
-application's executable runs, and sends it after the `Started` change as an
-`Identified` change. A build is the executable's file version, its size, and
-when it was written (`appytappy_sources::build`). The Windows adapter
+When a session starts, the lifecycle thread sends the `Started` change, then
+reads which build of the application's executable runs and sends it as an
+`Identified` change, so reading the file never holds back the session. A
+build is the executable's file version, its size, and when it was written
+(`appytappy_sources::build`). The Windows adapter
 (`crates/sources/src/win/build.rs`) asks `NtQuerySystemInformation` for the
 process's executable path by its process ID, which needs no process handle, so
 it is allowed for every anti-cheat class, and turns the device path it gives
 into a drive or network path with `QueryDosDeviceW`. Then it reads the file's
-version resource, size, and write time from disk.
+version resource, size, and write time from disk. A file that cannot be read,
+such as one another program holds locked, makes the build unreadable rather
+than one without a version.
 
 The owner logs a line when the build differs from the one the application's
 values were checked against, the `checked` that its file records, or when it
 cannot be read. Either way the values are still read: the line tells the user to
 check them in the setup app, whose Values page shows the same warning from the
-build of the process behind the window it matched. The setup app reads the
-build the same way and records it as described in
-[Saved files](Setup-app.md#saved-files).
+build of the process behind the best window its match finds. The setup app
+reads the build the same way, once for each process it sees, and records it as
+described in [Saved files](Setup-app.md#saved-files).
+
+The path is the one the process started from, so an updater that renames the
+running executable and writes the new build in its place makes both programs
+read the new file until the application restarts. When two copies of different
+builds run, the setup app reads the copy whose window fits best and the runtime
+the one its session follows, which can differ.
 
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
 second copy that finds it logs that and exits at once, and the setup app can
@@ -525,7 +534,9 @@ design enforces the block in four places:
 4. Every path that opens an application's process needs a process-access permit,
    including the guided memory scan
    ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any version
-   detection that reads the running process. Only `config` issues one, and only
+   detection that reads the running process. [Build
+   detection](#build-detection) reads only the executable file, so it needs
+   none. Only `config` issues one, and only
    for an application of class `none`. The scan runs before any binding exists,
    so this point, not the first three, is what blocks it.
 
