@@ -155,8 +155,7 @@ impl System for Unsupported {
     }
 }
 
-/// Each process's executable name, by process ID, as the action controls
-/// name an audio session's app.
+/// Each process's ID with its executable's name.
 #[must_use]
 pub fn executables(processes: Vec<ProcessEntry>) -> Vec<(ProcessId, String)> {
     processes

@@ -368,7 +368,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
 
 /// The operating system's media and audio controls, made on the action
 /// thread. They name each audio session's app from `system`'s process
-/// list, the same snapshot detection reads.
+/// list, which detection uses too, taken fresh for each volume action.
 #[cfg(windows)]
 #[mutants::skip] // Makes the real controls, checked by hand on Windows.
 fn controls(system: &Arc<HostSystem>) -> io::Result<appytappy_actions::win::WindowsControls> {

@@ -82,7 +82,9 @@ crates/
 | `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform` | —              |
 | setup app            | Windows  | `config`, `sources`, `tauri`, `tokio`, `serde`       | —              |
 
-Each crate's owning issue adds its code and its dependencies. Where issues #6
+The table leaves out dev-dependencies, such as `sources` for the actions
+crate's manual media player test. Each crate's owning issue adds its code and
+its dependencies. Where issues #6
 and #11 say "the core crate", they mean `appytappy-config` for formats, validation,
 and policy, and `appytappy-engine` for rule evaluation. `config` owns what a
 condition means, so the setup app and the runtime agree on it; `engine` owns
