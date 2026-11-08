@@ -535,15 +535,17 @@ changing.
   for a moment, so a failed rename is tried again a few times, as
   `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
   setup app shows the error.
-- **Reloading.** After each request that saves an application, a value, a
-  reference, an anti-cheat class, or an automation, the setup app sets the
-  named event `Local\AppyTappy.Reload`, and the runtime reads every `app.json`
-  and `automations.json` again, as the [reload watch](#the-runtime) describes.
-  `Request::saves` in `apps/setup/src-tauri/src/owner/messages.rs` lists those
-  requests. Turning an overlay on or off, changing its mode, and moving its
-  panel also write `app.json`, but they do not set the event, because the
-  runtime does not use the overlay. A runtime that is not running reads the
-  files when it starts, so the setup app ignores a failure to set the event.
+- **Reloading.** After each save of an application, a value, a reference, an
+  anti-cheat class, a checked build, or an automation that works, the setup
+  app sets the named event `Local\AppyTappy.Reload`, and the runtime reads
+  every `app.json` and `automations.json` again, as the
+  [reload watch](#the-runtime) describes. Each save passes its result and
+  what it changed to `Owner::after` in `apps/setup/src-tauri/src/owner.rs`,
+  which sets the event only when the save worked. Turning an overlay on or
+  off, changing its mode, and moving its panel also write `app.json`, but they
+  do not set the event, because the runtime does not use the overlay. A
+  runtime that is not running reads the files when it starts, so the setup app
+  ignores a failure to set the event.
 - **Reading.** The runtime reads the files with the same `config` code the
   setup app uses, and checks everything again before use, because the files
   are outside its control and a person can edit them by hand. Each `app.json`
@@ -610,9 +612,12 @@ Its Rust side exposes Tauri commands and holds no logic of its own: discovery,
 capture, preview, and saving come from the shared crates. It follows the
 same ownership rule as the runtime. One owner thread holds the setup app's
 state, and Tauri keeps only that thread's `Sender`, never state behind a
-`Mutex`. Each command is `async`: it sends a request with a
-`tokio::sync::oneshot` reply channel and awaits the reply, so a slow capture or
-save never freezes the window. The AI-assisted discovery flow belongs to
+`Mutex`. Each command is `async`: it sends the owner thread a `Run`, a
+closure that calls one of the owner's methods, with a `tokio::sync::oneshot`
+reply channel, and awaits the reply, so a slow capture or save never freezes
+the window. A new command is a method on the owner, a command in `commands.rs`
+that calls it, its name in `generate_handler!` in `main.rs`, and its call in
+the UI's `api.ts`. The AI-assisted discovery flow belongs to
 [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
 
 How Tauri compares with the alternatives:

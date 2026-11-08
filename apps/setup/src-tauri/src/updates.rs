@@ -18,7 +18,7 @@ use tauri_plugin_updater::{Updater, UpdaterExt};
 use tokio::sync::oneshot;
 
 use crate::commands::{Bridge, ask};
-use crate::owner::{Message, Request};
+use crate::owner::{Message, Owner, Run};
 
 /// The plugin's name, which is also its section in the configuration.
 const UPDATER: &str = "updater";
@@ -84,7 +84,7 @@ fn updater(app: &AppHandle) -> Result<Updater, String> {
         .on_before_exit(move || {
             let (reply, answer) = oneshot::channel();
             if messages
-                .send(Message::Request(Request::CloseForUpdate(reply)))
+                .send(Message::Run(Run::new(reply, Owner::close_for_update)))
                 .is_ok()
             {
                 #[expect(
@@ -165,11 +165,7 @@ pub(crate) async fn download_update(app: AppHandle) -> Result<UpdateOffer, Strin
         manifest: update.raw_json,
         installer,
     };
-    ask(&app, |reply| Request::KeepUpdate {
-        update: downloaded,
-        reply,
-    })
-    .await?;
+    ask(&app, move |owner| owner.keep_update(downloaded)).await?;
     Ok(UpdateOffer { version })
 }
 
@@ -180,7 +176,7 @@ pub(crate) async fn download_update(app: AppHandle) -> Result<UpdateOffer, Strin
 #[tauri::command]
 #[mutants::skip]
 pub(crate) async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
-    let downloaded = ask(&app, Request::TakeUpdate)
+    let downloaded = ask(&app, Owner::take_update)
         .await?
         .ok_or_else(|| "AppyTappy Setup has no update downloaded. Update again.".to_owned())?;
     agreed(&downloaded.version, &version)?;

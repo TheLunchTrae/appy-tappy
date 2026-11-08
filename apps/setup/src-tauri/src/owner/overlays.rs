@@ -3,13 +3,14 @@
 
 use appytappy_config::app_file::{OverlayDef, OverlayModeDef, PanelDef};
 
-use crate::overlay::{self, OverlayView, OverlayWindow};
+use crate::overlay::{self, Card, OverlayView, OverlayWindow, Place};
 
-use super::Owner;
 use super::host::Host;
+use super::{Changed, Owner};
 
 impl<H: Host> Owner<H> {
-    pub(super) fn overlay_windows(&self) -> Result<Vec<OverlayWindow>, String> {
+    /// The overlays that are on, for their windows to open.
+    pub(crate) fn overlay_windows(&self) -> Result<Vec<OverlayWindow>, String> {
         let loaded = self
             .stores()?
             .apps
@@ -20,23 +21,62 @@ impl<H: Host> Owner<H> {
         })))
     }
 
-    pub(super) fn set_overlay(
-        &self,
+    /// Turns the overlay of the application `app` on or off, shown as
+    /// `mode`.
+    pub(crate) fn set_overlay(
+        &mut self,
         app: &str,
         enabled: bool,
         mode: OverlayModeDef,
     ) -> Result<(), String> {
-        let mut file = self.stores()?.app_file(app)?;
-        let panel = file.overlay.and_then(|overlay| overlay.panel);
-        file.overlay = Some(OverlayDef {
-            enabled,
-            mode,
-            panel,
+        let saved = self.stores().and_then(|stores| {
+            let mut file = stores.app_file(app)?;
+            let panel = file.overlay.and_then(|overlay| overlay.panel);
+            file.overlay = Some(OverlayDef {
+                enabled,
+                mode,
+                panel,
+            });
+            stores
+                .apps
+                .save(app, &file, &[])
+                .map_err(|error| error.to_string())
         });
-        self.stores()?
-            .apps
-            .save(app, &file, &[])
-            .map_err(|error| error.to_string())
+        self.after(Changed::Overlay, saved)
+    }
+
+    /// What the overlay of the application `app` shows now, keeping where
+    /// the user put its panels once they settled.
+    pub(crate) fn overlay_state(&mut self, app: &str) -> Result<OverlayView, String> {
+        let view = self.overlay_view(app);
+        self.save_panels(false);
+        view
+    }
+
+    /// Where the overlay window of the application `app` goes, or `None`
+    /// while its window is not showing.
+    pub(crate) fn overlay_place(&self, app: &str) -> Option<Place> {
+        self.overlays.place(&self.host, app)
+    }
+
+    /// Keeps the size the page measured for the card of the application
+    /// `app`'s overlay, which placing its window uses.
+    pub(crate) fn overlay_card(&mut self, app: &str, card: Card) {
+        self.overlays.card(app, card);
+    }
+
+    /// Closes the overlay of the application `app` that shows as `mode`,
+    /// keeping where the user put its panels. An overlay shown another way
+    /// since stays open.
+    pub(crate) fn close_overlay(&mut self, app: &str, mode: OverlayModeDef) {
+        if self.overlays.mode(app) == Some(mode) {
+            self.save_panels(true);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the overlay's window closed, so nothing shows the capture's error"
+            )]
+            let _ = self.overlays.close(Some(app));
+        }
     }
 
     pub(super) fn overlay_view(&mut self, app: &str) -> Result<OverlayView, String> {
@@ -84,43 +124,32 @@ mod tests {
     use crate::overlay::{
         Card, FrameRead, OVERLAY_INTERVAL, Place, RETRY_POLLS, SETTLE_POLLS, ValueRead, ValueView,
     };
-    use crate::owner::messages::{Message, Reading, Reply, Request};
-    use crate::owner::test_support::{Harness, WINDOW, frame_image, with_saved_bar};
+    use crate::owner::messages::{Message, Reading};
+    use appytappy_config::app_file::AntiCheatDef;
+
+    use crate::owner::test_support::{
+        BAR, FakeHost, Harness, WINDOW, frame_image, spec, with_saved_bar,
+    };
 
     use super::*;
 
-    fn overlay_state(reply: Reply<Result<OverlayView, String>>) -> Request {
-        Request::OverlayState {
-            app: "example".to_owned(),
-            reply,
-        }
+    fn overlay_state(owner: &mut Owner<FakeHost>) -> Result<OverlayView, String> {
+        owner.overlay_state("example")
     }
 
-    fn overlay_place(reply: Reply<Option<Place>>) -> Request {
-        Request::OverlayPlace {
-            app: "example".to_owned(),
-            reply,
-        }
+    fn overlay_place(owner: &mut Owner<FakeHost>) -> Option<Place> {
+        owner.overlay_place("example")
     }
 
     fn set_overlay(
         enabled: bool,
         mode: OverlayModeDef,
-    ) -> impl FnOnce(Reply<Result<(), String>>) -> Request {
-        move |reply| Request::SetOverlay {
-            app: "example".to_owned(),
-            enabled,
-            mode,
-            reply,
-        }
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+        move |owner: &mut Owner<FakeHost>| owner.set_overlay("example", enabled, mode)
     }
 
-    fn close_overlay(mode: OverlayModeDef) -> impl FnOnce(Reply<()>) -> Request {
-        move |reply| Request::CloseOverlay {
-            app: "example".to_owned(),
-            mode,
-            reply,
-        }
+    fn close_overlay(mode: OverlayModeDef) -> impl FnOnce(&mut Owner<FakeHost>) {
+        move |owner: &mut Owner<FakeHost>| owner.close_overlay("example", mode)
     }
 
     /// The overlay's view of `Progress bar` reading `reading` or failing
@@ -180,12 +209,12 @@ mod tests {
             harness.ask(overlay_state),
             Err("The overlay for Example App is off.".to_owned())
         );
-        assert_eq!(harness.ask(Request::Overlays), Ok(Vec::new()));
+        assert_eq!(harness.ask(|owner| owner.overlay_windows()), Ok(Vec::new()));
         harness
             .ask(set_overlay(true, OverlayModeDef::Overlay))
             .expect("saves");
         assert_eq!(
-            harness.ask(Request::Overlays),
+            harness.ask(|owner| owner.overlay_windows()),
             Ok(vec![OverlayWindow {
                 app: "example".to_owned(),
                 name: "Example App".to_owned(),
@@ -214,11 +243,7 @@ mod tests {
             width: 180.0,
             height: 40.0,
         };
-        harness.ask(|reply| Request::OverlayCard {
-            app: "example".to_owned(),
-            card,
-            reply,
-        });
+        harness.ask(|owner| owner.overlay_card("example", card));
         assert_eq!(
             harness.ask(overlay_place),
             Some(Place {
@@ -328,15 +353,14 @@ mod tests {
             .ask(set_overlay(true, OverlayModeDef::PictureInPicture))
             .expect("saves");
         drop(overlay_capture(&mut harness));
+        harness.forget_reloads();
         harness
-            .ask(|reply| Request::RemoveApp {
-                app: "example".to_owned(),
-                reply,
-            })
+            .ask(|owner| owner.remove_app("example"))
             .expect("removes");
         assert_eq!(harness.closed.try_recv(), Ok(7), "its capture stops");
+        assert_eq!(harness.reloads(), 1, "the runtime reads the applications");
         // The window sync that follows the removal closes the panel.
-        assert_eq!(harness.ask(Request::Overlays), Ok(Vec::new()));
+        assert_eq!(harness.ask(|owner| owner.overlay_windows()), Ok(Vec::new()));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -489,7 +513,7 @@ mod tests {
         };
         let saved = |harness: &mut Harness| {
             harness
-                .ask(Request::Overlays)
+                .ask(|owner| owner.overlay_windows())
                 .expect("listed")
                 .first()
                 .and_then(|overlay| overlay.panel)
@@ -531,6 +555,56 @@ mod tests {
         assert!(harness.owner.handle(placed(50)).is_continue());
         harness.owner.shut_down().expect("closes");
         assert_eq!(saved(&mut harness), Some(panel(30)));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn only_a_save_that_worked_tells_the_runtime_and_the_overlays() {
+        let (mut harness, root) = with_saved_bar("overlay-saves");
+        assert_eq!(
+            harness.reloads(),
+            2,
+            "the application and its value were saved"
+        );
+        harness
+            .ask(set_overlay(true, OverlayModeDef::Overlay))
+            .expect("saves");
+        assert_eq!(harness.reloads(), 0, "the runtime shows no overlay");
+        drop(overlay_capture(&mut harness));
+
+        // Saves that fail change nothing, so the overlay keeps reading and
+        // the runtime keeps what it read.
+        assert!(
+            harness
+                .ask(|owner| owner.save(&spec("missing", "Progress bar", BAR)))
+                .is_err()
+        );
+        assert!(
+            harness
+                .ask(|owner| owner.set_anti_cheat("missing", AntiCheatDef::None))
+                .is_err()
+        );
+        assert!(
+            harness
+                .ask(|owner| owner.set_automation_enabled("missing", false))
+                .is_err()
+        );
+        assert!(harness.closed.try_recv().is_err(), "the overlay goes on");
+        assert_eq!(harness.reloads(), 0);
+
+        // A setting only the runtime reads leaves the overlay alone.
+        harness
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::UserMode))
+            .expect("saves");
+        assert_eq!(harness.reloads(), 1);
+        assert!(harness.closed.try_recv().is_err(), "the overlay goes on");
+
+        // A change to the values tells both.
+        harness
+            .ask(|owner| owner.save(&spec("example", "Another bar", BAR)))
+            .expect("saves");
+        assert_eq!(harness.reloads(), 1);
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the overlay reads again");
         std::fs::remove_dir_all(root).expect("clean up");
     }
 }

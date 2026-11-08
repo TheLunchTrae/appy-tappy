@@ -37,7 +37,7 @@ pub(super) struct Watched {
 
 /// A watch's message for one frame. A window too small for the region is
 /// another size, not a stopped capture: the capture goes on.
-fn watch_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
+fn watch_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Message<H> {
     let seen = match frame {
         Ok(frame) => Ok(Seen::Region {
             window_size: frame.window_size,
@@ -51,7 +51,11 @@ fn watch_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
 }
 
 impl<H: Host> Owner<H> {
-    pub(super) fn watch(&mut self, app: &str, value: &str) -> Result<u64, String> {
+    /// Captures the region of the saved value `value` on the window of the
+    /// application `app`, for the automation editor, and answers the
+    /// watch's number. Like [`Owner::pick`], it drops the previous window's
+    /// capture, screenshots and check.
+    pub(crate) fn watch(&mut self, app: &str, value: &str) -> Result<u64, String> {
         let stores = self.stores()?;
         let file = stores.app_file(app)?;
         let saved = file
@@ -86,7 +90,9 @@ impl<H: Host> Owner<H> {
         Ok(watch)
     }
 
-    pub(super) fn watched_reading(
+    /// What the watched value reads on the newest frame, and whether `when`
+    /// holds for it; an error once the watch was stopped or replaced.
+    pub(crate) fn watched_reading(
         &self,
         watch: u64,
         when: Option<&WhenDef>,
@@ -136,6 +142,13 @@ impl<H: Host> Owner<H> {
             holds,
         })
     }
+
+    /// Stops watch `watch`, unless another capture took its place.
+    pub(crate) fn stop_watching(&mut self, watch: u64) {
+        if self.watched.is_some() && watch == self.generation {
+            self.stop();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -145,27 +158,25 @@ mod tests {
     use appytappy_sources::screen::{FrameHandler, Image, Region};
 
     use crate::check_spec::CheckSpec;
-    use crate::owner::messages::{Reading, Reply, Request};
+    use crate::owner::messages::Reading;
     use crate::owner::test_support::{
-        Harness, STATE, WINDOW, add_example_app, frame_image, harness_with, scratch_store, spec,
-        with_saved_bar,
+        FakeHost, Harness, STATE, WINDOW, add_example_app, frame_image, harness_with,
+        scratch_store, spec, with_saved_bar,
     };
 
     use super::*;
 
-    fn watch(app: &str, value: &str) -> impl FnOnce(Reply<Result<u64, String>>) -> Request {
+    fn watch(app: &str, value: &str) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let (app, value) = (app.to_owned(), value.to_owned());
-        move |reply| Request::WatchValue { app, value, reply }
+        move |owner: &mut Owner<FakeHost>| owner.watch(&app, &value)
     }
 
     fn watched(
         watch: u64,
         when: Option<WhenDef>,
-    ) -> impl FnOnce(Reply<Result<Live, String>>) -> Request {
-        move |reply| Request::WatchedReading {
-            watch,
-            when: when.map(Box::new),
-            reply,
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<Live, String> {
+        move |owner: &mut Owner<FakeHost>| {
+            owner.watched_reading(watch, when.map(Box::new).as_deref())
         }
     }
 
@@ -247,7 +258,7 @@ mod tests {
         )
         .expect("valid JSON");
         harness
-            .ask(|reply| Request::SetCheck { spec, reply })
+            .ask(|owner| owner.set_check(&spec))
             .expect("valid check");
         assert_eq!(harness.ask(watched(watch, None)), read(None));
         assert_eq!(
@@ -323,10 +334,7 @@ mod tests {
             Err("No value is watched.".to_owned())
         );
         // A late stop of the first watch leaves the second running.
-        harness.ask(|reply| Request::StopWatching {
-            watch: first,
-            reply,
-        });
+        harness.ask(|owner| owner.stop_watching(first));
         assert!(harness.closed.try_recv().is_err());
         assert_eq!(harness.ask(watched(second, None)), Ok(Live::Waiting));
         // Frames from the first watch's capture are dropped.
@@ -337,17 +345,11 @@ mod tests {
         // watch that a pick replaced leaves the pick's capture running.
         let _picked = harness.pick();
         assert_eq!(harness.closed.try_recv(), Ok(7));
-        harness.ask(|reply| Request::StopWatching {
-            watch: second,
-            reply,
-        });
+        harness.ask(|owner| owner.stop_watching(second));
         assert!(harness.closed.try_recv().is_err());
         let (third, _handler) = watch_bar(&mut harness);
         assert_eq!(harness.closed.try_recv(), Ok(7));
-        harness.ask(|reply| Request::StopWatching {
-            watch: third,
-            reply,
-        });
+        harness.ask(|owner| owner.stop_watching(third));
         assert_eq!(harness.closed.try_recv(), Ok(7));
         assert_eq!(
             harness.ask(watched(third, None)),
@@ -364,13 +366,8 @@ mod tests {
         add_example_app(&mut harness);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        let save = |spec| {
-            move |reply| Request::SaveValue {
-                spec: Box::new(spec),
-                reply,
-            }
-        };
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let save = |spec| move |owner: &mut Owner<FakeHost>| owner.save(&spec);
         harness
             .ask(save(spec("example", "Icon visible", STATE)))
             .expect("saves");
