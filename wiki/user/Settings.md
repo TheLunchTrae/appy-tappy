@@ -12,9 +12,10 @@ background part picks up a change within a moment.
 - **Screenshot shortcut.** The key that takes a screenshot while you
   [make a value](Values.md) or a [reference](References.md), `F9` at first.
   Select **Change** and press the new keys, or Esc to keep the old ones. F1 to
-  F24, Print Screen, and Pause work alone. Any other key, such as a letter, a
-  digit, Space, or an arrow, needs Ctrl, Alt, Shift, or Win with it, so it
-  keeps working everywhere else. **Change shortcut** on the screenshot page
+  F24, Print Screen, and Pause work alone. A letter, a digit, Space, an arrow,
+  Insert, Delete, Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or
+  Win with it, so it keeps working everywhere else. Other keys can't be the
+  shortcut. **Change shortcut** on the screenshot page
   changes the same setting.
 
 ## Reading

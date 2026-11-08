@@ -23,9 +23,9 @@ On the Values page, select **New value**.
    has the keyboard, so you can carry on in it until it shows what you want
    and press `F9` then. To use other keys, select **Change shortcut** and
    press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,
-   and Pause work alone. Any other key, such as a letter, a digit, Space, or an
-   arrow, needs Ctrl, Alt, Shift, or Win with it, so it keeps working
-   everywhere else.
+   and Pause work alone. A letter, a digit, Space, an arrow, Insert, Delete,
+   Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or Win with it, so
+   it keeps working everywhere else. Other keys can't be the shortcut.
 3. **Where to read.** Type a **Value name**, such as `Progress`, and choose
    the **Check**, one of the four [checks](#checks) below. On a screenshot,
    drag to draw a box around what to read. Drag inside the box to move it, or
