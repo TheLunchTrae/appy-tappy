@@ -1,6 +1,6 @@
 //! The Settings page: the saved settings, which the runtime reads again once
-//! a save worked, and whether the runtime starts when the user signs in to
-//! Windows.
+//! a save worked, whether the runtime starts when the user signs in to
+//! Windows, and the folder its trace files go in.
 
 use appytappy_config::settings_file::SettingsFile;
 
@@ -49,6 +49,26 @@ impl<H: Host> Owner<H> {
     #[mutants::skip] // Writes the registry, checked by hand on Windows.
     pub(crate) fn set_starts_with_windows(&self, on: bool) -> Result<(), String> {
         settings::set_starts_with_windows(on)
+    }
+
+    /// The folder the runtime writes its trace files to.
+    #[expect(
+        clippy::unused_self,
+        reason = "every command runs on the owner, so each has one place to look"
+    )]
+    #[mutants::skip] // Reads the environment, which the tests leave alone.
+    pub(crate) fn trace_folder(&self) -> Result<String, String> {
+        settings::trace_folder().map(|folder| folder.display().to_string())
+    }
+
+    /// Opens the trace folder in File Explorer.
+    #[expect(
+        clippy::unused_self,
+        reason = "every command runs on the owner, so each has one place to look"
+    )]
+    #[mutants::skip] // Opens a window, checked by hand on Windows.
+    pub(crate) fn open_trace_folder(&self) -> Result<(), String> {
+        settings::open_trace_folder()
     }
 }
 
