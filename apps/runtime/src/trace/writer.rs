@@ -29,8 +29,10 @@ use crate::plan::AppPlan;
 use crate::workers::reader::SessionId;
 
 /// How many records the buffer holds. It is allocated once, when the trace
-/// starts.
-pub(crate) const BUFFER: usize = 65_536;
+/// starts, at about 150 bytes a record, so it is the trace's largest cost.
+/// The footprint run records about 160 rows a second with every category on,
+/// so this holds close to a minute of them while the writer waits for time.
+pub(crate) const BUFFER: usize = 8_192;
 
 /// How often the writer flushes what it wrote.
 const FLUSH_EVERY: Duration = Duration::from_secs(1);
@@ -741,12 +743,14 @@ mod tests {
 
     #[test]
     fn a_frame_from_before_the_trace_has_no_cause() {
-        let before = Instant::now();
+        let record = Record::now(What::Fired);
+        // Two clock reads can be equal on Windows, so the trace starts a
+        // moment after the frame on purpose.
+        let started = record.at + Duration::from_millis(1);
         let record = Record {
-            cause: Some(before),
-            ..Record::now(What::Fired)
+            cause: Some(record.at),
+            ..record
         };
-        let started = record.at;
         let line = row(&record, started, &BTreeMap::new());
         assert!(line.ends_with(",owner,fired,,,,,,"), "{line}");
     }

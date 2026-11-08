@@ -132,7 +132,7 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
 
 Off, the trace costs one check of an empty handle at each place that could
 record. On, the trace holds its buffer of `BUFFER` records in memory until it
-stops: 65,536 slots of 152 bytes, about 9.5 MB, all allocated and written when
+stops: 8,192 slots of 152 bytes, about 1.2 MB, all allocated and written when
 the trace starts. Each recorded row costs a clock read and a send into the
 buffer; the formatting and the disk writes happen on the writer thread, at the
 lowest priority. `readings` adds a row and a clock read for every read of every
