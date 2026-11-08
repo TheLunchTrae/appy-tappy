@@ -381,7 +381,6 @@ describe('opening and sounds', () => {
       opens('C:\\Program Files\\Timer\\Timer.exe'),
     );
     expect(typed('open', 'd:/notes.txt')).toEqual(opens('d:/notes.txt'));
-    expect(typed('open', '\\\\server\\share\\run.bat')).toEqual(opens('\\\\server\\share\\run.bat'));
     expect(typed('open', ' HTTPS://example.com/timer ')).toEqual(opens('HTTPS://example.com/timer'));
     expect(typed('open', ' "" ')).toEqual({
       ok: false,
@@ -392,6 +391,7 @@ describe('opening and sounds', () => {
       'C:Timer.exe',
       'ftp://example.com',
       'search-ms:query=x',
+      '\\\\server\\share\\run.bat',
       'https://',
       'https://a b',
     ]) {
@@ -408,10 +408,34 @@ describe('opening and sounds', () => {
       ok: false,
       next: 'Enter the full path of the WAV file action 1 plays, such as C:\\Sounds\\Ding.wav.',
     });
-    for (const file of ['Ding.wav', 'C:\\Sounds\\Ding.mp3', 'https://example.com/ding.wav']) {
+    for (const file of ['Ding.wav', 'C:\\Sounds\\Ding.mp3', 'https://example.com/ding.wav', '\\\\server\\ding.wav']) {
       expect(typed('sound', file)).toEqual({
         ok: false,
         next: 'Action 1 plays a WAV file by its full path, such as C:\\Sounds\\Ding.wav.',
+      });
+    }
+  });
+
+  test('refuse a path or link the runtime would not save', () => {
+    const typed = (kind: 'open' | 'sound', text: string): ReturnType<typeof buildAutomation> =>
+      buildAutomation(
+        { ...toDraft(openAndPlay), actions: [{ ...newAction(1, kind), opens: text, sound: text }] },
+        choices,
+        'pause_music',
+      );
+    const longest = `https://${'a'.repeat(2040)}`;
+    expect(typed('open', longest)).toEqual({
+      ok: true,
+      automation: { ...openAndPlay, actions: [{ kind: 'open', target: longest }] },
+    });
+    expect(typed('open', `${longest}a`)).toEqual({
+      ok: false,
+      next: 'The path or link in action 1 is too long to save. Shorten it to 2,048 characters or fewer.',
+    });
+    for (const kind of ['open', 'sound'] as const) {
+      expect(typed(kind, 'C:\\Sounds\tDing.wav')).toEqual({
+        ok: false,
+        next: 'The path or link in action 1 has a tab or line break in it. Remove it.',
       });
     }
   });

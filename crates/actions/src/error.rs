@@ -43,8 +43,7 @@ impl fmt::Display for ActionError {
                 write!(formatter, "Windows took only {sent} of {of} key events")
             },
             Self::SoundNotPlayed => formatter.write_str(
-                "the sound did not play: the file is missing or not a WAV file, or no playback \
-                 device is connected",
+                "the sound did not play: the file is missing or Windows could not play it",
             ),
             Self::Os(error) => write!(formatter, "the operating system failed: {error}"),
         }

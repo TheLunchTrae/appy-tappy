@@ -83,24 +83,30 @@ editing `app.json` by hand counts from the next reload or restart.
 
 ## Opening
 
-An open action names a full path, such as `C:\Tools\Timer.exe`, or a
-network path that starts with `\\`, or a link that starts with `http://` or
-`https://`, up to 2048 bytes. A relative path would depend on the runtime's
-working folder, which the user never sees, so it is refused.
+An open action names a full path on a drive, such as `C:\Tools\Timer.exe`,
+or a link that starts with `http://` or `https://`, up to 2048 bytes. A
+relative path would depend on the runtime's working folder, which the user
+never sees, so it is refused. A network path, which starts with `\\`, is
+refused too: reaching one sends the user's Windows sign-in to that server, and
+a file there, such as a shortcut or a saved search, can hand a link of any kind
+to its program.
 
 It uses `ShellExecuteExW` with the default verb, as opening the target from
-File Explorer does: a program runs, a file opens in the program its type is
-set to, and a link opens in the default browser. It passes nothing to what it
-opens, so no reading of the watched application can reach a program's command
-line. It asks Windows to show the window without taking the keyboard focus,
-though a program may take it anyway, and it shows no error dialog; a failure,
-such as a file that is not there, goes to the log.
+File Explorer does: a program runs in its own folder, a file opens in the
+program its type is set to, and a link opens in the default browser. It passes
+nothing to what it opens, so no reading of the watched application can reach a
+program's command line. It asks Windows to show the window without taking the
+keyboard focus, though a program may take it anyway, and it shows no error
+dialog; a failure, such as a file that is not there, goes to the log.
 
 The shell asks its callers for a single-threaded COM apartment, while Core
 Audio's controls need the action thread in the multithreaded one, so each open
 runs on a short-lived thread of its own. The action thread waits for it for at
 most 2 seconds, so a program that is slow to start cannot hold up the actions
-behind it. After that the log says it may still open, and it may.
+behind it. After that the log says it may still open, and it may. While that
+thread is still running, a later open is skipped and the log says so, so a
+target that never answers leaves one waiting thread, not one for each time
+the automation runs.
 
 Links are only `http` and `https`, because a link of another kind goes to
 whichever program registered that kind, and some such programs have run
@@ -110,15 +116,19 @@ actions before you use it.
 
 ## Sounds
 
-A sound action names a WAV file by its full path, which ends in `.wav`. It
-uses `PlaySoundW`, which returns once the sound starts, so the action thread
-does not wait for it to end. A new sound stops one that is still playing. When
-the file is missing or is not a WAV file, or no playback device is connected,
-the sound does not play and the log says so. It plays on the default playback
-device, at the volume Windows gives AppyTappy in the volume mixer.
+A sound action names a WAV file by its full path on a drive, which ends in
+`.wav`. It uses `PlaySoundW`, which returns once the sound is queued, so the
+action thread does not wait for it to end. A new sound stops one that is still
+playing. Played this way, the call does not report a missing file, so the
+adapter checks that the file is there first; when it is not, the sound does not
+play and the log says so. A file that is there but that Windows cannot play
+fails without a sign. It plays on the default playback device, at the volume
+Windows gives AppyTappy in the volume mixer.
 
 Neither opening nor a sound is restricted by anti-cheat class: neither sends
-input or touches the watched application's process.
+input or touches the watched application's process. A program an open action
+starts can send input of its own, which anti-cheat may count against the user;
+the user guide says so.
 
 ## Restoring
 

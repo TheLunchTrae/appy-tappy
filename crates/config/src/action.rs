@@ -340,17 +340,19 @@ impl Error for InvalidKeys {}
 /// The longest target an open action or a sound action names, in bytes.
 const MAX_TARGET_LEN: usize = 2048;
 
-/// Whether `text` is a full Windows path: a drive letter, a colon and a
-/// backslash or slash, such as `C:\Tools\Timer.exe`, or a network path that
-/// starts with two backslashes. A relative path would depend on the
-/// runtime's working folder, which the user never sees.
+/// Whether `text` is a full Windows path on a drive: a drive letter, a
+/// colon and a backslash or slash, such as `C:\Tools\Timer.exe`.
+///
+/// A relative path would depend on the runtime's working folder, which the
+/// user never sees. A network path, which starts with two backslashes, is
+/// refused: reaching one sends the user's sign-in to that server, and a file
+/// there can hand a link of any type to its program, so an automation from
+/// someone else must not name one.
 fn is_full_windows_path(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    let drive = matches!(
-        bytes,
+    matches!(
+        text.as_bytes(),
         [letter, b':', b'\\' | b'/', ..] if letter.is_ascii_alphabetic()
-    );
-    drive || text.starts_with(r"\\")
+    )
 }
 
 /// Whether `text` fits in a target: not empty, at most [`MAX_TARGET_LEN`]
@@ -367,7 +369,11 @@ fn fits_target(text: &str) -> bool {
 /// from a crafted link, so an automation from someone else must not reach
 /// them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenTarget(Box<str>);
+pub struct OpenTarget {
+    text: Box<str>,
+    /// Whether `text` is a web link rather than a path.
+    link: bool,
+}
 
 impl OpenTarget {
     /// Validates `target`, ignoring spaces around it.
@@ -393,7 +399,10 @@ impl OpenTarget {
             None => is_full_windows_path(target),
         };
         if valid {
-            Ok(Self(target.into()))
+            Ok(Self {
+                text: target.into(),
+                link: link.is_some(),
+            })
         } else {
             Err(InvalidOpenTarget)
         }
@@ -402,7 +411,22 @@ impl OpenTarget {
     /// The target as text.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.text
+    }
+
+    /// The folder that holds the program or file, which a program starts
+    /// in, as it does when opened from File Explorer; `None` for a web link.
+    /// It is found from the text, by the last backslash or slash, so it reads
+    /// the same on every system.
+    #[must_use]
+    pub fn folder(&self) -> Option<&str> {
+        if self.link {
+            return None;
+        }
+        let last = self.text.rfind(['\\', '/'])?;
+        // A file at a drive's top, such as C:\Timer.exe, is in C:\, not C:.
+        let end = if last == 2 { 3 } else { last };
+        self.text.get(..end)
     }
 }
 
@@ -638,7 +662,6 @@ mod tests {
         for (text, read) in [
             (r"C:\Tools\Timer.exe", r"C:\Tools\Timer.exe"),
             ("  d:/notes/today.txt ", "d:/notes/today.txt"),
-            (r"\\server\share\run.bat", r"\\server\share\run.bat"),
             ("https://example.com/a?b=c", "https://example.com/a?b=c"),
             ("HTTP://example.com", "HTTP://example.com"),
             (longest.as_str(), longest.as_str()),
@@ -662,6 +685,9 @@ mod tests {
             "ftp://example.com",
             "file:///C:/Tools/Timer.exe",
             "search-ms:query=x",
+            r"\\server\share\run.bat",
+            r"\\?\UNC\server\share\run.bat",
+            r"\\server@SSL\DavWWWRoot\x.url",
             "C:\\Tools\nTimer.exe",
             too_long.as_str(),
         ] {
@@ -671,11 +697,28 @@ mod tests {
     }
 
     #[test]
+    fn a_path_opens_in_its_own_folder_and_a_link_in_none() {
+        let folder = |text| {
+            OpenTarget::parse(text)
+                .expect("valid")
+                .folder()
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            folder(r"C:\Tools\Timer\Timer.exe"),
+            Some(r"C:\Tools\Timer".to_owned())
+        );
+        assert_eq!(folder("d:/notes/today.txt"), Some("d:/notes".to_owned()));
+        assert_eq!(folder(r"C:\Timer.exe"), Some(r"C:\".to_owned()));
+        assert_eq!(folder("https://example.com/a/b"), None);
+        assert_eq!(folder("HTTP://example.com"), None);
+    }
+
+    #[test]
     fn sound_files_are_full_paths_to_wav_files() {
         for (text, read) in [
             (r"C:\Sounds\Ding.wav", r"C:\Sounds\Ding.wav"),
             (" c:/sounds/ding.WAV ", "c:/sounds/ding.WAV"),
-            (r"\\server\sounds\ding.wav", r"\\server\sounds\ding.wav"),
         ] {
             assert_eq!(
                 SoundFile::parse(text).map(|file| file.path().to_path_buf()),
@@ -690,6 +733,7 @@ mod tests {
             r"C:\Sounds\Ding.mp3",
             r"C:\Sounds\Ding.wave",
             "https://example.com/ding.wav",
+            r"\\server\sounds\ding.wav",
             "C:\\Sounds\u{7}.wav",
             "C:\\\u{e9}.wa",
         ] {

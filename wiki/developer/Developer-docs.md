@@ -40,8 +40,8 @@ To get an installer of a branch without a release, use one of these:
   why AppyTappy does not use OCR.
 - [Rules](Rules.md): conditions, triggers, re-arming, restoring, and how the
   engine evaluates them.
-- [Actions](Actions.md): media, volume, and key press actions, and how
-  restoring works.
+- [Actions](Actions.md): media, volume, key press, open, and sound actions,
+  and how restoring works.
 - [Installer](Installer.md): what the installer does, builds, and the release
   workflow.
 - [MCP investigation server](MCP-investigation-server.md): the local server an

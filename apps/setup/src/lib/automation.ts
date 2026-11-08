@@ -406,11 +406,26 @@ function typedPath(text: string): string {
 }
 
 /**
- * Whether `text` is a full Windows path, such as `C:\Tools\Timer.exe` or `\\server\share\file`: a relative one
- * would depend on a folder the user never sees.
+ * Whether `text` is a full Windows path on a drive, such as `C:\Tools\Timer.exe`. A relative one would depend on a
+ * folder the user never sees, and a network path, such as `\\server\share\file`, is refused, as the runtime
+ * refuses it.
  */
 function isFullPath(text: string): boolean {
-  return /^[a-z]:[\\/]/iu.test(text) || text.startsWith('\\\\');
+  return /^[a-z]:[\\/]/iu.test(text);
+}
+
+/** The most bytes a path or link may take, as the runtime allows. */
+const MAX_TARGET_BYTES = 2048;
+
+/** Why the path or link `text` of action `position` can't be saved whatever its kind, or `null` when it can be. */
+function targetProblem(text: string, position: number): string | null {
+  if (/\p{Cc}/u.test(text)) {
+    return `The path or link in action ${position} has a tab or line break in it. Remove it.`;
+  }
+  if (new TextEncoder().encode(text).length > MAX_TARGET_BYTES) {
+    return `The path or link in action ${position} is too long to save. Shorten it to 2,048 characters or fewer.`;
+  }
+  return null;
 }
 
 /** Whether `text` is a web link: `http` or `https` only, as the runtime opens no other kind. */
@@ -424,6 +439,10 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
     if (target === '') {
       return `Enter what action ${position} opens: a program's full path, such as C:\\Tools\\Timer.exe, or a web link.`;
     }
+    const problem = targetProblem(target, position);
+    if (problem !== null) {
+      return problem;
+    }
     return isFullPath(target) || isWebLink(target)
       ? { kind: 'open', target }
       : `Action ${position} opens a program or file by its full path, such as C:\\Tools\\Timer.exe, or a link that starts with http:// or https://.`;
@@ -432,6 +451,10 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
     const file = typedPath(draft.sound);
     if (file === '') {
       return `Enter the full path of the WAV file action ${position} plays, such as C:\\Sounds\\Ding.wav.`;
+    }
+    const problem = targetProblem(file, position);
+    if (problem !== null) {
+      return problem;
     }
     return isFullPath(file) && /\.wav$/iu.test(file)
       ? { kind: 'sound', file }

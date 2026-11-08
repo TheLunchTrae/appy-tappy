@@ -58,7 +58,7 @@ const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = {
   ...MEDIA_NAMES,
   volume: 'Set volume',
   keys: 'Press keys',
-  open: 'Open a program or link',
+  open: 'Open a program, file, or link',
   sound: 'Play a sound',
 };
 
@@ -237,7 +237,7 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
       ) : action.kind === 'open' ? (
         <input
           className="input path-field"
-          aria-label={`${label}: program, file or link`}
+          aria-label={`${label}: program, file, or link`}
           placeholder="C:\Tools\Timer.exe or https://example.com"
           spellCheck={false}
           value={action.opens}

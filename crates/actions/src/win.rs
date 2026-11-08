@@ -10,8 +10,12 @@
 //! after asking which process that window belongs to. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
 //! Explorer's open, on a short-lived thread of its own, so a slow program
-//! cannot hold up the action worker for longer than 2 seconds. A sound
-//! plays through `PlaySoundW`, which returns once the sound starts.
+//! cannot hold up the action worker for longer than 2 seconds; while one
+//! open is still running, the next is skipped, so a program that never
+//! answers leaves one waiting thread at most. A sound plays through
+//! `PlaySoundW`, which returns once the sound is queued, after the adapter
+//! checks that its file is there, because the call does not report a
+//! missing file when it plays asynchronously.
 //!
 //! The media session manager may not be ready yet, such as right after
 //! sign-in, so the controls start without it and ask for it again when a
@@ -28,7 +32,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use appytappy_config::action::{Key, MediaCommand, Modifier, OpenTarget, VolumeLevel};
@@ -160,6 +164,8 @@ pub struct WindowsControls {
     /// The media session manager, or why Windows did not give it yet.
     media: Result<GlobalSystemMediaTransportControlsSessionManager, MediaMissing>,
     devices: IMMDeviceEnumerator,
+    /// The thread of the last open, which may still be waiting on the shell.
+    opening: Option<JoinHandle<()>>,
     // Dropped last, after the COM objects above.
     _apartment: Apartment,
 }
@@ -185,6 +191,7 @@ impl WindowsControls {
         Ok(Self {
             media,
             devices,
+            opening: None,
             _apartment: apartment,
         })
     }
@@ -426,24 +433,40 @@ impl Controls for WindowsControls {
     }
 
     fn open(&mut self, target: &OpenTarget) -> io::Result<()> {
+        if self
+            .opening
+            .as_ref()
+            .is_some_and(|last| !last.is_finished())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "the last program, file, or link is still opening, so this one was skipped",
+            ));
+        }
         let file = wide(target.as_str().encode_utf16());
+        let folder = target.folder().map(|folder| wide(folder.encode_utf16()));
         let (done, outcome) = mpsc::channel();
         // The thread is not joined: after a timeout it finishes on its own,
         // and its answer goes nowhere.
-        thread::Builder::new()
-            .name("open".to_owned())
-            .spawn(move || {
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "after a timeout nobody waits for the answer"
-                )]
-                let _ = done.send(shell_open(&file));
-            })?;
+        self.opening = Some(
+            thread::Builder::new()
+                .name("open".to_owned())
+                .spawn(move || {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "after a timeout nobody waits for the answer"
+                    )]
+                    let _ = done.send(shell_open(&file, folder.as_deref()));
+                })?,
+        );
         match outcome.recv_timeout(OPEN_TIMEOUT) {
             Ok(opened) => opened,
             Err(RecvTimeoutError::Timeout) => Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "opening it did not finish within 2 seconds, so it may still open",
+                format!(
+                    "opening it did not finish within {} seconds, so it may still open",
+                    OPEN_TIMEOUT.as_secs()
+                ),
             )),
             Err(RecvTimeoutError::Disconnected) => {
                 Err(io::Error::other("the thread that opens it stopped"))
@@ -452,20 +475,31 @@ impl Controls for WindowsControls {
     }
 
     fn play_sound(&mut self, file: &Path) -> io::Result<bool> {
-        let name = wide(file.as_os_str().encode_wide());
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `name` is a nul-terminated UTF-16 path that lives through
-        // the call. For a file name, PlaySoundW copies the name before it
-        // returns; only a sound in memory must outlive an asynchronous call.
-        let started = unsafe {
-            PlaySoundW(
-                PCWSTR(name.as_ptr()),
-                None,
-                SND_FILENAME | SND_ASYNC | SND_NODEFAULT,
-            )
-        };
-        Ok(started.as_bool())
+        Ok(play_file(file))
     }
+}
+
+/// Starts playing the WAV file at `file` without waiting for it to end,
+/// stopping any sound this process is still playing. Answers whether it
+/// started: `false` for a file that is not there, which `PlaySoundW` does not
+/// report when it plays asynchronously, or one the call refused.
+fn play_file(file: &Path) -> bool {
+    if !file.is_file() {
+        return false;
+    }
+    let name = wide(file.as_os_str().encode_wide());
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: `name` is a nul-terminated UTF-16 path that lives through
+    // the call. For a file name, PlaySoundW copies the name before it
+    // returns; only a sound in memory must outlive an asynchronous call.
+    let started = unsafe {
+        PlaySoundW(
+            PCWSTR(name.as_ptr()),
+            None,
+            SND_FILENAME | SND_ASYNC | SND_NODEFAULT,
+        )
+    };
+    started.as_bool()
 }
 
 /// UTF-16 `units` with the nul that ends a Windows string.
@@ -474,24 +508,26 @@ fn wide(units: impl Iterator<Item = u16>) -> Vec<u16> {
 }
 
 /// Opens `file`, a nul-terminated UTF-16 path or link, with its default
-/// action and no arguments, showing no error dialog. It asks the opened
-/// window not to take the keyboard focus, though a program may take it
-/// anyway. It runs on a thread of its own in a single-threaded apartment,
+/// action and no arguments, showing no error dialog. A program starts in
+/// `folder`, a nul-terminated UTF-16 path, when one is given. It asks the
+/// opened window not to take the keyboard focus, though a program may take
+/// it anyway. It runs on a thread of its own in a single-threaded apartment,
 /// as the shell asks of its callers.
-fn shell_open(file: &[u16]) -> io::Result<()> {
+fn shell_open(file: &[u16], folder: Option<&[u16]>) -> io::Result<()> {
     let _apartment = Apartment::join(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)?;
     let mut info = SHELLEXECUTEINFOW {
         cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>()).map_err(io::Error::other)?,
         // The thread ends after the call, so the call must finish first.
         fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
         lpFile: PCWSTR(file.as_ptr()),
+        lpDirectory: folder.map_or(PCWSTR::null(), |folder| PCWSTR(folder.as_ptr())),
         nShow: SW_SHOWNOACTIVATE.0,
         ..Default::default()
     };
     #[expect(unsafe_code, reason = "a Win32 call")]
     // SAFETY: `info` is a SHELLEXECUTEINFOW whose cbSize is set and whose
-    // file points to a nul-terminated string that outlives the call; every
-    // other pointer is null, which the call allows.
+    // file and folder, when given, point to nul-terminated strings that
+    // outlive the call; every other pointer is null, which the call allows.
     unsafe { ShellExecuteExW(&raw mut info) }?;
     Ok(())
 }
@@ -732,5 +768,30 @@ fn walk_end(result: windows::core::Result<()>) -> io::Result<bool> {
         Ok(()) => Ok(true),
         Err(error) if error.code() == ERROR_NO_MORE_FILES.to_hresult() => Ok(false),
         Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env;
+    use std::os::windows::ffi::OsStrExt;
+
+    use super::{play_file, shell_open, wide};
+
+    #[test]
+    fn a_missing_sound_file_does_not_play() {
+        let missing = env::temp_dir().join("appytappy-test-missing-sound.wav");
+        assert!(!missing.exists(), "{}", missing.display());
+        assert!(!play_file(&missing));
+    }
+
+    #[test]
+    fn opening_a_missing_program_fails_without_a_dialog() {
+        let folder = env::temp_dir();
+        let missing = folder.join("appytappy-test-missing-program.exe");
+        assert!(!missing.exists(), "{}", missing.display());
+        let file = wide(missing.as_os_str().encode_wide());
+        let folder = wide(folder.as_os_str().encode_wide());
+        assert!(shell_open(&file, Some(&folder)).is_err());
     }
 }
