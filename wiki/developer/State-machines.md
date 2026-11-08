@@ -182,7 +182,7 @@ stateDiagram-v2
     Finding --> Capturing: the capture starts
     Capturing --> Capturing: Recovered, the backoff resets
     Capturing --> Closing: Lost, Resized, or Failing from the frame handler
-    Capturing --> Closing: every CHECK_AGAIN, the window is hidden, no longer fits, or a better one fits
+    Capturing --> Closing: every CHECK_AGAIN, the window is hidden or no longer fits, or a better one fits or is another process's
     Closing --> Finding: Resized, or the check, after Unseen
     Closing --> Backoff: Lost or Failing
     Backoff --> Finding: the backoff wait passes
