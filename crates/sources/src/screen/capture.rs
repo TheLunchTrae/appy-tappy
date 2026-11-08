@@ -4,9 +4,10 @@
 
 use std::convert::Infallible;
 use std::io;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use super::{Image, Layout, Size};
+use super::{Image, Layout, Region, Size};
 use crate::system::Unsupported;
 
 /// What a capture copies out of each frame.
@@ -92,6 +93,56 @@ pub trait CaptureSession {
     fn close(self) -> io::Result<()>;
 }
 
+/// How long [`grab`]'s capture waits after its frame: longer than any grab
+/// takes, so the system is asked for no more frames before it closes.
+const AFTER_GRAB: Duration = Duration::from_secs(3600);
+
+/// Copies `region` of one frame of `window`, with the window's size.
+///
+/// `window` is a handle from [`crate::system::System::windows`], and the
+/// region's coordinates refer to the window's size. It starts a capture,
+/// waits up to `wait` for its first frame, and closes it.
+///
+/// # Errors
+///
+/// Returns the operating system's error when the capture cannot start or
+/// the frame cannot be copied, such as an [`super::OutsideWindow`] error
+/// when the region does not fit the window, or
+/// [`io::ErrorKind::TimedOut`] when no frame came in time.
+pub fn grab<C: Capture>(
+    capture: &C,
+    window: u64,
+    region: Region,
+    wait: Duration,
+) -> io::Result<(Size, Image)> {
+    let (sender, frames) = mpsc::sync_channel(1);
+    let handler: FrameHandler = Box::new(move |frame| {
+        let copied = frame.map(|frame| (frame.window_size, frame.image.clone()));
+        // Only the first frame is wanted: the channel holds one, and once
+        // the grab has it, nothing reads the rest.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a frame after the first, or after the grab stopped waiting, is not wanted"
+        )]
+        let _ = sender.try_send(copied);
+        AFTER_GRAB
+    });
+    let session = capture.start(
+        window,
+        Crop::Layout(Layout::one(region)),
+        Duration::ZERO,
+        handler,
+    )?;
+    let frame = frames.recv_timeout(wait);
+    session.close()?;
+    frame.unwrap_or_else(|_timeout| {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the window sent no frame in time",
+        ))
+    })
+}
+
 /// The session type of [`Unsupported`], which cannot be constructed.
 #[derive(Debug)]
 pub struct NoSession(Infallible);
@@ -125,6 +176,138 @@ impl Capture for Unsupported {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the fake capture was asked to do.
+    #[derive(Debug, PartialEq)]
+    enum Asked {
+        Start(u64, Crop),
+        Close,
+    }
+
+    /// A capture that sends `frames` to its handler as it starts, and says
+    /// what it was asked to do on `asked`.
+    struct Fake {
+        frames: Vec<Result<Image, io::ErrorKind>>,
+        asked: mpsc::Sender<Asked>,
+        refuse: bool,
+    }
+
+    struct FakeSession(mpsc::Sender<Asked>);
+
+    impl CaptureSession for FakeSession {
+        fn close(self) -> io::Result<()> {
+            self.0.send(Asked::Close).map_err(io::Error::other)
+        }
+    }
+
+    impl Capture for Fake {
+        type Session = FakeSession;
+
+        fn start(
+            &self,
+            window: u64,
+            crop: Crop,
+            _throttle: Duration,
+            mut handler: FrameHandler,
+        ) -> io::Result<FakeSession> {
+            if self.refuse {
+                return Err(io::Error::other("no capture"));
+            }
+            self.asked
+                .send(Asked::Start(window, crop))
+                .map_err(io::Error::other)?;
+            let window_size = Size {
+                width: 640,
+                height: 480,
+            };
+            for frame in &self.frames {
+                handler(match frame {
+                    Ok(image) => Ok(Frame {
+                        window_size,
+                        image,
+                        received: Instant::now(),
+                        delay: Duration::ZERO,
+                    }),
+                    Err(kind) => Err(io::Error::from(*kind)),
+                });
+            }
+            Ok(FakeSession(self.asked.clone()))
+        }
+    }
+
+    fn fake(frames: Vec<Result<Image, io::ErrorKind>>) -> (Fake, mpsc::Receiver<Asked>) {
+        let (asked, requests) = mpsc::channel();
+        (
+            Fake {
+                frames,
+                asked,
+                refuse: false,
+            },
+            requests,
+        )
+    }
+
+    fn pixel(gray: u8) -> Image {
+        Image::new(
+            Size {
+                width: 1,
+                height: 1,
+            },
+            vec![gray, gray, gray, u8::MAX],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_grab_takes_the_first_frame_of_its_region_and_closes() {
+        let (capture, asked) = fake(vec![Ok(pixel(10)), Ok(pixel(20))]);
+        let region = Region::new(5, 6, 1, 1).unwrap();
+        let (size, image) = grab(&capture, 7, region, Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            size,
+            Size {
+                width: 640,
+                height: 480
+            }
+        );
+        assert_eq!(image, pixel(10));
+        assert_eq!(
+            asked.try_iter().collect::<Vec<_>>(),
+            [
+                Asked::Start(7, Crop::Layout(Layout::one(region))),
+                Asked::Close
+            ]
+        );
+    }
+
+    #[test]
+    fn a_grab_fails_when_the_frame_or_the_capture_does() {
+        let region = Region::new(0, 0, 1, 1).unwrap();
+        let wait = Duration::from_millis(10);
+        for (frames, kind) in [
+            (
+                vec![Err(io::ErrorKind::InvalidInput)],
+                io::ErrorKind::InvalidInput,
+            ),
+            (Vec::new(), io::ErrorKind::TimedOut),
+        ] {
+            let (capture, asked) = fake(frames);
+            assert_eq!(grab(&capture, 7, region, wait).unwrap_err().kind(), kind);
+            assert_eq!(asked.try_iter().last(), Some(Asked::Close), "{kind:?}");
+        }
+        let (mut refusing, asked) = fake(Vec::new());
+        refusing.refuse = true;
+        assert_eq!(
+            grab(&refusing, 7, region, wait).unwrap_err().to_string(),
+            "no capture"
+        );
+        assert_eq!(asked.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn a_grab_s_capture_waits_long_after_its_frame() {
+        assert!(AFTER_GRAB >= Duration::from_secs(60));
+    }
 
     #[test]
     fn a_frame_s_latency_adds_its_delay_to_the_time_since_it_arrived() {

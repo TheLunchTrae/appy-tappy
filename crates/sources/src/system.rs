@@ -104,6 +104,18 @@ pub trait System {
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
+    /// The bounds of `window`'s frame as the screen shows it, which a
+    /// capture's frame covers, or `None` once it closed. On Windows they
+    /// leave out the invisible borders that [`System::window_place`]'s
+    /// bounds take in. This default gives those bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn frame_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
+        Ok(self.window_place(window)?.map(|place| place.bounds))
+    }
+
     /// The build of `process`'s executable, read from the file without
     /// opening the process: see [`crate::build`].
     ///
@@ -428,16 +440,58 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_s_bounds_default_to_the_window_s() {
+        struct OneWindow;
+        impl System for OneWindow {
+            fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
+                Ok(Vec::new())
+            }
+            fn windows(&self) -> io::Result<Vec<WindowEntry>> {
+                Ok(Vec::new())
+            }
+            fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
+                Ok((window == 7).then_some(WindowPlace {
+                    bounds: Bounds {
+                        left: 1,
+                        top: 2,
+                        right: 30,
+                        bottom: 40,
+                    },
+                    shown: true,
+                    front: false,
+                }))
+            }
+            fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
+                unsupported()
+            }
+            fn screen_pixel(&self, _x: i32, _y: i32) -> io::Result<Rgb> {
+                unsupported()
+            }
+        }
+        assert_eq!(
+            OneWindow.frame_bounds(7).unwrap(),
+            Some(Bounds {
+                left: 1,
+                top: 2,
+                right: 30,
+                bottom: 40
+            })
+        );
+        assert_eq!(OneWindow.frame_bounds(8).unwrap(), None);
+    }
+
+    #[test]
     fn unsupported_system_fails_every_call() {
         let system = Unsupported;
         let kinds = [
             system.processes().map(drop),
             system.windows().map(drop),
             system.window_place(7).map(drop),
+            system.frame_bounds(7).map(drop),
             system.executable_build(ProcessId::new(1)).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 5]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 6]);
     }
 }
