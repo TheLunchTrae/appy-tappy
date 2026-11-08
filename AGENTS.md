@@ -160,6 +160,15 @@ version-numbered names.
   examples. Keep test setup smaller than the behavior it protects.
 - Test counts and coverage percentages are not goals.
 
+## Interface text
+
+Buttons, labels, tabs, menu items, dialog titles, and headings in the setup app
+and the tray use sentence case: capitalize the first word and proper names,
+such as AppyTappy and Windows, and nothing else. Write **New automation** and
+**Active automations**, not **New Automation**. Sentence case matches Windows
+itself and the Google style that the docs follow. The user guide names each
+control exactly as the app shows it.
+
 ## State machines
 
 [`docs/developer/state-machines.md`](docs/developer/state-machines.md) maps
