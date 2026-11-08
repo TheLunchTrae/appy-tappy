@@ -21,9 +21,9 @@ pub(crate) struct Log {
     /// Whether `file` is the one moved to `old`, because the new file could
     /// not be opened after the move.
     moved: bool,
-    /// Opens a file to append to: [`open_append`], which a test replaces to
-    /// make the open fail.
-    reopen: fn(&Path) -> io::Result<File>,
+    /// Makes opening the new file fail, for a test.
+    #[cfg(test)]
+    fail_open: bool,
 }
 
 fn open_append(path: &Path) -> io::Result<File> {
@@ -46,7 +46,8 @@ impl Log {
             size,
             limit,
             moved: false,
-            reopen: open_append,
+            #[cfg(test)]
+            fail_open: false,
         })
     }
 
@@ -75,19 +76,29 @@ impl Log {
     /// Moves the file to the old name and starts a new one. A step that
     /// fails, such as a move while another program holds the file, leaves
     /// the log writing where it did, past its limit, and the next line tries
-    /// again, because the log is the runtime's only output.
+    /// again, because the log is the runtime's only output. A file deleted
+    /// while open has nothing to move, so the log starts the new one.
     fn rotate(&mut self) {
         if !self.moved {
-            if fs::rename(&self.path, &self.old).is_err() {
-                return;
+            match fs::rename(&self.path, &self.old) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => return,
+                Ok(()) | Err(_) => self.moved = true,
             }
-            self.moved = true;
         }
-        if let Ok(file) = (self.reopen)(&self.path) {
+        if let Ok(file) = self.open_new() {
             self.file = file;
             self.size = 0;
             self.moved = false;
         }
+    }
+
+    /// Opens the new file at the log's path.
+    fn open_new(&self) -> io::Result<File> {
+        #[cfg(test)]
+        if self.fail_open {
+            return Err(io::Error::other("injected"));
+        }
+        open_append(&self.path)
     }
 }
 
@@ -199,7 +210,7 @@ mod tests {
         let folder = Folder::new("reopen-fails");
         let mut log = Log::open(&folder.0, 10).expect("open");
         log.write(None, "first").expect("write");
-        log.reopen = |_path| Err(io::Error::other("injected"));
+        log.fail_open = true;
         log.write(None, "second")
             .expect("written to the moved file");
         log.write(None, "third").expect("written to the moved file");
@@ -208,7 +219,7 @@ mod tests {
             "first\nsecond\nthird\n"
         );
         assert!(!folder.0.join("runtime.log").exists());
-        log.reopen = open_append;
+        log.fail_open = false;
         log.write(None, "fourth").expect("write");
         assert_eq!(
             read(&folder.0.join("runtime.old.log")),
@@ -216,6 +227,17 @@ mod tests {
             "the moved file is not moved again"
         );
         assert_eq!(read(&folder.0.join("runtime.log")), "fourth\n");
+    }
+
+    #[test]
+    fn a_log_deleted_while_open_starts_a_new_file() {
+        let folder = Folder::new("deleted");
+        let mut log = Log::open(&folder.0, 10).expect("open");
+        log.write(None, "first").expect("write");
+        fs::remove_file(folder.0.join("runtime.log")).expect("delete the log");
+        log.write(None, "second").expect("write");
+        assert_eq!(read(&folder.0.join("runtime.log")), "second\n");
+        assert!(!folder.0.join("runtime.old.log").exists());
     }
 
     #[test]
