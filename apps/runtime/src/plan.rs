@@ -239,7 +239,7 @@ pub(crate) mod examples {
     use std::time::Duration;
 
     use appytappy_config::action::{Action, MediaCommand, MediaTarget};
-    use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
+    use appytappy_config::rule::{Comparison, Condition, Restore, Rule};
     use appytappy_config::signal::{Number, SignalName, Value};
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{BarFill, Check};
@@ -279,16 +279,7 @@ pub(crate) mod examples {
     fn plan_of(name: &str, threshold: f64, cooldown: Duration) -> Arc<AppPlan> {
         let condition =
             Condition::compare(signal(), Comparison::AtLeast, number(threshold)).expect("valid");
-        let rule = Rule::new(
-            Trigger::Becomes {
-                condition,
-                rearm: Rearm::WhenFalse,
-            },
-            pause(),
-            cooldown,
-            Restore::OnRelease,
-        )
-        .expect("valid");
+        let rule = Rule::new(condition, pause(), cooldown, Restore::OnRelease).expect("valid");
         let black = Rgb {
             red: 0,
             green: 0,
