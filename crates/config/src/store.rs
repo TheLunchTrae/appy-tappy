@@ -27,6 +27,11 @@ const RENAME_ATTEMPTS: u32 = 5;
 /// How long a write waits between those tries.
 const RENAME_WAIT: Duration = Duration::from_millis(50);
 
+/// How long a temporary file from another run is left alone before a save
+/// removes it: far longer than any write takes, so a write that another copy
+/// of the program still has under way is never removed.
+const LEFTOVER_AGE: Duration = Duration::from_mins(10);
+
 /// The longest application ID, in bytes.
 const MAX_ID_LEN: usize = 48;
 
@@ -94,7 +99,8 @@ impl AppStore {
 
     /// Writes `pictures` and then `file` into the application `id`'s folder,
     /// creating it. The pictures come first, so the file never names a
-    /// picture that is not there yet.
+    /// picture that is not there yet. Temporary files that an earlier run
+    /// left there go too.
     ///
     /// # Errors
     ///
@@ -113,7 +119,9 @@ impl AppStore {
             }
             write_atomic(&folder.join(name), bytes)?;
         }
-        write_atomic(&folder.join(APP_FILE), file.to_json().as_bytes())
+        write_atomic(&folder.join(APP_FILE), file.to_json().as_bytes())?;
+        remove_leftovers(&folder);
+        Ok(())
     }
 
     /// Removes the application `id`'s folder with everything in it. An
@@ -191,7 +199,7 @@ impl AutomationStore {
     /// Replaces the automations with `file`, creating the folder it lives
     /// in. An automation that has a problem is written as it is, so an edit
     /// of another one keeps it; the caller checks the automations it
-    /// changes.
+    /// changes. Temporary files that an earlier run left beside it go too.
     ///
     /// # Errors
     ///
@@ -199,10 +207,15 @@ impl AutomationStore {
     /// [`AutomationsFile::check`] or a write fails.
     pub fn save(&self, file: &AutomationsFile) -> io::Result<()> {
         file.check().map_err(|error| invalid(error.to_string()))?;
-        if let Some(folder) = self.path.parent() {
+        let folder = self.path.parent();
+        if let Some(folder) = folder {
             fs::create_dir_all(folder)?;
         }
-        write_atomic(&self.path, file.to_json().as_bytes())
+        write_atomic(&self.path, file.to_json().as_bytes())?;
+        if let Some(folder) = folder {
+            remove_leftovers(folder);
+        }
+        Ok(())
     }
 }
 
@@ -284,6 +297,48 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&temporary);
     }
     renamed
+}
+
+/// Whether `name` is a temporary file that [`write_atomic`] made in another
+/// run than the one with process ID `own`, such as one that a crash left
+/// between the write and the rename. This run's own may be mid-write.
+fn is_leftover(name: &str, own: u32) -> bool {
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    name.strip_suffix(".tmp")
+        .and_then(|rest| rest.rsplit_once('.'))
+        .and_then(|(_file, mark)| mark.split_once('-'))
+        .is_some_and(|(pid, stamp)| {
+            digits(pid) && digits(stamp) && pid.parse::<u32>().ok() != Some(own)
+        })
+}
+
+/// Removes the leftover temporary files in `folder` that have not changed
+/// for [`LEFTOVER_AGE`], as far as it can: one that stays is tried again by
+/// the next save.
+fn remove_leftovers(folder: &Path) {
+    let own = process::id();
+    let now = SystemTime::now();
+    for entry in fs::read_dir(folder).into_iter().flatten().flatten() {
+        let old = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| {
+                now.duration_since(modified)
+                    .is_ok_and(|age| age >= LEFTOVER_AGE)
+            });
+        if old
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| is_leftover(name, own))
+        {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the save itself worked; a leftover that stays is only clutter"
+            )]
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Renames `from` over `to`, trying [`RENAME_ATTEMPTS`] times.
@@ -557,6 +612,67 @@ mod tests {
             .map(|entry| entry.expect("entry").file_name())
             .collect();
         assert_eq!(names, ["file.json"]);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// Makes the file at `path` look untouched for longer than
+    /// [`LEFTOVER_AGE`].
+    fn age(path: &Path) {
+        let then = SystemTime::now()
+            .checked_sub(LEFTOVER_AGE.saturating_add(Duration::from_secs(1)))
+            .expect("the clock is past the epoch by more than that");
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|file| file.set_modified(then))
+            .expect("dates the file");
+    }
+
+    #[test]
+    fn a_save_removes_temporaries_that_another_run_left_behind() {
+        let other = process::id().wrapping_add(1);
+        let own = process::id();
+        assert!(is_leftover(&format!("app.json.{other}-1700.tmp"), own));
+        assert!(is_leftover(&format!("sample-1.png.{other}-1.tmp"), own));
+        assert!(!is_leftover(&format!("app.json.{own}-1700.tmp"), own));
+        for kept in ["notes.tmp", "a.b-c.tmp", "a.1-.tmp", "a.-1.tmp", "app.json"] {
+            assert!(!is_leftover(kept, own), "{kept}");
+        }
+
+        let root = scratch("leftovers");
+        let apps = AppStore::new(root.join("apps"));
+        let folder = apps.folder("app");
+        fs::create_dir_all(&folder).expect("create");
+        let left = format!("app.json.{other}-1700.tmp");
+        let writing = format!("sample-1.png.{own}-1700.tmp");
+        let fresh = format!("sample-2.png.{other}-1700.tmp");
+        for name in [&left, &writing, &fresh] {
+            fs::write(folder.join(name), b"x").expect("writes");
+        }
+        for name in [&left, &writing] {
+            age(&folder.join(name));
+        }
+        apps.save(
+            "app",
+            &file("kept.png"),
+            &[("kept.png".to_owned(), vec![1])],
+        )
+        .expect("saves");
+        assert!(!folder.join(&left).exists(), "another run's old one goes");
+        assert!(folder.join(&writing).exists(), "this run's stays");
+        assert!(
+            folder.join(&fresh).exists(),
+            "another copy's write under way stays"
+        );
+
+        let automations = AutomationStore::new(root.join("automations.json"));
+        let beside = root.join(format!("automations.json.{other}-1700.tmp"));
+        fs::write(&beside, b"x").expect("writes");
+        age(&beside);
+        automations
+            .save(&AutomationsFile::default())
+            .expect("saves");
+        assert!(!beside.exists());
         fs::remove_dir_all(root).expect("clean up");
     }
 

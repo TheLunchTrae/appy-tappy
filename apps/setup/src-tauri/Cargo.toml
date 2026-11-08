@@ -38,6 +38,9 @@ serde = { version = "=1.0.229", features = ["derive"] }
 tauri = { version = "=2.12.5", features = [] }
 # The screenshot hotkey, which works while the other application has the keyboard focus.
 tauri-plugin-global-shortcut = "=2.4.1"
+# Keeps one copy of the setup app running, so two copies cannot overwrite
+# each other's saves, and brings its window forward when another starts.
+tauri-plugin-single-instance = "=2.5.5"
 # Each command awaits the owner thread's answer on a oneshot channel, so a
 # slow request never freezes the window; Tauri does not re-export it.
 tokio = { version = "=1.54.1", features = ["sync"] }

@@ -369,6 +369,22 @@ fn follow<R: Runtime>(window: &WebviewWindow<R>, place: Option<Place>) -> tauri:
     Ok(())
 }
 
+/// Shows the main window in front of the others, restored if it was
+/// minimized, as when the user starts the setup app while it runs.
+#[mutants::skip]
+pub(crate) fn bring_forward<R: Runtime>(handle: &AppHandle<R>) {
+    if let Some(window) = handle.get_webview_window(MAIN) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a window that cannot come forward stays where it was, as before the user tried"
+        )]
+        let _ = window
+            .unminimize()
+            .and_then(|()| window.show())
+            .and_then(|()| window.set_focus());
+    }
+}
+
 /// Reacts to a window's `event`: a moved or resized panel's place is kept,
 /// a closed overlay window stops its capture, and closing the main window
 /// closes the overlays and ends the app.
