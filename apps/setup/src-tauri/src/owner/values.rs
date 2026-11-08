@@ -8,21 +8,22 @@ use appytappy_config::app_file::{
     AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, value_id,
 };
 
+use crate::applications::{self, AppSpec};
 use crate::automations;
 use crate::check_spec;
 use crate::stores::Stores;
 use crate::window_list::{self, WindowChoice};
 
-use super::Owner;
 use super::host::Host;
 use super::messages::{AppSummary, SaveSpec, SavedValue};
+use super::{Changed, Owner};
 
 impl<H: Host> Owner<H> {
     pub(super) fn stores(&self) -> Result<&Stores, String> {
         self.stores.as_ref().map_err(Clone::clone)
     }
 
-    pub(super) fn apps(&mut self) -> Result<Vec<AppSummary>, String> {
+    pub(crate) fn apps(&mut self) -> Result<Vec<AppSummary>, String> {
         let stored = self
             .stores()?
             .apps
@@ -70,7 +71,13 @@ impl<H: Host> Owner<H> {
             .collect())
     }
 
-    pub(super) fn save(&mut self, spec: &SaveSpec) -> Result<SavedValue, String> {
+    pub(crate) fn save(&mut self, spec: &SaveSpec) -> Result<SavedValue, String> {
+        let saved = self.save_value(spec);
+        self.after(Changed::Values, saved)
+    }
+
+    /// Saves the value `spec` describes, without telling anyone.
+    fn save_value(&mut self, spec: &SaveSpec) -> Result<SavedValue, String> {
         let stores = self.stores()?;
         let name = spec.value_name.trim();
         if name.is_empty() {
@@ -161,7 +168,13 @@ impl<H: Host> Owner<H> {
 
     /// Saves the build the application `app` runs now as the one its values
     /// were checked against.
-    pub(super) fn mark_checked(&mut self, app: &str) -> Result<(), String> {
+    pub(crate) fn mark_checked(&mut self, app: &str) -> Result<(), String> {
+        let saved = self.save_checked(app);
+        self.after(Changed::Runtime, saved)
+    }
+
+    /// Saves the build `app` runs now, without telling anyone.
+    fn save_checked(&mut self, app: &str) -> Result<(), String> {
         let mut file = self.stores()?.app_file(app)?;
         let build = self
             .running_build(&file)
@@ -184,7 +197,15 @@ impl<H: Host> Owner<H> {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn delete(&self, app: &str, value: &str) -> Result<(), String> {
+    /// Deletes the value `value` of the application `app`, unless an
+    /// automation uses it.
+    pub(crate) fn delete(&mut self, app: &str, value: &str) -> Result<(), String> {
+        let deleted = self.delete_value(app, value);
+        self.after(Changed::Values, deleted)
+    }
+
+    /// Deletes the value, without telling anyone.
+    fn delete_value(&self, app: &str, value: &str) -> Result<(), String> {
         let stores = self.stores()?;
         let store = &stores.apps;
         let mut file = stores.app_file(app)?;
@@ -206,14 +227,37 @@ impl<H: Host> Owner<H> {
     /// Saves `class` as the anti-cheat class of the application `app`. A
     /// class other than none stops its automations that press keys, which
     /// the Automations page then shows as unable to run.
-    pub(super) fn set_anti_cheat(&self, app: &str, class: AntiCheatDef) -> Result<(), String> {
-        let stores = self.stores()?;
-        let mut file = stores.app_file(app)?;
-        file.anti_cheat = class;
-        stores
-            .apps
-            .save(app, &file, &[])
-            .map_err(|error| error.to_string())
+    pub(crate) fn set_anti_cheat(&mut self, app: &str, class: AntiCheatDef) -> Result<(), String> {
+        let saved = self.stores().and_then(|stores| {
+            let mut file = stores.app_file(app)?;
+            file.anti_cheat = class;
+            stores
+                .apps
+                .save(app, &file, &[])
+                .map_err(|error| error.to_string())
+        });
+        self.after(Changed::Runtime, saved)
+    }
+
+    /// Saves `spec` as a new application, or over `existing`, and answers
+    /// its ID.
+    pub(crate) fn save_app(
+        &mut self,
+        existing: Option<&str>,
+        spec: AppSpec,
+    ) -> Result<String, String> {
+        let saved = self
+            .stores()
+            .and_then(|stores| applications::save(stores, existing, spec));
+        self.after(Changed::Values, saved)
+    }
+
+    /// Removes the application `app`, its values and their pictures.
+    pub(crate) fn remove_app(&mut self, app: &str) -> Result<(), String> {
+        let removed = self
+            .stores()
+            .and_then(|stores| applications::remove(stores, app));
+        self.after(Changed::Values, removed)
     }
 }
 
@@ -232,10 +276,9 @@ mod tests {
     use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
     use appytappy_sources::screen::{Image, Size};
 
-    use crate::owner::messages::Request;
     use crate::owner::test_support::{
-        BAR, Harness, STATE, add_example_app, example_build, frame_image, harness, harness_with,
-        scratch_store, spec, with_saved_bar,
+        BAR, FakeHost, Harness, STATE, add_example_app, example_build, frame_image, harness,
+        harness_with, scratch_store, spec, with_saved_bar,
     };
 
     use super::*;
@@ -247,18 +290,13 @@ mod tests {
         let mut harness = harness_with(false, Ok(stores));
         add_example_app(&mut harness);
         let mut handler = harness.pick();
-        let save = |spec| {
-            move |reply| Request::SaveValue {
-                spec: Box::new(spec),
-                reply,
-            }
-        };
+        let save = |spec| move |owner: &mut Owner<FakeHost>| owner.save(&spec);
         assert_eq!(
             harness.ask(save(spec("example", "Icon visible", STATE))),
             Err("Take a screenshot first.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         // The window shrinks after the screenshot, and the value keeps the
         // size of the screenshot its region was drawn on.
         let shrunk = Image::new(
@@ -270,7 +308,7 @@ mod tests {
         )
         .expect("matching length");
         harness.deliver(&mut handler, Ok(&shrunk));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(1));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(1));
         assert_eq!(
             harness.ask(save(spec("example", "  ", STATE))),
             Err("Name the value first.".to_owned())
@@ -311,7 +349,7 @@ mod tests {
             Err("That application is no longer saved.".to_owned())
         );
 
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!(apps.len(), 1);
         let app = &apps[0];
         assert_eq!((app.id.as_str(), &app.error), ("example", &None));
@@ -344,29 +382,19 @@ mod tests {
         }))
         .expect("the UI's spelling");
         let id = harness
-            .ask(|reply| Request::SaveAutomation {
-                existing: None,
-                automation: Box::new(automation),
-                reply,
-            })
+            .ask(|owner| owner.save_automation(None, automation))
             .expect("saves");
         assert_eq!(id, "pause_music");
         assert_eq!(
-            harness.ask(|reply| Request::DeleteValue {
-                app: "example".to_owned(),
-                value: "icon_visible".to_owned(),
-                reply,
-            }),
+            harness.ask(|owner| owner.delete("example", "icon_visible")),
             Err("Pause music uses Icon visible. Change or delete it first.".to_owned())
         );
         harness
-            .ask(|reply| Request::SetAutomationEnabled {
-                id: id.clone(),
-                enabled: false,
-                reply,
-            })
+            .ask(|owner| owner.set_automation_enabled(&id.clone(), false))
             .expect("turns off");
-        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        let listed = harness
+            .ask(|owner| owner.list_automations())
+            .expect("lists");
         assert_eq!(listed.len(), 1);
         assert!(!listed[0].automation.enabled);
         assert_eq!(listed[0].automation.cooldown_ms, 1500);
@@ -378,9 +406,12 @@ mod tests {
             }
         );
         harness
-            .ask(|reply| Request::DeleteAutomation { id, reply })
+            .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
-        assert_eq!(harness.ask(Request::ListAutomations), Ok(Vec::new()));
+        assert_eq!(
+            harness.ask(|owner| owner.list_automations()),
+            Ok(Vec::new())
+        );
 
         // Keys are pressed only for an application whose anti-cheat is none.
         let press: AutomationDef = serde_json::from_value(serde_json::json!({
@@ -393,33 +424,26 @@ mod tests {
             "cooldownMs": 0
         }))
         .expect("the UI's spelling");
-        let save_press = |harness: &mut Harness| {
-            harness.ask(|reply| Request::SaveAutomation {
-                existing: None,
-                automation: Box::new(press.clone()),
-                reply,
-            })
-        };
+        let save_press =
+            |harness: &mut Harness| harness.ask(|owner| owner.save_automation(None, press.clone()));
         assert!(
             save_press(&mut harness)
                 .is_err_and(|error| error.contains("anti-cheat is set to none")),
             "an application whose anti-cheat is not set cannot press keys"
         );
         let set = |harness: &mut Harness, class| {
-            harness.ask(|reply| Request::SetAntiCheat {
-                app: "example".to_owned(),
-                class,
-                reply,
-            })
+            harness.ask(|owner| owner.set_anti_cheat("example", class))
         };
         set(&mut harness, AntiCheatDef::None).expect("sets");
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!(
             apps[0].file.as_ref().map(|file| file.anti_cheat),
             Some(AntiCheatDef::None)
         );
         let id = save_press(&mut harness).expect("saves");
-        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        let listed = harness
+            .ask(|owner| owner.list_automations())
+            .expect("lists");
         assert_eq!(
             listed[0].automation.actions,
             [ActionDef::Keys {
@@ -429,7 +453,9 @@ mod tests {
         );
         assert_eq!(listed[0].problem, None);
         set(&mut harness, AntiCheatDef::KernelLevel).expect("sets");
-        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        let listed = harness
+            .ask(|owner| owner.list_automations())
+            .expect("lists");
         assert!(
             listed[0]
                 .problem
@@ -438,7 +464,7 @@ mod tests {
             "{listed:?}"
         );
         harness
-            .ask(|reply| Request::DeleteAutomation { id, reply })
+            .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
         assert_eq!(
             set(&mut harness, AntiCheatDef::None).map(drop),
@@ -462,13 +488,11 @@ mod tests {
         }))
         .expect("the UI's spelling");
         let id = harness
-            .ask(|reply| Request::SaveAutomation {
-                existing: None,
-                automation: Box::new(open_and_play),
-                reply,
-            })
+            .ask(|owner| owner.save_automation(None, open_and_play))
             .expect("saves");
-        let listed = harness.ask(Request::ListAutomations).expect("lists");
+        let listed = harness
+            .ask(|owner| owner.list_automations())
+            .expect("lists");
         assert_eq!(
             listed[0].automation.actions,
             [
@@ -481,39 +505,27 @@ mod tests {
             ]
         );
         harness
-            .ask(|reply| Request::DeleteAutomation { id, reply })
+            .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
 
         harness
-            .ask(|reply| Request::DeleteValue {
-                app: "example".to_owned(),
-                value: "icon_visible".to_owned(),
-                reply,
-            })
+            .ask(|owner| owner.delete("example", "icon_visible"))
             .expect("removes");
         assert!(!folder.join("icon_visible-1.png").exists());
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(file.values.len(), 1);
         // The saved values still list when the windows cannot be.
         harness.owner.host.unlisted = true;
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!((apps.len(), apps[0].windows.len()), (1, 0));
         harness.owner.host.unlisted = false;
         assert_eq!(
-            harness.ask(|reply| Request::DeleteValue {
-                app: "gone".to_owned(),
-                value: "x".to_owned(),
-                reply,
-            }),
+            harness.ask(|owner| owner.delete("gone", "x")),
             Err("That application is no longer saved.".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::SetAntiCheat {
-                app: "gone".to_owned(),
-                class: AntiCheatDef::None,
-                reply,
-            }),
+            harness.ask(|owner| owner.set_anti_cheat("gone", AntiCheatDef::None)),
             Err("That application is no longer saved.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");
@@ -523,7 +535,7 @@ mod tests {
     fn the_first_value_records_the_running_build_until_marked_checked_again() {
         let (mut harness, root) = with_saved_bar("checked");
         let checked = |harness: &mut Harness| {
-            harness.ask(Request::ListApps).expect("lists")[0]
+            harness.ask(Owner::apps).expect("lists")[0]
                 .file
                 .as_ref()
                 .and_then(|file| file.checked.clone())
@@ -538,25 +550,17 @@ mod tests {
         };
         harness.owner.host.process = 4;
         harness.owner.host.build = Some(updated.clone());
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!(apps[0].running.as_ref(), Some(&updated));
         harness
-            .ask(|reply| Request::SaveValue {
-                spec: Box::new(spec("example", "Icon visible", STATE)),
-                reply,
-            })
+            .ask(|owner| owner.save(&spec("example", "Icon visible", STATE)))
             .expect("saves");
         assert_eq!(
             checked(&mut harness).map(|checked| checked.build),
             Some(example_build()),
             "a later value leaves the checked build alone"
         );
-        let mark = |harness: &mut Harness, app: &str| {
-            harness.ask(|reply| Request::MarkChecked {
-                app: app.to_owned(),
-                reply,
-            })
-        };
+        let mark = |harness: &mut Harness, app: &str| harness.ask(|owner| owner.mark_checked(app));
         assert_eq!(mark(&mut harness, "example"), Ok(()));
         assert_eq!(
             checked(&mut harness).map(|checked| checked.build),
@@ -565,10 +569,10 @@ mod tests {
 
         // A build read once is kept for as long as its process runs.
         harness.owner.host.build = None;
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!(apps[0].running.as_ref(), Some(&updated));
         harness.owner.host.process = 5;
-        let apps = harness.ask(Request::ListApps).expect("lists");
+        let apps = harness.ask(Owner::apps).expect("lists");
         assert_eq!(
             apps[0].running, None,
             "an unreadable build only goes unshown"
@@ -580,17 +584,18 @@ mod tests {
                     .to_owned()
             )
         );
-        let other = harness.ask(|reply| Request::SaveApp {
-            existing: None,
-            spec: crate::applications::AppSpec {
-                name: "Other App".to_owned(),
-                window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
-                    title: "Other App",
-                    class: "OtherWindow",
-                    executable: "Other.exe",
-                }),
-            },
-            reply,
+        let other = harness.ask(|owner| {
+            owner.save_app(
+                None,
+                crate::applications::AppSpec {
+                    name: "Other App".to_owned(),
+                    window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                        title: "Other App",
+                        class: "OtherWindow",
+                        executable: "Other.exe",
+                    }),
+                },
+            )
         });
         assert_eq!(other, Ok("other".to_owned()));
         assert_eq!(
@@ -609,7 +614,7 @@ mod tests {
     fn values_made_again_or_another_executable_need_a_new_check() {
         let (mut harness, root) = with_saved_bar("rechecked");
         let checked = |harness: &mut Harness| {
-            harness.ask(Request::ListApps).expect("lists")[0]
+            harness.ask(Owner::apps).expect("lists")[0]
                 .file
                 .as_ref()
                 .and_then(|file| file.checked.clone())
@@ -617,11 +622,7 @@ mod tests {
         };
         assert_eq!(checked(&mut harness), Some(example_build()));
         harness
-            .ask(|reply| Request::DeleteValue {
-                app: "example".to_owned(),
-                value: "progress_bar".to_owned(),
-                reply,
-            })
+            .ask(|owner| owner.delete("example", "progress_bar"))
             .expect("deletes");
         assert_eq!(checked(&mut harness), None, "no values, nothing checked");
         let updated = BuildDef {
@@ -631,25 +632,23 @@ mod tests {
         harness.owner.host.process = 4;
         harness.owner.host.build = Some(updated.clone());
         harness
-            .ask(|reply| Request::SaveValue {
-                spec: Box::new(spec("example", "Progress bar", BAR)),
-                reply,
-            })
+            .ask(|owner| owner.save(&spec("example", "Progress bar", BAR)))
             .expect("saves");
         assert_eq!(checked(&mut harness), Some(updated.clone()));
 
         let rename = |harness: &mut Harness, executable: &str| {
-            harness.ask(|reply| Request::SaveApp {
-                existing: Some("example".to_owned()),
-                spec: crate::applications::AppSpec {
-                    name: "Example App".to_owned(),
-                    window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
-                        title: "Example App",
-                        class: "ExampleWindow",
-                        executable,
-                    }),
-                },
-                reply,
+            harness.ask(|owner| {
+                owner.save_app(
+                    Some("example"),
+                    crate::applications::AppSpec {
+                        name: "Example App".to_owned(),
+                        window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                            title: "Example App",
+                            class: "ExampleWindow",
+                            executable,
+                        }),
+                    },
+                )
             })
         };
         assert_eq!(
@@ -668,10 +667,7 @@ mod tests {
             Ok("example".to_owned())
         );
         harness
-            .ask(|reply| Request::SaveValue {
-                spec: Box::new(spec("example", "Icon visible", STATE)),
-                reply,
-            })
+            .ask(|owner| owner.save(&spec("example", "Icon visible", STATE)))
             .expect("saves");
         assert_eq!(
             checked(&mut harness),
@@ -685,48 +681,37 @@ mod tests {
     fn without_a_store_saving_and_listing_say_why() {
         let mut harness = harness(false);
         assert_eq!(
-            harness.ask(Request::ListApps),
+            harness.ask(Owner::apps),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::SaveValue {
-                spec: Box::new(spec("example", "x", BAR)),
-                reply
-            }),
+            harness.ask(|owner| owner.save(&spec("example", "x", BAR))),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::DeleteValue {
-                app: "a".to_owned(),
-                value: "b".to_owned(),
-                reply
-            }),
+            harness.ask(|owner| owner.delete("a", "b")),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::SaveApp {
-                existing: None,
-                spec: crate::applications::AppSpec {
+            harness.ask(|owner| owner.save_app(
+                None,
+                crate::applications::AppSpec {
                     name: "Example App".to_owned(),
                     window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
                         title: "Example App",
                         class: "ExampleWindow",
                         executable: "Example.exe",
                     }),
-                },
-                reply
-            }),
+                }
+            )),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::RemoveApp {
-                app: "a".to_owned(),
-                reply
-            }),
+            harness.ask(|owner| owner.remove_app("a")),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(Request::ListAutomations),
+            harness.ask(|owner| owner.list_automations()),
             Err("no store in this test".to_owned())
         );
         let automation: AutomationDef = serde_json::from_value(serde_json::json!({
@@ -736,26 +721,15 @@ mod tests {
         }))
         .expect("the UI's spelling");
         assert_eq!(
-            harness.ask(|reply| Request::SaveAutomation {
-                existing: None,
-                automation: Box::new(automation),
-                reply
-            }),
+            harness.ask(|owner| owner.save_automation(None, automation)),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::SetAutomationEnabled {
-                id: "x".to_owned(),
-                enabled: true,
-                reply
-            }),
+            harness.ask(|owner| owner.set_automation_enabled("x", true)),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|reply| Request::DeleteAutomation {
-                id: "x".to_owned(),
-                reply
-            }),
+            harness.ask(|owner| owner.delete_automation("x")),
             Err("no store in this test".to_owned())
         );
     }

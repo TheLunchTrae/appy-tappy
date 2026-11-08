@@ -1,15 +1,19 @@
 //! The thread that owns the setup app's state.
 //!
 //! Tauri runs commands on its own threads, and the capture hands frames over
-//! on another. None of them touches the state: each sends a [`Message`] here,
-//! and a request carries a oneshot channel the owner answers on. The state is
+//! on another. None of them touches the state: each sends a [`Message`] here.
+//! A command sends a [`Run`], work that runs on this thread with the state
+//! and answers on a oneshot channel. The state is
 //! the picked window's capture, its newest frame, the session's screenshots,
 //! and the check the user is setting up.
 //!
-//! This file keeps the state, the thread's loop and the request dispatch. The
-//! host, the messages and the work behind each kind of request live in modules
-//! below it, and `test_support` holds the stand-ins the tests share.
+//! This file keeps the state and the thread's loop. The host, the messages
+//! and the methods each command calls live in modules below it, and
+//! `test_support` holds the stand-ins the tests share. A method that saves
+//! says what it changed with [`Owner::after`], which tells the runtime and
+//! the overlays only once the save worked.
 
+mod automations;
 mod capture;
 mod host;
 mod messages;
@@ -25,27 +29,22 @@ use std::collections::BTreeMap;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_sources::screen::{CaptureSession, Image};
 
-use crate::applications;
-use crate::automations;
-use crate::check_spec::{self, RegionCheck};
+use crate::check_spec::RegionCheck;
 use crate::overlay::Overlays;
-use crate::pixels;
 use crate::recording::{Recording, ocr};
-use crate::selection::{self, SelectionView};
 use crate::stores::Stores;
-use crate::window_list;
 
 pub(crate) use self::host::Host;
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, Live, Message, Reading, ReferenceSaveSpec, Reply, Request, SaveSpec,
-    SavedReferenceId, SavedValue,
+    AppSummary, Live, Message, Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId,
+    SavedValue,
 };
 use self::watch::Watched;
 
@@ -67,7 +66,7 @@ pub(crate) struct Owner<H: Host> {
     /// The setup app's own process, left out of the window list.
     own_process: u32,
     /// A sender for this thread's messages, handed to each capture.
-    messages: Sender<Message>,
+    messages: Sender<Message<H>>,
     /// Counts captures, so a frame from a window the user left is dropped.
     generation: u64,
     session: Option<H::Session>,
@@ -98,7 +97,7 @@ impl<H: Host> Owner<H> {
         host: H,
         stores: Result<Stores, String>,
         own_process: u32,
-        messages: Sender<Message>,
+        messages: Sender<Message<H>>,
         ocr: Sender<ocr::Job>,
     ) -> Self {
         Self {
@@ -122,9 +121,9 @@ impl<H: Host> Owner<H> {
     }
 
     /// Applies one message; breaks on [`Message::Shutdown`].
-    pub(crate) fn handle(&mut self, message: Message) -> ControlFlow<()> {
+    pub(crate) fn handle(&mut self, message: Message<H>) -> ControlFlow<()> {
         match message {
-            Message::Request(request) => self.answer(request),
+            Message::Run(run) => run.run(self),
             Message::Frame {
                 generation,
                 image,
@@ -221,210 +220,56 @@ impl<H: Host> Owner<H> {
         self.close()
     }
 
-    fn answer(&mut self, request: Request) {
-        let saves = request.saves();
-        if request.changes_values() {
-            // Each overlay reads its values again, from their saved files,
-            // after keeping where the user just put its panel.
-            self.save_panels(true);
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "a capture that ended with an error stopped already, and the next poll starts another"
-            )]
-            let _ = self.overlays.close(None);
+    /// Does what follows from a save once `saved` shows that it worked:
+    /// each overlay reads again what `changed` names, and the runtime reads
+    /// the saved files again when it reads what changed. A save that failed
+    /// changed nothing, so nothing follows from it.
+    pub(super) fn after<T>(
+        &mut self,
+        changed: Changed,
+        saved: Result<T, String>,
+    ) -> Result<T, String> {
+        if saved.is_ok() {
+            if changed.values() {
+                // Each overlay reads its values again from their saved
+                // files, after keeping where the user just put its panel.
+                self.save_panels(true);
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "a capture that ended with an error stopped already, and the next poll starts another"
+                )]
+                let _ = self.overlays.close(None);
+            }
+            if changed.runtime() {
+                self.host.reload_runtime();
+            }
         }
-        match request {
-            Request::ListWindows(reply) => send(reply, self.window_list()),
-            Request::Pick { window, reply } => send(reply, self.pick(window)),
-            Request::Preview { max_width, reply } => send(
-                reply,
-                match (&self.failure, &self.latest) {
-                    (Some(failure), _) => Err(failure.error.clone()),
-                    (None, latest) => {
-                        Ok(latest.as_ref().map(|image| pixels::rgba(image, max_width)))
-                    },
-                },
-            ),
-            Request::Screenshot(reply) => send(reply, self.screenshot()),
-            Request::ScreenshotPixels {
-                index,
-                max_width,
-                reply,
-            } => send(
-                reply,
-                self.screenshots
-                    .get(index)
-                    .map(|image| pixels::rgba(image, max_width)),
-            ),
-            Request::Select {
-                screenshot,
-                selection,
-                reply,
-            } => send(
-                reply,
-                self.screenshots
-                    .get(screenshot)
-                    .map(|image| {
-                        selection::select(image, &selection)
-                            .as_ref()
-                            .map(SelectionView::from)
-                    })
-                    .ok_or_else(|| check_spec::SpecError::NoScreenshot.to_string()),
-            ),
-            Request::SetCheck { spec, reply } => send(
-                reply,
-                self.with_session(|session| check_spec::build(&spec, session))
-                    .map(|check| self.check = Some(check))
-                    .map_err(|error| error.to_string()),
-            ),
-            Request::Stop(reply) => {
-                self.stop();
-                send(reply, ());
-            },
-            Request::Reading(reply) => send(reply, self.reading()),
-            Request::StartRecording {
-                region,
-                ink,
-                tolerance,
-                screenshot,
-                more,
-                reply,
-            } => send(
-                reply,
-                self.start_recording(region, ink, tolerance, screenshot, more),
-            ),
-            Request::StopRecording(reply) => {
-                if let Some(recording) = &mut self.recording {
-                    recording.stop(Instant::now());
-                }
-                send(reply, ());
-            },
-            Request::DiscardRecording(reply) => {
-                self.recording = None;
-                send(reply, ());
-            },
-            Request::RecordingState(reply) => send(
-                reply,
-                self.recording
-                    .as_ref()
-                    .map(|recording| recording.view(Instant::now())),
-            ),
-            Request::RecordedPixels {
-                index,
-                max_width,
-                reply,
-            } => send(
-                reply,
-                self.recording
-                    .as_ref()
-                    .and_then(|recording| recording.readings().get(index))
-                    .map(|kept| pixels::rgba(&kept.image, max_width)),
-            ),
-            Request::ReviewProblems { spec, reply } => send(
-                reply,
-                self.with_session(|session| check_spec::recorded_problems(&spec, session))
-                    .map_err(|error| error.to_string()),
-            ),
-            Request::WatchValue { app, value, reply } => send(reply, self.watch(&app, &value)),
-            Request::WatchedReading { watch, when, reply } => {
-                send(reply, self.watched_reading(watch, when.as_deref()));
-            },
-            Request::StopWatching { watch, reply } => {
-                if self.watched.is_some() && watch == self.generation {
-                    self.stop();
-                }
-                send(reply, ());
-            },
-            Request::MatchWindows { window, reply } => send(
-                reply,
-                self.window_list()
-                    .map(|list| window_list::matching(&list.windows, &window)),
-            ),
-            Request::ListApps(reply) => send(reply, self.apps()),
-            Request::SaveApp {
-                existing,
-                spec,
-                reply,
-            } => send(
-                reply,
-                self.stores()
-                    .and_then(|stores| applications::save(stores, existing.as_deref(), spec)),
-            ),
-            Request::RemoveApp { app, reply } => send(
-                reply,
-                self.stores()
-                    .and_then(|stores| applications::remove(stores, &app)),
-            ),
-            Request::SaveValue { spec, reply } => send(reply, self.save(&spec)),
-            Request::SaveReference { spec, reply } => send(reply, self.save_reference(&spec)),
-            Request::DeleteReference {
-                app,
-                reference,
-                reply,
-            } => send(reply, self.delete_reference(&app, &reference)),
-            Request::DeleteValue { app, value, reply } => {
-                send(reply, self.delete(&app, &value));
-            },
-            Request::SetAntiCheat { app, class, reply } => {
-                send(reply, self.set_anti_cheat(&app, class));
-            },
-            Request::MarkChecked { app, reply } => send(reply, self.mark_checked(&app)),
-            Request::ListAutomations(reply) => {
-                send(reply, self.stores().and_then(automations::list));
-            },
-            Request::SaveAutomation {
-                existing,
-                automation,
-                reply,
-            } => send(
-                reply,
-                self.stores()
-                    .and_then(|stores| automations::save(stores, existing.as_deref(), *automation)),
-            ),
-            Request::SetAutomationEnabled { id, enabled, reply } => send(
-                reply,
-                self.stores()
-                    .and_then(|stores| automations::set_enabled(stores, &id, enabled)),
-            ),
-            Request::DeleteAutomation { id, reply } => send(
-                reply,
-                self.stores()
-                    .and_then(|stores| automations::delete(stores, &id)),
-            ),
-            Request::Overlays(reply) => send(reply, self.overlay_windows()),
-            Request::SetOverlay {
-                app,
-                enabled,
-                mode,
-                reply,
-            } => send(reply, self.set_overlay(&app, enabled, mode)),
-            Request::OverlayState { app, reply } => {
-                let view = self.overlay_view(&app);
-                self.save_panels(false);
-                send(reply, view);
-            },
-            Request::OverlayPlace { app, reply } => {
-                send(reply, self.overlays.place(&self.host, &app));
-            },
-            Request::OverlayCard { app, card, reply } => {
-                self.overlays.card(&app, card);
-                send(reply, ());
-            },
-            Request::CloseOverlay { app, mode, reply } => {
-                if self.overlays.mode(&app) == Some(mode) {
-                    self.save_panels(true);
-                    #[expect(
-                        clippy::let_underscore_must_use,
-                        reason = "the overlay's window closed, so nothing shows the capture's error"
-                    )]
-                    let _ = self.overlays.close(Some(&app));
-                }
-                send(reply, ());
-            },
-        }
-        if saves {
-            tell_runtime();
-        }
+        saved
+    }
+}
+
+/// What a save changed, which says who reads it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Changed {
+    /// What only the runtime reads: the automations, an application's
+    /// anti-cheat setting, and the build its values were checked against.
+    Runtime,
+    /// An application, its values, or the references they read with, which
+    /// the runtime and the overlays read.
+    Values,
+    /// An application's overlay, which only the overlays read.
+    Overlay,
+}
+
+impl Changed {
+    /// Whether the overlays read it.
+    const fn values(self) -> bool {
+        matches!(self, Self::Values | Self::Overlay)
+    }
+
+    /// Whether the runtime reads it.
+    const fn runtime(self) -> bool {
+        matches!(self, Self::Runtime | Self::Values)
     }
 }
 
@@ -433,33 +278,11 @@ impl<H: Host> Owner<H> {
 /// # Errors
 ///
 /// Returns the error the capture's thread ended with.
-pub(crate) fn run<H: Host>(mut owner: Owner<H>, messages: &Receiver<Message>) -> io::Result<()> {
+pub(crate) fn run<H: Host>(mut owner: Owner<H>, messages: &Receiver<Message<H>>) -> io::Result<()> {
     for message in messages {
         if owner.handle(message).is_break() {
             break;
         }
     }
     owner.shut_down()
-}
-
-/// Asks the runtime to read the saved automations again. A runtime that is
-/// not running reads them when it starts, and one that cannot be reached
-/// keeps what it read, so a failure here changes nothing the user did.
-#[mutants::skip]
-fn tell_runtime() {
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "the save already happened; the runtime picks it up when it next starts"
-    )]
-    let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
-}
-
-/// Answers a request. The command that asked may have been dropped, such as
-/// when the window closed while it waited, and then nobody needs the answer.
-fn send<T>(reply: Reply<T>, answer: T) {
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "a dropped command needs no answer"
-    )]
-    let _ = reply.send(answer);
 }

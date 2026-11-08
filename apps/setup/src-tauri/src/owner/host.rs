@@ -10,8 +10,10 @@ use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
 use appytappy_sources::system::{ProcessEntry, System, WindowEntry, WindowPlace};
 
 /// What the setup app needs from the operating system: its windows and
-/// processes, and a capture of one window.
-pub(crate) trait Host {
+/// processes, a capture of one window, and a way to tell the runtime that a
+/// save changed what it reads. It lives as long as the owner, which sends
+/// itself work that names it.
+pub(crate) trait Host: 'static {
     /// A running capture.
     type Session: CaptureSession;
 
@@ -56,9 +58,14 @@ pub(crate) trait Host {
         interval: Duration,
         handler: FrameHandler,
     ) -> io::Result<Self::Session>;
+
+    /// Asks the runtime to read the saved files again. A runtime that is not
+    /// running reads them when it starts, and one that cannot be reached
+    /// keeps what it read, so the save stands either way.
+    fn reload_runtime(&self);
 }
 
-impl<T: System + Capture> Host for T {
+impl<T: System + Capture + 'static> Host for T {
     type Session = T::Session;
 
     fn windows(&self) -> io::Result<Vec<WindowEntry>> {
@@ -85,6 +92,15 @@ impl<T: System + Capture> Host for T {
         handler: FrameHandler,
     ) -> io::Result<Self::Session> {
         self.start(window, crop, interval, handler)
+    }
+
+    #[mutants::skip]
+    fn reload_runtime(&self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the save already happened; the runtime picks it up when it next starts"
+        )]
+        let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
     }
 }
 

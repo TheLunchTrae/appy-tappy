@@ -203,7 +203,7 @@ impl<S: CaptureSession> Overlays<S> {
     pub(crate) fn view<H: Host<Session = S>>(
         &mut self,
         host: &H,
-        messages: &Sender<Message>,
+        messages: &Sender<Message<H>>,
         app: &str,
         file: impl FnOnce() -> Result<(AppFile, std::path::PathBuf), String>,
     ) -> Result<OverlayView, String> {
@@ -468,7 +468,7 @@ fn crop_for(
 /// Finds `overlay`'s window and starts reading it with `generation`.
 fn start<H: Host>(
     host: &H,
-    messages: &Sender<Message>,
+    messages: &Sender<Message<H>>,
     app: &str,
     generation: u64,
     overlay: &mut Overlay<H::Session>,

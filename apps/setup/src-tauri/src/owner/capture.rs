@@ -4,18 +4,21 @@
 use std::io;
 use std::time::{Duration, Instant};
 
+use appytappy_config::app_file::WindowDef;
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
 
-use crate::check_spec::{self, RegionCheck};
-use crate::window_list::{self, WindowList};
+use crate::check_spec::{self, CheckSpec, RegionCheck};
+use crate::pixels;
+use crate::selection::{self, SelectionSpec, SelectionView};
+use crate::window_list::{self, WindowFit, WindowList};
 
 use super::host::Host;
 use super::messages::{CaptureFailure, Message, Reading};
 use super::{Owner, PREVIEW_INTERVAL};
 
 /// A preview capture's message for one frame.
-fn preview_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
+fn preview_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Message<H> {
     match frame {
         Ok(frame) => Message::Frame {
             generation,
@@ -44,7 +47,7 @@ fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
 }
 
 impl<H: Host> Owner<H> {
-    pub(super) fn window_list(&self) -> Result<WindowList, String> {
+    pub(crate) fn window_list(&self) -> Result<WindowList, String> {
         let windows = self.host.windows().map_err(|error| error.to_string())?;
         let processes = self.host.processes().map_err(|error| error.to_string())?;
         Ok(window_list::list(windows, &processes, self.own_process))
@@ -52,7 +55,7 @@ impl<H: Host> Owner<H> {
 
     /// Stops the capture and forgets its frames, screenshots, recording, and
     /// check.
-    pub(super) fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         // A capture that failed already said why; what comes next matters now.
         #[expect(
             clippy::let_underscore_must_use,
@@ -68,7 +71,7 @@ impl<H: Host> Owner<H> {
         self.watched = None;
     }
 
-    pub(super) fn pick(&mut self, window: u64) -> Result<(), String> {
+    pub(crate) fn pick(&mut self, window: u64) -> Result<(), String> {
         self.start(window, Crop::Whole, PREVIEW_INTERVAL, preview_message)
             .map(drop)
     }
@@ -81,7 +84,7 @@ impl<H: Host> Owner<H> {
         window: u64,
         crop: Crop,
         interval: Duration,
-        to_message: fn(u64, io::Result<Frame<'_>>) -> Message,
+        to_message: fn(u64, io::Result<Frame<'_>>) -> Message<H>,
     ) -> Result<u64, String> {
         self.stop();
         let generation = self.generation;
@@ -136,7 +139,7 @@ impl<H: Host> Owner<H> {
         self.failure = Some(failure);
     }
 
-    pub(super) fn screenshot(&mut self) -> Result<usize, String> {
+    pub(crate) fn screenshot(&mut self) -> Result<usize, String> {
         if let Some(failure) = &self.failure {
             let next = if failure.ended {
                 "Change window to pick it again."
@@ -153,11 +156,58 @@ impl<H: Host> Owner<H> {
         Ok(self.screenshots.len().saturating_sub(1))
     }
 
-    pub(super) fn reading(&self) -> Result<Option<Reading>, String> {
+    pub(crate) fn reading(&self) -> Result<Option<Reading>, String> {
         let (Some(check), Some(latest)) = (&self.check, &self.latest) else {
             return Ok(None);
         };
         read(check, latest).map(|value| Some(value.into()))
+    }
+
+    /// The newest frame's pixels, at most `max_width` wide, or `None`
+    /// before one arrived. A failed capture answers why it failed.
+    pub(crate) fn preview(&self, max_width: u32) -> Result<Option<Vec<u8>>, String> {
+        match (&self.failure, &self.latest) {
+            (Some(failure), _) => Err(failure.error.clone()),
+            (None, latest) => Ok(latest.as_ref().map(|image| pixels::rgba(image, max_width))),
+        }
+    }
+
+    /// Screenshot `index`'s pixels, at most `max_width` wide.
+    pub(crate) fn screenshot_pixels(&self, index: usize, max_width: u32) -> Option<Vec<u8>> {
+        self.screenshots
+            .get(index)
+            .map(|image| pixels::rgba(image, max_width))
+    }
+
+    /// What `selection` picks on screenshot `screenshot`.
+    pub(crate) fn select(
+        &self,
+        screenshot: usize,
+        selection: &SelectionSpec,
+    ) -> Result<Option<SelectionView>, String> {
+        self.screenshots
+            .get(screenshot)
+            .map(|image| {
+                selection::select(image, selection)
+                    .as_ref()
+                    .map(SelectionView::from)
+            })
+            .ok_or_else(|| check_spec::SpecError::NoScreenshot.to_string())
+    }
+
+    /// Makes `spec` the check the live frame is read with.
+    pub(crate) fn set_check(&mut self, spec: &CheckSpec) -> Result<(), String> {
+        let check = self
+            .with_session(|session| check_spec::build(spec, session))
+            .map_err(|error| error.to_string())?;
+        self.check = Some(check);
+        Ok(())
+    }
+
+    /// The running windows that `window` matches, the best fit first.
+    pub(crate) fn match_windows(&self, window: &WindowDef) -> Result<Vec<WindowFit>, String> {
+        self.window_list()
+            .map(|list| window_list::matching(&list.windows, window))
     }
 }
 
@@ -167,9 +217,8 @@ mod tests {
     use appytappy_sources::screen::Size;
 
     use crate::check_spec::CheckSpec;
-    use crate::owner::messages::Request;
     use crate::owner::run;
-    use crate::owner::test_support::{Harness, frame_image, harness};
+    use crate::owner::test_support::{FakeHost, Harness, frame_image, harness};
     use crate::pixels;
     use crate::window_list::WindowFit;
 
@@ -178,7 +227,9 @@ mod tests {
     #[test]
     fn lists_windows_without_the_setup_apps_own() {
         let mut harness = harness(false);
-        let list = harness.ask(Request::ListWindows).expect("the host answers");
+        let list = harness
+            .ask(|owner| owner.window_list())
+            .expect("the host answers");
         assert_eq!(list.windows.len(), 1);
         assert_eq!(list.windows[0].executable, "Example.exe");
     }
@@ -187,10 +238,7 @@ mod tests {
     fn previews_the_newest_frame_once_one_arrives() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
-        let preview = |reply| Request::Preview {
-            max_width: 100,
-            reply,
-        };
+        let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
         assert_eq!(harness.ask(preview), Ok(None));
         harness.deliver(&mut handler, Ok(&frame_image()));
         let bytes = harness.ask(preview).expect("running").expect("a frame");
@@ -205,10 +253,7 @@ mod tests {
             &mut handler,
             Err(io::Error::other("the captured window closed")),
         );
-        let preview = |reply| Request::Preview {
-            max_width: 100,
-            reply,
-        };
+        let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
         assert_eq!(
             harness.ask(preview),
             Err("the captured window closed".to_owned())
@@ -221,15 +266,12 @@ mod tests {
     fn a_frame_error_lasts_until_a_good_frame_but_a_closed_window_ends_the_capture() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
-        let preview = |reply| Request::Preview {
-            max_width: 100,
-            reply,
-        };
+        let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
         harness.deliver(&mut handler, Ok(&frame_image()));
         harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
         assert_eq!(harness.ask(preview), Err("a frame was lost".to_owned()));
         assert_eq!(
-            harness.ask(Request::Screenshot),
+            harness.ask(Owner::screenshot),
             Err("A frame was lost. Take it once the window shows again.".to_owned()),
             "no screenshot of a frame from before the failure"
         );
@@ -238,7 +280,7 @@ mod tests {
             harness.ask(preview).is_ok(),
             "the next good frame clears it"
         );
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
 
         harness.deliver(
             &mut handler,
@@ -254,7 +296,7 @@ mod tests {
             "a closed window is final"
         );
         assert_eq!(
-            harness.ask(Request::Screenshot),
+            harness.ask(Owner::screenshot),
             Err("The captured window closed. Change window to pick it again.".to_owned())
         );
     }
@@ -266,10 +308,7 @@ mod tests {
         let _second = harness.pick();
         harness.deliver(&mut first, Ok(&frame_image()));
         harness.deliver(&mut first, Err(io::Error::other("closed")));
-        let preview = |reply| Request::Preview {
-            max_width: 100,
-            reply,
-        };
+        let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
         assert_eq!(harness.ask(preview), Ok(None));
     }
 
@@ -277,7 +316,7 @@ mod tests {
     fn a_capture_that_cannot_start_says_why() {
         let mut harness = harness(true);
         assert_eq!(
-            harness.ask(|reply| Request::Pick { window: 7, reply }),
+            harness.ask(|owner| owner.pick(7)),
             Err("no capture here".to_owned())
         );
     }
@@ -286,17 +325,12 @@ mod tests {
     fn screenshots_keep_frames_until_another_window_is_picked() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
-        assert!(harness.ask(Request::Screenshot).is_err());
+        assert!(harness.ask(Owner::screenshot).is_err());
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(1));
-        let pixels_of = |index| {
-            move |reply| Request::ScreenshotPixels {
-                index,
-                max_width: 2,
-                reply,
-            }
-        };
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(1));
+        let pixels_of =
+            |index| move |owner: &mut Owner<FakeHost>| owner.screenshot_pixels(index, 2);
         assert_eq!(
             harness.ask(pixels_of(1)),
             Some(pixels::rgba(&frame_image(), 2))
@@ -311,16 +345,17 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         let select = |screenshot, x| {
-            move |reply| Request::Select {
-                screenshot,
-                selection: serde_json::from_value(serde_json::json!({
-                    "tolerance": 10,
-                    "steps": [{"kind": "click", "x": x, "y": 0}]
-                }))
-                .expect("the UI's spelling"),
-                reply,
+            move |owner: &mut Owner<FakeHost>| {
+                owner.select(
+                    screenshot,
+                    &serde_json::from_value(serde_json::json!({
+                        "tolerance": 10,
+                        "steps": [{"kind": "click", "x": x, "y": 0}]
+                    }))
+                    .expect("the UI's spelling"),
+                )
             }
         };
         assert_eq!(
@@ -348,19 +383,19 @@ mod tests {
     fn the_check_reads_the_live_frame() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
-        assert_eq!(harness.ask(Request::Reading), Ok(None));
+        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
         let spec: CheckSpec = serde_json::from_str(
             r#"{"kind":"barFill","region":{"x":0,"y":0,"width":4,"height":2},
                 "filled":{"red":255,"green":0,"blue":0},"empty":{"red":40,"green":40,"blue":40}}"#,
         )
         .expect("valid JSON");
         harness
-            .ask(|reply| Request::SetCheck { spec, reply })
+            .ask(|owner| owner.set_check(&spec))
             .expect("valid check");
-        assert_eq!(harness.ask(Request::Reading), Ok(None));
+        assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(
-            harness.ask(Request::Reading),
+            harness.ask(|owner| owner.reading()),
             Ok(Some(Reading::Number(50.0)))
         );
     }
@@ -376,7 +411,7 @@ mod tests {
         )
         .expect("valid JSON");
         harness
-            .ask(|reply| Request::SetCheck { spec, reply })
+            .ask(|owner| owner.set_check(&spec))
             .expect("valid check");
         let small = Image::new(
             Size {
@@ -389,7 +424,7 @@ mod tests {
         harness.deliver(&mut handler, Ok(&small));
         assert!(
             harness
-                .ask(Request::Reading)
+                .ask(|owner| owner.reading())
                 .expect_err("outside")
                 .contains("past the edge")
         );
@@ -404,7 +439,7 @@ mod tests {
         )
         .expect("valid JSON");
         assert_eq!(
-            harness.ask(|reply| Request::SetCheck { spec, reply }),
+            harness.ask(|owner| owner.set_check(&spec)),
             Err("Draw a region on the screenshot first.".to_owned())
         );
     }
@@ -418,7 +453,7 @@ mod tests {
             executable: "Example.exe",
         });
         assert_eq!(
-            harness.ask(|reply| Request::MatchWindows { window, reply }),
+            harness.ask(|owner| owner.match_windows(&window)),
             Ok(vec![WindowFit {
                 handle: 7,
                 fallback: false,
@@ -432,19 +467,12 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        harness.ask(Request::Stop);
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness.ask(Owner::stop);
         assert_eq!(harness.closed.try_recv(), Ok(7));
+        assert_eq!(harness.ask(|owner| owner.screenshot_pixels(0, 100)), None);
         assert_eq!(
-            harness.ask(|reply| Request::ScreenshotPixels {
-                index: 0,
-                max_width: 100,
-                reply,
-            }),
-            None
-        );
-        assert_eq!(
-            harness.ask(Request::Screenshot),
+            harness.ask(Owner::screenshot),
             Err("No frame has arrived from the window yet.".to_owned())
         );
     }

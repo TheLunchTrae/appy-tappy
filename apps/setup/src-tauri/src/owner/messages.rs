@@ -2,24 +2,21 @@
 //! interface's requests, the frames its captures hand over, and the shapes both
 //! travel in.
 
+use std::fmt;
 use std::time::Instant;
 
-use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, OverlayModeDef, PanelDef, WindowDef,
-};
-use appytappy_config::automation_file::{AutomationDef, WhenDef};
+use appytappy_config::app_file::{AppFile, BuildDef, PanelDef};
 use appytappy_config::signal::Value;
+use appytappy_sources::HostSystem;
 use appytappy_sources::screen::{Image, Size};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::applications::AppSpec;
-use crate::automations::AutomationSummary;
-use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
-use crate::overlay::{Card, FrameRead, OverlayView, OverlayWindow, Place};
-use crate::recording::{RecordingView, Text};
-use crate::selection::{SelectionSpec, SelectionView};
-use crate::window_list::{WindowFit, WindowList};
+use crate::check_spec::CheckSpec;
+use crate::overlay::FrameRead;
+use crate::recording::Text;
+
+use super::{Host, Owner};
 
 /// Where a request's answer goes.
 pub(crate) type Reply<T> = oneshot::Sender<T>;
@@ -162,294 +159,55 @@ pub(crate) struct AppSummary {
     pub(crate) running: Option<BuildDef>,
 }
 
-/// A command from the UI.
-#[derive(Debug)]
-pub(crate) enum Request {
-    /// Lists the windows the user can pick.
-    ListWindows(Reply<Result<WindowList, String>>),
-    /// Captures `window`, dropping the previous window's screenshots and
-    /// check.
-    Pick {
-        /// The window's handle.
-        window: u64,
-        /// Answered once the capture started.
-        reply: Reply<Result<(), String>>,
-    },
-    /// The newest frame, scaled to at most `max_width`, as
-    /// [`pixels::rgba`](crate::pixels::rgba) encodes it: `None` until a frame arrives.
-    Preview {
-        /// The widest the UI draws it.
-        max_width: u32,
-        /// The frame, or why the capture stopped.
-        reply: Reply<Result<Option<Vec<u8>>, String>>,
-    },
-    /// Stops capturing and drops the session's screenshots and check, once
-    /// the user leaves the capture screen.
-    Stop(Reply<()>),
-    /// Keeps the newest frame as a screenshot and answers its index.
-    Screenshot(Reply<Result<usize, String>>),
-    /// A screenshot, scaled and encoded like a preview.
-    ScreenshotPixels {
-        /// The screenshot's index.
-        index: usize,
-        /// The widest the UI draws it.
-        max_width: u32,
-        /// The pixels, or `None` for an index that does not exist.
-        reply: Reply<Option<Vec<u8>>>,
-    },
-    /// What `selection`'s steps select on a screenshot.
-    Select {
-        /// The screenshot's index.
-        screenshot: usize,
-        /// The steps the user took on it.
-        selection: SelectionSpec,
-        /// The selection, or `None` when the steps leave nothing selected;
-        /// an error for a screenshot that does not exist.
-        reply: Reply<Result<Option<SelectionView>, String>>,
-    },
-    /// Sets up the check the live reading uses.
-    SetCheck {
-        /// The check as the UI describes it.
-        spec: CheckSpec,
-        /// Answered with what to fix when the check cannot be built.
-        reply: Reply<Result<(), String>>,
-    },
-    /// What the check reads on the newest frame: `None` until a check is
-    /// set up and a frame arrived.
-    Reading(Reply<Result<Option<Reading>, String>>),
-    /// Records `region` of the picked window, drawn on `screenshot`, keeping
-    /// each reading it shows. With `more`, goes on with the stopped
-    /// recording, which must be of the same region, ink, and window size;
-    /// otherwise starts a new one in place of any recording.
-    StartRecording {
-        /// The region to record.
-        region: RegionSpec,
-        /// The characters' color.
-        ink: ColorSpec,
-        /// How far a pixel may be from `ink` and still be ink.
-        tolerance: u8,
-        /// The screenshot the region was drawn on.
-        screenshot: usize,
-        /// Whether to go on with the recording rather than start over.
-        more: bool,
-        /// Answered once it records, or with why it cannot.
-        reply: Reply<Result<(), String>>,
-    },
-    /// Stops the recording, keeping its readings for review.
-    StopRecording(Reply<()>),
-    /// Forgets the recording and its readings.
-    DiscardRecording(Reply<()>),
-    /// The recording as the UI shows it: `None` without one.
-    RecordingState(Reply<Option<RecordingView>>),
-    /// A recorded reading's pixels, scaled and encoded like a preview.
-    RecordedPixels {
-        /// The reading's index.
-        index: usize,
-        /// The widest the UI draws it.
-        max_width: u32,
-        /// The pixels, or `None` for a reading that does not exist.
-        reply: Reply<Option<Vec<u8>>>,
-    },
-    /// Why the number check `spec` describes could not learn each of its
-    /// recorded readings, such as one whose shape an earlier reading or a
-    /// labeled screenshot gave to another character.
-    ReviewProblems {
-        /// The check with the readings review would keep.
-        spec: CheckSpec,
-        /// One answer per recorded reading, in order: `None` for one it
-        /// learns. An error when the labeled screenshots cannot be learned.
-        reply: Reply<Result<Vec<Option<String>>, String>>,
-    },
-    /// Captures the region of a saved value on its application's window,
-    /// for the automation editor. Like [`Request::Pick`], it drops the
-    /// previous window's capture, screenshots and check.
-    WatchValue {
-        /// The application's ID.
-        app: String,
-        /// The value's ID.
-        value: String,
-        /// The watch's number once the capture started, or why it cannot.
-        reply: Reply<Result<u64, String>>,
-    },
-    /// What the watched value reads on the newest frame, and whether `when`
-    /// holds for it; an error once the watch was stopped or replaced.
-    WatchedReading {
-        /// The watch's number.
-        watch: u64,
-        /// The condition to test, which must watch the watched value.
-        when: Option<Box<WhenDef>>,
-        /// The reading.
-        reply: Reply<Result<Live, String>>,
-    },
-    /// Stops the watch, unless another capture replaced it already.
-    StopWatching {
-        /// The watch's number.
-        watch: u64,
-        /// Answered once it stopped.
-        reply: Reply<()>,
-    },
-    /// The handles of the running windows a window match finds, the best
-    /// fit first.
-    MatchWindows {
-        /// How to recognize the window.
-        window: WindowDef,
-        /// The windows it takes, the best fit first.
-        reply: Reply<Result<Vec<WindowFit>, String>>,
-    },
-    /// The saved applications.
-    ListApps(Reply<Result<Vec<AppSummary>, String>>),
-    /// Saves an application's name and window match, as a new application
-    /// when `existing` is `None`.
-    SaveApp {
-        /// The application's ID, or `None` for a new one.
-        existing: Option<String>,
-        /// Its name and window match.
-        spec: AppSpec,
-        /// Its ID, or what to fix.
-        reply: Reply<Result<String, String>>,
-    },
-    /// Removes an application with its values, unless an automation watches
-    /// one of them.
-    RemoveApp {
-        /// The application's ID.
-        app: String,
-        /// Answered once it is removed, or with why it cannot be.
-        reply: Reply<Result<(), String>>,
-    },
-    /// Saves a value.
-    SaveValue {
-        /// The value.
-        spec: Box<SaveSpec>,
-        /// Where it was saved, or what to fix.
-        reply: Reply<Result<SavedValue, String>>,
-    },
-    /// Removes a saved value and the pictures only it used, unless an
-    /// automation watches it.
-    DeleteValue {
-        /// The application's ID.
-        app: String,
-        /// The value's ID.
-        value: String,
-        /// Answered once it is gone.
-        reply: Reply<Result<(), String>>,
-    },
-    /// Saves a reference, replacing the one of the same ID.
-    SaveReference {
-        /// The reference.
-        spec: Box<ReferenceSaveSpec>,
-        /// Where it was saved, or what to fix.
-        reply: Reply<Result<SavedReferenceId, String>>,
-    },
-    /// Removes a saved reference and its pictures, unless a value reads
-    /// with it.
-    DeleteReference {
-        /// The application's ID.
-        app: String,
-        /// The reference's ID.
-        reference: String,
-        /// Answered once it is gone.
-        reply: Reply<Result<(), String>>,
-    },
-    /// Records the build the application runs now as the one its values
-    /// were checked against.
-    MarkChecked {
-        /// The application's ID.
-        app: String,
-        /// Answered once it is saved, or with why it cannot be.
-        reply: Reply<Result<(), String>>,
-    },
-    /// Sets how an application protects itself from other programs.
-    SetAntiCheat {
-        /// The application's ID.
-        app: String,
-        /// Its anti-cheat class.
-        class: AntiCheatDef,
-        /// Answered once it is saved.
-        reply: Reply<Result<(), String>>,
-    },
-    /// The saved automations.
-    ListAutomations(Reply<Result<Vec<AutomationSummary>, String>>),
-    /// Saves an automation.
-    SaveAutomation {
-        /// The automation to replace, or `None` for a new one.
-        existing: Option<String>,
-        /// The automation; its ID is set on saving.
-        automation: Box<AutomationDef>,
-        /// Its ID, or what to fix.
-        reply: Reply<Result<String, String>>,
-    },
-    /// Turns an automation on or off.
-    SetAutomationEnabled {
-        /// The automation's ID.
-        id: String,
-        /// Whether it runs.
-        enabled: bool,
-        /// Answered once it is saved.
-        reply: Reply<Result<(), String>>,
-    },
-    /// Removes an automation.
-    DeleteAutomation {
-        /// The automation's ID.
-        id: String,
-        /// Answered once it is gone.
-        reply: Reply<Result<(), String>>,
-    },
-    /// The overlays that are on, for their windows to open.
-    Overlays(Reply<Result<Vec<OverlayWindow>, String>>),
-    /// Turns an application's overlay on or off and sets where it shows,
-    /// keeping where the user put its panel.
-    SetOverlay {
-        /// The application's ID.
-        app: String,
-        /// Whether it shows.
-        enabled: bool,
-        /// Where it shows.
-        mode: OverlayModeDef,
-        /// Answered once it is saved.
-        reply: Reply<Result<(), String>>,
-    },
-    /// What an application's overlay shows now.
-    OverlayState {
-        /// The application's ID.
-        app: String,
-        /// What it shows, or why it cannot.
-        reply: Reply<Result<OverlayView, String>>,
-    },
-    /// Where an application's overlay goes over its window now, or `None`
-    /// while it should not show.
-    OverlayPlace {
-        /// The application's ID.
-        app: String,
-        /// Where it goes.
-        reply: Reply<Option<Place>>,
-    },
-    /// The size an application's overlay card takes, as its page measured
-    /// it.
-    OverlayCard {
-        /// The application's ID.
-        app: String,
-        /// The card's size.
-        card: Card,
-        /// Answered once it is kept.
-        reply: Reply<()>,
-    },
-    /// Stops an application's overlay once its window closed.
-    CloseOverlay {
-        /// The application's ID.
-        app: String,
-        /// The mode of the window that closed. An overlay open in the other
-        /// mode belongs to the window that replaced it, and stays.
-        mode: OverlayModeDef,
-        /// Answered once it stopped.
-        reply: Reply<()>,
-    },
+/// A command from the UI: work for the owner thread, which runs it with the
+/// state and sends its own answer, as [`ask`](crate::commands) builds it.
+pub(crate) struct Run<H: Host>(Work<H>);
+
+/// Work for the owner thread, which answers on its own if it answers.
+type Work<H> = Box<dyn FnOnce(&mut Owner<H>) + Send>;
+
+impl<H: Host> Run<H> {
+    /// Work that runs `work` on the owner and sends what it returns to
+    /// `reply`.
+    pub(crate) fn new<T: Send + 'static>(
+        reply: Reply<T>,
+        work: impl FnOnce(&mut Owner<H>) -> T + Send + 'static,
+    ) -> Self {
+        Self(Box::new(move |owner| {
+            // A dropped command, such as one whose window closed while it
+            // waited, needs no answer.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a dropped command needs no answer"
+            )]
+            let _ = reply.send(work(owner));
+        }))
+    }
+
+    /// Work that runs `work` on the owner, for a sender that waits for no
+    /// answer.
+    pub(crate) fn unanswered(work: impl FnOnce(&mut Owner<H>) + Send + 'static) -> Self {
+        Self(Box::new(work))
+    }
+
+    /// Runs the work on `owner`.
+    pub(super) fn run(self, owner: &mut Owner<H>) {
+        (self.0)(owner);
+    }
 }
 
-/// What reaches the owner thread.
+impl<H: Host> fmt::Debug for Run<H> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Run")
+    }
+}
+
+/// What reaches the owner thread. Its host is the operating system's,
+/// except in the tests.
 #[derive(Debug)]
-pub(crate) enum Message {
+pub(crate) enum Message<H: Host = HostSystem> {
     /// A command from the UI.
-    Request(Request),
+    Run(Run<H>),
     /// The capture with this generation sent a frame.
     Frame {
         /// Which capture sent it; frames from an earlier one are dropped.
@@ -506,147 +264,11 @@ pub(crate) enum Message {
     Shutdown,
 }
 
-impl Request {
-    /// Whether the request changes the saved applications or automations,
-    /// which the runtime reads.
-    pub(super) const fn saves(&self) -> bool {
-        matches!(
-            self,
-            Self::SaveValue { .. }
-                | Self::DeleteValue { .. }
-                | Self::SaveApp { .. }
-                | Self::RemoveApp { .. }
-                | Self::SaveReference { .. }
-                | Self::DeleteReference { .. }
-                | Self::SetAntiCheat { .. }
-                | Self::MarkChecked { .. }
-                | Self::SaveAutomation { .. }
-                | Self::SetAutomationEnabled { .. }
-                | Self::DeleteAutomation { .. }
-        )
-    }
-
-    /// Whether the request changes an application's values, the references
-    /// they read with, or its overlay, which each overlay then reads again.
-    pub(super) const fn changes_values(&self) -> bool {
-        matches!(
-            self,
-            Self::SaveValue { .. }
-                | Self::DeleteValue { .. }
-                | Self::SaveApp { .. }
-                | Self::RemoveApp { .. }
-                | Self::SaveReference { .. }
-                | Self::DeleteReference { .. }
-                | Self::SetOverlay { .. }
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use appytappy_config::signal::StateName;
 
-    use crate::owner::test_support::{BAR, spec};
-
     use super::*;
-
-    #[test]
-    fn only_requests_that_save_tell_the_runtime() {
-        let automation: AutomationDef = serde_json::from_value(serde_json::json!({
-            "id": "",
-            "name": "x",
-            "enabled": true,
-            "when": {"app": "example", "value": "x", "is": "equals", "target": true},
-            "actions": [],
-            "undo": false,
-            "cooldownMs": 0
-        }))
-        .expect("the UI's spelling");
-        let saves = [
-            Request::SaveValue {
-                spec: Box::new(spec("example", "x", BAR)),
-                reply: oneshot::channel().0,
-            },
-            Request::SaveAutomation {
-                existing: None,
-                automation: Box::new(automation),
-                reply: oneshot::channel().0,
-            },
-            Request::DeleteValue {
-                app: "example".to_owned(),
-                value: "progress".to_owned(),
-                reply: oneshot::channel().0,
-            },
-            Request::SetAutomationEnabled {
-                id: "x".to_owned(),
-                enabled: true,
-                reply: oneshot::channel().0,
-            },
-            Request::DeleteAutomation {
-                id: "x".to_owned(),
-                reply: oneshot::channel().0,
-            },
-            Request::SetAntiCheat {
-                app: "example".to_owned(),
-                class: AntiCheatDef::None,
-                reply: oneshot::channel().0,
-            },
-            Request::MarkChecked {
-                app: "example".to_owned(),
-                reply: oneshot::channel().0,
-            },
-            Request::SaveApp {
-                existing: Some("example".to_owned()),
-                spec: crate::applications::AppSpec {
-                    name: "Example App".to_owned(),
-                    window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
-                        title: "Example App",
-                        class: "ExampleWindow",
-                        executable: "Example.exe",
-                    }),
-                },
-                reply: oneshot::channel().0,
-            },
-            Request::RemoveApp {
-                app: "example".to_owned(),
-                reply: oneshot::channel().0,
-            },
-        ];
-        assert!(saves.iter().all(Request::saves));
-        assert!(!Request::ListApps(oneshot::channel().0).saves());
-        assert!(!Request::ListAutomations(oneshot::channel().0).saves());
-    }
-
-    #[test]
-    fn a_saved_or_deleted_reference_is_read_again_by_the_runtime_and_overlays() {
-        let spec: ReferenceSaveSpec = serde_json::from_value(serde_json::json!({
-            "app": "example",
-            "referenceName": "Digits",
-            "check": {
-                "kind": "characters",
-                "region": {"x": 0, "y": 0, "width": 1, "height": 1},
-                "screenshot": 0,
-                "ink": {"red": 0, "green": 0, "blue": 0},
-                "tolerance": 0,
-                "labels": []
-            }
-        }))
-        .expect("the UI's spelling");
-        let changes = [
-            Request::SaveReference {
-                spec: Box::new(spec),
-                reply: oneshot::channel().0,
-            },
-            Request::DeleteReference {
-                app: "example".to_owned(),
-                reference: "digits".to_owned(),
-                reply: oneshot::channel().0,
-            },
-        ];
-        assert!(changes.iter().all(Request::saves));
-        assert!(changes.iter().all(Request::changes_values));
-        assert!(!Request::ListApps(oneshot::channel().0).changes_values());
-    }
 
     #[test]
     fn live_readings_reach_the_ui_tagged_by_kind() {
@@ -685,5 +307,26 @@ mod tests {
             .expect("serializes"),
             serde_json::json!({"kind": "lost", "message": "y"})
         );
+    }
+
+    #[test]
+    fn a_command_runs_on_the_owner_and_answers() {
+        let mut harness = crate::owner::test_support::harness(false);
+        let (reply, mut answer) = oneshot::channel();
+        let run = Run::new(reply, Owner::screenshot);
+        assert!(harness.owner.handle(Message::Run(run)).is_continue());
+        assert_eq!(
+            answer.try_recv(),
+            Ok(Err("No frame has arrived from the window yet.".to_owned()))
+        );
+
+        let (sender, told) = std::sync::mpsc::channel();
+        let run = Run::unanswered(move |owner| {
+            owner.stop();
+            sender.send(()).expect("test listens");
+        });
+        assert_eq!(format!("{run:?}"), "Run");
+        assert!(harness.owner.handle(Message::Run(run)).is_continue());
+        assert_eq!(told.try_recv(), Ok(()));
     }
 }

@@ -664,10 +664,12 @@ second copy over to the first, which brings its window forward
 
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
-one. Each save reads the file, changes it, and writes it back. After a request
-that saves values, automations, or applications, the setup app tells the
-runtime to read the saved files again. Turning an overlay on or off and moving a
-panel write the application's file without telling the runtime.
+one. Each save reads the file, changes it, and writes it back. After a save of
+values, automations, or applications that worked, the setup app tells the
+runtime to read the saved files again, and each overlay reads its values
+again. A save that failed changed nothing, so it tells neither. Turning an
+overlay on or off and moving a panel write the application's file without
+telling the runtime.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another
