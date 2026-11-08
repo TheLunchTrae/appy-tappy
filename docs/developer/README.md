@@ -24,8 +24,6 @@ To get an installer of a branch without a release, use one of these:
 - On GitHub, open the **Release** workflow under **Actions**, select
   **Run workflow**, and pick the branch. The installer is in the run's
   artifacts for 14 days.
-- Open a pull request that changes the installer or its build; its Release run
-  keeps a test build the same way.
 - On Windows, run `mise run installer:build`. The installer lands in
   `target/dist/bundle/nsis/`.
 

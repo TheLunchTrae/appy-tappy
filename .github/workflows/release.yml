@@ -1,32 +1,13 @@
 name: Release
 
 # Builds the Windows installer. A pushed v* tag publishes it as a GitHub
-# release. A manual run on any branch or tag, or a pull request that changes the
-# installer or its build, keeps it as a test build in the run's artifacts.
-# docs/developer/installer.md describes the builds.
+# release. A manual run on any branch or tag keeps it as a test build in the
+# run's artifacts. Nothing else starts it. docs/developer/installer.md
+# describes the builds.
 on:
   push:
     tags:
       - 'v*'
-  pull_request:
-    paths:
-      - .config/mise/conf.d/installer.toml
-      - .github/workflows/release.yml
-      - Cargo.toml
-      - apps/setup/bun.lock
-      - apps/setup/package.json
-      - apps/setup/src-tauri/tauri.conf.json
-      - apps/setup/src-tauri/tauri.installer.conf.json
-      - apps/setup/src-tauri/windows/**
-      # The runtime links the setup app's icon in its build script.
-      - apps/runtime/build.rs
-      - apps/runtime/runtime.rc
-      - apps/setup/src-tauri/icons/**
-      # The installer hooks find the runtime's tray window by the class and
-      # title in win/tray.rs, and the uninstaller removes the autostart value
-      # that autostart.rs names.
-      - crates/platform/src/autostart.rs
-      - crates/platform/src/win/tray.rs
   workflow_dispatch:
 
 permissions:
@@ -34,7 +15,6 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   installer:
@@ -53,9 +33,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A pull request builds its head commit, which names the test
-          # version, rather than a merge commit nobody can check out.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Install pinned tools
         uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3

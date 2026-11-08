@@ -76,7 +76,8 @@ a Windows runner:
   name the workspace version.
 - **A manual run** on any branch or tag, from the workflow's **Run workflow**
   button, makes a test build.
-- **A pull request** that changes the installer or its build makes a test
-  build.
+
+Nothing else starts it, so pull requests and pushes to branches build no
+installer.
 
 A test build's installer is in its run's artifacts for 14 days.
