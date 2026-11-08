@@ -32,7 +32,7 @@ use crate::window_list::{WindowFit, WindowList};
 pub(crate) struct Bridge(pub(crate) Sender<Message>);
 
 /// The message for a command whose answer never came.
-const GONE: &str = "AppyTappy setup is closing.";
+const GONE: &str = "AppyTappy Setup is closing.";
 
 /// Sends the request `build` makes to the owner thread and awaits its
 /// answer.

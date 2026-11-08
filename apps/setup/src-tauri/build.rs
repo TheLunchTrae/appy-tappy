@@ -13,7 +13,7 @@ use std::path::Path;
 
 /// The page shown when the UI has not been built.
 const STAND_IN: &str = "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\
-<title>AppyTappy setup</title></head><body><p>The setup UI is not built. Run \
+<title>AppyTappy Setup</title></head><body><p>The setup UI is not built. Run \
 <code>mise run ui:build</code>, then build this program again.</p></body></html>\n";
 
 fn main() -> io::Result<()> {

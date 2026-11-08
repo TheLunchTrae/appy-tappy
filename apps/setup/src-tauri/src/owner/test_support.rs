@@ -66,7 +66,7 @@ impl Host for FakeHost {
         let own = WindowEntry {
             handle: 8,
             process: ProcessId::new(OWN_PROCESS),
-            title: "AppyTappy setup".to_owned(),
+            title: "AppyTappy Setup".to_owned(),
             class: "SetupWindow".to_owned(),
             visible: true,
             // Elsewhere on the screen, so an overlay that followed it

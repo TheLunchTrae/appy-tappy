@@ -7,10 +7,20 @@ does not need administrator rights.
 
 1. Download the installer, the `.exe` file attached to the
    [latest release](https://github.com/TheLunchTrae/appy-tappy/releases/latest).
-2. Run it. AppyTappy is not signed, so the first time, Windows shows a
+2. Optionally, check that the installer came from AppyTappy's own release
+   before you run it. Install the [GitHub CLI](https://cli.github.com/), then
+   run this in the folder you downloaded it to, with your installer's file
+   name. It prints **Verification succeeded!** for an installer from a
+   release.
+
+   ```sh
+   gh attestation verify AppyTappy_0.1.0_x64-setup.exe -R TheLunchTrae/appy-tappy
+   ```
+
+3. Run the installer. AppyTappy is not signed, so the first time, Windows shows a
    **Windows protected your PC** warning. Select **More info**, then
    **Run anyway**.
-3. Follow the installer's steps. Its last page can open AppyTappy Setup for
+4. Follow the installer's steps. Its last page can open AppyTappy Setup for
    you.
 
 Installing does three things:
