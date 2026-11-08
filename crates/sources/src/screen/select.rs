@@ -393,6 +393,20 @@ mod tests {
     }
 
     #[test]
+    fn neighbors_stay_inside_the_picture() {
+        let size = Size {
+            width: 3,
+            height: 2,
+        };
+        assert_eq!(
+            neighbors(1, 0, size).collect::<Vec<_>>(),
+            [(0, 0), (2, 0), (1, 1)]
+        );
+        // The bottom right corner has nothing to its right or below.
+        assert_eq!(neighbors(2, 1, size).collect::<Vec<_>>(), [(1, 1), (2, 0)]);
+    }
+
+    #[test]
     fn grow_spreads_over_similar_colors_and_fills_holes() {
         let image = picture(SHIELD);
         let selection = grow(&image, 3, 2, 24).unwrap();
