@@ -27,6 +27,11 @@ const RENAME_ATTEMPTS: u32 = 5;
 /// How long a write waits between those tries.
 const RENAME_WAIT: Duration = Duration::from_millis(50);
 
+/// How long a temporary file from another run is left alone before a save
+/// removes it: far longer than any write takes, so a write that another copy
+/// of the program still has under way is never removed.
+const LEFTOVER_AGE: Duration = Duration::from_mins(10);
+
 /// The longest application ID, in bytes.
 const MAX_ID_LEN: usize = 48;
 
@@ -301,15 +306,25 @@ fn is_leftover(name: &str, own: u32) -> bool {
         })
 }
 
-/// Removes the leftover temporary files in `folder`, as far as it can: one
-/// that stays is tried again by the next save.
+/// Removes the leftover temporary files in `folder` that have not changed
+/// for [`LEFTOVER_AGE`], as far as it can: one that stays is tried again by
+/// the next save.
 fn remove_leftovers(folder: &Path) {
     let own = process::id();
+    let now = SystemTime::now();
     for entry in fs::read_dir(folder).into_iter().flatten().flatten() {
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| is_leftover(name, own))
+        let old = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| {
+                now.duration_since(modified)
+                    .is_ok_and(|age| age >= LEFTOVER_AGE)
+            });
+        if old
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| is_leftover(name, own))
         {
             #[expect(
                 clippy::let_underscore_must_use,
@@ -584,6 +599,19 @@ mod tests {
         fs::remove_dir_all(root).expect("clean up");
     }
 
+    /// Makes the file at `path` look untouched for longer than
+    /// [`LEFTOVER_AGE`].
+    fn age(path: &Path) {
+        let then = SystemTime::now()
+            .checked_sub(LEFTOVER_AGE.saturating_add(Duration::from_secs(1)))
+            .expect("the clock is past the epoch by more than that");
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|file| file.set_modified(then))
+            .expect("dates the file");
+    }
+
     #[test]
     fn a_save_removes_temporaries_that_another_run_left_behind() {
         let other = process::id().wrapping_add(1);
@@ -601,8 +629,12 @@ mod tests {
         fs::create_dir_all(&folder).expect("create");
         let left = format!("app.json.{other}-1700.tmp");
         let writing = format!("sample-1.png.{own}-1700.tmp");
-        for name in [&left, &writing] {
+        let fresh = format!("sample-2.png.{other}-1700.tmp");
+        for name in [&left, &writing, &fresh] {
             fs::write(folder.join(name), b"x").expect("writes");
+        }
+        for name in [&left, &writing] {
+            age(&folder.join(name));
         }
         apps.save(
             "app",
@@ -610,12 +642,17 @@ mod tests {
             &[("kept.png".to_owned(), vec![1])],
         )
         .expect("saves");
-        assert!(!folder.join(&left).exists(), "another run's goes");
+        assert!(!folder.join(&left).exists(), "another run's old one goes");
         assert!(folder.join(&writing).exists(), "this run's stays");
+        assert!(
+            folder.join(&fresh).exists(),
+            "another copy's write under way stays"
+        );
 
         let automations = AutomationStore::new(root.join("automations.json"));
         let beside = root.join(format!("automations.json.{other}-1700.tmp"));
         fs::write(&beside, b"x").expect("writes");
+        age(&beside);
         automations
             .save(&AutomationsFile::default())
             .expect("saves");

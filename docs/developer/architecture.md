@@ -542,10 +542,11 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   Tauri's plugin for a key press that works while another window has focus,
   which the setup app uses for its screenshot shortcut.
 - **[`tauri-plugin-single-instance`](https://v2.tauri.app/plugin/single-instance/).**
-  Tauri's plugin that keeps one copy of the setup app running and tells it
-  when another starts, so the second copy can hand over and exit. A named
-  mutex like the runtime's would find the running copy too, but bringing its
-  window forward would also need a message between the two processes.
+  Tauri's plugin that keeps one copy of the setup app running, so two copies
+  never save over each other or open the same overlays. A second copy tells
+  the first to bring its window forward and exits before it opens a window. A
+  named mutex like the runtime's would find the running copy too, but bringing
+  its window forward would also need a message between the two processes.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
   many random inputs to check a property, such as "a compiled config reads back
   to the same value". The standards require it at trust boundaries such as file
