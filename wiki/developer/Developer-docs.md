@@ -38,8 +38,8 @@ To get an installer of a branch without a release, use one of these:
   the setup app from source.
 - [Screen regions](Screen-regions.md): the checks, read intervals, capture, and
   why AppyTappy does not use OCR.
-- [Rules](Rules.md): conditions, triggers, re-arming, restoring, and how the
-  engine evaluates them.
+- [Rules](Rules.md): conditions, firing and re-arming, cooldowns, restoring,
+  and how the engine evaluates them.
 - [Actions](Actions.md): media, volume, key press, open, and sound actions,
   and how restoring works.
 - [Trace](Trace.md): the runtime trace, its file format, and what recording

@@ -45,9 +45,9 @@ parts fit.
   application, a value, a reference, an anti-cheat class, an automation, or the
   settings; saving only an overlay's settings does not tell it.
   `appytappy-config` calls each one an authoring file.
-- **Session.** One run of an application, from its start to its exit, or until
-  the runtime stops it for a pause or a config change. Rule state resets with
-  each session.
+- **Session.** One run of an application's automations: from when they start
+  (the application starts, automations are turned on, or a reload changes what
+  it runs) until they stop. Rule state resets with each session.
 - **Setup app.** The program the user opens to discover signals, build rules,
   and save its files.
 - **Signal.** A named, typed value an application exposes, such as `progress`
