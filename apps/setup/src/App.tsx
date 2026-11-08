@@ -19,7 +19,7 @@ import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
-import type { Held } from './lib/unsaved.ts';
+import { type Held, onLeave } from './lib/unsaved.ts';
 
 type Page = 'automations' | 'applications' | 'values' | 'references';
 
@@ -111,19 +111,17 @@ export function App() {
   };
   // A tab leaves an open flow only once the user agrees to lose its work, and never while it saves.
   const pressTab = (target: Page): void => {
-    if (flow === null) {
-      setPage(target);
-      return;
+    switch (onLeave(held)) {
+      case 'leave':
+        goTo(target);
+        break;
+      case 'ask':
+        setLeaving(target);
+        setAskedFor(target);
+        break;
+      case 'wait':
+        break;
     }
-    if (held === 'saving') {
-      return;
-    }
-    if (held === 'unsaved') {
-      setLeaving(target);
-      setAskedFor(target);
-      return;
-    }
-    goTo(target);
   };
   // A save closes its own flow, and nothing once the user has left it for another.
   const saved = (opened: Flow, target: Page): void => {
@@ -286,6 +284,7 @@ export function App() {
             label="Leave without saving?"
             keepLabel="Stay"
             actLabel="Leave"
+            busy={held === 'saving'}
             onKeep={() => {
               setLeaving(null);
             }}

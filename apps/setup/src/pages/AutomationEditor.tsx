@@ -619,7 +619,7 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
           <span className="warn" role="alert">
             {saveError ?? ''}
           </span>
-          <button type="button" className="btn" onClick={onCancel}>
+          <button type="button" className="btn" disabled={saving} onClick={onCancel}>
             Cancel
           </button>
           <button

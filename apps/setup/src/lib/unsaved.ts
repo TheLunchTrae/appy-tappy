@@ -51,6 +51,21 @@ export function held(saving: boolean, start: unknown, now: unknown): Held {
   return sameContent(start, now) ? 'nothing' : 'unsaved';
 }
 
+/** What a press that leaves a flow does: leave at once, ask first, or wait for the save. */
+export type Leave = 'leave' | 'ask' | 'wait';
+
+/** What a press that leaves a flow holding `now` does: work not saved is lost only once the user agrees. */
+export function onLeave(now: Held): Leave {
+  switch (now) {
+    case 'nothing':
+      return 'leave';
+    case 'unsaved':
+      return 'ask';
+    case 'saving':
+      return 'wait';
+  }
+}
+
 /** Tells `report` what the flow holds whenever that changes, and that it holds nothing once the flow goes. */
 export function useReportHeld(report: (held: Held) => void, now: Held): void {
   useEffect(() => {
