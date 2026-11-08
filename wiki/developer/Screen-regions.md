@@ -129,7 +129,8 @@ the window closes, the capture tells its handler and stops. It does the same
 when it can no longer produce frames: when the graphics device is lost, such
 as after a driver reset or update, and when it cannot follow the window to a
 new size. A lost device can stop frames altogether, so while no frame comes,
-the capture checks its device every two seconds.
+the capture checks its device every `DEVICE_CHECK`
+(`crates/sources/src/win/capture.rs`).
 
 Each frame carries the time since the system composed it. The benchmark uses
 that to report capture-to-decision latency on a live window:

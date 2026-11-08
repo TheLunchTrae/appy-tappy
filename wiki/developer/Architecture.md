@@ -151,16 +151,17 @@ Each thread below is a plain `std::thread`, and each channel is a
   and the owner forgets the application's values, so no rule acts on a value
   nobody can see. Each rule stays as it was, run or not, until the values read
   next decide its condition. When the window closes, when the capture cannot
-  go on, such as after the graphics device was lost, and after five frames in
-  a row fail, it sends `Unseen` and looks for the window again. After failing
-  frames it waits first: a second, doubling up to 30 seconds while each new
-  capture fails before reading a frame, and it logs the failure once until it
-  changes. Every two seconds it checks that the window still shows and that
-  no other window fits better, such as the main window opening after a
-  launcher's, and looks again if not. Among windows that fit equally well, it
-  takes one that shows over a minimized one. While no window fits, or every
-  one that fits best is minimized, it looks once a second, until the
-  application exits.
+  go on, such as after the graphics device was lost, and after
+  `RESTART_AFTER` frames in a row fail, it sends `Unseen` and looks for the
+  window again. After a capture ends that way it waits first, from
+  `FIND_AGAIN`, doubling up to `RESTART_WAIT_MAX` while each new capture ends
+  before reading a frame, and it logs why once until the reason changes.
+  Every `CHECK_AGAIN` it checks that the window still shows and that no other
+  window fits better, such as the main window opening after a launcher's,
+  and looks again if not. Among windows that fit equally well, it takes one
+  that shows over a minimized one. While no window fits, or every one that
+  fits best is minimized, it looks every `FIND_AGAIN`, until the application
+  exits. The constants are in `apps/runtime/src/workers/reader.rs`.
   Other kinds of source, such as a log tail or a memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends

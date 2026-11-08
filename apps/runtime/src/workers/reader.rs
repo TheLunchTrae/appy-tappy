@@ -7,8 +7,11 @@
 //! Then it captures one region of the window: the smallest rectangle that
 //! holds the regions of every value drawn at the window's current size, so
 //! the capture copies no more pixels than the values need. Windows pushes a
-//! frame only when the window's content changes, so a still window costs
-//! nothing, and the [`ReadSchedule`] backs off while the values hold still.
+//! frame only when the window's content changes, so a still window is
+//! copied no more, and the [`ReadSchedule`] backs off while the values hold
+//! still. What a still window costs is the checks below: the reader lists
+//! the processes and windows every [`CHECK_AGAIN`], and the capture checks
+//! its graphics device on a timer while no frame comes.
 //! A value is sent to the owner only when it reads differently from its last
 //! read.
 //!
@@ -21,17 +24,17 @@
 //! many applications replace their window as they run, such as when they
 //! switch to full screen. A capture ends when the window closes, when the
 //! capture cannot go on, such as after the graphics device was lost, and
-//! after [`RESTART_AFTER`] frames in a row fail. After failing frames, the
-//! reader waits before it captures again, from [`FIND_AGAIN`] up to
-//! [`RESTART_WAIT_MAX`], doubling while each new capture fails before it reads
-//! a frame, and logs the failure once until it changes. While capturing, the reader
+//! after [`RESTART_AFTER`] frames in a row fail. After a capture ends this
+//! way, the reader waits before it captures again, from [`FIND_AGAIN`] up to
+//! [`RESTART_WAIT_MAX`], doubling while each new capture ends before it reads
+//! a frame, and logs why once until the reason changes. While capturing, the reader
 //! checks every [`CHECK_AGAIN`] that the window still shows and still fits
 //! the application best, because a hidden window sends no frames and no
 //! close, and the application may open a better window, such as its main
 //! window after a launcher. While no window fits, or the one that fits best
 //! is minimized, it looks again every [`FIND_AGAIN`]. Each time a capture
 //! ends, the values it read can no longer be seen, so the reader sends
-//! [`Reading::Unseen`].
+//! [`Reading::Unseen`], and the capture's handler sends nothing more.
 
 use std::io;
 use std::sync::Arc;
@@ -101,9 +104,11 @@ pub(crate) enum Reading {
         /// What is wrong, as a sentence fragment for the log.
         problem: String,
     },
-    /// The values read so far can no longer be seen: the window closed or
-    /// changed size. Rules on them should forget them rather than hold their
-    /// last readings.
+    /// The values read so far can no longer be seen, because their capture
+    /// ended: the window closed, changed size, was minimized or hidden, or
+    /// gave way to a window that fits better, or the capture lost its
+    /// graphics device or its frames kept failing. Rules on them should
+    /// forget them rather than hold their last readings.
     Unseen {
         /// The session.
         session: SessionId,
@@ -115,8 +120,9 @@ pub(crate) enum Reading {
 enum Control {
     /// The session ended.
     Stop,
-    /// The capture ended, such as when the window closed.
-    Lost,
+    /// The capture ended, such as when the window closed, and this says
+    /// why, for the log.
+    Lost(String),
     /// The window took a size at which other values were drawn, so the
     /// capture starts again for those.
     Resized(Size),
@@ -127,30 +133,36 @@ enum Control {
     Recovered,
 }
 
-/// How the reader recovers from captures whose frames keep failing.
+/// How the reader recovers from captures that end because they fail.
 #[derive(Debug)]
 struct Recovery {
-    /// The error that last made frames fail, until a capture reads a frame.
-    failing: Option<String>,
-    /// How long to wait before the next capture after failing frames.
+    /// Why the last capture ended, until a capture reads a frame.
+    problem: Option<String>,
+    /// The error that made the last capture's frames fail, which they
+    /// logged already.
+    frame_error: Option<String>,
+    /// How long to wait before the next capture.
     wait: Duration,
 }
 
 impl Recovery {
     const fn new() -> Self {
         Self {
-            failing: None,
+            problem: None,
+            frame_error: None,
             wait: FIND_AGAIN,
         }
     }
 
-    /// Notes that frames keep failing with `error`. Returns the wait before
-    /// the next capture, and whether `error` is new, so it is logged.
-    fn failed(&mut self, error: String) -> (Duration, bool) {
-        let new = self.failing.as_ref() != Some(&error);
+    /// Notes that a capture ended for `problem`, after frames that failed
+    /// with `frame_error`, if any. Returns the wait before the next capture,
+    /// and whether `problem` is new, so it is logged.
+    fn failed(&mut self, problem: String, frame_error: Option<String>) -> (Duration, bool) {
+        let new = self.problem.as_ref() != Some(&problem);
         let wait = self.wait;
         self.wait = self.wait.saturating_mul(2).min(RESTART_WAIT_MAX);
-        self.failing = Some(error);
+        self.problem = Some(problem);
+        self.frame_error = frame_error;
         (wait, new)
     }
 
@@ -222,8 +234,10 @@ fn send<E: From<Reading>>(events: &Sender<E>, reading: Reading) -> bool {
     events.send(E::from(reading)).is_ok()
 }
 
-/// The reader thread: finds the window, captures it until it closes, takes
-/// another size, or the session stops, and looks again after it closes.
+/// The reader thread: finds the window that fits best and shows, and
+/// captures it until the capture ends, the window takes another size, is
+/// hidden or gives way to a better one, or the session stops. Then it sends
+/// [`Reading::Unseen`] and looks again, after a wait when the capture failed.
 fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
     system: &S,
     job: &Job,
@@ -265,11 +279,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 continue;
             },
             Ok(Found::Nothing) => {
-                let problem = format!(
-                    "no window of {} fits {}'s window yet",
-                    job.executable, job.plan.name
-                );
-                if !report(&mut reported, problem) || !wait() {
+                if !report(&mut reported, no_window(job)) || !wait() {
                     return;
                 }
                 continue;
@@ -285,7 +295,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         let Some(mut frames) = FrameReader::new(job, size, events.clone(), lost.clone()) else {
             return;
         };
-        frames.carry(recovery.failing.as_deref());
+        frames.carry(&recovery);
         let crop = Crop::Region(frames.bounds);
         let throttle = ReadInterval::DEFAULT.min();
         let handler = Box::new(move |frame: io::Result<Frame<'_>>| frames.handle(frame));
@@ -304,7 +314,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         if let Err(error) = session.close() {
             report(&mut reported, format!("its capture ended badly: {error}"));
         }
-        if stopped_meanwhile(control) {
+        if stopped_meanwhile(control, &mut recovery) {
             return;
         }
         match next {
@@ -319,14 +329,20 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                     return;
                 }
             },
-            Ok(Control::Lost | Control::Recovered) => {},
+            Ok(Control::Recovered) => {},
             Ok(Control::Resized(resized)) => size = resized,
+            Ok(Control::Lost(problem)) => {
+                let (pause_for, new) = recovery.failed(problem.clone(), None);
+                if (new && !report(&mut reported, problem)) || !pause(control, pause_for) {
+                    return;
+                }
+            },
             Ok(Control::Failing(error)) => {
-                let (pause_for, new) = recovery.failed(error.clone());
                 let problem = format!(
                     "{RESTART_AFTER} frames in a row cannot be read, so its capture starts \
                      again: {error}"
                 );
+                let (pause_for, new) = recovery.failed(problem.clone(), Some(error));
                 if (new && !report(&mut reported, problem)) || !pause(control, pause_for) {
                     return;
                 }
@@ -337,11 +353,16 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
 }
 
 /// Empties `control` of what a closed capture sent after the control that
-/// ended it, which is moot now, and says whether a stop came meanwhile.
-fn stopped_meanwhile(control: &Receiver<Control>) -> bool {
+/// ended it, which is moot now, and says whether a stop came meanwhile. A
+/// capture that read a frame meanwhile still counts as recovered.
+fn stopped_meanwhile(control: &Receiver<Control>, recovery: &mut Recovery) -> bool {
     let mut stopped = false;
     for left in control.try_iter() {
-        stopped |= left == Control::Stop;
+        match left {
+            Control::Stop => stopped = true,
+            Control::Recovered => recovery.recovered(),
+            Control::Lost(_) | Control::Resized(_) | Control::Failing(_) => {},
+        }
     }
     stopped
 }
@@ -421,6 +442,13 @@ fn minimized(job: &Job) -> String {
     format!("{}'s window is minimized or hidden", job.plan.name)
 }
 
+fn no_window(job: &Job) -> String {
+    format!(
+        "no window of {} fits {}'s window yet",
+        job.executable, job.plan.name
+    )
+}
+
 /// Why the reader should stop capturing `window` and look again, or `None`
 /// while it still shows and fits the app as well as any window. A check
 /// that fails keeps the capture.
@@ -430,6 +458,9 @@ fn moved_on<S: System>(system: &S, job: &Job, window: u64) -> Option<String> {
     }
     let processes = system.processes().ok()?;
     let best = best_windows(&job.plan.window, processes, system.windows().ok()?);
+    if best.is_empty() {
+        return Some(no_window(job));
+    }
     (!best.iter().any(|entry| entry.handle == window)).then(|| {
         format!(
             "another window fits {}'s window better, so it is read instead",
@@ -464,6 +495,10 @@ struct FrameReader<E> {
     restarted: bool,
     /// Whether it sent a reading since it last sent [`Reading::Unseen`].
     seen: bool,
+    /// Whether it told the reader that its capture ended. The capture can
+    /// still hand it frames until the reader closes it, and it reads none
+    /// of them, so nothing it sends follows the reader's `Unseen`.
+    ended: bool,
     schedule: ReadSchedule,
     events: Sender<E>,
     control: Sender<Control>,
@@ -497,6 +532,7 @@ impl<E: From<Reading>> FrameReader<E> {
             failures: 0,
             restarted: false,
             seen: false,
+            ended: false,
             schedule: ReadSchedule::new(ReadInterval::DEFAULT),
             events,
             control,
@@ -505,12 +541,14 @@ impl<E: From<Reading>> FrameReader<E> {
 
     /// Reads `frame` and returns how long to wait before the next one.
     fn handle(&mut self, frame: io::Result<Frame<'_>>) -> Duration {
+        if self.ended {
+            return FIND_AGAIN;
+        }
         let (window_size, frame) = match frame {
             Ok(frame) => (frame.window_size, Some(frame)),
             Err(error) if error.kind() == io::ErrorKind::NotConnected => {
                 self.unseen();
-                self.problem(format!("its capture ended: {error}"));
-                self.tell(Control::Lost);
+                self.tell(Control::Lost(format!("its capture ended: {error}")));
                 return Duration::ZERO;
             },
             Err(error) => match OutsideWindow::in_error(&error) {
@@ -566,11 +604,11 @@ impl<E: From<Reading>> FrameReader<E> {
         })
     }
 
-    /// Notes that the reader started this capture again because frames
-    /// failed with `failing`, which was logged already.
-    fn carry(&mut self, failing: Option<&str>) {
-        self.restarted = failing.is_some();
-        self.frame_problem = failing.map(frame_problem);
+    /// Notes whether the reader started this capture again after the last
+    /// one failed, and the frame error it logged already.
+    fn carry(&mut self, recovery: &Recovery) {
+        self.restarted = recovery.problem.is_some();
+        self.frame_problem = recovery.frame_error.as_deref().map(frame_problem);
     }
 
     /// Says once that frames cannot be read, until another problem or a
@@ -673,7 +711,15 @@ impl<E: From<Reading>> FrameReader<E> {
         }
     }
 
-    fn tell(&self, control: Control) {
+    /// Tells the reader `control`; once that ends the capture, it reads no
+    /// more frames.
+    fn tell(&mut self, control: Control) {
+        if matches!(
+            control,
+            Control::Lost(_) | Control::Resized(_) | Control::Failing(_)
+        ) {
+            self.ended = true;
+        }
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed send means the reader already stopped"
@@ -995,7 +1041,12 @@ mod tests {
         let mut frames = FrameReader::new(&icon, WINDOW, events, control).expect("values to read");
         let closed = io::Error::new(io::ErrorKind::NotConnected, "the captured window closed");
         assert_eq!(frames.handle(Err(closed)), Duration::ZERO);
-        assert_eq!(told.try_recv(), Ok(Control::Lost));
+        assert_eq!(
+            told.try_recv(),
+            Ok(Control::Lost(
+                "its capture ended: the captured window closed".to_owned()
+            ))
+        );
         let nothing = FrameReader::new(
             &job(Vec::new()),
             WINDOW,
@@ -1048,12 +1099,36 @@ mod tests {
                 },
             ]
         );
+        assert_eq!(frames.handle(Ok(frame(&red, WINDOW))), FIND_AGAIN);
         frames.handle(failed());
         assert_eq!(
-            told.try_recv(),
+            readings.try_recv(),
             Err(TryRecvError::Empty),
-            "the count starts again after a restart"
+            "the capture ended, so what it hands over until it closes is not read"
         );
+        assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    #[test]
+    fn a_capture_that_ended_reads_nothing_more() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, told) = mpsc::channel();
+        let values = || vec![red_at("icon", 0, 0), drawn_at("small", 0, 0, SMALL)];
+        let red = frame_image(2, 2, |_, _| true);
+        let closed = || Err(io::Error::new(io::ErrorKind::NotConnected, "closed"));
+        for ending in [closed(), outside(SMALL)] {
+            let mut frames =
+                FrameReader::new(&job(values()), WINDOW, events.clone(), control.clone())
+                    .expect("values to read");
+            frames.handle(Ok(frame(&red, WINDOW)));
+            frames.handle(ending);
+            assert!(told.try_recv().is_ok(), "the capture ended");
+            readings.try_iter().for_each(drop);
+            frames.handle(Ok(frame(&red, WINDOW)));
+            frames.handle(closed());
+            assert_eq!(readings.try_recv(), Err(TryRecvError::Empty));
+            assert_eq!(told.try_recv(), Err(TryRecvError::Empty));
+        }
     }
 
     #[test]
@@ -1062,7 +1137,12 @@ mod tests {
         let (control, told) = mpsc::channel();
         let icon = job(vec![red_at("icon", 0, 0)]);
         let mut frames = FrameReader::new(&icon, WINDOW, events, control).expect("values to read");
-        frames.carry(Some("the copy failed"));
+        let mut recovery = Recovery::new();
+        recovery.failed(
+            "the capture starts again".to_owned(),
+            Some("the copy failed".to_owned()),
+        );
+        frames.carry(&recovery);
         frames.handle(Err(io::Error::other("the copy failed")));
         assert_eq!(problems(&readings), Vec::<String>::new(), "logged already");
         let red = frame_image(2, 2, |_, _| true);
@@ -1074,7 +1154,8 @@ mod tests {
     #[test]
     fn recovery_waits_longer_after_each_failure_until_a_frame_is_read() {
         let mut recovery = Recovery::new();
-        let failed = |recovery: &mut Recovery, error: &str| recovery.failed(error.to_owned());
+        let failed =
+            |recovery: &mut Recovery, problem: &str| recovery.failed(problem.to_owned(), None);
         assert_eq!(failed(&mut recovery, "lost"), (FIND_AGAIN, true));
         assert_eq!(
             failed(&mut recovery, "lost"),
@@ -1529,6 +1610,11 @@ mod tests {
             None,
             "a failing check keeps the capture"
         );
+        assert_eq!(
+            check(4, Ok(vec![window(1, 7, "Main window", true)]), Vec::new()).as_deref(),
+            Some("no window of Example.exe fits Example App's window yet"),
+            "every window that fits closed"
+        );
     }
 
     #[test]
@@ -1542,10 +1628,12 @@ mod tests {
         let (first, _, handler) = desk.capture();
         assert_eq!(first, 4);
         desk.answer(Ok(desktop()));
+        // A reader that moved on would say why before it looks again.
+        let next = desk.lists.recv_timeout(PATIENCE).expect("the next check");
         assert_eq!(
             readings.try_recv(),
             Err(TryRecvError::Empty),
-            "4 still fits"
+            "4 still fits, so it checks again"
         );
         let better = || {
             vec![
@@ -1553,7 +1641,7 @@ mod tests {
                 window(5, 43, "Main window", true),
             ]
         };
-        desk.answer(Ok(better()));
+        next.send(Ok(better())).expect("the reader waits");
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Problem {
@@ -1579,15 +1667,26 @@ mod tests {
     #[test]
     fn what_a_closed_capture_sent_is_dropped_but_a_stop_counts() {
         let (control, received) = mpsc::channel();
-        for left in [Control::Lost, Control::Resized(SMALL), Control::Recovered] {
+        let lost = || Control::Lost("closed".to_owned());
+        let mut recovery = Recovery::new();
+        recovery.failed("closed".to_owned(), None);
+        for left in [
+            lost(),
+            Control::Resized(SMALL),
+            Control::Failing("x".to_owned()),
+        ] {
             control.send(left).expect("send");
         }
-        assert!(!stopped_meanwhile(&received));
+        assert!(!stopped_meanwhile(&received, &mut recovery));
         assert_eq!(received.try_recv(), Err(TryRecvError::Empty));
-        for left in [Control::Stop, Control::Lost, Control::Stop] {
+        assert_eq!(recovery.wait, Duration::from_secs(2), "still failing");
+        control.send(Control::Recovered).expect("send");
+        assert!(!stopped_meanwhile(&received, &mut recovery));
+        assert_eq!(recovery.wait, FIND_AGAIN, "a frame was read meanwhile");
+        for left in [Control::Stop, lost(), Control::Stop] {
             control.send(left).expect("send");
         }
-        assert!(stopped_meanwhile(&received));
+        assert!(stopped_meanwhile(&received, &mut recovery));
         assert_eq!(received.try_recv(), Err(TryRecvError::Empty));
     }
 
@@ -1595,7 +1694,11 @@ mod tests {
     fn a_capture_whose_frames_keep_failing_starts_again_after_a_wait() {
         let (system, desk) = FakeSystem::new();
         let (events, readings) = mpsc::channel::<Reading>();
-        let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
+        // No check of the captured window comes in the test, so every window
+        // list it answers is one the reader asked for to capture again.
+        let check = Duration::from_secs(60);
+        let reader = Reader::checking_every(check, system, job(vec![red_at("icon", 0, 0)]), events)
+            .expect("start");
         let fail_all = |handler: &mut FrameHandler| {
             for _ in 0..RESTART_AFTER {
                 handler(Err(io::Error::other("the copy failed")));
