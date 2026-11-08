@@ -1,6 +1,6 @@
-//! The messages the owner's thread receives and the answers it sends back: the
-//! interface's requests, the frames its captures hand over, and the shapes both
-//! travel in.
+//! The messages the owner's thread receives and the answers it sends back:
+//! the work commands and overlay windows send it, the frames its captures hand
+//! over, and the shapes both travel in.
 
 use std::fmt;
 use std::time::Instant;
@@ -159,8 +159,9 @@ pub(crate) struct AppSummary {
     pub(crate) running: Option<BuildDef>,
 }
 
-/// A command from the UI: work for the owner thread, which runs it with the
-/// state and sends its own answer, as [`ask`](crate::commands) builds it.
+/// Work for the owner thread, from a command or an overlay window, which it
+/// runs with the state and which sends its own answer, as
+/// [`ask`](crate::commands) builds it.
 pub(crate) struct Run<H: Host>(Work<H>);
 
 /// Work for the owner thread, which answers on its own if it answers.
@@ -206,7 +207,7 @@ impl<H: Host> fmt::Debug for Run<H> {
 /// except in the tests.
 #[derive(Debug)]
 pub(crate) enum Message<H: Host = HostSystem> {
-    /// A command from the UI.
+    /// Work from a command or an overlay window.
     Run(Run<H>),
     /// The capture with this generation sent a frame.
     Frame {
@@ -325,7 +326,6 @@ mod tests {
             owner.stop();
             sender.send(()).expect("test listens");
         });
-        assert_eq!(format!("{run:?}"), "Run");
         assert!(harness.owner.handle(Message::Run(run)).is_continue());
         assert_eq!(told.try_recv(), Ok(()));
     }

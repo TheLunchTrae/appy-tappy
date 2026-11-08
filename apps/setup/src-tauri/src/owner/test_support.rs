@@ -251,8 +251,8 @@ pub(super) fn frame_image() -> Image {
 }
 
 impl Harness {
-    /// Runs `command` on the owner, as a command does, and returns its
-    /// answer.
+    /// Calls `command` on the owner directly and returns its answer. How a
+    /// `Run` reaches the owner is tested in `messages.rs`.
     pub(super) fn ask<T>(&mut self, command: impl FnOnce(&mut Owner<FakeHost>) -> T) -> T {
         command(&mut self.owner)
     }

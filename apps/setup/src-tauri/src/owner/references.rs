@@ -4,7 +4,7 @@
 
 use std::fs;
 
-use appytappy_config::app_file::{new_reference_id, reference_id};
+use appytappy_config::app_file::{AppFile, new_reference_id, reference_id};
 use appytappy_sources::screen::Image;
 
 use crate::check_spec::{self, ReferenceRef, SavedReference, Session};
@@ -126,17 +126,26 @@ impl<H: Host> Owner<H> {
     /// Removes the reference `reference` of the application `app` and its
     /// pictures, unless a value reads with it.
     pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
-        let deleted = self.delete_reference_files(app, reference);
-        self.after(Changed::Values, deleted)
+        // A reference already gone changed nothing, so no one is told.
+        let Some(file) = self.delete_reference_files(app, reference)? else {
+            return Ok(());
+        };
+        self.tell(Changed::Values);
+        self.prune(app, &file)
     }
 
-    /// Removes the reference `reference` and its pictures, without telling
-    /// anyone.
-    fn delete_reference_files(&self, app: &str, reference: &str) -> Result<(), String> {
+    /// Removes the reference `reference` from the application's file,
+    /// without telling anyone, and answers the file as saved, or `None`
+    /// when the file had no such reference.
+    fn delete_reference_files(
+        &self,
+        app: &str,
+        reference: &str,
+    ) -> Result<Option<AppFile>, String> {
         let store = &self.stores()?.apps;
         let mut file = self.stores()?.app_file(app)?;
         let Some(saved) = file.reference(reference) else {
-            return Ok(());
+            return Ok(None);
         };
         let users: Vec<&str> = file
             .values
@@ -162,8 +171,8 @@ impl<H: Host> Owner<H> {
         file.references.retain(|saved| saved.id != reference);
         store
             .save(app, &file, &[])
-            .and_then(|()| store.prune(app, &file))
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok(Some(file))
     }
 }
 
@@ -359,11 +368,15 @@ mod tests {
             harness.ask(delete("digits")),
             Err("Progress reads with Red digits. Change or remove it first.".to_owned())
         );
+        let _saved_before = harness.reloads();
         harness
             .ask(|owner| owner.delete("example", "progress"))
             .expect("removes the value");
+        assert_eq!(harness.reloads(), 1, "the runtime reads the values again");
         assert_eq!(harness.ask(delete("digits")), Ok(()));
+        assert_eq!(harness.reloads(), 1, "and the references");
         assert_eq!(harness.ask(delete("digits")), Ok(()), "already gone");
+        assert_eq!(harness.reloads(), 0, "nothing changed");
         assert!(!folder.join("ref-digits-1.png").exists());
         let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
@@ -386,9 +399,11 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let _saved_before = harness.reloads();
         harness
             .ask(|owner| owner.save_reference(&reference("example", "Digits", None)))
             .expect("saves");
+        assert_eq!(harness.reloads(), 1, "the runtime reads the references");
         std::fs::remove_file(root.join("apps").join("example").join("ref-digits-1.png"))
             .expect("remove the picture");
         assert_eq!(
