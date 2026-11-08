@@ -256,9 +256,16 @@ impl Trace {
     }
 }
 
+/// How long a test waits for another thread: twice the 4 s that Windows can
+/// leave a starved lowest-priority thread, such as the writer, unscheduled,
+/// and short enough that a test that waits twice still ends within the
+/// mutation runs' timeout of about 30 s.
+#[cfg(test)]
+pub(crate) const PATIENCE: Duration = Duration::from_secs(8);
+
 /// Runs `work` on another thread and returns what it returns, or panics
-/// when that takes more than five seconds, so a test whose writer never
-/// stops fails rather than hangs.
+/// after [`PATIENCE`], so a test whose writer never stops fails rather than
+/// hangs.
 #[cfg(test)]
 pub(crate) fn within<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
     let (done, finished) = std::sync::mpsc::channel();
@@ -270,8 +277,18 @@ pub(crate) fn within<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'stati
         let _ = done.send(work());
     });
     finished
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the work finished within five seconds")
+        .recv_timeout(PATIENCE)
+        .expect("the work finished in time")
+}
+
+/// Waits until `done` holds, or panics with `what` after [`PATIENCE`].
+#[cfg(test)]
+pub(crate) fn eventually(what: &str, mut done: impl FnMut() -> bool) {
+    let patience = Instant::now().checked_add(PATIENCE).expect("in range");
+    while !done() {
+        assert!(Instant::now() < patience, "{what}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// The records that reached `received`, a receiver from [`Trace::for_test`],

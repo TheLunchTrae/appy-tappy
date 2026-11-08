@@ -476,13 +476,7 @@ mod tests {
 
     /// Waits until `thread` ends, so its writer reads as done stopping.
     fn ended_thread(thread: std::thread::JoinHandle<()>) -> Stopping {
-        let patience = Instant::now()
-            .checked_add(Duration::from_secs(5))
-            .expect("in range");
-        while !thread.is_finished() {
-            assert!(Instant::now() < patience, "the thread ended");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::trace::eventually("the thread ended", || thread.is_finished());
         Stopping::of(thread)
     }
 
@@ -528,15 +522,31 @@ mod tests {
             .expect("starts");
         switch.apply(&TraceDef::default(), at, &reports, &mut scratch.log);
         assert_eq!(switch.stopping.len(), 1, "one writer stopping");
-        let patience = Instant::now()
-            .checked_add(Duration::from_secs(5))
-            .expect("in range");
-        while !switch.stopping.iter().all(Stopping::is_finished) {
-            assert!(Instant::now() < patience, "the writer stopped");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::trace::eventually("the writer stopped", || {
+            switch.stopping.iter().all(Stopping::is_finished)
+        });
         assert_eq!(switch.expire(Instant::now(), &mut scratch.log), None);
         assert!(switch.stopping.is_empty(), "the writer was reaped");
+    }
+
+    #[test]
+    fn a_writer_still_stopping_is_left_to_finish() {
+        let mut scratch = Scratch::new("still-stopping");
+        let mut switch = Switch::new(scratch.traces());
+        let (go, wait) = mpsc::channel::<()>();
+        switch
+            .stopping
+            .push(Stopping::of(std::thread::spawn(move || {
+                wait.recv().expect("told to end");
+            })));
+        // Reaping a writer that still runs would block the owner thread.
+        let (switch, scratch) = within(move || {
+            switch.expire(Instant::now(), &mut scratch.log);
+            (switch, scratch)
+        });
+        assert_eq!(switch.stopping.len(), 1, "the writer is left running");
+        go.send(()).expect("send");
+        drop(scratch);
     }
 
     #[test]

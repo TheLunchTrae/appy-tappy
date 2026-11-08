@@ -798,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn the_writer_flushes_about_once_a_second_while_it_runs() {
+    fn the_writer_flushes_while_it_runs() {
         let folder = folder("flush");
         let (reports, _received) = mpsc::channel::<TraceReport>();
         let (writer, mut trace) =
@@ -806,15 +806,15 @@ mod tests {
         trace.record(What::Queued, |record| record);
         let path = folder.join(writer.file());
         let on_disk = || fs::read_to_string(&path).expect("read");
-        let patience = Instant::now()
-            .checked_add(Duration::from_secs(5))
-            .expect("in range");
-        while on_disk().lines().count() < 3 {
-            assert!(Instant::now() < patience, "the row reached the file");
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        crate::trace::eventually("the row reached the file", || {
+            on_disk().lines().count() >= 3
+        });
         writer.stop().expect("stop");
         fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_flush_is_due_once_a_second_has_passed() {
         let flushed = Instant::now();
         let at = |millis| {
             flushed
@@ -824,25 +824,6 @@ mod tests {
         assert!(!flush_due(flushed, at(999)), "not before a second");
         assert!(flush_due(flushed, at(1_000)), "right on time");
         assert!(flush_due(flushed, at(5_000)), "late");
-    }
-
-    #[test]
-    fn a_stopping_writer_is_finished_once_its_thread_ends() {
-        let (go, wait) = mpsc::channel::<()>();
-        let stopping = Stopping::of(std::thread::spawn(move || {
-            wait.recv().expect("told to end");
-        }));
-        assert!(!stopping.is_finished(), "the thread still waits");
-        go.send(()).expect("send");
-        let patience = Instant::now()
-            .checked_add(Duration::from_secs(5))
-            .expect("in range");
-        while !stopping.0.is_finished() {
-            assert!(Instant::now() < patience, "the thread ended");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(stopping.is_finished());
-        stopping.join().expect("join");
     }
 
     #[test]
@@ -867,8 +848,9 @@ mod tests {
         for name in ["notes.csv", "trace-a.txt", "trace-b.csv"] {
             fs::write(folder.join(name), "").expect("write");
         }
-        prune(&folder, 0);
-        assert_eq!(files(&folder), ["notes.csv", "trace-a.txt"]);
+        fs::write(folder.join("trace-c.csv"), "").expect("write");
+        prune(&folder, 1);
+        assert_eq!(files(&folder), ["notes.csv", "trace-a.txt", "trace-c.csv"]);
         fs::remove_dir_all(folder).expect("clean up");
     }
 

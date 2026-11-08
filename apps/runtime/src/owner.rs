@@ -1586,6 +1586,7 @@ mod tests {
     #[test]
     fn a_saved_end_time_counts_from_the_wall_clock() {
         let mut scratch = Scratch::new("trace-until");
+        let before = Instant::now();
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("after 1970")
@@ -1597,12 +1598,11 @@ mod tests {
         );
         let mut model = Model::default();
         let mut reloads = Reloads::default();
-        let before = Instant::now();
         let on = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
         assert!(on.trace.is_some_and(|trace| trace != Trace::OFF));
         let ends = scratch.tracing.until().expect("an end time");
         let soonest = before
-            .checked_add(Duration::from_secs(55))
+            .checked_add(Duration::from_secs(59))
             .expect("in range");
         let latest = Instant::now()
             .checked_add(Duration::from_secs(60))
