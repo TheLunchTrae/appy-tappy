@@ -5,7 +5,7 @@
 //! automations start running until they stop. Each new value goes in as a
 //! method call, and the [`Effect`]s that come out say which rules fired, which
 //! were held back by their cooldown, and which were released. The evaluator
-//! does no I/O and reads no clock: every value carries the time it was read.
+//! does no I/O and reads no clock: every call that can fire carries the time.
 //! `wiki/developer/Rules.md` explains the model.
 //!
 //! See `wiki/developer/Architecture.md` for this crate's boundaries.
@@ -23,7 +23,7 @@ use appytappy_config::signal::{SignalName, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuleIndex(pub usize);
 
-/// What the runtime must do after a new value.
+/// What the runtime must do after a new value, a recheck, or a stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
     /// The rule fired: run its actions.
@@ -232,10 +232,6 @@ mod tests {
         }
     }
 
-    fn start(rules: Vec<Rule>) -> Session {
-        Session::new(rules.into())
-    }
-
     /// Feeds `progress` values one millisecond apart from `from` and collects the effects.
     fn feed(session: &mut Session, clock: &Clock, from: u64, values: &[f64]) -> Vec<Effect> {
         let mut effects = Vec::new();
@@ -251,7 +247,7 @@ mod tests {
     #[test]
     fn a_threshold_rule_fires_once_per_crossing_and_releases_when_the_value_resets() {
         let clock = Clock::new();
-        let mut session = start(vec![at_90(Duration::ZERO, Restore::OnRelease)]);
+        let mut session = Session::new(vec![at_90(Duration::ZERO, Restore::OnRelease)].into());
         assert_eq!(feed(&mut session, &clock, 1, &[10.0, 50.0, 89.9]), []);
         assert_eq!(
             feed(&mut session, &clock, 4, &[90.0, 95.0, 100.0]),
@@ -276,7 +272,7 @@ mod tests {
         let both = Condition::all(vec![progress(Comparison::AtLeast, 90.0), lobby]).expect("valid");
         let rule =
             Rule::new(both, pause(), Duration::from_secs(60), Restore::OnRelease).expect("valid");
-        let mut session = start(vec![rule]);
+        let mut session = Session::new(vec![rule].into());
         session.sample(name("lobby"), Value::Flag(true), clock.at(1));
         assert_eq!(
             feed(&mut session, &clock, 2, &[95.0]),
@@ -306,7 +302,7 @@ mod tests {
         let either =
             Condition::any(vec![progress(Comparison::AtLeast, 90.0), lobby]).expect("valid");
         let rule = Rule::new(either, pause(), Duration::ZERO, Restore::OnRelease).expect("valid");
-        let mut session = start(vec![rule]);
+        let mut session = Session::new(vec![rule].into());
         session.sample(name("lobby"), Value::Flag(false), clock.at(1));
         assert_eq!(
             feed(&mut session, &clock, 2, &[95.0]),
@@ -327,7 +323,7 @@ mod tests {
     #[test]
     fn a_condition_that_holds_on_the_first_value_fires() {
         let clock = Clock::new();
-        let mut session = start(vec![at_90(Duration::ZERO, Restore::Never)]);
+        let mut session = Session::new(vec![at_90(Duration::ZERO, Restore::Never)].into());
         assert_eq!(
             feed(&mut session, &clock, 1, &[95.0]),
             [Effect::Fire(FIRST)]
@@ -341,7 +337,7 @@ mod tests {
     fn a_cooldown_holds_back_a_flapping_value() {
         let clock = Clock::new();
         let cooldown = Duration::from_millis(10);
-        let mut session = start(vec![at_90(cooldown, Restore::Never)]);
+        let mut session = Session::new(vec![at_90(cooldown, Restore::Never)].into());
         assert_eq!(
             feed(&mut session, &clock, 1, &[90.1, 89.9, 90.1, 89.9, 90.1]),
             [
@@ -365,7 +361,7 @@ mod tests {
     fn a_rule_that_became_true_during_its_cooldown_fires_once_it_passes() {
         let clock = Clock::new();
         let cooldown = Duration::from_millis(10);
-        let mut session = start(vec![at_90(cooldown, Restore::Never)]);
+        let mut session = Session::new(vec![at_90(cooldown, Restore::Never)].into());
         assert_eq!(session.next_due(), None, "nothing fired yet");
         assert_eq!(
             feed(&mut session, &clock, 1, &[95.0, 10.0, 95.0]),
@@ -383,7 +379,7 @@ mod tests {
     fn a_rule_whose_condition_stopped_holding_is_not_due() {
         let clock = Clock::new();
         let cooldown = Duration::from_millis(10);
-        let mut session = start(vec![at_90(cooldown, Restore::Never)]);
+        let mut session = Session::new(vec![at_90(cooldown, Restore::Never)].into());
         feed(&mut session, &clock, 1, &[95.0, 10.0, 95.0, 10.0]);
         assert_eq!(session.next_due(), None);
         assert_eq!(session.recheck(clock.at(20)), []);
@@ -403,7 +399,8 @@ mod tests {
             let condition = progress(comparison, 1.0);
             Rule::new(condition, pause(), Duration::ZERO, Restore::OnRelease).expect("valid")
         };
-        let mut session = start(vec![rule(Comparison::AtLeast), rule(Comparison::Below)]);
+        let mut session =
+            Session::new(vec![rule(Comparison::AtLeast), rule(Comparison::Below)].into());
         assert_eq!(
             feed(&mut session, &clock, 1, &[0.0]),
             [Effect::Fire(SECOND)]
@@ -422,7 +419,7 @@ mod tests {
         let paused =
             Condition::compare(name("status"), Comparison::Equals, state("Paused")).expect("valid");
         let rule = Rule::new(paused, pause(), Duration::ZERO, Restore::OnRelease).expect("valid");
-        let mut session = start(vec![rule]);
+        let mut session = Session::new(vec![rule].into());
         let mut status = |value, at| session.sample(name("status"), value, clock.at(at));
         assert_eq!(status(state("Live"), 1), []);
         assert_eq!(status(state("Paused"), 2), [Effect::Fire(FIRST)]);
@@ -436,10 +433,13 @@ mod tests {
     #[test]
     fn stopping_releases_only_the_active_rules_that_restore() {
         let clock = Clock::new();
-        let mut session = start(vec![
-            at_90(Duration::ZERO, Restore::OnRelease),
-            at_90(Duration::ZERO, Restore::Never),
-        ]);
+        let mut session = Session::new(
+            vec![
+                at_90(Duration::ZERO, Restore::OnRelease),
+                at_90(Duration::ZERO, Restore::Never),
+            ]
+            .into(),
+        );
         assert_eq!(
             feed(&mut session, &clock, 1, &[95.0]),
             [Effect::Fire(FIRST), Effect::Fire(SECOND)]
@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn released_rules_are_not_released_again_when_the_session_stops() {
         let clock = Clock::new();
-        let mut session = start(vec![at_90(Duration::ZERO, Restore::OnRelease)]);
+        let mut session = Session::new(vec![at_90(Duration::ZERO, Restore::OnRelease)].into());
         assert_eq!(
             feed(&mut session, &clock, 1, &[95.0, 0.0]),
             [Effect::Fire(FIRST), Effect::Release(FIRST)]

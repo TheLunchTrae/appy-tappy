@@ -7,7 +7,7 @@ A rule says when AppyTappy acts on an application and which
 Each enabled automation in the setup app's automations file that passes the
 setup app's and the runtime's checks becomes one rule.
 [Saved files](Setup-app.md#saved-files) describes the file, which holds one
-comparison per automation and no all or any groups yet.
+comparison per automation and no all or any groups.
 
 A rule has a condition, the actions to run in order, a cooldown, and whether
 it restores what it changed.
@@ -95,5 +95,5 @@ the window reaches a threshold: pause the music while it is at 90 or more.
 when:     progress at least 90
 actions:  pause Player.exe
 cooldown: none
-restore:  on release (resume when the number drops or the application exits)
+restore:  on release (resume when the number drops or the session stops)
 ```
