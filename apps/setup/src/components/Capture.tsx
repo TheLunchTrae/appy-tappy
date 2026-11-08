@@ -17,8 +17,8 @@ import {
   startRecording,
   stopRecording,
   takeScreenshot,
-} from './api.ts';
-import { readingText } from './automation.ts';
+} from '../lib/api.ts';
+import { readingText } from '../lib/automation.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type CheckKind,
@@ -29,17 +29,17 @@ import {
   KIND_NAMES,
   reviewSpec,
   withKind,
-} from './check.ts';
+} from '../lib/check.ts';
 import type { Choice } from './Picker.tsx';
-import { type Color, type Picture, colorAt, hex } from './pixels.ts';
+import { type Color, type Picture, colorAt, hex } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
-import { type ReviewEntry, clock, entries, keptLabels } from './review.ts';
-import { type Point, type Rect, type Size, fit } from './region.ts';
+import { type ReviewEntry, clock, entries, keptLabels } from '../lib/review.ts';
+import { type Point, type Rect, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
-import { background, useRepeat } from './repeat.ts';
-import { accelerator, shortcutLabel } from './shortcut.ts';
-import { useSize } from './size.ts';
-import { loadShortcut, saveShortcut } from './storage.ts';
+import { background, useRepeat } from '../lib/repeat.ts';
+import { accelerator, shortcutLabel } from '../lib/shortcut.ts';
+import { useSize } from '../lib/size.ts';
+import { loadShortcut, saveShortcut } from '../lib/storage.ts';
 
 /** A screenshot taken this session. */
 interface Shot {

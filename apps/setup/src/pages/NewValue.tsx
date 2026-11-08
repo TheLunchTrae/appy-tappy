@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 
-import { type AppSummary, stopCapture } from './api.ts';
-import { Capture } from './Capture.tsx';
-import { type Choice, Picker } from './Picker.tsx';
-import { background } from './repeat.ts';
+import { type AppSummary, stopCapture } from '../lib/api.ts';
+import { Capture } from '../components/Capture.tsx';
+import { type Choice, Picker } from '../components/Picker.tsx';
+import { background } from '../lib/repeat.ts';
 
 interface Props {
   readonly apps: readonly AppSummary[];

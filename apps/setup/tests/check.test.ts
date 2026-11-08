@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildSpec, DEFAULT_TOLERANCE, EMPTY_DRAFT, withKind } from '../src/check.ts';
+import { buildSpec, DEFAULT_TOLERANCE, EMPTY_DRAFT, withKind } from '../src/lib/check.ts';
 
 const region = { x: 1, y: 2, width: 3, height: 4 };
 const red = { red: 255, green: 0, blue: 0 };

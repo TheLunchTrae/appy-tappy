@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { accelerator, actionKeys, shortcutLabel, spellKeys } from '../src/shortcut.ts';
+import { accelerator, actionKeys, shortcutLabel, spellKeys } from '../src/lib/shortcut.ts';
 
 const none = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
 

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-import { preview } from './api.ts';
-import type { Picture } from './pixels.ts';
-import { useRepeat } from './repeat.ts';
+import { preview } from '../lib/api.ts';
+import type { Picture } from '../lib/pixels.ts';
+import { useRepeat } from '../lib/repeat.ts';
 
 function draw(canvas: HTMLCanvasElement | null, picture: Picture): void {
   if (canvas === null) {

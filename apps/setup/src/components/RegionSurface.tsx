@@ -10,7 +10,7 @@ import {
   fromCorners,
   moveRect,
   toPicture,
-} from './region.ts';
+} from '../lib/region.ts';
 
 type Drag =
   | { readonly mode: 'draw'; readonly from: Point }

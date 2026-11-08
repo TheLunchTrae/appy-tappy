@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { overlayOf } from '../src/overlay.ts';
+import { overlayOf } from '../src/lib/overlay.ts';
 
 describe('overlayOf', () => {
   test('names the application and mode of an overlay window and nothing else', () => {

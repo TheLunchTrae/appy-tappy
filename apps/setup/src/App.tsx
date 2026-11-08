@@ -8,13 +8,13 @@ import {
   listApps,
   listAutomations,
   syncOverlays,
-} from './api.ts';
-import { ApplicationsPage } from './ApplicationsPage.tsx';
-import { AutomationEditor } from './AutomationEditor.tsx';
-import { AutomationsPage } from './AutomationsPage.tsx';
-import { NewValue } from './NewValue.tsx';
-import { background, useRepeat } from './repeat.ts';
-import { ValuesPage } from './ValuesPage.tsx';
+} from './lib/api.ts';
+import { background, useRepeat } from './lib/repeat.ts';
+import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
+import { AutomationEditor } from './pages/AutomationEditor.tsx';
+import { AutomationsPage } from './pages/AutomationsPage.tsx';
+import { NewValue } from './pages/NewValue.tsx';
+import { ValuesPage } from './pages/ValuesPage.tsx';
 
 type Page = 'values' | 'automations' | 'applications';
 

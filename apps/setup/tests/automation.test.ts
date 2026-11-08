@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/api.ts';
+import type { AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/api.ts';
 import {
   EMPTY_DRAFT,
   actionText,
@@ -20,7 +20,7 @@ import {
   valueChoices,
   valueKind,
   withSource,
-} from '../src/automation.ts';
+} from '../src/lib/automation.ts';
 
 const white = { red: 255, green: 255, blue: 255 };
 
