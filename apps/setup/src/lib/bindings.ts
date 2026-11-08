@@ -1264,6 +1264,42 @@ export const PARSE_CASES = {
     {
       "read": null,
       "text": "\ufeffF9"
+    },
+    {
+      "read": null,
+      "text": "M+"
+    },
+    {
+      "read": null,
+      "text": "+M"
+    },
+    {
+      "read": null,
+      "text": "Ctrl++M"
+    },
+    {
+      "read": "F",
+      "text": "F"
+    },
+    {
+      "read": null,
+      "text": "F9x"
+    },
+    {
+      "read": null,
+      "text": "F1+F2"
+    },
+    {
+      "read": "Up",
+      "text": "Up"
+    },
+    {
+      "read": null,
+      "text": "ArrowUp"
+    },
+    {
+      "read": null,
+      "text": "Control+M"
     }
   ],
   "openTarget": [
@@ -1286,6 +1322,14 @@ export const PARSE_CASES = {
     {
       "read": "HTTP://example.com",
       "text": "HTTP://example.com"
+    },
+    {
+      "read": "http://x",
+      "text": "http://x"
+    },
+    {
+      "read": "C:\\",
+      "text": "C:\\"
     },
     {
       "read": "https://a\ufeffb",
@@ -1394,8 +1438,16 @@ export const PARSE_CASES = {
       "text": " c:/sounds/ding.WAV "
     },
     {
+      "read": "C:\\.wav",
+      "text": "C:\\.wav"
+    },
+    {
       "read": null,
       "text": ""
+    },
+    {
+      "read": null,
+      "text": "   "
     },
     {
       "read": null,
