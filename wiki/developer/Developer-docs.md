@@ -42,12 +42,12 @@ To get an installer of a branch without a release, use one of these:
   engine evaluates them.
 - [Actions](Actions.md): media, volume, key press, open, and sound actions,
   and how restoring works.
-- [Installer](Installer.md): what the installer does, builds, and the release
-  workflow.
+- [Installer](Installer.md): what the installer does, builds, the release
+  workflow, updates and the update key, and winget.
 - [MCP investigation server](MCP-investigation-server.md): the local server an
-  AI agent uses to find how an application exposes a value.
+  AI agent uses to find how an application shows a value.
 - [State machines](State-machines.md): the implicit state machines in the
-  runtime, the setup app, and the MCP server, and where each can fail.
+  runtime and the setup app, and where each can fail.
 - [Rust standards](Rust-standards.md): how the Rust checks work, mutation
   testing, and their limits.
 - [Wiki](Wiki.md): how `wiki/` publishes to the GitHub wiki, and what that

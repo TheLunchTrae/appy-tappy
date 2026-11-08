@@ -19,6 +19,7 @@ use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, FrameRead, OverlayView, OverlayWindow, Place};
 use crate::recording::{RecordingView, Text};
 use crate::selection::{SelectionSpec, SelectionView};
+use crate::updates::Downloaded;
 use crate::window_list::{WindowFit, WindowList};
 
 /// Where a request's answer goes.
@@ -186,6 +187,17 @@ pub(crate) enum Request {
     /// Stops capturing and drops the session's screenshots and check, once
     /// the user leaves the capture screen.
     Stop(Reply<()>),
+    /// Keeps a downloaded update until the user installs it, in place of
+    /// any kept before.
+    KeepUpdate {
+        update: Downloaded,
+        reply: Reply<()>,
+    },
+    /// Hands over the downloaded update, which the owner then forgets.
+    TakeUpdate(Reply<Option<Downloaded>>),
+    /// Saves where each panel is, closes the overlays, and stops the capture
+    /// before an update's installer ends the process.
+    CloseForUpdate(Reply<()>),
     /// Keeps the newest frame as a screenshot and answers its index.
     Screenshot(Reply<Result<usize, String>>),
     /// A screenshot, scaled and encoded like a preview.

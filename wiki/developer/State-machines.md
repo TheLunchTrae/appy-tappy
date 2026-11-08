@@ -535,6 +535,39 @@ that finishes after the user moved on leaves the next flow alone. Leaving the
 value or reference flow unmounts it and stops its capture, which clears its screenshots and
 recording.
 
+### Update notice
+
+The update notice at the end of the tabs (`apps/setup/src/lib/update.ts`,
+drawn by `apps/setup/src/components/UpdateNotice.tsx`) offers a newer release.
+It checks once, when the main window mounts, and shows nothing until a check
+finds one. The owner thread keeps the downloaded installer until the install
+takes it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Offered: the check finds a newer release
+    None --> [*]: the check finds none or fails
+    Offered --> Downloading: Update or Try again
+    Downloading --> Ready: the download and its signature check finish
+    Downloading --> Offered: the check, the download, or its signature check fails, the notice shows why
+    Ready --> Asking: Install
+    Asking --> Ready: Not now, Escape, or work starts in a flow
+    Asking --> Installing: Install
+    Installing --> Offered: the installer does not start, the notice shows why
+    Installing --> [*]: the installer starts and AppyTappy Setup exits
+```
+
+The download names the release it downloaded, so a release that came out
+after the offer waits in **Ready** under its own version, and the question
+names that version. A connection that sends nothing for 30 seconds fails the
+check or the download. **Install** is disabled while a flow holds unsaved work
+or saves, since the install closes AppyTappy Setup. Before the installer ends
+the process, the owner saves where each panel is and stops the capture, as the
+app's own end would. While the question to leave a flow has the nav's place,
+the notice is hidden and keeps its state. An event that does not fit the
+state, such as a late check during the download, changes nothing.
+
 ### Capture slot
 
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
@@ -682,37 +715,3 @@ A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 run left and that have not changed for ten minutes, such as one a crash left
 between the write and the rename. A failed delete does not fail the save, and
 the next save tries again.
-
-## MCP investigation server
-
-The [MCP investigation server](MCP-investigation-server.md) answers one request
-at a time. Its `Session` in `apps/mcp/src/tools.rs` keeps the executables the
-user refused, and at most one attached process with its memory scan.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Detached
-    Detached --> Attached: process_attach, the user allows it
-    Attached --> Attached: process_attach for another process
-    Attached --> Attached: process_attach fails
-    Attached --> Scanning: memory_scan_first
-    Scanning --> Scanning: memory_scan_next
-    Scanning --> Scanning: memory_scan_first starts over
-    Scanning --> Scanning: process_attach fails
-    Attached --> Detached: process_detach
-    Scanning --> Detached: process_detach
-    Scanning --> Attached: process_attach for another process
-    Scanning --> Attached: memory_scan_first fails
-```
-
-A program the user refuses is refused again without asking for the rest of the
-session, whatever its process ID.
-
-- **An attach that fails** leaves the session as it was. `open_attachment`
-  opens and checks the new process, and only once that works does
-  `process_attach` replace the attached one. The error says which process is
-  still attached, unless the user refused that process's own program.
-- **A first scan that fails** has already dropped the previous scan, on
-  purpose: an unknown-value scan can copy up to 2 GiB of memory, and keeping
-  the old one too could double that. Its error says the previous scan was
-  dropped.
