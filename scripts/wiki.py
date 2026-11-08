@@ -29,12 +29,19 @@ UNSAFE_NAME = re.compile(r'[\\/:*?"<>|#%]')
 RESERVED_NAMES = {"_sidebar", "_footer"}
 
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-H1 = re.compile(r"^# +(.+?) *#* *$")
+H1 = re.compile(r"^# +(.+?)(?: +#+)? *$")
+PARAGRAPH_BREAK = re.compile(r"(\n[ \t]*\n)")
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
-# An inline link or image: the bracketed text, then the destination, in angle
-# brackets or bare, and an optional title.
-INLINE_LINK = re.compile(r"\[(?:[^\[\]]|\[[^\[\]]*\])*\]\(\s*(<[^<>\n]*>|[^\s()]+)(?:\s+\"[^\"\n]*\")?\s*\)")
-REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]\n]+\]:[ \t]*(<[^<>\n]*>|\S+)", re.M)
+# An image, then an inline link: the bracketed text, then the destination, in
+# angle brackets or bare, and an optional title. Images go first, so an image
+# inside a link's text is rewritten too.
+DESTINATION = r"\(\s*(<[^<>\n]*>|[^\s()]+)(?:\s+\"[^\"\n]*\")?\s*\)"
+IMAGE = re.compile(r"!\[[^\[\]]*\]" + DESTINATION)
+INLINE_LINK = re.compile(r"(?<!!)\[(?:[^\[\]]|\[[^\[\]]*\])*\]" + DESTINATION)
+# A link reference definition; a footnote's label starts with ^.
+REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^<>\n]*>|\S+)", re.M)
+# What is left of a link that the patterns above do not read.
+UNREAD_LINK = re.compile(r"\]\(|^ {0,3}\[(?!\^)[^\]\n]+\]:", re.M)
 PAGES_SECTION = re.compile(r"^## Pages\n([\s\S]*?)(?=^## |\Z)", re.M)
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
@@ -60,7 +67,9 @@ def build(root: Path, output: Path, repo: str, ref: str) -> None:
     output.mkdir(parents=True, exist_ok=True)
     for page in pages:
         text = (root / page.source).read_text(encoding="utf-8")
-        body = render(page, text, lambda target, page=page: resolve(root, page, target, by_source, repo, ref))
+        body = render(
+            page, text, lambda target, image, page=page: resolve(root, page, target, image, by_source, repo, ref)
+        )
         body += footer(page, repo, ref)
         (output / f"{page.name}.md").write_text(body, encoding="utf-8")
     for asset in assets:
@@ -90,10 +99,10 @@ def collect(root: Path) -> tuple[list[Page], list[PurePosixPath]]:
     seen: dict[str, PurePosixPath] = {}
     for page in pages:
         key = page.name.casefold()
-        if key in seen:
-            raise BuildError(f"{page.source} and {seen[key]} both make the wiki page {page.name}; retitle one")
         if key in RESERVED_NAMES or (key == "home" and page.source != HOME):
             raise BuildError(f"{page.source}: its title makes the reserved wiki page name {page.name}")
+        if key in seen:
+            raise BuildError(f"{page.source} and {seen[key]} both make the wiki page {page.name}; retitle one")
         seen[key] = page.source
     return pages, assets
 
@@ -153,7 +162,7 @@ def render(page: Page, text: str, rewrite) -> str:
         if code:
             output.append(chunk)
             continue
-        chunk = rewrite_links(chunk, rewrite)
+        chunk = "".join(rewrite_links(page, part, rewrite) for part in PARAGRAPH_BREAK.split(chunk))
         if drop_heading:
             chunk, count = re.subn(r"^# .*\n+", "", chunk, count=1, flags=re.M)
             drop_heading = count == 0
@@ -162,30 +171,45 @@ def render(page: Page, text: str, rewrite) -> str:
     return notice + "".join(output).lstrip("\n")
 
 
-def rewrite_links(text: str, rewrite) -> str:
-    """Rewrite the destinations of inline links, images, and link definitions outside code spans."""
-    spans = [match.span() for match in CODE_SPAN.finditer(text)]
+def rewrite_links(page: Page, text: str, rewrite) -> str:
+    """Rewrite one paragraph's link, image, and link definition destinations outside code spans.
 
-    def in_code(position: int) -> bool:
-        return any(start <= position < end for start, end in spans)
+    A paragraph is the unit, because a code span cannot cross a blank line, so
+    a stray backtick hides no link past its own paragraph. A link that the
+    patterns cannot read fails the build rather than reach the wiki unchanged.
+    """
 
-    def replace(match: re.Match) -> str:
-        if in_code(match.start()) or in_code(match.start(1)):
-            return match.group(0)
-        destination = match.group(1)
-        bracketed = destination.startswith("<")
-        target = rewrite(destination[1:-1] if bracketed else destination)
-        start, end = match.span(1)
-        offset = match.start()
-        return match.group(0)[: start - offset] + target + match.group(0)[end - offset :]
+    def substitute(pattern: re.Pattern, text: str, image: bool) -> str:
+        spans = [match.span() for match in CODE_SPAN.finditer(text)]
 
-    text = INLINE_LINK.sub(replace, text)
-    spans = [match.span() for match in CODE_SPAN.finditer(text)]
-    return REFERENCE_DEFINITION.sub(replace, text)
+        def replace(match: re.Match) -> str:
+            if any(start <= match.start() < end or start <= match.start(1) < end for start, end in spans):
+                return match.group(0)
+            destination = match.group(1)
+            bracketed = destination.startswith("<")
+            target = rewrite(destination[1:-1] if bracketed else destination, image)
+            target = f"<{target}>" if bracketed else target
+            offset = match.start()
+            start, end = match.start(1) - offset, match.end(1) - offset
+            return match.group(0)[:start] + target + match.group(0)[end:]
+
+        return pattern.sub(replace, text)
+
+    text = substitute(IMAGE, text, True)
+    text = substitute(INLINE_LINK, text, False)
+    text = substitute(REFERENCE_DEFINITION, text, False)
+    rest = text
+    for pattern in (IMAGE, INLINE_LINK, REFERENCE_DEFINITION, CODE_SPAN):
+        rest = pattern.sub("", rest)
+    if match := UNREAD_LINK.search(rest):
+        line = rest[: match.start()].count("\n")
+        near = rest.splitlines()[line].strip()
+        raise BuildError(f"{page.source}: the link near {near!r} is in a form the wiki build cannot read")
+    return text
 
 
-def resolve(root: Path, page: Page, target: str, by_source: dict, repo: str, ref: str) -> str:
-    """The wiki destination for a link written in `page`."""
+def resolve(root: Path, page: Page, target: str, image: bool, by_source: dict, repo: str, ref: str) -> str:
+    """The wiki destination for a link or image written in `page`."""
     if target.startswith(("#", "//")) or SCHEME.match(target):
         return target
     path, hash_mark, fragment = target.partition("#")
@@ -201,16 +225,23 @@ def resolve(root: Path, page: Page, target: str, by_source: dict, repo: str, ref
     if resolved == ".." or resolved.startswith("../"):
         raise BuildError(f"{page.source}: the link {target} leaves the repository")
     resolved_path = PurePosixPath(resolved)
-    if resolved_path in by_source:
-        return quote(by_source[resolved_path].name, safe="-,'") + anchor
     on_disk = root / resolved_path
+    if on_disk.is_dir() and resolved_path / INDEX in by_source:
+        resolved_path = resolved_path / INDEX
+    if resolved_path in by_source:
+        return page_link(by_source[resolved_path].name) + anchor
     if not on_disk.exists():
         raise BuildError(f"{page.source}: the link {target} names no file in the repository")
     if resolved_path.is_relative_to(DOCS) and on_disk.is_file():
         return quote(resolved_path.relative_to(DOCS).as_posix()) + anchor
-    kind = "tree" if on_disk.is_dir() else "blob"
+    # GitHub shows an image only from its raw file.
+    kind = "tree" if on_disk.is_dir() else "raw" if image else "blob"
     location = "" if resolved == "." else "/" + quote(resolved)
     return f"https://github.com/{repo}/{kind}/{ref}{location}{anchor}"
+
+
+def page_link(name: str) -> str:
+    return quote(name, safe="-,'")
 
 
 def footer(page: Page, repo: str, ref: str) -> str:
@@ -240,14 +271,15 @@ def sidebar(root: Path, pages: list[Page], by_source: dict, repo: str, ref: str)
         names = {page.name: page for page in members}
         for match in INLINE_LINK.finditer(text):
             destination = match.group(1).strip("<>")
-            name = unquote(resolve(root, index, destination, by_source, repo, ref).partition("#")[0])
+            name = unquote(resolve(root, index, destination, False, by_source, repo, ref).partition("#")[0])
             if (member := names.get(name)) and member is not index and member not in linked:
                 linked.append(member)
         rest = sorted((page for page in members if page is not index and page not in linked), key=lambda p: p.title)
-        lines = [f"**[{index.title}]({quote(index.name, safe='-,')})**", ""]
-        lines += [f"- [{page.title}]({quote(page.name, safe='-,')})" for page in linked + rest]
+        lines = [f"**[{index.title}]({page_link(index.name)})**", ""]
+        lines += [f"- [{page.title}]({page_link(page.name)})" for page in linked + rest]
         blocks.append("\n".join(lines) + "\n")
-    return "\n".join(blocks)
+    notice = "<!-- Generated from docs/ by scripts/wiki.py. Edit docs/ in the repository, not this page. -->\n\n"
+    return notice + "\n".join(blocks)
 
 
 def main() -> int:

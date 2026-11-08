@@ -92,6 +92,39 @@ class WikiBuildTest(unittest.TestCase):
         self.assertIn("`[a](install.md)` and [b](Install,-update,-and-uninstall)", page)
         self.assertIn("```md\n[c](install.md)\n```", page)
 
+    def test_a_stray_backtick_hides_no_link_past_its_paragraph(self) -> None:
+        self.write(
+            "docs/user/troubleshooting.md", "# Troubleshooting\n\nPress the ` key.\n\nSee [it](install.md) and `code`.\n"
+        )
+        self.build()
+        self.assertIn("See [it](Install,-update,-and-uninstall) and", self.page("Troubleshooting"))
+
+    def test_an_image_inside_a_link_is_rewritten_with_it(self) -> None:
+        self.write("docs/user/troubleshooting.md", "# Troubleshooting\n\n[![shot](images/window.png)](install.md)\n")
+        self.build()
+        self.assertIn("[![shot](user/images/window.png)](Install,-update,-and-uninstall)", self.page("Troubleshooting"))
+
+    def test_an_image_elsewhere_in_the_repository_shows_its_raw_file(self) -> None:
+        self.write("icon.png", "picture")
+        self.write("docs/user/troubleshooting.md", "# Troubleshooting\n\n![icon](../../icon.png)\n")
+        self.build()
+        self.assertIn("![icon](https://github.com/owner/name/raw/main/icon.png)", self.page("Troubleshooting"))
+
+    def test_a_link_to_a_docs_folder_opens_its_index_page(self) -> None:
+        self.write("docs/user/troubleshooting.md", "# Troubleshooting\n\nSee [the docs](../developer/).\n")
+        self.build()
+        self.assertIn("See [the docs](Developer-docs).", self.page("Troubleshooting"))
+
+    def test_a_link_in_a_form_the_build_cannot_read_fails_it(self) -> None:
+        self.write("docs/user/troubleshooting.md", "# Troubleshooting\n\nSee [it](install.md 'Install').\n")
+        with self.assertRaisesRegex(wiki.BuildError, "is in a form the wiki build cannot read"):
+            self.build()
+
+    def test_footnotes_are_not_links(self) -> None:
+        self.write("docs/user/troubleshooting.md", "# Troubleshooting\n\nAsk.[^1]\n\n[^1]: A note.\n")
+        self.build()
+        self.assertIn("[^1]: A note.\n", self.page("Troubleshooting"))
+
     def test_link_definitions_are_rewritten(self) -> None:
         self.write(
             "docs/user/troubleshooting.md", "# Troubleshooting\n\nSee [the guide][guide].\n\n[guide]: README.md\n"
@@ -117,6 +150,7 @@ class WikiBuildTest(unittest.TestCase):
         self.build()
         self.assertEqual(
             self.page("_Sidebar"),
+            "<!-- Generated from docs/ by scripts/wiki.py. Edit docs/ in the repository, not this page. -->\n\n"
             "**[Example user guide](Home)**\n\n"
             "- [Overview](Overview)\n"
             "- [Install, update, and uninstall](Install,-update,-and-uninstall)\n"
@@ -135,6 +169,24 @@ class WikiBuildTest(unittest.TestCase):
         self.write("docs/developer/overview.md", "# Overview\n")
         with self.assertRaisesRegex(wiki.BuildError, "both make the wiki page Overview"):
             self.build()
+
+    def test_titles_that_differ_only_in_case_fail_the_build(self) -> None:
+        self.write("docs/developer/overview.md", "# OVERVIEW\n")
+        with self.assertRaisesRegex(wiki.BuildError, "both make the wiki page OVERVIEW"):
+            self.build()
+
+    def test_a_title_that_makes_a_reserved_name_fails_the_build(self) -> None:
+        for title in ("Home", "_Sidebar"):
+            with self.subTest(title=title):
+                self.write("docs/user/troubleshooting.md", f"# {title}\n")
+                with self.assertRaisesRegex(wiki.BuildError, "reserved wiki page name"):
+                    self.build()
+
+    def test_a_hash_that_ends_a_title_word_stays_in_its_name(self) -> None:
+        self.write("docs/developer/setup-app.md", "# Setup in C#\n")
+        self.build()
+        self.assertIn("# Setup in C#\n", self.page("Setup-in-C"))
+        self.assertIn("- [Setup in C#](Setup-in-C)", self.page("_Sidebar"))
 
     def test_a_page_without_a_title_fails_the_build(self) -> None:
         self.write("docs/user/troubleshooting.md", "Ask.\n")

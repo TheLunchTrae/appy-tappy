@@ -30,7 +30,8 @@ one wiki page:
   included. A link to another file in `docs/`, such as an image, links the
   copy that the wiki holds at the same path below `docs/`. A link to any other
   file in the repository opens it on GitHub, on `main`. A link to a file that
-  does not exist fails the build. Links in code stay as written.
+  does not exist fails the build, and so does a link the build cannot read,
+  such as one with a title in single quotes. Links in code stay as written.
 - The sidebar lists the user guide, then the developer docs. Each section
   starts with its `README.md` and follows the order of that page's **Pages**
   list. Pages that list leaves out follow by title.

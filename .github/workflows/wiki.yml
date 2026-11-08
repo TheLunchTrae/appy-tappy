@@ -19,9 +19,10 @@ on:
 permissions:
   contents: read
 
-# Runs queue rather than race, so the wiki ends at the newest main.
+# Runs on one branch queue rather than race, so the wiki ends at the newest
+# main, and a dry run on another branch never replaces a queued publish.
 concurrency:
-  group: wiki
+  group: wiki-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -71,7 +72,7 @@ jobs:
           remote="https://github.com/$GITHUB_REPOSITORY.wiki.git"
           wiki="$RUNNER_TEMP/wiki"
           if ! git clone --quiet --depth 1 "$remote" "$wiki"; then
-            echo "::error title=No wiki repository::$remote could not be cloned. Turn on Wikis in the repository's settings, save any first page in the wiki, then run this workflow again."
+            echo "::error title=Wiki not cloned::$remote could not be cloned. If the wiki has never been created, turn on Wikis in the repository's settings, save any first page in the wiki, then run this workflow again."
             exit 1
           fi
           find "$wiki" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +

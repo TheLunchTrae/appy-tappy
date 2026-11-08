@@ -80,7 +80,7 @@ tools = { python = "3.15.1" }
 run = '''
 set -eu
 rm -rf artifacts/wiki
-python3 -B scripts/wiki.py artifacts/wiki --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
+python -B scripts/wiki.py artifacts/wiki --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
 '''
 
 [tasks."md:wiki:check"]
@@ -88,8 +88,8 @@ description = "Test the wiki build, then build the wiki from docs/ into a tempor
 tools = { python = "3.15.1" }
 run = '''
 set -eu
-python3 -B -m unittest discover -s scripts -p wiki_test.py
+python -B -m unittest discover -s scripts -p wiki_test.py
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
-python3 -B scripts/wiki.py "$out/wiki" --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
+python -B scripts/wiki.py "$out/wiki" --repo "${GITHUB_REPOSITORY:-TheLunchTrae/appy-tappy}"
 '''
