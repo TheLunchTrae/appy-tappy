@@ -160,6 +160,33 @@ version-numbered names.
   examples. Keep test setup smaller than the behavior it protects.
 - Test counts and coverage percentages are not goals.
 
+## State machines
+
+[`docs/developer/state-machines.md`](docs/developer/state-machines.md) maps
+each state machine in the runtime, the setup app, and the MCP server, including
+implicit ones: state spread over fields, flags, `Option`s, maps, or a thread's
+place in its loop.
+
+- A change that adds, removes, or alters a machine's states, transitions, or
+  stale-message guards updates that machine's section in the same change. The
+  section names every state, the event that causes each transition, the
+  failure states the machine can reach, and how it recovers from each. Keep
+  its diagram in step with the code.
+- A reachable state that the machine never leaves, or that does the wrong
+  thing, gets an issue linked under the section's **Open problems**. The change
+  that fixes it removes the entry.
+- Test each transition, each failure, and each recovery at the narrowest
+  interface that drives it: the pure `(state, event)` transition where one
+  exists, otherwise the owner's event handler. Assert the resulting state and
+  the effects it emits, such as orders, messages, or queued undos. Test that
+  each stale-message guard drops a message from an old session or generation.
+- When fields can hold a combination that names no state on the page, prefer
+  an enum that names the states, as
+  [Invariants and errors](#invariants-and-errors) describes.
+- [Testing](#testing) and [Tests and mutation](#tests-and-mutation) apply. A
+  mutant that survives in transition code usually marks a missing transition
+  test.
+
 ## Rust
 
 `Cargo.toml`, `clippy.toml`, and `deny.toml` own executable policy;
