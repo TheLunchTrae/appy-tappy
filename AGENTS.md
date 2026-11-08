@@ -183,9 +183,10 @@ maps, or a thread's place in its loop.
   `(state, event)` transition where one exists, otherwise the owner thread's
   event handler. Assert the resulting state and the effects it emits, such as
   orders, messages, or queued undos. One table of cases can cover several
-  transitions, and [Testing](#testing) decides what earns a test. Test that
-  each stale-message guard drops a message that carries an old ID, such as a
-  session ID, generation, recording ID, or overlay number.
+  transitions, and [Testing](#testing) decides what earns a test. A new or
+  changed stale-message guard needs a test that it drops a message that
+  carries an old ID, such as a session ID, generation, recording ID, or
+  overlay number.
 - When fields can hold a combination that names no state on the page, prefer
   one type that names the states: a Rust enum, as
   [Invariants and errors](#invariants-and-errors) describes, or a TypeScript
