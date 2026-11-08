@@ -617,15 +617,17 @@ fn settled_elsewhere(
 /// Where the values of `job` read at the size the system frames `window`
 /// at now, when it says and some value reads there, so the capture starts
 /// at the size its first frame has and is not started again for it.
-/// Otherwise `placed`, and the capture's frames tell the size.
+/// Otherwise `placed`, and the capture's frames tell the size. Placing the
+/// values again at `placed`'s own size gives `placed` back, so that size
+/// needs no case of its own.
 fn framed_at<S: System>(system: &S, job: &Job, window: u64, placed: Placed) -> Placed {
-    match system.frame_size(window) {
-        Ok(Some(size)) if size != placed.size => {
-            let there = Placed::new(&job.plan, size);
-            if there.reads() { there } else { placed }
-        },
-        _ => placed,
-    }
+    system
+        .frame_size(window)
+        .ok()
+        .flatten()
+        .map(|size| Placed::new(&job.plan, size))
+        .filter(Placed::reads)
+        .unwrap_or(placed)
 }
 
 /// What the reader found to capture.

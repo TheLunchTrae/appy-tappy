@@ -198,8 +198,9 @@ struct Overlay<S> {
     /// The window size frames show, settled, while a capture runs.
     settle: Option<Settle>,
     /// What the next capture copies at a settled size where values read,
-    /// resolved when the size settled.
-    prepared: Option<(Size, Placing)>,
+    /// resolved when the size settled. That size is the overlay's
+    /// [`Overlay::size`] from then on, so the capture is for it.
+    prepared: Option<Placing>,
 }
 
 /// What a capture copies for the values that read at one size, and where
@@ -502,7 +503,7 @@ fn settled<S: CaptureSession>(overlay: &mut Overlay<S>, now: Instant) {
     }
     match crop_for(&overlay.values, size) {
         Ok(placing) => {
-            overlay.prepared = Some((size, placing));
+            overlay.prepared = Some(placing);
             overlay.size = Some(size);
             overlay.latest = None;
             overlay.window = None;
@@ -590,8 +591,8 @@ fn start<H: Host>(
         })
         .ok_or_else(no_values)?;
     let (crop, readables) = match overlay.prepared.take() {
-        Some((prepared, placing)) if prepared == size => placing,
-        _ => crop_for(&overlay.values, size).map_err(|_unread| no_values())?,
+        Some(placing) => placing,
+        None => crop_for(&overlay.values, size).map_err(|_unread| no_values())?,
     };
     let processes = host.processes().map_err(|error| error.to_string())?;
     let windows = host.windows().map_err(|error| error.to_string())?;
@@ -861,8 +862,7 @@ mod tests {
         assert_eq!(overlay.size, Some(large));
         assert_eq!((overlay.window, overlay.wait), (None, 0));
         assert!(overlay.settle.is_none());
-        let (at, (layout, _)) = overlay.prepared.as_ref().expect("prepared");
-        assert_eq!(*at, large);
+        let (layout, _) = overlay.prepared.as_ref().expect("prepared");
         assert_eq!(
             layout
                 .copies()

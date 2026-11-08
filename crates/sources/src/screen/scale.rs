@@ -119,11 +119,8 @@ fn rounded(numerator: i128, denominator: i128) -> Option<i128> {
     }
     let half = numerator.abs().checked_mul(2)?.checked_add(denominator)?;
     let magnitude = half.checked_div(denominator.checked_mul(2)?)?;
-    Some(if numerator < 0 {
-        magnitude.checked_neg()?
-    } else {
-        magnitude
-    })
+    // The sign comes back by multiplying, so zero needs no case of its own.
+    magnitude.checked_mul(numerator.signum())
 }
 
 #[cfg(test)]

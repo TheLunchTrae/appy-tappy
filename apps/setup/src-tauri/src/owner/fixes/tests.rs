@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use appytappy_config::app_file::{AppFile, RegionDef};
 use appytappy_sources::screen::{FrameHandler, Image};
 
+use crate::owner::ReferenceSaveSpec;
 use crate::owner::test_support::{
     FakeHost, Harness, STATE, add_example_app, frame_image, harness_with, scratch_store, spec,
     with_saved_bar,
@@ -261,6 +262,76 @@ fn a_bar_fix_keeps_only_its_region_and_the_flow_starts_from_it() {
     assert_eq!(
         harness.ask(|owner| owner.place_value("example", "gone", narrow)),
         Err("Example App no longer has that value.".to_owned())
+    );
+    std::fs::remove_dir_all(root).expect("clean up");
+}
+
+/// A number check of `region`, as JSON, that reads with the reference
+/// `reference` of `Example App`.
+fn number(region: &str, reference: &str) -> String {
+    format!(
+        r#"{{"kind":"number","region":{region},
+            "reference":{{"app":"example","id":"{reference}"}},"whole":true}}"#
+    )
+}
+
+#[test]
+fn a_number_fix_names_its_reference_only_when_it_is_not_the_first_drawing_s() {
+    let (stores, root) = scratch_store("fix-number");
+    let mut harness = harness_with(false, Ok(stores));
+    add_example_app(&mut harness);
+    let mut handler = harness.pick();
+    harness.deliver(&mut handler, Ok(&frame_image()));
+    assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+    for name in ["Digits", "Small"] {
+        // The red square on screenshot 0 taught as a 1.
+        let reference = ReferenceSaveSpec {
+            app: "example".to_owned(),
+            reference_name: name.to_owned(),
+            check: serde_json::from_str(
+                r#"{"kind":"characters","region":{"x":0,"y":0,"width":2,"height":2},
+                    "screenshot":0,"reference":null,"ink":{"red":255,"green":0,"blue":0},
+                    "tolerance":0,"labels":[{"screenshot":0,"text":"1"}]}"#,
+            )
+            .expect("valid JSON"),
+        };
+        harness
+            .ask(|owner| owner.save_reference(&reference))
+            .expect("saves");
+    }
+    let drawn = number(r#"{"x":0,"y":0,"width":2,"height":2}"#, "digits");
+    harness
+        .ask(|owner| owner.save(&spec("example", "Progress", &drawn)))
+        .expect("saves");
+    harness.deliver(&mut handler, Ok(&larger_image()));
+    assert_eq!(harness.ask(Owner::screenshot), Ok(1));
+    let reading_with = |reference: &str| {
+        fix(
+            "progress",
+            &number(r#"{"x":0,"y":0,"width":4,"height":4}"#, reference),
+        )
+    };
+    let references = |harness: &Harness| -> Vec<Option<String>> {
+        fixes_of(harness)
+            .into_iter()
+            .map(|fix| fix.reference)
+            .collect()
+    };
+    harness
+        .ask(|owner| owner.save_fix(&reading_with("digits")))
+        .expect("saves");
+    assert_eq!(
+        references(&harness),
+        [None],
+        "the first drawing's reference"
+    );
+    harness
+        .ask(|owner| owner.save_fix(&reading_with("small")))
+        .expect("saves");
+    assert_eq!(
+        references(&harness),
+        [Some("small".to_owned())],
+        "a reference of its own"
     );
     std::fs::remove_dir_all(root).expect("clean up");
 }
