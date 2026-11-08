@@ -6,6 +6,8 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::click::Click;
+
 /// The longest app name, in bytes.
 pub const MAX_APP_NAME_LEN: usize = 256;
 
@@ -516,13 +518,16 @@ pub enum Action {
     Open(OpenTarget),
     /// Starts playing a WAV file, without waiting for it to end.
     PlaySound(SoundFile),
+    /// Clicks in a window of another saved application, with the real
+    /// cursor, as if the user clicked there.
+    Click(Click),
 }
 
 impl Action {
     /// Whether a rule can undo this action on release: pausing or playing
     /// can be reversed and a volume can be set back, but a skipped track
-    /// cannot be unskipped, a pressed key cannot be unpressed, and what was
-    /// opened or played has nothing to put back.
+    /// cannot be unskipped, a pressed key or a click cannot be taken back,
+    /// and what was opened or played has nothing to put back.
     #[must_use]
     pub const fn restorable(&self) -> bool {
         !matches!(
@@ -533,21 +538,23 @@ impl Action {
             } | Self::PressKeys(_)
                 | Self::Open(_)
                 | Self::PlaySound(_)
+                | Self::Click(_)
         )
     }
 
-    /// Whether the action sends input as if the user typed it, which
-    /// anti-cheat can see, so the policy allows it only for an application
-    /// whose anti-cheat class is none.
+    /// Whether the action sends input as if the user typed or clicked it,
+    /// which anti-cheat can see, so the policy allows it only for an
+    /// application whose anti-cheat class is none.
     #[must_use]
     pub const fn injects_input(&self) -> bool {
-        matches!(self, Self::PressKeys(_))
+        matches!(self, Self::PressKeys(_) | Self::Click(_))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::click::{ClickAt, ClickButton, Corner, Spot};
 
     #[test]
     fn app_names_are_bounded_and_match_ignoring_case() {
@@ -643,10 +650,22 @@ mod tests {
     }
 
     #[test]
-    fn only_key_presses_inject_input() {
+    fn only_key_presses_and_clicks_inject_input() {
         let keys = Action::PressKeys(KeyChord::parse("F9").expect("valid"));
         assert!(keys.injects_input());
         assert!(!keys.restorable());
+        let spot = Spot::new(Corner::TopLeft, 0, 0).expect("valid");
+        let click = Action::Click(
+            Click::new(
+                "streaming_app",
+                ClickButton::Left,
+                true,
+                ClickAt::Spot(spot),
+            )
+            .expect("valid"),
+        );
+        assert!(click.injects_input());
+        assert!(!click.restorable());
         assert!(
             !Action::Media {
                 target: MediaTarget::Current,

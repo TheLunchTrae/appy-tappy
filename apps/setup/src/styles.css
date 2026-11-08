@@ -1789,3 +1789,135 @@ select {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* Click target */
+.search-area {
+  position: absolute;
+  border: 1.5px dashed var(--capture);
+  pointer-events: none;
+}
+
+.search-area .tag {
+  position: absolute;
+  top: 100%;
+  left: -1px;
+  font-size: 11px;
+  color: var(--capture);
+  background: rgb(20 22 28 / 85%);
+  padding: 1px 6px;
+  border-radius: 0 0 4px 4px;
+  white-space: nowrap;
+}
+
+.click-spot {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid var(--capture);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 50%);
+  pointer-events: none;
+}
+
+.click-spot::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--capture);
+}
+
+.click-spot.found {
+  border-color: var(--holds);
+}
+
+.click-spot.found::after {
+  background: var(--holds);
+}
+
+.result {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--holds);
+  color: var(--holds);
+  background: var(--base);
+}
+
+/* A click's target and its tools take the target, application and level columns. */
+.click-row {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.click-row .target-sum {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.target-sum > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.click-thumb {
+  flex: none;
+  display: grid;
+  place-items: center;
+  max-width: 110px;
+  height: 22px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.click-thumb canvas {
+  display: block;
+  max-width: 110px;
+  max-height: 22px;
+}
+
+.inspector .click-thumb {
+  max-width: 100%;
+  height: auto;
+  justify-content: start;
+}
+
+.inspector .click-thumb canvas {
+  max-width: 100%;
+  max-height: 120px;
+}
+
+.click-app {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+.click-options {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  color: var(--muted);
+}
+
+.click-options label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text);
+}

@@ -907,6 +907,7 @@ mod tests {
                 },
                 values,
                 rules: Arc::<[Rule]>::from(Vec::new()),
+                clicks: Arc::default(),
             },
         })
     }
