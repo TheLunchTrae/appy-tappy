@@ -397,9 +397,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             made_.flatMap((selection) => (selection.view === null ? [] : [selection.view.region])),
           );
           const last = fitted.current;
-          // Steps the region was not fitted to yet refit it even over a hand
-          // edit; a new color match for the same steps refits only an untouched one.
-          const fresh = made_.some((selection) => last?.steps.has(selection.steps) !== true);
+          // Steps that select something new refit the region even over a hand
+          // edit; steps that select nothing, or a new color match for steps seen
+          // before, refit only a region the user has not changed.
+          const fresh = made_.some((selection) => selection.view !== null && last?.steps.has(selection.steps) !== true);
           if (region !== null && (last === null || fresh || sameRect(shownRegion.current, last.region))) {
             fitted.current = { steps: new Set(made_.map((selection) => selection.steps)), region };
             const on = made[0]?.state.screenshot ?? null;
