@@ -201,7 +201,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     carry(orders, &mut crew, log);
     // Dropping the jobs ends the action thread once it has undone what is
     // queued. Only then does the tray stop: at the end of the session the
-    // tray holds it until then, and Windows may end the process after.
+    // tray holds it until then, and Windows may end the process after. This
+    // order (undo, drop the jobs, join the action thread, then Tray::stop)
+    // is also what keeps the two from waiting on each other: the tray's wait
+    // ends at Tray::stop, which nothing here waits behind.
     let Crew { jobs, readers, .. } = crew;
     drop(jobs);
     let acted = join(actor);
