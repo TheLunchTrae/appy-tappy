@@ -2,8 +2,9 @@
 //! the values AppyTappy reads from it.
 //!
 //! The setup app writes one `app.json` per application, in a folder of its
-//! own that also holds the pictures the values' checks learn from or compare
-//! against. Each value names its pictures by file name within that folder.
+//! own that also holds the pictures its references learn from and its image
+//! checks compare against. Each names its pictures by file name within that
+//! folder.
 //! The file is JSON, so a person can read it and a text diff shows a change.
 //!
 //! [`AppFile::parse`] checks everything the setup app or a person could get
@@ -26,9 +27,14 @@ pub const FORMAT: u32 = 1;
 const MAX_IMAGE_NAME_LEN: usize = 64;
 
 /// The longest ID [`value_id`] makes, in bytes. It leaves room for a
-/// picture named after the value, such as `{id}-12.png` for a number check's
-/// twelfth sample, within [`MAX_IMAGE_NAME_LEN`].
+/// picture named after the value, such as `{id}.png` for an image check,
+/// within [`MAX_IMAGE_NAME_LEN`].
 const MAX_VALUE_ID_LEN: usize = 48;
+
+/// The longest ID [`reference_id`] makes, in bytes. It leaves room for the
+/// pictures named after the reference, such as `ref-{id}-12.png` for its
+/// twelfth sample, within [`MAX_IMAGE_NAME_LEN`].
+const MAX_REFERENCE_ID_LEN: usize = 40;
 
 /// One application's authoring file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +50,9 @@ pub struct AppFile {
     pub anti_cheat: AntiCheatDef,
     /// The values read from the application's window.
     pub values: Vec<ValueDef>,
+    /// The characters its number values are read with.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<ReferenceDef>,
     /// How the setup app shows the values' live readings on top of the
     /// application, or `None` when it never has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -204,6 +213,27 @@ pub struct ValueDef {
     pub screen: ScreenDef,
 }
 
+/// The characters of one font at one color, that number values read with.
+///
+/// It learns them from pictures of text in that font. One reference serves
+/// every value drawn in its font, whatever the size: the reader scales each
+/// character to its line's height.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReferenceDef {
+    /// The reference's ID, unique within the file, such as `percent_font`.
+    /// Number checks refer to it by this.
+    pub id: String,
+    /// The reference's name as the user sees it, such as `Percent font`.
+    pub name: String,
+    /// The characters' color.
+    pub ink: ColorDef,
+    /// How far a pixel may stray from `ink` and still count.
+    pub tolerance: u8,
+    /// The pictures it learns from.
+    pub samples: Vec<SampleDef>,
+}
+
 /// A value read from a region of the window's frame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -257,15 +287,13 @@ pub struct ColorDef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum CheckDef {
-    /// Reads a number whose characters have the `ink` color, learned from
-    /// pictures of the region and what each one shows.
+    /// Reads a number with the characters of a reference.
     Number {
-        /// The characters' color.
-        ink: ColorDef,
-        /// How far a pixel may stray from `ink` and still count.
-        tolerance: u8,
-        /// The pictures the check learns from.
-        samples: Vec<SampleDef>,
+        /// The [`ReferenceDef::id`] of the reference to read with.
+        reference: String,
+        /// Whether only the whole part counts: every digit after the decimal
+        /// point is ignored, so `87.5%` reads as 87.
+        whole: bool,
     },
     /// How full a bar is, as the share of pixels nearer `filled` than
     /// `empty`.
@@ -284,7 +312,7 @@ pub enum CheckDef {
         tolerance: u8,
     },
     /// Whether the region looks like a picture of it.
-    Reference {
+    Image {
         /// The picture's file name.
         image: String,
         /// How far the region may stray from it.
@@ -292,13 +320,13 @@ pub enum CheckDef {
     },
 }
 
-/// A picture of a number's region and the text it shows.
+/// A picture of text in a reference's font and the text it shows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SampleDef {
     /// The picture's file name.
     pub image: String,
-    /// What the region shows, such as `87%`.
+    /// What the picture shows, such as `87%`.
     pub text: String,
 }
 
@@ -310,15 +338,12 @@ impl CheckDef {
         matches!(self, Self::Number { .. } | Self::BarFill { .. })
     }
 
-    /// The file names of the pictures this check needs.
+    /// The file name of the picture this check compares against, if any.
     #[must_use]
-    pub fn images(&self) -> Vec<&str> {
+    pub fn image(&self) -> Option<&str> {
         match self {
-            Self::Number { samples, .. } => {
-                samples.iter().map(|sample| sample.image.as_str()).collect()
-            },
-            Self::Reference { image, .. } => vec![image.as_str()],
-            Self::BarFill { .. } | Self::Color { .. } => Vec::new(),
+            Self::Image { image, .. } => Some(image),
+            Self::Number { .. } | Self::BarFill { .. } | Self::Color { .. } => None,
         }
     }
 }
@@ -349,10 +374,31 @@ impl AppFile {
         json
     }
 
+    /// The file names of every picture the file names: its references'
+    /// samples and its image checks' pictures.
+    #[must_use]
+    pub fn images(&self) -> Vec<&str> {
+        self.references
+            .iter()
+            .flat_map(|reference| reference.samples.iter().map(|sample| sample.image.as_str()))
+            .chain(
+                self.values
+                    .iter()
+                    .filter_map(|value| value.screen.check.image()),
+            )
+            .collect()
+    }
+
+    /// The reference with the ID `id`, if the file has one.
+    #[must_use]
+    pub fn reference(&self, id: &str) -> Option<&ReferenceDef> {
+        self.references.iter().find(|reference| reference.id == id)
+    }
+
     /// Checks the rules JSON alone cannot: the format version, a name for
-    /// the application and each value, a window match that requires a field, valid and unique value IDs, regions
-    /// inside their window, picture file names, and at least one sample for
-    /// a number.
+    /// the application and each value and reference, valid and unique IDs, regions inside their window,
+    /// picture file names, at least one sample for a reference, and a
+    /// reference for each number.
     ///
     /// # Errors
     ///
@@ -364,6 +410,15 @@ impl AppFile {
         if self.name.trim().is_empty() {
             return Err(AppFileError::NoName);
         }
+        let mut references = BTreeSet::new();
+        for reference in &self.references {
+            let problem = |problem: String| AppFileError::Reference(reference.id.clone(), problem);
+            let id = SignalName::new(&reference.id).map_err(|error| problem(error.to_string()))?;
+            if !references.insert(id) {
+                return Err(problem("another reference has the same ID".to_owned()));
+            }
+            check_reference(reference).map_err(problem)?;
+        }
         let mut ids = BTreeSet::new();
         for value in &self.values {
             let id = SignalName::new(&value.id)
@@ -374,14 +429,29 @@ impl AppFile {
                     "another value has the same ID".to_owned(),
                 ));
             }
-            check_value(value).map_err(|problem| AppFileError::Value(value.id.clone(), problem))?;
+            check_value(self, value)
+                .map_err(|problem| AppFileError::Value(value.id.clone(), problem))?;
         }
         Ok(())
     }
 }
 
-/// Checks one value's rules, answering the problem as a sentence.
-fn check_value(value: &ValueDef) -> Result<(), String> {
+/// Checks one reference's rules, answering the problem as a sentence.
+fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
+    if reference.name.trim().is_empty() {
+        return Err("it has no name".to_owned());
+    }
+    if reference.samples.is_empty() {
+        return Err("it has no sample to learn from".to_owned());
+    }
+    reference
+        .samples
+        .iter()
+        .try_for_each(|sample| check_image(&sample.image))
+}
+
+/// Checks one value's rules in `file`, answering the problem as a sentence.
+fn check_value(file: &AppFile, value: &ValueDef) -> Result<(), String> {
     if value.name.trim().is_empty() {
         return Err("it has no name".to_owned());
     }
@@ -398,20 +468,26 @@ fn check_value(value: &ValueDef) -> Result<(), String> {
     {
         return Err("its region is empty or reaches past the window".to_owned());
     }
-    if let CheckDef::Number { samples, .. } = check
-        && samples.is_empty()
+    if let CheckDef::Number { reference, .. } = check
+        && file.reference(reference).is_none()
     {
-        return Err("its number check has no sample to learn from".to_owned());
+        return Err(format!(
+            "its number check reads with reference {reference:?}, which the file does not have"
+        ));
     }
-    for image in check.images() {
-        if !is_image_name(image) {
-            return Err(format!(
-                "picture {image:?} must be a lowercase .png file name of letters, digits, \
-                 hyphens, and underscores"
-            ));
-        }
+    check.image().map_or(Ok(()), check_image)
+}
+
+/// Checks that `image` is a picture name the folder can hold.
+fn check_image(image: &str) -> Result<(), String> {
+    if is_image_name(image) {
+        Ok(())
+    } else {
+        Err(format!(
+            "picture {image:?} must be a lowercase .png file name of letters, digits, hyphens, \
+             and underscores"
+        ))
     }
-    Ok(())
 }
 
 /// Whether `name` is a picture file name the folder can hold.
@@ -444,6 +520,8 @@ pub enum AppFileError {
     NoName,
     /// A value, named by its ID, breaks a rule.
     Value(String, String),
+    /// A reference, named by its ID, breaks a rule.
+    Reference(String, String),
 }
 
 impl fmt::Display for AppFileError {
@@ -456,6 +534,7 @@ impl fmt::Display for AppFileError {
             ),
             Self::NoName => formatter.write_str("the application has no name"),
             Self::Value(id, problem) => write!(formatter, "value {id:?}: {problem}"),
+            Self::Reference(id, problem) => write!(formatter, "reference {id:?}: {problem}"),
         }
     }
 }
@@ -471,6 +550,22 @@ impl Error for AppFileError {}
 #[must_use]
 pub fn value_id(name: &str) -> String {
     id_from_name(name, "value", MAX_VALUE_ID_LEN)
+}
+
+/// A reference ID made from a name the user typed, such as `percent_font`
+/// from `Percent font`, the way [`value_id`] makes one, with a `reference`
+/// prefix where it needs one.
+#[must_use]
+pub fn reference_id(name: &str) -> String {
+    id_from_name(name, "reference", MAX_REFERENCE_ID_LEN)
+}
+
+/// The file name of a reference's `number`th sample, such as
+/// `ref-percent_font-3.png`. No value's picture can have it: a value's ID
+/// has no hyphen, and its picture is `{id}.png`.
+#[must_use]
+pub fn sample_name(reference: &str, number: usize) -> String {
+    format!("ref-{reference}-{number}.png")
 }
 
 /// An ID made from a name the user typed, as [`value_id`] describes, with
@@ -541,18 +636,24 @@ mod tests {
                         height: 38,
                     },
                     check: CheckDef::Number {
-                        ink: ColorDef {
-                            red: 255,
-                            green: 255,
-                            blue: 255,
-                        },
-                        tolerance: 40,
-                        samples: vec![SampleDef {
-                            image: "progress-1.png".to_owned(),
-                            text: "87%".to_owned(),
-                        }],
+                        reference: "percent".to_owned(),
+                        whole: true,
                     },
                 },
+            }],
+            references: vec![ReferenceDef {
+                id: "percent".to_owned(),
+                name: "Percent".to_owned(),
+                ink: ColorDef {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                },
+                tolerance: 40,
+                samples: vec![SampleDef {
+                    image: sample_name("percent", 1),
+                    text: "87%".to_owned(),
+                }],
             }],
         }
     }
@@ -567,7 +668,39 @@ mod tests {
         assert!(json.contains("\"mustMatch\""));
         assert!(json.contains("\"kind\": \"number\""));
         assert!(json.contains("\"windowSize\""));
+        assert!(json.contains("\"whole\": true"));
+        assert!(json.contains("\"ref-percent-1.png\""));
         assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn a_file_without_references_leaves_them_out() {
+        let mut file = dash();
+        file.values.clear();
+        file.references.clear();
+        let json = file.to_json();
+        assert!(!json.contains("references"));
+        assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn the_file_names_its_references_samples_and_its_image_checks_pictures() {
+        let mut file = dash();
+        let mut icon = file.values[0].clone();
+        icon.id = "icon".to_owned();
+        icon.screen.check = CheckDef::Image {
+            image: "icon.png".to_owned(),
+            tolerance: 9,
+        };
+        file.values.push(icon);
+        assert_eq!(file.images(), ["ref-percent-1.png", "icon.png"]);
+        assert_eq!(
+            file.reference("percent")
+                .map(|reference| reference.tolerance),
+            Some(40)
+        );
+        assert!(file.reference("progress").is_none());
+        assert_eq!(file.values[0].screen.check.image(), None);
     }
 
     #[test]
@@ -604,9 +737,13 @@ mod tests {
                 color: RED,
                 tolerance: 3,
             },
-            CheckDef::Reference {
+            CheckDef::Image {
                 image: "icon_visible.png".to_owned(),
                 tolerance: 9,
+            },
+            CheckDef::Number {
+                reference: "percent".to_owned(),
+                whole: false,
             },
         ];
         for check in checks {
@@ -675,13 +812,24 @@ mod tests {
         let mut taller = dash();
         taller.values[0].screen.region.y = 1050;
         let mut no_samples = dash();
-        no_samples.values[0].screen.check = CheckDef::Number {
-            ink: RED,
-            tolerance: 0,
-            samples: Vec::new(),
+        no_samples.references[0].samples.clear();
+        let mut unknown = dash();
+        unknown.values[0].screen.check = CheckDef::Number {
+            reference: "digits".to_owned(),
+            whole: false,
         };
+        let mut bad_reference = dash();
+        bad_reference.references[0].id = "Percent".to_owned();
+        let mut two_references = dash();
+        two_references
+            .references
+            .push(two_references.references[0].clone());
+        let mut unnamed_reference = dash();
+        unnamed_reference.references[0].name = "  ".to_owned();
+        let mut sample_escape = dash();
+        sample_escape.references[0].samples[0].image = "../1.png".to_owned();
         let mut escape = dash();
-        escape.values[0].screen.check = CheckDef::Reference {
+        escape.values[0].screen.check = CheckDef::Image {
             image: "../app.png".to_owned(),
             tolerance: 0,
         };
@@ -705,7 +853,21 @@ mod tests {
             ),
             (
                 no_samples,
-                "value \"progress\": its number check has no sample",
+                "reference \"percent\": it has no sample to learn from",
+            ),
+            (
+                unknown,
+                "value \"progress\": its number check reads with reference \"digits\", which",
+            ),
+            (bad_reference, "reference \"Percent\": signal name"),
+            (
+                two_references,
+                "reference \"percent\": another reference has the same ID",
+            ),
+            (unnamed_reference, "reference \"percent\": it has no name"),
+            (
+                sample_escape,
+                "reference \"percent\": picture \"../1.png\" must be",
             ),
             (escape, "value \"progress\": picture \"../app.png\" must be"),
         ];
@@ -763,8 +925,18 @@ mod tests {
         let long = value_id(&"abc".repeat(30));
         assert_eq!(long.len(), MAX_VALUE_ID_LEN);
         assert!(SignalName::new(&long).is_ok());
-        // The pictures named after the longest ID still fit.
+        // The picture named after the longest ID still fits.
         assert!(is_image_name(&format!("{long}.png")));
-        assert!(is_image_name(&format!("{long}-999999999.png")));
+    }
+
+    #[test]
+    fn reference_ids_and_their_sample_names_fit() {
+        assert_eq!(reference_id("Percent font"), "percent_font");
+        assert_eq!(reference_id("0-9"), "reference_0_9");
+        let long = reference_id(&"abc".repeat(30));
+        assert_eq!(long.len(), MAX_REFERENCE_ID_LEN);
+        assert!(SignalName::new(&long).is_ok());
+        assert_eq!(sample_name("percent_font", 3), "ref-percent_font-3.png");
+        assert!(is_image_name(&sample_name(&long, 999_999_999)));
     }
 }

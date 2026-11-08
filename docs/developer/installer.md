@@ -33,7 +33,7 @@ runtime's logs.
 
 The installer also holds the setup app's text reader model,
 `models\text-recognition.onnx` beside the setup app, which
-[recording a number](../user/values.md#record-a-number) uses
+[recording readings](../user/references.md#record-readings) uses
 ([The text reader](setup-app.md#the-text-reader)). `mise run
 installer:build` downloads it first with `mise run ocr:model`, which fails when
 the download does not match the hash pinned in

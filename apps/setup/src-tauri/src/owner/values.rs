@@ -73,9 +73,9 @@ impl<H: Host> Owner<H> {
         if name.is_empty() {
             return Err("Name the value first.".to_owned());
         }
-        // A picture check's region was drawn on the screenshot it keeps.
+        // An image check's region was drawn on the screenshot it keeps.
         let drawn_on = match &spec.check {
-            CheckSpec::Reference { screenshot, .. } => *screenshot,
+            CheckSpec::Image { screenshot, .. } => *screenshot,
             _ => spec.screenshot,
         };
         let size = self
@@ -97,9 +97,11 @@ impl<H: Host> Owner<H> {
                 file.name
             ));
         }
-        let saved =
-            check_spec::to_saved(&spec.check, &self.screenshots, self.recording.as_ref(), &id)
-                .map_err(|error| error.to_string())?;
+        let saved = self
+            .with_session(|session| {
+                check_spec::to_saved(&spec.check, session, Some(spec.app.as_str()), &id)
+            })
+            .map_err(|error| error.to_string())?;
         file.values.push(ValueDef {
             id: id.clone(),
             name: name.to_owned(),
@@ -165,8 +167,8 @@ mod tests {
 
     use crate::owner::messages::Request;
     use crate::owner::test_support::{
-        BAR, Harness, REFERENCE, add_example_app, frame_image, harness, harness_with,
-        scratch_store, spec,
+        BAR, Harness, IMAGE, add_example_app, frame_image, harness, harness_with, scratch_store,
+        spec,
     };
 
     use super::*;
@@ -185,7 +187,7 @@ mod tests {
             }
         };
         assert_eq!(
-            harness.ask(save(spec("example", "Icon visible", REFERENCE))),
+            harness.ask(save(spec("example", "Icon visible", IMAGE))),
             Err("Take a screenshot first.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
@@ -202,11 +204,11 @@ mod tests {
         .expect("matching length");
         harness.deliver(&mut handler, Ok(&shrunk));
         assert_eq!(
-            harness.ask(save(spec("example", "  ", REFERENCE))),
+            harness.ask(save(spec("example", "  ", IMAGE))),
             Err("Name the value first.".to_owned())
         );
-        let mut stale = spec("example", "Icon visible", REFERENCE);
-        // A picture check's own screenshot wins over the one shown.
+        let mut stale = spec("example", "Icon visible", IMAGE);
+        // An image check's own screenshot wins over the one shown.
         stale.screenshot = 9;
         let saved = harness.ask(save(stale)).expect("saves a new app");
         assert_eq!(

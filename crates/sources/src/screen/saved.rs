@@ -1,7 +1,8 @@
 //! A saved value's check, rebuilt from its application's file.
 //!
 //! The setup app saves a value as plain data: the window size it was drawn
-//! at, its region, its check, and the pictures the check learns from. The
+//! at, its region, and its check, which names a picture or a reference. A
+//! reference is the characters of a font, learned from its own pictures. The
 //! runtime turns that back into a [`Check`] here. Anything else that reads a
 //! saved value should too, so a value reads the same wherever it is read.
 
@@ -9,10 +10,11 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
-use appytappy_config::app_file::{CheckDef, ColorDef, ScreenDef};
+use appytappy_config::app_file::{CheckDef, ColorDef, ReferenceDef, ScreenDef};
 
-use super::check::{BarFill, Check, ColorMatch, ReferenceMatch};
+use super::check::{BarFill, Check, ColorMatch, ImageMatch};
 use super::digits::{DigitReader, LearnError};
+use super::mask::Mask;
 use super::{Image, ImageError, Region, Size};
 use crate::system::Rgb;
 
@@ -38,17 +40,20 @@ impl From<ColorDef> for Rgb {
     }
 }
 
-/// Rebuilds the check `screen` describes. `picture` returns the bytes of the
-/// PNG file the check names, such as `progress-1.png`.
+/// Rebuilds the check `screen` describes, with the application's
+/// `references`. `picture` returns the bytes of a PNG file the check or its
+/// reference names, such as `icon.png`.
 ///
 /// # Errors
 ///
 /// Returns a [`SavedError`] when the region is empty or does not fit the
-/// window size it was drawn at, a picture cannot be
-/// read or decoded or is not the region's size, the bar's two colors are the
-/// same, or a number cannot learn from one of its pictures.
+/// window size it was drawn at, a picture cannot be read or decoded or an
+/// image check's picture is not the region's size, the bar's two colors are
+/// the same, or a number's reference is missing or cannot learn from one of
+/// its pictures.
 pub fn build(
     screen: &ScreenDef,
+    references: &[ReferenceDef],
     mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<SavedCheck, SavedError> {
     let region = Region::new(
@@ -65,47 +70,18 @@ pub fn build(
     if !region.fits(window_size) {
         return Err(SavedError::OutsideWindow { window_size });
     }
-    // Only a reference picture's transparent pixels mean anything; a digit
-    // sample is read as it looks.
-    let mut load = |name: &str, masked: bool| {
-        let bytes = picture(name).map_err(|source| SavedError::Missing {
-            name: name.to_owned(),
-            source,
-        })?;
-        let decoded = if masked {
-            Image::decode_png_masked(&bytes)
-        } else {
-            Image::decode_png(&bytes).map(|image| (image, None))
-        };
-        let (image, mask) = decoded.map_err(|source| SavedError::Picture {
-            name: name.to_owned(),
-            source,
-        })?;
-        if image.size() != region.size() {
-            return Err(SavedError::PictureSize {
-                name: name.to_owned(),
-                found: image.size(),
-                expected: region.size(),
-            });
-        }
-        Ok((image, mask))
-    };
     let check = match &screen.check {
-        CheckDef::Number {
-            ink,
-            tolerance,
-            samples,
-        } => {
-            let mut reader = DigitReader::new((*ink).into(), *tolerance);
-            for sample in samples {
-                reader
-                    .learn(&load(&sample.image, false)?.0, &sample.text)
-                    .map_err(|source| SavedError::Learn {
-                        name: sample.image.clone(),
-                        source,
-                    })?;
+        CheckDef::Number { reference, whole } => {
+            let reference = references
+                .iter()
+                .find(|known| known.id == *reference)
+                .ok_or_else(|| SavedError::NoReference {
+                    id: reference.clone(),
+                })?;
+            Check::Number {
+                reader: reader(reference, picture)?,
+                whole: *whole,
             }
-            Check::Number(reader)
         },
         CheckDef::BarFill { filled, empty } => Check::BarFill(
             BarFill::new((*filled).into(), (*empty).into())
@@ -115,23 +91,85 @@ pub fn build(
             color: (*color).into(),
             tolerance: *tolerance,
         }),
-        CheckDef::Reference { image, tolerance } => {
-            let (reference, mask) = load(image, true)?;
+        CheckDef::Image { image, tolerance } => {
+            let (saved, mask) = load_masked(image, &mut picture)?;
+            if saved.size() != region.size() {
+                return Err(SavedError::PictureSize {
+                    name: image.clone(),
+                    found: saved.size(),
+                    expected: region.size(),
+                });
+            }
             // The mask came from the same file, so its size always fits.
-            let check =
-                ReferenceMatch::new(reference, mask.as_ref(), *tolerance).map_err(|error| {
-                    SavedError::Picture {
-                        name: image.clone(),
-                        source: ImageError::Mask(error),
-                    }
-                })?;
-            Check::Reference(check)
+            let check = ImageMatch::new(saved, mask.as_ref(), *tolerance).map_err(|error| {
+                SavedError::Picture {
+                    name: image.clone(),
+                    source: ImageError::Mask(error),
+                }
+            })?;
+            Check::Image(check)
         },
     };
     Ok(SavedCheck {
         window_size,
         region,
         check,
+    })
+}
+
+/// A reader with the characters `reference` learns from its pictures, which
+/// `picture` returns the bytes of. The pictures may be any size: each is
+/// text in the reference's font.
+///
+/// # Errors
+///
+/// Returns a [`SavedError`] when a picture cannot be read or decoded, or the
+/// reader cannot learn from it.
+pub fn reader(
+    reference: &ReferenceDef,
+    mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<DigitReader, SavedError> {
+    let mut reader = DigitReader::new(reference.ink.into(), reference.tolerance);
+    for sample in &reference.samples {
+        reader
+            .learn(&load(&sample.image, &mut picture)?, &sample.text)
+            .map_err(|source| SavedError::Learn {
+                name: sample.image.clone(),
+                source,
+            })?;
+    }
+    Ok(reader)
+}
+
+/// The picture `name` and the mask its transparent pixels make, decoded
+/// from the bytes `picture` returns for it. Only an image check's picture
+/// is masked; a reference's samples are read as they look.
+fn load_masked(
+    name: &str,
+    picture: &mut impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<(Image, Option<Mask>), SavedError> {
+    let bytes = picture(name).map_err(|source| SavedError::Missing {
+        name: name.to_owned(),
+        source,
+    })?;
+    Image::decode_png_masked(&bytes).map_err(|source| SavedError::Picture {
+        name: name.to_owned(),
+        source,
+    })
+}
+
+/// The picture `name`, decoded from the bytes `picture` returns for it.
+fn load(
+    name: &str,
+    picture: &mut impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<Image, SavedError> {
+    let bytes = picture(name).map_err(|source| SavedError::Missing {
+        name: name.to_owned(),
+        source,
+    })?;
+    Image::decode_png(&bytes).map_err(|source| SavedError::Picture {
+        name: name.to_owned(),
+        source,
     })
 }
 
@@ -170,7 +208,12 @@ pub enum SavedError {
     },
     /// The bar's filled and empty colors are the same.
     SameColors,
-    /// A number cannot learn from one of its pictures.
+    /// A number reads with a reference the application does not have.
+    NoReference {
+        /// The reference's ID.
+        id: String,
+    },
+    /// A reference cannot learn from one of its pictures.
     Learn {
         /// The picture's file name.
         name: String,
@@ -205,10 +248,13 @@ impl fmt::Display for SavedError {
             Self::SameColors => {
                 formatter.write_str("its bar's filled and empty colors are the same")
             },
+            Self::NoReference { id } => {
+                write!(formatter, "its reference {id} is not saved")
+            },
             Self::Learn { name, source } => {
                 write!(
                     formatter,
-                    "it cannot learn from its picture {name}: {source}"
+                    "its reference cannot learn from the picture {name}: {source}"
                 )
             },
         }
@@ -224,7 +270,8 @@ impl Error for SavedError {
             Self::EmptyRegion
             | Self::OutsideWindow { .. }
             | Self::PictureSize { .. }
-            | Self::SameColors => None,
+            | Self::SameColors
+            | Self::NoReference { .. } => None,
         }
     }
 }
@@ -233,11 +280,10 @@ impl Error for SavedError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use appytappy_config::app_file::{RegionDef, SampleDef, SizeDef};
+    use appytappy_config::app_file::{RegionDef, SampleDef, SizeDef, sample_name};
     use appytappy_config::signal::{Number, Value};
 
     use super::*;
-    use crate::screen::mask::Mask;
 
     const RED: ColorDef = ColorDef {
         red: 255,
@@ -315,6 +361,7 @@ mod tests {
                 color: RED,
                 tolerance: 10,
             }),
+            &[],
             from(&BTreeMap::new()),
         )
         .expect("builds");
@@ -331,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_ignores_its_pictures_transparent_pixels() {
+    fn an_image_check_ignores_its_pictures_transparent_pixels() {
         let icon = solid(4, RED);
         // Only the left half of each row belongs to the icon.
         let mask = Mask::new(icon.size(), [true, true, false, false].repeat(2)).unwrap();
@@ -341,10 +388,11 @@ mod tests {
             icon.encode_png_masked(&mask).unwrap(),
         );
         let built = build(
-            &screen(CheckDef::Reference {
+            &screen(CheckDef::Image {
                 image: "icon.png".to_owned(),
                 tolerance: 0,
             }),
+            &[],
             from(&files),
         )
         .expect("builds");
@@ -363,6 +411,7 @@ mod tests {
                 filled: RED,
                 empty: GRAY,
             }),
+            &[],
             from(&BTreeMap::new()),
         )
         .expect("builds");
@@ -375,19 +424,21 @@ mod tests {
                 filled: RED,
                 empty: RED,
             }),
+            &[],
             from(&BTreeMap::new()),
         );
         assert!(matches!(same, Err(SavedError::SameColors)), "{same:?}");
     }
 
     #[test]
-    fn a_reference_compares_with_its_picture() {
+    fn an_image_check_compares_with_its_picture() {
         let files = pictures(&[("icon.png", &solid(4, RED))]);
         let built = build(
-            &screen(CheckDef::Reference {
+            &screen(CheckDef::Image {
                 image: "icon.png".to_owned(),
                 tolerance: 0,
             }),
+            &[],
             from(&files),
         )
         .expect("builds");
@@ -395,65 +446,91 @@ mod tests {
         assert_eq!(built.check.read(&solid(4, GRAY)), Ok(Value::Flag(false)));
     }
 
-    #[test]
-    fn a_number_learns_from_its_samples() {
-        // Two separate ink columns read as two characters.
+    /// "11" as two separate red columns on gray, 4 by 2 pixels drawn
+    /// `scale` times larger.
+    fn elevens(scale: u32) -> Image {
         let ink = [0, 0, 255, 255];
         let paper = [40, 40, 40, 255];
-        let row = [ink, paper, ink, paper].concat();
-        let picture = Image::new(
-            Size {
-                width: 4,
-                height: 2,
-            },
-            [row.clone(), row].concat(),
-        )
-        .expect("matching length");
-        let files = pictures(&[("count-1.png", &picture)]);
-        let number = CheckDef::Number {
+        let wide = usize::try_from(scale).expect("small");
+        let row = [ink, paper, ink, paper]
+            .iter()
+            .flat_map(|pixel| pixel.repeat(wide))
+            .collect::<Vec<u8>>();
+        let size = Size {
+            width: scale.saturating_mul(4),
+            height: scale.saturating_mul(2),
+        };
+        Image::new(size, row.repeat(wide.saturating_mul(2))).expect("matching length")
+    }
+
+    fn counter(text: &str) -> ReferenceDef {
+        ReferenceDef {
+            id: "counter".to_owned(),
+            name: "Counter".to_owned(),
             ink: RED,
             tolerance: 10,
             samples: vec![SampleDef {
-                image: "count-1.png".to_owned(),
-                text: "11".to_owned(),
+                image: sample_name("counter", 1),
+                text: text.to_owned(),
             }],
+        }
+    }
+
+    #[test]
+    fn a_number_reads_with_its_reference_at_any_size() {
+        // The sample is taller than the region, and its own size.
+        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
+        let number = CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: true,
         };
-        let built = build(&screen(number.clone()), from(&files)).expect("builds");
+        let built = build(&screen(number.clone()), &[counter("11")], from(&files)).expect("builds");
         assert_eq!(
-            built.check.read(&picture),
+            built.check.read(&elevens(1)),
             Ok(Value::Number(Number::new(11.0).expect("finite")))
         );
-        let wrong = CheckDef::Number {
-            ink: RED,
-            tolerance: 10,
-            samples: vec![SampleDef {
-                image: "count-1.png".to_owned(),
-                text: "1".to_owned(),
-            }],
-        };
+        assert!(matches!(built.check, Check::Number { whole: true, .. }));
         // A sample's transparency means nothing, even when every pixel is
         // transparent.
-        let clear = transparent(&picture);
-        let mut clear_files = BTreeMap::new();
-        clear_files.insert("count-1.png".to_owned(), clear);
-        let from_clear = build(&screen(number), from(&clear_files)).expect("builds");
+        let mut clear = BTreeMap::new();
+        clear.insert(sample_name("counter", 1), transparent(&elevens(3)));
+        let from_clear = build(&screen(number), &[counter("11")], from(&clear)).expect("builds");
         assert_eq!(
-            from_clear.check.read(&picture),
+            from_clear.check.read(&elevens(1)),
             Ok(Value::Number(Number::new(11.0).expect("finite")))
         );
-        let error = build(&screen(wrong), from(&files)).expect_err("two characters, not one");
+        let error = build(
+            &screen(CheckDef::Number {
+                reference: "counter".to_owned(),
+                whole: false,
+            }),
+            &[counter("1")],
+            from(&files),
+        )
+        .expect_err("two characters, not one");
         assert_eq!(
             error.to_string(),
-            "it cannot learn from its picture count-1.png: the region shows 2 characters but the \
-             text has 1; characters that touch count as one"
+            "its reference cannot learn from the picture ref-counter-1.png: the region shows 2 \
+             characters but the text has 1; characters that touch count as one"
         );
         assert!(error.source().is_some());
+        let error = build(
+            &screen(CheckDef::Number {
+                reference: "digits".to_owned(),
+                whole: false,
+            }),
+            &[counter("11")],
+            from(&files),
+        )
+        .expect_err("no such reference");
+        assert_eq!(error.to_string(), "its reference digits is not saved");
+        assert!(error.source().is_none());
     }
 
     #[test]
     fn broken_pictures_and_regions_say_what_is_wrong() {
         let reference = |image: &str| {
-            screen(CheckDef::Reference {
+            screen(CheckDef::Image {
                 image: image.to_owned(),
                 tolerance: 0,
             })
@@ -461,7 +538,7 @@ mod tests {
         let mut files = pictures(&[("small.png", &solid(3, RED))]);
         files.insert("broken.png".to_owned(), b"not a picture".to_vec());
         let problems = ["gone.png", "broken.png", "small.png"].map(|name| {
-            let error = build(&reference(name), from(&files)).expect_err("refused");
+            let error = build(&reference(name), &[], from(&files)).expect_err("refused");
             (error.to_string(), error.source().is_some())
         });
         assert_eq!(
@@ -480,19 +557,19 @@ mod tests {
         );
         let mut empty = reference("small.png");
         empty.region.width = 0;
-        let error = build(&empty, from(&files)).expect_err("empty");
+        let error = build(&empty, &[], from(&files)).expect_err("empty");
         assert_eq!(error.to_string(), "its region is empty");
         assert!(error.source().is_none());
         let mut outside = reference("small.png");
         outside.region.x = 797;
-        let error = build(&outside, from(&files)).expect_err("outside");
+        let error = build(&outside, &[], from(&files)).expect_err("outside");
         assert_eq!(
             error.to_string(),
             "its region lies outside the 800x600 window it was drawn on"
         );
         assert!(error.source().is_none());
         outside.region.x = 796;
-        let edge = build(&outside, from(&files));
+        let edge = build(&outside, &[], from(&files));
         assert!(
             matches!(edge, Err(SavedError::PictureSize { .. })),
             "touching the edge fits, so only the picture is wrong: {edge:?}"

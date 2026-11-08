@@ -158,8 +158,10 @@ pub(crate) fn compile(
         };
         let draft = drafts.entry(app_id).or_default();
         let ready = built.entry((app_id, value.id.as_str())).or_insert_with(|| {
-            let check = saved::build(&value.screen, |name| picture(app_id, name))
-                .map_err(|error| format!("{} of {}: {error}", value.name, file.name))?;
+            let check = saved::build(&value.screen, &file.references, |name| {
+                picture(app_id, name)
+            })
+            .map_err(|error| format!("{} of {}: {error}", value.name, file.name))?;
             draft.values.push(ValuePlan {
                 signal,
                 name: value.name.clone(),
@@ -199,12 +201,13 @@ mod tests {
 
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
-        RegionDef, ScreenDef, SizeDef, ValueDef, WindowDef,
+        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeDef, ValueDef, WindowDef, sample_name,
     };
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
     };
     use appytappy_config::window_match::Pattern;
+    use appytappy_sources::screen::{Image, Size};
 
     use super::*;
 
@@ -251,6 +254,7 @@ mod tests {
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             values,
+            references: Vec::new(),
         }
     }
 
@@ -362,7 +366,7 @@ mod tests {
 
     #[test]
     fn what_cannot_run_is_named_and_the_rest_still_runs() {
-        let reference = CheckDef::Reference {
+        let reference = CheckDef::Image {
             image: "icon.png".to_owned(),
             tolerance: 0,
         };
@@ -432,7 +436,7 @@ mod tests {
 
     #[test]
     fn pictures_come_from_the_applications_folder() {
-        let picture = appytappy_sources::screen::Image::new(
+        let picture = Image::new(
             appytappy_sources::screen::Size {
                 width: 4,
                 height: 2,
@@ -442,7 +446,7 @@ mod tests {
         .expect("matching length")
         .encode_png()
         .expect("encodes");
-        let reference = CheckDef::Reference {
+        let reference = CheckDef::Image {
             image: "icon.png".to_owned(),
             tolerance: 0,
         };
@@ -464,6 +468,63 @@ mod tests {
         assert_eq!(asked, ["example/icon.png"]);
         assert_eq!(plan.problems, Vec::<String>::new());
         assert!(plan.apps.contains_key("example"));
+    }
+
+    #[test]
+    fn a_number_reads_with_its_applications_reference() {
+        let red = [0, 0, 255, 255];
+        let gray = [40, 40, 40, 255];
+        let picture = Image::new(
+            Size {
+                width: 3,
+                height: 1,
+            },
+            [red, gray, red].concat(),
+        )
+        .expect("matching length")
+        .encode_png()
+        .expect("encodes");
+        let count = CheckDef::Number {
+            reference: "digits".to_owned(),
+            whole: true,
+        };
+        let mut example = app("Example App", vec![value("count", count)]);
+        example.references.push(ReferenceDef {
+            id: "digits".to_owned(),
+            name: "Digits".to_owned(),
+            ink: RED,
+            tolerance: 10,
+            samples: vec![SampleDef {
+                image: sample_name("digits", 1),
+                text: "11".to_owned(),
+            }],
+        });
+        let mut missing = example.clone();
+        missing.references.clear();
+        let automations = file(vec![automation(
+            "on",
+            "example",
+            "count",
+            TargetDef::Number(11.0),
+        )]);
+        let mut asked = Vec::new();
+        let plan = compile(
+            &[stored("example", Ok(example))],
+            &automations,
+            |app, name| {
+                asked.push(format!("{app}/{name}"));
+                Ok(picture.clone())
+            },
+        );
+        assert_eq!(asked, ["example/ref-digits-1.png"]);
+        assert_eq!(plan.problems, Vec::<String>::new());
+        let plan = compile(&[stored("example", Ok(missing))], &automations, no_pictures);
+        assert_eq!(
+            plan.problems,
+            [
+                "Automation on cannot run: The count of Example App: its reference digits is not saved"
+            ]
+        );
     }
 
     #[test]

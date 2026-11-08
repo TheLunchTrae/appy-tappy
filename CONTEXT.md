@@ -20,7 +20,8 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
 - **Binding.** The concrete way to read one signal for one application
   version: a source primitive and its parameters, such as a pointer chain.
 - **Check.** How a screen region binding turns a region's pixels into a value:
-  a number, a bar's fill, a color match, or a match with a reference picture.
+  a number read with a reference, a bar's fill, a color match, or a match
+  with a saved image.
 - **Compiled config.** The one file the setup app compiles from authoring
   files and the runtime loads.
 - **Process-access permit.** The value `config` issues for an application of
@@ -37,7 +38,9 @@ Domain vocabulary for AppyTappy. Use these terms in code, docs, and issues.
   paired actions then.
 - **Recording.** A setup-app capture of one number region over time that
   keeps each different reading once, for the user to review and label. Kept
-  readings teach the number check like labeled screenshots.
+  readings teach a reference like labeled screenshots.
+- **Reference.** The characters of one font in one application, learned from
+  labeled pictures of its text. A number check reads with one, at any size.
 - **Rule.** A trigger, the actions to run when it fires, a cooldown, and
   whether those actions restore.
 - **Runtime.** The always-on background program.

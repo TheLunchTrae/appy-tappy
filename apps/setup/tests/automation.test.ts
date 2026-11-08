@@ -36,12 +36,7 @@ function value(id: string, name: string, check: CheckDef): ValueDef {
   };
 }
 
-const progress = value('progress', 'Progress', {
-  kind: 'number',
-  ink: white,
-  tolerance: 10,
-  samples: [{ image: 'progress-1.png', text: '12%' }],
-});
+const progress = value('progress', 'Progress', { kind: 'number', reference: 'percent', whole: false });
 const iconVisible = value('icon_visible', 'Icon visible', { kind: 'color', color: white, tolerance: 10 });
 
 const apps: readonly AppSummary[] = [
@@ -59,6 +54,7 @@ const apps: readonly AppSummary[] = [
       },
       antiCheat: 'unknown',
       values: [progress, iconVisible],
+      references: [],
     },
     error: null,
     windows: [7],
@@ -82,11 +78,11 @@ const pauseMusic: AutomationDef = {
 };
 
 describe('values', () => {
-  test('number and bar fill checks read numbers; color and picture checks read yes or no', () => {
-    expect(valueKind({ kind: 'number', ink: white, tolerance: 0, samples: [] })).toBe('number');
+  test('number and bar fill checks read numbers; color and image checks read yes or no', () => {
+    expect(valueKind({ kind: 'number', reference: 'percent', whole: true })).toBe('number');
     expect(valueKind({ kind: 'barFill', filled: white, empty: white })).toBe('number');
     expect(valueKind({ kind: 'color', color: white, tolerance: 0 })).toBe('flag');
-    expect(valueKind({ kind: 'reference', image: 'a.png', tolerance: 0 })).toBe('flag');
+    expect(valueKind({ kind: 'image', image: 'a.png', tolerance: 0 })).toBe('flag');
   });
 
   test('only readable applications offer their values', () => {

@@ -12,7 +12,7 @@ whose window is open now.
 
 On the Values page, select **New value**.
 
-1. **Pick the window.** Choose the application in **Save values to**, then
+1. **Pick the window.** Choose the application in **Save to**, then
    pick its window in the list of open windows; type in the filter to find
    one. Picking a window a saved application finds chooses that application.
    If the application isn't saved yet, select **Add application** to
@@ -24,50 +24,50 @@ On the Values page, select **New value**.
    and press `F9` then. To use other keys, select **Change shortcut** and
    press them. A letter, a digit, or Space needs Ctrl, Alt, Shift, or Win
    with it, so the key keeps working everywhere else.
-3. **Draw the region.** On a screenshot, drag to draw a box around what to
-   read. Drag inside the box to move it, or drag a corner to resize it. The
-   **X**, **Y**, **Width**, and **Height** fields set it to the exact pixel,
-   counted in the window's own pixels from its top-left corner.
-4. **Choose the check.** Pick how AppyTappy reads the region, from the four
-   [checks](#checks) below.
-5. **Watch the reading.** Once the check is complete, the box under it shows
-   what AppyTappy reads on the live window, a few times a second. If the
-   check cannot work, such as a bar whose filled and empty colors are the
-   same, it says why there.
-6. **Name it and save.** Type a **Value name**, such as `Progress`, and
-   select **Save value**.
+3. **Where to read.** Type a **Value name**, such as `Progress`, and choose
+   the **Check**, one of the four [checks](#checks) below. On a screenshot,
+   drag to draw a box around what to read. Drag inside the box to move it, or
+   drag a corner to resize it. The **X**, **Y**, **Width**, and **Height**
+   fields set it to the exact pixel, counted in the window's own pixels from
+   its top-left corner. Then select **Next: how to read it**.
+4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
+   box under it then shows what AppyTappy reads on the live window, a few
+   times a second. If the check cannot work, such as a bar whose filled and
+   empty colors are the same, it says why there.
+5. **Save.** Select **Save value**. **Back** returns to the first step.
 
 AppyTappy keeps the screenshots until you select **Change window** or leave
 the new value.
 
 ## Checks
 
-- **Number** reads a number, such as `87%` or `-12.5`. Next to
-  **Characters' color**, select **Pick**, then click the characters on a
-  screenshot. Then select each screenshot and type what the region shows on
-  it, such as `87%`. AppyTappy learns the shape of each character from what
-  you type, so label enough screenshots to show every digit it needs to know,
-  or [record the region](#record-a-number) to collect them as they show.
-  **Tolerance** says how far a pixel's color may be from the characters'
-  color and still count.
+- **Number** reads a number, such as `87%` or `-12.5`, with a
+  [reference](references.md): the color and shapes of the application's
+  characters. Pick one of the application's references, or select
+  **New reference from this region** to make one from the region you drew.
+  **Edit** changes the picked one, such as to teach it a digit it does not
+  know yet. Turn on **Whole number only** to ignore every digit after the
+  decimal point, so `87.5%` reads as 87.
 - **Bar fill** reads how full a bar is, from 0 to 100. Use **Pick** next to
   **Filled color** and click a filled part of the bar, then next to
   **Empty color** and click an empty part. Borders and labels inside the
   region don't count.
 - **Color** is yes when the region's average color is close to the
   **Color to look for**, such as a light that turns red. Use **Pick** and
-  click the color on a screenshot. **Tolerance** says how close.
-- **Picture** is yes when the region looks like it does on a screenshot you
+  click the color on a screenshot. **Tolerance** says how close: drag the
+  slider or type a number.
+- **Image** is yes when the region looks like it does on a screenshot you
   choose, such as an icon that appears. Select that screenshot, then
   **Use this one** next to **Compare against**. **Tolerance** says how much
   it may differ on average. To compare only the thing itself and not what is
-  behind it, [select it](#select-the-thing-in-a-picture).
+  behind it, [select it](#select-the-thing-in-an-image).
 
-## Select the thing in a picture
+## Select the thing in an image
 
-A **Picture** check compares every pixel of its region, so a background that
+An **Image** check compares every pixel of its region, so a background that
 changes, such as a sky behind an icon or a scene behind a word, can stop it
-from matching. **Select with** marks just the thing instead:
+from matching. **Select with**, under **Where to read**, marks just the thing
+instead:
 
 - **Box** draws the region by hand, as for other checks.
 - **Snap** takes a rough box. Drag one around the thing with some plain
@@ -84,7 +84,7 @@ region fits the selection, and the screenshot you select on becomes the one
 the check compares against. Selecting on another screenshot, or choosing
 another with **Use this one**, starts the selection over.
 
-While **Ignore the background** is on, the pixels left out are shaded over the
+Under **How to read it**, while **Ignore the background** is on, the pixels left out are shaded over the
 screenshot, and the check skips them. The note under it says how many pixels
 it compares. Turn it off to compare the whole region again. You can still
 adjust the region by hand with **Box**; anything you add to it counts as
@@ -92,43 +92,7 @@ background.
 
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
-**Picture** check on the part that matters often works instead.
-
-## Record a number
-
-Typing what a counter shows on screenshot after screenshot is slow when it
-shows many values. A **Number** check can record its region instead, while
-you use the application, and keep each different reading it shows.
-
-1. **Start recording.** Draw the region and pick the **Characters' color**
-   first. Then select **Start recording** under **Record readings**. The
-   region turns red while it records.
-2. **Use the application.** Go on in it until the region has shown the
-   characters you need, such as every digit. Each different reading is kept
-   once, with the time it first showed, and AppyTappy reads its text for you.
-   Readings appear under **Recording** as they are found. Moments when the
-   region shows none of the characters' color, such as while a menu covers
-   it, are skipped.
-3. **Stop and review.** Come back and select **Stop and review**. Each
-   reading shows with the text AppyTappy read. Fix any text it got wrong, and
-   clear **Keep** on any reading that is not the value, such as a paused
-   screen. A reading whose text gives one shape two different characters,
-   such as a `1` typed as `l`, is flagged: fix it or leave it out.
-4. **Keep them.** Select the button that says how many you keep, such as
-   **Keep 12 readings**. The kept readings teach the check like labeled
-   screenshots. **Review recording** opens them again with your choices, and
-   **Record more** goes on with the same recording. **Back** leaves review
-   without keeping, and your changes stay for next time. To record more, keep
-   the region, the characters' color, and the tolerance as they were: if you
-   changed them, **Use its settings** puts them back. Or **Discard** the
-   recording to start a new one. Changing window also discards it.
-
-Keep the window the size it was when you took the screenshot you drew the
-region on: at another size, recording pauses and says to resize the window.
-One recording keeps at most 200 readings.
-
-If AppyTappy cannot read a reading's text, review leaves its text empty for
-you to type.
+**Image** check on the part that matters often works instead.
 
 ## Window size
 

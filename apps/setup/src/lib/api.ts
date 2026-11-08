@@ -60,15 +60,20 @@ export type AntiCheat = 'none' | 'userMode' | 'kernelLevel' | 'unknown';
 
 /** A saved check, as the application file spells it. */
 export type CheckDef =
-  | {
-      readonly kind: 'number';
-      readonly ink: Color;
-      readonly tolerance: number;
-      readonly samples: readonly { readonly image: string; readonly text: string }[];
-    }
+  /** Reads a number with the characters of the reference `reference`; `whole` ignores every digit after the decimal point. */
+  | { readonly kind: 'number'; readonly reference: string; readonly whole: boolean }
   | { readonly kind: 'barFill'; readonly filled: Color; readonly empty: Color }
   | { readonly kind: 'color'; readonly color: Color; readonly tolerance: number }
-  | { readonly kind: 'reference'; readonly image: string; readonly tolerance: number };
+  | { readonly kind: 'image'; readonly image: string; readonly tolerance: number };
+
+/** How an application's characters look: their color, and the pictures they were learned from. */
+export interface ReferenceDef {
+  readonly id: string;
+  readonly name: string;
+  readonly ink: Color;
+  readonly tolerance: number;
+  readonly samples: readonly { readonly image: string; readonly text: string }[];
+}
 
 /** A saved value. */
 export interface ValueDef {
@@ -91,12 +96,13 @@ interface OverlayDef {
 }
 
 /** A saved application's file. `overlay` is absent until the overlay was first set. */
-interface AppFile {
+export interface AppFile {
   readonly format: number;
   readonly name: string;
   readonly window: WindowDef;
   readonly antiCheat: AntiCheat;
   readonly values: readonly ValueDef[];
+  readonly references: readonly ReferenceDef[];
   readonly overlay?: OverlayDef;
 }
 
@@ -114,21 +120,33 @@ export interface AppSpec {
   readonly window: WindowDef;
 }
 
+/** A saved reference of a saved application. */
+export interface ReferenceRef {
+  readonly app: string;
+  readonly id: string;
+}
+
+/** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
+export interface CharactersSpec {
+  readonly kind: 'characters';
+  readonly region: Rect;
+  /** The saved reference these add to, or null for a new one. */
+  readonly reference: ReferenceRef | null;
+  readonly ink: Color;
+  readonly tolerance: number;
+  readonly labels: readonly { readonly screenshot: number; readonly text: string }[];
+  /** Readings of this session's recording, which must be of `region`. */
+  readonly recorded: readonly RecordedLabel[];
+}
+
 /** A check as the capture screen describes it, naming this session's screenshots by index. */
 export type CheckSpec =
-  | {
-      readonly kind: 'number';
-      readonly region: Rect;
-      readonly ink: Color;
-      readonly tolerance: number;
-      readonly labels: readonly { readonly screenshot: number; readonly text: string }[];
-      /** Readings of this session's recording, which must be of `region`. */
-      readonly recorded: readonly RecordedLabel[];
-    }
+  | { readonly kind: 'number'; readonly region: Rect; readonly reference: ReferenceRef; readonly whole: boolean }
+  | CharactersSpec
   | { readonly kind: 'barFill'; readonly region: Rect; readonly filled: Color; readonly empty: Color }
   | { readonly kind: 'color'; readonly region: Rect; readonly color: Color; readonly tolerance: number }
   | {
-      readonly kind: 'reference';
+      readonly kind: 'image';
       readonly region: Rect;
       readonly screenshot: number;
       readonly tolerance: number;
@@ -220,6 +238,20 @@ export interface SaveSpec {
   readonly check: CheckSpec;
   /** The screenshot the region was drawn on, whose size the value keeps. */
   readonly screenshot: number;
+}
+
+/** A reference to save, with a new application when `app` is null. */
+export interface ReferenceSaveSpec {
+  /** The saved application the reference belongs to. */
+  readonly app: string;
+  readonly referenceName: string;
+  readonly check: CharactersSpec;
+}
+
+/** Where a reference was saved. */
+export interface SavedReference {
+  readonly app: string;
+  readonly reference: string;
 }
 
 /** Where a value was saved. */
@@ -350,8 +382,8 @@ export async function recordedReading(index: number, maxWidth: number): Promise<
   return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { index, maxWidth }));
 }
 
-/** Why the number check `spec` describes cannot learn each of its recorded readings, in order, or null for one it can. */
-export async function reviewProblems(spec: CheckSpec): Promise<readonly (string | null)[]> {
+/** Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it can. */
+export async function reviewProblems(spec: CharactersSpec): Promise<readonly (string | null)[]> {
   return invoke<readonly (string | null)[]>('review_problems', { spec });
 }
 
@@ -395,6 +427,16 @@ export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
 
 export async function deleteValue(application: string, value: string): Promise<void> {
   await invoke('delete_value', { application, value });
+}
+
+/** Saves a reference, over the one `spec.check.reference` names when it names one. */
+export async function saveReference(spec: ReferenceSaveSpec): Promise<SavedReference> {
+  return invoke<SavedReference>('save_reference', { spec });
+}
+
+/** Removes a saved reference and its pictures; refused while a value reads with it. */
+export async function deleteReference(application: string, reference: string): Promise<void> {
+  await invoke('delete_reference', { application, reference });
 }
 
 /** Sets how the application `application` protects itself from other programs. */

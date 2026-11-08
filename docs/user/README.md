@@ -35,6 +35,8 @@ That is all. The background part runs the automation from then on.
   window, and the anti-cheat setting.
 - [Values](values.md): what AppyTappy reads from a window, and the four ways
   it can read it.
+- [References](references.md): how AppyTappy knows an application's
+  characters, which its number values read with.
 - [Automations](automations.md): what to do, and when.
 - [Overlay](overlay.md): see your values as AppyTappy reads them, over the
   window or in a small panel.

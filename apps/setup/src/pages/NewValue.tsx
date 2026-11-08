@@ -5,6 +5,8 @@ import { Capture } from '../components/Capture.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
 import { background } from '../lib/repeat.ts';
 
+const VALUE = { kind: 'value' } as const;
+
 interface Props {
   readonly apps: readonly AppSummary[];
   readonly onCancel: () => void;
@@ -28,6 +30,8 @@ export function NewValue({ apps, onCancel, onSaved, onAddApplication }: Props) {
     return (
       <Picker
         apps={apps}
+        heading="New value"
+        lockedApp={null}
         initial={choice}
         onCancel={onCancel}
         onAddApplication={onAddApplication}
@@ -41,6 +45,7 @@ export function NewValue({ apps, onCancel, onSaved, onAddApplication }: Props) {
   return (
     <Capture
       choice={choice}
+      mode={VALUE}
       onCancel={onCancel}
       onChangeWindow={() => {
         setPicking(true);

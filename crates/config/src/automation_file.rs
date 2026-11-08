@@ -154,7 +154,7 @@ impl From<ComparisonDef> for Comparison {
 pub enum TargetDef {
     /// A number, for a value a number or bar fill check reads.
     Number(f64),
-    /// Yes or no, for a value a color or picture check reads.
+    /// Yes or no, for a value a color or image check reads.
     Flag(bool),
 }
 
@@ -487,8 +487,8 @@ mod tests {
 
     use super::*;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, RegionDef, SampleDef, ScreenDef,
-        SizeDef, ValueDef, WindowDef,
+        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, ReferenceDef, RegionDef, SampleDef,
+        ScreenDef, SizeDef, ValueDef, WindowDef, sample_name,
     };
     use crate::window_match::WindowFacts;
 
@@ -533,12 +533,8 @@ mod tests {
                     "progress",
                     "Progress",
                     CheckDef::Number {
-                        ink: white,
-                        tolerance: 10,
-                        samples: vec![SampleDef {
-                            image: "progress-1.png".to_owned(),
-                            text: "12%".to_owned(),
-                        }],
+                        reference: "percent".to_owned(),
+                        whole: false,
                     },
                 ),
                 value(
@@ -564,12 +560,22 @@ mod tests {
                 value(
                     "score_shown",
                     "Score shown",
-                    CheckDef::Reference {
+                    CheckDef::Image {
                         image: "score_shown.png".to_owned(),
                         tolerance: 10,
                     },
                 ),
             ],
+            references: vec![ReferenceDef {
+                id: "percent".to_owned(),
+                name: "Percent".to_owned(),
+                ink: white,
+                tolerance: 10,
+                samples: vec![SampleDef {
+                    image: sample_name("percent", 1),
+                    text: "12%".to_owned(),
+                }],
+            }],
         }
     }
 

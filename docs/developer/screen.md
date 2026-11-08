@@ -16,9 +16,13 @@ Each check reads a cropped region and produces a signal value. All four are
 plain Rust over the region's pixels: they call no operating system API, give
 the same answer on every system, and allocate nothing per read.
 
-- **Number** reads digits, a decimal point, and a minus sign. The user types
-  the characters a screenshot shows, such as `0123456789.%`, and the check
-  learns each character's shape from it. A read finds the ink (pixels near the
+- **Number** reads digits, a decimal point, and a minus sign, with a
+  reference of the application's: the characters' color and tolerance, and
+  pictures labeled with the text they show, such as `0123456789.%`, from
+  which it learns each character's shape. Several values read with one
+  reference, and each says whether only the whole part counts: a whole value
+  ends the number at its `.`, so `87.5%` reads as 87 and needs no glyphs
+  after the point. A read finds the ink (pixels near the
   text color), splits it into characters at blank columns, scales each one to
   a fixed grid, and picks the closest learned shape. The text line is the
   band of rows with the most ink, so a stray speck elsewhere in the region
@@ -33,12 +37,11 @@ the same answer on every system, and allocate nothing per read.
   nearer one.
 - **Color** is yes when the region's average color is within a tolerance of a
   chosen color.
-- **Matches reference** is yes when the region looks like a saved picture of
-  it, within a tolerance per color channel on average. A mask can leave
-  pixels out: the average is then over the kept pixels only, so a changing
-  background behind the thing does not count. The mask becomes runs of kept
-  pixel indexes once, when the check loads, so a read walks the runs without
-  testing each pixel.
+- **Image** is yes when the region looks like a saved picture of it, within
+  a tolerance per color channel on average. A mask can leave pixels out: the
+  average is then over the kept pixels only, so a changing background behind
+  the thing does not count. The mask becomes runs of kept pixel indexes once,
+  when the check loads, so a read walks the runs without testing each pixel.
 
 On the fixture screenshots, each check takes 2 to 10 microseconds per read on
 one CPU core; `mise run rust:bench` prints the current numbers.
@@ -53,12 +56,13 @@ Reading with it at runtime stays an option for text the number check cannot
 read
 ([#33](https://github.com/TheLunchTrae/appy-tappy/issues/33)).
 
-## Reference images
+## Saved pictures
 
-A matches-reference check stores its picture as a PNG file. AppyTappy reads
-any PNG, converting it to 8-bit color, and refuses images over 8192 pixels on
-a side. Alpha is the mask: a pixel at least half opaque is compared, and a
-more transparent one is left out. A picture with no transparent pixel is
+A reference's samples and an image check's picture are PNG files. AppyTappy
+reads any PNG, converting it to 8-bit color, and refuses images over 8192
+pixels on a side. A sample is read as it looks, ignoring alpha. In an image
+check's picture, alpha is the mask: a pixel at least half opaque is compared,
+and a more transparent one is left out. A picture with no transparent pixel is
 compared whole, and one with no opaque pixel is refused. AppyTappy writes
 8-bit RGB, or RGBA with the left-out pixels fully transparent when a mask
 leaves any out.

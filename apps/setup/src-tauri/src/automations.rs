@@ -303,6 +303,7 @@ mod tests {
             }),
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
+            references: Vec::new(),
             values: vec![
                 value(
                     "icon_visible",

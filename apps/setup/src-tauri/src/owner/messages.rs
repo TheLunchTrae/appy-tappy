@@ -97,6 +97,29 @@ pub(crate) struct SaveSpec {
     pub(crate) screenshot: usize,
 }
 
+/// A reference to save, as the UI describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferenceSaveSpec {
+    /// The saved application to add the reference to.
+    pub(crate) app: String,
+    /// The reference's name, such as `Percent font`.
+    pub(crate) reference_name: String,
+    /// The characters it is taught, as a [`CheckSpec::Characters`] that
+    /// names the reference when it is saved already.
+    pub(crate) check: CheckSpec,
+}
+
+/// Where a reference was saved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SavedReferenceId {
+    /// The application's ID.
+    pub(crate) app: String,
+    /// The reference's ID.
+    pub(crate) reference: String,
+}
+
 /// Where a value was saved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -292,6 +315,23 @@ pub(crate) enum Request {
         /// Answered once it is gone.
         reply: Reply<Result<(), String>>,
     },
+    /// Saves a reference, replacing the one of the same ID.
+    SaveReference {
+        /// The reference.
+        spec: Box<ReferenceSaveSpec>,
+        /// Where it was saved, or what to fix.
+        reply: Reply<Result<SavedReferenceId, String>>,
+    },
+    /// Removes a saved reference and its pictures, unless a value reads
+    /// with it.
+    DeleteReference {
+        /// The application's ID.
+        app: String,
+        /// The reference's ID.
+        reference: String,
+        /// Answered once it is gone.
+        reply: Reply<Result<(), String>>,
+    },
     /// Sets how an application protects itself from other programs.
     SetAntiCheat {
         /// The application's ID.
@@ -450,6 +490,8 @@ impl Request {
                 | Self::DeleteValue { .. }
                 | Self::SaveApp { .. }
                 | Self::RemoveApp { .. }
+                | Self::SaveReference { .. }
+                | Self::DeleteReference { .. }
                 | Self::SetAntiCheat { .. }
                 | Self::SaveAutomation { .. }
                 | Self::SetAutomationEnabled { .. }
@@ -457,8 +499,8 @@ impl Request {
         )
     }
 
-    /// Whether the request changes an application's values or overlay, which
-    /// each overlay then reads again.
+    /// Whether the request changes an application's values, the references
+    /// they read with, or its overlay, which each overlay then reads again.
     pub(super) const fn changes_values(&self) -> bool {
         matches!(
             self,
@@ -466,6 +508,8 @@ impl Request {
                 | Self::DeleteValue { .. }
                 | Self::SaveApp { .. }
                 | Self::RemoveApp { .. }
+                | Self::SaveReference { .. }
+                | Self::DeleteReference { .. }
                 | Self::SetOverlay { .. }
         )
     }
@@ -538,6 +582,36 @@ mod tests {
         assert!(saves.iter().all(Request::saves));
         assert!(!Request::ListApps(oneshot::channel().0).saves());
         assert!(!Request::ListAutomations(oneshot::channel().0).saves());
+    }
+
+    #[test]
+    fn a_saved_or_deleted_reference_is_read_again_by_the_runtime_and_overlays() {
+        let spec: ReferenceSaveSpec = serde_json::from_value(serde_json::json!({
+            "app": "example",
+            "referenceName": "Digits",
+            "check": {
+                "kind": "characters",
+                "region": {"x": 0, "y": 0, "width": 1, "height": 1},
+                "ink": {"red": 0, "green": 0, "blue": 0},
+                "tolerance": 0,
+                "labels": []
+            }
+        }))
+        .expect("the UI's spelling");
+        let changes = [
+            Request::SaveReference {
+                spec: Box::new(spec),
+                reply: oneshot::channel().0,
+            },
+            Request::DeleteReference {
+                app: "example".to_owned(),
+                reference: "digits".to_owned(),
+                reply: oneshot::channel().0,
+            },
+        ];
+        assert!(changes.iter().all(Request::saves));
+        assert!(changes.iter().all(Request::changes_values));
+        assert!(!Request::ListApps(oneshot::channel().0).changes_values());
     }
 
     #[test]

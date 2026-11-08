@@ -1,4 +1,4 @@
-// Selecting the thing a picture check looks for: the steps the user takes on
+// Selecting the thing an image check looks for: the steps the user takes on
 // a screenshot, and which pixels of the region the selection leaves out.
 
 import type { Rect } from './region.ts';
@@ -24,7 +24,7 @@ export type SelectStep =
   | { readonly kind: 'snap'; readonly region: Rect; readonly combine: Combine }
   | { readonly kind: 'click'; readonly x: number; readonly y: number; readonly combine: Combine };
 
-/** The steps the setup app replays on the screenshot a picture check compares against. */
+/** The steps the setup app replays on the screenshot an image check compares against. */
 export interface SelectionSpec {
   /** How far a color may be from another and still count as alike. */
   readonly tolerance: number;

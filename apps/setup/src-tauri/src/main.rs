@@ -93,6 +93,8 @@ fn main() -> ExitCode {
             commands::remove_app,
             commands::save_value,
             commands::delete_value,
+            commands::save_reference,
+            commands::delete_reference,
             commands::set_anti_cheat,
             commands::list_automations,
             commands::save_automation,

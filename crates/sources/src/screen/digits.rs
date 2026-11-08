@@ -146,13 +146,14 @@ impl DigitReader {
 
     /// Reads the first number in `image`: an optional `-`, digits, and an
     /// optional `.` with more digits. Other learned characters, such as `%`,
-    /// separate numbers.
+    /// separate numbers. With `whole`, the number ends at the `.`, so the
+    /// digits after it are ignored and need no glyphs: `87.5%` reads as 87.
     ///
     /// # Errors
     ///
     /// Returns a [`ReadError`] when the image has no ink, too many
     /// characters, a character that matches no learned glyph, or no digits.
-    pub fn read(&self, image: &Image) -> Result<Number, ReadError> {
+    pub fn read(&self, image: &Image, whole: bool) -> Result<Number, ReadError> {
         let mut spans = [Span::default(); MAX_CHARACTERS];
         let (line, count) = self
             .segment(image, &mut spans)
@@ -160,7 +161,10 @@ impl DigitReader {
                 Segmentation::NoInk => ReadError::NoInk,
                 Segmentation::TooMany => ReadError::TooManyCharacters,
             })?;
-        let mut number = NumberText::default();
+        let mut number = NumberText {
+            point: Point::for_whole(whole),
+            ..NumberText::default()
+        };
         for (position, span) in spans.iter().take(count).enumerate() {
             let shape = self.shape(image, line, *span);
             match self.best_match(&shape) {
@@ -348,8 +352,26 @@ struct NumberText {
     text: [u8; MAX_NUMBER_LEN],
     len: usize,
     digits: bool,
-    point: bool,
     ended: bool,
+    point: Point,
+}
+
+/// What a `.` after the digits does to a number being read.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Point {
+    /// It starts the number's fraction.
+    #[default]
+    Starts,
+    /// The fraction has started, so another `.` is not part of the number.
+    Taken,
+    /// It ends the number: the value reads whole numbers only.
+    Ends,
+}
+
+impl Point {
+    const fn for_whole(whole: bool) -> Self {
+        if whole { Self::Ends } else { Self::Starts }
+    }
 }
 
 impl NumberText {
@@ -363,10 +385,12 @@ impl NumberText {
                 true
             },
             '-' => self.len == 0,
-            '.' if self.digits && !self.point => {
-                self.point = true;
+            '.' if self.digits && self.point == Point::Starts => {
+                self.point = Point::Taken;
                 true
             },
+            // Any other character, or a `.` once the fraction is taken or
+            // for a whole number, ends the number after its digits.
             _ => false,
         };
         if !accepted {
@@ -567,7 +591,14 @@ mod tests {
     }
 
     fn text(characters: &str) -> NumberText {
-        let mut number = NumberText::default();
+        number_text(characters, false)
+    }
+
+    fn number_text(characters: &str, whole: bool) -> NumberText {
+        let mut number = NumberText {
+            point: Point::for_whole(whole),
+            ..NumberText::default()
+        };
         characters
             .chars()
             .for_each(|character| number.push(character));
@@ -595,6 +626,56 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_number_ends_at_its_point() {
+        let whole = |characters| number_text(characters, true).parse();
+        assert_eq!(whole("90.5%"), Number::new(90.0));
+        assert_eq!(whole("-7.9"), Number::new(-7.0));
+        assert_eq!(whole("12"), Number::new(12.0));
+        assert_eq!(whole(".5"), Number::new(5.0));
+        assert!(number_text("3.", true).ended);
+        assert!(!number_text("3.", false).ended);
+    }
+
+    /// `rows` drawn `scale` times larger.
+    fn scaled(rows: &[&str], scale: usize) -> Vec<String> {
+        rows.iter()
+            .flat_map(|row| {
+                let wide: String = row
+                    .chars()
+                    .flat_map(|cell| std::iter::repeat_n(cell, scale))
+                    .collect();
+                std::iter::repeat_n(wide, scale)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn characters_learned_at_one_size_read_at_another() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&TWELVE), "12").unwrap();
+        let big = scaled(&TWELVE, 3);
+        let rows: Vec<&str> = big.iter().map(String::as_str).collect();
+        assert_eq!(
+            reader.read(&draw(&rows), false),
+            Ok(Number::new(12.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn a_whole_read_ignores_the_digits_after_the_point() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        // "1" and a "." that sits at the baseline.
+        reader.learn(&draw(&["#..", "#..", "#.#"]), "1.").unwrap();
+        // "1.", then a character never learned.
+        let fraction = draw(&["#...#.#", "#...###", "#.#.#.#"]);
+        assert_eq!(
+            reader.read(&fraction, false),
+            Err(ReadError::UnknownCharacter { position: 2 })
+        );
+        assert_eq!(reader.read(&fraction, true), Ok(Number::new(1.0).unwrap()));
+    }
+
+    #[test]
     fn learns_and_reads_separate_characters() {
         let digits = draw(&[
             "#.###.###", //
@@ -614,7 +695,10 @@ mod tests {
             "#...#.#..",
             "###.#.###",
         ]);
-        assert_eq!(reader.read(&swapped), Ok(Number::new(212.0).unwrap()));
+        assert_eq!(
+            reader.read(&swapped, false),
+            Ok(Number::new(212.0).unwrap())
+        );
     }
 
     #[test]
@@ -649,17 +733,17 @@ mod tests {
             .learn(&draw(&["#.###", "#.#.#", "#.###"]), "1%")
             .unwrap();
         assert_eq!(
-            reader.read(&draw(&["###", "#.#", "###"])),
+            reader.read(&draw(&["###", "#.#", "###"]), false),
             Err(ReadError::NoNumber)
         );
         assert_eq!(
-            reader.read(&draw(&["#.#.#", "#...#", "#.###"])),
+            reader.read(&draw(&["#.#.#", "#...#", "#.###"]), false),
             Err(ReadError::UnknownCharacter { position: 1 })
         );
-        assert_eq!(reader.read(&draw(&["..."])), Err(ReadError::NoInk));
+        assert_eq!(reader.read(&draw(&["..."]), false), Err(ReadError::NoInk));
         let crowded = "#.".repeat(MAX_CHARACTERS + 1);
         assert_eq!(
-            reader.read(&draw(&[crowded.as_str()])),
+            reader.read(&draw(&[crowded.as_str()]), false),
             Err(ReadError::TooManyCharacters)
         );
     }
@@ -672,7 +756,7 @@ mod tests {
             .unwrap();
         // "1%" and then a character never learned.
         let labeled = draw(&["#.###.#.#", "#.#.#.###", "#.###.#.#"]);
-        assert_eq!(reader.read(&labeled), Ok(Number::new(1.0).unwrap()));
+        assert_eq!(reader.read(&labeled, false), Ok(Number::new(1.0).unwrap()));
     }
 
     #[test]
@@ -681,11 +765,17 @@ mod tests {
         reader.learn(&draw(&TWELVE), "12").unwrap();
         let mut noisy = TWELVE.to_vec();
         noisy.extend([".....", "....#"]);
-        assert_eq!(reader.read(&draw(&noisy)), Ok(Number::new(12.0).unwrap()));
+        assert_eq!(
+            reader.read(&draw(&noisy), false),
+            Ok(Number::new(12.0).unwrap())
+        );
         // Of two runs of inked rows, the one with more ink is the line.
         let mut above = vec!["#....", "....."];
         above.extend(TWELVE);
-        assert_eq!(reader.read(&draw(&above)), Ok(Number::new(12.0).unwrap()));
+        assert_eq!(
+            reader.read(&draw(&above), false),
+            Ok(Number::new(12.0).unwrap())
+        );
     }
 
     #[test]
@@ -767,7 +857,10 @@ mod tests {
         // Sixteen ink pixels, as many as "12", in one unlearned block.
         let mut tied = TWELVE.to_vec();
         tied.extend([".....", "#####", "#####", "#####", "#...."]);
-        assert_eq!(reader.read(&draw(&tied)), Ok(Number::new(12.0).unwrap()));
+        assert_eq!(
+            reader.read(&draw(&tied), false),
+            Ok(Number::new(12.0).unwrap())
+        );
     }
 
     #[test]

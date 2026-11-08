@@ -131,17 +131,13 @@ impl AppStore {
     }
 
     /// Removes the pictures in the application `id`'s folder that `file` no
-    /// longer names, after a value was removed or changed.
+    /// longer names, after a value or reference was removed or changed.
     ///
     /// # Errors
     ///
     /// Returns the error from listing the folder or removing a picture.
     pub fn prune(&self, id: &str, file: &AppFile) -> io::Result<()> {
-        let named: Vec<&str> = file
-            .values
-            .iter()
-            .flat_map(|value| value.screen.check.images())
-            .collect();
+        let named = file.images();
         for entry in fs::read_dir(self.folder(id))? {
             let entry = entry?;
             let name = entry.file_name();
@@ -346,12 +342,13 @@ mod tests {
                         width: 10,
                         height: 10,
                     },
-                    check: CheckDef::Reference {
+                    check: CheckDef::Image {
                         image: reference.to_owned(),
                         tolerance: 0,
                     },
                 },
             }],
+            references: Vec::new(),
         }
     }
 

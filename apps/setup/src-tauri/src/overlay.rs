@@ -400,7 +400,7 @@ fn open<S>(
         .values
         .iter()
         .map(|value| {
-            let check = saved::build(&value.screen, picture.clone())
+            let check = saved::build(&value.screen, &file.references, picture.clone())
                 .map_err(|error| format!("Cannot read: {error}."));
             (value.name.clone(), check)
         })

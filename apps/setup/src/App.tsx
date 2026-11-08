@@ -15,9 +15,11 @@ import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
 import { NewValue } from './pages/NewValue.tsx';
 import { background, useRepeat } from './lib/repeat.ts';
+import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
+import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
 
-type Page = 'automations' | 'applications' | 'values';
+type Page = 'automations' | 'applications' | 'values' | 'references';
 
 /**
  * The pages, Automations first since running them is what the app is for, then in the order something new is set
@@ -27,13 +29,15 @@ const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
   { id: 'automations', name: 'Automations' },
   { id: 'applications', name: 'Applications' },
   { id: 'values', name: 'Values' },
+  { id: 'references', name: 'References' },
 ];
 
 /** What the window shows in place of a page: a flow that makes or changes something. */
 type Flow =
   | { readonly kind: 'value' }
   | { readonly kind: 'automation'; readonly existing: AutomationDef | null }
-  | { readonly kind: 'application'; readonly existing: AppSummary | null };
+  | { readonly kind: 'application'; readonly existing: AppSummary | null }
+  | { readonly kind: 'reference'; readonly existing: SavedRef | null };
 
 /** How often the saved files are read again, which also refreshes which applications are running. */
 const REFRESH_MS = 3000;
@@ -66,13 +70,14 @@ export function App() {
   useEffect(() => {
     background(syncOverlays());
   }, []);
-  // A flow that makes a value captures a window, so the lists wait until it ends.
-  useRepeat(refresh, REFRESH_MS, flow?.kind !== 'value');
+  // A flow that makes a value or a reference captures a window, so the lists wait until it ends.
+  useRepeat(refresh, REFRESH_MS, flow?.kind !== 'value' && flow?.kind !== 'reference');
 
   const counts: Readonly<Record<Page, number | null>> = {
     values: apps === null ? null : apps.reduce((total, app) => total + (app.file?.values.length ?? 0), 0),
     automations: automations === null ? null : automations.length,
     applications: apps === null ? null : apps.length,
+    references: apps === null ? null : apps.reduce((total, app) => total + (app.file?.references.length ?? 0), 0),
   };
 
   const content = (() => {
@@ -104,6 +109,24 @@ export function App() {
             setFlow(null);
             setPage('applications');
             background(refresh());
+          }}
+        />
+      );
+    }
+    if (flow?.kind === 'reference') {
+      return (
+        <ReferenceFlow
+          apps={apps ?? []}
+          existing={flow.existing}
+          onCancel={() => {
+            setFlow(null);
+          }}
+          onSaved={() => {
+            setFlow(null);
+            setPage('references');
+          }}
+          onAddApplication={() => {
+            setFlow({ kind: 'application', existing: null });
           }}
         />
       );
@@ -163,6 +186,20 @@ export function App() {
             }}
             onEdit={(app) => {
               setFlow({ kind: 'application', existing: app });
+            }}
+          />
+        );
+      case 'references':
+        return (
+          <ReferencesPage
+            apps={apps}
+            loadError={loadError}
+            onChanged={refresh}
+            onNew={() => {
+              setFlow({ kind: 'reference', existing: null });
+            }}
+            onEdit={(existing) => {
+              setFlow({ kind: 'reference', existing });
             }}
           />
         );

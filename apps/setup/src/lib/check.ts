@@ -1,12 +1,12 @@
 // The check the user is setting up, and when it is complete enough to try.
 
-import type { CheckSpec, RecordedLabel } from './api.ts';
+import type { CharactersSpec, CheckSpec, RecordedLabel, ReferenceRef } from './api.ts';
 import type { Color } from './pixels.ts';
 import type { Rect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, type SelectStep } from './selection.ts';
 
 /** The kinds of check, in the order the capture screen offers them. */
-export const CHECK_KINDS = ['number', 'barFill', 'color', 'reference'] as const;
+export const CHECK_KINDS = ['number', 'barFill', 'color', 'image'] as const;
 
 export type CheckKind = (typeof CHECK_KINDS)[number];
 
@@ -15,23 +15,23 @@ export const KIND_NAMES: Readonly<Record<CheckKind, string>> = {
   number: 'Number',
   barFill: 'Bar fill',
   color: 'Color',
-  reference: 'Picture',
+  image: 'Image',
 };
 
-/** The tolerance each kind starts with. */
+/** The tolerance each kind starts with; a number's is its new reference's. */
 export const DEFAULT_TOLERANCE: Readonly<Record<CheckKind, number>> = {
   number: 40,
   barFill: 0,
   color: 24,
-  reference: 16,
+  image: 16,
 };
 
-/** Everything the capture screen collects for a check, complete or not. */
+/** Everything the capture screen collects for a check or a reference, complete or not. */
 export interface Draft {
   readonly kind: CheckKind;
   readonly region: Rect | null;
   readonly tolerance: number;
-  /** The number's characters' color. */
+  /** The reference's characters' color. */
   readonly ink: Color | null;
   /** What the region shows on each labeled screenshot, by screenshot index. */
   readonly labels: ReadonlyMap<number, string>;
@@ -40,14 +40,18 @@ export interface Draft {
   readonly filled: Color | null;
   readonly empty: Color | null;
   readonly color: Color | null;
-  /** The screenshot a picture check compares against. */
-  readonly reference: number | null;
-  /** How the user selected the thing a picture check looks for, on its screenshot. */
+  /** The screenshot an image check compares against. */
+  readonly image: number | null;
+  /** How the user selected the thing an image check looks for, on its screenshot. */
   readonly steps: readonly SelectStep[];
   /** How far a color may be from another and still count as alike, while selecting. */
   readonly colorMatch: number;
-  /** Whether a picture check compares only the selected pixels. */
+  /** Whether an image check compares only the selected pixels. */
   readonly ignoreBackground: boolean;
+  /** The ID of the reference a number check reads with. */
+  readonly reference: string | null;
+  /** Whether a number check ignores every digit after the decimal point. */
+  readonly whole: boolean;
 }
 
 export const EMPTY_DRAFT: Draft = {
@@ -60,16 +64,20 @@ export const EMPTY_DRAFT: Draft = {
   filled: null,
   empty: null,
   color: null,
+  image: null,
   reference: null,
   steps: [],
   colorMatch: DEFAULT_COLOR_MATCH,
   ignoreBackground: true,
+  whole: false,
 };
 
 /** The draft's check, or what the user still has to do. */
-export type Built = { readonly ok: true; readonly spec: CheckSpec } | { readonly ok: false; readonly next: string };
+export type Built<Spec = CheckSpec> =
+  | { readonly ok: true; readonly spec: Spec }
+  | { readonly ok: false; readonly next: string };
 
-function missing(next: string): Built {
+function missing(next: string): { readonly ok: false; readonly next: string } {
   return { ok: false, next };
 }
 
@@ -80,21 +88,31 @@ function labelsOf(draft: Draft): readonly { readonly screenshot: number; readonl
     .toSorted((left, right) => left.screenshot - right.screenshot);
 }
 
+function recordedOf(draft: Draft): readonly RecordedLabel[] {
+  return [...draft.recorded]
+    .map(([reading, text]) => ({ reading, text: text.trim() }))
+    .filter((label) => label.text.length > 0)
+    .toSorted((left, right) => left.reading - right.reading);
+}
+
 /**
- * The number check review asks about: `draft`'s labeled screenshots and
- * `kept` recorded readings, learned the way the saved check learns them.
- * Null until the draft has a region and the characters' color.
+ * The characters review asks about: `draft`'s labeled screenshots and `kept`
+ * recorded readings, added to `reference` when it names a saved one, learned
+ * the way saving learns them. Null until the draft has a region and the
+ * characters' color.
  */
 export function reviewSpec(
   draft: Draft,
   kept: readonly RecordedLabel[],
-): Extract<CheckSpec, { readonly kind: 'number' }> | null {
+  reference: ReferenceRef | null,
+): CharactersSpec | null {
   if (draft.region === null || draft.ink === null) {
     return null;
   }
   return {
-    kind: 'number',
+    kind: 'characters',
     region: draft.region,
+    reference,
     ink: draft.ink,
     tolerance: draft.tolerance,
     labels: labelsOf(draft),
@@ -102,26 +120,39 @@ export function reviewSpec(
   };
 }
 
-/** The check `draft` describes, or the next thing it needs. */
-export function buildSpec(draft: Draft): Built {
+/** The characters `draft` teaches the reference `reference`, or a new one when null; or what it still needs. */
+export function buildCharacters(draft: Draft, reference: ReferenceRef | null): Built<CharactersSpec> {
+  if (draft.region === null) {
+    return missing('Draw a region around the characters on a screenshot.');
+  }
+  if (draft.ink === null) {
+    return missing("Pick the characters' color.");
+  }
+  const spec = reviewSpec(draft, recordedOf(draft), reference);
+  if (spec === null) {
+    return missing("Pick the characters' color.");
+  }
+  if (reference === null && spec.labels.length === 0 && spec.recorded.length === 0) {
+    return missing('Type what the region shows on a screenshot, or record it.');
+  }
+  return { ok: true, spec };
+}
+
+/** The check `draft` describes for the saved application `app`, or null for a new one; or the next thing it needs. */
+export function buildSpec(draft: Draft, app: string | null): Built {
   const { region, tolerance } = draft;
   if (region === null) {
     return missing('Draw a region on a screenshot.');
   }
   switch (draft.kind) {
     case 'number': {
-      if (draft.ink === null) {
-        return missing("Pick the color of the number's characters.");
+      if (app === null || draft.reference === null) {
+        return missing('Pick a reference to read the number with, or make one from this region.');
       }
-      const labels = labelsOf(draft);
-      const recorded = [...draft.recorded]
-        .map(([reading, text]) => ({ reading, text: text.trim() }))
-        .filter((label) => label.text.length > 0)
-        .toSorted((left, right) => left.reading - right.reading);
-      if (labels.length === 0 && recorded.length === 0) {
-        return missing('Type what the region shows on a screenshot, or record it.');
-      }
-      return { ok: true, spec: { kind: 'number', region, ink: draft.ink, tolerance, labels, recorded } };
+      return {
+        ok: true,
+        spec: { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole },
+      };
     }
     case 'barFill': {
       if (draft.filled === null) {
@@ -138,11 +169,11 @@ export function buildSpec(draft: Draft): Built {
       }
       return { ok: true, spec: { kind: 'color', region, color: draft.color, tolerance } };
     }
-    case 'reference': {
-      if (draft.reference === null) {
+    case 'image': {
+      if (draft.image === null) {
         return missing('Choose the screenshot to compare against.');
       }
-      const spec = { kind: 'reference', region, screenshot: draft.reference, tolerance } as const;
+      const spec = { kind: 'image', region, screenshot: draft.image, tolerance } as const;
       if (!draft.ignoreBackground || draft.steps.length === 0) {
         return { ok: true, spec };
       }
