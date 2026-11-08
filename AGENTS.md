@@ -170,8 +170,9 @@ names such as Escape, and nothing else. Write **New automation** and
 itself and the Google style that the docs follow. The user guide names each
 control exactly as the app shows it.
 
-The setup app's name is **AppyTappy Setup**, a proper name that keeps both
-capitals wherever it appears, including its window title and messages.
+The setup app's window title, its messages, and the user guide call it
+**AppyTappy Setup**, a proper name, so both words keep their capitals. The
+installer, the Start menu, and the tray name the product **AppyTappy**.
 
 ## State machines
 
