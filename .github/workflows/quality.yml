@@ -217,3 +217,54 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+
+  # Temporary: measures the mutation diff lane before and after #200's flags.
+  probe:
+    name: probe
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          version: '2026.10.19'
+          install: true
+          cache: true
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: rust-${{ runner.os }}-quality-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: rust-${{ runner.os }}-quality-
+      - name: Build like the gate does before the lane copies target
+        run: |
+          mise run ui:build
+          mise exec -- cargo test --workspace --all-features --locked --no-run
+      - name: Measure
+        shell: bash
+        run: |
+          git diff --relative 268228a^ 268228a -- > /tmp/d.diff
+          echo "mutants: $(mise exec -- cargo mutants --list --workspace --all-features --in-diff /tmp/d.diff | wc -l)"
+          s=$(date +%s)
+          mise exec -- cargo mutants --output=/tmp/old --workspace --all-features --test-workspace=true --cargo-arg=--locked --in-diff /tmp/d.diff --copy-target=false --jobs=1 || true
+          m=$(date +%s)
+          mise exec -- cargo mutants --output=/tmp/new --workspace --all-features --test-workspace=true --cargo-arg=--locked --in-diff /tmp/d.diff --copy-target=true --jobs=2 || true
+          e=$(date +%s)
+          echo "OLD seconds: $((m-s))  NEW seconds: $((e-m))"
+          for d in old new; do echo "== $d"; for f in caught missed timeout unviable; do echo "$f $(wc -l < /tmp/$d/mutants.out/$f.txt)"; done; done
+          diff <(sort /tmp/old/mutants.out/caught.txt) <(sort /tmp/new/mutants.out/caught.txt) && echo "caught sets equal"
+          grep -h "baseline" /tmp/old/mutants.out/debug.log /tmp/new/mutants.out/debug.log | head -4 || true
