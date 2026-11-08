@@ -34,8 +34,8 @@ To get an installer of a branch without a release, use one of these:
 - [Architecture](Architecture.md): the two programs, the crates, the runtime's
   threads and lifecycle, the tray, files, anti-cheat enforcement, why the
   setup app uses Tauri, and unsafe code.
-- [Setup app](Setup-app.md): window matching, saved file formats, and running
-  the setup app from source.
+- [Setup app](Setup-app.md): window matching, saved file formats, the page's
+  generated types, and running the setup app from source.
 - [Screen regions](Screen-regions.md): the checks, read intervals, capture, and
   why AppyTappy does not use OCR.
 - [Rules](Rules.md): conditions, firing and re-arming, cooldowns, restoring,

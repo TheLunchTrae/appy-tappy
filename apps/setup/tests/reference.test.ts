@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import type { AppFile } from '../src/lib/api.ts';
+import type { AppFile } from '../src/lib/bindings.ts';
 import { andList, knownCharacters, readers, referenceCharacters } from '../src/lib/reference.ts';
 
 const white = { red: 255, green: 255, blue: 255 };

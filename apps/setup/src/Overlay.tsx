@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { type OverlayMode, type OverlayView, errorText, overlayCard, overlayState } from './lib/api.ts';
+import type { OverlayModeDef, OverlayView } from './lib/bindings.ts';
+import { errorText, overlayCard, overlayState } from './lib/api.ts';
 import { readingText } from './lib/automation.ts';
 import { background, useRepeat } from './lib/repeat.ts';
 
@@ -9,7 +10,7 @@ const POLL_MS = 150;
 
 interface Props {
   readonly app: string;
-  readonly mode: OverlayMode;
+  readonly mode: OverlayModeDef;
 }
 
 /** An application's live readings, in a window of its own over the application or in a panel kept on top. */

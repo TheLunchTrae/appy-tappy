@@ -1,6 +1,6 @@
 // How saved settings read on the Values and Applications pages.
 
-import type { AntiCheat, CheckDef, ReferenceDef } from './api.ts';
+import type { AntiCheatDef, CheckDef, ReferenceDef } from './bindings.ts';
 import type { Color } from './pixels.ts';
 
 /** A saved check, in a few words, with its application's `references`. */
@@ -29,7 +29,7 @@ export function checkSummary(
 }
 
 /** What each anti-cheat class means for the actions AppyTappy may take. */
-export const ANTI_CHEAT_NAMES: Readonly<Record<AntiCheat, string>> = {
+export const ANTI_CHEAT_NAMES: Readonly<Record<AntiCheatDef, string>> = {
   none: 'None',
   userMode: 'User-mode anti-cheat',
   kernelLevel: 'Kernel-level anti-cheat',

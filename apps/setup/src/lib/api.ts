@@ -1,26 +1,35 @@
-// The setup app's commands, typed as its Rust side defines them.
+// The setup app's commands. Their arguments and answers are the Rust side's
+// own types, which bindings.ts holds.
 
 import { invoke } from '@tauri-apps/api/core';
 
-import { type Color, type Picture, decodePicture } from './pixels.ts';
-import type { Rect, Size } from './region.ts';
-import type { SelectionSpec, SelectionView } from './selection.ts';
-
-/** A window the user can pick. */
-export interface WindowChoice {
-  readonly handle: number;
-  readonly title: string;
-  readonly class: string;
-  readonly executable: string;
-  readonly width: number;
-  readonly height: number;
-}
-
-/** The windows the user can pick, and the anti-cheat products running now. */
-export interface WindowList {
-  readonly windows: readonly WindowChoice[];
-  readonly antiCheat: readonly string[];
-}
+import type {
+  AntiCheatDef,
+  AppSpec,
+  AppSummary,
+  AutomationDef,
+  AutomationSummary,
+  CheckSpec,
+  ColorSpec,
+  Live,
+  OverlayModeDef,
+  OverlayView,
+  Reading,
+  RecordingView,
+  ReferenceSaveSpec,
+  RegionSpec,
+  SaveSpec,
+  SavedReference,
+  SavedValue,
+  SelectionSpec,
+  SelectionView,
+  UpdateOffer,
+  WhenDef,
+  WindowDef,
+  WindowFit,
+  WindowList,
+} from './bindings.ts';
+import { type Picture, decodePicture } from './pixels.ts';
 
 /** One of the things an application's window is recognized by. */
 export type MatchField = 'title' | 'class' | 'executable';
@@ -28,333 +37,8 @@ export type MatchField = 'title' | 'class' | 'executable';
 /** A field that may be allowed to differ; the executable always has to match. */
 export type LooseField = Exclude<MatchField, 'executable'>;
 
-/** What to take when no window qualifies: nothing, or any window of the executable. */
-export type Fallback = 'none' | 'executable';
-
-/**
- * How an application's window is recognized. `*` and `?` are wildcards; case is ignored. A window qualifies when
- * its executable and every field in `mustMatch` match; among those, the one matching the most fields wins.
- */
-export interface WindowDef {
-  readonly title: string;
-  readonly class: string;
-  readonly executable: string;
-  readonly mustMatch: Readonly<Record<LooseField, boolean>>;
-  readonly fallback: Fallback;
-}
-
-/** A running window an application's window match takes. */
-export interface WindowFit {
-  readonly handle: number;
-  /** Whether it is taken only because no window qualifies. */
-  readonly fallback: boolean;
-  /**
-   * Whether no other window fits better. The runtime reads one of the best windows, the one Windows lists first,
-   * so a value has to be drawn on one of them.
-   */
-  readonly best: boolean;
-}
-
-/** How strongly an application's anti-cheat protects it. */
-export type AntiCheat = 'none' | 'userMode' | 'kernelLevel' | 'unknown';
-
-/** A saved check, as the application file spells it. */
-export type CheckDef =
-  /** Reads a number with the characters of the reference `reference`; `whole` ignores every digit after the decimal point. */
-  | { readonly kind: 'number'; readonly reference: string; readonly whole: boolean }
-  | { readonly kind: 'barFill'; readonly filled: Color; readonly empty: Color }
-  | { readonly kind: 'color'; readonly color: Color; readonly tolerance: number }
-  /** Which of `states` the region shows, each a name and the file name of its picture. */
-  | { readonly kind: 'state'; readonly states: readonly StateDef[]; readonly tolerance: number };
-
-/** One look a state check knows: its name, and its picture's file name. */
-interface StateDef {
-  readonly name: string;
-  readonly image: string;
-}
-
-/** How an application's characters look: their color, and the pictures they were learned from. */
-export interface ReferenceDef {
-  readonly id: string;
-  readonly name: string;
-  readonly ink: Color;
-  readonly tolerance: number;
-  readonly samples: readonly { readonly image: string; readonly text: string }[];
-}
-
-/** A saved value. */
-export interface ValueDef {
-  readonly id: string;
-  readonly name: string;
-  readonly screen: {
-    readonly windowSize: { readonly width: number; readonly height: number };
-    readonly region: Rect;
-    readonly check: CheckDef;
-  };
-}
-
-/** Where an application's live readings show: over its window, or in a panel kept on top. */
-export type OverlayMode = 'overlay' | 'pictureInPicture';
-
-/** How the setup app shows an application's live readings on top of it. */
-interface OverlayDef {
-  readonly enabled: boolean;
-  readonly mode: OverlayMode;
-}
-
-/** Which build of an executable runs: its file version, if it has one, its size in bytes, and when it was written. */
-export interface BuildDef {
-  readonly version?: string;
-  readonly size: number;
-  /** Seconds since 1970. */
-  readonly modified: number;
-}
-
-/** The build an application's values were last checked against, and when, in seconds since 1970. */
-interface CheckedDef {
-  readonly build: BuildDef;
-  readonly at: number;
-}
-
-/**
- * A saved application's file. `overlay` is absent until the overlay was first set, and `checked` until a value was
- * saved while the application ran.
- */
-export interface AppFile {
-  readonly format: number;
-  readonly name: string;
-  readonly window: WindowDef;
-  readonly antiCheat: AntiCheat;
-  readonly values: readonly ValueDef[];
-  readonly references: readonly ReferenceDef[];
-  readonly overlay?: OverlayDef;
-  readonly checked?: CheckedDef;
-}
-
-/**
- * A saved application, with the handles of the running windows its window match takes, the best first, and the build
- * that runs in the best one, or null when none runs or its build cannot be read.
- */
-export interface AppSummary {
-  readonly id: string;
-  readonly file: AppFile | null;
-  readonly error: string | null;
-  readonly windows: readonly number[];
-  readonly running: BuildDef | null;
-}
-
-/** An application's name and how its window is recognized, as the editor saves them. */
-export interface AppSpec {
-  readonly name: string;
-  readonly window: WindowDef;
-}
-
-/** A saved reference of a saved application. */
-export interface ReferenceRef {
-  readonly app: string;
-  readonly id: string;
-}
-
 /** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
-export interface CharactersSpec {
-  readonly kind: 'characters';
-  readonly region: Rect;
-  /** The screenshot the region was drawn on; every labeled screenshot and the recording must have its window size. */
-  readonly screenshot: number;
-  /** The saved reference these add to, or null for a new one. */
-  readonly reference: ReferenceRef | null;
-  readonly ink: Color;
-  readonly tolerance: number;
-  readonly labels: readonly { readonly screenshot: number; readonly text: string }[];
-  /** Readings of this session's recording, which must be of `region`. */
-  readonly recorded: readonly RecordedLabel[];
-}
-
-/** A check as the capture screen describes it, naming this session's screenshots by index. */
-export type CheckSpec =
-  | { readonly kind: 'number'; readonly region: Rect; readonly reference: ReferenceRef; readonly whole: boolean }
-  | CharactersSpec
-  | { readonly kind: 'barFill'; readonly region: Rect; readonly filled: Color; readonly empty: Color }
-  | { readonly kind: 'color'; readonly region: Rect; readonly color: Color; readonly tolerance: number }
-  | {
-      readonly kind: 'state';
-      readonly region: Rect;
-      /** The screenshot the region was drawn on; every state's screenshot must have its window size. */
-      readonly drawnOn: number;
-      readonly states: readonly StateSpec[];
-      readonly tolerance: number;
-    };
-
-/** One state of a state check, taken from a screenshot. */
-export interface StateSpec {
-  readonly name: string;
-  readonly screenshot: number;
-  /** The thing to compare, selected on the screenshot; without one the whole region is compared. */
-  readonly selection?: SelectionSpec;
-}
-
-/** What a recorded reading shows, as the user confirmed it in review. */
-export interface RecordedLabel {
-  /** The reading's index in the recording. */
-  readonly reading: number;
-  readonly text: string;
-}
-
-/** What the text reader made of a recorded reading. */
-type RecordedText =
-  | { readonly kind: 'pending' }
-  /** The text it read, which is empty when it found none. */
-  | { readonly kind: 'read'; readonly text: string }
-  /** Why it could not read it, such as a missing model. */
-  | { readonly kind: 'failed'; readonly text: string };
-
-/** One reading a recording kept. */
-export interface RecordedReading {
-  /** When it first showed, from the start of the recording. */
-  readonly firstMs: number;
-  /** How many frames showed it. */
-  readonly seen: number;
-  readonly text: RecordedText;
-}
-
-/** A recording of a region, as the setup app shows it. */
-export interface RecordingView {
-  /** Its number this session; a new recording gets a new one. */
-  readonly id: number;
-  /** Whether it still records. */
-  readonly recording: boolean;
-  /** How long it has recorded, not counting pauses. */
-  readonly elapsedMs: number;
-  /** Whether it holds as many readings as it keeps. */
-  readonly full: boolean;
-  /** Why the latest frame could not be recorded, such as a resized window. */
-  readonly problem: string | null;
-  /** Its readings, in the order they first showed. */
-  readonly readings: readonly RecordedReading[];
-  /** What it records with; Record more needs the same. */
-  readonly settings: RecordingSettings;
-}
-
-/** The region, color and tolerance a recording reads with, and the window size the region was drawn at. */
-export interface RecordingSettings {
-  readonly region: Rect;
-  readonly ink: Color;
-  readonly tolerance: number;
-  readonly windowSize: Size;
-}
-
-/** What a check read. */
-export type Reading =
-  | { readonly kind: 'number'; readonly value: number }
-  | { readonly kind: 'flag'; readonly value: boolean }
-  /** A state's name, or `none` when the region shows none of them. */
-  | { readonly kind: 'state'; readonly value: string };
-
-/** What an application's overlay shows now. */
-export interface OverlayView {
-  readonly name: string;
-  readonly mode: OverlayMode;
-  /** Why there are no readings, such as that the application is not running. */
-  readonly message: string | null;
-  readonly values: readonly {
-    readonly name: string;
-    readonly reading: Reading | null;
-    readonly problem: string | null;
-  }[];
-}
-
-/** What a watched value reads on its window now, for the automation editor. */
-export type Live =
-  | { readonly kind: 'waiting' }
-  /** `holds` says whether the condition asked about is true, or is null when none was asked about. */
-  | { readonly kind: 'read'; readonly reading: Reading; readonly holds: boolean | null }
-  | { readonly kind: 'problem'; readonly message: string }
-  /** The capture stopped, such as when the window closed. */
-  | { readonly kind: 'lost'; readonly message: string };
-
-/** A value to save to a saved application. */
-export interface SaveSpec {
-  /** The saved application to add the value to. */
-  readonly app: string;
-  readonly valueName: string;
-  readonly check: CheckSpec;
-  /** The screenshot the region was drawn on, whose size the value keeps. */
-  readonly screenshot: number;
-}
-
-/** A reference to save to a saved application. */
-export interface ReferenceSaveSpec {
-  /** The saved application the reference belongs to. */
-  readonly app: string;
-  readonly referenceName: string;
-  readonly check: CharactersSpec;
-}
-
-/** Where a reference was saved. */
-export interface SavedReference {
-  readonly app: string;
-  readonly reference: string;
-}
-
-/** Where a value was saved. */
-export interface SavedValue {
-  readonly app: string;
-  readonly value: string;
-}
-
-/** How a value relates to the target it is compared with. */
-export type Comparison = 'below' | 'atMost' | 'equals' | 'notEquals' | 'atLeast' | 'above';
-
-/** What a media action does. */
-export type MediaCommand = 'play' | 'pause' | 'next' | 'previous';
-
-/**
- * One action. A null `app` means the media session Windows considers current, or the whole system's volume.
- * Keys, such as `Ctrl+Shift+M`, go to whichever window has the keyboard focus.
- */
-export type ActionDef =
-  | { readonly kind: 'media'; readonly command: MediaCommand; readonly app: string | null }
-  | { readonly kind: 'volume'; readonly percent: number; readonly app: string | null }
-  | { readonly kind: 'keys'; readonly keys: string }
-  /** Opens a program or file by its full path, or an `http` or `https` link. */
-  | { readonly kind: 'open'; readonly target: string }
-  /** Plays a WAV file by its full path. */
-  | { readonly kind: 'sound'; readonly file: string };
-
-/** What a condition compares a value with. */
-export type Target = number | boolean | string;
-
-/** The condition on one saved value that makes an automation run. */
-export interface WhenDef {
-  /** The application's ID. */
-  readonly app: string;
-  /** The value's ID. */
-  readonly value: string;
-  readonly is: Comparison;
-  /**
-   * A number for a value that reads a number; true or false for one that reads yes or no; a state's name, or
-   * `none`, for one that reads a state.
-   */
-  readonly target: Target;
-}
-
-/** A saved automation, as the automations file spells it. */
-export interface AutomationDef {
-  readonly id: string;
-  readonly name: string;
-  readonly enabled: boolean;
-  readonly when: WhenDef;
-  readonly actions: readonly ActionDef[];
-  /** Whether to undo the actions when the condition stops being true. */
-  readonly undo: boolean;
-  readonly cooldownMs: number;
-}
-
-/** A saved automation, with why it cannot run as saved, if so. */
-export interface AutomationSummary {
-  readonly automation: AutomationDef;
-  readonly problem: string | null;
-}
+export type CharactersSpec = Extract<CheckSpec, { readonly kind: 'characters' }>;
 
 /** The message of a failed command, which the Rust side writes for the user. */
 export function errorText(error: unknown): string {
@@ -405,8 +89,8 @@ export async function readValue(): Promise<Reading | null> {
 
 /** Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped recording, which needs the same region, ink and window size; otherwise starts a new one. */
 export async function startRecording(
-  region: Rect,
-  ink: Color,
+  region: RegionSpec,
+  ink: ColorSpec,
   tolerance: number,
   screenshot: number,
   more: boolean,
@@ -500,7 +184,7 @@ export async function deleteReference(application: string, reference: string): P
 }
 
 /** Sets how the application `application` protects itself from other programs. */
-export async function setAntiCheat(application: string, antiCheat: AntiCheat): Promise<void> {
+export async function setAntiCheat(application: string, antiCheat: AntiCheatDef): Promise<void> {
   await invoke('set_anti_cheat', { application, class: antiCheat });
 }
 
@@ -530,7 +214,7 @@ export async function syncOverlays(): Promise<void> {
  * Turns an application's overlay on or off and sets where it shows. The setting is saved when this resolves; the
  * answer is why an overlay window could not open or close, or null.
  */
-export async function setOverlay(application: string, enabled: boolean, mode: OverlayMode): Promise<string | null> {
+export async function setOverlay(application: string, enabled: boolean, mode: OverlayModeDef): Promise<string | null> {
   return invoke<string | null>('set_overlay', { application, enabled, mode });
 }
 
@@ -542,11 +226,6 @@ export async function overlayState(application: string): Promise<OverlayView> {
 /** Tells the setup app the size of an overlay's card in CSS pixels, which its window over the application takes. */
 export async function overlayCard(application: string, width: number, height: number): Promise<void> {
   await invoke('overlay_card', { application, width, height });
-}
-
-/** A newer AppyTappy release the user can install. */
-export interface UpdateOffer {
-  readonly version: string;
 }
 
 /** The newer release on GitHub, or null when this one is the newest or this build does not update itself. */

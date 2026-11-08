@@ -82,6 +82,7 @@ pub struct Compiled<'apps> {
 /// One automation: a condition on a value, the actions to run in order when
 /// it becomes true, and whether to undo them when it stops being true.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AutomationDef {
     /// The automation's ID, unique within the file, such as `pause_music`.
@@ -103,6 +104,7 @@ pub struct AutomationDef {
 
 /// A comparison of one saved value with a target.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WhenDef {
     /// The ID of the value's application, such as `example`.
@@ -147,6 +149,7 @@ impl WhenDef {
 
 /// [`Comparison`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum ComparisonDef {
     /// [`Comparison::Below`].
@@ -178,6 +181,7 @@ impl From<ComparisonDef> for Comparison {
 
 /// What a value is compared with: a number, yes or no, or a state's name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum TargetDef {
     /// A number, for a value a number or bar fill check reads.
@@ -191,6 +195,7 @@ pub enum TargetDef {
 
 /// [`MediaCommand`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum MediaCommandDef {
     /// [`MediaCommand::Play`].
@@ -216,6 +221,7 @@ impl From<MediaCommandDef> for MediaCommand {
 
 /// One action, as the file spells it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum ActionDef {
     /// Controls media playback.

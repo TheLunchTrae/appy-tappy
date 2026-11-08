@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AppFile, BuildDef } from '../src/lib/api.ts';
+import type { AppFile, BuildDef } from '../src/lib/bindings.ts';
 import { buildState, checkedText } from '../src/lib/build.ts';
 
 const checked: BuildDef = { version: '1.4.2.0', size: 1024, modified: 1_762_500_000 };

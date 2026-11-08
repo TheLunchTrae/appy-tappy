@@ -33,6 +33,7 @@ pub(crate) struct CaptureFailure {
 
 /// A value the check read, as the UI shows it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub(crate) enum Reading {
     /// A number, such as a percentage.
@@ -56,6 +57,7 @@ impl From<Value> for Reading {
 /// What a watched value reads on the newest frame, for the automation
 /// editor.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum Live {
     /// No frame has arrived from the window yet.
@@ -97,6 +99,7 @@ pub(crate) enum Seen {
 
 /// A value to save, as the UI describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SaveSpec {
     /// The saved application to add the value to.
@@ -111,6 +114,7 @@ pub(crate) struct SaveSpec {
 
 /// A reference to save, as the UI describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReferenceSaveSpec {
     /// The saved application to add the reference to.
@@ -124,6 +128,8 @@ pub(crate) struct ReferenceSaveSpec {
 
 /// Where a reference was saved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SavedReference"))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SavedReferenceId {
     /// The application's ID.
@@ -134,6 +140,7 @@ pub(crate) struct SavedReferenceId {
 
 /// Where a value was saved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SavedValue {
     /// The application's ID.
@@ -144,6 +151,7 @@ pub(crate) struct SavedValue {
 
 /// A saved application, as the Values page lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AppSummary {
     /// The application's ID.
@@ -153,6 +161,7 @@ pub(crate) struct AppSummary {
     /// Why the file is broken.
     pub(crate) error: Option<String>,
     /// The handles of the running windows that match, the best fit first.
+    #[cfg_attr(test, ts(type = "Array<number>"))]
     pub(crate) windows: Vec<u64>,
     /// The build the best fit's executable runs, or `None` while no window
     /// matches or its build cannot be read.
