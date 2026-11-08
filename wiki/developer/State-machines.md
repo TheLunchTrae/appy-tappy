@@ -146,7 +146,7 @@ automations run while all of these hold:
 - The plan has automations for it.
 
 When they all hold, the application has an entry in `running`, with its engine
-session, its reader's `SessionId`, and the plan it started with.
+session, its reader's `SessionId`, and its newest plan.
 
 ```mermaid
 stateDiagram-v2
@@ -155,16 +155,24 @@ stateDiagram-v2
     Detached --> Attached: Started, while disabled or not planned
     Attached --> Running: enabled, or a reload plans it
     Running --> Attached: disabled, or a reload drops it
-    Running --> Running: a reload changes its plan, so it stops and starts again
+    Running --> Running: a reload changes what it runs, so it stops and starts again
+    Running --> Running: a reload changes only its names, which it takes as it runs
     Running --> Detached: Exited
     Attached --> Detached: Exited
 ```
 
 - **Running to Attached or Detached.** The engine session is stopped or ended,
   which releases every rule that restores. The reader is stopped.
-- **A reload that changes the plan.** The application stops, which undoes what
-  its automations changed, and starts again with `Start::Resume`. A resumed
-  session fires no `Started` rules, because those already ran.
+- **A reload that changes what it runs.** `replan` compares each plan's
+  `Runs`: its window match, its values' checks and its rules. When they
+  differ, the application stops, which undoes what its automations changed,
+  and starts again with `Start::Resume`. A resumed session fires no `Started`
+  rules, because those already ran.
+- **A reload that changes only names.** When only the plan's `Labels` differ,
+  its names or the build its values were checked against, the session keeps running
+  and takes the new plan, so the log and the tray use the new names. The
+  reader sends a value's problem by its position, and the owner logs it with
+  the value's newest name.
 - **Unseen.** When the reader says the values can no longer be seen, the owner
   calls `forget_values`. The rules keep their state, so a rule that fired stays
   fired until new readings decide its condition.
