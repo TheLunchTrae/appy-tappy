@@ -75,13 +75,14 @@ pub trait Controls {
     /// Returns the operating system's error.
     fn app_volumes(&mut self) -> io::Result<Vec<(String, Volume<Self::Volume>)>>;
 
-    /// Sets `control` to `level`.
+    /// Sets `control` to `level`. Returns `false` when the control is gone
+    /// for good, such as the audio session of an app that closed.
     ///
     /// # Errors
     ///
-    /// Returns the operating system's error, including for a control that is
-    /// gone.
-    fn set_volume(&mut self, control: &Self::Volume, level: VolumeLevel) -> io::Result<()>;
+    /// Returns the operating system's error, including for a device that is
+    /// unplugged, which may come back.
+    fn set_volume(&mut self, control: &Self::Volume, level: VolumeLevel) -> io::Result<bool>;
 
     /// The process whose window has the keyboard focus, or `None` when no
     /// window has it.

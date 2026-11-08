@@ -106,23 +106,30 @@ audio sessions, what it changed before the failure is still restored.
 
 A restore that fails is kept and tried again, and the log says so:
 
-- **Volume:** tried again before each later job and every 10 seconds, until it
+- **Volume:** tried again after each later job and every 10 seconds, until it
   works. A device that was unplugged gets a new volume control from Windows
   when it comes back, so the retry finds the device again by its endpoint ID,
-  or the audio session again by its session ID on that device. A restoring
-  rule that changes the same volume meanwhile takes the restore over, so its
-  own release puts back the level from before the first change; a rule that
-  does not restore drops it.
+  or the audio session again by its session ID on that device. An audio
+  session that is no longer on its device ended with its app, so its restore
+  is dropped.
 - **Media:** tried once more after 2 seconds, then given up, because a player
   that refused twice is unlikely to take a third request, and playing music
-  long after the release would surprise the user.
+  long after the release would surprise the user. Other jobs that come
+  meanwhile do not shorten the wait.
+
+A restoring rule that changes a target with a pending restore takes the
+restore over, so its own release puts back the state from before the first
+change, and the pending restore is not sent just before the rule's action; a
+rule that does not restore drops it. When the runtime stops, each restore
+still pending gets one last try.
 
 ## When the controls cannot start
 
 The action worker makes the media and audio controls when the runtime starts.
 Right after sign-in, Windows may not have the media session manager ready yet,
-so the controls start without it and ask for it again on each media action
-until they get it; volume and key press actions run meanwhile.
+so the controls start without it and ask for it again when a media action
+needs it, with the same growing wait as below, because each request can take
+2 seconds; volume and key press actions run meanwhile.
 
 If the controls cannot be made at all, the log says so, and each automation
 that fires meanwhile logs that its actions did not run. The worker makes the

@@ -10,10 +10,11 @@
 //! after asking which process that window belongs to.
 //!
 //! The media session manager may not be ready yet, such as right after
-//! sign-in, so the controls start without it and ask for it again each time
-//! a media action needs it. A volume control that stops working, such as
-//! after its device was unplugged and plugged back in, is found again by its
-//! ID.
+//! sign-in, so the controls start without it and ask for it again when a
+//! media action needs it, waiting longer after each failure. A volume
+//! control that stops working, such as after its device was unplugged and
+//! plugged back in, is found again by its ID; an audio session that is not
+//! found again ended for good.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -53,7 +54,7 @@ use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThre
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
-use crate::{Controls, MediaSession, Stroke, Volume};
+use crate::{Backoff, Controls, MediaSession, Stroke, Volume};
 
 /// How long a media request may take before it counts as failed, so an app
 /// that hangs cannot stall the action worker.
@@ -137,8 +138,8 @@ impl PartialEq for VolumeKey {
 /// another.
 #[derive(Debug)]
 pub struct WindowsControls {
-    /// The media session manager, once Windows gave it.
-    media: Option<GlobalSystemMediaTransportControlsSessionManager>,
+    /// The media session manager, or why Windows did not give it yet.
+    media: Result<GlobalSystemMediaTransportControlsSessionManager, MediaMissing>,
     devices: IMMDeviceEnumerator,
     // Dropped last, after the COM objects above.
     _apartment: Apartment,
@@ -156,9 +157,12 @@ impl WindowsControls {
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the class ID is a static GUID, and the result is a new owned interface.
         let devices = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }?;
-        // A manager that is not ready yet is asked for again by the first
+        // A manager that is not ready yet is asked for again by a later
         // media action, so volume and key actions run meanwhile.
-        let media = media_manager().ok();
+        let media = media_manager().map_err(|error| MediaMissing {
+            error: error.to_string(),
+            backoff: Backoff::new(Instant::now()),
+        });
         Ok(Self {
             media,
             devices,
@@ -167,19 +171,27 @@ impl WindowsControls {
     }
 
     /// The media session manager, asked for again when Windows did not give
-    /// it before.
+    /// it before and the wait since the last try is over. Each request can
+    /// take up to [`MEDIA_TIMEOUT`], so it is not made on every action.
     fn media(&mut self) -> io::Result<&GlobalSystemMediaTransportControlsSessionManager> {
-        if self.media.is_none() {
-            self.media = Some(media_manager().map_err(|error| {
-                io::Error::new(
-                    error.kind(),
-                    format!("the media session manager is not ready: {error}"),
-                )
-            })?);
+        if let Err(missing) = &mut self.media {
+            let now = Instant::now();
+            if missing.backoff.is_over(now) {
+                match media_manager() {
+                    Ok(manager) => self.media = Ok(manager),
+                    Err(error) => {
+                        missing.error = error.to_string();
+                        missing.backoff.failed_again(now);
+                    },
+                }
+            }
         }
-        self.media
-            .as_ref()
-            .ok_or_else(|| io::Error::other("the media session manager is missing"))
+        self.media.as_ref().map_err(|missing| {
+            io::Error::other(format!(
+                "the media session manager is not ready: {}",
+                missing.error
+            ))
+        })
     }
 
     /// The device whose endpoint ID is `id`.
@@ -192,8 +204,9 @@ impl WindowsControls {
     }
 
     /// Finds the control `key` names again, by its ID, for when the
-    /// interface it holds stopped working.
-    fn find_again(&self, key: &VolumeKey) -> io::Result<VolumeControl> {
+    /// interface it holds stopped working. Answers `None` for an audio
+    /// session that is no longer on its device.
+    fn find_again(&self, key: &VolumeKey) -> io::Result<Option<VolumeControl>> {
         match &key.control {
             VolumeControl::Device(_) => {
                 let device = self.device(&key.id)?;
@@ -201,19 +214,19 @@ impl WindowsControls {
                 // SAFETY: the call activates an interface the type parameter
                 // names, with no activation parameters.
                 let control: IAudioEndpointVolume = unsafe { device.Activate(CLSCTX_ALL, None) }?;
-                Ok(VolumeControl::Device(control))
+                Ok(Some(VolumeControl::Device(control)))
             },
             VolumeControl::Session(_, device_id) => {
                 let device = self.device(device_id)?;
                 for (id, session) in sessions(&device)? {
                     if id == key.id {
-                        return Ok(VolumeControl::Session(session.cast()?, device_id.clone()));
+                        return Ok(Some(VolumeControl::Session(
+                            session.cast()?,
+                            device_id.clone(),
+                        )));
                     }
                 }
-                Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "the audio session is gone",
-                ))
+                Ok(None)
             },
         }
     }
@@ -331,13 +344,18 @@ impl Controls for WindowsControls {
         Ok(volumes)
     }
 
-    fn set_volume(&mut self, control: &VolumeKey, level: VolumeLevel) -> io::Result<()> {
+    fn set_volume(&mut self, control: &VolumeKey, level: VolumeLevel) -> io::Result<bool> {
         // An interface whose device went away keeps failing even after the
         // device returns, so a failure finds the control again by its ID.
-        set_level(&control.control, level).or_else(|error| {
-            let found = self.find_again(control).map_err(|_gone| error)?;
-            set_level(&found, level)
-        })
+        let Err(error) = set_level(&control.control, level) else {
+            return Ok(true);
+        };
+        match self.find_again(control) {
+            Ok(Some(found)) => set_level(&found, level).map(|()| true),
+            Ok(None) => Ok(false),
+            // The device is still missing, so the first error says why.
+            Err(_missing) => Err(error),
+        }
     }
 
     fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
@@ -473,6 +491,15 @@ fn virtual_key(key: Key) -> (VIRTUAL_KEY, bool) {
         Key::Left => (VK_LEFT, true),
         Key::Right => (VK_RIGHT, true),
     }
+}
+
+/// Why the media session manager is missing, and when to ask for it again.
+#[derive(Debug)]
+struct MediaMissing {
+    /// The last error asking for it.
+    error: String,
+    /// When to ask again.
+    backoff: Backoff,
 }
 
 /// Asks Windows for the media session manager.
