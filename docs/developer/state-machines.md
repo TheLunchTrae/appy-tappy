@@ -116,7 +116,7 @@ stateDiagram-v2
     Quiet --> Due: the watchlist changes and is not empty
     Settling --> Due: the watchlist changes and is not empty
     Backstop --> Due: the watchlist changes and is not empty
-    Backstop --> Quiet: the watchlist becomes empty
+    Backstop --> Quiet: the watchlist becomes empty while snapshots work
 ```
 
 A created top-level window is relevant while anything is watched. A destroyed
@@ -276,7 +276,7 @@ stateDiagram-v2
 
 Before a digit, a character that does not fit starts the number over. After a
 digit, it ends the number, and the rest of the region is ignored, so `12/50`
-reads as 12. A region with more than 24 characters (`MAX_CHARACTERS`) is a read
+reads as 12 once `/` is learned. A region with more than 24 characters (`MAX_CHARACTERS`) is a read
 error.
 
 Open problems:
@@ -396,7 +396,7 @@ Open problems:
 ### Log rotation
 
 `Log` in `apps/runtime/src/log.rs` appends to `runtime.log`. A line that would
-take it past `LIMIT`, 512 KiB, first renames it to `runtime.old.log` and opens a new
+take it past 512 KiB (`LIMIT`) first renames it to `runtime.old.log` and opens a new
 file.
 
 ```mermaid
@@ -439,7 +439,8 @@ The unsaved work of a flow, such as its screenshots and recording, lives in the
 flow's components and in the owner thread. Leaving the value flow, by a tab or
 by **Add application**, unmounts it and stops its capture, which clears its
 screenshots and recording. **Change window** unmounts only the capture view: the
-capture and the recording keep running until the next pick stops them.
+capture and the recording keep running until the next pick, or until the value
+flow closes.
 
 Open problems:
 
@@ -470,6 +471,8 @@ stateDiagram-v2
     Watching --> Previewing: a window is picked
     Watching --> WatchFailed: the watch reports an error
     WatchFailed --> Closed: stop
+    WatchFailed --> Watching: the editor watches again
+    WatchFailed --> Previewing: a window is picked
 ```
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
@@ -509,7 +512,7 @@ stateDiagram-v2
 - Each frame is cropped to the region. A crop of another window size sets the
   recording's `problem` and is skipped. A crop with no ink is skipped.
 - A crop whose characters are new is kept and sent to the text reader. A
-  recording keeps at most `MAX_READINGS`, 200, readings.
+  recording keeps at most 200 readings (`MAX_READINGS`).
 - **Record more** needs the same region, ink, tolerance, and window size.
 - Saving a value takes the window size from the screenshot it names, and builds
   the check from the labeled screenshots and the recording.
