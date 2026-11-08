@@ -93,8 +93,9 @@ once it previews automations.
 The design uses the [`windows`](https://github.com/microsoft/windows-rs) crate
 rather than `windows-sys`. Media sessions and Core Audio are WinRT and COM
 APIs, which only `windows` covers; `windows-sys` covers plain Win32 functions.
-[#12](https://github.com/TheLunchTrae/appy-tappy/issues/12) measures what this
-costs.
+Link-time optimization drops the bindings the runtime does not call, so the
+crate's cost shows in the runtime's binary size, which [Footprint](#footprint)
+bounds.
 
 ### Portable core, thin Windows adapters
 
@@ -123,8 +124,7 @@ The runtime is one process for all applications. It uses no async runtime and no
 webview, and it keeps its dependencies few. It is built as a Windows GUI
 program (`#![windows_subsystem = "windows"]`), so no console window opens. It
 has no console output, so it logs only to `%LOCALAPPDATA%\AppyTappy\logs\`.
-Footprint targets belong to
-[#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
+[Footprint](#footprint) states how small and quiet it has to stay.
 
 It follows the standards' ownership rule: one thread owns all state, and other
 threads send it events over channels instead of sharing state behind locks.
@@ -184,9 +184,10 @@ Each thread below is a plain `std::thread`, and each channel is a
   undone; settings that cannot be read are logged, and the runtime keeps the
   ones it has. An application whose automations
   did not change keeps running untouched; one whose automations changed starts
-  over, undoing what they changed first. An automation that cannot run, such
-  as one whose value lost a picture or one that breaks a rule after a hand
-  edit, is logged, and the rest run. When the applications' folder or the
+  over, undoing what they changed first. A change only to the build its
+  values were checked against restarts nothing. An automation that cannot
+  run, such as one whose value lost a picture or one that breaks a rule after
+  a hand edit, is logged, and the rest run. When the applications' folder or the
   automations' file cannot be read as a whole, such as while another program
   holds the file, the runtime logs it, keeps running the plan it has, and
   reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
@@ -225,8 +226,9 @@ The runtime is in one of three states:
 
 - **Idle.** No watched application runs. The window event hook is installed, and
   no timer runs. A new top-level window anywhere on the desktop, a tooltip or a
-  menu included, still leads to a snapshot; what that costs is measured in
-  [#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
+  menu included, still leads to a snapshot. [Footprint](#footprint) measures
+  idle CPU on a CI desktop, where few windows open; a busy desktop's snapshots
+  are not measured.
 - **Attached.** At least one watched application runs, and each has a session
   that follows one of its processes.
 - **Degraded.** A problem stops the runtime from watching applications: process
@@ -296,6 +298,35 @@ that can run, and matches each by its window match's executable pattern, such
 as `Example.exe`, against the file names in the snapshot. A reload changes the
 list at once: an application that is no longer watched detaches, and one that
 is newly watched is found by the next snapshot.
+
+#### Build detection
+
+When a session starts, the lifecycle thread sends the `Started` change, then
+reads which build of the application's executable runs and sends it as an
+`Identified` change, so reading the file never holds back the session. A
+build is the executable's file version, its size, and when it was written
+(`appytappy_sources::build`). The Windows adapter
+(`crates/sources/src/win/build.rs`) asks `NtQuerySystemInformation` for the
+process's executable path by its process ID, which needs no process handle, so
+it is allowed for every anti-cheat class, and turns the device path it gives
+into a drive or network path with `QueryDosDeviceW`. Then it reads the file's
+version resource, size, and write time from disk. A file that cannot be read,
+such as one another program holds locked, makes the build unreadable rather
+than one without a version.
+
+The owner logs a line when the build differs from the one the application's
+values were checked against, the `checked` that its file records, or when it
+cannot be read. Either way the values are still read: the line tells the user to
+check them in the setup app, whose Values page shows the same warning from the
+build of the process behind the best window its match finds. The setup app
+reads the build the same way, once for each process it sees, and records it as
+described in [Saved files](Setup-app.md#saved-files).
+
+The path is the one the process started from, so an updater that renames the
+running executable and writes the new build in its place makes both programs
+read the new file until the application restarts. When two copies of different
+builds run, the setup app reads the copy whose window fits best and the runtime
+the one its session follows, which can differ.
 
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
 second copy that finds it logs that and exits at once, and the setup app can
@@ -404,6 +435,48 @@ owner gives the tray a fresh description. When the runtime cannot make the
 tray, such as without a desktop, it logs that and runs without one; when the
 tray stops on its own, the runtime logs why and keeps running without it.
 
+### Footprint
+
+The runtime runs all day beside games, so it has to stay small and use next to
+no CPU. `mise run rust:footprint` builds the runtime the installer ships, with
+the `dist` profile, and
+[`scripts/footprint.ps1`](../../scripts/footprint.ps1) runs it on Windows and
+fails when a measurement exceeds its target. The `footprint` CI job runs it.
+The targets, and how long each phase settles and samples, are the constants at
+the top of the script.
+
+The script gives the runtime scratch app data folders that hold one
+application with three values, two color checks and a bar fill, and an
+automation on each. It runs the runtime through three phases:
+
+1. **Idle.** The application is not running.
+2. **Active.** A probe program the script compiles shows the application's
+   window and repaints it every 16 ms, the way a game does. Two of the values
+   change on every frame, so the runtime reads at its fastest. One automation
+   fires once, which shows the reads work; its action targets a program that
+   does not exist, so it changes nothing. The phase fails if any value cannot
+   be read.
+3. **Idle after.** The probe has exited and the runtime has detached.
+
+It checks these against their targets:
+
+- **Binary size.** The size of the program the installer ships.
+- **Visual C++ Redistributable.** The program must not import the Visual C++
+  runtime DLLs. The runtime links the C startup files and the Visual C++
+  runtime into the program, as the setup app's Tauri build does, and leaves
+  the Universal C runtime to the copy in Windows.
+- **Memory.** The private working set at the end of each phase, which Task
+  Manager's Details tab shows as Memory. It leaves out the pages of Windows
+  DLLs that every program shares. Idle has its own target; active and idle
+  after share a larger one.
+- **CPU.** The share of one core over each phase's sample. Task Manager shows
+  the share of all cores, which is smaller by the number of cores. Both idle
+  phases share one target. Windows charges CPU time in ticks of about 16 ms,
+  so an idle sample runs long enough that its target spans several ticks.
+
+The script also prints each phase's full working set, commit size, threads,
+and handles, and the CI job shows the table in its run summary.
+
 ## Sources, rules, and actions
 
 These three parts stay separate so that each one can grow without the others
@@ -419,8 +492,9 @@ changing.
 - A **signal** is a named, typed value an application exposes, such as
   `progress`. An app definition binds each signal to a source primitive
   per application version. The format belongs to
-  [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6), and version
-  changes to [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7).
+  [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6). The runtime and
+  the setup app tell which build of an application runs, as [Build
+  detection](#build-detection) describes.
 - A **rule** says when to act: a trigger on signals or application events, with
   conditions, a cooldown, and re-arming. The engine evaluates rules as a pure
   function with no I/O, so its tests need no application and no Windows.
@@ -454,13 +528,14 @@ changing.
   for a moment, so a failed rename is tried again a few times, as
   `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
   setup app shows the error.
-- **Reloading.** After each request that saves an application, a value, a
-  reference, an anti-cheat class, an automation, or the settings, the setup app
-  sets the named event `Local\AppyTappy.Reload`, and the runtime reads
-  `settings.json`, every `app.json`, and `automations.json` again, as the
-  [reload watch](#the-runtime) describes.
-  `Request::saves` in `apps/setup/src-tauri/src/owner/messages.rs` lists those
-  requests. Turning an overlay on or off, changing its mode, and moving its
+- **Reloading.** After each save of an application, a value, a reference, an
+  anti-cheat class, a checked build, an automation, or the settings that
+  works, the setup app sets the named event `Local\AppyTappy.Reload`, and the
+  runtime reads `settings.json`, every `app.json`, and `automations.json`
+  again, as the [reload watch](#the-runtime) describes. Each save passes its
+  result and what it changed to `Owner::after` in
+  `apps/setup/src-tauri/src/owner.rs`, which sets the event only when the save
+  worked. Turning an overlay on or off, changing its mode, and moving its
   panel also write `app.json`, but they do not set the event, because the
   runtime does not use the overlay. A runtime that is not running reads the
   files when it starts, so the setup app ignores a failure to set the event.
@@ -488,9 +563,11 @@ changing.
   it cannot remove an application or delete a value, because it checks the
   file to see whether an automation still uses them.
 - **Application versions.** A saved value has one binding for every version of
-  its application. Detecting the version and keeping a binding per version are
-  not built; [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7) tracks
-  them.
+  its application. `app.json` records the build its values were checked
+  against, and both programs warn when another build runs, as [Build
+  detection](#build-detection) describes. Keeping a memory binding per
+  version is not built;
+  [#158](https://github.com/TheLunchTrae/appy-tappy/issues/158) tracks it.
 
 ## Anti-cheat enforcement
 
@@ -523,7 +600,9 @@ design enforces the block in four places:
 4. Every path that opens an application's process needs a process-access permit,
    including the guided memory scan
    ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any version
-   detection that reads the running process. Only `config` issues one, and only
+   detection that reads the running process. [Build
+   detection](#build-detection) reads only the executable file, so it needs
+   none. Only `config` issues one, and only
    for an application of class `none`. The scan runs before any binding exists,
    so this point, not the first three, is what blocks it.
 
@@ -537,9 +616,10 @@ Its Rust side exposes Tauri commands and holds no logic of its own: discovery,
 scanning, preview, and saving come from the shared crates. It follows the
 same ownership rule as the runtime. One owner thread holds the setup app's
 state, and Tauri keeps only that thread's `Sender`, never state behind a
-`Mutex`. Each command is `async`: it sends a request with a
-`tokio::sync::oneshot` reply channel and awaits the reply, so a slow scan never
-freezes the window. The guided memory scan
+`Mutex`. Each command is `async`: it sends the owner thread a `Run`, a
+closure that calls one of the owner's methods, with a `tokio::sync::oneshot`
+reply channel, and awaits the reply, so a slow scan never freezes the window.
+A new command is a method on the owner and a command that calls it. The guided memory scan
 ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) lives with the
 memory source. The AI-assisted discovery flow belongs to
 [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).

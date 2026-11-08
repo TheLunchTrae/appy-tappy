@@ -5,8 +5,9 @@ use std::time::Instant;
 
 use appytappy_sources::screen::{Image, Region};
 
-use crate::check_spec::{self, ColorSpec, RegionSpec};
-use crate::recording::{Recording, Text, ocr};
+use crate::check_spec::{self, CheckSpec, ColorSpec, RegionSpec};
+use crate::pixels;
+use crate::recording::{Recording, RecordingView, Text, ocr};
 
 use super::Owner;
 use super::host::Host;
@@ -34,7 +35,7 @@ impl<H: Host> Owner<H> {
         }
     }
 
-    pub(super) fn start_recording(
+    pub(crate) fn start_recording(
         &mut self,
         region: RegionSpec,
         ink: ColorSpec,
@@ -100,6 +101,40 @@ impl<H: Host> Owner<H> {
         }
         Ok(())
     }
+
+    /// Stops the recording, which keeps what it recorded.
+    pub(crate) fn stop_recording(&mut self) {
+        if let Some(recording) = &mut self.recording {
+            recording.stop(Instant::now());
+        }
+    }
+
+    /// Forgets the recording.
+    pub(crate) fn discard_recording(&mut self) {
+        self.recording = None;
+    }
+
+    /// The recording as the interface shows it, or `None` without one.
+    pub(crate) fn recording_state(&self) -> Option<RecordingView> {
+        self.recording
+            .as_ref()
+            .map(|recording| recording.view(Instant::now()))
+    }
+
+    /// Recorded reading `index`'s pixels, at most `max_width` wide.
+    pub(crate) fn recorded_pixels(&self, index: usize, max_width: u32) -> Option<Vec<u8>> {
+        self.recording
+            .as_ref()
+            .and_then(|recording| recording.readings().get(index))
+            .map(|kept| pixels::rgba(&kept.image, max_width))
+    }
+
+    /// For each recorded reading, why `spec` reads it wrong, or `None` when
+    /// it reads it right.
+    pub(crate) fn review_problems(&self, spec: &CheckSpec) -> Result<Vec<Option<String>>, String> {
+        self.with_session(|session| check_spec::recorded_problems(spec, session))
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -110,8 +145,8 @@ mod tests {
     use appytappy_sources::screen::Size;
 
     use crate::check_spec::CheckSpec;
-    use crate::owner::messages::{Message, Reply, Request};
-    use crate::owner::test_support::{Harness, frame_image, harness};
+    use crate::owner::messages::Message;
+    use crate::owner::test_support::{FakeHost, Harness, frame_image, harness};
     use crate::pixels;
     use crate::recording::RecordingView;
 
@@ -139,26 +174,22 @@ mod tests {
     }
 
     /// Records the whole 4 by 2 frame, red as ink, drawn on screenshot 0.
-    fn start_recording(red: u8, more: bool) -> impl FnOnce(Reply<Result<(), String>>) -> Request {
+    fn start_recording(
+        red: u8,
+        more: bool,
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
         let region: RegionSpec =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let ink: ColorSpec =
             serde_json::from_str(&format!(r#"{{"red":{red},"green":0,"blue":0}}"#))
                 .expect("valid JSON");
-        move |reply| Request::StartRecording {
-            region,
-            ink,
-            tolerance: 0,
-            screenshot: 0,
-            more,
-            reply,
-        }
+        move |owner: &mut Owner<FakeHost>| owner.start_recording(region, ink, 0, 0, more)
     }
 
     impl Harness {
         /// The recording as the UI sees it.
         fn recording(&mut self) -> Option<RecordingView> {
-            self.ask(Request::RecordingState)
+            self.ask(|owner| owner.recording_state())
         }
 
         /// Each reading's sightings and text.
@@ -177,7 +208,7 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(harness.recording(), None);
         assert_eq!(harness.ask(start_recording(255, false)), Ok(()));
         for frame in [
@@ -215,20 +246,14 @@ mod tests {
             harness.readings(),
             [(2, Text::Read("1".to_owned())), (1, Text::Pending)]
         );
-        let pixels_of = |index| {
-            move |reply| Request::RecordedPixels {
-                index,
-                max_width: 4,
-                reply,
-            }
-        };
+        let pixels_of = |index| move |owner: &mut Owner<FakeHost>| owner.recorded_pixels(index, 4);
         assert_eq!(
             harness.ask(pixels_of(1)),
             Some(pixels::rgba(&red_columns(3), 4))
         );
         assert_eq!(harness.ask(pixels_of(2)), None);
 
-        harness.ask(Request::StopRecording);
+        harness.ask(Owner::stop_recording);
         harness.deliver(&mut handler, Ok(&red_columns(4)));
         let stopped = harness.recording().expect("kept for review");
         assert!(!stopped.recording);
@@ -245,7 +270,7 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(&mut handler, Ok(&red_columns(3)));
@@ -262,7 +287,7 @@ mod tests {
                 recorded.join(",")
             ))
             .expect("valid JSON");
-            move |reply| Request::ReviewProblems { spec, reply }
+            move |owner: &mut Owner<FakeHost>| owner.review_problems(&spec)
         };
         let problems = harness
             .ask(review("", &[(0, "1"), (1, "12"), (1, "7"), (9, "1")]))
@@ -300,20 +325,11 @@ mod tests {
             ))
             .expect("valid JSON")
         };
-        assert_eq!(
-            harness.ask(|reply| Request::SetCheck {
-                spec: number(0),
-                reply
-            }),
-            Ok(())
-        );
-        harness.ask(Request::DiscardRecording);
+        assert_eq!(harness.ask(|owner| owner.set_check(&number(0))), Ok(()));
+        harness.ask(Owner::discard_recording);
         assert_eq!(harness.recording(), None);
         assert_eq!(
-            harness.ask(|reply| Request::SetCheck {
-                spec: number(0),
-                reply
-            }),
+            harness.ask(|owner| owner.set_check(&number(0))),
             Err("That recording is gone. Record the region again.".to_owned())
         );
         assert_eq!(
@@ -329,7 +345,7 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(
             harness.ask(start_recording(255, true)),
             Err(
@@ -342,12 +358,12 @@ mod tests {
         assert!(harness.recording().is_none());
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
-        harness.ask(Request::StopRecording);
+        harness.ask(Owner::stop_recording);
         harness.ask(start_recording(255, true)).expect("goes on");
         assert!(harness.recording().expect("kept").recording);
         harness.deliver(&mut handler, Ok(&red_columns(3)));
         assert_eq!(harness.readings().len(), 2, "the same recording went on");
-        harness.ask(Request::StopRecording);
+        harness.ask(Owner::stop_recording);
         assert_eq!(
             harness.ask(start_recording(200, true)),
             Err(
@@ -405,7 +421,7 @@ mod tests {
         )
         .expect("matching length");
         harness.deliver(&mut handler, Ok(&small));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(
             harness.ask(start_recording(255, false)),
             Err(
@@ -418,14 +434,7 @@ mod tests {
         let ink: ColorSpec =
             serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
         assert_eq!(
-            harness.ask(|reply| Request::StartRecording {
-                region: empty,
-                ink,
-                tolerance: 0,
-                screenshot: 0,
-                more: false,
-                reply,
-            }),
+            harness.ask(|owner| owner.start_recording(empty, ink, 0, 0, false)),
             Err("Draw the region to record first.".to_owned())
         );
     }
@@ -435,7 +444,7 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
@@ -458,7 +467,7 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
         harness.deliver(
@@ -488,10 +497,10 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness.ask(start_recording(255, false)).expect("records");
         harness.deliver(&mut handler, Ok(&red_columns(2)));
-        harness.ask(Request::StopRecording);
+        harness.ask(Owner::stop_recording);
         harness.deliver(&mut handler, Err(io::Error::other("a frame was lost")));
         assert_eq!(
             harness.recording().expect("kept").problem,
@@ -516,7 +525,7 @@ mod tests {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
-        assert_eq!(harness.ask(Request::Screenshot), Ok(0));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         harness.ask(start_recording(255, false)).expect("records");
         let (closed, _) = mpsc::channel();
         harness.owner.ocr = closed;

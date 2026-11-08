@@ -441,6 +441,7 @@ mod tests {
             }),
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
+            checked: None,
             values: vec![ValueDef {
                 id: "icon_visible".to_owned(),
                 name: "Icon visible".to_owned(),

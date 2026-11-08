@@ -14,7 +14,7 @@ use std::fs;
 use std::io;
 use std::sync::Arc;
 
-use appytappy_config::app_file::AppFile;
+use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_config::automation_file::AutomationsFile;
 use appytappy_config::rule::Rule;
 use appytappy_config::signal::SignalName;
@@ -46,6 +46,10 @@ pub(crate) struct AppPlan {
     pub(crate) rules: Arc<[Rule]>,
     /// Each rule's automation's name, in the same order.
     pub(crate) automations: Vec<String>,
+    /// The build its values were last checked against, if the setup app
+    /// recorded one. Only the log reads it, from the newest plan: a change to
+    /// it restarts nothing, so a running session may hold an older one.
+    pub(crate) checked: Option<BuildDef>,
 }
 
 /// A value an automation watches.
@@ -58,6 +62,27 @@ pub(crate) struct ValuePlan {
     pub(crate) name: String,
     /// Where it is read and how.
     pub(crate) check: SavedCheck,
+}
+
+impl AppPlan {
+    /// Whether the application runs the same under `other`: everything but
+    /// the build its values were checked against, which only the log reads,
+    /// so marking values as checked restarts nothing.
+    pub(crate) fn runs_as(&self, other: &Self) -> bool {
+        let Self {
+            name,
+            window,
+            values,
+            rules,
+            automations,
+            checked: _,
+        } = self;
+        *name == other.name
+            && *window == other.window
+            && *values == other.values
+            && *rules == other.rules
+            && *automations == other.automations
+    }
 }
 
 impl Plan {
@@ -189,6 +214,7 @@ pub(crate) fn compile(
                 values: draft.values,
                 rules: draft.rules.into(),
                 automations: draft.automations,
+                checked: file.checked.as_ref().map(|checked| checked.build.clone()),
             };
             Some((id.to_owned(), Arc::new(plan)))
         })
@@ -288,6 +314,7 @@ pub(crate) mod examples {
             }],
             rules: Arc::from(vec![rule]),
             automations: vec![format!("Pause {name}")],
+            checked: None,
         })
     }
 }
@@ -352,6 +379,7 @@ mod tests {
             },
             anti_cheat: AntiCheatDef::None,
             overlay: None,
+            checked: None,
             values,
             references: Vec::new(),
         }

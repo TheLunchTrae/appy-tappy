@@ -191,6 +191,10 @@ leaves the background out
   },
   "antiCheat": "none",
   "overlay": { "enabled": true, "mode": "pictureInPicture" },
+  "checked": {
+    "build": { "version": "1.4.2.0", "size": 48234496, "modified": 1762500000 },
+    "at": 1762600000
+  },
   "values": [
     {
       "id": "progress",
@@ -237,6 +241,19 @@ Each names its value by application ID and value ID:
   ]
 }
 ```
+
+An application's `checked` is the build of its executable that its values were
+checked against, and `at` is when, in seconds since 1970. A build is the
+executable's file version, which is left out when the file has none, its size
+in bytes, and when it was last written, in seconds since 1970; two builds are
+the same only when all three match. The setup app records the running build
+when it saves an application's first value, and when the user selects **Mark
+as checked**. It leaves `checked` out again when
+the last value is deleted or the window match's executable changes, since the
+build was of the values or the executable that are gone. The Values page shows
+`checked`'s version and day, and warns while a different build runs, as does
+the runtime's log, as [Build detection](Architecture.md#build-detection)
+describes.
 
 The settings live in `%APPDATA%\AppyTappy\settings.json`. A setting the
 file leaves out takes its default:

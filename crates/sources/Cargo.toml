@@ -20,9 +20,12 @@ png = "=0.18.1"
 # Microsoft's Windows API bindings; the features select the APIs the adapter
 # in `win.rs` and `win/capture.rs` calls. Capture uses them directly rather
 # than the `windows-capture` crate, which adds its own thread pool and locks.
+# `Wdk_System_SystemInformation` and `Win32_Storage_FileSystem` read an
+# executable's path and file version for `win/build.rs`.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = [
   "Foundation",
+  "Wdk_System_SystemInformation",
   "Graphics",
   "Graphics_Capture",
   "Graphics_DirectX",
@@ -33,6 +36,7 @@ windows = { version = "=0.62.2", features = [
   "Win32_Graphics_Dxgi",
   "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
   "Win32_System_Diagnostics_Debug",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Memory",

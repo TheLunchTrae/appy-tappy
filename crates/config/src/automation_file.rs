@@ -575,6 +575,7 @@ mod tests {
             }),
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
+            checked: None,
             values: vec![
                 value(
                     "progress",

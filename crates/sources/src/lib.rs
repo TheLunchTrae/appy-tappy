@@ -9,6 +9,7 @@
 //!
 //! See `wiki/developer/Architecture.md` for this crate's boundaries.
 
+pub mod build;
 pub mod memory;
 pub mod schedule;
 pub mod screen;
