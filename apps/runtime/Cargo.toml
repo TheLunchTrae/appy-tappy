@@ -24,11 +24,15 @@ mutants = "0.0.4"
 # Compiles runtime.rc, the program's icon, and links it into the program on
 # Windows.
 embed-resource = "=3.0.12"
+# Links the Visual C++ runtime into the program, so it starts on a PC without
+# the Visual C++ Redistributable. The Universal C runtime stays a Windows DLL.
+# Builds for other systems skip it.
+static_vcruntime = "=3.0.0"
 
 [lints]
 workspace = true
 
 # cargo-machete reads only the package's library and binary sources, so it
-# misses build.rs, which calls embed-resource.
+# misses build.rs, which calls embed-resource and static_vcruntime.
 [package.metadata.cargo-machete]
-ignored = ["embed-resource"]
+ignored = ["embed-resource", "static_vcruntime"]
