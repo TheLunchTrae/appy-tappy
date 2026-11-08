@@ -1383,10 +1383,17 @@ mod tests {
     }
 
     /// Stops `reader` and checks its thread ended, which drops its senders.
-    /// The desk goes first, so a reader that waits on it cannot hang.
+    /// The desk goes first, so a reader that waits on it cannot hang, and a
+    /// reader that does not end within `PATIENCE` fails the test rather than
+    /// hanging it.
     fn stopped(reader: Reader, desk: Desk, readings: &Receiver<Reading>) {
         drop(desk);
-        reader.stop().expect("stop");
+        let (done, ended) = mpsc::channel();
+        thread::spawn(move || done.send(reader.stop().map_err(|error| error.to_string())));
+        ended
+            .recv_timeout(PATIENCE)
+            .expect("the reader ends when the session stops")
+            .expect("stop");
         let left: Vec<Reading> = readings.try_iter().collect();
         assert_eq!(left, [], "nothing more was sent");
         assert_eq!(readings.try_recv(), Err(TryRecvError::Disconnected));
