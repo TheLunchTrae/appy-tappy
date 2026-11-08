@@ -311,8 +311,14 @@ public static class Probe {
     Assert-Read
     Assert-Trace
     $stops = Measure-Log 'the trace stopped'
+    $reads = Measure-Log 'reading its values'
     Set-Trace $false
     Wait-Log 'the trace stopped' 10 ($stops + 1)
+    # Stopping the trace starts the reader over. Its capture starts just after
+    # it logs that it reads, and fails to start on a window that is closing,
+    # so the probe stays open until it has.
+    Wait-Log 'reading its values' 10 ($reads + 1)
+    Start-Sleep -Seconds 2
 
     Stop-Process -Id $probe.Id
     $probe.WaitForExit()
