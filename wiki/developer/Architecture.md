@@ -457,6 +457,13 @@ automation on each. It runs the runtime through four phases:
    CPU and memory share the active targets.
 4. **Idle after.** The probe has exited and the runtime has detached.
 
+Before the last phase, a settle check measures nothing but has to pass. The
+probe starts once more with its values dim gray and repaints the strip for five
+seconds, so the capture asks for a frame only every half second. Then it turns
+the values silver in one last repaint and draws nothing more. The check fails
+unless the runtime reads that change, which shows that Windows holds back a
+frame drawn inside the interval rather than dropping it.
+
 It checks these against their targets:
 
 - **Binary size.** The size of the program the installer ships.

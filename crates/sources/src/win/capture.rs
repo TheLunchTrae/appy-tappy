@@ -52,7 +52,7 @@ use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemIntero
 use windows::core::{Interface, factory};
 
 use super::WindowsSystem;
-use crate::schedule::{LONGEST_WAIT, ReadClock};
+use crate::schedule::{ReadClock, frame_interval};
 use crate::screen::{
     Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
     Region, Size,
@@ -344,12 +344,13 @@ impl Capturer {
     }
 
     /// Asks the system for frames no more often than the handler reads
-    /// them, and never more often than the session's throttle, so a window
-    /// whose values hold still costs the system fewer copies too. A frame
-    /// still arrives as soon as that time has passed and the window changed,
-    /// which is when the handler would have read again anyway.
+    /// them, as [`frame_interval`] works out, so a window whose values hold
+    /// still costs the system fewer copies too. The system is expected to
+    /// hold back a change drawn inside that time and deliver it once the time
+    /// has passed, which is when the handler would have read again anyway;
+    /// the footprint check's settle phase tests that on Windows.
     fn follow(&mut self, wait: Duration) {
-        let interval = wait.clamp(self.throttle, LONGEST_WAIT.max(self.throttle));
+        let interval = frame_interval(wait, self.throttle);
         if interval != self.asked {
             self.asked = interval;
             ask_interval(&self.session, interval);

@@ -107,8 +107,8 @@ changes sooner; a longer maximum saves CPU while nothing changes. Reads happen
 only on frames the window draws, so a window that draws nothing new is not read
 at all.
 
-Between the two, the reader adapts. After a read that changed a value, or
-that came close to where a rule would fire, it waits the minimum. Each read
+Between the two, the reader adapts. After a read that changed a value, it
+waits the minimum. Each read
 that changed nothing doubles the wait, up to the maximum. A bar that holds
 still, in a window that keeps drawing, is read about twice a second; one that
 moves is read at full speed.
@@ -124,12 +124,15 @@ Capture is the one part that needs the operating system, so it sits behind the
 `Capture` trait. Windows Graphics Capture, the API screen recorders use, is the
 only implementation. The system pushes a frame when the window's content
 changes, so a window that does not change costs nothing. The capture also
-asks the system for no more frames than its handler reads: after each read it
-sets the session's minimum update interval to the handler's wait, never below
-the throttle it started with, so a game that repaints all the time while its
-values hold still is copied into the frame pool about as often as it is read.
-Between reads
-the capture keeps only the newest frame and copies nothing. When a read is
+asks the system for no more frames than its handler reads: after a read that
+waits 64 ms or more, it sets the session's minimum update interval to that
+wait, never below the throttle it started with, so a game that repaints all
+the time while its values hold still is copied into the frame pool about as
+often as it is read. A shorter wait keeps the throttle, so a value that moves
+does not change the setting on every read. Windows is expected to hold back a
+change drawn inside the interval and deliver it once the interval passes; the
+footprint check's settle phase tests that. Between reads the capture keeps
+only the newest frame and copies nothing. When a read is
 due, the graphics card copies just the values' regions into a small texture
 the CPU can read, stacked one under another as the capture's `Layout` places
 them, and those rows land in a buffer that is reused for every frame. When
