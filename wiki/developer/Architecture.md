@@ -474,7 +474,12 @@ automation on each. It runs the runtime through five phases:
 5. **Idle after.** The trace has stopped, the probe has exited, and the
    runtime has detached. The trace's buffer is freed once its last handle
    and its writer end, so a handle left behind shows here as memory over the
-   target.
+   target. The report sets this phase's thread and handle counts beside the
+   first idle phase's, and counts them once more two minutes later, so a
+   thread that Windows ends on its own tells apart from one left behind.
+   Each phase's details count the threads by the module each one started
+   in: the runtime's own executable for the threads it spawns, `ntdll.dll`
+   for Windows' thread pool, and a graphics DLL for a driver's threads.
 
 Before the last phase, a settle check measures nothing but has to pass. The
 probe starts once more with its values dim gray and repaints the strip for

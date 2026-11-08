@@ -38,6 +38,9 @@ $ActiveCpuLimit = 2.0
 $Settle = 5
 $IdleSample = 60
 $ActiveSample = 30
+# How long after the idle after sample the threads and handles are counted
+# once more, to tell threads Windows ends on its own from ones left behind.
+$LongIdle = 120
 
 $ProbeTitle = 'AppyTappy footprint probe'
 $ProbeExecutable = 'appytappy-footprint-probe.exe'
@@ -83,6 +86,8 @@ $traces = Join-Path $local 'AppyTappy\traces'
 $script:details = @()
 $script:memory = @{}
 $script:cpu = @{}
+$script:threads = @{}
+$script:handles = @{}
 $script:process = $null
 $probe = $null
 $peak = $null
@@ -102,6 +107,33 @@ function Wait-Log([string]$Line, [int]$Seconds, [int]$Count = 1) {
         Start-Sleep -Milliseconds 250
     }
     throw "the runtime's log did not say '$Line' within $Seconds seconds"
+}
+
+# The runtime's threads, counted by the module each one started in: its own
+# executable for the threads it spawns, ntdll.dll for Windows' thread pool,
+# and a graphics DLL for a driver's own threads. A thread that starts at an
+# address no module holds counts as unknown.
+function Get-ThreadStarts {
+    $script:process.Refresh()
+    $modules = @($script:process.Modules | ForEach-Object {
+            $base = $_.BaseAddress.ToInt64()
+            [pscustomobject]@{ Name = $_.ModuleName; Start = $base; End = $base + $_.ModuleMemorySize }
+        })
+    $counts = @{}
+    foreach ($thread in $script:process.Threads) {
+        $address = 0
+        try { $address = $thread.StartAddress.ToInt64() } catch { $address = 0 }
+        $owner = $modules | Where-Object { $address -ge $_.Start -and $address -lt $_.End } | Select-Object -First 1
+        $name = if ($null -eq $owner) { 'unknown' } else { $owner.Name }
+        $counts[$name] = 1 + [int]$counts[$name]
+    }
+    ($counts.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name) $($_.Value)" }) -join ', '
+}
+
+# The runtime's thread and handle counts, and where its threads started.
+function Get-Threads {
+    $script:process.Refresh()
+    "$($script:process.Threads.Count) threads ($(Get-ThreadStarts)), $($script:process.HandleCount) handles"
 }
 
 function Get-PrivateWorkingSet([int]$Id) {
@@ -133,7 +165,9 @@ function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double
         Add-Measure "$Name memory" (Format-Bytes $memory)
         Add-Measure "$Name CPU" ('{0:N3} %' -f $cpu)
     }
-    $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $($script:process.Threads.Count) threads, $($script:process.HandleCount) handles"
+    $script:threads[$Name] = $script:process.Threads.Count
+    $script:handles[$Name] = $script:process.HandleCount
+    $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $(Get-Threads)"
 }
 
 # Every value has to read without a problem, or an active sample measured
@@ -359,7 +393,12 @@ public static class Probe {
     $probe = $null
     Wait-Log '): detached' 10 3
 
+    $script:details += "Just after the last detach: $(Get-Threads)"
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
+    Add-Measure 'Idle after threads' "$($script:threads['Idle after']), $($script:threads['Idle']) at idle"
+    Add-Measure 'Idle after handles' "$($script:handles['Idle after']), $($script:handles['Idle']) at idle"
+    Start-Sleep -Seconds $LongIdle
+    $script:details += "$LongIdle s after the idle after sample: $(Get-Threads)"
     # The stopped trace's writer has long finished its file by now.
     Measure-Trace
 }
