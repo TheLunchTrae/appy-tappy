@@ -4,10 +4,9 @@ A rule says when AppyTappy acts on an application and which
 [actions](Actions.md) it runs. The types live in
 `appytappy-config` (`crates/config/src/rule.rs` and
 `crates/config/src/signal.rs`), and the evaluator lives in `appytappy-engine`.
-The authoring and compiled file formats that carry rules belong to
-[#6](https://github.com/TheLunchTrae/appy-tappy/issues/6) and
-[#8](https://github.com/TheLunchTrae/appy-tappy/issues/8); this page describes
-the model they encode.
+Each automation in the setup app's saved automations file becomes one rule;
+[Saved files](setup-app.md#saved-files) describes that file, and this page
+describes the model it encodes.
 
 ## Signals and conditions
 
@@ -120,7 +119,7 @@ it starts with every rule armed and no signal values.
 
 ## Examples
 
-These use plain words; the file formats belong to #6 and #8. `Player.exe`
+These use plain words rather than the saved file's format. `Player.exe`
 stands for whichever app plays the audio.
 
 A number in a region of the window reaches a threshold: pause the music while

@@ -111,9 +111,10 @@ that changed nothing doubles the wait, up to the maximum. A bar that holds
 still, in a window that keeps drawing, is read about twice a second; one that
 moves is read at full speed.
 
-The config format, with a default for all bindings and an override for one,
-belongs to [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6) and
-[#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).
+The saved files do not set a read interval, so every binding reads with the
+defaults. A setting in the app definition, with a default for all bindings and
+an override for one, belongs to
+[#6](https://github.com/TheLunchTrae/appy-tappy/issues/6).
 
 ## Capture
 
