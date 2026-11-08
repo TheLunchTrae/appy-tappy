@@ -51,8 +51,35 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
+      # Restores the Rust build from main, so the job compiles only what
+      # changed. Only pushes to main save it, once for each Cargo.lock and
+      # toolchain, so pull requests never fill the cache or read one another's
+      # builds. mise installs the tools, so Cargo's bin directory stays out.
+      - name: Restore the Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            !target/**/incremental/
+          key: rust-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: rust-${{ runner.os }}-${{ github.job }}-
       - name: Run the mandatory gate
         run: mise run standards:check
+      - name: Save the Rust build cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            !target/**/incremental/
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   # The rest of the full mutation sweep, beside the quality job's shard. Keep
   # the shard count here and in the quality job's MUTANTS_SHARD the same. Each
@@ -124,6 +151,19 @@ jobs:
           install: true
           install_args: rust github:nextest-rs/nextest bun
           cache: true
+      # The same build cache as the quality job.
+      - name: Restore the Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            !target/**/incremental/
+          key: rust-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: rust-${{ runner.os }}-${{ github.job }}-
       # The setup app's Rust side embeds the built UI, so the UI builds first.
       - name: Build the setup UI
         run: mise run ui:build
@@ -140,6 +180,17 @@ jobs:
       - name: Benchmark
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: mise run rust:bench
+      - name: Save the Rust build cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            !target/**/incremental/
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   # Builds the runtime the installer ships and checks it against its
   # footprint targets. It runs on a runner of its own, so no build beside it
@@ -165,5 +216,30 @@ jobs:
           install: true
           install_args: rust
           cache: true
+      # The same build cache as the quality job. A fresh checkout is newer than
+      # every cached build, so Cargo rebuilds the runtime the job measures.
+      - name: Restore the Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            !target/**/incremental/
+          key: rust-${{ runner.os }}-${{ github.job }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: rust-${{ runner.os }}-${{ github.job }}-
       - name: Check the runtime's footprint
         run: mise run rust:footprint
+      - name: Save the Rust build cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            !target/**/incremental/
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
