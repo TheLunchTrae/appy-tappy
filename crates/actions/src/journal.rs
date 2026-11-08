@@ -275,6 +275,9 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
 
     /// Undoes what `owner` changed, newest first, and forgets it, at `now`.
     /// A restore that fails is kept pending for [`Actions::retry_restores`].
+    /// Undoing a target drops its pending restore, which a newer rule's
+    /// failed release left: the target goes back to this rule's earlier
+    /// state instead.
     ///
     /// # Errors
     ///
@@ -290,7 +293,14 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
             });
             if let Some(later) = later {
                 later.change.inherit(entry.change);
-            } else if let Err(error) = self.undo(&entry.change) {
+                continue;
+            }
+            // A pending restore of this target came from a newer change, so
+            // this entry's "before" state supersedes it: sending it after
+            // this undo would leave the target as that newer rule set it.
+            self.pending
+                .retain(|pending| !pending.change.same_target(&entry.change));
+            if let Err(error) = self.undo(&entry.change) {
                 failure.get_or_insert(error);
                 let once_at = entry
                     .change
@@ -1284,6 +1294,83 @@ mod tests {
         actions.controls().broken = None;
         actions.last_try().expect("nothing left");
         assert_eq!(actions.controls().level("speakers"), Some(percent(20)));
+    }
+
+    #[test]
+    fn an_older_rule_released_after_a_failed_restore_puts_its_own_state_back() {
+        let start = Instant::now();
+        let mut actions = speakers();
+        let lower = |level| volume(VolumeTarget::System, level);
+        for (owner, level) in [('x', 50), ('a', 20)] {
+            actions
+                .perform(owner, &lower(level), Restore::OnRelease, &watched())
+                .expect("set");
+        }
+        actions.controls().broken = Some("speakers");
+        assert!(actions.release('a', start).is_err());
+        actions.controls().broken = None;
+        actions.release('x', start).expect("restored");
+        actions.retry_restores(start).expect("nothing pending");
+        assert!(!actions.has_pending());
+        assert_eq!(
+            actions.controls().level("speakers"),
+            Some(percent(80)),
+            "the level from before both rules, not the one between them"
+        );
+
+        let mut actions = player(true);
+        actions
+            .perform(
+                'x',
+                &current(MediaCommand::Pause),
+                Restore::OnRelease,
+                &watched(),
+            )
+            .expect("paused");
+        actions
+            .perform(
+                'a',
+                &current(MediaCommand::Play),
+                Restore::OnRelease,
+                &watched(),
+            )
+            .expect("played");
+        actions.controls().refuse = true;
+        assert!(actions.release('a', start).is_err());
+        actions.controls().refuse = false;
+        actions.release('x', start).expect("resumed");
+        actions
+            .retry_restores(start + MEDIA_RETRY)
+            .expect("nothing pending");
+        assert_eq!(actions.next_retry(), None);
+        assert!(
+            actions.controls().playing(1),
+            "playing, as before both rules"
+        );
+    }
+
+    #[test]
+    fn a_pending_restore_waits_while_an_older_rule_still_holds_the_target() {
+        let start = Instant::now();
+        let mut actions = speakers();
+        let lower = |level| volume(VolumeTarget::System, level);
+        for (owner, level) in [('x', 50), ('y', 30), ('a', 20)] {
+            actions
+                .perform(owner, &lower(level), Restore::OnRelease, &watched())
+                .expect("set");
+        }
+        actions.controls().broken = Some("speakers");
+        assert!(actions.release('a', start).is_err());
+        actions.controls().broken = None;
+        actions.release('x', start).expect("handed to y");
+        actions.retry_restores(start).expect("restored");
+        assert_eq!(
+            actions.controls().level("speakers"),
+            Some(percent(30)),
+            "y still holds the level it set"
+        );
+        actions.release('y', start).expect("restored");
+        assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
     }
 
     #[test]
