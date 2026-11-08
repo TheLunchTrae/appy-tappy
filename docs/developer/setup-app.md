@@ -50,7 +50,7 @@ This page covers what the user guide leaves out.
 
 [Recording a number](../user/values.md#record-a-number) samples the frames the
 value editor's preview capture already takes, about 30 a second, in the owner
-thread (`recording.rs`, with the ink sampling in `recording/ink.rs`). Each frame is cut to the region and reduced to the
+thread (`recording.rs`). Each frame is cut to the region and reduced to the
 shapes the number check reads: `DigitReader::shapes` finds the ink, splits it
 into characters, and scales each to the grid the check compares. A crop whose
 shapes equal a kept reading's is another sighting of that reading, because it
@@ -90,7 +90,7 @@ one line, so there is no text to find first. It runs on a thread of its own,
 because a read takes tens of milliseconds and the owner answers the UI in
 microseconds, and only for new readings, a few times a recording. It gets each
 reading's ink as black text on white with a margin, whatever the application's
-colors. Text for a recording the user discarded or replaced is dropped by the
+colors (`recording/ink.rs`). Text for a recording the user discarded or replaced is dropped by the
 recording's number. Only the setup app uses it; the runtime reads numbers with
 the shapes the user's labels and kept readings taught it
 ([Screen regions](screen.md#checks)).
