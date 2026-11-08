@@ -172,13 +172,17 @@ mod tests {
     }
 
     /// Polls the overlay once and returns its capture's handler, checking it
-    /// captures only `crop` of window 7.
+    /// copies only `crop` of window 7.
     fn overlay_capture_of(harness: &mut Harness, crop: Region) -> FrameHandler {
         harness.ask(overlay_state).expect("shows");
         let started = harness.handlers.try_recv().expect("capture started");
+        let copied = match &started.crop {
+            Crop::Layout(layout) => layout.copies().iter().map(|copy| copy.from).collect(),
+            Crop::Whole => Vec::new(),
+        };
         assert_eq!(
-            (started.window, started.crop, started.interval),
-            (7, Crop::Region(crop), OVERLAY_INTERVAL)
+            (started.window, copied, started.interval),
+            (7, vec![crop], OVERLAY_INTERVAL)
         );
         started.handler
     }

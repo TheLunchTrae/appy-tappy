@@ -6,16 +6,17 @@ use std::convert::Infallible;
 use std::io;
 use std::time::{Duration, Instant};
 
-use super::{Image, Region, Size};
+use super::{Image, Layout, Size};
 use crate::system::Unsupported;
 
 /// What a capture copies out of each frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Crop {
     /// The whole frame, as the setup app's preview and screenshot need.
     Whole,
-    /// One region, as a screen binding reads.
-    Region(Region),
+    /// The regions a layout packs, as the values of a window read. The
+    /// frame's image is then the packed image.
+    Layout(Layout),
 }
 
 /// One captured frame's pixels, lent to the frame handler. The image is
@@ -25,7 +26,8 @@ pub struct Frame<'buffer> {
     /// The size of the window's whole frame, which a region's coordinates
     /// refer to.
     pub window_size: Size,
-    /// The cropped pixels.
+    /// The cropped pixels: the whole frame, or the packed image of the
+    /// capture's [`Layout`].
     pub image: &'buffer Image,
     /// When AppyTappy received the frame.
     pub received: Instant,
@@ -65,7 +67,8 @@ pub trait Capture {
     /// Starts capturing `window`, a handle from [`crate::system::System::windows`],
     /// and calls `handler` with `crop` of new frames. Where the system
     /// supports it, it also asks the system for at most one frame every
-    /// `throttle`, which saves the system's own work as well as ours.
+    /// `throttle`, or every wait the handler last returned when that is
+    /// longer, which saves the system's own work as well as ours.
     ///
     /// # Errors
     ///

@@ -4,8 +4,9 @@ A screen region source reads a signal from part of an application's window, such
 as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
-`screen/image.rs` holds images and regions, `screen/capture.rs` the capture
-trait, `screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
+`screen/image.rs` holds images and regions, `screen/layout.rs` where a
+capture packs the regions it copies, `screen/capture.rs` the capture trait,
+`screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
 the saved checks, and `schedule.rs` the read interval.
 Issue [#5](https://github.com/TheLunchTrae/appy-tappy/issues/5) tracks it.
@@ -106,11 +107,10 @@ changes sooner; a longer maximum saves CPU while nothing changes. Reads happen
 only on frames the window draws, so a window that draws nothing new is not read
 at all.
 
-Between the two, the reader adapts. After a read that changed a value, or
-that came close to where a rule would fire, it waits the minimum. Each read
-that changed nothing doubles the wait, up to the maximum. A bar that holds
-still, in a window that keeps drawing, is read about twice a second; one that
-moves is read at full speed.
+Between the two, the reader adapts. After a read that changed a value, it waits
+the minimum. Each read that changed nothing doubles the wait, up to the maximum.
+A bar that holds still, in a window that keeps drawing, is read about twice a
+second; one that moves is read at full speed.
 
 The Settings page sets one read interval for every reader, as **Fastest read**
 and **Slowest read**, which `settings.json` keeps. A setting in the app
@@ -122,17 +122,24 @@ definition, with an override for one binding, belongs to
 Capture is the one part that needs the operating system, so it sits behind the
 `Capture` trait. Windows Graphics Capture, the API screen recorders use, is the
 only implementation. The system pushes a frame when the window's content
-changes, so a window that does not change costs nothing, and the capture also
-asks the system for no more than one frame per minimum interval. Between reads
-the capture keeps only the newest frame and copies nothing. When a read is
-due, the graphics card copies just the region into a small texture the CPU can
-read, and those rows land in a buffer that is reused for every frame. When
-the window closes, the capture tells its handler and stops. It does the same
-when it can no longer produce frames: when the graphics device is lost, such
-as after a driver reset or update, and when it cannot follow the window to a
-new size. A lost device can stop frames altogether, so while no frame comes,
-the capture checks its device every `DEVICE_CHECK`
-(`crates/sources/src/win/capture.rs`).
+changes, so a window that does not change costs nothing. The capture also asks
+the system for no more frames than its handler reads: after a read that waits 64
+ms or more, it sets the session's minimum update interval to that wait, never
+below the throttle it started with, so a game that repaints all the time while
+its values hold still is copied into the frame pool about as often as it is
+read. A shorter wait keeps the throttle, so a value that moves does not change
+the setting on every read. Windows is expected to hold back a change drawn
+inside the interval and deliver it once the interval passes; the footprint
+check's settle check tests that. Between reads the capture keeps only the newest
+frame and copies nothing. When a read is due, the graphics card copies just the
+values' regions into a small texture the CPU can read, stacked one under another
+as the capture's `Layout` places them, and those rows land in a buffer that is
+reused for every frame. When the window closes, the capture tells its handler
+and stops. It does the same when it can no longer produce frames: when the
+graphics device is lost, such as after a driver reset or update, and when it
+cannot follow the window to a new size. A lost device can stop frames
+altogether, so while no frame comes, the capture checks its device every
+`DEVICE_CHECK` (`crates/sources/src/win/capture.rs`).
 
 Each frame carries the time since the system composed it. The benchmark uses
 that to report capture-to-decision latency on a live window:

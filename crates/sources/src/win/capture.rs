@@ -6,9 +6,9 @@
 //! every Direct3D and capture call. The system's own threads fill the frame
 //! pool on the same Direct3D device, so the device is set to serialize its
 //! calls. Between reads the thread keeps only the newest frame and copies
-//! nothing; when the handler's wait ends, the GPU copies just the region into
-//! a small CPU-readable texture, and the thread copies those rows into a
-//! reused buffer.
+//! nothing; when the handler's wait ends, the GPU copies just the values'
+//! regions into a small CPU-readable texture, as the crop's layout packs
+//! them, and the thread copies those rows into a reused buffer.
 //!
 //! A capture that can no longer produce frames ends the way a closed window
 //! does: its handler receives a [`io::ErrorKind::NotConnected`] error that
@@ -52,9 +52,10 @@ use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemIntero
 use windows::core::{Interface, factory};
 
 use super::WindowsSystem;
-use crate::schedule::ReadClock;
+use crate::schedule::{ReadClock, frame_interval};
 use crate::screen::{
-    Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Region, Size,
+    Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
+    Region, Size,
 };
 
 /// The frame pool's buffers: one the thread may hold until its next read,
@@ -206,7 +207,7 @@ fn run(
         reason = "a send fails only when `start` stopped waiting, and nobody is left to tell"
     )]
     let _ = ready.send(Ok(()));
-    capture.handle_frames(crop, &mut handler, events);
+    capture.handle_frames(&crop, &mut handler, events);
     capture.stop();
 }
 
@@ -228,6 +229,10 @@ struct Capturer {
     pool_size: SizeInt32,
     session: GraphicsCaptureSession,
     arrived: i64,
+    /// The least time between two frames that the session may ask for.
+    throttle: Duration,
+    /// The time between frames that the session asks the system for now.
+    asked: Duration,
     staging: Option<(Size, ID3D11Texture2D)>,
     buffer: FrameBuffer,
     ticks_per_second: i128,
@@ -272,7 +277,8 @@ impl Capturer {
             Ok(())
         }))?;
         let session = pool.CreateCaptureSession(&item)?;
-        configure(&session, throttle);
+        configure(&session);
+        ask_interval(&session, throttle);
         session.StartCapture()?;
         let mut frequency = 0;
         #[expect(unsafe_code, reason = "a Win32 call")]
@@ -288,6 +294,8 @@ impl Capturer {
             pool_size,
             session,
             arrived,
+            throttle,
+            asked: throttle,
             staging: None,
             buffer: FrameBuffer::default(),
             ticks_per_second: i128::from(frequency).max(1),
@@ -297,7 +305,7 @@ impl Capturer {
     /// Waits for frames and hands the newest to `handler` whenever its last
     /// wait has ended, until the session stops or the capture ends; an
     /// ending reaches the handler as a [`io::ErrorKind::NotConnected`] error.
-    fn handle_frames(&mut self, crop: Crop, handler: &mut FrameHandler, events: &Receiver<Event>) {
+    fn handle_frames(&mut self, crop: &Crop, handler: &mut FrameHandler, events: &Receiver<Event>) {
         let mut held: Option<Held> = None;
         let mut clock = ReadClock::new(Instant::now());
         loop {
@@ -327,10 +335,25 @@ impl Capturer {
                     break;
                 };
                 clock.after_read(Instant::now(), wait);
+                self.follow(wait);
             }
         }
         if let Some(frame) = held {
             close(&frame.frame);
+        }
+    }
+
+    /// Asks the system for frames no more often than the handler reads
+    /// them, as [`frame_interval`] works out, so a window whose values hold
+    /// still costs the system fewer copies too. The system is expected to
+    /// hold back a change drawn inside that time and deliver it once the time
+    /// has passed, which is when the handler would have read again anyway;
+    /// the footprint check's settle check tests that on Windows.
+    fn follow(&mut self, wait: Duration) {
+        let interval = frame_interval(wait, self.throttle);
+        if interval != self.asked {
+            self.asked = interval;
+            ask_interval(&self.session, interval);
         }
     }
 
@@ -365,7 +388,7 @@ impl Capturer {
 
     /// Copies `crop` of one frame and passes it to `handler`, returning the
     /// handler's wait, or `None` when the capture ended.
-    fn read(&mut self, held: Held, crop: Crop, handler: &mut FrameHandler) -> Option<Duration> {
+    fn read(&mut self, held: Held, crop: &Crop, handler: &mut FrameHandler) -> Option<Duration> {
         let copied = self.copy(&held.frame, crop);
         close(&held.frame);
         match copied {
@@ -409,7 +432,7 @@ impl Capturer {
 
     /// Copies `crop` of `frame` into the buffer and returns the window's
     /// size, or `None` when the frame had to be dropped for a resize.
-    fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: Crop) -> io::Result<Option<Size>> {
+    fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: &Crop) -> io::Result<Option<Size>> {
         let content = frame.ContentSize()?;
         if content != self.pool_size {
             self.pool
@@ -431,42 +454,48 @@ impl Capturer {
             width: u32::try_from(content.Width).unwrap_or_default(),
             height: u32::try_from(content.Height).unwrap_or_default(),
         };
-        let region = match crop {
-            Crop::Whole => Region::whole(window_size),
-            Crop::Region(region) => Some(region),
-        }
-        .filter(|region| region.fits(window_size))
-        .ok_or(OutsideWindow { window_size })?;
-        let size = region.size();
+        let outside = OutsideWindow { window_size };
+        let whole = [Placement {
+            from: Region::whole(window_size).ok_or(outside)?,
+            y: 0,
+        }];
+        let (size, placements) = match crop {
+            Crop::Whole => (window_size, whole.as_slice()),
+            Crop::Layout(layout) if layout.fits(window_size) => (layout.size(), layout.copies()),
+            Crop::Layout(_) => return Err(outside.into()),
+        };
         let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `access` wraps the frame's live surface; the call returns a
         // new reference to its texture.
         let source: ID3D11Texture2D = unsafe { access.GetInterface() }?;
         let staging = self.staging(size)?;
-        let area = D3D11_BOX {
-            left: region.x(),
-            top: region.y(),
-            front: 0,
-            right: region.right(),
-            bottom: region.bottom(),
-            back: 1,
-        };
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: both textures are live and BGRA; `area` lies inside the
-        // source, which `fits` checked, and matches the staging texture's size.
-        unsafe {
-            self.context.CopySubresourceRegion(
-                &staging,
-                0,
-                0,
-                0,
-                0,
-                &source,
-                0,
-                Some(&raw const area),
-            );
-        };
+        for placement in placements {
+            let area = D3D11_BOX {
+                left: placement.from.x(),
+                top: placement.from.y(),
+                front: 0,
+                right: placement.from.right(),
+                bottom: placement.from.bottom(),
+                back: 1,
+            };
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: both textures are live and BGRA; `area` lies inside the
+            // source, which `fits` checked, and the layout placed it inside
+            // the staging texture, which has the layout's size.
+            unsafe {
+                self.context.CopySubresourceRegion(
+                    &staging,
+                    0,
+                    0,
+                    placement.y,
+                    0,
+                    &source,
+                    0,
+                    Some(&raw const area),
+                );
+            };
+        }
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `staging` is a live CPU-readable texture and `mapped` a live
@@ -516,7 +545,7 @@ impl Capturer {
     }
 
     /// The staging texture for `size`, made once and remade only when the
-    /// region's size changes.
+    /// packed image's size changes.
     fn staging(&mut self, size: Size) -> windows::core::Result<ID3D11Texture2D> {
         if let Some((cached, texture)) = &self.staging
             && *cached == size
@@ -566,10 +595,10 @@ impl Capturer {
     }
 }
 
-/// Asks for a borderless capture without the cursor, at most one frame per
-/// `throttle`. Each is optional: older Windows versions lack some, and the
-/// capture works without them.
-fn configure(session: &GraphicsCaptureSession, throttle: Duration) {
+/// Asks for a borderless capture without the cursor. Each setting is
+/// optional: older Windows versions lack some, and the capture works without
+/// them.
+fn configure(session: &GraphicsCaptureSession) {
     if let Ok(request) =
         GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless)
     {
@@ -579,7 +608,6 @@ fn configure(session: &GraphicsCaptureSession, throttle: Duration) {
         )]
         let _ = request.join();
     }
-    let ticks = i64::try_from(throttle.as_nanos() / 100).unwrap_or(i64::MAX);
     #[expect(
         clippy::let_underscore_must_use,
         reason = "each setting is optional and missing on older Windows versions"
@@ -587,8 +615,19 @@ fn configure(session: &GraphicsCaptureSession, throttle: Duration) {
     let _ = (
         session.SetIsBorderRequired(false),
         session.SetIsCursorCaptureEnabled(false),
-        session.SetMinUpdateInterval(TimeSpan { Duration: ticks }),
     );
+}
+
+/// Asks the system for at most one frame every `interval`. Older Windows
+/// versions lack the setting, and then frames come as often as the window
+/// changes.
+fn ask_interval(session: &GraphicsCaptureSession, interval: Duration) {
+    let ticks = i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX);
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the setting is optional and missing on older Windows versions"
+    )]
+    let _ = session.SetMinUpdateInterval(TimeSpan { Duration: ticks });
 }
 
 /// The error that tells a handler its capture ended.
@@ -645,7 +684,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::*;
-    use crate::screen::Region;
+    use crate::screen::{Image, Layout, Region};
     use crate::system::System;
 
     /// Captures a visible window on the desktop of whoever runs it. It is
@@ -669,7 +708,7 @@ mod tests {
         let session = system
             .start(
                 window.handle,
-                Crop::Region(Region::new(0, 0, 32, 16).unwrap()),
+                Crop::Layout(Layout::one(Region::new(0, 0, 32, 16).unwrap())),
                 Duration::ZERO,
                 Box::new(move |frame| {
                     let frame = frame.unwrap();
@@ -690,6 +729,67 @@ mod tests {
             }
         );
         assert!(latency < Duration::from_secs(5), "{latency:?}");
+    }
+
+    /// The newest frame's window size and image for `crop` of `window`.
+    fn capture_once(system: &WindowsSystem, window: u64, crop: Crop) -> (Size, Image) {
+        let (frames, received) = mpsc::channel();
+        let session = system
+            .start(
+                window,
+                crop,
+                Duration::ZERO,
+                Box::new(move |frame| {
+                    let frame = frame.unwrap();
+                    // The test stops listening after the first frame.
+                    let _sent = frames.send((frame.window_size, frame.image.clone()));
+                    Duration::from_secs(60)
+                }),
+            )
+            .unwrap();
+        let frame = received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a frame within five seconds");
+        session.close().unwrap();
+        frame
+    }
+
+    /// Packs two far-apart regions of a visible window and checks that each
+    /// lands where the layout says, by comparing it with the same region of
+    /// a whole frame. The window may change between the two captures, so it
+    /// tries a few times. It is ignored because CI runners have no visible
+    /// windows.
+    #[test]
+    #[ignore = "needs a visible window on an interactive desktop"]
+    fn packs_each_region_where_its_layout_says() {
+        let system = WindowsSystem::new();
+        let window = system
+            .windows()
+            .unwrap()
+            .into_iter()
+            .find(|window| {
+                window.visible
+                    && window.bounds.right - window.bounds.left >= 256
+                    && window.bounds.bottom - window.bounds.top >= 256
+                    && !window.title.is_empty()
+            })
+            .expect("a visible window of at least 256 by 256 pixels");
+        let (size, _) = capture_once(&system, window.handle, Crop::Whole);
+        let regions = [
+            Region::new(4, 4, 40, 12).unwrap(),
+            Region::new(size.width - 36, size.height - 28, 32, 24).unwrap(),
+        ];
+        let layout = Layout::new(regions.map(Some)).unwrap();
+        assert_eq!(layout.copies().len(), 2, "far apart regions are stacked");
+        let matched = (0..5).any(|_| {
+            let (_, packed) = capture_once(&system, window.handle, Crop::Layout(layout.clone()));
+            let (_, whole) = capture_once(&system, window.handle, Crop::Whole);
+            assert_eq!(packed.size(), layout.size());
+            regions.iter().enumerate().all(|(slot, region)| {
+                packed.crop(layout.packed(slot).unwrap()) == whole.crop(*region)
+            })
+        });
+        assert!(matched, "each packed region matches the whole frame's");
     }
 
     #[test]

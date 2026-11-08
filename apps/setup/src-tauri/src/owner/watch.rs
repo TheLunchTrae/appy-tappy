@@ -9,7 +9,7 @@ use appytappy_config::automation_file::WhenDef;
 use appytappy_config::signal::SignalName;
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved;
-use appytappy_sources::screen::{Crop, Frame, OutsideWindow, Size};
+use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Size};
 use appytappy_sources::system::best_window;
 
 use super::host::Host;
@@ -74,7 +74,7 @@ impl<H: Host> Owner<H> {
             .ok_or_else(|| format!("Open {} to see what {} reads.", file.name, saved.name))?;
         let watch = self.start(
             window,
-            Crop::Region(check.region),
+            Crop::Layout(Layout::one(check.region)),
             WATCH_INTERVAL,
             watch_message,
         )?;
@@ -201,7 +201,7 @@ mod tests {
             (started.window, started.crop, started.interval),
             (
                 7,
-                Crop::Region(Region::new(0, 0, 4, 2).expect("not empty")),
+                Crop::Layout(Layout::one(Region::new(0, 0, 4, 2).expect("not empty"))),
                 WATCH_INTERVAL
             )
         );
