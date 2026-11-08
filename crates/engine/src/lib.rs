@@ -150,6 +150,33 @@ impl Session {
         effects
     }
 
+    /// When a [`Trigger::Becomes`] rule that its cooldown held back is next
+    /// due: its condition holds on the values recorded, and it fires at that
+    /// time unless a new value changes that first. The runtime calls
+    /// [`Session::recheck`] then, because a value that holds still sends no
+    /// sample.
+    #[must_use]
+    pub fn next_due(&self) -> Option<Instant> {
+        self.rules
+            .iter()
+            .zip(&self.states)
+            .filter(|(rule, state)| state.armed && becomes_holds(rule, &self.values))
+            .filter_map(|(rule, state)| state.last_fired?.checked_add(rule.cooldown()))
+            .min()
+    }
+
+    /// Checks at `at`, with no new value, whether a [`Trigger::Becomes`]
+    /// rule that its cooldown held back fires now that the cooldown passed.
+    pub fn recheck(&mut self, at: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        for (index, (rule, state)) in self.rules.iter().zip(&mut self.states).enumerate() {
+            if state.armed && becomes_holds(rule, &self.values) && state.cooled(rule, at) {
+                effects.push(state.fire(rule, index, at));
+            }
+        }
+        effects
+    }
+
     /// Records that the app gained (`true`) or lost (`false`) the keyboard
     /// focus at `at`. A report that repeats the current focus does nothing.
     pub fn focus(&mut self, focused: bool, at: Instant) -> Vec<Effect> {
@@ -214,6 +241,11 @@ impl Session {
             }
         }
     }
+}
+
+/// Whether `rule` is a [`Trigger::Becomes`] rule whose condition holds.
+fn becomes_holds(rule: &Rule, values: &BTreeMap<SignalName, Value>) -> bool {
+    matches!(rule.trigger(), Trigger::Becomes { condition, .. } if condition.holds(values))
 }
 
 fn guard_holds(guard: Option<&Condition>, values: &BTreeMap<SignalName, Value>) -> bool {
@@ -440,6 +472,40 @@ mod tests {
             session.sample(name("progress"), number(90.1), clock.at(11)),
             [Effect::Fire(FIRST)]
         );
+    }
+
+    #[test]
+    fn a_rule_that_became_true_during_its_cooldown_fires_once_it_passes() {
+        let clock = Clock::new();
+        let cooldown = Duration::from_millis(10);
+        let mut session = start(
+            vec![becomes(Rearm::WhenFalse, cooldown, Restore::Never)],
+            &clock,
+        );
+        assert_eq!(session.next_due(), None, "nothing fired yet");
+        assert_eq!(
+            feed(&mut session, &clock, 1, &[95.0, 10.0, 95.0]),
+            [Effect::Fire(FIRST)]
+        );
+        // The value then holds still, so no sample comes.
+        assert_eq!(session.next_due(), Some(clock.at(11)));
+        assert_eq!(session.recheck(clock.at(10)), [], "still cooling down");
+        assert_eq!(session.recheck(clock.at(11)), [Effect::Fire(FIRST)]);
+        assert_eq!(session.next_due(), None, "it fired, so nothing is due");
+        assert_eq!(session.recheck(clock.at(30)), []);
+    }
+
+    #[test]
+    fn a_rule_whose_condition_stopped_holding_is_not_due() {
+        let clock = Clock::new();
+        let cooldown = Duration::from_millis(10);
+        let mut session = start(
+            vec![becomes(Rearm::WhenFalse, cooldown, Restore::Never)],
+            &clock,
+        );
+        feed(&mut session, &clock, 1, &[95.0, 10.0, 95.0, 10.0]);
+        assert_eq!(session.next_due(), None);
+        assert_eq!(session.recheck(clock.at(20)), []);
     }
 
     #[test]

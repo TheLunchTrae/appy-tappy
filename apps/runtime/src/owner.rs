@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::Instant;
 
 use appytappy_config::paths::Locations;
@@ -37,6 +37,9 @@ enum Event {
     Reading(Reading),
     /// An action could not run.
     ActionFailed(ActionFailed),
+    /// An automation that its cooldown held back is due, and no event came
+    /// before.
+    Due,
 }
 
 impl From<Change> for Event {
@@ -168,7 +171,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     };
     let orders = model.replan(first.apps);
     carry(orders, &mut crew, log);
-    for event in &events {
+    while let Some(event) = next(&events, model.next_due()) {
         match handle(&mut model, log, event) {
             Step::Carry(orders) => carry(orders, &mut crew, log),
             Step::Reload => {
@@ -304,6 +307,19 @@ impl appytappy_actions::Controls for NoControls {
     #[mutants::skip]
     fn hold(&mut self, _time: std::time::Duration) {
         match self.0 {}
+    }
+}
+
+/// Waits for the next event, or, when an automation is `due`, until then at
+/// most. Returns `None` once nobody can send another event.
+fn next(events: &Receiver<Event>, due: Option<Instant>) -> Option<Event> {
+    let Some(due) = due else {
+        return events.recv().ok();
+    };
+    match events.recv_timeout(due.saturating_duration_since(Instant::now())) {
+        Ok(event) => Some(event),
+        Err(RecvTimeoutError::Timeout) => Some(Event::Due),
+        Err(RecvTimeoutError::Disconnected) => None,
     }
 }
 
@@ -449,6 +465,7 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
             note(log, &message);
             Step::Carry(Vec::new())
         },
+        Event::Due => Step::Carry(model.recheck(Instant::now())),
     }
 }
 
@@ -563,6 +580,23 @@ mod tests {
                 "{line:?} should end with {message:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_owner_wakes_when_an_automation_is_due() {
+        let (sender, events) = mpsc::channel();
+        let soon = Instant::now();
+        assert!(matches!(next(&events, Some(soon)), Some(Event::Due)));
+        sender.send(Event::Reload).expect("send");
+        assert!(
+            matches!(next(&events, Some(soon)), Some(Event::Reload)),
+            "an event that came first goes first"
+        );
+        sender.send(Event::DetectionEnded).expect("send");
+        assert!(matches!(next(&events, None), Some(Event::DetectionEnded)));
+        drop(sender);
+        assert!(next(&events, Some(soon)).is_none());
+        assert!(next(&events, None).is_none());
     }
 
     #[test]
