@@ -33,10 +33,7 @@ pub use capture::WindowsCaptureSession;
 
 /// The Windows implementation of [`System`].
 #[derive(Debug)]
-pub struct WindowsSystem {
-    /// The Direct3D device every capture shares, made by the first.
-    device: capture::DeviceSlot,
-}
+pub struct WindowsSystem(());
 
 impl WindowsSystem {
     /// Prepares the adapter. It makes the process aware of per-monitor DPI,
@@ -51,9 +48,7 @@ impl WindowsSystem {
         // SAFETY: the call takes a predefined constant and no pointers.
         let _ =
             unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
-        Self {
-            device: capture::DeviceSlot::default(),
-        }
+        Self(())
     }
 }
 
