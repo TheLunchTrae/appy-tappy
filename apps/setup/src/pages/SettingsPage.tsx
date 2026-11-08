@@ -108,8 +108,7 @@ function RememberEnabled() {
         <span className="set-name">
           <span id="remember-enabled">Remember whether automations are on</span>
           <Hint topic="Remember whether automations are on" id="remember-enabled-hint">
-            When on, AppyTappy starts with automations on or off as you last set them from the tray. When off,
-            automations are on each time it starts.
+            When on, AppyTappy starts with automations on or off as you last set them from the tray.
           </Hint>
         </span>
         <span className="note" id="remember-enabled-note">

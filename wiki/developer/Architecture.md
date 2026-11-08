@@ -569,12 +569,13 @@ changing.
   settings say, so turning `rememberEnabled` on while the runtime runs
   remembers the picks that follow. A file that cannot be written is logged,
   and the pick still applies. The owner reads it once, when the settings
-  first read, and only when they say `rememberEnabled`; settings read later
+  first read, even on a retry, and only when they say `rememberEnabled` and
+  the user has not picked from the tray in this run; settings read later
   leave the state to the tray. Only `off` means disabled: a file that is
   missing, cannot be read, or holds anything else means enabled. The tray
-  starts after that first read, so its check mark shows the state the
-  runtime starts in. Quitting disables automations to undo them, but that
-  is not a pick and writes nothing.
+  starts before that first read and gets a fresh menu after it, so its check
+  mark shows the state the runtime starts in. Quitting disables automations
+  to undo them, but that is not a pick and writes nothing.
 - **Reloading.** After each save of an application, a value, a reference, an
   anti-cheat class, a checked build, an automation, or the settings that
   works, the setup app sets the named event `Local\AppyTappy.Reload`, and the

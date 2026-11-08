@@ -12,7 +12,9 @@ use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile, TraceCategory};
 use appytappy_config::store::{AppStore, AutomationStore, EnabledStore, SettingsStore};
-use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, WindowWatch};
+use appytappy_platform::{
+    RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
+};
 use appytappy_sources::HostSystem;
 use appytappy_sources::schedule::ReadInterval;
 use appytappy_sources::system::{System, shows};
@@ -118,6 +120,10 @@ impl From<TraceReport> for Event {
 enum Step {
     /// Carry out these orders and wait for the next event.
     Carry(Vec<Order>),
+    /// The user picked Enable or Disable from the tray: carry out these
+    /// orders, and from now on in this run the settings no longer start
+    /// automations as the tray last left them.
+    Picked(Vec<Order>),
     /// Read the saved automations again.
     Reload,
     /// Trace `0` stopped, as its writer reported.
@@ -168,6 +174,11 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let windows = WindowWatch::start(inputs.clone())?;
     let (sender, events) = mpsc::channel();
     let mut model = Model::default();
+    // Without a desktop the runtime still works; it only has no icon.
+    let mut shown = tray::menu(&model);
+    let tray = Tray::start(sender.clone(), shown.clone())
+        .inspect_err(|error| note(log, &format!("no tray icon: {error}")))
+        .ok();
     // Without the reload event the runtime still runs what it read at start.
     let reload = ReloadWatch::start(RELOAD, sender.clone())
         .inspect_err(|error| {
@@ -187,13 +198,9 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         &mut reloads,
         (Stale::BOTH, &mut tracing, &sender),
     );
-    // The first read decides whether automations start enabled, so the tray
-    // starts after it and its check mark shows that from the start. Without
-    // a desktop the runtime still works; it only has no icon.
-    let mut shown = tray::menu(&model);
-    let tray = Tray::start(sender.clone(), shown.clone())
-        .inspect_err(|error| note(log, &format!("no tray icon: {error}")))
-        .ok();
+    // The first read can start automations disabled, as the tray last left
+    // them, so the menu's check mark shows that before the first event.
+    show(tray.as_ref(), &model, &mut shown);
     let lifecycle = Lifecycle::new(first.watchlist.unwrap_or_default(), Instant::now());
     let detect = Arc::clone(&system);
     let changes = sender.clone();
@@ -265,6 +272,11 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 carry(orders, &mut crew, log);
                 reloads.due(Instant::now())
             },
+            Step::Picked(orders) => {
+                reloads.picked = true;
+                carry(orders, &mut crew, log);
+                reloads.due(Instant::now())
+            },
             Step::Reload => {
                 // A save starts the tries over.
                 reloads.retry = None;
@@ -318,17 +330,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             detail: Detail::Note(kind),
             ..record
         });
-        // Most events, such as each value read, leave the menu as it was, and
-        // the icon is redrawn only when it changes.
-        let menu = tray::menu(&model);
-        if let Some(tray) = tray.as_ref().filter(|_| menu != shown) {
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "a tray that ended reports why when it is stopped"
-            )]
-            let _ = tray.show(menu.clone());
-        }
-        shown = menu;
+        show(tray.as_ref(), &model, &mut shown);
     }
     // Undo what the running automations changed before anything stops.
     let orders = model.set_enabled(false);
@@ -368,6 +370,26 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         .and(reload_stopped)
         .and(windows_stopped)
         .and(traced)
+}
+
+/// Shows on `tray`, if there is one, the menu the model calls for, when it
+/// differs from `shown`, the menu shown last. Most events, such as each value
+/// read, leave the menu as it was, and the icon is redrawn only when it
+/// changes.
+#[mutants::skip] // Only a real tray shows it, checked by hand on Windows.
+fn show(tray: Option<&Tray>, model: &Model, shown: &mut TrayMenu) {
+    let menu = tray::menu(model);
+    if menu == *shown {
+        return;
+    }
+    if let Some(tray) = tray {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a tray that ended reports why when it is stopped"
+        )]
+        let _ = tray.show(menu.clone());
+    }
+    *shown = menu;
 }
 
 /// The operating system's media and audio controls, made on the action
@@ -523,6 +545,9 @@ struct Reloads {
     had: Had,
     /// Whether the settings ever read.
     had_settings: bool,
+    /// Whether the user picked Enable or Disable from the tray in this run,
+    /// which outranks how the tray left them in an earlier run.
+    picked: bool,
 }
 
 impl Default for Reloads {
@@ -533,6 +558,7 @@ impl Default for Reloads {
             failing: Stale::default(),
             had: Had::Nothing,
             had_settings: false,
+            picked: false,
         }
     }
 }
@@ -639,9 +665,11 @@ struct Saved {
 /// and settings it has, and `reloads` says when to read those files again,
 /// if at all.
 ///
-/// The first settings that read decide whether automations start enabled:
-/// when they say to remember, as the tray last left them, and otherwise
-/// enabled, as the model starts. Settings read later leave it to the tray.
+/// The first settings that read, even on a retry, decide whether
+/// automations start enabled: when they say to remember, as the tray last
+/// left them, and otherwise enabled, as the model starts. Settings read
+/// later, or after the user picked Enable or Disable from the tray in this
+/// run, leave it to the tray.
 fn read_saved(
     stores: &Stores,
     log: &mut Log,
@@ -658,7 +686,7 @@ fn read_saved(
     if read.settings {
         match read_settings(&stores.settings) {
             Ok(settings) => {
-                if settings.remember_enabled && !reloads.had_settings {
+                if settings.remember_enabled && !reloads.had_settings && !reloads.picked {
                     orders = remembered(&stores.enabled, model, log);
                 }
                 reloads.had_settings = true;
@@ -956,13 +984,16 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
                         "automations disabled"
                     },
                 );
+                // The pick applies before it is kept, so a slow disk does not
+                // hold it up.
+                let orders = model.set_enabled(on);
                 if let Err(error) = enabled.save(on) {
                     note(
                         log,
                         &format!("whether automations are enabled cannot be kept: {error}"),
                     );
                 }
-                Step::Carry(model.set_enabled(on))
+                Step::Picked(orders)
             },
             Some(tray::Command::Quit) => {
                 note(log, "quit from the tray");
@@ -1154,6 +1185,7 @@ mod tests {
         let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
         fs::remove_dir_all(&folder).expect("clean up");
         let carry = || Step::Carry(Vec::new());
+        let picked = || Step::Picked(Vec::new());
         assert_eq!(
             steps,
             [
@@ -1161,10 +1193,10 @@ mod tests {
                 carry(),
                 carry(),
                 carry(),
+                picked(),
                 carry(),
                 carry(),
-                carry(),
-                carry(),
+                picked(),
                 Step::Reload,
                 Step::Stop,
                 Step::Stop,
@@ -1644,10 +1676,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn settings_that_first_read_late_stop_what_runs_when_the_tray_left_it_off() {
-        let mut scratch = Scratch::new("remember-late");
-        scratch.write("settings.json", REMEMBER);
+    /// A scratch folder whose settings remember and whose enabled file says
+    /// off, and a model that runs one application, whose reader started.
+    fn running_with_the_tray_left_off(name: &str) -> (Scratch, Model) {
+        let scratch = Scratch::new(name);
         scratch.write("enabled.txt", "off\n");
         let mut model = Model::default();
         model.replan(BTreeMap::from([(
@@ -1660,12 +1692,48 @@ mod tests {
             executable: "Example.exe".to_owned(),
         });
         assert!(matches!(orders.first(), Some(Order::Read(_))));
+        (scratch, model)
+    }
+
+    #[test]
+    fn settings_that_first_read_late_stop_what_runs_when_the_tray_left_it_off() {
+        let (mut scratch, mut model) = running_with_the_tray_left_off("remember-late");
         let mut reloads = Reloads::default();
+        // The first read fails, so the first settings that work come with a
+        // retry, while the application runs.
+        scratch.write("settings.json", "{");
+        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
+        assert!(reloads.retry.is_some() && model.enabled());
+        scratch.write("settings.json", REMEMBER);
         assert_eq!(
             scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY),
             [Order::StopReading(SessionId(0), "Example App".to_owned())]
         );
         assert!(!model.enabled());
+    }
+
+    #[test]
+    fn settings_that_first_read_after_a_tray_pick_leave_the_pick() {
+        let (mut scratch, mut model) = running_with_the_tray_left_off("remember-picked");
+        let mut reloads = Reloads::default();
+        scratch.write("settings.json", "{");
+        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
+        // The pick cannot be kept, so the enabled file still says off.
+        let unkept = EnabledStore::new(scratch.folder.join("enabled.txt").join("enabled.txt"));
+        let enable = Event::from(TrayEvent::Picked(tray::ENABLE));
+        let step = handle(&mut model, &mut scratch.log, &unkept, enable);
+        assert_eq!(step, Step::Picked(Vec::new()));
+        // As the owner loop does on a pick.
+        reloads.picked = true;
+        scratch.write("settings.json", REMEMBER);
+        assert_eq!(scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY), []);
+        assert!(model.enabled(), "the pick stands");
+        assert!(reloads.had_settings && reloads.retry.is_none());
+        assert!(
+            !scratch
+                .log()
+                .contains("automations disabled, as the tray last left them")
+        );
     }
 
     #[test]
@@ -1677,7 +1745,7 @@ mod tests {
         let disable = Event::from(TrayEvent::Picked(tray::DISABLE));
         assert_eq!(
             handle(&mut model, &mut scratch.log, &enabled, disable),
-            Step::Carry(Vec::new())
+            Step::Picked(Vec::new())
         );
         assert!(!model.enabled());
         let written = scratch.log();
