@@ -84,6 +84,8 @@ $appFolder = Join-Path $roaming 'AppyTappy\apps\probe'
 $log = Join-Path $local 'AppyTappy\logs\runtime.log'
 $traces = Join-Path $local 'AppyTappy\traces'
 $script:details = @()
+# Each phase's first CPU sample, which trace on is compared against.
+$script:firstCpu = @{}
 $script:memory = @{}
 $script:cpu = @{}
 $script:process = $null
@@ -126,11 +128,12 @@ function Measure-Cpu([string]$Name, [int]$Seconds) {
 
 # Measures one phase: CPU over the sample as a share of one core, and the
 # private working set at its end. A phase with a memory limit of 0 has no
-# targets, so it only reports. A shared CI machine can charge the runtime a
-# stray tick, which is most of an idle target, so a CPU sample over its target
-# is taken again, up to $CpuSamples in all, and the lowest counts. A runtime
-# that is really over its target is over it in every sample, and the details
-# list every sample taken.
+# targets, so it only reports. One clock tick is about a quarter of the idle
+# target, so a shared CI machine charging a stray tick or two can fail a
+# runtime that is under it. A CPU sample over its target is taken again, up to
+# $CpuSamples in all, and the lowest counts. A runtime over its target the
+# whole time fails every sample, though one that is over it only now and then
+# can pass, and the details list every sample taken.
 function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double]$CpuLimit) {
     Start-Sleep -Seconds $Settle
     $samples = @(Measure-Cpu $Name $Seconds)
@@ -143,6 +146,7 @@ function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double
     $memory = Get-PrivateWorkingSet $script:process.Id
     $script:memory[$Name] = $memory
     $script:cpu[$Name] = $cpu
+    $script:firstCpu[$Name] = $samples[0]
     if ($MemoryLimit -gt 0) {
         Add-Row "$Name memory" (Format-Bytes $memory) (Format-Bytes $MemoryLimit) ($memory -le $MemoryLimit)
         Add-Row "$Name CPU" ('{0:N3} %' -f $cpu) ('{0:N3} %' -f $CpuLimit) ($cpu -le $CpuLimit)
@@ -205,7 +209,7 @@ function Measure-Trace {
     Add-Measure 'Trace files' "$($files.Count), $(Format-Bytes $bytes)"
     Add-Measure 'Trace rows' ('{0:N0} over {1:N1} s, {2:N0} a second' -f $recorded, $seconds, ($recorded / [Math]::Max($seconds, 1)))
     Add-Measure 'Trace records dropped' ('{0:N0}' -f $dropped)
-    Add-Measure 'Trace on adds' ('{0} memory, {1:N3} % CPU' -f (Format-Bytes ($script:memory['Active, trace on'] - $script:memory['Active'])), ($script:cpu['Active, trace on'] - $script:cpu['Active']))
+    Add-Measure 'Trace on adds' ('{0} memory, {1:N3} % CPU' -f (Format-Bytes ($script:memory['Active, trace on'] - $script:memory['Active'])), ($script:firstCpu['Active, trace on'] - $script:firstCpu['Active']))
 }
 
 try {

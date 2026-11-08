@@ -1,8 +1,9 @@
 # Weekly version updates, grouped into one pull request per ecosystem and
 # directory, each held back a week after a release so a bad one is usually
 # caught upstream first. Security updates are separate and come without the
-# wait. Dependabot has no mise ecosystem, so the tools in .config/mise and
-# their lockfile are updated by hand.
+# wait. Dependabot has no mise ecosystem, so the tools in .config/mise, the
+# Rust toolchain in rust-toolchain.toml and mise.lock are updated by hand:
+# a toolchain bump also needs mise.lock relocked, which Dependabot can't do.
 version: 2
 updates:
   # Every action is pinned to a commit; Dependabot moves the pin and its
@@ -26,14 +27,6 @@ updates:
     groups:
       rust:
         patterns: ['*']
-
-  # rust-toolchain.toml pins the compiler.
-  - package-ecosystem: rust-toolchain
-    directory: /
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
 
   # The Markdown tooling at the root and the setup UI each have a Bun lockfile.
   - package-ecosystem: bun
