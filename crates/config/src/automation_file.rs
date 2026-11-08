@@ -8,11 +8,10 @@
 //! read it and a text diff shows a change.
 //!
 //! [`AutomationsFile::parse`] checks the file as a whole, and
-//! [`AutomationsFile::problem`] everything one automation can get wrong on
-//! its own, so one broken automation leaves the others usable. Whether the
-//! value it names still exists, and reads the kind of value its condition
-//! compares, depends on the applications' files, which
-//! [`AutomationDef::check_against`] checks.
+//! [`AutomationDef::compile`] one automation against the saved applications,
+//! so one broken automation leaves the others usable. Both the setup app's
+//! save and the runtime call `compile`, so an automation that saves is one
+//! the runtime can run, as long as its application's files do not change.
 
 use std::error::Error;
 use std::fmt;
@@ -25,10 +24,11 @@ use crate::action::{
     VolumeTarget,
 };
 use crate::anti_cheat::{AntiCheatClass, allows_input};
-use crate::app_file::{AppFile, RegionDef, SizeDef, ValueKind, id_from_name};
+use crate::app_file::{AppFile, RegionDef, SizeDef, ValueDef, ValueKind, id_from_name};
 use crate::click::{Area, Click, ClickAt, ClickButton, ClickPicture, Corner, InvalidClick, Spot};
 use crate::rule::{Comparison, Condition, Restore, Rule, RuleError};
 use crate::signal::{NO_STATE, Number, SignalName, StateName, Value};
+use crate::store::StoredApp;
 
 /// The format version this build writes and reads.
 pub const FORMAT: u32 = 1;
@@ -61,6 +61,23 @@ impl Default for AutomationsFile {
             automations: Vec::new(),
         }
     }
+}
+
+/// An automation that can run, from [`AutomationDef::compile`]: its rule and
+/// the value it watches.
+#[derive(Debug)]
+pub struct Compiled<'apps> {
+    /// The rule to run, reading the value as [`Compiled::signal`].
+    pub rule: Rule,
+    /// The signal the rule reads: the value's ID, which is unique within its
+    /// application.
+    pub signal: SignalName,
+    /// The ID of the value's application, which is its folder's name.
+    pub app_id: &'apps str,
+    /// The value's application.
+    pub app: &'apps AppFile,
+    /// The value the rule reads.
+    pub value: &'apps ValueDef,
 }
 
 /// One automation: a condition on a value, the actions to run in order when
@@ -440,22 +457,128 @@ impl ActionDef {
 }
 
 impl AutomationDef {
-    /// The rule the runtime runs for this automation, reading the watched
-    /// value as the signal `signal`.
+    /// Checks the automation against the saved applications `apps` and
+    /// makes the rule the runtime runs for it. This is the one answer to
+    /// whether an automation can run: the setup app's save and the runtime
+    /// both ask it, so an application whose files change stops running an
+    /// automation that does not fit them.
     ///
-    /// The caller names the signal because a value's ID is unique only
-    /// within its application: two applications can each have a `progress`,
-    /// so whoever feeds the runtime's readings picks a name that tells them
-    /// apart.
+    /// The automation needs a name, a valid rule, a value that is still
+    /// saved, and a target of the kind that value reads. It may press keys
+    /// or click only when its application's anti-cheat class is none, as the
+    /// policy in [`allows_input`] says, and a click also needs the
+    /// application it clicks in saved and readable with the class none. Its own ID is not checked: the runtime never
+    /// reads it, and the setup app keeps it as its own key.
     ///
-    /// The rule runs its actions when the condition becomes true, and may run
-    /// again once the condition stopped being true. With `undo`, it undoes
-    /// what it changed at that point.
+    /// The rule reads the value as the signal named by the value's ID, which
+    /// is unique within its application.
     ///
     /// # Errors
     ///
-    /// Returns the problem as a sentence the setup app can show.
-    pub fn to_rule(&self, signal: SignalName) -> Result<Rule, String> {
+    /// Returns the first problem as a sentence the setup app can show.
+    pub fn compile<'apps>(&self, apps: &'apps [StoredApp]) -> Result<Compiled<'apps>, String> {
+        if self.name.trim().is_empty() {
+            return Err("it has no name".to_owned());
+        }
+        let signal = SignalName::new(&self.when.value)
+            .map_err(|_invalid| format!("the ID of the value it watches {ID_RULES}"))?;
+        let rule = self.to_rule(signal.clone())?;
+        let Some(stored) = apps.iter().find(|app| app.id == self.when.app) else {
+            return Err("its application is no longer saved".to_owned());
+        };
+        let app = stored.file.as_ref().map_err(|_error| {
+            format!(
+                "its application's app.json, in the {} folder, cannot be read",
+                stored.id
+            )
+        })?;
+        let Some(value) = app.values.iter().find(|value| value.id == self.when.value) else {
+            return Err(format!("{} no longer has the value it watches", app.name));
+        };
+        // Read from the rule's actions, so a new kind of action that sends
+        // input is covered as soon as `Action::injects_input` names it.
+        if rule.actions().iter().any(Action::injects_input)
+            && !allows_input(AntiCheatClass::from(app.anti_cheat))
+        {
+            let what = if rule
+                .actions()
+                .iter()
+                .any(|action| matches!(action, Action::PressKeys(_)))
+            {
+                "presses keys"
+            } else {
+                "clicks"
+            };
+            return Err(format!(
+                "it {what}, which anti-cheat can treat as cheating, so it can run only once \
+                 {}'s anti-cheat is set to none",
+                app.name
+            ));
+        }
+        // A click also needs the application it clicks in saved with the
+        // class none, since its anti-cheat sees the click too.
+        for action in rule.actions() {
+            let Action::Click(click) = action else {
+                continue;
+            };
+            let Some(target) = apps.iter().find(|app| app.id == click.app) else {
+                return Err("the application it clicks in is no longer saved".to_owned());
+            };
+            let target = target.file.as_ref().map_err(|_error| {
+                format!(
+                    "the app.json of the application it clicks in, in the {} folder, cannot be \
+                     read",
+                    target.id
+                )
+            })?;
+            if !allows_input(AntiCheatClass::from(target.anti_cheat)) {
+                return Err(format!(
+                    "it clicks in {}, which anti-cheat can treat as cheating, so it can run \
+                     only once {}'s anti-cheat is set to none",
+                    target.name, target.name
+                ));
+            }
+        }
+        let check = &value.screen.check;
+        match (check.reads(), &self.when.target) {
+            (ValueKind::Number, TargetDef::Number(_)) | (ValueKind::Flag, TargetDef::Flag(_)) => {},
+            (ValueKind::State, TargetDef::State(name)) if check.reads_state(name) => {},
+            (ValueKind::State, TargetDef::State(name)) => {
+                return Err(format!("{} has no state named {name:?}", value.name));
+            },
+            (ValueKind::Number, TargetDef::Flag(_) | TargetDef::State(_)) => {
+                return Err(format!(
+                    "{} reads a number, so compare it with a number",
+                    value.name
+                ));
+            },
+            (ValueKind::Flag, TargetDef::Number(_) | TargetDef::State(_)) => {
+                return Err(format!(
+                    "{} reads yes or no, so compare it with yes or no",
+                    value.name
+                ));
+            },
+            (ValueKind::State, TargetDef::Number(_) | TargetDef::Flag(_)) => {
+                return Err(format!(
+                    "{} reads a state, so compare it with one of its states",
+                    value.name
+                ));
+            },
+        }
+        Ok(Compiled {
+            rule,
+            signal,
+            app_id: &stored.id,
+            app,
+            value,
+        })
+    }
+
+    /// The rule for this automation, reading the watched value as the signal
+    /// `signal`. It runs its actions when the condition becomes true, and may
+    /// run again once the condition stopped being true. With `undo`, it
+    /// undoes what it changed at that point.
+    fn to_rule(&self, signal: SignalName) -> Result<Rule, String> {
         if self.cooldown_ms > MAX_COOLDOWN_MS {
             return Err("the wait before it can run again is longer than a day".to_owned());
         }
@@ -488,104 +611,6 @@ impl AutomationDef {
         })
     }
 
-    /// Checks everything the automation can get wrong on its own: the ID of
-    /// the value it watches, and that it makes a valid rule.
-    ///
-    /// # Errors
-    ///
-    /// Returns the problem as a sentence the setup app can show.
-    pub fn validate(&self) -> Result<(), String> {
-        let signal = SignalName::new(&self.when.value)
-            .map_err(|_invalid| format!("the ID of the value it watches {ID_RULES}"))?;
-        self.to_rule(signal).map(drop)
-    }
-
-    /// Checks the automation against the saved applications: its value must
-    /// exist, its target must be the kind of value the value's check reads,
-    /// and it may press keys or click only when its application's anti-cheat
-    /// class is none, as the policy in [`allows_input`] says. A click also
-    /// needs the application it clicks in to be saved with the class none. Both the setup app's
-    /// save and the runtime, each time it reads the saved files, check this,
-    /// so an application whose class changes later stops running such
-    /// automations.
-    ///
-    /// # Errors
-    ///
-    /// Returns the problem as a sentence the setup app can show.
-    pub fn check_against<'file>(
-        &self,
-        apps: impl IntoIterator<Item = (&'file str, &'file AppFile)>,
-    ) -> Result<(), String> {
-        let apps: Vec<(&str, &AppFile)> = apps.into_iter().collect();
-        let Some(&(_, app)) = apps.iter().find(|(id, _)| *id == self.when.app) else {
-            return Err("its application is no longer saved".to_owned());
-        };
-        let Some(value) = app.values.iter().find(|value| value.id == self.when.value) else {
-            return Err(format!("{} no longer has the value it watches", app.name));
-        };
-        // Read from the action itself, so a new kind of action that sends
-        // input is covered as soon as `Action::injects_input` names it.
-        let actions: Vec<Action> = self
-            .actions
-            .iter()
-            .filter_map(|action| action.to_action().ok())
-            .collect();
-        if actions.iter().any(Action::injects_input)
-            && !allows_input(AntiCheatClass::from(app.anti_cheat))
-        {
-            let what = if actions
-                .iter()
-                .any(|action| matches!(action, Action::PressKeys(_)))
-            {
-                "presses keys"
-            } else {
-                "clicks"
-            };
-            return Err(format!(
-                "it {what}, which anti-cheat can treat as cheating, so it can run only once \
-                 {}'s anti-cheat is set to none",
-                app.name
-            ));
-        }
-        for action in &actions {
-            let Action::Click(click) = action else {
-                continue;
-            };
-            let Some((_, target)) = apps.iter().find(|(id, _)| *id == click.app) else {
-                return Err("the application it clicks in is no longer saved".to_owned());
-            };
-            if !allows_input(AntiCheatClass::from(target.anti_cheat)) {
-                return Err(format!(
-                    "it clicks in {}, which anti-cheat can treat as cheating, so it can run \
-                     only once {}'s anti-cheat is set to none",
-                    target.name, target.name
-                ));
-            }
-        }
-        let check = &value.screen.check;
-        match (check.reads(), &self.when.target) {
-            (ValueKind::Number, TargetDef::Number(_)) | (ValueKind::Flag, TargetDef::Flag(_)) => {
-                Ok(())
-            },
-            (ValueKind::State, TargetDef::State(name)) if check.reads_state(name) => Ok(()),
-            (ValueKind::State, TargetDef::State(name)) => {
-                Err(format!("{} has no state named {name:?}", value.name))
-            },
-            (ValueKind::Number, TargetDef::Flag(_) | TargetDef::State(_)) => Err(format!(
-                "{} reads a number, so compare it with a number",
-                value.name
-            )),
-            (ValueKind::Flag, TargetDef::Number(_) | TargetDef::State(_)) => Err(format!(
-                "{} reads yes or no, so compare it with yes or no",
-                value.name
-            )),
-            (ValueKind::State, TargetDef::Number(_) | TargetDef::Flag(_)) => Err(format!(
-                "{} reads a state, so compare it with one of its states",
-                value.name
-            )),
-        }
-    }
-
     /// Whether the automation watches the value `value` of the application
     /// `app`.
     #[must_use]
@@ -596,7 +621,7 @@ impl AutomationDef {
 
 impl AutomationsFile {
     /// Reads a file's JSON and checks its format version. An automation that
-    /// breaks a rule is kept, and [`AutomationsFile::problem`] says why.
+    /// breaks a rule is kept, and [`AutomationDef::compile`] says why.
     ///
     /// # Errors
     ///
@@ -645,29 +670,6 @@ impl AutomationsFile {
         } else {
             Err(AutomationsError::Format(self.format))
         }
-    }
-
-    /// What breaks a rule JSON alone cannot check in `automation`, one of
-    /// this file's: a valid ID no other automation has, a name, and a valid
-    /// rule. Nothing runs an automation that has a problem, but the file
-    /// keeps it, so the setup app can show it and delete it.
-    #[must_use]
-    pub fn problem(&self, automation: &AutomationDef) -> Option<String> {
-        if SignalName::new(&automation.id).is_err() {
-            return Some(format!("its ID {ID_RULES}"));
-        }
-        let same = self
-            .automations
-            .iter()
-            .filter(|other| other.id == automation.id)
-            .count();
-        if same > 1 {
-            return Some("another automation has the same ID".to_owned());
-        }
-        if automation.name.trim().is_empty() {
-            return Some("it has no name".to_owned());
-        }
-        automation.validate().err()
     }
 
     /// The automations that watch the value `value` of the application
@@ -867,8 +869,20 @@ mod tests {
         }
     }
 
+    fn stored(file: Result<AppFile, String>) -> Vec<StoredApp> {
+        vec![StoredApp {
+            id: "example".to_owned(),
+            file,
+        }]
+    }
+
+    /// Whether `automation` can run with the example application.
+    fn check(automation: &AutomationDef) -> Result<(), String> {
+        automation.compile(&stored(Ok(app()))).map(drop)
+    }
+
     fn problem(automation: AutomationDef) -> String {
-        automation.validate().expect_err("broken")
+        check(&automation).expect_err("broken")
     }
 
     #[test]
@@ -1028,9 +1042,10 @@ mod tests {
         bad_state.when.target = TargetDef::State(" Paused".to_owned());
         assert!(problem(bad_state).contains("starts or ends with a space"));
         let mut no_state = pause_music();
+        no_state.when.value = "status".to_owned();
         no_state.when.is = ComparisonDef::NotEquals;
         no_state.when.target = TargetDef::State("none".to_owned());
-        assert_eq!(no_state.validate(), Ok(()));
+        assert_eq!(check(&no_state), Ok(()));
 
         let mut loud = pause_music();
         loud.actions = vec![ActionDef::Volume {
@@ -1149,7 +1164,7 @@ mod tests {
         let blocked = |class: AntiCheatDef| {
             let mut app = app();
             app.anti_cheat = class;
-            press.check_against([("example", &app)])
+            press.compile(&stored(Ok(app))).map(drop)
         };
         assert_eq!(blocked(AntiCheatDef::None), Ok(()));
         for class in [
@@ -1167,9 +1182,8 @@ mod tests {
                 "{class:?}"
             );
         }
-        let app = app();
         assert_eq!(
-            pause_music().check_against([("example", &app)]),
+            check(&pause_music()),
             Ok(()),
             "other actions run whatever the class"
         );
@@ -1308,17 +1322,21 @@ mod tests {
     fn a_click_needs_both_applications_without_anti_cheat() {
         let mut click = pause_music();
         click.actions = vec![click_on("streaming_app")];
+        click.undo = false;
         let check = |click: &AutomationDef, watched: AntiCheatDef, target: Option<AntiCheatDef>| {
             let mut app = app();
             app.anti_cheat = watched;
             let mut other = app.clone();
             other.name = "Streaming App".to_owned();
+            let mut apps = stored(Ok(app));
             if let Some(target) = target {
                 other.anti_cheat = target;
-                click.check_against([("example", &app), ("streaming_app", &other)])
-            } else {
-                click.check_against([("example", &app)])
+                apps.push(StoredApp {
+                    id: "streaming_app".to_owned(),
+                    file: Ok(other),
+                });
             }
+            click.compile(&apps).map(drop)
         };
         assert_eq!(
             check(&click, AntiCheatDef::None, Some(AntiCheatDef::None)),
@@ -1351,6 +1369,18 @@ mod tests {
             check(&click, AntiCheatDef::None, None),
             Err("the application it clicks in is no longer saved".to_owned())
         );
+        let mut watched = app();
+        watched.anti_cheat = AntiCheatDef::None;
+        let mut unreadable = stored(Ok(watched));
+        unreadable.push(StoredApp {
+            id: "streaming_app".to_owned(),
+            file: Err("broken".to_owned()),
+        });
+        assert!(
+            click
+                .compile(&unreadable)
+                .is_err_and(|problem| problem.contains("streaming_app folder, cannot be read"))
+        );
         click.actions.push(ActionDef::Keys {
             keys: "F9".to_owned(),
         });
@@ -1374,29 +1404,15 @@ mod tests {
                 .contains("reads format 1")
         );
 
-        let twice = file(vec![pause_music(), pause_music()]);
-        assert_eq!(
-            twice
-                .automations
-                .iter()
-                .map(|automation| twice.problem(automation))
-                .collect::<Vec<_>>(),
-            vec![Some("another automation has the same ID".to_owned()); 2]
-        );
+        // The runtime never reads an automation's ID, so a hand edit that
+        // breaks it or repeats it stops nothing.
+        let mut bad_id = pause_music();
+        bad_id.id = "Pause music".to_owned();
+        assert_eq!(check(&bad_id), Ok(()));
 
         let mut unnamed = pause_music();
         unnamed.name = " ".to_owned();
-        assert_eq!(
-            file(Vec::new()).problem(&unnamed),
-            Some("it has no name".to_owned())
-        );
-
-        let mut bad_id = pause_music();
-        bad_id.id = "Pause music".to_owned();
-        assert_eq!(
-            file(Vec::new()).problem(&bad_id),
-            Some(format!("its ID {ID_RULES}"))
-        );
+        assert_eq!(problem(unnamed), "it has no name");
 
         let mut bad_value = pause_music();
         bad_value.when.value = "Progress".to_owned();
@@ -1407,7 +1423,7 @@ mod tests {
 
         let mut slow = pause_music();
         slow.cooldown_ms = MAX_COOLDOWN_MS;
-        assert_eq!(slow.validate(), Ok(()));
+        assert_eq!(check(&slow), Ok(()));
         slow.cooldown_ms = MAX_COOLDOWN_MS + 1;
         assert_eq!(
             problem(slow),
@@ -1441,66 +1457,69 @@ mod tests {
         let parsed = AutomationsFile::parse(&file(vec![broken, pause_music()]).to_json())
             .expect("the file as a whole reads");
         assert_eq!(
-            parsed
-                .automations
-                .iter()
-                .map(|automation| parsed.problem(automation))
-                .collect::<Vec<_>>(),
-            [Some("add an action".to_owned()), None]
+            parsed.automations.iter().map(check).collect::<Vec<_>>(),
+            [Err("add an action".to_owned()), Ok(())]
         );
     }
 
     #[test]
     fn the_value_must_exist_and_read_the_kind_its_target_is() {
-        let app = app();
-        let apps = || [("example", &app)];
-        assert_eq!(pause_music().check_against(apps()), Ok(()));
+        let compiled = stored(Ok(app()));
+        let compiled = pause_music().compile(&compiled).expect("runs");
+        assert_eq!(compiled.app_id, "example");
+        assert_eq!(compiled.value.name, "Progress");
+        assert!(
+            compiled.rule.condition().holds(&BTreeMap::from([(
+                SignalName::new("progress").expect("valid"),
+                Value::Number(Number::new(95.0).expect("finite")),
+            )])),
+            "the rule reads the value by its ID"
+        );
 
         let mut bar = pause_music();
         bar.when.value = "health".to_owned();
-        assert_eq!(bar.check_against(apps()), Ok(()));
+        assert_eq!(check(&bar), Ok(()));
+        bar.when.is = ComparisonDef::Equals;
         bar.when.target = TargetDef::Flag(false);
         assert_eq!(
-            bar.check_against(apps()),
+            check(&bar),
             Err("Health reads a number, so compare it with a number".to_owned())
         );
 
         let mut shown = pause_music();
         shown.when.value = "icon_visible".to_owned();
+        shown.when.is = ComparisonDef::Equals;
         shown.when.target = TargetDef::Flag(true);
-        assert_eq!(shown.check_against(apps()), Ok(()));
+        assert_eq!(check(&shown), Ok(()));
         for target in [
             TargetDef::Number(1.0),
             TargetDef::State("Paused".to_owned()),
         ] {
             shown.when.target = target;
             assert_eq!(
-                shown.check_against(apps()),
+                check(&shown),
                 Err("Icon visible reads yes or no, so compare it with yes or no".to_owned())
             );
         }
         bar.when.target = TargetDef::State("Paused".to_owned());
-        assert!(
-            bar.check_against(apps())
-                .is_err_and(|error| error.ends_with("compare it with a number"))
-        );
+        assert!(check(&bar).is_err_and(|error| error.ends_with("compare it with a number")));
 
         let mut status = pause_music();
         status.when.value = "status".to_owned();
         status.when.is = ComparisonDef::Equals;
         for known in ["Paused", "Live", "none"] {
             status.when.target = TargetDef::State(known.to_owned());
-            assert_eq!(status.check_against(apps()), Ok(()), "{known}");
+            assert_eq!(check(&status), Ok(()), "{known}");
         }
         status.when.target = TargetDef::State("Dead".to_owned());
         assert_eq!(
-            status.check_against(apps()),
+            check(&status),
             Err("Status has no state named \"Dead\"".to_owned())
         );
         for target in [TargetDef::Number(1.0), TargetDef::Flag(true)] {
             status.when.target = target;
             assert_eq!(
-                status.check_against(apps()),
+                check(&status),
                 Err("Status reads a state, so compare it with one of its states".to_owned())
             );
         }
@@ -1508,14 +1527,20 @@ mod tests {
         let mut gone = pause_music();
         gone.when.value = "lap".to_owned();
         assert_eq!(
-            gone.check_against(apps()),
+            check(&gone),
             Err("Example App no longer has the value it watches".to_owned())
         );
         let mut elsewhere = pause_music();
         elsewhere.when.app = "other".to_owned();
         assert_eq!(
-            elsewhere.check_against(apps()),
+            check(&elsewhere),
             Err("its application is no longer saved".to_owned())
+        );
+        assert_eq!(
+            pause_music()
+                .compile(&stored(Err("not JSON".to_owned())))
+                .map(drop),
+            Err("its application's app.json, in the example folder, cannot be read".to_owned())
         );
     }
 

@@ -188,7 +188,8 @@ impl AutomationStore {
 
     /// The automations. A file that does not exist yet holds none. An
     /// automation that breaks a rule is kept, and
-    /// [`AutomationsFile::problem`] says why.
+    /// [`AutomationDef::compile`](crate::automation_file::AutomationDef::compile)
+    /// says why.
     ///
     /// # Errors
     ///
@@ -741,10 +742,7 @@ mod tests {
             .save(&broken)
             .expect("an automation with a problem is kept");
         let loaded = store.load().expect("one automation's problem is its own");
-        assert_eq!(
-            loaded.problem(&loaded.automations[0]),
-            Some("add an action".to_owned())
-        );
+        assert_eq!(loaded.automations[0].actions, []);
         let mut other = file;
         other.format = 2;
         let refused = store.save(&other).expect_err("another format");
