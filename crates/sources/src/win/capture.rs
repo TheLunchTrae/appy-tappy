@@ -673,9 +673,10 @@ fn configure(session: &GraphicsCaptureSession) {
         clippy::let_underscore_must_use,
         reason = "each setting is optional and missing on older Windows versions"
     )]
-    // Experiment: the border stays, to learn whether asking to drop it per
-    // session leaves handles behind.
-    let _ = session.SetIsCursorCaptureEnabled(false);
+    let _ = (
+        session.SetIsBorderRequired(false),
+        session.SetIsCursorCaptureEnabled(false),
+    );
 }
 
 /// Asks Windows for leave to drop the yellow capture border. Windows
