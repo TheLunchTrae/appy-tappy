@@ -24,12 +24,15 @@ function StartWithWindows() {
   const [on, setOn] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Asking Windows again after a failed read is what a press does while the state is unknown.
+  const [asks, setAsks] = useState(0);
   useEffect(() => {
     let current = true;
     startsWithWindows().then(
       (starts) => {
         if (current) {
           setOn(starts);
+          setError(null);
         }
       },
       (failure: unknown) => {
@@ -41,9 +44,15 @@ function StartWithWindows() {
     return () => {
       current = false;
     };
-  }, []);
+  }, [asks]);
   const toggle = async (): Promise<void> => {
-    if (on === null || busy) {
+    if (busy) {
+      return;
+    }
+    if (on === null) {
+      if (error !== null) {
+        setAsks((count) => count + 1);
+      }
       return;
     }
     setBusy(true);
@@ -75,7 +84,7 @@ function StartWithWindows() {
         aria-labelledby="start-with-windows"
         aria-checked={on === true}
         aria-busy={busy}
-        aria-disabled={on === null || busy}
+        aria-disabled={busy || (on === null && error === null)}
         onClick={() => {
           background(toggle());
         }}
@@ -100,9 +109,9 @@ function ScreenshotShortcut({ onError }: { readonly onError: (error: string | nu
     const next = accelerator(event);
     if (next !== null) {
       setChanging(false);
-      change({ ...settings, screenshotShortcut: next }).then(
-        () => {
-          onError(null);
+      change((current) => ({ ...current, screenshotShortcut: next })).then(
+        (problem) => {
+          onError(problem);
         },
         (failure: unknown) => {
           onError(errorText(failure));
@@ -115,12 +124,15 @@ function ScreenshotShortcut({ onError }: { readonly onError: (error: string | nu
       <div className="what">
         <span>Screenshot shortcut</span>
         <span className="note">Takes a screenshot of the picked window while you make a value or a reference.</span>
+        <span className="note" role="status">
+          {changing ? 'Press the new shortcut, or Esc to keep this one.' : null}
+        </span>
       </div>
       <span className="chip">{shortcutLabel(settings.screenshotShortcut)}</span>
       <button
         type="button"
         className="btn small"
-        aria-label={changing ? undefined : 'Change screenshot shortcut'}
+        aria-label="Change screenshot shortcut"
         aria-pressed={changing}
         onClick={() => {
           setChanging((current) => !current);
@@ -130,7 +142,7 @@ function ScreenshotShortcut({ onError }: { readonly onError: (error: string | nu
         }}
         onKeyDown={onKey}
       >
-        {changing ? 'Press the new shortcut, or Esc' : 'Change'}
+        Change
       </button>
     </div>
   );
@@ -168,14 +180,16 @@ function Wait({ which, label, note }: WaitProps) {
       setError(null);
       return;
     }
-    const next = withWait(settings.readInterval, which, ms);
-    if ('problem' in next) {
-      refuse(next.problem);
-      return;
-    }
-    change({ ...settings, readInterval: next.interval }).then(
-      () => {
-        setError(null);
+    change((current) => {
+      const next = withWait(current.readInterval, which, ms);
+      return 'problem' in next ? next : { ...current, readInterval: next.interval };
+    }).then(
+      (problem) => {
+        if (problem === null) {
+          setError(null);
+        } else {
+          refuse(problem);
+        }
       },
       (failure: unknown) => {
         refuse(errorText(failure));

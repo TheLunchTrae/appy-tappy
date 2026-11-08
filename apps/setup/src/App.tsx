@@ -25,8 +25,10 @@ import {
   type Settings,
   SettingsContext,
   type SettingsHandle,
+  type SettingsUpdate,
   loadSettings,
   saveSettings,
+  sameSettings,
 } from './lib/settings.ts';
 import { type Held, onLeave } from './lib/unsaved.ts';
 
@@ -81,24 +83,49 @@ export function App() {
   const [automationError, setAutomationError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsProblem, setSettingsProblem] = useState<string | null>(null);
+  // The saved settings as the last save left them, and the changes still to run, one after another, after the load.
+  const savedSettings = useRef<Settings>(DEFAULT_SETTINGS);
+  const [settingsLoad] = useState(() => Promise.withResolvers<undefined>());
+  const settingsQueue = useRef<Promise<unknown>>(settingsLoad.promise);
   useEffect(() => {
-    loadSettings().then(
-      (view) => {
-        setSettings(view.settings);
-        setSettingsProblem(view.problem);
-      },
-      (error: unknown) => {
-        setSettingsProblem(errorText(error));
-      },
-    );
-  }, []);
+    loadSettings()
+      .then(
+        (view) => {
+          savedSettings.current = view.settings;
+          setSettings(view.settings);
+          setSettingsProblem(view.problem);
+        },
+        (error: unknown) => {
+          setSettingsProblem(errorText(error));
+        },
+      )
+      .finally(() => {
+        settingsLoad.resolve(undefined);
+      });
+  }, [settingsLoad]);
   const settingsHandle = useMemo<SettingsHandle>(
     () => ({
       settings,
-      change: async (next: Settings): Promise<void> => {
-        await saveSettings(next);
-        setSettings(next);
-        setSettingsProblem(null);
+      change: async (update: SettingsUpdate): Promise<string | null> => {
+        const run = async (): Promise<string | null> => {
+          const next = update(savedSettings.current);
+          if ('problem' in next) {
+            return next.problem;
+          }
+          // A second ask for the same change, such as Enter and then leaving the field, saves nothing.
+          if (!sameSettings(next, savedSettings.current)) {
+            await saveSettings(next);
+            savedSettings.current = next;
+            setSettings(next);
+          }
+          setSettingsProblem(null);
+          return null;
+        };
+        const result = settingsQueue.current.then(run);
+        settingsQueue.current = result.catch(() => {
+          // The caller hears of the failure; the next change runs either way.
+        });
+        return result;
       },
     }),
     [settings],

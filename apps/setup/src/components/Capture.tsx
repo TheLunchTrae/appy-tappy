@@ -642,14 +642,16 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     const next = accelerator(event);
     if (next !== null) {
       setChangingShortcut(false);
-      appSettings.change({ ...appSettings.settings, screenshotShortcut: next }).then(
-        () => {
-          setShortcutSaveError(null);
-        },
-        (error: unknown) => {
-          setShortcutSaveError(errorText(error));
-        },
-      );
+      appSettings
+        .change((current) => ({ ...current, screenshotShortcut: next }))
+        .then(
+          (problem) => {
+            setShortcutSaveError(problem);
+          },
+          (error: unknown) => {
+            setShortcutSaveError(errorText(error));
+          },
+        );
     }
   };
 
@@ -961,7 +963,6 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               <button
                 type="button"
                 className="btn small"
-                aria-label={changingShortcut ? undefined : 'Change screenshot shortcut'}
                 aria-pressed={changingShortcut}
                 onClick={() => {
                   setChangingShortcut((current) => !current);
@@ -971,7 +972,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 }}
                 onKeyDown={shortcutKey}
               >
-                {changingShortcut ? 'Press the new shortcut, or Esc' : 'Change shortcut'}
+                Change shortcut
               </button>
               <button
                 type="button"
@@ -985,6 +986,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             </div>
           )}
         </div>
+        <p className="note" role="status">
+          {changingShortcut ? 'Press the new shortcut, or Esc to keep this one.' : null}
+        </p>
         {shortcutError === null ? null : <p className="warn">{shortcutError}</p>}
         {shortcutSaveError === null ? null : <p className="warn">{shortcutSaveError}</p>}
         {shotError === null ? null : <p className="warn">{shotError}</p>}

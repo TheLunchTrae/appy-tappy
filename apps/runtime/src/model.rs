@@ -74,6 +74,8 @@ struct Running {
     session: Session,
     /// The process the session follows.
     watched: Watched,
+    /// How often its reader reads.
+    interval: ReadInterval,
 }
 
 /// The owner thread's state.
@@ -237,19 +239,25 @@ impl Model {
         self.interval
     }
 
-    /// Sets how often readers read. Each running app's reader starts over
-    /// with the new interval, in the same session, so its automations keep
-    /// their state and nothing is undone. Its values are forgotten, as when
-    /// a reader can no longer see them, so no rule fires on a value read
-    /// before the restart until the new reader reads it again.
-    pub(crate) fn set_interval(&mut self, interval: ReadInterval) -> Vec<Order> {
-        if interval == self.interval {
-            return Vec::new();
-        }
+    /// Sets how often readers read. Readers that start from now on read at
+    /// `interval`; [`Model::restart_readers`] moves the running ones to it.
+    pub(crate) const fn set_interval(&mut self, interval: ReadInterval) {
         self.interval = interval;
+    }
+
+    /// Starts over each running app's reader that reads at another interval
+    /// than the model's, in the same session, so its automations keep their
+    /// state and nothing is undone. Its values are forgotten first, as when a
+    /// reader can no longer see them, because the new reader sends each
+    /// value as it first reads it. A reading the old reader sent just before
+    /// it stopped can still arrive after that, a few milliseconds old.
+    pub(crate) fn restart_readers(&mut self) -> Vec<Order> {
+        let interval = self.interval;
         self.running
             .values_mut()
+            .filter(|running| running.interval != interval)
             .flat_map(|running| {
+                running.interval = interval;
                 running.session.forget_values();
                 [
                     Order::StopReading(running.id, running.plan.name.clone()),
@@ -347,6 +355,7 @@ impl Model {
                 plan,
                 session,
                 watched,
+                interval: self.interval,
             },
         );
         orders
@@ -702,14 +711,16 @@ mod tests {
         model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
         model.apply(started("a", 7), now);
         model.sample(SessionId(0), signal(), number(95.0), now);
+        model.set_interval(ReadInterval::DEFAULT);
         assert_eq!(
-            model.set_interval(ReadInterval::DEFAULT),
+            model.restart_readers(),
             [],
             "the same interval changes nothing"
         );
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        let orders = model.set_interval(slower);
+        model.set_interval(slower);
+        let orders = model.restart_readers();
         assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"], "b is not running");
         let Some(Order::Read(job)) = orders.last() else {
             panic!("a read order");
@@ -720,6 +731,7 @@ mod tests {
             ["Pause A"],
             "the automation stays run"
         );
+        assert_eq!(model.restart_readers(), [], "a moves to it once");
         let Some(Order::Read(job)) = model.apply(started("b", 8), now).first().cloned() else {
             panic!("b is read");
         };
@@ -745,8 +757,37 @@ mod tests {
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
         model.set_interval(slower);
+        model.restart_readers();
         assert_eq!(model.next_due(), None, "nothing holds on unseen values");
         assert_eq!(model.recheck(now + Duration::from_secs(61)), []);
+    }
+
+    #[test]
+    fn a_reload_that_changes_the_plan_and_the_interval_restarts_a_reader_once() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
+        model.apply(started("a", 7), now);
+        model.apply(started("b", 8), now);
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        // As the owner does on a reload: the interval, then the plan, then
+        // the readers the plan left running.
+        model.set_interval(slower);
+        let mut orders = model.replan(plans(&[("a", &plan("A", 80.0)), ("b", &plan("B", 90.0))]));
+        orders.extend(model.restart_readers());
+        assert_eq!(
+            kinds(&orders),
+            ["stop 0 A", "read 2 A", "stop 1 B", "read 1 B"],
+            "a starts again for its plan, b for the interval"
+        );
+        assert!(
+            orders.iter().all(|order| match order {
+                Order::Read(job) => job.interval == slower,
+                _ => true,
+            }),
+            "both read at the new interval"
+        );
     }
 
     #[test]

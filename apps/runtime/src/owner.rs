@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use appytappy_config::paths::Locations;
-use appytappy_config::settings_file::ReadIntervalDef;
+use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile};
 use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, WindowWatch};
 use appytappy_sources::HostSystem;
@@ -119,10 +119,6 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let windows = WindowWatch::start(inputs.clone())?;
     let (sender, events) = mpsc::channel();
     let mut model = Model::default();
-    // No reader runs yet, so the settings change no reader here.
-    let mut retry = read_settings(&stores.settings, log, &mut model)
-        .err()
-        .and_then(|error| failed(log, &error, None, Instant::now(), DEFAULTS));
     // Without a desktop the runtime still works; it only has no icon.
     let mut shown = tray::menu(&model);
     let tray = Tray::start(sender.clone(), shown.clone())
@@ -137,14 +133,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             );
         })
         .ok();
-    let mut had = Had::Plan;
-    let first = load(&stores, log).unwrap_or_else(|error| {
-        had = Had::Nothing;
-        // A settings read that failed too asks for the same retry.
-        retry = failed(log, &error, None, Instant::now(), had.keeps());
-        plan::Plan::default()
-    });
-    let lifecycle = Lifecycle::new(first.watchlist(), Instant::now());
+    let mut reloads = Reloads::default();
+    // No app is attached yet, so the first read starts no reader.
+    let (watchlist, first) = read_saved(&stores, log, &mut model, &mut reloads, Stale::BOTH);
+    let lifecycle = Lifecycle::new(watchlist.unwrap_or_default(), Instant::now());
     let detect = Arc::clone(&system);
     let changes = sender.clone();
     let detector = spawn("lifecycle", move || {
@@ -191,44 +183,32 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         jobs,
         readers: BTreeMap::new(),
     };
-    let orders = model.replan(first.apps);
-    carry(orders, &mut crew, log);
+    carry(first, &mut crew, log);
     loop {
-        let due = wake(model.next_due(), retry);
+        let due = wake(model.next_due(), reloads.retry);
         let Some(event) = next(&events, due) else {
             break;
         };
-        let read_again = match handle(&mut model, log, event) {
+        let read = match handle(&mut model, log, event) {
             Step::Carry(orders) => {
                 carry(orders, &mut crew, log);
-                retry.is_some_and(|retry| retry.due(Instant::now()))
+                reloads.due(Instant::now())
             },
             Step::Reload => {
                 // A save starts the tries over.
-                retry = None;
-                true
+                reloads.retry = None;
+                Some(Stale::BOTH)
             },
             Step::Stop => break,
         };
-        if read_again {
-            let previous = retry;
-            let now = Instant::now();
-            if let Some((watchlist, orders)) =
-                reread(&stores, log, &mut model, (&mut retry, &mut had), now)
+        if let Some(read) = read {
+            let (watchlist, orders) = read_saved(&stores, log, &mut model, &mut reloads, read);
+            if let Some(watchlist) = watchlist
+                && inputs.send(Input::Watch(watchlist)).is_err()
             {
-                if inputs.send(Input::Watch(watchlist)).is_err() {
-                    break;
-                }
-                carry(orders, &mut crew, log);
+                break;
             }
-            // After the plan, so a new read interval restarts only the
-            // readers the new plan keeps.
-            match read_settings(&stores.settings, log, &mut model) {
-                Ok(orders) => carry(orders, &mut crew, log),
-                Err(error) => {
-                    retry = retry.or_else(|| failed(log, &error, previous, now, KEPT));
-                },
-            }
+            carry(orders, &mut crew, log);
         }
         // Most events, such as each value read, leave the menu as it was, and
         // the icon is redrawn only when it changes.
@@ -396,6 +376,59 @@ const RETRY_WAIT: Duration = Duration::from_secs(2);
 /// waits for the next save.
 const RETRIES: u32 = 5;
 
+/// Which saved files the owner reads: the settings, the applications and
+/// automations, or both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Stale {
+    /// The applications and automations.
+    files: bool,
+    /// The settings.
+    settings: bool,
+}
+
+impl Stale {
+    /// Every saved file.
+    const BOTH: Self = Self {
+        files: true,
+        settings: true,
+    };
+}
+
+/// What the owner knows about reading the saved files: when it tries again,
+/// which files that try reads, and what it has read so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Reloads {
+    /// When it reads again the files that did not read.
+    retry: Option<Retry>,
+    /// The files that did not read at the last try.
+    failing: Stale,
+    /// Whether the applications and automations ever read.
+    had: Had,
+    /// Whether the settings ever read.
+    had_settings: bool,
+}
+
+impl Default for Reloads {
+    /// Before the first read.
+    fn default() -> Self {
+        Self {
+            retry: None,
+            failing: Stale::default(),
+            had: Had::Nothing,
+            had_settings: false,
+        }
+    }
+}
+
+impl Reloads {
+    /// The files to read again at `now`, when a retry is due.
+    fn due(&self, now: Instant) -> Option<Stale> {
+        self.retry
+            .is_some_and(|retry| retry.due(now))
+            .then_some(self.failing)
+    }
+}
+
 /// When the owner reads the saved files again after a read failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Retry {
@@ -460,29 +493,62 @@ fn load(stores: &Stores, log: &mut Log) -> Result<plan::Plan, String> {
     Ok(plan)
 }
 
-/// Reads the saved files again at `now`, after a save or for `retry`. When
-/// they read, returns the watchlist and the orders that switch `model` to
-/// their plan. When they do not, `model` keeps running its plan, and
-/// `retry` says when to read them again, if at all. `had` says whether a
-/// read has worked yet.
-fn reread(
+/// Reads the saved files that `read` names, at start, after a save, or for
+/// a retry, and returns the watchlist, when the applications and
+/// automations read, and the orders that put what was read to use.
+///
+/// The settings come first, so the readers that a new plan starts read at
+/// the new interval; then the plan; then the readers the plan kept running
+/// start over at the new interval, so no reader starts twice. Files that do
+/// not read are kept as they were: the model runs the plan and settings it
+/// has, and `reloads` says when to read those files again, if at all.
+fn read_saved(
     stores: &Stores,
     log: &mut Log,
     model: &mut Model,
-    (retry, had): (&mut Option<Retry>, &mut Had),
-    now: Instant,
-) -> Option<(Watchlist, Vec<Order>)> {
-    match load(stores, log) {
-        Ok(plan) => {
-            *retry = None;
-            *had = Had::Plan;
-            Some((plan.watchlist(), model.replan(plan.apps)))
-        },
-        Err(error) => {
-            *retry = failed(log, &error, *retry, now, had.keeps());
-            None
-        },
+    reloads: &mut Reloads,
+    read: Stale,
+) -> (Option<Watchlist>, Vec<Order>) {
+    let now = Instant::now();
+    let previous = reloads.retry;
+    let mut retry = None;
+    let mut failing = Stale::default();
+    if read.settings {
+        match read_settings(&stores.settings) {
+            Ok(settings) => {
+                reloads.had_settings = true;
+                let interval = read_interval(settings.read_interval);
+                if interval != model.interval() {
+                    note(log, &interval_line(interval));
+                }
+                model.set_interval(interval);
+            },
+            Err(error) => {
+                failing.settings = true;
+                let keeps = if reloads.had_settings { KEPT } else { DEFAULTS };
+                retry = failed(log, &error, previous, now, keeps);
+            },
+        }
     }
+    let mut watchlist = None;
+    let mut orders = Vec::new();
+    if read.files {
+        match load(stores, log) {
+            Ok(plan) => {
+                reloads.had = Had::Plan;
+                watchlist = Some(plan.watchlist());
+                orders = model.replan(plan.apps);
+            },
+            Err(error) => {
+                failing.files = true;
+                retry = failed(log, &error, previous, now, reloads.had.keeps());
+            },
+        }
+    }
+    orders.extend(model.restart_readers());
+    reloads.retry = retry;
+    reloads.failing = failing;
+    (watchlist, orders)
 }
 
 /// Logs that the saved files cannot be read for `error`, and what the
@@ -513,25 +579,15 @@ fn failed(
     retry
 }
 
-/// Reads the settings and gives `model` the ones the runtime uses, returning
-/// the orders that carry them out.
+/// Reads the settings.
 ///
 /// # Errors
 ///
-/// Returns why the settings cannot be read; `model` keeps the ones it has.
-fn read_settings(
-    store: &SettingsStore,
-    log: &mut Log,
-    model: &mut Model,
-) -> Result<Vec<Order>, String> {
-    let settings = store
+/// Returns why the settings cannot be read, as a line for the log.
+fn read_settings(store: &SettingsStore) -> Result<SettingsFile, String> {
+    store
         .load()
-        .map_err(|error| format!("the settings cannot be read: {error}"))?;
-    let interval = read_interval(settings.read_interval);
-    if interval != model.interval() {
-        note(log, &interval_line(interval));
-    }
-    Ok(model.set_interval(interval))
+        .map_err(|error| format!("the settings cannot be read: {error}"))
 }
 
 /// The read interval `saved` asks for. A saved file is checked, so its
@@ -901,43 +957,84 @@ mod tests {
         );
     }
 
+    /// The saved files in a scratch folder, which it removes when dropped.
+    struct Scratch {
+        folder: std::path::PathBuf,
+        stores: Stores,
+        log: Log,
+    }
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let folder = env::temp_dir().join(format!("appytappy-{name}-{}", process::id()));
+            drop(fs::remove_dir_all(&folder));
+            fs::create_dir_all(&folder).expect("make the folder");
+            let stores = Stores {
+                apps: AppStore::new(folder.join("apps")),
+                automations: AutomationStore::new(folder.join("automations.json")),
+                settings: SettingsStore::new(folder.join("settings.json")),
+            };
+            let log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
+            Self {
+                folder,
+                stores,
+                log,
+            }
+        }
+
+        fn write(&self, file: &str, text: &str) {
+            fs::write(self.folder.join(file), text).expect("write");
+        }
+
+        fn log(&self) -> String {
+            fs::read_to_string(self.folder.join("logs").join("runtime.log")).expect("read the log")
+        }
+
+        fn reload(&mut self, model: &mut Model, reloads: &mut Reloads, read: Stale) -> Vec<Order> {
+            read_saved(&self.stores, &mut self.log, model, reloads, read).1
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            drop(fs::remove_dir_all(&self.folder));
+        }
+    }
+
+    const NO_AUTOMATIONS: &str = "{\"format\":1,\"automations\":[]}";
+
+    const SETTINGS_ONLY: Stale = Stale {
+        files: false,
+        settings: true,
+    };
+
     #[test]
     fn settings_set_the_read_interval_and_unreadable_ones_are_kept() {
-        let folder = env::temp_dir().join(format!("appytappy-settings-{}", process::id()));
-        fs::create_dir_all(&folder).expect("make the folder");
-        let store = SettingsStore::new(folder.join("settings.json"));
-        let mut log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
+        let mut scratch = Scratch::new("settings");
         let mut model = Model::default();
-        assert_eq!(read_settings(&store, &mut log, &mut model), Ok(Vec::new()));
+        let mut reloads = Reloads::default();
+        assert_eq!(scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY), []);
         assert_eq!(
             model.interval(),
             ReadInterval::DEFAULT,
             "no file is the defaults"
         );
-        fs::write(
-            folder.join("settings.json"),
+        scratch.write(
+            "settings.json",
             r#"{"format":1,"readInterval":{"fastestMs":40,"slowestMs":2000}}"#,
-        )
-        .expect("write");
-        assert_eq!(read_settings(&store, &mut log, &mut model), Ok(Vec::new()));
+        );
+        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
         let slower = ReadInterval::new(Duration::from_millis(40), Duration::from_secs(2));
         assert_eq!(Some(model.interval()), slower);
-        fs::write(folder.join("settings.json"), "not JSON").expect("break the file");
-        let error = read_settings(&store, &mut log, &mut model).expect_err("not JSON");
-        assert!(
-            error.starts_with("the settings cannot be read: the settings file is not valid: "),
-            "{error}"
-        );
+        scratch.write("settings.json", "not JSON");
+        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
         assert_eq!(Some(model.interval()), slower, "the settings are kept");
-        let now = Instant::now();
-        let retry = failed(&mut log, &error, None, now, KEPT);
         assert_eq!(
-            retry.map(|retry| retry.at),
-            now.checked_add(RETRY_WAIT),
-            "unreadable settings are read again soon"
+            reloads.due(Instant::now() + RETRY_WAIT),
+            Some(SETTINGS_ONLY),
+            "only the settings are read again, soon"
         );
-        let written =
-            fs::read_to_string(folder.join("logs").join("runtime.log")).expect("read the log");
+        let written = scratch.log();
         let lines: Vec<&str> = written.lines().collect();
         assert_eq!(lines.len(), 2, "{written:?}");
         assert!(
@@ -945,23 +1042,86 @@ mod tests {
             "{written:?}"
         );
         assert!(
+            lines[1].contains("the settings cannot be read: the settings file is not valid: "),
+            "{written:?}"
+        );
+        assert!(
             lines[1]
                 .ends_with(", so the runtime keeps its settings and reads them again in 2 seconds"),
             "{written:?}"
         );
-        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn settings_that_never_read_leave_the_defaults() {
+        let mut scratch = Scratch::new("first-settings");
+        scratch.write("settings.json", "not JSON");
+        scratch.write("automations.json", NO_AUTOMATIONS);
+        let mut model = Model::default();
+        let mut reloads = Reloads::default();
+        let (watchlist, orders) = read_saved(
+            &scratch.stores,
+            &mut scratch.log,
+            &mut model,
+            &mut reloads,
+            Stale::BOTH,
+        );
+        assert_eq!(orders, []);
+        assert!(watchlist.is_some(), "the files read");
+        assert_eq!(model.interval(), ReadInterval::DEFAULT);
+        assert_eq!(reloads.failing, SETTINGS_ONLY);
+        let written = scratch.log();
+        assert!(
+            written.contains(
+                ", so the runtime uses the default settings and reads them again in 2 seconds\n"
+            ),
+            "{written:?}"
+        );
+        // A retry reads the settings only, so the plan is not logged again.
+        scratch.write("settings.json", r#"{"format":1}"#);
+        let retry = reloads.due(Instant::now() + RETRY_WAIT).expect("a retry");
+        assert_eq!(scratch.reload(&mut model, &mut reloads, retry), []);
+        assert_eq!(reloads.retry, None);
+        assert_eq!(
+            scratch.log().matches("no saved automation can run").count(),
+            1,
+            "the files were read once"
+        );
+    }
+
+    #[test]
+    fn a_reload_that_changes_the_interval_restarts_only_the_readers_the_plan_keeps() {
+        let mut scratch = Scratch::new("interval");
+        scratch.write(
+            "settings.json",
+            r#"{"format":1,"readInterval":{"fastestMs":40,"slowestMs":2000}}"#,
+        );
+        scratch.write("automations.json", NO_AUTOMATIONS);
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            app_plan("Example App", &["Mute"]),
+        )]));
+        let orders = model.apply(
+            Change::Started {
+                app: "a".to_owned(),
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
+            Instant::now(),
+        );
+        assert!(matches!(orders.first(), Some(Order::Read(_))));
+        let mut reloads = Reloads::default();
+        assert_eq!(
+            scratch.reload(&mut model, &mut reloads, Stale::BOTH),
+            [Order::StopReading(SessionId(0), "Example App".to_owned())],
+            "the app the plan dropped stops and does not start again"
+        );
     }
 
     #[test]
     fn a_reload_that_cannot_read_the_files_keeps_the_plan_and_tries_again() {
-        let folder = env::temp_dir().join(format!("appytappy-reload-{}", process::id()));
-        fs::create_dir_all(&folder).expect("make the folder");
-        let stores = Stores {
-            apps: AppStore::new(folder.join("apps")),
-            automations: AutomationStore::new(folder.join("automations.json")),
-            settings: SettingsStore::new(folder.join("settings.json")),
-        };
-        let mut log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
+        let mut scratch = Scratch::new("reload");
         let mut model = Model::default();
         model.replan(BTreeMap::from([(
             "a".to_owned(),
@@ -975,18 +1135,28 @@ mod tests {
             },
             Instant::now(),
         );
-        fs::write(folder.join("automations.json"), "not JSON").expect("break the file");
-        let now = Instant::now();
-        let mut retry = None;
-        let mut had = Had::Plan;
+        scratch.write("automations.json", "not JSON");
+        let mut reloads = Reloads {
+            had: Had::Plan,
+            ..Reloads::default()
+        };
         let mut tries = Vec::new();
+        let mut read = Stale::BOTH;
         for _ in 0..=RETRIES {
-            assert_eq!(
-                reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now),
-                None
-            );
-            tries.push(retry.map(|retry| retry.left));
+            assert_eq!(scratch.reload(&mut model, &mut reloads, read), []);
+            tries.push(reloads.retry.map(|retry| retry.left));
+            if let Some(again) = reloads.due(Instant::now() + RETRY_WAIT) {
+                read = again;
+            }
         }
+        assert_eq!(
+            read,
+            Stale {
+                files: true,
+                settings: false
+            },
+            "the settings read"
+        );
         assert_eq!(
             model.active_automations(),
             ["Mute"],
@@ -998,52 +1168,44 @@ mod tests {
             "the tries are bounded"
         );
         assert_eq!(
-            retry, None,
+            reloads.due(Instant::now() + RETRY_WAIT),
+            None,
             "after the last try only a save reads the files again"
         );
-        // As at start, when no read has worked yet.
-        had = Had::Nothing;
-        retry = failed(
-            &mut log,
-            "the automations cannot be read: locked",
-            None,
-            now,
-            had.keeps(),
+        // A save starts the tries over; both files failing share one try.
+        scratch.write("settings.json", "not JSON");
+        reloads.retry = None;
+        scratch.reload(&mut model, &mut reloads, Stale::BOTH);
+        assert_eq!(reloads.retry.map(|retry| retry.left), Some(4));
+        assert_eq!(reloads.failing, Stale::BOTH);
+        scratch.write("settings.json", r#"{"format":1}"#);
+        scratch.write("automations.json", NO_AUTOMATIONS);
+        let (watchlist, orders) = read_saved(
+            &scratch.stores,
+            &mut scratch.log,
+            &mut model,
+            &mut reloads,
+            Stale::BOTH,
         );
-        assert_eq!(
-            retry.map(|retry| retry.at),
-            now.checked_add(RETRY_WAIT),
-            "a failed read tries again soon"
-        );
-        assert_eq!(
-            reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now),
-            None
-        );
-        assert_eq!(retry.map(|retry| retry.left), Some(3));
-        fs::write(
-            folder.join("automations.json"),
-            "{\"format\":1,\"automations\":[]}",
-        )
-        .expect("mend the file");
-        let (_, orders) = reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now)
-            .expect("the files read");
-        assert_eq!(had, Had::Plan, "a read that works gives a plan");
-        let written = fs::read_to_string(folder.join("logs").join("runtime.log")).expect("read");
-        fs::remove_dir_all(&folder).expect("clean up");
-        assert_eq!(retry, None, "a read that works needs no retry");
+        assert!(watchlist.is_some(), "the files read");
+        assert_eq!(reloads.retry, None, "a read that works needs no retry");
         assert_eq!(
             orders,
             [Order::StopReading(SessionId(0), "Example App".to_owned())]
         );
+        let written = scratch.log();
         assert!(
             written.contains("the automations cannot be read: the automations file is not valid: "),
             "{written:?}"
         );
-        assert!(
-            written.contains(
-                ", so the runtime keeps running what it ran and reads them again in 2 seconds\n"
-            ),
-            "{written:?}"
+        assert_eq!(
+            written
+                .matches(
+                    ", so the runtime keeps running what it ran and reads them again in 2 seconds\n"
+                )
+                .count(),
+            6,
+            "five tries, then the save's: {written:?}"
         );
         assert!(
             written.contains(
@@ -1051,16 +1213,30 @@ mod tests {
             ),
             "{written:?}"
         );
-        assert_eq!(
-            written
-                .matches(", so the runtime runs no automations and reads them again in 2 seconds\n")
-                .count(),
-            2,
-            "the start's failure and the retry after it: {written:?}"
+        assert!(
+            written.contains(
+                ", so the runtime keeps its settings and reads them again in 2 seconds\n"
+            ),
+            "both failures are logged: {written:?}"
         );
         assert!(
             written.ends_with("no saved automation can run\n"),
             "{written:?}"
+        );
+    }
+
+    #[test]
+    fn the_first_read_that_fails_runs_nothing() {
+        let mut scratch = Scratch::new("start");
+        scratch.write("automations.json", "not JSON");
+        let mut model = Model::default();
+        let mut reloads = Reloads::default();
+        scratch.reload(&mut model, &mut reloads, Stale::BOTH);
+        assert_eq!(reloads.had, Had::Nothing);
+        assert!(
+            scratch.log().contains(
+                ", so the runtime runs no automations and reads them again in 2 seconds\n"
+            )
         );
     }
 

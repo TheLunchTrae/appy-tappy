@@ -78,8 +78,8 @@ This page covers what the user guide leaves out.
   ([Key presses](Actions.md#key-presses)).
 - **Reload.** Saving or removing an application, saving or deleting a value,
   a reference or an automation, switching an automation on or off, changing
-  an anti-cheat class, and changing a setting set the reload event, so the runtime reads the
-  files again at once. Overlay changes do not, since
+  an anti-cheat class, and changing a setting set the reload event, so the
+  runtime reads the files again at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](Architecture.md#the-runtime)
   describes how it reads them.
 

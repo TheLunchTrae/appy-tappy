@@ -80,17 +80,36 @@ export function withWait(
     : { interval: next };
 }
 
+/** A change to the settings: the new settings, made from the current ones, or what to fix. */
+export type SettingsUpdate = (current: Settings) => Settings | { readonly problem: string };
+
 /** The settings every page reads, and how a page changes them: it saves, then the new settings show. */
 export interface SettingsHandle {
   readonly settings: Settings;
-  /** Saves `next`; rejects with what to fix, and the saved settings stay. */
-  readonly change: (next: Settings) => Promise<void>;
+  /**
+   * Saves what `update` makes of the saved settings, after the settings have loaded and after every change asked for
+   * before it, so no change is made from settings that are out of date. Resolves to what to fix when `update` refuses,
+   * or null; rejects with why the save failed, and the saved settings stay.
+   */
+  readonly change: (update: SettingsUpdate) => Promise<string | null>;
 }
 
 export const SettingsContext = createContext<SettingsHandle>({
   settings: DEFAULT_SETTINGS,
-  change: saveSettings,
+  change: async (update) => {
+    const next = update(DEFAULT_SETTINGS);
+    if ('problem' in next) {
+      return next.problem;
+    }
+    await saveSettings(next);
+    return null;
+  },
 });
+
+/** Whether two settings are the same, so saving one over the other changes nothing. */
+export function sameSettings(one: Settings, other: Settings): boolean {
+  return JSON.stringify(one) === JSON.stringify(other);
+}
 
 export function useSettings(): SettingsHandle {
   return use(SettingsContext);

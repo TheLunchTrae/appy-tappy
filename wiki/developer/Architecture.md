@@ -178,9 +178,9 @@ Each thread below is a plain `std::thread`, and each channel is a
   automation fires (see [Actions](Actions.md#when-the-controls-cannot-start)).
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save that changes what the runtime runs, and
-  sends `Reload`. The owner reads the settings and the
-  saved applications and automations again. A new read interval restarts each
-  reader in its session, so automations keep their state and nothing is
+  sends `Reload`. The owner reads the settings, then the saved applications
+  and automations, again. A new read interval restarts each reader the new
+  plan keeps, in its session, so automations keep their state and nothing is
   undone; settings that cannot be read are logged, and the runtime keeps the
   ones it has. An application whose automations
   did not change keeps running untouched; one whose automations changed starts

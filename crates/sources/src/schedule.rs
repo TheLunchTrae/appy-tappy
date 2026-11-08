@@ -20,7 +20,7 @@ pub struct ReadInterval {
 }
 
 impl ReadInterval {
-    /// The bounds used when a signal sets none: at most about 60 reads a
+    /// The bounds the settings start with: at most about 60 reads a
     /// second, and while the value holds still, a wait of at most half a
     /// second before the next frame is read.
     pub const DEFAULT: Self = Self {
