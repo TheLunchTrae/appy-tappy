@@ -64,9 +64,10 @@ stateDiagram-v2
 - **Running.** Each event becomes a `Step`: `Carry` some orders, `Reload` the
   saved files, or `Stop`. The owner waits for its next event only until the
   first of two times (`wake`): when a rule that its cooldown held back is due,
-  which sends it `Due`, and when it reads the saved files again after a read
-  failed. With neither, it waits with no limit. After each step the tray gets
-  a fresh menu if it changed.
+  and when it reads the saved files again after a read failed. Either time
+  sends it `Due`, whose step rechecks the held rules and, once the retry is
+  due, reads the saved files again. With neither, it waits with no limit.
+  After each step the tray gets a fresh menu if it changed.
 - **Undoing.** `model.set_enabled(false)` stops every running application and
   queues the undo of what its automations changed. The owner then drops the
   job sender and joins the action thread, which runs the queued undos before
@@ -400,6 +401,7 @@ stateDiagram-v2
     MenuOpen --> Holding: the session ends, CloseRequested is sent
     Holding --> [*]: stop, after the owner ran the undo
     Holding --> Shown: 10 seconds pass, and Windows may end the runtime
+    Holding --> MenuOpen: 10 seconds pass with the menu open
     Shown --> [*]: stop
     MenuOpen --> [*]: stop closes the menu first
 ```
@@ -556,7 +558,7 @@ stateDiagram-v2
 A recording (`apps/setup/src-tauri/src/recording.rs`) keeps each reading a
 region shows once, for the user to review. It is `None` or a `Recording` whose
 `stopped` field says whether it still records, and whose `problem` says why
-it stopped, if it stopped by itself.
+it skips frames or why it stopped by itself.
 
 ```mermaid
 stateDiagram-v2
@@ -573,13 +575,17 @@ stateDiagram-v2
     Ended --> None: Discard, a window is picked, or the flow closes
 ```
 
-- Each frame is cropped to the region. A crop of another window size sets the
-  recording's `problem` and is skipped. A crop with no ink is skipped.
+- Each frame is cropped to the region. A crop of another window size, or one
+  the reader cannot read, sets the recording's `problem` and is skipped while
+  it goes on recording. A crop with no ink is skipped and clears the problem,
+  as does a crop that reads. A capture failure stops the recording, and its
+  problem says why.
 - A crop whose characters are new is kept and sent to the text reader. A
   recording keeps at most 200 readings (`MAX_READINGS`).
 - **Record more** needs the same region, ink, tolerance, and window size, and
-  clears the problem. When only the window size differs, **Use its
-  settings** puts the region back on a screenshot of the recording's size.
+  clears the problem. When any of them differs (`settingsDiffer`), **Use its
+  settings** shows and puts all of them back, with the region on a screenshot
+  of the recording's size.
 - **Ended** is a stopped recording whose capture slot is **Ended**
   (`Recording::end`). Its problem says to change window, and **Record more**
   and a new **Record** are refused. Its readings stay for review, so a
