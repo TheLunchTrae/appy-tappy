@@ -298,22 +298,40 @@ small menu:
 
 When Windows asks the program to close, as when the session ends or a tool
 sends it a close message, the runtime logs it and quits the same way. Either
-way it undoes what the running automations changed before it exits.
+way it undoes what the running automations changed before it exits: the
+owner queues the undo, waits for the action thread to finish it, and only
+then stops the tray.
 
 `appytappy-platform` draws the icon and the menu from a description the
 runtime gives it, and the runtime's `tray` module decides what the
 description says. The tray thread makes a hidden top-level window, which,
 unlike a message-only window, hears when Explorer restarts, so it adds the
 icon again. At sign-in the taskbar may not exist yet; the icon then appears
-when it starts. The window's procedure keeps no state: it posts a right-click,
-a taskbar restart, and a close request back to its own window, and the tray
-thread's loop, which holds the menu, handles them. A close request never
-destroys the window, so the icon cannot outlive its menu.
+when it starts, and until then the window still hears that the session
+ends. The window's procedure posts a right-click and a taskbar restart back
+to its own window, and the tray thread's loop, which holds the menu, handles
+them. While the menu is open, Windows runs its own loop, which drops those
+posts, so the tray loop refreshes the icon each time the menu closes, which
+covers a taskbar restart in that time. Stopping the tray closes an open menu
+first.
 
-While the menu is open, Windows runs its own loop, which drops those posts.
-The tray loop therefore refreshes the icon each time the menu closes, which
-covers a taskbar restart in that time; a close request in that time is lost,
-and the next one works. Stopping the tray closes an open menu first.
+A close request and the end of the session cannot wait for the tray loop, so
+the procedure sends `CloseRequested` to the owner itself, through a value the
+tray thread attaches to the window (`GWLP_USERDATA`). The menu's loop still
+calls the procedure, so neither is lost while the menu is open. A close
+request never destroys the window, so the icon cannot outlive its menu.
+
+Windows may end the process as soon as every program returns from
+`WM_ENDSESSION`. So when the session ends, the procedure does not return
+until `Tray::stop` drops the sender it waits on, or 10 seconds pass. It sets
+a shutdown block reason with `ShutdownBlockReasonCreate`, which Windows shows
+if the wait passes its own 5 seconds, and the user can end the session
+anyway. `WM_QUERYENDSESSION` always agrees, because the undo runs only once
+the session really ends. The restore journal lives only in memory: a forced
+end, a crash, or a wait that runs out loses what it had not undone.
+Without the tray window, such as when it cannot be made or someone destroys
+it, nothing hears the end of the session, and Windows ends the runtime
+without an undo.
 
 The Enabled item names what a pick does, enable or disable, rather than
 flipping the current setting, so a pick from a menu that was out of date

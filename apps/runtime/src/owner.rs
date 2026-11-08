@@ -196,22 +196,23 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     // Undo what the running automations changed before anything stops.
     let orders = model.set_enabled(false);
     carry(orders, &mut crew, log);
-    // The tray stops first, so its icon goes before anything else. Dropping
-    // the inputs and the jobs ends detection and the actions, so the joins
-    // below return; the actions undo what is queued first.
+    // Dropping the jobs ends the action thread once it has undone what is
+    // queued. Only then does the tray stop: at the end of the session the
+    // tray holds it until then, and Windows may end the process after.
+    let Crew { jobs, readers, .. } = crew;
+    drop(jobs);
+    let acted = join(actor);
     let tray_stopped = tray.map_or(Ok(()), Tray::stop);
+    // Dropping the inputs ends detection, so its join below returns.
     let reload_stopped = reload.map_or(Ok(()), ReloadWatch::stop);
     let windows_stopped = windows.stop();
     drop(inputs);
-    let Crew { jobs, readers, .. } = crew;
-    drop(jobs);
     // Every reader is stopped, and the first that stopped badly says how.
     let read = readers
         .into_values()
         .map(Reader::stop)
         .fold(Ok(()), Result::and);
     let detected = join(detector);
-    let acted = join(actor);
     detected
         .and(acted)
         .and(read)
