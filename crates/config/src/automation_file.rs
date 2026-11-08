@@ -301,8 +301,8 @@ impl AutomationDef {
     /// Checks the automation against the saved applications `apps` and
     /// makes the rule the runtime runs for it. This is the one answer to
     /// whether an automation can run: the setup app's save and the runtime
-    /// both ask it, so an application whose files change later stops running
-    /// what no longer fits.
+    /// both ask it, so an application whose files change stops running an
+    /// automation that does not fit them.
     ///
     /// The automation needs a name, a valid rule, a value that is still
     /// saved, and a target of the kind that value reads. It may press keys

@@ -570,16 +570,17 @@ changing.
   panel also write `app.json`, but they do not set the event, because the
   runtime does not use the overlay. A runtime that is not running reads the
   files when it starts, so the setup app ignores a failure to set the event.
-- **Reading.** The runtime reads the files with the same `config` code the
-  setup app uses, and checks everything again before use, because the files
-  are outside its control and a person can edit them by hand. Each `app.json`
-  must parse and pass `AppFile::parse`'s checks, which cover the file as a
-  whole, each automation must pass `AutomationDef::compile` against the saved
+- **Reading.** The runtime reads the files with the same `config` code the setup
+  app uses, and checks everything again before use, because the files are
+  outside its control and a person can edit them by hand. Each `app.json` must
+  parse and pass `AppFile::parse`'s checks, which cover the file as a whole,
+  each automation must pass `AutomationDef::compile` against the saved
   applications, and each value it watches must pass `saved::build` with its
-  pictures. The setup app's saves call the same two, so what saves is what
-  runs. `apps/runtime/src/plan.rs` turns what passes into the plan the runtime
-  runs, in memory; nothing it builds is written to disk. An automation or a
-  value that fails a check is logged and left out, and the rest run.
+  pictures. Saving a value in the setup app calls `saved::build`, and saving an
+  automation calls `compile` and builds the value it watches, so what saves is
+  what runs. `apps/runtime/src/plan.rs` turns what passes into the plan the
+  runtime runs, in memory; nothing it builds is written to disk. An automation
+  or a value that fails a check is logged and left out, and the rest run.
 - **Format.** `app.json`, `automations.json`, and `settings.json` each carry a
   `format` number, and the `FORMAT` constant in `app_file.rs`,
   `automation_file.rs`, and `settings_file.rs` sets the one version this build

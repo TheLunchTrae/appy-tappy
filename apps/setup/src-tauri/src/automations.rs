@@ -16,7 +16,10 @@ use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
 };
 use appytappy_config::signal::SignalName;
-use appytappy_config::store::StoredApp;
+use std::fs;
+
+use appytappy_config::store::{AppStore, StoredApp};
+use appytappy_sources::screen::saved;
 use serde::Serialize;
 
 use crate::stores::Stores;
@@ -84,12 +87,20 @@ fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
 }
 
 /// What stops `automation` from running with the applications in `apps`,
-/// if anything, as a sentence: the same answer the runtime gets.
-fn problem(automation: &AutomationDef, apps: &[StoredApp]) -> Option<String> {
-    automation
-        .compile(apps)
-        .err()
-        .map(|problem| sentence(&problem))
+/// whose folders `store` holds, if anything, as a sentence: the same answer
+/// the runtime gets. The runtime also builds the check of the value it
+/// watches, so a value a hand edit broke shows here too.
+fn problem(automation: &AutomationDef, apps: &[StoredApp], store: &AppStore) -> Option<String> {
+    let compiled = match automation.compile(apps) {
+        Ok(compiled) => compiled,
+        Err(problem) => return Some(sentence(&problem)),
+    };
+    let folder = store.folder(compiled.app_id);
+    saved::build(&compiled.value.screen, &compiled.app.references, |name| {
+        fs::read(folder.join(name))
+    })
+    .err()
+    .map(|error| format!("{} cannot be read: {error}.", compiled.value.name))
 }
 
 /// Every automation, with what stops each one from running.
@@ -101,7 +112,7 @@ pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
         .iter()
         .map(|automation| AutomationSummary {
             automation: automation.clone(),
-            problem: problem(automation, &apps),
+            problem: problem(automation, &apps, &stores.apps),
         })
         .collect())
 }
@@ -136,7 +147,7 @@ pub(crate) fn save(
             },
         }
     }
-    if let Some(problem) = problem(&draft, &apps(stores)?) {
+    if let Some(problem) = problem(&draft, &apps(stores)?, &stores.apps) {
         return Err(problem);
     }
     let mut file = load(stores)?;
@@ -191,7 +202,7 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
     )]
     {
         let automation = &file.automations[position];
-        if enabled && let Some(problem) = problem(automation, &apps(stores)?) {
+        if enabled && let Some(problem) = problem(automation, &apps(stores)?, &stores.apps) {
             return Err(format!(
                 "{} cannot run until it is fixed. {problem}",
                 automation.name
@@ -454,6 +465,21 @@ mod tests {
             .file
             .clone()
             .expect("good");
+        // A hand edit that leaves the file readable but the value not, as
+        // the runtime reads it, shows on the automation that watches it.
+        let mut broken = app.clone();
+        for value in &mut broken.values {
+            value.screen.region.width = 0;
+        }
+        stores.apps.save("example", &broken, &[]).expect("saves");
+        assert!(
+            list(&stores).expect("lists")[0]
+                .problem
+                .as_deref()
+                .is_some_and(|problem| problem.starts_with("Icon visible cannot be read: ")),
+            "{:?}",
+            list(&stores)
+        );
         app.values.retain(|value| value.id != "icon_visible");
         stores.apps.save("example", &app, &[]).expect("saves");
         assert_eq!(

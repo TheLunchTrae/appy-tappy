@@ -698,6 +698,12 @@ mod tests {
             refused(&many),
             format!("its state check has more than {MAX_STATES} states")
         );
+        let most = many.get(..MAX_STATES).expect("one more than the most");
+        assert_eq!(
+            refused(most),
+            "two of its states use the picture a.png",
+            "the most states pass the count"
+        );
         assert_eq!(
             refused(&[("Paused", "a.png"), ("paused", "b.png")]),
             "two of its states are named \"paused\""

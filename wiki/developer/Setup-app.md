@@ -290,29 +290,30 @@ An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
-`settings_file.rs`) and
-the files (`store.rs`). Each save writes a temporary file and renames it over
-the old one, so a crash never leaves half a file; a later save in that folder
-removes a temporary file that a crash left between the two steps, once it is ten
-minutes old. A file that cannot be read is listed with the reason and left
-alone; an automations file that cannot be read as a whole, such as one with
-another format version, is not replaced: until it is fixed, the setup app saves
-no automations, removes no application, and deletes no value, because it checks
-that file to see whether an automation still uses the application or value. One
-automation that breaks a rule on its own, such as after a hand edit, is kept in
-the file and listed with its problem, and nothing runs it; the user can turn it
-off or delete it, and the others keep working. Saving an automation, turning
-one on, and listing them all ask `AutomationDef::compile`, the same check the
-runtime makes. An automation's ID is the setup app's own key: the runtime does
-not read it, so an ID that a hand edit made invalid, or gave to more than one
-automation, stops nothing. When the setup app reads the file, it gives a new
-ID, made from the name, to each automation whose ID is invalid or held by one
-before it, the same way each time, so every row can be edited or deleted on its
-own; the next save writes the new IDs. Saving a value reads it back with
-`saved::build`, from its new pictures and those already saved, as the runtime
-will, and refuses it if the runtime could not read it. A new application's
-anti-cheat class starts as `unknown`, which blocks key press actions until the
-user sets it ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+`settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
+file and renames it over the old one, so a crash never leaves half a file; a
+later save in that folder removes a temporary file that a crash left between the
+two steps, once it is ten minutes old. A file that cannot be read is listed with
+the reason and left alone; an automations file that cannot be read as a whole,
+such as one with another format version, is not replaced: until it is fixed, the
+setup app saves no automations, removes no application, and deletes no value,
+because it checks that file to see whether an automation still uses the
+application or value. One automation that breaks a rule on its own, such as
+after a hand edit, is kept in the file and listed with its problem, and nothing
+runs it; the user can turn it off or delete it, and the others keep working.
+Saving an automation, turning one on, and listing them all ask
+`AutomationDef::compile` and build the value it watches with `saved::build`, the
+same checks the runtime makes. An automation's ID is the setup app's own key:
+the runtime does not read it, so an ID that a hand edit made invalid, or gave to
+more than one automation, stops nothing. When the setup app reads the file, it
+gives a new ID, made from the name, to each automation whose ID is invalid or
+held by one before it, the same way each time, so every row can be edited or
+deleted on its own; the next save writes the new IDs. Saving a value reads it
+back with `saved::build`, from its new pictures and those already saved, as the
+runtime will, and refuses it if the runtime could not read it. A new
+application's anti-cheat class starts as `unknown`, which blocks key press
+actions until the user sets it
+([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
 ## Running it
 
