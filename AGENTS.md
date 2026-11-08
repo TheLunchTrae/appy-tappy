@@ -163,29 +163,33 @@ version-numbered names.
 ## State machines
 
 [`docs/developer/state-machines.md`](docs/developer/state-machines.md) maps
-each state machine in the runtime, the setup app, and the MCP server, including
-implicit ones: state spread over fields, flags, `Option`s, maps, or a thread's
-place in its loop.
+each state machine in the runtime, the setup app, and the MCP investigation
+server, including implicit ones: state spread over fields, flags, `Option`s,
+maps, or a thread's place in its loop.
 
-- A change that adds, removes, or alters a machine's states, transitions, or
-  stale-message guards updates that machine's section in the same change. The
-  section names every state, the event that causes each transition, the
-  failure states the machine can reach, and how it recovers from each. Keep
-  its diagram in step with the code.
+- A change that adds or removes a machine, or changes a machine's states,
+  transitions, or stale-message guards, updates that machine's section in the
+  same change. The section names every state, the event that causes each
+  transition, the failure states the machine can reach, and how it recovers
+  from each. Update the diagram if the section has one. A guard change also
+  updates the guard list in
+  [How to read this page](docs/developer/state-machines.md#how-to-read-this-page).
 - A reachable state that the machine never leaves, or that does the wrong
-  thing, gets an issue linked under the section's **Open problems**. The change
-  that fixes it removes the entry.
-- Test each transition, each failure, and each recovery at the narrowest
-  interface that drives it: the pure `(state, event)` transition where one
-  exists, otherwise the owner's event handler. Assert the resulting state and
-  the effects it emits, such as orders, messages, or queued undos. Test that
-  each stale-message guard drops a message from an old session or generation.
+  thing, gets an issue linked under the section's **Open problems** list,
+  which the change adds if the section has none. The change that fixes the
+  issue removes the entry.
+- A change to a transition, failure, or recovery needs a test that fails
+  without it, at the narrowest interface that drives it: the pure
+  `(state, event)` transition where one exists, otherwise the owner thread's
+  event handler. Assert the resulting state and the effects it emits, such as
+  orders, messages, or queued undos. One table of cases can cover several
+  transitions, and [Testing](#testing) decides what earns a test. Test that
+  each stale-message guard drops a message that carries an old ID, such as a
+  session ID, generation, recording ID, or overlay number.
 - When fields can hold a combination that names no state on the page, prefer
-  an enum that names the states, as
-  [Invariants and errors](#invariants-and-errors) describes.
-- [Testing](#testing) and [Tests and mutation](#tests-and-mutation) apply. A
-  mutant that survives in transition code usually marks a missing transition
-  test.
+  one type that names the states: a Rust enum, as
+  [Invariants and errors](#invariants-and-errors) describes, or a TypeScript
+  discriminated union.
 
 ## Rust
 
