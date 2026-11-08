@@ -7,9 +7,9 @@
 //! folder.
 //! The file is JSON, so a person can read it and a text diff shows a change.
 //!
-//! [`AppFile::parse`] checks everything the setup app or a person could get
-//! wrong, so a file that parses is one the runtime's `plan::compile`, which
-//! builds what the runtime runs from the authoring files, can use.
+//! [`AppFile::parse`] checks everything in the file alone that the setup app
+//! or a person could get wrong. The pictures it names are read and checked
+//! only when a screen source is built from a value.
 
 use std::collections::BTreeSet;
 use std::error::Error;

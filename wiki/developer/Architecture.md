@@ -61,7 +61,7 @@ Cargo.toml       workspace root; hosts the standards policy tests
 apps/
   mcp/           appytappy-mcp: the local MCP investigation server
   runtime/       appytappy-runtime: the always-on binary
-  setup/         the Tauri setup app (#16); its Rust side is in src-tauri/
+  setup/         the Tauri setup app; its Rust side is in src-tauri/
 crates/
   config/        appytappy-config: formats, validation, saved files, paths
   engine/        appytappy-engine: the rule evaluator
@@ -389,11 +389,12 @@ changing.
   - `%APPDATA%\AppyTappy\` holds the saved files, which are small and can
     roam with the user's profile. Each application has a folder in `apps\`,
     named by its ID, that holds its `app.json` and the pictures its references
-    learned from and its image checks compare against. Every automation is in
+    learned from and its state checks compare against. Every automation is in
     one file, `automations.json`. [Setup app](Setup-app.md#saved-files)
-    describes both files.
-  - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine: the
-    runtime's log in `logs\`.
+    describes `app.json` and `automations.json`.
+  - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
+    the installed programs, as [Installer](Installer.md#what-it-does)
+    describes, and the runtime's log in `logs\`.
 - **Writing.** Only the setup app writes the saved files, through
   `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
   file beside the old one, is flushed to disk with `sync_all`, and is renamed
@@ -404,11 +405,15 @@ changing.
   for a moment, so a failed rename is tried again a few times, as
   `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
   setup app shows the error.
-- **Reloading.** After each request that saves, the setup app sets the named
-  event `Local\AppyTappy.Reload`, and the runtime reads both files again, as
-  the [reload watch](#the-runtime) describes. A runtime that is not running
-  reads them when it starts, so the setup app ignores a failure to set the
-  event.
+- **Reloading.** After each request that saves an application, a value, a
+  reference, an anti-cheat class, or an automation, the setup app sets the
+  named event `Local\AppyTappy.Reload`, and the runtime reads every `app.json`
+  and `automations.json` again, as the [reload watch](#the-runtime) describes.
+  `Request::saves` in `apps/setup/src-tauri/src/owner/messages.rs` lists those
+  requests. Turning an overlay on or off, changing its mode, and moving its
+  panel also write `app.json`, but they do not set the event, because the
+  runtime does not use the overlay. A runtime that is not running reads the
+  files when it starts, so the setup app ignores a failure to set the event.
 - **Reading.** The runtime reads the files with the same `config` code the
   setup app uses, and checks everything again before use, because the files
   are outside its control and a person can edit them by hand. Each `app.json`
@@ -425,7 +430,9 @@ changing.
   application's automations do not run, and the log names its folder. An
   `automations.json` with another version cannot be read as a whole: the
   runtime keeps running what it ran, or runs nothing if it has not read the
-  files yet, and the setup app saves no automations until the file is fixed.
+  files yet. Until the file is fixed, the setup app saves no automations, and
+  it cannot remove an application or delete a value, because it checks the
+  file to see whether an automation still uses them.
 - **Application versions.** A saved value has one binding for every version of
   its application. Detecting the version and keeping a binding per version are
   not built; [#7](https://github.com/TheLunchTrae/appy-tappy/issues/7) tracks
@@ -447,11 +454,16 @@ design enforces the block in four places:
 2. The runtime runs the same check each time it reads the saved files, so an
    automation that a hand edit or a later change to the application's class
    made blocked does not run.
-3. Parsing and validation produce different types. Reading a file gives a raw
-   type that nothing else accepts; only `config` validation turns it into the
-   validated type that sources and actions take. The validated type has
-   private fields and no `Deserialize` or `Default`, so code that skips
-   validation does not compile.
+3. For rules and actions, parsing and validation produce different types.
+   Reading `automations.json` gives `AutomationDef` and `ActionDef`, which the
+   engine and the action worker do not accept; only `AutomationDef::to_rule`
+   in `config` turns them into a `Rule` and its `Action`s. `Rule` has private
+   fields, an action's values such as a key chord or a volume level are types
+   that only their checked constructors make, and neither has `Deserialize` or
+   `Default`, so code that skips validation does not compile. The screen
+   source has no such split: `saved::build` in `appytappy-sources` takes the
+   raw `ScreenDef` and `ReferenceDef` from `app.json` and checks them as it
+   builds the check it reads with.
 4. Every path that opens an application's process needs a process-access permit,
    including the guided memory scan
    ([#14](https://github.com/TheLunchTrae/appy-tappy/issues/14)) and any version
@@ -462,7 +474,7 @@ design enforces the block in four places:
 ## The setup app
 
 The setup app is a Tauri v2 app with a React and TypeScript frontend, in
-`apps/setup/`. The owner chose Tauri, which settled the framework question in
+`apps/setup/`. The owner chose Tauri, which settles the framework question in
 [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16).
 
 Its Rust side exposes Tauri commands and holds no logic of its own: discovery,
@@ -604,6 +616,6 @@ and `AGENTS.md` asks every addition to state what complexity it removes.
   named mutex like the runtime's would find the running copy too, but bringing
   its window forward would also need a message between the two processes.
 - **[`proptest`](https://docs.rs/proptest).** A dev-dependency that generates
-  many random inputs to check a property, such as "a saved file reads back
-  to the same value". The standards require it at trust boundaries such as file
-  formats.
+  many random inputs to check a property. `appytappy-sources` uses it to check
+  that a picture written as a PNG file reads back the same. The standards
+  require it at trust boundaries such as file formats.

@@ -35,8 +35,8 @@ still attached, unless the user refused that process's program. A new
 `memory_scan_first` drops the previous scan before it starts, because an
 unknown-value scan can snapshot gigabytes of memory, so when it fails its
 error says the previous scan was dropped. Tool names are `area_verb`, so the
-definition and rule tools that come next slot in as `definition_*`,
-`rule_*`, and `source_test`.
+tools that come next slot in beside these: `definition_*` and `rule_*` for
+app definitions and rules, and `source_test` to try a source.
 
 ## Anti-cheat safety
 

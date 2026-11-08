@@ -16,9 +16,6 @@ parts fit.
 - **Application.** Any program AppyTappy watches: a game, a media player, a
   browser, or anything else with a window. Code and short UI labels call it
   an app.
-- **Authoring files.** The files the setup app saves: each application's
-  `app.json` with its pictures, and `automations.json`. The runtime reads them
-  when it starts and again each time the setup app saves.
 - **Binding.** The concrete way to read one signal for one application
   version: a source primitive and its parameters, such as a pointer chain.
 - **Check.** How a screen region binding turns a region's pixels into a value:
@@ -45,11 +42,16 @@ parts fit.
   whether those actions restore.
 - **Runtime.** The always-on background program.
 - **Sample.** One value a source read for a signal.
+- **Saved files.** The files the setup app saves: each application's
+  `app.json` with its pictures, and `automations.json`. The runtime reads them
+  when it starts and again each time the setup app saves an application, a
+  value, or an automation; saving only an overlay's settings does not tell
+  it. `appytappy-config` calls each one an authoring file.
 - **Session.** One run of an application, from its start to its exit, or until
   the runtime stops it for a pause or a config change. Rule state resets with
   each session.
 - **Setup app.** The program the user opens to discover signals, build rules,
-  and save the authoring files.
+  and save them.
 - **Signal.** A named, typed value an application exposes, such as `progress`
   or `icon_visible`.
 - **Source primitive.** One kind of state reader the runtime ships: memory

@@ -99,21 +99,22 @@ mask of any region, as after the user adjusts the box by hand.
 
 ## Read interval
 
-Each screen binding has a read interval: a minimum and a maximum time between
-reads. The defaults are 16 ms and 500 ms. A shorter minimum notices changes
+The runtime reads an application's values in one pass of its reader, so each
+reader keeps one read interval for all of them: a minimum and a maximum time
+between reads. The defaults are 16 ms and 500 ms. A shorter minimum notices changes
 sooner; a longer maximum saves CPU while nothing changes. Reads happen only on
 frames the window draws, so a window that draws nothing new is not read at
 all.
 
-Between the two, the source adapts. After a read that changed the value, or
+Between the two, the reader adapts. After a read that changed a value, or
 that came close to where a rule would fire, it waits the minimum. Each read
 that changed nothing doubles the wait, up to the maximum. A bar that holds
 still, in a window that keeps drawing, is read about twice a second; one that
 moves is read at full speed.
 
-The saved files do not set a read interval, so every binding reads with the
-defaults. A setting in the app definition, with a default for all bindings and
-an override for one, belongs to
+The saved files do not set a read interval, so every reader uses
+`ReadInterval::DEFAULT`. A setting in the app definition, with a default for all
+bindings and an override for one, belongs to
 [#6](https://github.com/TheLunchTrae/appy-tappy/issues/6).
 
 ## Capture

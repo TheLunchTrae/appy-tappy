@@ -330,9 +330,9 @@ impl AutomationDef {
     /// exist, its target must be the kind of value the value's check reads,
     /// and it may press keys only when its application's anti-cheat class is
     /// none, as the policy in [`allows_input`] says. Both the setup app's
-    /// save and the runtime's `plan::compile`, which builds what the runtime
-    /// runs each time it reads the authoring files, check this, so an
-    /// application whose class changes later stops running such automations.
+    /// save and the runtime, each time it reads the saved files, check this,
+    /// so an application whose class changes later stops running such
+    /// automations.
     ///
     /// # Errors
     ///

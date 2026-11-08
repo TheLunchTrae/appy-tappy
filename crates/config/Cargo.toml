@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-config"
-description = "App definition, rule, and compiled config formats, their validation, and the compile step."
+description = "The saved files' formats, rules, their validation, and where the files live and how they are written."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
