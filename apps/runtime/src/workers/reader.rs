@@ -21,7 +21,10 @@
 //! many applications replace their window as they run, such as when they
 //! switch to full screen. A capture ends when the window closes, when the
 //! capture cannot go on, such as after the graphics device was lost, and
-//! after [`RESTART_AFTER`] frames in a row fail. While capturing, the reader
+//! after [`RESTART_AFTER`] frames in a row fail. After failing frames, the
+//! reader waits before it captures again, from [`FIND_AGAIN`] up to
+//! [`RESTART_WAIT_MAX`], doubling while each new capture fails before it reads
+//! a frame, and logs the failure once until it changes. While capturing, the reader
 //! checks every [`CHECK_AGAIN`] that the window still shows and still fits
 //! the application best, because a hidden window sends no frames and no
 //! close, and the application may open a better window, such as its main
@@ -54,6 +57,9 @@ pub(crate) const CHECK_AGAIN: Duration = Duration::from_secs(2);
 
 /// How many frames in a row may fail before the capture starts again.
 pub(crate) const RESTART_AFTER: u32 = 5;
+
+/// The longest wait before a capture whose frames keep failing starts again.
+pub(crate) const RESTART_WAIT_MAX: Duration = Duration::from_secs(30);
 
 /// One session of an attached application. A new session starts each time
 /// the runtime starts reading an app, so a reading from a session that ended
@@ -105,15 +111,53 @@ pub(crate) enum Reading {
 }
 
 /// What reaches the reader thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Control {
     /// The session ended.
     Stop,
-    /// The capture ended, such as when the window closed, or keeps failing.
+    /// The capture ended, such as when the window closed.
     Lost,
     /// The window took a size at which other values were drawn, so the
     /// capture starts again for those.
     Resized(Size),
+    /// [`RESTART_AFTER`] frames in a row failed, the last with this error,
+    /// so the capture starts again after a wait.
+    Failing(String),
+    /// A capture started again for failing frames read a frame.
+    Recovered,
+}
+
+/// How the reader recovers from captures whose frames keep failing.
+#[derive(Debug)]
+struct Recovery {
+    /// The error that last made frames fail, until a capture reads a frame.
+    failing: Option<String>,
+    /// How long to wait before the next capture after failing frames.
+    wait: Duration,
+}
+
+impl Recovery {
+    const fn new() -> Self {
+        Self {
+            failing: None,
+            wait: FIND_AGAIN,
+        }
+    }
+
+    /// Notes that frames keep failing with `error`. Returns the wait before
+    /// the next capture, and whether `error` is new, so it is logged.
+    fn failed(&mut self, error: String) -> (Duration, bool) {
+        let new = self.failing.as_ref() != Some(&error);
+        let wait = self.wait;
+        self.wait = self.wait.saturating_mul(2).min(RESTART_WAIT_MAX);
+        self.failing = Some(error);
+        (wait, new)
+    }
+
+    /// Notes that a capture read a frame again.
+    fn recovered(&mut self) {
+        *self = Self::new();
+    }
 }
 
 /// A running reader thread.
@@ -209,20 +253,18 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         )
     };
     // Waits before looking again; false once the session stopped.
-    let wait = || match control.recv_timeout(FIND_AGAIN) {
-        Ok(Control::Lost | Control::Resized(_)) | Err(RecvTimeoutError::Timeout) => true,
-        Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected) => false,
-    };
+    let wait = || pause(control, FIND_AGAIN);
+    let mut recovery = Recovery::new();
     loop {
         let window = match find_window(system, job) {
-            Ok(Some(window)) if shown(system.window_place(window)) => window,
-            Ok(Some(_minimized)) => {
+            Ok(Found::Shown(window)) => window,
+            Ok(Found::Minimized) => {
                 if !report(&mut reported, minimized(job)) || !wait() {
                     return;
                 }
                 continue;
             },
-            Ok(None) => {
+            Ok(Found::Nothing) => {
                 let problem = format!(
                     "no window of {} fits {}'s window yet",
                     job.executable, job.plan.name
@@ -243,6 +285,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         let Some(mut frames) = FrameReader::new(job, size, events.clone(), lost.clone()) else {
             return;
         };
+        frames.carry(recovery.failing.as_deref());
         let crop = Crop::Region(frames.bounds);
         let throttle = ReadInterval::DEFAULT.min();
         let handler = Box::new(move |frame: io::Result<Frame<'_>>| frames.handle(frame));
@@ -257,24 +300,64 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
             },
         };
         reported = None;
-        let next = watch(system, job, window, check, control);
-        if let Err(problem) = &next {
-            // The frame handler cannot see why, so it does not send
-            // `Unseen` itself.
-            let unseen = Reading::Unseen {
-                session: job.session,
-            };
-            if !report(&mut reported, problem.clone()) || !send(events, unseen) {
-                return;
-            }
-        }
+        let next = watch(system, job, window, check, control, &mut recovery);
         if let Err(error) = session.close() {
             report(&mut reported, format!("its capture ended badly: {error}"));
         }
+        if stopped_meanwhile(control) {
+            return;
+        }
         match next {
-            Err(_) | Ok(Control::Lost) => {},
+            Err(problem) => {
+                // The frame handler cannot see why, so it does not send
+                // `Unseen` itself. It is sent after the capture closed, so
+                // no reading from it can follow.
+                let unseen = Reading::Unseen {
+                    session: job.session,
+                };
+                if !report(&mut reported, problem) || !send(events, unseen) {
+                    return;
+                }
+            },
+            Ok(Control::Lost | Control::Recovered) => {},
             Ok(Control::Resized(resized)) => size = resized,
+            Ok(Control::Failing(error)) => {
+                let (pause_for, new) = recovery.failed(error.clone());
+                let problem = format!(
+                    "{RESTART_AFTER} frames in a row cannot be read, so its capture starts \
+                     again: {error}"
+                );
+                if (new && !report(&mut reported, problem)) || !pause(control, pause_for) {
+                    return;
+                }
+            },
             Ok(Control::Stop) => return,
+        }
+    }
+}
+
+/// Empties `control` of what a closed capture sent after the control that
+/// ended it, which is moot now, and says whether a stop came meanwhile.
+fn stopped_meanwhile(control: &Receiver<Control>) -> bool {
+    let mut stopped = false;
+    for left in control.try_iter() {
+        stopped |= left == Control::Stop;
+    }
+    stopped
+}
+
+/// Waits for `time` while the session runs; false once it stopped. Any
+/// other control is moot while no capture runs.
+fn pause(control: &Receiver<Control>, time: Duration) -> bool {
+    let until = Instant::now().checked_add(time);
+    loop {
+        let left = until.map_or(time, |until| {
+            until.saturating_duration_since(Instant::now())
+        });
+        match control.recv_timeout(left) {
+            Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected) => return false,
+            Err(RecvTimeoutError::Timeout) => return true,
+            Ok(_moot) => {},
         }
     }
 }
@@ -288,9 +371,11 @@ fn watch<S: System>(
     window: u64,
     check: Duration,
     control: &Receiver<Control>,
+    recovery: &mut Recovery,
 ) -> Result<Control, String> {
     loop {
         match control.recv_timeout(check) {
+            Ok(Control::Recovered) => recovery.recovered(),
             Ok(next) => return Ok(next),
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(problem) = moved_on(system, job, window) {
@@ -302,12 +387,28 @@ fn watch<S: System>(
     }
 }
 
-/// The handle of the visible window that fits the app best.
-fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Option<u64>> {
+/// What the reader found to capture.
+#[derive(Debug, PartialEq, Eq)]
+enum Found {
+    /// The first window that fits the app best and shows.
+    Shown(u64),
+    /// Windows fit, but every one that fits best is minimized.
+    Minimized,
+    /// No window fits.
+    Nothing,
+}
+
+/// The first shown window among the visible windows that fit the app best.
+fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Found> {
     let processes = system.processes()?;
-    Ok(best_windows(&job.plan.window, processes, system.windows()?)
-        .first()
-        .map(|entry| entry.handle))
+    let best = best_windows(&job.plan.window, processes, system.windows()?);
+    if best.is_empty() {
+        return Ok(Found::Nothing);
+    }
+    Ok(best
+        .iter()
+        .find(|entry| shown(system.window_place(entry.handle)))
+        .map_or(Found::Minimized, |entry| Found::Shown(entry.handle)))
 }
 
 /// Whether a window shows. A window whose place cannot be read counts as
@@ -358,6 +459,9 @@ struct FrameReader<E> {
     frame_problem: Option<String>,
     /// How many frames in a row failed.
     failures: u32,
+    /// Whether the reader started this capture again for failing frames,
+    /// and waits to hear that it read one.
+    restarted: bool,
     /// Whether it sent a reading since it last sent [`Reading::Unseen`].
     seen: bool,
     schedule: ReadSchedule,
@@ -391,6 +495,7 @@ impl<E: From<Reading>> FrameReader<E> {
             problems: vec![None; count],
             frame_problem: None,
             failures: 0,
+            restarted: false,
             seen: false,
             schedule: ReadSchedule::new(ReadInterval::DEFAULT),
             events,
@@ -415,23 +520,24 @@ impl<E: From<Reading>> FrameReader<E> {
                 // drawn at. A new capture would fail the same way.
                 Some(_) => return self.frame_failed(&error),
                 None => {
+                    let wait = self.frame_failed(&error);
                     self.failures = self.failures.saturating_add(1);
-                    if self.failures >= RESTART_AFTER {
-                        self.failures = 0;
-                        self.unseen();
-                        self.problem(format!(
-                            "{RESTART_AFTER} frames in a row cannot be read, so its capture \
-                             starts again: {error}"
-                        ));
-                        self.tell(Control::Lost);
-                        return Duration::ZERO;
+                    if self.failures < RESTART_AFTER {
+                        return wait;
                     }
-                    return self.frame_failed(&error);
+                    self.failures = 0;
+                    self.unseen();
+                    self.tell(Control::Failing(error.to_string()));
+                    return Duration::ZERO;
                 },
             },
         };
         self.frame_problem = None;
         self.failures = 0;
+        if self.restarted {
+            self.restarted = false;
+            self.tell(Control::Recovered);
+        }
         let other_values = self
             .plan
             .values
@@ -460,10 +566,17 @@ impl<E: From<Reading>> FrameReader<E> {
         })
     }
 
+    /// Notes that the reader started this capture again because frames
+    /// failed with `failing`, which was logged already.
+    fn carry(&mut self, failing: Option<&str>) {
+        self.restarted = failing.is_some();
+        self.frame_problem = failing.map(frame_problem);
+    }
+
     /// Says once that frames cannot be read, until another problem or a
     /// good frame replaces it, and returns the wait before the next frame.
     fn frame_failed(&mut self, error: &io::Error) -> Duration {
-        let problem = format!("a frame cannot be read: {error}");
+        let problem = frame_problem(&error.to_string());
         if self.frame_problem.as_ref() != Some(&problem) {
             self.frame_problem = Some(problem.clone());
             self.problem(problem);
@@ -580,6 +693,10 @@ impl<E: From<Reading>> FrameReader<E> {
     }
 }
 
+fn frame_problem(error: &str) -> String {
+    format!("a frame cannot be read: {error}")
+}
+
 /// The smallest region that holds both.
 fn union(one: Region, other: Region) -> Region {
     let left = one.x().min(other.x());
@@ -637,7 +754,7 @@ mod tests {
         width: 640,
         height: 480,
     };
-    const PATIENCE: Duration = Duration::from_secs(10);
+    const PATIENCE: Duration = Duration::from_secs(3);
     /// Shorter than [`FIND_AGAIN`], so nothing should happen in it.
     const QUIET: Duration = Duration::from_millis(300);
 
@@ -914,20 +1031,21 @@ mod tests {
         );
         readings.try_iter().for_each(drop);
         assert_eq!(frames.handle(failed()), Duration::ZERO);
-        assert_eq!(told.try_recv(), Ok(Control::Lost));
+        assert_eq!(
+            told.try_recv(),
+            Ok(Control::Failing("the copy failed".to_owned()))
+        );
         let restart: Vec<Reading> = readings.try_iter().collect();
         assert_eq!(
             restart,
             [
+                Reading::Problem {
+                    session: SessionId(3),
+                    problem: "a frame cannot be read: the copy failed".to_owned()
+                },
                 Reading::Unseen {
                     session: SessionId(3)
                 },
-                Reading::Problem {
-                    session: SessionId(3),
-                    problem: "5 frames in a row cannot be read, so its capture starts again: \
-                              the copy failed"
-                        .to_owned()
-                }
             ]
         );
         frames.handle(failed());
@@ -938,6 +1056,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_restarted_capture_logs_the_same_failure_once_and_says_when_it_reads() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, told) = mpsc::channel();
+        let icon = job(vec![red_at("icon", 0, 0)]);
+        let mut frames = FrameReader::new(&icon, WINDOW, events, control).expect("values to read");
+        frames.carry(Some("the copy failed"));
+        frames.handle(Err(io::Error::other("the copy failed")));
+        assert_eq!(problems(&readings), Vec::<String>::new(), "logged already");
+        let red = frame_image(2, 2, |_, _| true);
+        frames.handle(Ok(frame(&red, WINDOW)));
+        frames.handle(Ok(frame(&red, WINDOW)));
+        assert_eq!(told.try_iter().collect::<Vec<_>>(), [Control::Recovered]);
+    }
+
+    #[test]
+    fn recovery_waits_longer_after_each_failure_until_a_frame_is_read() {
+        let mut recovery = Recovery::new();
+        let failed = |recovery: &mut Recovery, error: &str| recovery.failed(error.to_owned());
+        assert_eq!(failed(&mut recovery, "lost"), (FIND_AGAIN, true));
+        assert_eq!(
+            failed(&mut recovery, "lost"),
+            (Duration::from_secs(2), false)
+        );
+        assert_eq!(
+            failed(&mut recovery, "gone"),
+            (Duration::from_secs(4), true)
+        );
+        for _ in 0..10 {
+            failed(&mut recovery, "gone");
+        }
+        assert_eq!(failed(&mut recovery, "gone"), (RESTART_WAIT_MAX, false));
+        recovery.recovered();
+        assert_eq!(failed(&mut recovery, "gone"), (FIND_AGAIN, true));
+    }
+
     /// A capture the fake system started: its window, its crop, and the
     /// handler that receives its frames.
     type Started = (u64, Crop, FrameHandler);
@@ -945,25 +1099,42 @@ mod tests {
     /// Where the fake system's window list is answered.
     type Answer = SyncSender<io::Result<Vec<WindowEntry>>>;
 
+    /// A request for whether a window shows, and where it is answered.
+    type PlaceAsk = (u64, SyncSender<bool>);
+
     /// A system with set processes that asks the test for each window list,
-    /// and whose captures hand their handler to the test.
+    /// and whose captures hand their handler to the test. Each window's
+    /// place cannot be read, unless the test answers where windows are.
     struct FakeSystem {
         processes: Vec<ProcessEntry>,
-        /// Windows whose place says they do not show. Every other window's
-        /// place cannot be read.
-        minimized: Vec<u64>,
         lists: Sender<Answer>,
+        places: Option<Sender<PlaceAsk>>,
         captures: Sender<Started>,
     }
 
-    /// The test's side of a [`FakeSystem`].
+    /// The test's side of a [`FakeSystem`]. Dropping it makes every request
+    /// to the test fail, so a reader waiting on one never hangs.
     struct Desk {
         lists: Receiver<Answer>,
+        places: Option<Receiver<PlaceAsk>>,
         /// Dropped to make every capture fail.
         started: Option<Receiver<Started>>,
     }
 
     impl Desk {
+        /// Answers whether the window the reader asks about shows, and
+        /// returns that window.
+        fn place(&self, shown: bool) -> u64 {
+            let (window, answer) = self
+                .places
+                .as_ref()
+                .expect("places are answered")
+                .recv_timeout(PATIENCE)
+                .expect("a request");
+            answer.send(shown).expect("the reader waits");
+            window
+        }
+
         /// Answers the reader's next request for the window list.
         fn answer(&self, windows: io::Result<Vec<WindowEntry>>) {
             let answer = self.lists.recv_timeout(PATIENCE).expect("a request");
@@ -987,10 +1158,15 @@ mod tests {
 
     impl FakeSystem {
         fn new() -> (Arc<Self>, Desk) {
-            Self::minimizing(Vec::new())
+            Self::start(false)
         }
 
-        fn minimizing(minimized: Vec<u64>) -> (Arc<Self>, Desk) {
+        /// A system whose windows' places the test answers.
+        fn placing() -> (Arc<Self>, Desk) {
+            Self::start(true)
+        }
+
+        fn start(placing: bool) -> (Arc<Self>, Desk) {
             let process = |id, executable: &str| ProcessEntry {
                 id: ProcessId::new(id),
                 parent: ProcessId::new(1),
@@ -1004,14 +1180,21 @@ mod tests {
             ];
             let (lists, requests) = mpsc::channel();
             let (captures, started) = mpsc::channel();
+            let (places, asked) = if placing {
+                let (places, asked) = mpsc::channel();
+                (Some(places), Some(asked))
+            } else {
+                (None, None)
+            };
             let desk = Desk {
                 lists: requests,
+                places: asked,
                 started: Some(started),
             };
             let system = Self {
                 processes,
-                minimized,
                 lists,
+                places,
                 captures,
             };
             (Arc::new(system), desk)
@@ -1041,9 +1224,14 @@ mod tests {
         }
 
         fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
-            if !self.minimized.contains(&window) {
-                return Err(io::Error::from(io::ErrorKind::Unsupported));
-            }
+            let places = self
+                .places
+                .as_ref()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::Unsupported))?;
+            let (answer, answered) = mpsc::sync_channel(1);
+            let gone = || io::Error::from(io::ErrorKind::BrokenPipe);
+            places.send((window, answer)).map_err(|_gone| gone())?;
+            let shown = answered.recv().map_err(|_gone| gone())?;
             Ok(Some(WindowPlace {
                 bounds: Bounds {
                     left: 0,
@@ -1051,7 +1239,7 @@ mod tests {
                     right: 800,
                     bottom: 600,
                 },
-                shown: false,
+                shown,
                 front: false,
             }))
         }
@@ -1114,7 +1302,9 @@ mod tests {
     }
 
     /// Stops `reader` and checks its thread ended, which drops its senders.
-    fn stopped(reader: Reader, readings: &Receiver<Reading>) {
+    /// The desk goes first, so a reader that waits on it cannot hang.
+    fn stopped(reader: Reader, desk: Desk, readings: &Receiver<Reading>) {
+        drop(desk);
         reader.stop().expect("stop");
         let left: Vec<Reading> = readings.try_iter().collect();
         assert_eq!(left, [], "nothing more was sent");
@@ -1186,7 +1376,7 @@ mod tests {
         assert_eq!(again, 4, "it looks for the window again");
         // A real capture drops its handler when it closes.
         drop((first, second));
-        stopped(reader, &readings);
+        stopped(reader, desk, &readings);
     }
 
     #[test]
@@ -1204,7 +1394,7 @@ mod tests {
         );
         assert!(!desk.asks_soon(), "it waits before looking again");
         desk.answer(Err(io::Error::other("denied")));
-        stopped(reader, &readings);
+        stopped(reader, desk, &readings);
     }
 
     #[test]
@@ -1223,15 +1413,16 @@ mod tests {
         );
         assert!(!desk.asks_soon(), "it waits before looking again");
         desk.answer(Ok(desktop()));
-        stopped(reader, &readings);
+        stopped(reader, desk, &readings);
     }
 
     #[test]
     fn a_minimized_window_is_not_captured_until_it_shows() {
-        let (system, desk) = FakeSystem::minimizing(vec![4]);
+        let (system, desk) = FakeSystem::placing();
         let (events, readings) = mpsc::channel::<Reading>();
         let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
         desk.answer(Ok(desktop()));
+        assert_eq!(desk.place(false), 4);
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Problem {
@@ -1241,45 +1432,100 @@ mod tests {
         );
         assert!(!desk.asks_soon(), "it waits before looking again");
         desk.answer(Ok(desktop()));
-        assert_eq!(
-            desk.started
-                .as_ref()
-                .expect("captures work")
-                .recv_timeout(QUIET)
-                .map(|(window, _, _)| window)
-                .ok(),
-            None,
-            "nothing is captured"
-        );
-        stopped(reader, &readings);
+        assert_eq!(desk.place(true), 4);
+        let (window, _, handler) = desk.capture();
+        assert_eq!(window, 4, "the window shows again, so it is captured");
+        drop(handler);
+        stopped(reader, desk, &readings);
+    }
+
+    #[test]
+    fn a_shown_window_is_taken_over_a_minimized_one_that_fits_as_well() {
+        let (system, desk) = FakeSystem::placing();
+        let (events, readings) = mpsc::channel::<Reading>();
+        let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
+        let mut windows = desktop();
+        windows.push(window(5, 43, "Main window", true));
+        desk.answer(Ok(windows));
+        assert_eq!(desk.place(false), 4);
+        assert_eq!(desk.place(true), 5);
+        let (window, _, handler) = desk.capture();
+        assert_eq!(window, 5);
+        drop(handler);
+        stopped(reader, desk, &readings);
+    }
+
+    /// A system that answers from set lists, for checks on one thread.
+    struct Still {
+        windows: io::Result<Vec<WindowEntry>>,
+        minimized: Vec<u64>,
+    }
+
+    impl System for Still {
+        type Process = NoProcess;
+
+        fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
+            Ok(vec![ProcessEntry {
+                id: ProcessId::new(43),
+                parent: ProcessId::new(1),
+                executable: "Example.exe".to_owned(),
+                threads: 1,
+            }])
+        }
+
+        fn windows(&self) -> io::Result<Vec<WindowEntry>> {
+            match &self.windows {
+                Ok(windows) => Ok(windows.clone()),
+                Err(error) => Err(io::Error::new(error.kind(), error.to_string())),
+            }
+        }
+
+        fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
+            Ok(Some(WindowPlace {
+                bounds: Bounds {
+                    left: 0,
+                    top: 0,
+                    right: 800,
+                    bottom: 600,
+                },
+                shown: !self.minimized.contains(&window),
+                front: false,
+            }))
+        }
+
+        fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+
+        fn open(&self, _: &ProcessAccessPermit) -> io::Result<NoProcess> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+
+        fn screen_pixel(&self, _: i32, _: i32) -> io::Result<Rgb> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
     }
 
     #[test]
     fn a_capture_moves_on_when_its_window_hides_or_a_better_one_opens() {
-        let (system, desk) = FakeSystem::minimizing(vec![9]);
         let icon = job(vec![red_at("icon", 0, 0)]);
+        let check =
+            |window, windows, minimized| moved_on(&Still { windows, minimized }, &icon, window);
         assert_eq!(
-            moved_on(system.as_ref(), &icon, 9).as_deref(),
+            check(4, Ok(desktop()), vec![4]).as_deref(),
             Some("Example App's window is minimized or hidden")
         );
-        let check = |window, windows| {
-            thread::scope(|scope| {
-                let checked = scope.spawn(|| moved_on(system.as_ref(), &icon, window));
-                desk.answer(windows);
-                checked.join().expect("the check ends")
-            })
-        };
-        assert_eq!(check(4, Ok(desktop())), None, "4 still fits best");
+        assert_eq!(check(4, Ok(desktop()), Vec::new()), None, "4 fits best");
         let mut tied = desktop();
-        tied.push(window(5, 42, "Main window", true));
-        assert_eq!(check(5, Ok(tied)), None, "5 fits as well as 4");
+        tied.push(window(5, 43, "Main window", true));
+        assert_eq!(check(5, Ok(tied), Vec::new()), None, "5 fits as well as 4");
         assert_eq!(
-            check(2, Ok(desktop())).as_deref(),
+            check(2, Ok(desktop()), Vec::new()).as_deref(),
             Some("another window fits Example App's window better, so it is read instead"),
             "a launcher's window gives way to the main window"
         );
         assert_eq!(
-            check(2, Err(io::Error::other("denied"))),
+            check(2, Err(io::Error::other("denied")), Vec::new()),
             None,
             "a failing check keeps the capture"
         );
@@ -1326,7 +1572,90 @@ mod tests {
         desk.answer(Ok(better()));
         let (second, _, _) = desk.capture();
         assert_eq!(second, 5, "the reader captures the better window");
-        drop((handler, desk));
-        stopped(reader, &readings);
+        drop(handler);
+        stopped(reader, desk, &readings);
+    }
+
+    #[test]
+    fn what_a_closed_capture_sent_is_dropped_but_a_stop_counts() {
+        let (control, received) = mpsc::channel();
+        for left in [Control::Lost, Control::Resized(SMALL), Control::Recovered] {
+            control.send(left).expect("send");
+        }
+        assert!(!stopped_meanwhile(&received));
+        assert_eq!(received.try_recv(), Err(TryRecvError::Empty));
+        for left in [Control::Stop, Control::Lost, Control::Stop] {
+            control.send(left).expect("send");
+        }
+        assert!(stopped_meanwhile(&received));
+        assert_eq!(received.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    #[test]
+    fn a_capture_whose_frames_keep_failing_starts_again_after_a_wait() {
+        let (system, desk) = FakeSystem::new();
+        let (events, readings) = mpsc::channel::<Reading>();
+        let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
+        let fail_all = |handler: &mut FrameHandler| {
+            for _ in 0..RESTART_AFTER {
+                handler(Err(io::Error::other("the copy failed")));
+            }
+        };
+        desk.answer(Ok(desktop()));
+        let (_, _, mut first) = desk.capture();
+        fail_all(&mut first);
+        let problem = |problem: &str| Reading::Problem {
+            session: SessionId(3),
+            problem: problem.to_owned(),
+        };
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(problem("a frame cannot be read: the copy failed"))
+        );
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(problem(
+                "5 frames in a row cannot be read, so its capture starts again: the copy failed"
+            ))
+        );
+        assert!(!desk.asks_soon(), "it waits before capturing again");
+        desk.answer(Ok(desktop()));
+        let (_, _, mut second) = desk.capture();
+        let red = frame_image(2, 2, |_, _| true);
+        second(Ok(frame(&red, WINDOW)));
+        assert!(
+            matches!(readings.recv_timeout(PATIENCE), Ok(Reading::Sample { .. })),
+            "the new capture reads"
+        );
+        assert!(!desk.asks_soon(), "a capture that reads is kept");
+        fail_all(&mut second);
+        let again: Vec<Reading> = (0..3)
+            .filter_map(|_| readings.recv_timeout(PATIENCE).ok())
+            .collect();
+        assert_eq!(
+            again,
+            [
+                problem("a frame cannot be read: the copy failed"),
+                Reading::Unseen {
+                    session: SessionId(3)
+                },
+                problem(
+                    "5 frames in a row cannot be read, so its capture starts again: the copy \
+                     failed"
+                ),
+            ],
+            "after a good frame, a failure is news again"
+        );
+        desk.answer(Ok(desktop()));
+        let (_, _, mut third) = desk.capture();
+        fail_all(&mut third);
+        assert_eq!(
+            readings.recv_timeout(QUIET),
+            Err(RecvTimeoutError::Timeout),
+            "the same failure is logged once"
+        );
+        assert!(!desk.asks_soon(), "it waits longer");
+        drop((first, second, third));
+        stopped(reader, desk, &readings);
     }
 }

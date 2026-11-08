@@ -152,11 +152,15 @@ Each thread below is a plain `std::thread`, and each channel is a
   nobody can see. Each rule stays as it was, run or not, until the values read
   next decide its condition. When the window closes, when the capture cannot
   go on, such as after the graphics device was lost, and after five frames in
-  a row fail, it sends `Unseen` and looks for the window again. Every two
-  seconds it checks that the window still shows and that no other window fits
-  better, such as the main window opening after a launcher's, and looks again
-  if not. While no window fits, or the one that fits best is minimized, it
-  looks once a second, until the application exits.
+  a row fail, it sends `Unseen` and looks for the window again. After failing
+  frames it waits first: a second, doubling up to 30 seconds while each new
+  capture fails before reading a frame, and it logs the failure once until it
+  changes. Every two seconds it checks that the window still shows and that
+  no other window fits better, such as the main window opening after a
+  launcher's, and looks again if not. Among windows that fit equally well, it
+  takes one that shows over a minimized one. While no window fits, or every
+  one that fits best is minimized, it looks once a second, until the
+  application exits.
   Other kinds of source, such as a log tail or a memory read, join them later
   ([#3](https://github.com/TheLunchTrae/appy-tappy/issues/3)).
 - **Action worker.** Runs action requests and releases in order and sends
