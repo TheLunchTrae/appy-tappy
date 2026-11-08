@@ -17,9 +17,11 @@ AppyTappy has two parts:
 
 1. [Install AppyTappy](install.md).
 2. Open **AppyTappy** from the Start menu.
-3. [Make a value](values.md): pick the window to watch, take a screenshot, and
-   draw a box around what AppyTappy should read, such as a number or a bar.
-4. [Make an automation](automations.md): say when it runs, such as when the
+3. [Add the application](applications.md): pick the window of the program to
+   watch.
+4. [Make a value](values.md): take a screenshot of that window and draw a box
+   around what AppyTappy should read, such as a number or a bar.
+5. [Make an automation](automations.md): say when it runs, such as when the
    value is at least 90, and what it does, such as pause the music.
 
 That is all. The background part runs the automation from then on.

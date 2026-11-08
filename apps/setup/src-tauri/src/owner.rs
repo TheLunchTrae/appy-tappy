@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 
 use appytappy_sources::screen::{CaptureSession, Image};
 
+use crate::applications;
 use crate::automations::{self, Stores};
 use crate::check_spec::{self, RegionCheck};
 use crate::ocr;
@@ -311,6 +312,20 @@ impl<H: Host> Owner<H> {
                     .map(|list| window_list::matching(&list.windows, &window)),
             ),
             Request::ListApps(reply) => send(reply, self.apps()),
+            Request::SaveApp {
+                existing,
+                spec,
+                reply,
+            } => send(
+                reply,
+                self.stores()
+                    .and_then(|stores| applications::save(stores, existing.as_deref(), spec)),
+            ),
+            Request::RemoveApp { app, reply } => send(
+                reply,
+                self.stores()
+                    .and_then(|stores| applications::remove(stores, &app)),
+            ),
             Request::SaveValue { spec, reply } => send(reply, self.save(&spec)),
             Request::DeleteValue { app, value, reply } => {
                 send(reply, self.delete(&app, &value));

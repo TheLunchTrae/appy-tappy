@@ -255,7 +255,7 @@ pub fn best_window(
     }));
     ranked
         .first()
-        .and_then(|&position| candidates.get(position))
+        .and_then(|&(position, _)| candidates.get(position))
         .map(|(entry, _)| entry.handle)
 }
 
@@ -312,6 +312,26 @@ mod tests {
             ]),
             Some(6)
         );
+    }
+
+    #[test]
+    fn the_fallback_takes_a_window_of_the_executable_only() {
+        let mut example = WindowMatch::exact(WindowFacts {
+            title: "Example App",
+            class: "ExampleWindow",
+            executable: "Example.exe",
+        });
+        example.must_match.title = true;
+        let processes = || vec![process(1, "Example.exe"), process(2, "Other.exe")];
+        let windows = || {
+            vec![
+                window(5, 2, "Example App", true),
+                window(6, 1, "Launcher", true),
+            ]
+        };
+        assert_eq!(best_window(&example, processes(), windows()), None);
+        example.fallback = true;
+        assert_eq!(best_window(&example, processes(), windows()), Some(6));
     }
 
     #[test]

@@ -114,6 +114,22 @@ impl AppStore {
         write_atomic(&folder.join(APP_FILE), file.to_json().as_bytes())
     }
 
+    /// Removes the application `id`'s folder with everything in it. An
+    /// application that is not there is already removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `id` is not valid or the removal fails.
+    pub fn remove(&self, id: &str) -> io::Result<()> {
+        if !is_app_id(id) {
+            return Err(invalid(format!("{id:?} is not a valid application ID")));
+        }
+        match fs::remove_dir_all(self.folder(id)) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            removed => removed,
+        }
+    }
+
     /// Removes the pictures in the application `id`'s folder that `file` no
     /// longer names, after a value was removed or changed.
     ///
@@ -380,6 +396,32 @@ mod tests {
             fs::read(store.folder("zeta").join("icon_visible.png")).expect("picture"),
             [1, 2, 3]
         );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn remove_takes_the_whole_folder_and_only_a_valid_id() {
+        let root = scratch("remove");
+        let store = AppStore::new(root.clone());
+        store
+            .save(
+                "alpha",
+                &file("icon_visible.png"),
+                &[("icon_visible.png".to_owned(), vec![1])],
+            )
+            .expect("save");
+        fs::create_dir_all(store.folder("beta")).expect("broken folder");
+        store.remove("alpha").expect("remove");
+        assert!(!store.folder("alpha").exists());
+        store.remove("alpha").expect("removing again is fine");
+        let refused = store.remove("../beta").expect_err("bad id");
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+        assert!(store.folder("beta").exists());
+        // Any other failure, such as a file where the folder should be, is
+        // reported.
+        fs::write(store.folder("gamma"), b"not a folder").expect("stray file");
+        store.remove("gamma").expect_err("not a folder");
+        assert!(store.folder("gamma").exists());
         fs::remove_dir_all(root).expect("clean up");
     }
 

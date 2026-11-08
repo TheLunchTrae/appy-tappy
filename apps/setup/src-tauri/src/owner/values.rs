@@ -1,10 +1,7 @@
 //! Saved values and applications: listing them with their running windows,
 //! saving and deleting them, and each application's anti-cheat setting.
 
-use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, FORMAT, ScreenDef, SizeDef, ValueDef, value_id,
-};
-use appytappy_config::store::new_app_id;
+use appytappy_config::app_file::{AntiCheatDef, AppFile, ScreenDef, SizeDef, ValueDef, value_id};
 use appytappy_sources::screen::Image;
 
 use crate::automations::{self, Stores};
@@ -53,7 +50,12 @@ impl<H: Host> Owner<H> {
                 };
                 let matched = file
                     .as_ref()
-                    .map(|file| window_list::matching(&windows, &file.window))
+                    .map(|file| {
+                        window_list::matching(&windows, &file.window)
+                            .into_iter()
+                            .map(|fit| fit.handle)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 AppSummary {
                     id: app.id,
@@ -82,25 +84,12 @@ impl<H: Host> Owner<H> {
             .map(Image::size)
             .ok_or_else(|| "Take a screenshot first.".to_owned())?;
         let loaded = store.load().map_err(|error| error.to_string())?;
-        let (app, mut file) = if let Some(id) = &spec.app {
-            let file = loaded
-                .into_iter()
-                .find(|app| &app.id == id)
-                .ok_or_else(|| "That application is no longer saved.".to_owned())?
-                .file?;
-            (id.clone(), file)
-        } else {
-            let taken: Vec<&str> = loaded.iter().map(|app| app.id.as_str()).collect();
-            let file = AppFile {
-                format: FORMAT,
-                name: spec.name.trim().to_owned(),
-                window: spec.window.clone(),
-                anti_cheat: AntiCheatDef::Unknown,
-                overlay: None,
-                values: Vec::new(),
-            };
-            (new_app_id(&spec.window.executable, &taken), file)
-        };
+        let app = spec.app.clone();
+        let mut file = loaded
+            .into_iter()
+            .find(|each| each.id == app)
+            .ok_or_else(|| "That application is no longer saved.".to_owned())?
+            .file?;
         let id = value_id(name);
         if file.values.iter().any(|value| value.id == id) {
             return Err(format!(
@@ -170,12 +159,14 @@ impl<H: Host> Owner<H> {
 
 #[cfg(test)]
 mod tests {
+    use appytappy_config::app_file::WindowDef;
     use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
     use appytappy_sources::screen::Size;
 
     use crate::owner::messages::Request;
     use crate::owner::test_support::{
-        BAR, Harness, REFERENCE, frame_image, harness, harness_with, scratch_store, spec,
+        BAR, Harness, REFERENCE, add_example_app, frame_image, harness, harness_with,
+        scratch_store, spec,
     };
 
     use super::*;
@@ -185,10 +176,16 @@ mod tests {
         let (stores, root) = scratch_store("save");
         let apps_root = stores.apps.folder("");
         let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
         let mut handler = harness.pick();
-        let save = |spec| move |reply| Request::SaveValue { spec, reply };
+        let save = |spec| {
+            move |reply| Request::SaveValue {
+                spec: Box::new(spec),
+                reply,
+            }
+        };
         assert_eq!(
-            harness.ask(save(spec(None, "Icon visible", REFERENCE))),
+            harness.ask(save(spec("example", "Icon visible", REFERENCE))),
             Err("Take a screenshot first.".to_owned())
         );
         harness.deliver(&mut handler, Ok(&frame_image()));
@@ -205,10 +202,10 @@ mod tests {
         .expect("matching length");
         harness.deliver(&mut handler, Ok(&shrunk));
         assert_eq!(
-            harness.ask(save(spec(None, "  ", REFERENCE))),
+            harness.ask(save(spec("example", "  ", REFERENCE))),
             Err("Name the value first.".to_owned())
         );
-        let mut stale = spec(None, "Icon visible", REFERENCE);
+        let mut stale = spec("example", "Icon visible", REFERENCE);
         // A picture check's own screenshot wins over the one shown.
         stale.screenshot = 9;
         let saved = harness.ask(save(stale)).expect("saves a new app");
@@ -220,17 +217,17 @@ mod tests {
             }
         );
         harness
-            .ask(save(spec(Some("example"), "Progress bar", BAR)))
+            .ask(save(spec("example", "Progress bar", BAR)))
             .expect("adds to the app");
         assert_eq!(
-            harness.ask(save(spec(Some("example"), "Progress BAR", BAR))),
+            harness.ask(save(spec("example", "Progress BAR", BAR))),
             Err(
                 "Example App already has a value named like \"Progress BAR\". Pick another name."
                     .to_owned()
             )
         );
         assert_eq!(
-            harness.ask(save(spec(Some("gone"), "x", BAR))),
+            harness.ask(save(spec("gone", "x", BAR))),
             Err("That application is no longer saved.".to_owned())
         );
 
@@ -413,7 +410,7 @@ mod tests {
         );
         assert_eq!(
             harness.ask(|reply| Request::SaveValue {
-                spec: spec(None, "x", BAR),
+                spec: Box::new(spec("example", "x", BAR)),
                 reply
             }),
             Err("no store in this test".to_owned())
@@ -422,6 +419,28 @@ mod tests {
             harness.ask(|reply| Request::DeleteValue {
                 app: "a".to_owned(),
                 value: "b".to_owned(),
+                reply
+            }),
+            Err("no store in this test".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::SaveApp {
+                existing: None,
+                spec: crate::applications::AppSpec {
+                    name: "Example App".to_owned(),
+                    window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                        title: "Example App",
+                        class: "ExampleWindow",
+                        executable: "Example.exe",
+                    }),
+                },
+                reply
+            }),
+            Err("no store in this test".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|reply| Request::RemoveApp {
+                app: "a".to_owned(),
                 reply
             }),
             Err("no store in this test".to_owned())

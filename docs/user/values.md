@@ -12,12 +12,12 @@ whose window is open now.
 
 On the Values page, select **New value**.
 
-1. **Pick the window.** The list shows the open windows; type in the filter
-   to find one. If the window belongs to an application you already saved,
-   AppyTappy picks that application, so the new value joins it. Otherwise
-   **Save values to** is **A new application**: give it a name, and check how
-   AppyTappy will [find its window](applications.md#how-appytappy-finds-the-window).
-   Then select **Capture this window**.
+1. **Pick the window.** Choose the application in **Save values to**, then
+   pick its window in the list of open windows; type in the filter to find
+   one. Picking a window a saved application finds chooses that application.
+   If the application isn't saved yet, select **Add application** to
+   [add it](applications.md#add-change-or-remove-an-application) first. Then
+   select **Capture this window**.
 2. **Take screenshots.** Select **Take screenshot**, or press the screenshot
    shortcut, `F9` at first. The shortcut works while the other application
    has the keyboard, so you can carry on in it until it shows what you want

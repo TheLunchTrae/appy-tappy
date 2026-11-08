@@ -493,7 +493,7 @@ mod tests {
 
     use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
     use appytappy_config::rule::Rule;
-    use appytappy_config::window_match::{MatchPriority, Pattern, WindowMatch};
+    use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{Check, ColorMatch};
     use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::SavedCheck;
@@ -549,7 +549,11 @@ mod tests {
                 title: Pattern::new("Main*"),
                 class: Pattern::new("*"),
                 executable: Pattern::new("Example.exe"),
-                priority: MatchPriority::Title,
+                must_match: MustMatch {
+                    title: true,
+                    class: true,
+                },
+                fallback: false,
             },
             values,
             rules: Arc::<[Rule]>::from(Vec::new()),

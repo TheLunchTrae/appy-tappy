@@ -15,12 +15,13 @@ use tauri::ipc::Response;
 use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 
+use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{self, Card, OverlayView};
 use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
 use crate::recording::RecordingView;
-use crate::window_list::WindowList;
+use crate::window_list::{WindowFit, WindowList};
 
 /// The UI's way to the owner thread.
 #[derive(Debug)]
@@ -143,9 +144,12 @@ pub(crate) async fn stop_watching(app: AppHandle, watch: u64) -> Result<(), Stri
     ask(&app, |reply| Request::StopWatching { watch, reply }).await
 }
 
-/// The handles of the running windows `window` matches, the best fit first.
+/// The running windows `window` takes, the best fit first.
 #[tauri::command]
-pub(crate) async fn match_windows(app: AppHandle, window: WindowDef) -> Result<Vec<u64>, String> {
+pub(crate) async fn match_windows(
+    app: AppHandle,
+    window: WindowDef,
+) -> Result<Vec<WindowFit>, String> {
     ask(&app, |reply| Request::MatchWindows { window, reply }).await?
 }
 
@@ -155,7 +159,34 @@ pub(crate) async fn list_apps(app: AppHandle) -> Result<Vec<AppSummary>, String>
     ask(&app, Request::ListApps).await?
 }
 
-/// Saves a value, and a new application with it when `spec` names none.
+/// Saves an application's name and window match over the application
+/// `existing`, or as a new application; answers its ID.
+#[tauri::command]
+pub(crate) async fn save_app(
+    app: AppHandle,
+    existing: Option<String>,
+    spec: AppSpec,
+) -> Result<String, String> {
+    ask(&app, |reply| Request::SaveApp {
+        existing,
+        spec,
+        reply,
+    })
+    .await?
+}
+
+/// Removes an application with its values, unless an automation watches one
+/// of them.
+#[tauri::command]
+pub(crate) async fn remove_app(app: AppHandle, application: String) -> Result<(), String> {
+    ask(&app, |reply| Request::RemoveApp {
+        app: application,
+        reply,
+    })
+    .await?
+}
+
+/// Saves a value to the application `spec` names.
 #[tauri::command]
 pub(crate) async fn save_value(app: AppHandle, spec: SaveSpec) -> Result<SavedValue, String> {
     let spec = Box::new(spec);

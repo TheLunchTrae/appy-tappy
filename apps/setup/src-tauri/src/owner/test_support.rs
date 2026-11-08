@@ -12,6 +12,7 @@ use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 use tokio::sync::oneshot;
 
+use crate::applications::AppSpec;
 use crate::automations::Stores;
 use crate::ocr;
 
@@ -265,19 +266,30 @@ impl Harness {
     }
 }
 
-pub(super) fn spec(app: Option<&str>, value_name: &str, check: &str) -> Box<SaveSpec> {
-    Box::new(SaveSpec {
-        app: app.map(str::to_owned),
-        name: " Example App ".to_owned(),
-        window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
-            title: "Example App",
-            class: "ExampleWindow",
-            executable: "Example.exe",
-        }),
+pub(super) fn spec(app: &str, value_name: &str, check: &str) -> SaveSpec {
+    SaveSpec {
+        app: app.to_owned(),
         value_name: value_name.to_owned(),
         check: serde_json::from_str(check).expect("valid JSON"),
         screenshot: 0,
-    })
+    }
+}
+
+/// Saves `Example App`, with no values, as the application `example`.
+pub(super) fn add_example_app(harness: &mut Harness) {
+    let saved = harness.ask(|reply| Request::SaveApp {
+        existing: None,
+        spec: AppSpec {
+            name: " Example App ".to_owned(),
+            window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                title: "Example App",
+                class: "ExampleWindow",
+                executable: "Example.exe",
+            }),
+        },
+        reply,
+    });
+    assert_eq!(saved, Ok("example".to_owned()));
 }
 
 pub(super) const REFERENCE: &str = r#"{"kind":"reference","region":{"x":0,"y":0,"width":2,"height":2},
@@ -291,12 +303,13 @@ pub(super) const BAR: &str = r#"{"kind":"barFill","region":{"x":0,"y":0,"width":
 pub(super) fn with_saved_bar(name: &str) -> (Harness, std::path::PathBuf) {
     let (stores, root) = scratch_store(name);
     let mut harness = harness_with(false, Ok(stores));
+    add_example_app(&mut harness);
     let mut handler = harness.pick();
     harness.deliver(&mut handler, Ok(&frame_image()));
     assert_eq!(harness.ask(Request::Screenshot), Ok(0));
     harness
         .ask(|reply| Request::SaveValue {
-            spec: spec(None, "Progress bar", BAR),
+            spec: Box::new(spec("example", "Progress bar", BAR)),
             reply,
         })
         .expect("saves");

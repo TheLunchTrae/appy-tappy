@@ -472,7 +472,7 @@ mod tests {
     use std::process;
 
     use appytappy_config::anti_cheat::ProcessId;
-    use appytappy_config::window_match::{MatchPriority, Pattern, WindowMatch};
+    use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
 
     use super::*;
     use crate::workers::reader;
@@ -600,7 +600,11 @@ mod tests {
                 title: Pattern::new("*"),
                 class: Pattern::new("*"),
                 executable: Pattern::new("Example.exe"),
-                priority: MatchPriority::Title,
+                must_match: MustMatch {
+                    title: true,
+                    class: true,
+                },
+                fallback: false,
             },
             values: Vec::new(),
             rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),

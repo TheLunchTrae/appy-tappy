@@ -9,29 +9,37 @@ import {
   listAutomations,
   syncOverlays,
 } from './lib/api.ts';
-import { background, useRepeat } from './lib/repeat.ts';
+import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
 import { NewValue } from './pages/NewValue.tsx';
+import { background, useRepeat } from './lib/repeat.ts';
 import { ValuesPage } from './pages/ValuesPage.tsx';
 
-type Page = 'values' | 'automations' | 'applications';
+type Page = 'automations' | 'applications' | 'values';
 
+/**
+ * The pages, Automations first since running them is what the app is for, then in the order something new is set
+ * up: the application, then the values read from it.
+ */
 const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
-  { id: 'values', name: 'Values' },
   { id: 'automations', name: 'Automations' },
   { id: 'applications', name: 'Applications' },
+  { id: 'values', name: 'Values' },
 ];
 
 /** What the window shows in place of a page: a flow that makes or changes something. */
-type Flow = { readonly kind: 'value' } | { readonly kind: 'automation'; readonly existing: AutomationDef | null };
+type Flow =
+  | { readonly kind: 'value' }
+  | { readonly kind: 'automation'; readonly existing: AutomationDef | null }
+  | { readonly kind: 'application'; readonly existing: AppSummary | null };
 
 /** How often the saved files are read again, which also refreshes which applications are running. */
 const REFRESH_MS = 3000;
 
 export function App() {
-  const [page, setPage] = useState<Page>('values');
+  const [page, setPage] = useState<Page>('automations');
   const [flow, setFlow] = useState<Flow | null>(null);
   const [apps, setApps] = useState<readonly AppSummary[] | null>(null);
   const [automations, setAutomations] = useState<readonly AutomationSummary[] | null>(null);
@@ -78,6 +86,24 @@ export function App() {
           onSaved={() => {
             setFlow(null);
             setPage('values');
+          }}
+          onAddApplication={() => {
+            setFlow({ kind: 'application', existing: null });
+          }}
+        />
+      );
+    }
+    if (flow?.kind === 'application') {
+      return (
+        <ApplicationEditor
+          existing={flow.existing}
+          onCancel={() => {
+            setFlow(null);
+          }}
+          onSaved={() => {
+            setFlow(null);
+            setPage('applications');
+            background(refresh());
           }}
         />
       );
@@ -127,7 +153,19 @@ export function App() {
           />
         );
       case 'applications':
-        return <ApplicationsPage apps={apps} loadError={loadError} onChanged={refresh} />;
+        return (
+          <ApplicationsPage
+            apps={apps}
+            loadError={loadError}
+            onChanged={refresh}
+            onAdd={() => {
+              setFlow({ kind: 'application', existing: null });
+            }}
+            onEdit={(app) => {
+              setFlow({ kind: 'application', existing: app });
+            }}
+          />
+        );
     }
   })();
 

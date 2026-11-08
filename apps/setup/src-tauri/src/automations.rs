@@ -202,8 +202,8 @@ pub(crate) fn delete(stores: &Stores, id: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Refuses to remove the value `value` of the application `app`, named
-/// `name`, while an automation watches it, naming those automations.
+/// Fails, naming the automations that watch the value `value` of the
+/// application `app`, unless none does. `name` is the value's name.
 pub(crate) fn check_unused(
     stores: &Stores,
     app: &str,
@@ -211,17 +211,34 @@ pub(crate) fn check_unused(
     name: &str,
 ) -> Result<(), String> {
     let file = load(stores)?;
-    let users: Vec<&str> = file
-        .watching(app, value)
-        .map(|automation| automation.name.as_str())
-        .collect();
+    unused(file.watching(app, value), name)
+}
+
+/// Fails, naming the automations that watch any value of the application
+/// `app`, unless none does. `name` is the application's name.
+pub(crate) fn check_app_unused(stores: &Stores, app: &str, name: &str) -> Result<(), String> {
+    let file = load(stores)?;
+    unused(
+        file.automations
+            .iter()
+            .filter(|automation| automation.when.app == app),
+        &format!("a value of {name}"),
+    )
+}
+
+/// Fails, naming `users`, unless there are none. `what` is what they use.
+fn unused<'file>(
+    users: impl Iterator<Item = &'file AutomationDef>,
+    what: &str,
+) -> Result<(), String> {
+    let users: Vec<&str> = users.map(|automation| automation.name.as_str()).collect();
     let named = match users.as_slice() {
         [] => return Ok(()),
         [only] => format!("{only} uses"),
         [first @ .., last] => format!("{} and {last} use", first.join(", ")),
     };
     Err(format!(
-        "{named} {name}. Change or delete {} first.",
+        "{named} {what}. Change or delete {} first.",
         if users.len() == 1 { "it" } else { "them" }
     ))
 }

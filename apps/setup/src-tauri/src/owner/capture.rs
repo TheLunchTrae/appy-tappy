@@ -128,6 +128,7 @@ mod tests {
     use crate::owner::run;
     use crate::owner::test_support::{Harness, frame_image, harness};
     use crate::pixels;
+    use crate::window_list::WindowFit;
 
     use super::*;
 
@@ -295,7 +296,11 @@ mod tests {
         });
         assert_eq!(
             harness.ask(|reply| Request::MatchWindows { window, reply }),
-            Ok(vec![7])
+            Ok(vec![WindowFit {
+                handle: 7,
+                fallback: false,
+                best: true
+            }])
         );
     }
 

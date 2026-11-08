@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![windows_subsystem = "windows"]
 
+mod applications;
 mod automations;
 mod check_spec;
 mod commands;
@@ -86,6 +87,8 @@ fn main() -> ExitCode {
             commands::stop_watching,
             commands::match_windows,
             commands::list_apps,
+            commands::save_app,
+            commands::remove_app,
             commands::save_value,
             commands::delete_value,
             commands::set_anti_cheat,
