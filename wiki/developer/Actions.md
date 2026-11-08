@@ -163,7 +163,7 @@ shows. For a picture, the window must have the size the picture was taken
 at; the runtime then grabs one frame of the area, waits up to a second for
 it, and looks for the picture there (see
 [Screen regions](Screen-regions.md)). It reads the window's frame again after
-the grab, and a window that moved meanwhile is not clicked. Nothing is
+the search, and a window that moved since the grab is not clicked. Nothing is
 clicked when the picture is not found, and the log says why.
 
 The search compares the picture's kept pixels with each place it fits in the
@@ -183,14 +183,17 @@ two, and only while no mouse button or modifier key is held, so it is never
 a drag or a Ctrl-click. It brings the click's window to the front first with
 `SetForegroundWindow`, because a game in front may keep the cursor inside
 its window or hold the mouse, and would then get the press itself. Windows
-may refuse that while another program holds the foreground, and the click
-is then skipped. It clicks only when the click's window is the one that
+lets only the program in front move the foreground, so the adapter attaches
+its thread to the input of the window in front for the moment it asks
+(`AttachThreadInput`). Windows may still refuse, and the click is then
+skipped. It clicks only when the click's window is the one that
 shows at its place, so it never lands in a window that covers it. It then
 moves the cursor there with `SetCursorPos` and reads the cursor back, since
 Windows keeps the cursor inside a window that confines it without failing
 the move; a cursor that did not get there skips the press. It presses
-through `SendInput`, one button event at a time, holding each button down
-20 ms so an application that reads the buttons once a frame sees it, waits
+through `SendInput`, one button event at a time, 20 ms apart so an
+application that reads the buttons once a frame sees each button go down,
+and for a double click up again between the two, waits
 40 ms so one that reads the cursor once a frame still sees it there, and
 moves the cursor back. A double click stays well inside the double-click
 time. Injected events name the physical buttons, so with the buttons

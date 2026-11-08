@@ -40,8 +40,9 @@ impl Press {
 /// there.
 pub const CLICK_HOLD: Duration = Duration::from_millis(40);
 
-/// How long a click holds its button down, so an application that reads
-/// the buttons once a frame still sees it down.
+/// How long each press of a click lasts before the next, so an application
+/// that reads the buttons once a frame sees the button down, and for a
+/// double click up again between the two.
 pub const PRESS_HOLD: Duration = Duration::from_millis(20);
 
 /// The presses that click `button`: down and up, twice for a double click.

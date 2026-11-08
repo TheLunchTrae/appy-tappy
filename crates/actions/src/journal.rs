@@ -326,7 +326,9 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                     of: presses.len(),
                 },
                 Ok(_) => {
-                    if press.down {
+                    // Each press stays a moment before the next, so a
+                    // double click's second press is seen as a second one.
+                    if press.down || sent < presses.len().saturating_sub(1) {
                         self.controls.hold(PRESS_HOLD);
                     }
                     last = Some(press);
@@ -1875,6 +1877,7 @@ mod tests {
                 "buttons Left↓",
                 "hold 20ms",
                 "buttons Left↑",
+                "hold 20ms",
                 "buttons Left↓",
                 "hold 20ms",
                 "buttons Left↑",
