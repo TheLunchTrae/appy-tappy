@@ -130,7 +130,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         .ok();
     let mut retry = None;
     let first = load(&stores, log).unwrap_or_else(|error| {
-        retry = failed(log, &error, retry, Instant::now());
+        retry = failed(log, &error, None, Instant::now(), Had::Nothing);
         plan::Plan::default()
     });
     let lifecycle = Lifecycle::new(first.watchlist(), Instant::now());
@@ -176,17 +176,14 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let orders = model.replan(first.apps);
     carry(orders, &mut crew, log);
     loop {
-        let due = [model.next_due(), retry.map(|retry: Retry| retry.at)]
-            .into_iter()
-            .flatten()
-            .min();
+        let due = wake(model.next_due(), retry);
         let Some(event) = next(&events, due) else {
             break;
         };
         let read_again = match handle(&mut model, log, event) {
             Step::Carry(orders) => {
                 carry(orders, &mut crew, log);
-                retry.is_some_and(|retry| retry.at <= Instant::now())
+                retry.is_some_and(|retry| retry.due(Instant::now()))
             },
             Step::Reload => {
                 // A save starts the tries over.
@@ -369,6 +366,31 @@ struct Retry {
     left: u32,
 }
 
+impl Retry {
+    /// Whether the files are to be read again at `now`.
+    fn due(self, now: Instant) -> bool {
+        self.at <= now
+    }
+}
+
+/// When the owner wakes with no event: the first of `next_due`, when a held
+/// rule is due, and `retry`, when it reads the saved files again.
+fn wake(next_due: Option<Instant>, retry: Option<Retry>) -> Option<Instant> {
+    [next_due, retry.map(|retry| retry.at)]
+        .into_iter()
+        .flatten()
+        .min()
+}
+
+/// What the runtime runs while the saved files cannot be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Had {
+    /// Nothing, since it has just started.
+    Nothing,
+    /// The plan from the last read that worked.
+    Plan,
+}
+
 /// Reads the saved automations and logs what cannot run.
 ///
 /// # Errors
@@ -400,16 +422,22 @@ fn reread(
             Some((plan.watchlist(), model.replan(plan.apps)))
         },
         Err(error) => {
-            *retry = failed(log, &error, *retry, now);
+            *retry = failed(log, &error, *retry, now, Had::Plan);
             None
         },
     }
 }
 
-/// Logs that the saved files cannot be read for `error`, and returns when
-/// to read them again: soon, unless `previous`, the try that just failed,
-/// was the last.
-fn failed(log: &mut Log, error: &str, previous: Option<Retry>, now: Instant) -> Option<Retry> {
+/// Logs that the saved files cannot be read for `error`, and what the
+/// runtime runs meanwhile, as `had` says, and returns when to read them
+/// again: soon, unless `previous`, the try that just failed, was the last.
+fn failed(
+    log: &mut Log,
+    error: &str,
+    previous: Option<Retry>,
+    now: Instant,
+    had: Had,
+) -> Option<Retry> {
     let left = previous
         .map_or(RETRIES, |previous| previous.left)
         .checked_sub(1);
@@ -424,10 +452,11 @@ fn failed(log: &mut Log, error: &str, previous: Option<Retry>, now: Instant) -> 
     } else {
         "waits for the next save".to_owned()
     };
-    note(
-        log,
-        &format!("{error}, so the runtime keeps running what it ran and {then}"),
-    );
+    let keeps = match had {
+        Had::Nothing => "starts with no automations",
+        Had::Plan => "keeps running what it ran",
+    };
+    note(log, &format!("{error}, so the runtime {keeps} and {then}"));
     retry
 }
 
@@ -824,6 +853,7 @@ mod tests {
             "the automations cannot be read: locked",
             None,
             now,
+            Had::Nothing,
         );
         assert_eq!(
             retry.map(|retry| retry.at),
@@ -856,9 +886,29 @@ mod tests {
             "{written:?}"
         );
         assert!(
+            written.contains("locked, so the runtime starts with no automations and reads them"),
+            "{written:?}"
+        );
+        assert!(
             written.ends_with("no saved automation can run\n"),
             "{written:?}"
         );
+    }
+
+    #[test]
+    fn a_retry_alone_wakes_the_owner() {
+        let now = Instant::now();
+        let soon = now.checked_add(Duration::from_secs(1)).expect("soon");
+        let later = now.checked_add(Duration::from_secs(3)).expect("later");
+        let retry = |at| Retry { at, left: 2 };
+        assert_eq!(wake(None, None), None);
+        assert_eq!(wake(None, Some(retry(soon))), Some(soon));
+        assert_eq!(wake(Some(later), Some(retry(soon))), Some(soon));
+        assert_eq!(wake(Some(soon), Some(retry(later))), Some(soon));
+        assert_eq!(wake(Some(soon), None), Some(soon));
+        assert!(!retry(soon).due(now), "not yet");
+        assert!(retry(soon).due(soon), "right on time");
+        assert!(retry(now).due(soon), "late");
     }
 
     #[test]
