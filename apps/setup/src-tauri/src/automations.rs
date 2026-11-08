@@ -4,7 +4,9 @@
 //! and name a value by its application's ID and the value's ID. Saving one
 //! checks it against the saved applications, so it never names a value that
 //! is not there or compares a value with the wrong kind of target. A value
-//! that later goes away shows as a problem on the automation that used it.
+//! that later goes away shows as a problem on the automation that used it,
+//! and so does an automation that breaks a rule on its own, such as after a
+//! hand edit; either can still be turned off and deleted.
 
 use appytappy_config::action::KeyChord;
 use appytappy_config::app_file::AppFile;
@@ -53,9 +55,22 @@ fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
     stores.apps.load().map_err(|error| error.to_string())
 }
 
+/// What stops `automation`, one of `file`'s, from running with the
+/// applications in `apps`, if anything: a rule it breaks on its own, such as
+/// after a hand edit, or a change to its application since it was saved.
+fn problem(
+    file: &AutomationsFile,
+    automation: &AutomationDef,
+    apps: &[StoredApp],
+) -> Option<String> {
+    file.problem(automation)
+        .map(|problem| sentence(&problem))
+        .or_else(|| app_problem(automation, apps))
+}
+
 /// What stops `automation` from running with the applications in `apps`, if
 /// anything.
-fn problem(automation: &AutomationDef, apps: &[StoredApp]) -> Option<String> {
+fn app_problem(automation: &AutomationDef, apps: &[StoredApp]) -> Option<String> {
     if let Some(broken) = apps
         .iter()
         .find(|app| app.id == automation.when.app && app.file.is_err())
@@ -83,13 +98,10 @@ pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
     let apps = apps(stores)?;
     Ok(file
         .automations
-        .into_iter()
-        .map(|automation| {
-            let problem = problem(&automation, &apps);
-            AutomationSummary {
-                automation,
-                problem,
-            }
+        .iter()
+        .map(|automation| AutomationSummary {
+            automation: automation.clone(),
+            problem: problem(&file, automation, &apps),
         })
         .collect())
 }
@@ -123,7 +135,7 @@ pub(crate) fn save(
     }
     draft.validate().map_err(|problem| sentence(&problem))?;
     let apps = apps(stores)?;
-    if let Some(problem) = problem(&draft, &apps) {
+    if let Some(problem) = app_problem(&draft, &apps) {
         return Err(problem);
     }
     let mut file = load(stores)?;
@@ -169,16 +181,22 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
     let mut file = load(stores)?;
     let automation = file
         .automations
-        .iter_mut()
+        .iter()
         .find(|automation| automation.id == id)
         .ok_or_else(|| "That automation is no longer saved.".to_owned())?;
-    if enabled && let Some(problem) = problem(automation, &apps(stores)?) {
+    if enabled && let Some(problem) = problem(&file, automation, &apps(stores)?) {
         return Err(format!(
             "{} cannot run until it is fixed. {problem}",
             automation.name
         ));
     }
-    automation.enabled = enabled;
+    for automation in file
+        .automations
+        .iter_mut()
+        .filter(|automation| automation.id == id)
+    {
+        automation.enabled = enabled;
+    }
     stores
         .automations
         .save(&file)
@@ -452,6 +470,34 @@ mod tests {
             list(&stores).expect("lists")[0].problem.as_deref(),
             Some("Its application's app.json, in the example folder, cannot be read.")
         );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_broken_automation_is_listed_and_can_be_deleted() {
+        let (stores, folder) = stores("broken");
+        save(&stores, None, draft("Pause music")).expect("saves");
+        let mut file = stores.automations.load().expect("loads");
+        let mut broken = draft("Broken");
+        broken.id = "broken".to_owned();
+        broken.actions.clear();
+        file.automations.push(broken);
+        // A hand edit, which the setup app's own save refuses.
+        fs::write(folder.join("automations.json"), file.to_json()).expect("writes");
+        let problems: Vec<Option<String>> = list(&stores)
+            .expect("one broken automation leaves the list readable")
+            .into_iter()
+            .map(|summary| summary.problem)
+            .collect();
+        assert_eq!(problems, [None, Some("Add an action.".to_owned())]);
+        set_enabled(&stores, "pause_music", false).expect("the others still change");
+        set_enabled(&stores, "broken", false).expect("turns off");
+        assert_eq!(
+            set_enabled(&stores, "broken", true),
+            Err("Broken cannot run until it is fixed. Add an action.".to_owned())
+        );
+        delete(&stores, "broken").expect("removes");
+        assert_eq!(ids(&stores), ["pause_music"]);
         fs::remove_dir_all(folder).expect("clean up");
     }
 

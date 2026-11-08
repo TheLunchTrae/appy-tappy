@@ -164,7 +164,12 @@ Each thread below is a plain `std::thread`, and each channel is a
   saved applications and automations again. An application whose automations
   did not change keeps running untouched; one whose automations changed starts
   over, undoing what they changed first. An automation that cannot run, such
-  as one whose value lost a picture, is logged, and the rest run. The runtime
+  as one whose value lost a picture or one that breaks a rule after a hand
+  edit, is logged, and the rest run. When the applications' folder or the
+  automations' file cannot be read as a whole, such as while another program
+  holds the file, the runtime logs it, keeps running the plan it has, and
+  reads them again every 2 seconds, up to 5 times, before it waits for the
+  next save. The runtime
   reads the setup app's files directly; the compiled config under
   [Files and handoff](#files-and-handoff) stays planned in
   [#8](https://github.com/TheLunchTrae/appy-tappy/issues/8).

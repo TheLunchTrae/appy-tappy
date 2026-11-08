@@ -7,12 +7,13 @@
 //! of automations can use the same value. The file is JSON, so a person can
 //! read it and a text diff shows a change.
 //!
-//! [`AutomationsFile::parse`] checks everything one automation can get wrong
-//! on its own. Whether the value it names still exists, and reads the kind of
-//! value its condition compares, depends on the applications' files, which
+//! [`AutomationsFile::parse`] checks the file as a whole, and
+//! [`AutomationsFile::problem`] everything one automation can get wrong on
+//! its own, so one broken automation leaves the others usable. Whether the
+//! value it names still exists, and reads the kind of value its condition
+//! compares, depends on the applications' files, which
 //! [`AutomationDef::check_against`] checks.
 
-use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
@@ -370,13 +371,13 @@ impl AutomationDef {
 }
 
 impl AutomationsFile {
-    /// Reads and checks a file's JSON.
+    /// Reads a file's JSON and checks its format version. An automation that
+    /// breaks a rule is kept, and [`AutomationsFile::problem`] says why.
     ///
     /// # Errors
     ///
-    /// Returns an [`AutomationsError`] naming the first problem: JSON that
-    /// does not fit the format, another format version, or an automation
-    /// that breaks a rule in [`AutomationsFile::check`].
+    /// Returns an [`AutomationsError`] naming the problem: JSON that does not
+    /// fit the format, or another format version.
     pub fn parse(json: &str) -> Result<Self, AutomationsError> {
         let file: Self = serde_json::from_str(json)
             .map_err(|error| AutomationsError::Json(error.to_string()))?;
@@ -396,32 +397,40 @@ impl AutomationsFile {
         json
     }
 
-    /// Checks the rules JSON alone cannot: the format version, a name and a
-    /// valid, unique ID for each automation, and that each one makes a valid
-    /// rule.
+    /// Checks the format version, which decides how the whole file reads.
     ///
     /// # Errors
     ///
-    /// Returns an [`AutomationsError`] naming the first problem.
+    /// Returns [`AutomationsError::Format`] for another version.
     pub fn check(&self) -> Result<(), AutomationsError> {
-        if self.format != FORMAT {
-            return Err(AutomationsError::Format(self.format));
+        if self.format == FORMAT {
+            Ok(())
+        } else {
+            Err(AutomationsError::Format(self.format))
         }
-        let mut ids = BTreeSet::new();
-        for automation in &self.automations {
-            let problem =
-                |problem: String| AutomationsError::Automation(automation.id.clone(), problem);
-            SignalName::new(&automation.id)
-                .map_err(|_invalid| problem(format!("its ID {ID_RULES}")))?;
-            if !ids.insert(automation.id.as_str()) {
-                return Err(problem("another automation has the same ID".to_owned()));
-            }
-            if automation.name.trim().is_empty() {
-                return Err(problem("it has no name".to_owned()));
-            }
-            automation.validate().map_err(problem)?;
+    }
+
+    /// What breaks a rule JSON alone cannot check in `automation`, one of
+    /// this file's: a valid ID no other automation has, a name, and a valid
+    /// rule. Nothing runs an automation that has a problem, but the file
+    /// keeps it, so the setup app can show it and delete it.
+    #[must_use]
+    pub fn problem(&self, automation: &AutomationDef) -> Option<String> {
+        if SignalName::new(&automation.id).is_err() {
+            return Some(format!("its ID {ID_RULES}"));
         }
-        Ok(())
+        let same = self
+            .automations
+            .iter()
+            .filter(|other| other.id == automation.id)
+            .count();
+        if same > 1 {
+            return Some("another automation has the same ID".to_owned());
+        }
+        if automation.name.trim().is_empty() {
+            return Some("it has no name".to_owned());
+        }
+        automation.validate().err()
     }
 
     /// The automations that watch the value `value` of the application
@@ -444,8 +453,6 @@ pub enum AutomationsError {
     Json(String),
     /// The file has a format version this build does not know.
     Format(u32),
-    /// An automation, named by its ID, breaks a rule.
-    Automation(String, String),
 }
 
 impl fmt::Display for AutomationsError {
@@ -457,7 +464,6 @@ impl fmt::Display for AutomationsError {
                 "the automations file has format {format}, but this version of AppyTappy reads \
                  format {FORMAT}"
             ),
-            Self::Automation(id, problem) => write!(formatter, "automation {id:?}: {problem}"),
         }
     }
 }
@@ -861,31 +867,26 @@ mod tests {
 
         let twice = file(vec![pause_music(), pause_music()]);
         assert_eq!(
-            twice.check(),
-            Err(AutomationsError::Automation(
-                "pause_music".to_owned(),
-                "another automation has the same ID".to_owned()
-            ))
+            twice
+                .automations
+                .iter()
+                .map(|automation| twice.problem(automation))
+                .collect::<Vec<_>>(),
+            vec![Some("another automation has the same ID".to_owned()); 2]
         );
 
         let mut unnamed = pause_music();
         unnamed.name = " ".to_owned();
         assert_eq!(
-            file(vec![unnamed]).check(),
-            Err(AutomationsError::Automation(
-                "pause_music".to_owned(),
-                "it has no name".to_owned()
-            ))
+            file(Vec::new()).problem(&unnamed),
+            Some("it has no name".to_owned())
         );
 
         let mut bad_id = pause_music();
         bad_id.id = "Pause music".to_owned();
         assert_eq!(
-            file(vec![bad_id]).check(),
-            Err(AutomationsError::Automation(
-                "Pause music".to_owned(),
-                format!("its ID {ID_RULES}")
-            ))
+            file(Vec::new()).problem(&bad_id),
+            Some(format!("its ID {ID_RULES}"))
         );
 
         let mut bad_value = pause_music();
@@ -904,14 +905,6 @@ mod tests {
             "the wait before it can run again is longer than a day"
         );
 
-        let mut broken = pause_music();
-        broken.actions.clear();
-        let error = file(vec![broken]).check().expect_err("no actions");
-        assert_eq!(
-            error.to_string(),
-            "automation \"pause_music\": add an action"
-        );
-
         let json = AutomationsFile::parse("{\"format\":1}").expect_err("no list");
         assert!(
             json.to_string()
@@ -925,6 +918,27 @@ mod tests {
         let mut broken_json = file(vec![pause_music()]).to_json();
         broken_json = broken_json.replace("\"undo\": true", "\"undo\": true, \"when2\": 1");
         assert!(AutomationsFile::parse(&broken_json).is_err());
+        assert_eq!(
+            AutomationsFile::parse(r#"{"format":2,"automations":[]}"#),
+            Err(AutomationsError::Format(2))
+        );
+    }
+
+    #[test]
+    fn a_broken_automation_leaves_the_others_usable() {
+        let mut broken = pause_music();
+        broken.id = "broken".to_owned();
+        broken.actions.clear();
+        let parsed = AutomationsFile::parse(&file(vec![broken, pause_music()]).to_json())
+            .expect("the file as a whole reads");
+        assert_eq!(
+            parsed
+                .automations
+                .iter()
+                .map(|automation| parsed.problem(automation))
+                .collect::<Vec<_>>(),
+            [Some("add an action".to_owned()), None]
+        );
     }
 
     #[test]

@@ -6,7 +6,8 @@
 //! enabled automation becomes a rule, and each value an automation watches
 //! becomes a ready check. An application is watched only when at least one
 //! of its automations can run. Whatever cannot run is named in
-//! [`Plan::problems`] for the log, and the rest still runs.
+//! [`Plan::problems`] for the log, and the rest still runs. Only a store that
+//! cannot be read as a whole makes [`load`] fail.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -71,25 +72,22 @@ impl Plan {
 }
 
 /// Reads the saved files and compiles them.
-pub(crate) fn load(apps: &AppStore, automations: &AutomationStore) -> Plan {
-    let stored = match apps.load() {
-        Ok(stored) => stored,
-        Err(error) => return failed(&format!("the applications cannot be read: {error}")),
-    };
-    let file = match automations.load() {
-        Ok(file) => file,
-        Err(error) => return failed(&format!("the automations cannot be read: {error}")),
-    };
-    compile(&stored, &file, |app, name| {
+///
+/// # Errors
+///
+/// Returns why, as a sentence for the log, when the applications' folder
+/// or the automations' file cannot be read as a whole, such as while
+/// another program holds the file.
+pub(crate) fn load(apps: &AppStore, automations: &AutomationStore) -> Result<Plan, String> {
+    let stored = apps
+        .load()
+        .map_err(|error| format!("the applications cannot be read: {error}"))?;
+    let file = automations
+        .load()
+        .map_err(|error| format!("the automations cannot be read: {error}"))?;
+    Ok(compile(&stored, &file, |app, name| {
         fs::read(apps.folder(app).join(name))
-    })
-}
-
-fn failed(problem: &str) -> Plan {
-    Plan {
-        apps: BTreeMap::new(),
-        problems: vec![problem.to_owned()],
-    }
+    }))
 }
 
 /// An application's part of the plan while it is being compiled.
@@ -125,6 +123,10 @@ pub(crate) fn compile(
         let mut problem = |problem: &str| {
             problems.push(format!("{} cannot run: {problem}", automation.name));
         };
+        if let Some(reason) = automations.problem(automation) {
+            problem(&reason);
+            continue;
+        }
         if let Some(broken) = apps
             .iter()
             .find(|app| app.id == when.app && app.file.is_err())
@@ -384,6 +386,10 @@ mod tests {
             automation("picture", "example", "icon", TargetDef::Flag(true)),
             automation("again", "example", "icon", TargetDef::Flag(false)),
             automation("good", "example", "progress", TargetDef::Number(90.0)),
+            AutomationDef {
+                actions: Vec::new(),
+                ..automation("empty", "example", "progress", TargetDef::Number(90.0))
+            },
         ]);
         let plan = compile(&apps, &automations, no_pictures);
         assert_eq!(
@@ -395,6 +401,7 @@ mod tests {
                 "Automation kind cannot run: The progress reads a number, so compare it with a number",
                 "Automation picture cannot run: The icon of Example App: its picture icon.png cannot be read",
                 "Automation again cannot run: The icon of Example App: its picture icon.png cannot be read",
+                "Automation empty cannot run: add an action",
             ]
         );
         let example = plan.apps.get("example").expect("the good automation runs");
@@ -473,7 +480,7 @@ mod tests {
         let automations = AutomationStore::new(root.join("automations.json"));
         assert_eq!(
             load(&apps, &automations),
-            Plan::default(),
+            Ok(Plan::default()),
             "nothing saved yet"
         );
         apps.save(
@@ -490,17 +497,12 @@ mod tests {
                 TargetDef::Number(5.0),
             )]))
             .expect("save the automations");
-        let plan = load(&apps, &automations);
+        let plan = load(&apps, &automations).expect("loads");
         assert!(plan.apps.contains_key("example"), "{plan:?}");
         fs::write(root.join("automations.json"), "not JSON").expect("break the file");
-        let broken = load(&apps, &automations);
-        assert!(broken.apps.is_empty());
-        assert_eq!(broken.problems.len(), 1);
+        let broken = load(&apps, &automations).expect_err("unreadable");
         assert!(
-            broken
-                .problems
-                .first()
-                .is_some_and(|problem| problem.starts_with("the automations cannot be read: ")),
+            broken.starts_with("the automations cannot be read: "),
             "{broken:?}"
         );
         fs::remove_dir_all(&root).expect("clean up");
@@ -508,13 +510,10 @@ mod tests {
         // through a file missing, which reads as an empty store, so the store
         // is the file itself.
         fs::write(&root, "a file where the folder should be").expect("block the folder");
-        let blocked = load(&AppStore::new(root.clone()), &automations);
+        let blocked = load(&AppStore::new(root.clone()), &automations).expect_err("unreadable");
         fs::remove_file(&root).expect("clean up");
         assert!(
-            blocked
-                .problems
-                .first()
-                .is_some_and(|problem| problem.starts_with("the applications cannot be read: ")),
+            blocked.starts_with("the applications cannot be read: "),
             "{blocked:?}"
         );
     }
