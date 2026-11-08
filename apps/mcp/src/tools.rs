@@ -150,13 +150,10 @@ impl<S: System> Session<S> {
                 self.attached = Some(attached);
                 Ok(result)
             },
-            Err(error) => Err(match &self.attached {
-                Some(old) => format!(
-                    "{error}; process {} ({}) is still attached",
-                    old.entry.id, old.entry.executable
-                ),
-                None => error,
-            }),
+            Err(error) => Err(attach_error(
+                error,
+                self.attached.as_ref().map(|old| &old.entry),
+            )),
         }
     }
 
@@ -431,6 +428,18 @@ fn read_value(memory: &impl ProcessMemory, address: u64, value_type: ValueType) 
     value_type
         .decode(&bytes)
         .ok_or_else(|| "the read returned too few bytes".to_owned())
+}
+
+/// The error of a failed attach, naming the process `still` that stays
+/// attached, if any.
+fn attach_error(error: String, still: Option<&ProcessEntry>) -> String {
+    match still {
+        Some(entry) => format!(
+            "{error}; process {} ({}) is still attached",
+            entry.id, entry.executable
+        ),
+        None => error,
+    }
 }
 
 #[cfg(test)]
