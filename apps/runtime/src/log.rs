@@ -18,9 +18,6 @@ pub(crate) struct Log {
     file: File,
     size: u64,
     limit: u64,
-    /// Whether `file` is the one moved to `old`, because the new file could
-    /// not be opened after the move.
-    moved: bool,
     /// Makes opening the new file fail, for a test.
     #[cfg(test)]
     fail_open: bool,
@@ -45,7 +42,6 @@ impl Log {
             file,
             size,
             limit,
-            moved: false,
             #[cfg(test)]
             fail_open: false,
         })
@@ -76,19 +72,18 @@ impl Log {
     /// Moves the file to the old name and starts a new one. A step that
     /// fails, such as a move while another program holds the file, leaves
     /// the log writing where it did, past its limit, and the next line tries
-    /// again, because the log is the runtime's only output. A file deleted
-    /// while open has nothing to move, so the log starts the new one.
+    /// again, because the log is the runtime's only output. A move that finds
+    /// no file, because it was deleted or already moved by a try whose open
+    /// failed, goes on to the open, so the old file is never moved twice.
     fn rotate(&mut self) {
-        if !self.moved {
-            match fs::rename(&self.path, &self.old) {
-                Err(error) if error.kind() != io::ErrorKind::NotFound => return,
-                Ok(()) | Err(_) => self.moved = true,
-            }
+        if let Err(error) = fs::rename(&self.path, &self.old)
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            return;
         }
         if let Ok(file) = self.open_new() {
+            self.size = file.metadata().map_or(0, |metadata| metadata.len());
             self.file = file;
-            self.size = 0;
-            self.moved = false;
         }
     }
 

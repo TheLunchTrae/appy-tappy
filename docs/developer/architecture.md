@@ -271,8 +271,8 @@ never turns autostart on by itself.
 The log is `runtime.log` in `%LOCALAPPDATA%\AppyTappy\logs\`, one
 timestamped line per start, exit, state change, and problem. A line that
 would take it past 512 KiB first moves it to `runtime.old.log`, replacing the
-older one, so the log never takes more than about 1 MiB. When the move or
-the new file fails, such as while another program holds the log open, the
+older one, so the log normally takes no more than about 1 MiB. When moving
+it or opening the new file fails, such as while another program holds the log open, the
 runtime keeps writing to the file it has and tries again with the next line,
 because the log is its only output. Only the copy that
 holds the single-instance guard rotates it; a second copy or an `--autostart`
