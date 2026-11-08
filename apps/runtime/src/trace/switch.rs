@@ -193,11 +193,11 @@ impl Switch {
     }
 
     /// Waits for every writer told to stop, for the tests that read their
-    /// files.
+    /// files, failing the test when one does not stop within a few seconds.
     #[cfg(test)]
     fn settle(&mut self, log: &mut Log) {
         for stopping in std::mem::take(&mut self.stopping) {
-            ended(stopping.join(), log);
+            ended(super::within(move || stopping.join()), log);
         }
     }
 
@@ -255,7 +255,7 @@ mod tests {
 
     use super::*;
     use crate::log;
-    use crate::trace::{Record, What};
+    use crate::trace::{Record, What, within};
 
     struct Scratch {
         folder: PathBuf,
@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(switch.running(), Some(2));
         assert_eq!(switch.failed(2, &mut scratch.log), Some(Trace::OFF));
         assert_eq!(switch.running(), None);
-        switch.finish().expect("nothing to stop");
+        within(move || switch.finish()).expect("nothing to stop");
     }
 
     #[test]
@@ -503,7 +503,7 @@ mod tests {
             item: Some(0),
             ..record
         });
-        switch.finish().expect("finish");
+        within(move || switch.finish()).expect("finish");
         let file = fs::read_dir(scratch.traces())
             .expect("list")
             .next()
@@ -555,7 +555,10 @@ mod tests {
             "{lines:?}"
         );
         switch.stopping.push(ended_thread(panics()));
-        assert!(switch.finish().is_err(), "the finish says it ended badly");
+        assert!(
+            within(move || switch.finish()).is_err(),
+            "the finish says it ended badly"
+        );
     }
 
     #[test]

@@ -256,6 +256,24 @@ impl Trace {
     }
 }
 
+/// Runs `work` on another thread and returns what it returns, or panics
+/// when that takes more than five seconds, so a test whose writer never
+/// stops fails rather than hangs.
+#[cfg(test)]
+pub(crate) fn within<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a test that gave up waiting has failed already"
+        )]
+        let _ = done.send(work());
+    });
+    finished
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the work finished within five seconds")
+}
+
 /// The records that reached `received`, a receiver from [`Trace::for_test`],
 /// in the order they were sent.
 #[cfg(test)]

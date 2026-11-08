@@ -226,14 +226,15 @@ impl Writer {
         Stopping(self.thread)
     }
 
-    /// Writes what is left, closes the file, and waits for the thread.
+    /// Writes what is left, closes the file, and waits for the thread,
+    /// failing the test when it does not stop within a few seconds.
     ///
     /// # Errors
     ///
     /// Returns an error when the writer thread panicked.
     #[cfg(test)]
     pub(crate) fn stop(self) -> io::Result<()> {
-        self.retire().join()
+        super::within(move || self.retire().join())
     }
 }
 
@@ -259,7 +260,7 @@ fn write(
         if !going {
             break;
         }
-        if flushed.elapsed() >= FLUSH_EVERY {
+        if flush_due(flushed, Instant::now()) {
             files.flush()?;
             flushed = Instant::now();
         }
@@ -271,6 +272,11 @@ fn write(
         }
     }
     files.flush()
+}
+
+/// Whether it is time at `now` to flush again, after a flush at `flushed`.
+fn flush_due(flushed: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(flushed) >= FLUSH_EVERY
 }
 
 /// Takes the orders that wait into `names`. Returns false when the writer
@@ -741,7 +747,7 @@ mod tests {
             trace.record(What::Queued, |record| record);
         }
         let name = writer.file().to_owned();
-        writer.retire().join().expect("join");
+        writer.stop().expect("stop");
         let text = fs::read_to_string(folder.join(name)).expect("read");
         assert_eq!(
             text.lines().count(),
@@ -792,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn the_writer_flushes_about_once_a_second_rather_than_each_row() {
+    fn the_writer_flushes_about_once_a_second_while_it_runs() {
         let folder = folder("flush");
         let (reports, _received) = mpsc::channel::<TraceReport>();
         let (writer, mut trace) =
@@ -800,8 +806,6 @@ mod tests {
         trace.record(What::Queued, |record| record);
         let path = folder.join(writer.file());
         let on_disk = || fs::read_to_string(&path).expect("read");
-        std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(on_disk(), "", "a row waits for the next flush");
         let patience = Instant::now()
             .checked_add(Duration::from_secs(5))
             .expect("in range");
@@ -811,6 +815,15 @@ mod tests {
         }
         writer.stop().expect("stop");
         fs::remove_dir_all(folder).expect("clean up");
+        let flushed = Instant::now();
+        let at = |millis| {
+            flushed
+                .checked_add(Duration::from_millis(millis))
+                .expect("in range")
+        };
+        assert!(!flush_due(flushed, at(999)), "not before a second");
+        assert!(flush_due(flushed, at(1_000)), "right on time");
+        assert!(flush_due(flushed, at(5_000)), "late");
     }
 
     #[test]
