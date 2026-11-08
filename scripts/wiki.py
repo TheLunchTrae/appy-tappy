@@ -35,13 +35,14 @@ CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
 # An image, then an inline link: the bracketed text, then the destination, in
 # angle brackets or bare, and an optional title. Images go first, so an image
 # inside a link's text is rewritten too.
-DESTINATION = r"\(\s*(<[^<>\n]*>|[^\s()]+)(?:\s+\"[^\"\n]*\")?\s*\)"
+DESTINATION = r"\(\s*(<[^<>\n]*>|[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+\"[^\"\n]*\")?\s*\)"
 IMAGE = re.compile(r"!\[[^\[\]]*\]" + DESTINATION)
 INLINE_LINK = re.compile(r"(?<!!)\[(?:[^\[\]]|\[[^\[\]]*\])*\]" + DESTINATION)
 # A link reference definition; a footnote's label starts with ^.
 REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^<>\n]*>|\S+)", re.M)
-# What is left of a link that the patterns above do not read.
-UNREAD_LINK = re.compile(r"\]\(|^ {0,3}\[(?!\^)[^\]\n]+\]:", re.M)
+# What is left of a link that the patterns above do not read, including an
+# HTML link to a relative address, which the build does not rewrite.
+UNREAD_LINK = re.compile(r"\]\(|^ {0,3}\[(?!\^)[^\]\n]+\]:|href=[\"']?(?![\"']?(?:#|[A-Za-z][A-Za-z0-9+.-]*:))", re.M)
 PAGES_SECTION = re.compile(r"^## Pages\n([\s\S]*?)(?=^## |\Z)", re.M)
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
@@ -199,7 +200,7 @@ def rewrite_links(page: Page, text: str, rewrite) -> str:
     text = substitute(INLINE_LINK, text, False)
     text = substitute(REFERENCE_DEFINITION, text, False)
     rest = text
-    for pattern in (IMAGE, INLINE_LINK, REFERENCE_DEFINITION, CODE_SPAN):
+    for pattern in (CODE_SPAN, IMAGE, INLINE_LINK, REFERENCE_DEFINITION):
         rest = pattern.sub("", rest)
     if match := UNREAD_LINK.search(rest):
         line = rest[: match.start()].count("\n")

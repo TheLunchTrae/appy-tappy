@@ -120,6 +120,19 @@ class WikiBuildTest(unittest.TestCase):
         with self.assertRaisesRegex(wiki.BuildError, "is in a form the wiki build cannot read"):
             self.build()
 
+    def test_a_relative_html_link_fails_the_build(self) -> None:
+        self.write("docs/user/troubleshooting.md", '# Troubleshooting\n\n<a href="install.md">Install</a>\n')
+        with self.assertRaisesRegex(wiki.BuildError, "is in a form the wiki build cannot read"):
+            self.build()
+
+    def test_parentheses_in_an_address_stay_in_it(self) -> None:
+        self.write(
+            "docs/user/troubleshooting.md",
+            '# Troubleshooting\n\nSee [Foo](https://example.com/Foo_(bar)) and <a href="https://example.com">it</a>.\n',
+        )
+        self.build()
+        self.assertIn("See [Foo](https://example.com/Foo_(bar)) and", self.page("Troubleshooting"))
+
     def test_footnotes_are_not_links(self) -> None:
         self.write("docs/user/troubleshooting.md", "# Troubleshooting\n\nAsk.[^1]\n\n[^1]: A note.\n")
         self.build()
