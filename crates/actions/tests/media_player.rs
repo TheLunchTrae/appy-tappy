@@ -26,6 +26,14 @@ use appytappy_config::action::{
 };
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::rule::Restore;
+use appytappy_sources::system::{System, executables};
+use appytappy_sources::win::WindowsSystem;
+
+/// The controls, naming audio sessions from the system's process list.
+fn connect() -> io::Result<WindowsControls> {
+    let system = WindowsSystem::new();
+    WindowsControls::new(Box::new(move || system.processes().map(executables)))
+}
 
 /// How long a player takes to report a new playback state.
 const SETTLE: Duration = Duration::from_secs(2);
@@ -83,7 +91,7 @@ fn levels(controls: &mut WindowsControls) -> io::Result<Vec<f32>> {
 #[test]
 #[ignore = "needs a media player playing; pauses and resumes it"]
 fn pauses_and_resumes_the_player() {
-    let mut actions = Actions::new(WindowsControls::new().expect("the controls connect"));
+    let mut actions = Actions::new(connect().expect("the controls connect"));
     assert_eq!(
         playing(actions.controls()).expect("readable"),
         Some(true),
@@ -126,7 +134,7 @@ fn pauses_and_resumes_the_player() {
 #[test]
 #[ignore = "needs a media player playing; lowers its volume and puts it back"]
 fn lowers_and_restores_the_player_volume() {
-    let mut actions = Actions::new(WindowsControls::new().expect("the controls connect"));
+    let mut actions = Actions::new(connect().expect("the controls connect"));
     let before = levels(actions.controls()).expect("readable");
     assert!(
         !before.is_empty(),
