@@ -1,7 +1,7 @@
 //! The always-on AppyTappy background program.
 //!
 //! It runs with no console window, so it reports only to its log in
-//! `%LOCALAPPDATA%\AppyTappy\logs\`. See `wiki/developer/Architecture.md` for
+//! `%LOCALAPPDATA%\AppyTappy\logs\`. See `wiki/Architecture.md` for
 //! the runtime's threads and events, its lifecycle states, and the files it
 //! writes.
 

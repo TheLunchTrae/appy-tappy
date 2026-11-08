@@ -2,7 +2,7 @@
 //!
 //! Each check is one pass of integer arithmetic over the region's pixels,
 //! with no allocation, so it costs microseconds and gives the same answer on
-//! every platform. `wiki/developer/Screen-regions.md` explains when to use which.
+//! every platform. `wiki/Screen-regions.md` explains when to use which.
 
 use std::error::Error;
 use std::fmt;

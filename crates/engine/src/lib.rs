@@ -6,9 +6,9 @@
 //! method call, and the [`Effect`]s that come out say which rules fired, which
 //! were held back by their cooldown, and which were released. The evaluator
 //! does no I/O and reads no clock: every call that can fire carries the time.
-//! `wiki/developer/Rules.md` explains the model.
+//! `wiki/Rules.md` explains the model.
 //!
-//! See `wiki/developer/Architecture.md` for this crate's boundaries.
+//! See `wiki/Architecture.md` for this crate's boundaries.
 
 #![forbid(unsafe_code)]
 

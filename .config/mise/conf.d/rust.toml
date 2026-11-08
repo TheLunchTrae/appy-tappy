@@ -85,7 +85,7 @@ run = "cargo bench -p appytappy-sources --bench screen --locked"
 # Builds the runtime the installer ships and measures it on Windows: its
 # size, whether it needs the Visual C++ Redistributable, and its memory and
 # CPU while idle and while it reads a window. It fails when a measurement
-# exceeds its target; wiki/developer/Architecture.md#footprint describes them.
+# exceeds its target; wiki/Architecture.md#footprint describes them.
 [tasks."rust:footprint"]
 description = "Check the shipped runtime against its footprint targets (Windows only)"
 run = """
@@ -215,7 +215,7 @@ description = "Run the Rust standards workflow with autofixes"
 depends = ["rust:fmt"]
 
 # Member crates hold product code, so the gate runs a mutation lane; see
-# wiki/developer/Rust-standards.md#mutation-testing. The two lanes share one lock, so the gate runs
+# wiki/Rust-standards.md#mutation-testing. The two lanes share one lock, so the gate runs
 # only one. exec hands the lane mise's process, so a signal that stops the
 # gate reaches the lane's own traps.
 [tasks."rust:mutants:gate"]

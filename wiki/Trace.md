@@ -4,7 +4,7 @@ The runtime trace records what the runtime reads and does, with timings, to a
 CSV file. It is for benchmarking: how long a check takes, how long a changed
 value takes to reach the rules, and how long an automation's actions take to
 run. It is off unless the user turns it on under **Runtime trace** on the
-Settings page, which [Settings](../user/Settings.md#runtime-trace) describes
+Settings page, which [Settings](Settings.md#runtime-trace) describes
 for users.
 
 ## Settings

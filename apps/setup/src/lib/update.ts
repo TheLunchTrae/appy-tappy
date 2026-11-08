@@ -1,6 +1,6 @@
 // What the update notice in the nav shows: nothing until a check finds a newer release, then an offer, the download,
 // the downloaded release waiting to install, the question that asks before the update closes everything, and the
-// installer starting. wiki/developer/State-machines.md maps it.
+// installer starting. wiki/State-machines.md maps it.
 
 /** The update notice's state. */
 export type UpdateState =
