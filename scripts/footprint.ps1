@@ -127,7 +127,7 @@ function Wait-Log([string]$Line, [int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
         if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch -Quiet -Pattern $Line)) { return }
-        if ($script:runtime.HasExited) { throw "the runtime exited with code $($script:runtime.ExitCode) before its log said '$Line'" }
+        if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) before its log said '$Line'" }
         Start-Sleep -Milliseconds 250
     }
     throw "the runtime's log did not say '$Line' within $Seconds seconds"
@@ -141,26 +141,26 @@ function Get-PrivateWorkingSet([int]$Id) {
 # private working set at its end.
 function Measure-Phase([string]$Name, [long]$MemoryLimit, [double]$CpuLimit) {
     Start-Sleep -Seconds $Settle
-    $script:runtime.Refresh()
-    $before = $script:runtime.TotalProcessorTime
+    $script:process.Refresh()
+    $before = $script:process.TotalProcessorTime
     $clock = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds $Sample
-    $script:runtime.Refresh()
-    if ($script:runtime.HasExited) { throw "the runtime exited during the $Name sample" }
-    $cpu = 100 * ($script:runtime.TotalProcessorTime - $before).TotalSeconds / $clock.Elapsed.TotalSeconds
-    $memory = Get-PrivateWorkingSet $script:runtime.Id
+    $script:process.Refresh()
+    if ($script:process.HasExited) { throw "the runtime exited during the $Name sample" }
+    $cpu = 100 * ($script:process.TotalProcessorTime - $before).TotalSeconds / $clock.Elapsed.TotalSeconds
+    $memory = Get-PrivateWorkingSet $script:process.Id
     Add-Row "$Name memory" (Format-Bytes $memory) (Format-Bytes $MemoryLimit) ($memory -le $MemoryLimit)
     Add-Row "$Name CPU" ('{0:N3} %' -f $cpu) ('{0:N3} %' -f $CpuLimit) ($cpu -le $CpuLimit)
-    $script:details += "$($Name): working set $(Format-Bytes $script:runtime.WorkingSet64), commit $(Format-Bytes $script:runtime.PrivateMemorySize64), $($script:runtime.Threads.Count) threads, $($script:runtime.HandleCount) handles"
+    $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $($script:process.Threads.Count) threads, $($script:process.HandleCount) handles"
 }
 
 $script:details = @()
-$script:runtime = $null
+$script:process = $null
 $probe = $null
 $env:LOCALAPPDATA = $local
 $env:APPDATA = $roaming
 try {
-    $script:runtime = Start-Process -FilePath $exe -PassThru
+    $script:process = Start-Process -FilePath $exe -PassThru
     Wait-Log 'runtime started' 10
     Wait-Log 'automations run for Footprint probe' 10
 
@@ -182,11 +182,11 @@ catch {
 finally {
     if ($null -ne $probe -and -not $probe.HasExited) { Stop-Process -Id $probe.Id }
     $peak = $null
-    if ($null -ne $script:runtime -and -not $script:runtime.HasExited) {
-        $script:runtime.Refresh()
-        $peak = $script:runtime.PeakWorkingSet64
-        Stop-Process -Id $script:runtime.Id
-        $script:runtime.WaitForExit()
+    if ($null -ne $script:process -and -not $script:process.HasExited) {
+        $script:process.Refresh()
+        $peak = $script:process.PeakWorkingSet64
+        Stop-Process -Id $script:process.Id
+        $script:process.WaitForExit()
     }
 }
 
