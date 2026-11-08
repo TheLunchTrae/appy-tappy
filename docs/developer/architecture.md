@@ -323,11 +323,17 @@ request never destroys the window, so the icon cannot outlive its menu.
 
 Windows may end the process as soon as every program returns from
 `WM_ENDSESSION`. So when the session ends, the procedure does not return
-until `Tray::stop` drops the sender it waits on, or 10 seconds pass. It sets
-a shutdown block reason with `ShutdownBlockReasonCreate`, which Windows shows
-if the wait passes its own 5 seconds, and the user can end the session
-anyway. `WM_QUERYENDSESSION` always agrees, because the undo runs only once
-the session really ends. The restore journal lives only in memory: a forced
+until `Tray::stop` drops the sender it waits on, or 10 seconds pass. Windows
+ends a program with no visible window that takes more than 5 seconds there,
+unless the program gave a shutdown block reason. The procedure therefore
+calls `ShutdownBlockReasonCreate` on `WM_QUERYENDSESSION` and agrees at once,
+since the undo runs only once the session really ends; Windows then treats
+the hidden window like a visible one, which after 5 seconds can show the
+reason and let the user end the session anyway. `WM_ENDSESSION` takes the
+reason back with `ShutdownBlockReasonDestroy`, also when Windows calls the
+session's end off, so a later end that something else holds does not name the
+runtime. A critical shutdown, or a user who ends the session anyway, can still
+end the runtime before the wait is over. The restore journal lives only in memory: a forced
 end, a crash, or a wait that runs out loses what it had not undone.
 Without the tray window, such as when it cannot be made or someone destroys
 it, nothing hears the end of the session, and Windows ends the runtime
