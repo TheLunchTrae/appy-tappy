@@ -23,6 +23,8 @@ pub enum ActionError {
         /// How many there were.
         of: usize,
     },
+    /// Windows did not start playing the sound file.
+    SoundNotPlayed,
     /// The operating system failed.
     Os(io::Error),
 }
@@ -40,6 +42,9 @@ impl fmt::Display for ActionError {
             Self::KeysDropped { sent, of } => {
                 write!(formatter, "Windows took only {sent} of {of} key events")
             },
+            Self::SoundNotPlayed => formatter.write_str(
+                "the sound did not play: the file is missing or Windows could not play it",
+            ),
             Self::Os(error) => write!(formatter, "the operating system failed: {error}"),
         }
     }
@@ -53,7 +58,8 @@ impl Error for ActionError {
             | Self::Refused
             | Self::NoAudio
             | Self::NotInFront(_)
-            | Self::KeysDropped { .. } => None,
+            | Self::KeysDropped { .. }
+            | Self::SoundNotPlayed => None,
         }
     }
 }
@@ -77,6 +83,7 @@ mod tests {
             (ActionError::NoMediaSession, "no media session"),
             (ActionError::Refused, "did not take"),
             (ActionError::NoAudio, "no audio session"),
+            (ActionError::SoundNotPlayed, "did not play"),
         ] {
             assert!(error.to_string().contains(words), "{error}");
             assert!(error.source().is_none());

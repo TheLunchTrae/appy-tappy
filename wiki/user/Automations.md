@@ -56,6 +56,11 @@ whose condition still holds runs again.
 - **Set volume** sets a volume, from 0 to 100 percent.
 - **Press keys** presses keys such as `Ctrl+Shift+M`. See
   [Key presses](#key-presses).
+- **Open a program, file, or link** opens a program or a file, as
+  double-clicking it does, or a web page. See
+  [Opening and sounds](#opening-and-sounds).
+- **Play a sound** plays a WAV file. See
+  [Opening and sounds](#opening-and-sounds).
 
 Media and volume actions choose what they change:
 
@@ -93,6 +98,31 @@ first. [Anti-cheat](Applications.md#anti-cheat) explains why.
 Windows does not let AppyTappy press keys into a program that runs as
 administrator, and it gives no sign that it dropped them.
 
+## Opening and sounds
+
+**Open a program, file, or link** takes the full path of a program or a file
+on one of your drives, such as `C:\Tools\Timer.exe`, or a web link that
+starts with `http://` or `https://`. A file opens in the program it usually
+opens in, and a program starts in its own folder. **Play a sound** takes the
+full path of a WAV file, such as `C:\Sounds\Ding.wav`. Network paths, which
+start with `\\`, are not accepted.
+
+To get a file's full path, right-click it in File Explorer and select
+**Copy as path**, then paste it. On Windows 10, hold Shift as you right-click.
+The quotes that Copy as path adds are fine.
+
+A program opens without arguments, and a window that opens can take you out of
+a full-screen game. If a file is missing, AppyTappy notes it in
+[its log](Troubleshooting.md#appytappys-log) and goes on with the next action.
+A new sound stops one that is still playing.
+
+Opening and sounds work whatever the application's anti-cheat setting is,
+because AppyTappy presses no keys for them. A program that AppyTappy opens can
+still press keys of its own, and anti-cheat can treat that as cheating.
+
+An automations file from someone else can open any program or file on your
+computer, so check its actions before you use it.
+
 ## Undo and running again
 
 With **Undo these when the condition stops being true** on, AppyTappy puts
@@ -101,8 +131,9 @@ things back when the condition stops being true:
 - Paused media plays again, and started media pauses again.
 - Each volume goes back to what it was.
 
-A skipped track cannot be unskipped, and pressed keys cannot be unpressed, so an
-automation that only skips tracks or presses keys cannot undo. With undo on,
+A skipped track cannot be unskipped, pressed keys cannot be unpressed, what
+opened stays open, and a played sound cannot be unplayed, so an automation
+needs a pause, a play, or a volume action to undo. With undo on,
 AppyTappy also puts things back when the application closes, when you turn
 automations off from the [tray icon](The-tray-icon.md), and when AppyTappy
 quits. It quits when you sign out or shut down too, and asks Windows to wait
