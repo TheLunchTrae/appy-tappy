@@ -129,8 +129,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         })
         .ok();
     let mut retry = None;
+    let mut had = Had::Plan;
     let first = load(&stores, log).unwrap_or_else(|error| {
-        retry = failed(log, &error, None, Instant::now(), Had::Nothing);
+        had = Had::Nothing;
+        retry = failed(log, &error, None, Instant::now(), had);
         plan::Plan::default()
     });
     let lifecycle = Lifecycle::new(first.watchlist(), Instant::now());
@@ -193,8 +195,13 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             Step::Stop => break,
         };
         if read_again
-            && let Some((watchlist, orders)) =
-                reread(&stores, log, &mut model, &mut retry, Instant::now())
+            && let Some((watchlist, orders)) = reread(
+                &stores,
+                log,
+                &mut model,
+                (&mut retry, &mut had),
+                Instant::now(),
+            )
         {
             if inputs.send(Input::Watch(watchlist)).is_err() {
                 break;
@@ -385,7 +392,7 @@ fn wake(next_due: Option<Instant>, retry: Option<Retry>) -> Option<Instant> {
 /// What the runtime runs while the saved files cannot be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Had {
-    /// Nothing, since it has just started.
+    /// Nothing, since no read has worked since it started.
     Nothing,
     /// The plan from the last read that worked.
     Plan,
@@ -408,21 +415,23 @@ fn load(stores: &Stores, log: &mut Log) -> Result<plan::Plan, String> {
 /// Reads the saved files again at `now`, after a save or for `retry`. When
 /// they read, returns the watchlist and the orders that switch `model` to
 /// their plan. When they do not, `model` keeps running its plan, and
-/// `retry` says when to read them again, if at all.
+/// `retry` says when to read them again, if at all. `had` says whether a
+/// read has worked yet.
 fn reread(
     stores: &Stores,
     log: &mut Log,
     model: &mut Model,
-    retry: &mut Option<Retry>,
+    (retry, had): (&mut Option<Retry>, &mut Had),
     now: Instant,
 ) -> Option<(Watchlist, Vec<Order>)> {
     match load(stores, log) {
         Ok(plan) => {
             *retry = None;
+            *had = Had::Plan;
             Some((plan.watchlist(), model.replan(plan.apps)))
         },
         Err(error) => {
-            *retry = failed(log, &error, *retry, now, Had::Plan);
+            *retry = failed(log, &error, *retry, now, *had);
             None
         },
     }
@@ -453,7 +462,7 @@ fn failed(
         "waits for the next save".to_owned()
     };
     let keeps = match had {
-        Had::Nothing => "starts with no automations",
+        Had::Nothing => "runs no automations",
         Had::Plan => "keeps running what it ran",
     };
     note(log, &format!("{error}, so the runtime {keeps} and {then}"));
@@ -824,9 +833,13 @@ mod tests {
         fs::write(folder.join("automations.json"), "not JSON").expect("break the file");
         let now = Instant::now();
         let mut retry = None;
+        let mut had = Had::Plan;
         let mut tries = Vec::new();
         for _ in 0..=RETRIES {
-            assert_eq!(reread(&stores, &mut log, &mut model, &mut retry, now), None);
+            assert_eq!(
+                reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now),
+                None
+            );
             tries.push(retry.map(|retry| retry.left));
         }
         assert_eq!(
@@ -843,25 +856,33 @@ mod tests {
             retry, None,
             "after the last try only a save reads the files again"
         );
-        fs::write(
-            folder.join("automations.json"),
-            "{\"format\":1,\"automations\":[]}",
-        )
-        .expect("mend the file");
+        // As at start, when no read has worked yet.
+        had = Had::Nothing;
         retry = failed(
             &mut log,
             "the automations cannot be read: locked",
             None,
             now,
-            Had::Nothing,
+            had,
         );
         assert_eq!(
             retry.map(|retry| retry.at),
             now.checked_add(RETRY_WAIT),
             "a failed read tries again soon"
         );
-        let (_, orders) =
-            reread(&stores, &mut log, &mut model, &mut retry, now).expect("the files read");
+        assert_eq!(
+            reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now),
+            None
+        );
+        assert_eq!(retry.map(|retry| retry.left), Some(3));
+        fs::write(
+            folder.join("automations.json"),
+            "{\"format\":1,\"automations\":[]}",
+        )
+        .expect("mend the file");
+        let (_, orders) = reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now)
+            .expect("the files read");
+        assert_eq!(had, Had::Plan, "a read that works gives a plan");
         let written = fs::read_to_string(folder.join("logs").join("runtime.log")).expect("read");
         fs::remove_dir_all(&folder).expect("clean up");
         assert_eq!(retry, None, "a read that works needs no retry");
@@ -885,9 +906,12 @@ mod tests {
             ),
             "{written:?}"
         );
-        assert!(
-            written.contains("locked, so the runtime starts with no automations and reads them"),
-            "{written:?}"
+        assert_eq!(
+            written
+                .matches(", so the runtime runs no automations and reads them again in 2 seconds\n")
+                .count(),
+            2,
+            "the start's failure and the retry after it: {written:?}"
         );
         assert!(
             written.ends_with("no saved automation can run\n"),

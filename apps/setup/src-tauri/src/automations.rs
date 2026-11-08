@@ -136,6 +136,11 @@ fn good(apps: &[StoredApp]) -> impl Iterator<Item = (&str, &AppFile)> {
         .filter_map(|app| app.file.as_ref().ok().map(|file| (app.id.as_str(), file)))
 }
 
+/// The problem of an automation whose ID cannot be used as saved, for every
+/// automation that shares the ID as well as one whose ID breaks the rules.
+const HAND_EDITED_ID: &str =
+    "Another automation has the same ID, or its ID was changed by hand. Save it to fix that.";
+
 /// Every automation, with what stops each one from running. One whose ID
 /// cannot be used as saved says so, since the runtime skips it until a save
 /// writes the ID [`load`] gave it.
@@ -151,7 +156,7 @@ pub(crate) fn list(stores: &Stores) -> Result<Vec<AutomationSummary>, String> {
         .map(|(as_saved, automation)| AutomationSummary {
             automation: automation.clone(),
             problem: if bad_id(&saved, as_saved) {
-                Some("Its ID was changed by hand. Save it to fix that.".to_owned())
+                Some(HAND_EDITED_ID.to_owned())
             } else {
                 problem(&file, automation, &apps)
             },
@@ -232,23 +237,24 @@ pub(crate) fn save(
 /// off until it is fixed.
 pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<(), String> {
     let mut file = load(stores)?;
-    let automation = file
+    let position = file
         .automations
         .iter()
-        .find(|automation| automation.id == id)
+        .position(|automation| automation.id == id)
         .ok_or_else(|| "That automation is no longer saved.".to_owned())?;
-    if enabled && let Some(problem) = problem(&file, automation, &apps(stores)?) {
-        return Err(format!(
-            "{} cannot run until it is fixed. {problem}",
-            automation.name
-        ));
-    }
-    if let Some(automation) = file
-        .automations
-        .iter_mut()
-        .find(|automation| automation.id == id)
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`position` was just found in this list, which has not changed"
+    )]
     {
-        automation.enabled = enabled;
+        let automation = &file.automations[position];
+        if enabled && let Some(problem) = problem(&file, automation, &apps(stores)?) {
+            return Err(format!(
+                "{} cannot run until it is fixed. {problem}",
+                automation.name
+            ));
+        }
+        file.automations[position].enabled = enabled;
     }
     stores
         .automations
@@ -581,7 +587,7 @@ mod tests {
             ],
         );
         assert_eq!(ids(&stores), ["pause_music", "lower_volume", "skip_ahead"]);
-        let hand = Some("Its ID was changed by hand. Save it to fix that.".to_owned());
+        let hand = Some(HAND_EDITED_ID.to_owned());
         let problems: Vec<Option<String>> = list(&stores)
             .expect("lists")
             .into_iter()
