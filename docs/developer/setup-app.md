@@ -50,7 +50,7 @@ This page covers what the user guide leaves out.
 
 [Recording a number](../user/values.md#record-a-number) samples the frames the
 value editor's preview capture already takes, about 30 a second, in the owner
-thread (`recording.rs`). Each frame is cut to the region and reduced to the
+thread (`recording.rs`, with the ink sampling in `recording/ink.rs`). Each frame is cut to the region and reduced to the
 shapes the number check reads: `DigitReader::shapes` finds the ink, splits it
 into characters, and scales each to the grid the check compares. A crop whose
 shapes equal a kept reading's is another sighting of that reading, because it
@@ -83,7 +83,7 @@ leave review without keeping, and review's edits stay for the next one.
 ### The text reader
 
 The text reader guesses each new reading's text so review only needs
-corrections (`ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs),
+corrections (`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs),
 a pure-Rust neural text reader, so it reads the same on every system without
 the operating system's OCR. Only its recognition model loads: the region holds
 one line, so there is no text to find first. It runs on a thread of its own,
