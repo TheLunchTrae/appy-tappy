@@ -37,6 +37,16 @@ export const PIN_HINT =
 export const FIX_HINT =
   "Draw the value again at the window's size now. It is read there exactly, instead of scaled from its first drawing.";
 
+/** The hint beside the Values page's column for the window's size now. */
+export const NOW_HINT =
+  "What each value reads at the window's size now, scaled from where it was drawn or read at its fix. A value " +
+  'that reads wrong here can be fixed at this size.';
+
+/** The hint beside Remove fix. */
+export const REMOVE_FIX_HINT =
+  "Forget the value's drawing at this size. It then reads here the way the application's window size question " +
+  'says.';
+
 /** The hint beside Read with, in the fix flow of a number. */
 export const READ_WITH_HINT =
   'Characters often look different at another size. Learn a reference at this size if the shared one misreads.';

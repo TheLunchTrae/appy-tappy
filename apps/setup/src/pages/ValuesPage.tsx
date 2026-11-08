@@ -14,7 +14,16 @@ import { buildState, checkedText } from '../lib/build.ts';
 import { checkSummary } from '../lib/describe.ts';
 import { hex } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
-import { FIX_HINT, type NowCell, nowCell, regionText, sameSize, sizeText } from '../lib/sizes.ts';
+import {
+  FIX_HINT,
+  NOW_HINT,
+  type NowCell,
+  nowCell,
+  REMOVE_FIX_HINT,
+  regionText,
+  sameSize,
+  sizeText,
+} from '../lib/sizes.ts';
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
 import { Hint } from '../components/Hint.tsx';
 import type { Fixing } from './NewValue.tsx';
@@ -77,9 +86,12 @@ function NowCellView({ value, cell, size, onFix, onRemoveFix }: NowProps) {
         </>
       )}
       {fixed ? (
-        <button type="button" className="btn small" onClick={onRemoveFix}>
-          Remove fix<span className="visually-hidden"> of {value.name}</span>
-        </button>
+        <>
+          <button type="button" className="btn small" onClick={onRemoveFix}>
+            Remove fix<span className="visually-hidden"> of {value.name}</span>
+          </button>
+          <Hint topic="Remove fix">{REMOVE_FIX_HINT}</Hint>
+        </>
       ) : null}
     </span>
   );
@@ -341,7 +353,12 @@ export function ValuesPage({ apps, automations, loadError, onChanged, onNew, onF
               <th scope="col">Value</th>
               <th scope="col">Check</th>
               <th scope="col">Region</th>
-              {nowColumn ? <th scope="col">{nowHeading(live)}</th> : null}
+              {nowColumn ? (
+                <th scope="col">
+                  {nowHeading(live)}
+                  <Hint topic={nowHeading(live)}>{NOW_HINT}</Hint>
+                </th>
+              ) : null}
               <th scope="col">Used by</th>
               <th scope="col">
                 <span className="note">Actions</span>
