@@ -2,15 +2,19 @@
 //! and builds, saving and deleting them, each application's anti-cheat
 //! setting, and the build its values were checked against.
 
+use std::fs;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, value_id,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ReferenceDef, ScreenDef, SizeDef, ValueDef,
+    value_id,
 };
+use appytappy_sources::screen::saved;
 
 use crate::applications::{self, AppSpec};
 use crate::automations;
-use crate::check_spec;
+use crate::check_spec::{self, Pictures};
 use crate::stores::Stores;
 use crate::window_list::{self, WindowChoice};
 
@@ -105,18 +109,25 @@ impl<H: Host> Owner<H> {
         let saved = self
             .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
             .map_err(|error| error.to_string())?;
+        let screen = ScreenDef {
+            window_size: SizeDef {
+                width: size.width,
+                height: size.height,
+            },
+            region: saved.region,
+            check: saved.check,
+        };
+        read_back(
+            &screen,
+            &file.references,
+            &saved.pictures,
+            &stores.apps.folder(&app),
+        )?;
         let first = file.values.is_empty();
         file.values.push(ValueDef {
             id: id.clone(),
             name: name.to_owned(),
-            screen: ScreenDef {
-                window_size: SizeDef {
-                    width: size.width,
-                    height: size.height,
-                },
-                region: saved.region,
-                check: saved.check,
-            },
+            screen,
         });
         // The first value is checked against the build that runs now. Later
         // ones leave that to Mark as checked, since one new value says
@@ -289,6 +300,28 @@ fn checked_now(build: BuildDef) -> CheckedDef {
     CheckedDef { build, at }
 }
 
+/// Reads `screen` back as the runtime will, from `pictures`, about to be
+/// saved, and those already in the application's `folder`, so a value that
+/// saves is one the runtime can read.
+fn read_back(
+    screen: &ScreenDef,
+    references: &[ReferenceDef],
+    pictures: &Pictures,
+    folder: &Path,
+) -> Result<(), String> {
+    saved::build(screen, references, |picture| {
+        pictures
+            .iter()
+            .find(|(name, _)| name == picture)
+            .map_or_else(
+                || fs::read(folder.join(picture)),
+                |(_, png)| Ok(png.clone()),
+            )
+    })
+    .map(drop)
+    .map_err(|error| format!("AppyTappy could not read this value as saved: {error}."))
+}
+
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::WindowDef;
@@ -301,6 +334,65 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_value_is_read_back_from_its_new_pictures_and_the_saved_ones() {
+        let (stores, root) = scratch_store("read-back");
+        let folder = stores.apps.folder("example");
+        fs::create_dir_all(&folder).expect("makes the folder");
+        let png = Image::new(
+            Size {
+                width: 2,
+                height: 2,
+            },
+            vec![0; 16],
+        )
+        .expect("fits")
+        .encode_png()
+        .expect("encodes");
+        let screen = |images: [&str; 2]| ScreenDef {
+            window_size: SizeDef {
+                width: 4,
+                height: 2,
+            },
+            region: appytappy_config::app_file::RegionDef {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            },
+            check: appytappy_config::app_file::CheckDef::State {
+                states: ["Shown", "Hidden"]
+                    .iter()
+                    .zip(images)
+                    .map(|(name, image)| appytappy_config::app_file::StateDef {
+                        name: (*name).to_owned(),
+                        image: image.to_owned(),
+                    })
+                    .collect(),
+                tolerance: 0,
+            },
+        };
+        fs::write(folder.join("old.png"), &png).expect("writes");
+        let new = vec![("new.png".to_owned(), png)];
+        assert_eq!(
+            read_back(&screen(["new.png", "old.png"]), &[], &new, &folder),
+            Ok(())
+        );
+        assert_eq!(
+            read_back(&screen(["new.png", "gone.png"]), &[], &new, &folder),
+            Err(
+                "AppyTappy could not read this value as saved: its picture gone.png cannot be \
+                 read."
+                    .to_owned()
+            )
+        );
+        assert!(
+            read_back(&screen(["old.png", "new.png"]), &[], &Vec::new(), &folder).is_err(),
+            "a new picture is not on disk yet"
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
 
     #[test]
     fn saved_values_are_listed_with_their_running_windows_and_can_be_removed() {

@@ -570,15 +570,17 @@ changing.
   panel also write `app.json`, but they do not set the event, because the
   runtime does not use the overlay. A runtime that is not running reads the
   files when it starts, so the setup app ignores a failure to set the event.
-- **Reading.** The runtime reads the files with the same `config` code the
-  setup app uses, and checks everything again before use, because the files
-  are outside its control and a person can edit them by hand. Each `app.json`
-  must parse and pass `AppFile::parse`'s checks, each automation must pass
-  `AutomationsFile::problem` on its own and `AutomationDef::check_against`
-  against the saved applications, and each value it watches must build a
-  check from its pictures. `apps/runtime/src/plan.rs` turns what passes into
-  the plan the runtime runs, in memory; nothing it builds is written to disk.
-  An automation that fails a check is logged and left out, and the rest run.
+- **Reading.** The runtime reads the files with the same `config` code the setup
+  app uses, and checks everything again before use, because the files are
+  outside its control and a person can edit them by hand. Each `app.json` must
+  parse and pass `AppFile::parse`'s checks, which cover the file as a whole,
+  each automation must pass `AutomationDef::compile` against the saved
+  applications, and each value it watches must pass `saved::build` with its
+  pictures. Saving a value in the setup app calls `saved::build`, and saving an
+  automation calls `compile` and builds the value it watches, so what saves is
+  what runs. `apps/runtime/src/plan.rs` turns what passes into the plan the
+  runtime runs, in memory; nothing it builds is written to disk. An automation
+  or a value that fails a check is logged and left out, and the rest run.
 - **Format.** `app.json`, `automations.json`, and `settings.json` each carry a
   `format` number, and the `FORMAT` constant in `app_file.rs`,
   `automation_file.rs`, and `settings_file.rs` sets the one version this build
@@ -608,23 +610,25 @@ design enforces the block in three places:
 
 1. The setup app refuses to save or turn on an automation whose actions the
    application's class blocks. The one blocked item the saved files can hold
-   is a key press action, which `AutomationDef::check_against` refuses unless
-   the class is `none`.
+   is a key press action, which `AutomationDef::compile` refuses unless the
+   class is `none`.
 2. The runtime runs the same check each time it reads the saved files, so an
    automation that a hand edit or a later change to the application's class
    made blocked does not run.
 3. For rules and actions, parsing and validation produce different types.
    Reading `automations.json` gives `AutomationDef` and `ActionDef`, which the
-   engine and the action worker do not accept; only `AutomationDef::to_rule`
+   engine and the action worker do not accept; only `AutomationDef::compile`
    and `ActionDef::to_action` in `config` turn them into a `Rule` and its
-   `Action`s, and `check_against` uses `ActionDef::to_action` to find a key
-   press. `Rule` has private
+   `Action`s, and `compile` reads the rule's actions to find a key press.
+   `Rule` has private
    fields, an action's values such as a key chord or a volume level are types
    that only their checked constructors make, and neither has `Deserialize` or
    `Default`, so code that skips validation does not compile. The screen
    source has no such split: `saved::build` in `appytappy-sources` takes the
    raw `ScreenDef` and `ReferenceDef` from `app.json` and checks them as it
-   builds the check it reads with.
+   builds the check it reads with. It is the one owner of the rules for a
+   readable value, such as a state check's states, so one value that breaks
+   them stops only itself.
 
 Nothing in AppyTappy opens another application's process. [Build
 detection](#build-detection) reads only the executable file, and process and
