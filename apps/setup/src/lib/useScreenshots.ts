@@ -1,3 +1,5 @@
+// The screenshots the capture screen took this session, and the one it shows.
+
 import { useCallback, useState } from 'react';
 
 import { errorText, screenshot, takeScreenshot } from './api.ts';

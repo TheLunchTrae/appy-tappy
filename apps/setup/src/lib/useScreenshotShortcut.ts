@@ -1,3 +1,5 @@
+// The global shortcut that takes a screenshot, and choosing a new one.
+
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 
 import { type ShortcutEvent, register, unregister } from '@tauri-apps/plugin-global-shortcut';
