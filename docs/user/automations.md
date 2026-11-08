@@ -103,6 +103,10 @@ A skipped track cannot be unskipped, and pressed keys cannot be unpressed, so
 an automation that only skips tracks or presses keys cannot undo. With undo
 on, AppyTappy also puts things back when the application closes, when you
 turn automations off from the [tray icon](tray.md), and when AppyTappy quits.
+It quits when you sign out or shut down too, and asks Windows to wait while
+it puts things back. If that takes more than a few seconds, Windows may list
+AppyTappy as **Restoring what automations changed** among the apps holding up
+the sign-out or shutdown, and you can go on anyway.
 
 When several automations change the same thing, such as the volume of one
 player, the original comes back only once all of them have undone their
@@ -112,8 +116,8 @@ Whether undo is on or not, an automation runs once each time its condition
 becomes true. It runs again only after the condition has stopped being true
 and then becomes true again. **Wait before it can run again, in seconds**
 also keeps it from running again until that many seconds after it last ran.
-If its condition became true during the wait, it runs the next time the value
-changes and still makes the condition true.
+If its condition became true during the wait and is still true when the wait
+ends, it runs then.
 
 ## Delete an automation
 

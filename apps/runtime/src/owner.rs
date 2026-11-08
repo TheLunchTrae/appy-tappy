@@ -5,8 +5,8 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Sender};
-use std::time::Instant;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::time::{Duration, Instant};
 
 use appytappy_config::paths::Locations;
 use appytappy_config::store::{AppStore, AutomationStore};
@@ -14,7 +14,7 @@ use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, Wi
 use appytappy_sources::HostSystem;
 use appytappy_sources::system::System;
 
-use crate::lifecycle::{Change, Input, Lifecycle};
+use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
 use crate::log::Log;
 use crate::model::{Model, Order};
 use crate::workers::act::ActionFailed;
@@ -37,6 +37,9 @@ enum Event {
     Reading(Reading),
     /// An action could not run.
     ActionFailed(ActionFailed),
+    /// An automation that its cooldown held back is due, and no event came
+    /// before.
+    Due,
 }
 
 impl From<Change> for Event {
@@ -125,7 +128,13 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             );
         })
         .ok();
-    let first = load(&stores, log);
+    let mut retry = None;
+    let mut had = Had::Plan;
+    let first = load(&stores, log).unwrap_or_else(|error| {
+        had = Had::Nothing;
+        retry = failed(log, &error, None, Instant::now(), had);
+        plan::Plan::default()
+    });
     let lifecycle = Lifecycle::new(first.watchlist(), Instant::now());
     let detect = Arc::clone(&system);
     let changes = sender.clone();
@@ -168,18 +177,36 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     };
     let orders = model.replan(first.apps);
     carry(orders, &mut crew, log);
-    for event in &events {
-        match handle(&mut model, log, event) {
-            Step::Carry(orders) => carry(orders, &mut crew, log),
-            Step::Reload => {
-                let plan = load(&stores, log);
-                if inputs.send(Input::Watch(plan.watchlist())).is_err() {
-                    break;
-                }
-                let orders = model.replan(plan.apps);
+    loop {
+        let due = wake(model.next_due(), retry);
+        let Some(event) = next(&events, due) else {
+            break;
+        };
+        let read_again = match handle(&mut model, log, event) {
+            Step::Carry(orders) => {
                 carry(orders, &mut crew, log);
+                retry.is_some_and(|retry| retry.due(Instant::now()))
+            },
+            Step::Reload => {
+                // A save starts the tries over.
+                retry = None;
+                true
             },
             Step::Stop => break,
+        };
+        if read_again
+            && let Some((watchlist, orders)) = reread(
+                &stores,
+                log,
+                &mut model,
+                (&mut retry, &mut had),
+                Instant::now(),
+            )
+        {
+            if inputs.send(Input::Watch(watchlist)).is_err() {
+                break;
+            }
+            carry(orders, &mut crew, log);
         }
         // Most events, such as each value read, leave the menu as it was, and
         // the icon is redrawn only when it changes.
@@ -196,22 +223,26 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     // Undo what the running automations changed before anything stops.
     let orders = model.set_enabled(false);
     carry(orders, &mut crew, log);
-    // The tray stops first, so its icon goes before anything else. Dropping
-    // the inputs and the jobs ends detection and the actions, so the joins
-    // below return; the actions undo what is queued first.
+    // Dropping the jobs ends the action thread once it has undone what is
+    // queued. Only then does the tray stop: at the end of the session the
+    // tray holds it until then, and Windows may end the process after. This
+    // order (undo, drop the jobs, join the action thread, then Tray::stop)
+    // is also what keeps the two from waiting on each other: the tray's wait
+    // ends at Tray::stop, which nothing here waits behind.
+    let Crew { jobs, readers, .. } = crew;
+    drop(jobs);
+    let acted = join(actor);
     let tray_stopped = tray.map_or(Ok(()), Tray::stop);
+    // Dropping the inputs ends detection, so its join below returns.
     let reload_stopped = reload.map_or(Ok(()), ReloadWatch::stop);
     let windows_stopped = windows.stop();
     drop(inputs);
-    let Crew { jobs, readers, .. } = crew;
-    drop(jobs);
     // Every reader is stopped, and the first that stopped badly says how.
     let read = readers
         .into_values()
         .map(Reader::stop)
         .fold(Ok(()), Result::and);
     let detected = join(detector);
-    let acted = join(actor);
     detected
         .and(acted)
         .and(read)
@@ -306,14 +337,136 @@ impl appytappy_actions::Controls for NoControls {
     }
 }
 
+/// Waits for the next event, or, when an automation is `due`, until then at
+/// most. Returns `None` once nobody can send another event.
+fn next(events: &Receiver<Event>, due: Option<Instant>) -> Option<Event> {
+    let Some(due) = due else {
+        return events.recv().ok();
+    };
+    // A due time that passed goes first, so a busy channel cannot hold back
+    // an automation that is due.
+    let now = Instant::now();
+    if due <= now {
+        return Some(Event::Due);
+    }
+    match events.recv_timeout(due.saturating_duration_since(now)) {
+        Ok(event) => Some(event),
+        Err(RecvTimeoutError::Timeout) => Some(Event::Due),
+        Err(RecvTimeoutError::Disconnected) => None,
+    }
+}
+
+/// How long the owner waits before it reads the saved files again after
+/// they could not be read, such as while another program held one.
+const RETRY_WAIT: Duration = Duration::from_secs(2);
+
+/// How many times in a row the owner reads the saved files again before it
+/// waits for the next save.
+const RETRIES: u32 = 5;
+
+/// When the owner reads the saved files again after a read failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Retry {
+    /// When.
+    at: Instant,
+    /// How many more tries follow this one, should it fail too.
+    left: u32,
+}
+
+impl Retry {
+    /// Whether the files are to be read again at `now`.
+    fn due(self, now: Instant) -> bool {
+        self.at <= now
+    }
+}
+
+/// When the owner wakes with no event: the first of `next_due`, when a held
+/// rule is due, and `retry`, when it reads the saved files again.
+fn wake(next_due: Option<Instant>, retry: Option<Retry>) -> Option<Instant> {
+    [next_due, retry.map(|retry| retry.at)]
+        .into_iter()
+        .flatten()
+        .min()
+}
+
+/// What the runtime runs while the saved files cannot be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Had {
+    /// Nothing, since no read has worked since it started.
+    Nothing,
+    /// The plan from the last read that worked.
+    Plan,
+}
+
 /// Reads the saved automations and logs what cannot run.
-fn load(stores: &Stores, log: &mut Log) -> plan::Plan {
-    let plan = plan::load(&stores.apps, &stores.automations);
+///
+/// # Errors
+///
+/// Returns why the saved files cannot be read as a whole.
+fn load(stores: &Stores, log: &mut Log) -> Result<plan::Plan, String> {
+    let plan = plan::load(&stores.apps, &stores.automations)?;
     for problem in &plan.problems {
         note(log, problem);
     }
     note(log, &loaded_line(&plan));
-    plan
+    Ok(plan)
+}
+
+/// Reads the saved files again at `now`, after a save or for `retry`. When
+/// they read, returns the watchlist and the orders that switch `model` to
+/// their plan. When they do not, `model` keeps running its plan, and
+/// `retry` says when to read them again, if at all. `had` says whether a
+/// read has worked yet.
+fn reread(
+    stores: &Stores,
+    log: &mut Log,
+    model: &mut Model,
+    (retry, had): (&mut Option<Retry>, &mut Had),
+    now: Instant,
+) -> Option<(Watchlist, Vec<Order>)> {
+    match load(stores, log) {
+        Ok(plan) => {
+            *retry = None;
+            *had = Had::Plan;
+            Some((plan.watchlist(), model.replan(plan.apps)))
+        },
+        Err(error) => {
+            *retry = failed(log, &error, *retry, now, *had);
+            None
+        },
+    }
+}
+
+/// Logs that the saved files cannot be read for `error`, and what the
+/// runtime runs meanwhile, as `had` says, and returns when to read them
+/// again: soon, unless `previous`, the try that just failed, was the last.
+fn failed(
+    log: &mut Log,
+    error: &str,
+    previous: Option<Retry>,
+    now: Instant,
+    had: Had,
+) -> Option<Retry> {
+    let left = previous
+        .map_or(RETRIES, |previous| previous.left)
+        .checked_sub(1);
+    let retry = left.and_then(|left| {
+        Some(Retry {
+            at: now.checked_add(RETRY_WAIT)?,
+            left,
+        })
+    });
+    let then = if retry.is_some() {
+        format!("reads them again in {} seconds", RETRY_WAIT.as_secs())
+    } else {
+        "waits for the next save".to_owned()
+    };
+    let keeps = match had {
+        Had::Nothing => "runs no automations",
+        Had::Plan => "keeps running what it ran",
+    };
+    note(log, &format!("{error}, so the runtime {keeps} and {then}"));
+    retry
 }
 
 /// The log line that says what the runtime runs.
@@ -448,6 +601,7 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
             note(log, &message);
             Step::Carry(Vec::new())
         },
+        Event::Due => Step::Carry(model.recheck(Instant::now())),
     }
 }
 
@@ -470,6 +624,7 @@ mod tests {
     use std::fs;
     use std::num::NonZeroU16;
     use std::process;
+    use std::time::Duration;
 
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
@@ -565,6 +720,33 @@ mod tests {
     }
 
     #[test]
+    fn the_owner_wakes_when_an_automation_is_due() {
+        let (sender, events) = mpsc::channel();
+        let passed = Instant::now();
+        let later = passed
+            .checked_add(Duration::from_secs(60))
+            .expect("a test time fits in an Instant");
+        assert!(matches!(
+            next(&events, passed.checked_add(Duration::from_millis(10))),
+            Some(Event::Due)
+        ));
+        sender.send(Event::Reload).expect("send");
+        assert!(
+            matches!(next(&events, Some(passed)), Some(Event::Due)),
+            "a due time that passed goes before a waiting event"
+        );
+        assert!(
+            matches!(next(&events, Some(later)), Some(Event::Reload)),
+            "an event goes before a due time still to come"
+        );
+        sender.send(Event::DetectionEnded).expect("send");
+        assert!(matches!(next(&events, None), Some(Event::DetectionEnded)));
+        drop(sender);
+        assert!(next(&events, Some(later)).is_none());
+        assert!(next(&events, None).is_none());
+    }
+
+    #[test]
     fn log_lines_name_the_app_and_process() {
         let process = ProcessId::new(42);
         let lines = [
@@ -627,27 +809,130 @@ mod tests {
     }
 
     #[test]
-    fn loading_logs_what_cannot_run() {
-        let folder = env::temp_dir().join(format!("appytappy-load-{}", process::id()));
+    fn a_reload_that_cannot_read_the_files_keeps_the_plan_and_tries_again() {
+        let folder = env::temp_dir().join(format!("appytappy-reload-{}", process::id()));
         fs::create_dir_all(&folder).expect("make the folder");
-        fs::write(folder.join("automations.json"), "not JSON").expect("break the file");
         let stores = Stores {
             apps: AppStore::new(folder.join("apps")),
             automations: AutomationStore::new(folder.join("automations.json")),
         };
         let mut log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
-        let plan = load(&stores, &mut log);
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            app_plan("Example App", &["Mute"]),
+        )]));
+        model.apply(
+            Change::Started {
+                app: "a".to_owned(),
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
+            Instant::now(),
+        );
+        fs::write(folder.join("automations.json"), "not JSON").expect("break the file");
+        let now = Instant::now();
+        let mut retry = None;
+        let mut had = Had::Plan;
+        let mut tries = Vec::new();
+        for _ in 0..=RETRIES {
+            assert_eq!(
+                reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now),
+                None
+            );
+            tries.push(retry.map(|retry| retry.left));
+        }
+        assert_eq!(
+            model.active_automations(),
+            ["Mute"],
+            "the plan keeps running"
+        );
+        assert_eq!(
+            tries,
+            [Some(4), Some(3), Some(2), Some(1), Some(0), None],
+            "the tries are bounded"
+        );
+        assert_eq!(
+            retry, None,
+            "after the last try only a save reads the files again"
+        );
+        // As at start, when no read has worked yet.
+        had = Had::Nothing;
+        retry = failed(
+            &mut log,
+            "the automations cannot be read: locked",
+            None,
+            now,
+            had,
+        );
+        assert_eq!(
+            retry.map(|retry| retry.at),
+            now.checked_add(RETRY_WAIT),
+            "a failed read tries again soon"
+        );
+        assert_eq!(
+            reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now),
+            None
+        );
+        assert_eq!(retry.map(|retry| retry.left), Some(3));
+        fs::write(
+            folder.join("automations.json"),
+            "{\"format\":1,\"automations\":[]}",
+        )
+        .expect("mend the file");
+        let (_, orders) = reread(&stores, &mut log, &mut model, (&mut retry, &mut had), now)
+            .expect("the files read");
+        assert_eq!(had, Had::Plan, "a read that works gives a plan");
         let written = fs::read_to_string(folder.join("logs").join("runtime.log")).expect("read");
         fs::remove_dir_all(&folder).expect("clean up");
-        assert_eq!(plan.problems.len(), 1, "{plan:?}");
+        assert_eq!(retry, None, "a read that works needs no retry");
+        assert_eq!(
+            orders,
+            [Order::StopReading(SessionId(0), "Example App".to_owned())]
+        );
         assert!(
-            written.contains("the automations cannot be read: "),
+            written.contains("the automations cannot be read: the automations file is not valid: "),
             "{written:?}"
+        );
+        assert!(
+            written.contains(
+                ", so the runtime keeps running what it ran and reads them again in 2 seconds\n"
+            ),
+            "{written:?}"
+        );
+        assert!(
+            written.contains(
+                ", so the runtime keeps running what it ran and waits for the next save\n"
+            ),
+            "{written:?}"
+        );
+        assert_eq!(
+            written
+                .matches(", so the runtime runs no automations and reads them again in 2 seconds\n")
+                .count(),
+            2,
+            "the start's failure and the retry after it: {written:?}"
         );
         assert!(
             written.ends_with("no saved automation can run\n"),
             "{written:?}"
         );
+    }
+
+    #[test]
+    fn a_retry_alone_wakes_the_owner() {
+        let now = Instant::now();
+        let soon = now.checked_add(Duration::from_secs(1)).expect("soon");
+        let later = now.checked_add(Duration::from_secs(3)).expect("later");
+        let retry = |at| Retry { at, left: 2 };
+        assert_eq!(wake(None, None), None);
+        assert_eq!(wake(None, Some(retry(soon))), Some(soon));
+        assert_eq!(wake(Some(later), Some(retry(soon))), Some(soon));
+        assert_eq!(wake(Some(soon), Some(retry(later))), Some(soon));
+        assert_eq!(wake(Some(soon), None), Some(soon));
+        assert!(!retry(soon).due(now), "not yet");
+        assert!(retry(soon).due(soon), "right on time");
+        assert!(retry(now).due(soon), "late");
     }
 
     #[test]
