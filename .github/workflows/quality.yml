@@ -87,7 +87,8 @@ jobs:
       - name: Run the mutation shard
         run: mise run rust:mutants
 
-  # AppyTappy ships for Windows only. This job proves the Rust workspace
+  # AppyTappy ships for Windows only. This job proves the runtime the
+  # installer ships meets its footprint targets, and the Rust workspace
   # formats, lints, documents, and passes the member crates' tests on the
   # target platform, where the Windows adapters' tests run. The root package's
   # standards policy tests compare POSIX paths, so they run in `quality`.

@@ -21,11 +21,11 @@ Set-StrictMode -Version Latest
 
 # The targets. Memory is the private working set, the Memory column of Task
 # Manager's Details tab; CPU is the share of one core over the sample.
-$BinaryLimit = 5MB
-$IdleMemoryLimit = 5MB
-$IdleCpuLimit = 0.1
-$ActiveMemoryLimit = 15MB
-$ActiveCpuLimit = 1.0
+$BinaryLimit = 2MB
+$IdleMemoryLimit = 3MB
+$IdleCpuLimit = 0.05
+$ActiveMemoryLimit = 6MB
+$ActiveCpuLimit = 2.0
 
 # Sampling: how long each phase settles before its sample, and how long the
 # sample runs.
@@ -44,7 +44,7 @@ function Add-Row([string]$Measure, [string]$Value, [string]$Limit, [bool]$Within
 }
 
 function Format-Bytes([long]$Bytes) {
-    '{0:N2} MB' -f ($Bytes / 1MB)
+    '{0:N2} MB ({1:N0} bytes)' -f ($Bytes / 1MB), $Bytes
 }
 
 $exe = (Resolve-Path $Runtime).Path

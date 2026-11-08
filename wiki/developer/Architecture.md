@@ -92,8 +92,9 @@ once it previews automations.
 The design uses the [`windows`](https://github.com/microsoft/windows-rs) crate
 rather than `windows-sys`. Media sessions and Core Audio are WinRT and COM
 APIs, which only `windows` covers; `windows-sys` covers plain Win32 functions.
-[#12](https://github.com/TheLunchTrae/appy-tappy/issues/12) measures what this
-costs.
+Link-time optimization drops the bindings the runtime does not call, so the
+crate's cost shows in the runtime's binary size, which [Footprint](#footprint)
+bounds.
 
 ### Portable core, thin Windows adapters
 
@@ -122,8 +123,7 @@ The runtime is one process for all applications. It uses no async runtime and no
 webview, and it keeps its dependencies few. It is built as a Windows GUI
 program (`#![windows_subsystem = "windows"]`), so no console window opens. It
 has no console output, so it logs only to `%LOCALAPPDATA%\AppyTappy\logs\`.
-Footprint targets belong to
-[#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
+[Footprint](#footprint) states how small and quiet it has to stay.
 
 It follows the standards' ownership rule: one thread owns all state, and other
 threads send it events over channels instead of sharing state behind locks.
@@ -205,8 +205,9 @@ The runtime is in one of three states:
 
 - **Idle.** No watched application runs. The window event hook is installed, and
   no timer runs. A new top-level window anywhere on the desktop, a tooltip or a
-  menu included, still leads to a snapshot; what that costs is measured in
-  [#12](https://github.com/TheLunchTrae/appy-tappy/issues/12).
+  menu included, still leads to a snapshot. [Footprint](#footprint) measures
+  idle CPU on a CI desktop, where few windows open; a busy desktop's snapshots
+  are not measured.
 - **Attached.** At least one watched application runs, and each has a session
   that follows one of its processes.
 - **Degraded.** A problem stops the runtime from watching applications: process
@@ -357,6 +358,50 @@ pointer for a right-click and the icon for the keyboard. After each event the
 owner gives the tray a fresh description. When the runtime cannot make the
 tray, such as without a desktop, it logs that and runs without one; when the
 tray stops on its own, the runtime logs why and keeps running without it.
+
+### Footprint
+
+The runtime runs all day beside games, so it has to stay small and use next to
+no CPU. `mise run rust:footprint` builds the runtime the installer ships, with
+the `dist` profile, and
+[`scripts/footprint.ps1`](../../scripts/footprint.ps1) runs it on Windows and
+fails when a measurement exceeds its target. The `windows` CI job runs it on
+every pull request and every push to `main`.
+
+The script gives the runtime scratch app data folders that hold one
+application with three values, two color checks and a bar fill, and an
+automation on each. It runs the runtime through three phases and samples each
+for 30 seconds after 5 seconds of settling:
+
+1. **Idle.** The application is not running.
+2. **Active.** A probe program the script compiles shows the application's
+   window and repaints it every 16 ms, the way a game does. Two of the values
+   change on every frame, so the runtime reads at its fastest. One automation
+   fires once, which shows the reads work; its action targets a program that
+   does not exist, so it changes nothing.
+3. **Idle after.** The probe has exited and the runtime has detached.
+
+| Measure                    | Target        |
+| -------------------------- | ------------- |
+| Binary size                | At most 2 MB  |
+| Visual C++ Redistributable | Not needed    |
+| Idle memory                | At most 3 MB  |
+| Idle CPU, before and after | At most 0.05% |
+| Active memory, and after   | At most 6 MB  |
+| Active CPU                 | At most 2%    |
+
+Memory is the private working set, which Task Manager's Details tab shows as
+Memory. It leaves out the pages of Windows DLLs that every program shares.
+CPU is the share of one core over the sample; Task Manager shows the share of
+all cores, which is smaller by the number of cores. The script holds these
+values, so a change to a target changes both. The script also prints the full
+working set, commit size, threads, and handles of each phase, and the CI job
+shows the table in its run summary.
+
+The runtime links the C startup files and the Visual C++ runtime into the
+program, as the setup app's Tauri build does, and leaves the Universal C
+runtime to the copy in Windows. The script checks that the program imports no
+`vcruntime140.dll`.
 
 ## Sources, rules, and actions
 
