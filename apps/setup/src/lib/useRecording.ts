@@ -1,3 +1,5 @@
+// Recording a region on the capture screen: its readings, their pictures, and its commands.
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -36,7 +38,8 @@ export function useRecording(): {
   readonly clearCommandError: () => void;
   /**
    * Starts a new recording of `settings`, or with `more` goes on with the stopped one; `onStarted` runs once it has
-   * started.
+   * started. It is a callback, not an answer like `stop`'s, so it runs before the recording's state is read and still
+   * runs when that read fails.
    */
   readonly start: (settings: Recordable, more: boolean, onStarted: () => void) => Promise<void>;
   /** Stops recording, keeping its readings; true once it stopped. */

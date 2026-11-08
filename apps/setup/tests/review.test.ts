@@ -90,7 +90,7 @@ describe('reviewing the kept readings', () => {
     expect(keepBlocked(kept, new Map([[2, 'No.']]), true)).toBeNull();
   });
 
-  test('Keep all and Keep none edit every reading but one still being read', () => {
+  test('Keep all and Keep none edit every reading but one still being read with no edit yet', () => {
     const readings = [read('1'), pending, read(''), pending];
     const edits = new Map([[3, { keep: false, text: '9' }]]);
     const all = entries(readings, edits, new Map());
