@@ -554,10 +554,9 @@ changing.
 
 AppyTappy must never get a user banned. The policy and its classes belong to
 [#11](https://github.com/TheLunchTrae/appy-tappy/issues/11). For any application
-whose anti-cheat class is not `none`, input-injection actions are blocked. No
-source opens an application's process: screen, log, local API, and process and
-window event sources stay allowed. The design enforces the block in three
-places:
+whose anti-cheat class is not `none`, input-injection actions are blocked;
+screen, log, local API, and process and window event sources stay allowed. The
+design enforces the block in three places:
 
 1. The setup app refuses to save or turn on an automation whose actions the
    application's class blocks. The one blocked item the saved files can hold
@@ -590,12 +589,12 @@ The setup app is a Tauri v2 app with a React and TypeScript frontend, in
 [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16).
 
 Its Rust side exposes Tauri commands and holds no logic of its own: discovery,
-scanning, preview, and saving come from the shared crates. It follows the
+capture, preview, and saving come from the shared crates. It follows the
 same ownership rule as the runtime. One owner thread holds the setup app's
 state, and Tauri keeps only that thread's `Sender`, never state behind a
 `Mutex`. Each command is `async`: it sends a request with a
-`tokio::sync::oneshot` reply channel and awaits the reply, so a slow scan never
-freezes the window. The AI-assisted discovery flow belongs to
+`tokio::sync::oneshot` reply channel and awaits the reply, so a slow capture or
+save never freezes the window. The AI-assisted discovery flow belongs to
 [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
 
 How Tauri compares with the alternatives:
@@ -657,9 +656,10 @@ once the panel stops moving.
 
 The standards deny `unsafe` code. Win32 and COM calls through the `windows`
 crate are `unsafe`, because Rust cannot check what Windows does with the
-pointers it receives. That covers Core Audio, window hooks, the tray icon, directory watching, and the Direct3D
-interop that screen capture needs. WinRT calls, such as media sessions and the
-screen capture API itself, are safe Rust methods. A `win.rs` module's
+pointers it receives. That covers Core Audio, window hooks, the tray icon,
+directory watching, and the Direct3D interop that screen capture needs. WinRT
+calls, such as media sessions and the screen capture API itself, are safe Rust
+methods. A `win.rs` module's
 submodules, such as screen capture in `sources/src/win/capture.rs` and the
 tray in `platform/src/win/tray.rs`, follow the same rules.
 

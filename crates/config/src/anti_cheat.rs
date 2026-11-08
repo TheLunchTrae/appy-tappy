@@ -1,5 +1,6 @@
 //! The anti-cheat policy: protection classes, the input they allow, and the
-//! anti-cheat programs the code recognizes.
+//! anti-cheat programs the code recognizes. It also holds [`ProcessId`], the
+//! Windows process ID the other crates share.
 
 use std::fmt;
 

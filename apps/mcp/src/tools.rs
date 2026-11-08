@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn rejects_unknown_tools_and_arguments() {
         let session = session();
-        assert_eq!(session.call("memory_read", json!({})), None);
+        assert_eq!(session.call("no_such_tool", json!({})), None);
         assert!(
             call(&session, "window_list", json!({ "force": true }))
                 .unwrap_err()
