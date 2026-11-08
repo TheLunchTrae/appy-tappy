@@ -1679,10 +1679,23 @@ select {
 }
 
 .set-row .what {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* A setting's name with a ? hint beside it. The hint's explanation spans the setting's text, and the button keeps
+   the line's height. */
+.set-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.set-name .hint-btn {
+  margin: -4px 0;
 }
 
 .num {

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile, TraceCategory};
-use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
+use appytappy_config::store::{AppStore, AutomationStore, EnabledStore, SettingsStore};
 use appytappy_platform::{RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, WindowWatch};
 use appytappy_sources::HostSystem;
 use appytappy_sources::schedule::ReadInterval;
@@ -126,11 +126,13 @@ enum Step {
     Stop,
 }
 
-/// Where the saved applications, automations, and settings are.
+/// Where the saved applications, automations, and settings are, and where
+/// the runtime keeps whether automations are enabled.
 struct Stores {
     apps: AppStore,
     automations: AutomationStore,
     settings: SettingsStore,
+    enabled: EnabledStore,
 }
 
 /// The threads and handles the owner carries orders out with.
@@ -157,6 +159,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         apps: AppStore::new(locations.apps()),
         automations: AutomationStore::new(locations.automations()),
         settings: SettingsStore::new(locations.settings()),
+        enabled: EnabledStore::new(locations.enabled()),
     };
     // The host system sets the process's DPI awareness, which Windows
     // requires before any window exists, so it comes before the tray window.
@@ -165,11 +168,6 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let windows = WindowWatch::start(inputs.clone())?;
     let (sender, events) = mpsc::channel();
     let mut model = Model::default();
-    // Without a desktop the runtime still works; it only has no icon.
-    let mut shown = tray::menu(&model);
-    let tray = Tray::start(sender.clone(), shown.clone())
-        .inspect_err(|error| note(log, &format!("no tray icon: {error}")))
-        .ok();
     // Without the reload event the runtime still runs what it read at start.
     let reload = ReloadWatch::start(RELOAD, sender.clone())
         .inspect_err(|error| {
@@ -189,6 +187,13 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         &mut reloads,
         (Stale::BOTH, &mut tracing, &sender),
     );
+    // The first read decides whether automations start enabled, so the tray
+    // starts after it and its check mark shows that from the start. Without
+    // a desktop the runtime still works; it only has no icon.
+    let mut shown = tray::menu(&model);
+    let tray = Tray::start(sender.clone(), shown.clone())
+        .inspect_err(|error| note(log, &format!("no tray icon: {error}")))
+        .ok();
     let lifecycle = Lifecycle::new(first.watchlist.unwrap_or_default(), Instant::now());
     let detect = Arc::clone(&system);
     let changes = sender.clone();
@@ -255,7 +260,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         let received = crew.trace.wants(TraceCategory::Rules).then(Instant::now);
         let (kind, cause) = (event.kind(), event.cause());
         receive(&mut crew.trace, &model, &event);
-        let read = match handle(&mut model, log, event) {
+        let read = match handle(&mut model, log, &stores.enabled, event) {
             Step::Carry(orders) => {
                 carry(orders, &mut crew, log);
                 reloads.due(Instant::now())
@@ -633,6 +638,10 @@ struct Saved {
 /// Files that do not read are kept as they were: the model runs the plan
 /// and settings it has, and `reloads` says when to read those files again,
 /// if at all.
+///
+/// The first settings that read decide whether automations start enabled:
+/// when they say to remember, as the tray last left them, and otherwise
+/// enabled, as the model starts. Settings read later leave it to the tray.
 fn read_saved(
     stores: &Stores,
     log: &mut Log,
@@ -645,9 +654,13 @@ fn read_saved(
     let mut retry = None;
     let mut failing = Stale::default();
     let mut trace = None;
+    let mut orders = Vec::new();
     if read.settings {
         match read_settings(&stores.settings) {
             Ok(settings) => {
+                if settings.remember_enabled && !reloads.had_settings {
+                    orders = remembered(&stores.enabled, model, log);
+                }
                 reloads.had_settings = true;
                 let interval = read_interval(settings.read_interval);
                 if interval != model.interval() {
@@ -665,13 +678,12 @@ fn read_saved(
         }
     }
     let mut watchlist = None;
-    let mut orders = Vec::new();
     if read.files {
         match load(stores, log) {
             Ok(plan) => {
                 reloads.had = Had::Plan;
                 watchlist = Some(plan.watchlist());
-                orders = model.replan(plan.apps);
+                orders.extend(model.replan(plan.apps));
             },
             Err(error) => {
                 failing.files = true;
@@ -687,6 +699,16 @@ fn read_saved(
         orders,
         trace,
     }
+}
+
+/// Enables or disables automations as the tray last left them, as `store`
+/// keeps it, and logs when that leaves them disabled.
+fn remembered(store: &EnabledStore, model: &mut Model, log: &mut Log) -> Vec<Order> {
+    let enabled = store.load();
+    if !enabled {
+        note(log, "automations disabled, as the tray last left them");
+    }
+    model.set_enabled(enabled)
 }
 
 /// Milliseconds since 1970, as the settings give the trace's end; 0 should
@@ -900,8 +922,9 @@ fn order_line(order: &Order) -> Option<String> {
     }
 }
 
-/// Applies one event to the model and logs it.
-fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
+/// Applies one event to the model and logs it. A pick of Enabled from the
+/// tray is also kept in `enabled`, for the settings that remember it.
+fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event) -> Step {
     match event {
         Event::Detected(change) => {
             if let Some(line) = describe(model, &change) {
@@ -924,16 +947,22 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
             Step::Carry(Vec::new())
         },
         Event::Tray(TrayEvent::Picked(id)) => match tray::command(id) {
-            Some(tray::Command::SetEnabled(enabled)) => {
+            Some(tray::Command::SetEnabled(on)) => {
                 note(
                     log,
-                    if enabled {
+                    if on {
                         "automations enabled"
                     } else {
                         "automations disabled"
                     },
                 );
-                Step::Carry(model.set_enabled(enabled))
+                if let Err(error) = enabled.save(on) {
+                    note(
+                        log,
+                        &format!("whether automations are enabled cannot be kept: {error}"),
+                    );
+                }
+                Step::Carry(model.set_enabled(on))
             },
             Some(tray::Command::Quit) => {
                 note(log, "quit from the tray");
@@ -1084,6 +1113,7 @@ mod tests {
     fn events_update_the_model_and_the_log_until_quit() {
         let folder = env::temp_dir().join(format!("appytappy-handle-{}", process::id()));
         let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let enabled = EnabledStore::new(folder.join("enabled.txt"));
         let mut model = Model::default();
         let started = Event::from(Change::Started {
             app: "example".to_owned(),
@@ -1105,9 +1135,10 @@ mod tests {
         for event in [
             started, problem, failed, cannot_run, disable, unknown, ended,
         ] {
-            steps.push(handle(&mut model, &mut log, event));
+            steps.push(handle(&mut model, &mut log, &enabled, event));
         }
         let disabled = model.enabled();
+        let kept_disabled = enabled.load();
         let could_run = model.actions_can_run();
         let ends = [
             Event::from(TrayEvent::Picked(tray::ENABLE)),
@@ -1117,8 +1148,9 @@ mod tests {
             Event::DetectionEnded,
         ];
         for event in ends {
-            steps.push(handle(&mut model, &mut log, event));
+            steps.push(handle(&mut model, &mut log, &enabled, event));
         }
+        let kept_enabled = enabled.load();
         let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
         fs::remove_dir_all(&folder).expect("clean up");
         let carry = || Step::Carry(Vec::new());
@@ -1141,7 +1173,9 @@ mod tests {
         );
         assert!(!could_run, "the action thread said actions cannot run");
         assert!(!disabled, "Disable disables");
+        assert!(!kept_disabled, "Disable is kept");
         assert!(model.enabled(), "Enable enables again");
+        assert!(kept_enabled, "Enable is kept");
         assert_eq!(model.state(), model::State::Attached);
         // On Windows each line starts with the local time.
         let lines: Vec<&str> = written.lines().collect();
@@ -1328,10 +1362,11 @@ mod tests {
                 problem: "cannot be read: too dark".to_owned(),
             })
         };
-        handle(&mut model, &mut log, started);
-        handle(&mut model, &mut log, problem());
+        let enabled = EnabledStore::new(folder.join("enabled.txt"));
+        handle(&mut model, &mut log, &enabled, started);
+        handle(&mut model, &mut log, &enabled, problem());
         assert_eq!(model.replan(named("Renamed", "Health")), []);
-        handle(&mut model, &mut log, problem());
+        handle(&mut model, &mut log, &enabled, problem());
         let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
         fs::remove_dir_all(&folder).expect("clean up");
         let problems: Vec<&str> = written
@@ -1410,6 +1445,7 @@ mod tests {
                 apps: AppStore::new(folder.join("apps")),
                 automations: AutomationStore::new(folder.join("automations.json")),
                 settings: SettingsStore::new(folder.join("settings.json")),
+                enabled: EnabledStore::new(folder.join("enabled.txt")),
             };
             let log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
             let tracing = Switch::new(folder.join("traces"));
@@ -1559,6 +1595,95 @@ mod tests {
             scratch.reload(&mut model, &mut reloads, Stale::BOTH),
             [Order::StopReading(SessionId(0), "Example App".to_owned())],
             "the app the plan dropped stops and does not start again"
+        );
+    }
+
+    const REMEMBER: &str = r#"{"format":1,"rememberEnabled":true}"#;
+
+    #[test]
+    fn the_first_settings_start_automations_as_the_tray_left_them_if_they_remember() {
+        // Each case: whether the settings remember, what the enabled file
+        // holds, and whether automations start enabled.
+        for (settings, kept, starts) in [
+            (r#"{"format":1}"#, Some("off\n"), true),
+            (REMEMBER, Some("off\n"), false),
+            (REMEMBER, Some("on\n"), true),
+            (REMEMBER, None, true),
+        ] {
+            let mut scratch = Scratch::new("remember");
+            scratch.write("settings.json", settings);
+            if let Some(kept) = kept {
+                scratch.write("enabled.txt", kept);
+            }
+            let mut model = Model::default();
+            let mut reloads = Reloads::default();
+            assert_eq!(scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY), []);
+            assert_eq!(model.enabled(), starts, "{settings} {kept:?}");
+            assert_eq!(
+                scratch
+                    .log()
+                    .contains("automations disabled, as the tray last left them"),
+                !starts,
+                "{settings} {kept:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_read_later_leave_automations_as_the_tray_has_them() {
+        let mut scratch = Scratch::new("remember-later");
+        let mut model = Model::default();
+        let mut reloads = Reloads::default();
+        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
+        scratch.write("settings.json", REMEMBER);
+        scratch.write("enabled.txt", "off\n");
+        scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY);
+        assert!(
+            model.enabled(),
+            "turning the setting on changes nothing now"
+        );
+    }
+
+    #[test]
+    fn settings_that_first_read_late_stop_what_runs_when_the_tray_left_it_off() {
+        let mut scratch = Scratch::new("remember-late");
+        scratch.write("settings.json", REMEMBER);
+        scratch.write("enabled.txt", "off\n");
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "a".to_owned(),
+            app_plan("Example App", &["Mute"]),
+        )]));
+        let orders = model.apply(Change::Started {
+            app: "a".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        assert!(matches!(orders.first(), Some(Order::Read(_))));
+        let mut reloads = Reloads::default();
+        assert_eq!(
+            scratch.reload(&mut model, &mut reloads, SETTINGS_ONLY),
+            [Order::StopReading(SessionId(0), "Example App".to_owned())]
+        );
+        assert!(!model.enabled());
+    }
+
+    #[test]
+    fn a_tray_pick_that_cannot_be_kept_is_logged_and_still_applies() {
+        let mut scratch = Scratch::new("remember-unkept");
+        scratch.write("enabled.txt", "");
+        let enabled = EnabledStore::new(scratch.folder.join("enabled.txt").join("enabled.txt"));
+        let mut model = Model::default();
+        let disable = Event::from(TrayEvent::Picked(tray::DISABLE));
+        assert_eq!(
+            handle(&mut model, &mut scratch.log, &enabled, disable),
+            Step::Carry(Vec::new())
+        );
+        assert!(!model.enabled());
+        let written = scratch.log();
+        assert!(
+            written.contains("whether automations are enabled cannot be kept: "),
+            "{written:?}"
         );
     }
 

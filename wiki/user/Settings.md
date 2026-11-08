@@ -9,6 +9,10 @@ background part picks up a change within a moment.
 - **Start AppyTappy when I sign in to Windows.** On, the background part
   starts each time you sign in. The installer turns this on. Turn it off to
   start AppyTappy only when you open it yourself.
+- **Remember whether automations are on.** Off at first, automations are on
+  each time AppyTappy starts. Turn it on to have AppyTappy start with
+  automations on or off as you last left them with **Enabled** in the
+  [tray menu](The-tray-icon.md#the-menu).
 - **Screenshot shortcut.** The key that takes a screenshot while you
   [make a value](Values.md) or a [reference](References.md), `F9` at first.
   Select **Change** and press the new keys, or Esc to keep the old ones. A

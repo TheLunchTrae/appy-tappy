@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { LIMITS, type ReadIntervalDef } from '../lib/bindings.ts';
 import { errorText } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
+import { Hint } from '../components/Hint.tsx';
 import { NumberSetting } from '../components/NumberSetting.tsx';
 import { RuntimeTrace } from '../components/RuntimeTrace.tsx';
 import { setStartsWithWindows, startsWithWindows, useSettings, withWait } from '../lib/settings.ts';
@@ -87,6 +88,54 @@ function StartWithWindows() {
   );
 }
 
+/** Whether the runtime starts with automations as the tray's Enabled item last left them, or always on. */
+function RememberEnabled() {
+  const { settings, change } = useSettings();
+  const [error, setError] = useState<string | null>(null);
+  const turn = (on: boolean): void => {
+    change((current) => ({ ...current, rememberEnabled: on })).then(
+      (problem) => {
+        setError(problem);
+      },
+      (failure: unknown) => {
+        setError(errorText(failure));
+      },
+    );
+  };
+  return (
+    <div className="set-row">
+      <div className="what">
+        <span className="set-name">
+          <span id="remember-enabled">Remember whether automations are on</span>
+          <Hint topic="Remember whether automations are on" id="remember-enabled-hint">
+            When on, AppyTappy starts with automations on or off as you last set them from the tray. When off,
+            automations are on each time it starts.
+          </Hint>
+        </span>
+        <span className="note" id="remember-enabled-note">
+          When off, automations are on each time AppyTappy starts.
+        </span>
+        {error === null ? null : (
+          <span className="warn" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        className="switch"
+        aria-labelledby="remember-enabled"
+        aria-describedby="remember-enabled-note remember-enabled-hint"
+        aria-checked={settings.rememberEnabled}
+        onClick={() => {
+          turn(!settings.rememberEnabled);
+        }}
+      />
+    </div>
+  );
+}
+
 /** The screenshot shortcut, and a button that records a new one from the next key press. */
 function ScreenshotShortcut() {
   const { label, choosing, saveError, toggle, cancel, onKeyDown } = useShortcutChoice();
@@ -164,6 +213,7 @@ export function SettingsPage({ problem }: Props) {
         <section className="card" aria-labelledby="settings-general">
           <h2 id="settings-general">General</h2>
           <StartWithWindows />
+          <RememberEnabled />
           <ScreenshotShortcut />
         </section>
         <section className="card" aria-labelledby="settings-reading">

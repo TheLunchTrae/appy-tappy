@@ -766,7 +766,12 @@ screenshotShortcut: string,
 /**
  * The runtime trace, which records what the runtime reads and does.
  */
-trace: TraceDef, }>;
+trace: TraceDef,
+/**
+ * Whether the runtime starts with automations enabled or disabled as
+ * the tray last left them. Off, it starts with them enabled.
+ */
+rememberEnabled: boolean, }>;
 
 /**
  * The settings as the Settings page shows them.
@@ -1111,5 +1116,6 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     ],
     "fileLimitMb": 50,
     "keepFiles": 5
-  }
+  },
+  "rememberEnabled": false
 };

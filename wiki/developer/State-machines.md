@@ -55,9 +55,10 @@ stateDiagram-v2
 ```
 
 - **Starting.** The window events hook starts first, and the runtime exits if
-  it cannot. Then the tray and the reload watch start. Each of those two is
-  optional: the runtime logs why it cannot make one and runs without it. Then
-  the saved files are read, and the lifecycle and action threads start. If
+  it cannot. Then the reload watch starts, the saved files are read, and the
+  tray starts, so its menu shows whether automations start enabled. The
+  reload watch and the tray are optional: the runtime logs why it cannot make
+  one and runs without it. Then the lifecycle and action threads start. If
   either cannot start, the runtime stops what it started and exits with the
   error. A first read that fails starts with an empty plan and reads again, as
   [Reload watch](#reload-watch) describes.
@@ -142,7 +143,9 @@ The model (`apps/runtime/src/model.rs`) has no run state type. An application's
 automations run while all of these hold:
 
 - It is in `attached`: detection found its process.
-- `enabled` is true: automations are on in the tray.
+- `enabled` is true: automations are on in the tray. It starts true, or as
+  the tray last left it when the settings remember that, as
+  [Files and handoff](Architecture.md#files-and-handoff) describes.
 - The plan has automations for it.
 
 When they all hold, the application has an entry in `running`, with its engine
