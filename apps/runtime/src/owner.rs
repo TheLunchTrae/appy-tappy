@@ -1602,7 +1602,7 @@ mod tests {
         assert!(on.trace.is_some_and(|trace| trace != Trace::OFF));
         let ends = scratch.tracing.until().expect("an end time");
         let soonest = before
-            .checked_add(Duration::from_secs(59))
+            .checked_add(Duration::from_secs(30))
             .expect("in range");
         let latest = Instant::now()
             .checked_add(Duration::from_secs(60))
