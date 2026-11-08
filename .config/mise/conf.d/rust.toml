@@ -81,6 +81,18 @@ cargo test --workspace --exclude appy-tappy-workspace --doc --all-features --loc
 description = "Run the screen benchmarks and print their timings"
 run = "cargo bench -p appytappy-sources --bench screen --locked"
 
+# Builds the runtime the installer ships and measures it on Windows: its
+# size, whether it needs the Visual C++ Redistributable, and its memory and
+# CPU while idle and while it reads a window. It fails when a measurement
+# exceeds its target in wiki/developer/Architecture.md#footprint.
+[tasks."rust:footprint"]
+description = "Check the shipped runtime against its footprint targets (Windows only)"
+run = """
+set -eu
+cargo build --profile dist --locked -p appytappy-runtime
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/footprint.ps1 -Runtime target/dist/appytappy-runtime.exe
+"""
+
 # Every package is unpublished (`publish = false`), and Cargo then resolves a
 # member's path dependencies on other members from crates.io, where they do not
 # exist. So the task builds each package's file list and normalized manifest
