@@ -121,9 +121,10 @@ A restoring rule that changes a target with a pending restore takes the
 restore over, so its own release puts back the state from before the first
 change, and the pending restore is not sent just before the rule's action; a
 rule that does not restore drops it. When an earlier rule that changed the
-same target is released, its undo drops the pending restore, so the target
-goes back to its state from before both rules rather than the one between
-them. When the runtime stops, each restore still pending gets one last try.
+same target is released, its undo takes the pending restore in: it puts back
+the earlier rule's state, from the state the failed restore left, so the
+pending restore is not sent after it. When the runtime stops, each restore
+still pending gets one last try.
 
 ## When the controls cannot start
 

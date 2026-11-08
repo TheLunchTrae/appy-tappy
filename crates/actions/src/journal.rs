@@ -275,9 +275,10 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
 
     /// Undoes what `owner` changed, newest first, and forgets it, at `now`.
     /// A restore that fails is kept pending for [`Actions::retry_restores`].
-    /// Undoing a target drops its pending restore, which a newer rule's
-    /// failed release left: the target goes back to this rule's earlier
-    /// state instead.
+    /// Undoing a target merges in its pending restore, which a newer rule's
+    /// failed release left: the undo puts back this rule's earlier state
+    /// from the state the newer rule left, so the pending restore is not
+    /// sent after it.
     ///
     /// # Errors
     ///
@@ -296,20 +297,26 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                 continue;
             }
             // A pending restore of this target came from a newer change, so
-            // this entry's "before" state supersedes it: sending it after
-            // this undo would leave the target as that newer rule set it.
-            self.pending
-                .retain(|pending| !pending.change.same_target(&entry.change));
-            if let Err(error) = self.undo(&entry.change) {
+            // it knows the state the target was left in, and this entry
+            // knows the state to put back: the undo merges the two.
+            let change = match self
+                .pending
+                .iter()
+                .position(|pending| pending.change.same_target(&entry.change))
+            {
+                Some(position) => {
+                    let mut newer = self.pending.remove(position).change;
+                    newer.inherit(entry.change);
+                    newer
+                },
+                None => entry.change,
+            };
+            if let Err(error) = self.undo(&change) {
                 failure.get_or_insert(error);
-                let once_at = entry
-                    .change
+                let once_at = change
                     .retried_once()
                     .then(|| now.checked_add(MEDIA_RETRY).unwrap_or(now));
-                self.pending.push(Pending {
-                    change: entry.change,
-                    once_at,
-                });
+                self.pending.push(Pending { change, once_at });
             }
         }
         failure.map_or(Ok(()), Err)
@@ -1346,6 +1353,47 @@ mod tests {
         assert!(
             actions.controls().playing(1),
             "playing, as before both rules"
+        );
+        // An older rule whose change changed nothing still puts back its
+        // state over the newer rule's.
+        let mut actions = speakers();
+        for (owner, level) in [('x', 80), ('a', 20)] {
+            actions
+                .perform(owner, &lower(level), Restore::OnRelease, &watched())
+                .expect("set");
+        }
+        actions.controls().broken = Some("speakers");
+        assert!(actions.release('a', start).is_err());
+        actions.controls().broken = None;
+        actions.release('x', start).expect("restored");
+        assert!(!actions.has_pending());
+        assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
+
+        let mut actions = player(false);
+        actions
+            .perform(
+                'x',
+                &current(MediaCommand::Pause),
+                Restore::OnRelease,
+                &watched(),
+            )
+            .expect("already paused");
+        actions
+            .perform(
+                'a',
+                &current(MediaCommand::Play),
+                Restore::OnRelease,
+                &watched(),
+            )
+            .expect("played");
+        actions.controls().refuse = true;
+        assert!(actions.release('a', start).is_err());
+        actions.controls().refuse = false;
+        actions.release('x', start).expect("paused");
+        assert!(!actions.has_pending());
+        assert!(
+            !actions.controls().playing(1),
+            "paused, as before both rules"
         );
     }
 
