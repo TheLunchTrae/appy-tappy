@@ -384,7 +384,7 @@ mod tests {
         let mut lifecycle = Lifecycle::new(example_app(), now);
         lifecycle.scan(Ok(vec![entry(42, "Example.exe")]), now);
         assert_eq!(
-            lifecycle.scan(Ok(vec![entry(42, "notepad.exe")]), now),
+            lifecycle.scan(Ok(vec![entry(42, "Other.exe")]), now),
             [exited(42)]
         );
     }
