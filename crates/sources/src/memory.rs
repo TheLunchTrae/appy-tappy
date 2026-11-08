@@ -1,8 +1,8 @@
 //! Reading another process's memory: the guided value scan and the
 //! pointer-chain walker.
 //!
-//! A scan works like Cheat Engine's: a first scan finds every address whose
-//! value passes a test, or snapshots all readable memory when the value is
+//! A scan works in rounds: a first scan finds every address whose value
+//! passes a test, or snapshots all readable memory when the value is
 //! unknown, and each next scan keeps the addresses whose value passes a new
 //! test against its current and previous value.
 

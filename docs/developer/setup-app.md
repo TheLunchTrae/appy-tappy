@@ -95,14 +95,14 @@ leave review without keeping, and review's edits stay for the next one.
 ### The text reader
 
 The text reader guesses each new reading's text so review only needs
-corrections (`ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs),
+corrections (`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs),
 a pure-Rust neural text reader, so it reads the same on every system without
 the operating system's OCR. Only its recognition model loads: the region holds
 one line, so there is no text to find first. It runs on a thread of its own,
 because a read takes tens of milliseconds and the owner answers the UI in
 microseconds, and only for new readings, a few times a recording. It gets each
 reading's ink as black text on white with a margin, whatever the application's
-colors. Text for a recording the user discarded or replaced is dropped by the
+colors (`recording/ink.rs`). Text for a recording the user discarded or replaced is dropped by the
 recording's number. Only the setup app uses it; the runtime reads numbers with
 the shapes the user's labels and kept readings taught it
 ([Screen regions](screen.md#checks)).

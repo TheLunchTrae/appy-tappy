@@ -111,7 +111,7 @@ audio sessions, what it changed before the failure is still restored.
   cannot be sent.
 - **Running a command or opening a URL:** configs may be shared, and a
   shared config should not be able to run programs.
-- **HTTP and WebSocket calls** (OBS, Streamer.bot, Home Assistant): useful,
+- **HTTP and WebSocket calls** (to streaming or smart-home software): useful,
   but each needs its own connection settings and error handling, so they can
   come after the core set works.
 
