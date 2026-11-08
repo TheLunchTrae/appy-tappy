@@ -14,7 +14,9 @@ pub(crate) struct Stores {
 }
 
 impl Stores {
-    /// The saved application `app`, from its file.
+    /// The saved application `app`, from its file. Fails with "That
+    /// application is no longer saved." when no application has that ID, and
+    /// with the read error when the stores or its file cannot be read.
     pub(crate) fn app_file(&self, app: &str) -> Result<AppFile, String> {
         self.apps
             .load()

@@ -164,15 +164,7 @@ mod tests {
     /// save did, without telling the overlays.
     fn change_app_file(harness: &Harness, change: impl FnOnce(&mut AppFile)) {
         let stores = harness.owner.stores().expect("stores");
-        let mut file = stores
-            .apps
-            .load()
-            .expect("loads")
-            .into_iter()
-            .find(|stored| stored.id == "example")
-            .expect("saved")
-            .file
-            .expect("readable");
+        let mut file = stores.app_file("example").expect("saved and readable");
         change(&mut file);
         stores.apps.save("example", &file, &[]).expect("saves");
     }
