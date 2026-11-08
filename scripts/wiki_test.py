@@ -100,13 +100,92 @@ class WikiBuildTest(unittest.TestCase):
         with self.assertRaisesRegex(wiki.BuildError, "no Home.md"):
             self.build()
 
-    def test_a_special_page_inside_a_folder_fails_the_build(self) -> None:
-        self.write("wiki/user/_Footer.md", "Footer\n")
-        with self.assertRaisesRegex(wiki.BuildError, "only at the top of wiki/"):
+    def test_home_and_special_files_belong_at_the_top_of_the_wiki_folder(self) -> None:
+        for path, expected in (
+            ("wiki/user/_Footer.md", "belongs at wiki/_Footer.md"),
+            ("wiki/user/Home.md", "both make the wiki page|belongs at wiki/Home.md"),
+            ("wiki/developer/home.md", "belongs at wiki/Home.md"),
+        ):
+            with self.subTest(path=path):
+                self.write(path, "Text\n")
+                with self.assertRaisesRegex(wiki.BuildError, expected):
+                    self.build()
+                (self.root / path).unlink()
+
+    def test_a_home_page_in_another_case_fails_the_build(self) -> None:
+        (self.root / "wiki/Home.md").rename(self.root / "wiki/home.md")
+        with self.assertRaisesRegex(wiki.BuildError, "belongs at wiki/Home.md"):
             self.build()
 
+    def test_a_footer_needs_no_sidebar_line_and_gets_no_footer(self) -> None:
+        self.write("wiki/_Footer.md", "Questions? See [Home](Home.md).\n")
+        self.build()
+        footer = self.page("_Footer")
+        self.assertIn("See [Home](Home).", footer)
+        self.assertNotIn("generated from [", footer)
+
+    def test_another_underscore_name_fails_the_build(self) -> None:
+        self.write("wiki/_Draft.md", "# Draft\n")
+        with self.assertRaisesRegex(wiki.BuildError, "only _Footer and _Sidebar start with _"):
+            self.build()
+
+    def test_another_page_format_fails_the_build(self) -> None:
+        for name in ("Notes.markdown", "Notes.rst", "Notes.MD"):
+            with self.subTest(name=name):
+                path = self.root / f"wiki/user/{name}"
+                path.write_text("# Notes\n", encoding="utf-8")
+                with self.assertRaisesRegex(wiki.BuildError, "write wiki pages as .md files"):
+                    self.build()
+                path.unlink()
+
+    def test_the_sidebar_ignores_links_a_reader_cannot_see(self) -> None:
+        for hidden in (
+            "`[Extra](user/Extra.md)`",
+            "<!-- [Extra](user/Extra.md) -->",
+            "\n    [Extra](user/Extra.md)",
+        ):
+            with self.subTest(hidden=hidden):
+                self.write("wiki/user/Extra.md", "# Extra\n")
+                sidebar = (self.root / "wiki/_Sidebar.md").read_text(encoding="utf-8")
+                self.write("wiki/_Sidebar.md", sidebar + "\n" + hidden + "\n")
+                with self.assertRaisesRegex(wiki.BuildError, "does not link wiki/user/Extra.md"):
+                    self.build()
+                self.write("wiki/_Sidebar.md", sidebar)
+
+    def test_the_sidebar_counts_nested_reference_and_bracketed_links(self) -> None:
+        self.write("wiki/user/Extra.md", "# Extra\n")
+        self.write("wiki/user/More.md", "# More\n")
+        self.write("wiki/user/Most.md", "# Most\n")
+        with open(self.root / "wiki/_Sidebar.md", "a", encoding="utf-8") as sidebar:
+            sidebar.write(
+                "- Group\n    - [Extra](user/Extra.md)\n- [More][more]\n- [Most](<user/Most.md>)\n\n"
+                "[more]: user/More.md\n"
+            )
+        self.build()
+        sidebar = self.page("_Sidebar")
+        self.assertIn("    - [Extra](Extra)\n", sidebar)
+        self.assertIn("[more]: More\n", sidebar)
+        self.assertIn("- [Most](<Most>)\n", sidebar)
+
+    def test_a_link_in_the_wrong_case_fails_the_build(self) -> None:
+        self.write("wiki/user/Troubleshooting.md", "# Troubleshooting\n\nSee [it](install.md).\n")
+        with self.assertRaisesRegex(wiki.BuildError, "names no file in the repository; did you mean wiki/user/Install"):
+            self.build()
+
+    def test_an_image_in_the_wrong_case_fails_the_build(self) -> None:
+        self.write("wiki/user/Troubleshooting.md", "# Troubleshooting\n\n![shot](images/Window.png)\n")
+        with self.assertRaisesRegex(wiki.BuildError, "names no file in the repository"):
+            self.build()
+
+    def test_an_image_in_another_folder_links_its_wiki_copy(self) -> None:
+        self.write("wiki/images/logo.png", "picture")
+        self.write("wiki/developer/Setup-app.md", "# Setup app\n\n![logo](../images/logo.png)\n")
+        self.build()
+        self.assertIn("![logo](images/logo.png)", self.page("Setup-app"))
+        self.assertTrue((self.output / "images/logo.png").is_file())
+
     def test_a_file_name_the_wiki_cannot_use_fails_the_build(self) -> None:
-        for name in ("Setup in C#", "Setup app"):
+        for name in ("C#", "Setup:app", "Setup app"):
             with self.subTest(name=name):
                 path = self.root / f"wiki/developer/{name}.md"
                 path.write_text("# Setup\n", encoding="utf-8")
@@ -160,7 +239,9 @@ class WikiBuildTest(unittest.TestCase):
     def test_a_link_to_a_wiki_folder_opens_it_on_github(self) -> None:
         self.write("wiki/user/Troubleshooting.md", "# Troubleshooting\n\nSee [the pages](../developer/).\n")
         self.build()
-        self.assertIn("See [the pages](https://github.com/owner/name/tree/main/wiki/developer).", self.page("Troubleshooting"))
+        self.assertIn(
+            "See [the pages](https://github.com/owner/name/tree/main/wiki/developer).", self.page("Troubleshooting")
+        )
 
     def test_a_link_in_a_form_the_build_cannot_read_fails_it(self) -> None:
         self.write("wiki/user/Troubleshooting.md", "# Troubleshooting\n\nSee [it](Install.md 'Install').\n")

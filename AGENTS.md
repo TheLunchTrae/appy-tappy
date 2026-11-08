@@ -133,7 +133,8 @@ version-numbered names.
   and use AppyTappy, in the setup app's own words, with no implementation,
   crates, frameworks, or algorithms. `wiki/developer/` holds the architecture,
   contracts, and decisions, and links to the user guide for what the user sees
-  rather than repeating it. A change to what the user sees updates the user guide.
+  rather than repeating it. A change to what the user sees updates the user
+  guide.
 - `wiki/` publishes to the GitHub wiki on each push to `main`. Edit `wiki/`,
   never the wiki itself, and link between pages with relative `.md` links. A
   page's file name is its wiki page's name, with hyphens for spaces, and every
@@ -347,8 +348,8 @@ authorization.
 
 Every workspace package, including the root package, declares
 `[lints] workspace = true`. Release profiles belong in the root manifest; keep
-overflow checks enabled. `tests/allow_policy.rs` checks first-party source inputs, and
-`rust:policy` checks configured policy probes. Read their [scope and
+overflow checks enabled. `tests/allow_policy.rs` checks first-party source
+inputs, and `rust:policy` checks configured policy probes. Read their [scope and
 limitations](wiki/developer/Rust-standards.md#source-policy-scan) before adding
 macros, custom target paths, includes, or symlinks. Checker-specific production
 behavior and synthesized suppression attributes are prohibited even when static

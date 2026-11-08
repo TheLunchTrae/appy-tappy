@@ -10,6 +10,7 @@ Usage: wiki.py OUTPUT_DIRECTORY --repo OWNER/NAME [--ref BRANCH]
 """
 
 import argparse
+import os
 import posixpath
 import re
 import shutil
@@ -19,9 +20,15 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote, unquote
 
 WIKI = PurePosixPath("wiki")
+HOME = WIKI / "Home.md"
 SIDEBAR = WIKI / "_Sidebar.md"
-# GitHub's own wiki files, such as the sidebar: no page lists or footers them.
-SPECIAL = re.compile(r"^_")
+# The files GitHub's wiki shows around every page: no page lists or footers them.
+SPECIAL = {"_Sidebar", "_Footer"}
+# Other formats GitHub's wiki renders as pages, which the build does not read.
+OTHER_PAGE_SUFFIXES = {
+    ".adoc", ".asciidoc", ".creole", ".markdown", ".mdown", ".mediawiki", ".mkdn",
+    ".org", ".pod", ".rdoc", ".rst", ".textile", ".wiki",
+}
 # Characters GitHub refuses in a wiki file name, or that break a page's URL.
 UNSAFE_NAME = re.compile(r'[\\/:*?"<>|#%]')
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
@@ -39,6 +46,8 @@ REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^<>\n]*>|
 # What is left of a link that the patterns above do not read, including an
 # HTML link to a relative address, which the build does not rewrite.
 UNREAD_LINK = re.compile(r"\]\(|^ {0,3}\[(?!\^)[^\]\n]+\]:|href=[\"']?(?![\"']?(?:#|[A-Za-z][A-Za-z0-9+.-]*:))", re.M)
+HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
+INDENTED_CODE = re.compile(r"^(?: {4}|\t)(?![ \t]*(?:[-*+]|\d+[.)])[ \t]).*$", re.M)
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
@@ -59,13 +68,14 @@ def build(root: Path, output: Path, repo: str, ref: str) -> None:
         raise BuildError(f"{output} is not empty")
     pages, assets = collect(root)
     by_source = {page.source: page for page in pages}
+    check_sidebar(root, pages, by_source, repo, ref)
     output.mkdir(parents=True, exist_ok=True)
     for page in pages:
         text = (root / page.source).read_text(encoding="utf-8")
         body = render(
             page, text, lambda target, image, page=page: resolve(root, page, target, image, by_source, repo, ref)
         )
-        if not SPECIAL.match(page.name):
+        if page.name not in SPECIAL:
             body += footer(page, repo, ref)
         # GitHub's wiki names a page by its file name alone, so pages land at
         # the top of the wiki repository whatever folder holds them here.
@@ -74,7 +84,6 @@ def build(root: Path, output: Path, repo: str, ref: str) -> None:
         destination = output / asset.relative_to(WIKI)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(root / asset, destination)
-    check_sidebar(root, pages, by_source, repo, ref)
 
 
 def collect(root: Path) -> tuple[list[Page], list[PurePosixPath]]:
@@ -86,20 +95,26 @@ def collect(root: Path) -> tuple[list[Page], list[PurePosixPath]]:
         if not path.is_file():
             continue
         source = PurePosixPath(path.relative_to(root).as_posix())
-        if source.suffix != ".md":
+        suffix = source.suffix.lower()
+        if suffix in OTHER_PAGE_SUFFIXES or (suffix == ".md" and source.suffix != ".md"):
+            raise BuildError(f"{source}: write wiki pages as .md files")
+        if suffix != ".md":
             assets.append(source)
             continue
         name = source.stem
         if UNSAFE_NAME.search(name) or " " in name:
             raise BuildError(f"{source}: a wiki file name holds no spaces or any of \\ / : * ? \" < > | # %")
-        if SPECIAL.match(name) and source.parent != WIKI:
-            raise BuildError(f"{source}: GitHub reads {source.name} only at the top of wiki/")
+        if name.startswith("_") and name not in SPECIAL:
+            raise BuildError(f"{source}: only {' and '.join(sorted(SPECIAL))} start with _ in the wiki")
+        top = HOME if name.casefold() == "home" else WIKI / source.name if name in SPECIAL else None
+        if top is not None and source != top:
+            raise BuildError(f"{source}: this file belongs at {top}")
         key = name.casefold()
         if key in seen:
             raise BuildError(f"{source} and {seen[key]} both make the wiki page {name}; rename one")
         seen[key] = source
         pages.append(Page(source, name, heading(path.read_text(encoding="utf-8"))))
-    if "home" not in seen:
+    if HOME not in {page.source for page in pages}:
         raise BuildError(f"{WIKI}/ has no Home.md, the wiki's first page")
     return pages, assets
 
@@ -116,15 +131,32 @@ def check_sidebar(root: Path, pages: list[Page], by_source: dict, repo: str, ref
     sidebar = by_source.get(SIDEBAR)
     if sidebar is None:
         raise BuildError(f"{SIDEBAR} is missing; it lists every page")
-    text = "".join(chunk for code, chunk in chunks((root / SIDEBAR).read_text(encoding="utf-8")) if not code)
     linked = set()
-    for match in INLINE_LINK.finditer(text):
+    for match in shown_links(root / SIDEBAR):
         destination = match.group(1).strip("<>")
         linked.add(unquote(resolve(root, sidebar, destination, False, by_source, repo, ref).partition("#")[0]))
-    missing = [page.source for page in pages if page.name != "Home" and not SPECIAL.match(page.name)]
+    missing = [page.source for page in pages if page.source != HOME and page.name not in SPECIAL]
     missing = [str(source) for source in missing if by_source[source].name not in linked]
     if missing:
         raise BuildError(f"{SIDEBAR} does not link {', '.join(missing)}")
+
+
+def shown_links(path: Path) -> list[re.Match]:
+    """The inline links and link definitions in a file that a reader sees.
+
+    Links in code, in an indented code block, or in an HTML comment are not
+    shown, so they do not count. A line indented four spaces is taken as code
+    unless it is a list item, so nested lists still count.
+    """
+    text = "".join(chunk for code, chunk in chunks(path.read_text(encoding="utf-8")) if not code)
+    text = HTML_COMMENT.sub("", text)
+    text = INDENTED_CODE.sub("", text)
+    matches: list[re.Match] = []
+    for paragraph in PARAGRAPH_BREAK.split(text):
+        paragraph = CODE_SPAN.sub(lambda match: " " * len(match.group(0)), paragraph)
+        matches += INLINE_LINK.finditer(paragraph)
+        matches += REFERENCE_DEFINITION.finditer(paragraph)
+    return matches
 
 
 def outside_fences(text: str) -> list[str]:
@@ -234,8 +266,10 @@ def resolve(root: Path, page: Page, target: str, image: bool, by_source: dict, r
     on_disk = root / resolved_path
     if resolved_path in by_source:
         return page_link(by_source[resolved_path].name) + anchor
-    if not on_disk.exists():
-        raise BuildError(f"{page.source}: the link {target} names no file in the repository")
+    if not exists_as_written(root, resolved_path):
+        near = [str(source) for source in by_source if str(source).casefold() == resolved.casefold()]
+        hint = f"; did you mean {near[0]}?" if near else ""
+        raise BuildError(f"{page.source}: the link {target} names no file in the repository{hint}")
     # Other files under wiki/ are copied to the same place in the wiki.
     if resolved_path.is_relative_to(WIKI) and on_disk.is_file():
         return quote(resolved_path.relative_to(WIKI).as_posix()) + anchor
@@ -243,6 +277,20 @@ def resolve(root: Path, page: Page, target: str, image: bool, by_source: dict, r
     kind = "tree" if on_disk.is_dir() else "raw" if image else "blob"
     location = "" if resolved == "." else "/" + quote(resolved)
     return f"https://github.com/{repo}/{kind}/{ref}{location}{anchor}"
+
+
+def exists_as_written(root: Path, path: PurePosixPath) -> bool:
+    """Whether `path` exists with each part in the case it is written.
+
+    Windows and macOS find a file whatever the case, but GitHub and the wiki do
+    not, so a link that matches only in another case would break there.
+    """
+    current = root
+    for part in path.parts:
+        if not current.is_dir() or part not in os.listdir(current):
+            return False
+        current = current / part
+    return True
 
 
 def page_link(name: str) -> str:

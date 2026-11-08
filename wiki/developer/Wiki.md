@@ -27,18 +27,22 @@ days, without publishing.
   is the page **The tray icon**, and renaming the file renames the page. A
   page's level 1 heading is dropped when it matches that title.
 - `wiki/Home.md` is the wiki's first page, and `wiki/_Sidebar.md` is the
-  sidebar on every page. Both stay at the top of `wiki/`. The pages sit in
-  `wiki/user/` and `wiki/developer/`, but the wiki itself has no folders, so
-  two files with one name, in any folder or case, fail the build. A file name
-  with a space or any of `\ / : * ? " < > | # %` fails it too.
-- Every page other than **Home** needs a link in `wiki/_Sidebar.md`, or the
-  build fails, so no page is left where readers cannot find it.
+  sidebar on every page. An optional `wiki/_Footer.md` shows under every page.
+  These stay at the top of `wiki/`, and no other file name starts with `_`.
+  The pages sit in `wiki/user/` and `wiki/developer/`, but the wiki itself has
+  no folders, so two files with one name, in any folder or case, fail the
+  build. A file name with a space or any of `\ / : * ? " < > | # %` fails it
+  too, and so does a page in a format other than `.md`.
+- Every page other than **Home** needs a link in `wiki/_Sidebar.md` that a
+  reader sees, or the build fails, so no page is left where readers cannot
+  find it. A link in code or in an HTML comment does not count.
 - A relative link to another page in `wiki/` links its wiki page, anchor
   included. A link to another file in `wiki/`, such as an image, links the
   copy that the wiki holds at the same path below `wiki/`. A link to any other
   file in the repository opens it on GitHub, on `main`. A link to a file that
-  does not exist fails the build, and so does a link the build cannot read,
-  such as one with a title in single quotes. Links in code stay as written.
+  does not exist, or that matches a file only in another case, fails the
+  build, and so does a link the build cannot read, such as one with a title in
+  single quotes. Links in code stay as written.
 - Each page other than the sidebar ends with a link to the file in `wiki/` to
   edit.
 
