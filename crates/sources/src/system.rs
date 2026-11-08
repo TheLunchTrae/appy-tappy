@@ -397,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn the_window_read_is_the_current_processs_then_one_that_shows() {
+    fn the_window_read_is_the_current_process_window_then_one_that_shows() {
         // Copy 40's window is listed first but minimized; copy 42 shows.
         let tied = [
             window(5, 40, "Example App", true),
