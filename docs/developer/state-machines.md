@@ -14,14 +14,14 @@ machines run on.
 An _implicit_ state machine is state that is spread over a few fields, flags,
 or `Option`s, plus the code that changes them. No type lists its states, so
 this page does. For example, the runtime has no type for an application's run
-state; whether it runs follows from four maps on the owner thread.
+state; whether it runs follows from three maps and a flag on the owner thread.
 
 The diagrams are [Mermaid](https://mermaid.js.org/) state diagrams. GitHub
 draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Three guards drop such stale messages:
+it was about has gone. Four guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`. The
   owner drops a reading whose session no longer runs.
@@ -30,9 +30,11 @@ it was about has gone. Three guards drop such stale messages:
   generation is dropped.
 - **Recording IDs.** Each recording gets a new `id`, so text that the text
   reader sends back for a discarded recording is dropped.
+- **Overlay numbers.** Each overlay capture gets its own number from
+  `Overlays::next`, and a reading from an older capture is dropped.
 
-Source files are named as code text rather than linked, because the code is
-being reorganized into folders.
+Source files are named as code text rather than linked, so a file that moves
+leaves no broken link.
 
 ## Runtime
 
@@ -45,18 +47,19 @@ event loop, and stops every thread in a fixed order.
 stateDiagram-v2
     [*] --> Starting
     Starting --> Running: threads started, first plan carried out
-    Starting --> [*]: detection or action thread cannot start
+    Starting --> [*]: the window events hook, detection, or the action thread cannot start
     Running --> Running: Carry orders, Reload
     Running --> Undoing: Quit, CloseRequested, DetectionEnded
     Undoing --> Stopping: undo orders queued
     Stopping --> [*]: every thread joined
 ```
 
-- **Starting.** The window events hook starts, then the tray and the reload
-  watch. Each of those two is optional: the runtime logs why it cannot make one
-  and runs without it. Then the saved files are read, and the lifecycle and
-  action threads start. If either cannot start, the runtime stops what it
-  started and exits with the error.
+- **Starting.** The window events hook starts first, and the runtime exits if
+  it cannot. Then the tray and the reload watch start. Each of those two is
+  optional: the runtime logs why it cannot make one and runs without it. Then
+  the saved files are read, and the lifecycle and action threads start. If
+  either cannot start, the runtime stops what it started and exits with the
+  error.
 - **Running.** Each event becomes a `Step`: `Carry` some orders, `Reload` the
   saved files, or `Stop`. After each step the tray gets a fresh menu if it
   changed.
@@ -69,9 +72,9 @@ stateDiagram-v2
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/88>: when Windows ends
+- [#88](https://github.com/TheLunchTrae/appy-tappy/issues/88): when Windows ends
   the session, the runtime can be ended before the undo runs.
-- <https://github.com/TheLunchTrae/appy-tappy/issues/92>: a reload that cannot
+- [#92](https://github.com/TheLunchTrae/appy-tappy/issues/92): a reload that cannot
   read the saved files replaces the running plan with an empty one.
 
 ### Runtime state
@@ -110,13 +113,16 @@ stateDiagram-v2
     Due --> Backstop: snapshot, an application runs or it failed
     Backstop --> Settling: a relevant window event
     Backstop --> Due: 5 seconds pass
-    Quiet --> Due: the watchlist changes
-    Backstop --> Due: the watchlist changes
+    Quiet --> Due: the watchlist changes and is not empty
+    Settling --> Due: the watchlist changes and is not empty
+    Backstop --> Due: the watchlist changes and is not empty
+    Backstop --> Quiet: the watchlist becomes empty
 ```
 
 A created top-level window is relevant while anything is watched. A destroyed
 window is relevant only while a watched application runs. More events while
-**Settling** do not move the deadline, so a burst becomes one snapshot.
+**Settling** do not move the deadline, so a burst becomes one snapshot. The
+two delays are `SETTLE` and `RESCAN`.
 
 Each snapshot ends the session of an application whose process is gone, and
 starts one for an application that runs without one. A new watchlist ends the
@@ -157,9 +163,9 @@ stateDiagram-v2
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/92>: a store-level read
+- [#92](https://github.com/TheLunchTrae/appy-tappy/issues/92): a store-level read
   error, or one invalid automation, makes the next plan empty.
-- <https://github.com/TheLunchTrae/appy-tappy/issues/96>: the session follows
+- [#96](https://github.com/TheLunchTrae/appy-tappy/issues/96): the session follows
   one process while the reader can read another copy's window.
 
 ### Reader thread
@@ -186,15 +192,15 @@ stateDiagram-v2
   fits the pattern.
 - **Capturing.** The thread blocks on `control.recv()`. The capture's frame
   handler runs on another thread and sends `Lost` or `Resized` back to this
-  one. Nothing else wakes it.
+  one. Only `Lost`, `Resized`, or `Stop` wakes it.
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/90>: a capture that keeps
+- [#90](https://github.com/TheLunchTrae/appy-tappy/issues/90): a capture that keeps
   running but stops giving usable frames never wakes the thread.
-- <https://github.com/TheLunchTrae/appy-tappy/issues/96>: `Job` carries no
+- [#96](https://github.com/TheLunchTrae/appy-tappy/issues/96): `Job` carries no
   process ID, so the reader can pick another copy's window.
 
 ### Frame handler
@@ -224,7 +230,7 @@ stateDiagram-v2
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/90>: frame errors that
+- [#90](https://github.com/TheLunchTrae/appy-tappy/issues/90): frame errors that
   never stop, such as a lost graphics device, keep stale values in the engine.
 
 ### Read schedule
@@ -242,7 +248,8 @@ stateDiagram-v2
     Slow --> Fast: a value changed
 ```
 
-With the default interval, **Fast** is 16 ms and **Slow** is 500 ms.
+The reader always uses `ReadInterval::DEFAULT`, so **Fast** is 16 ms and
+**Slow** is 500 ms.
 `Activity::NearThreshold` also resets the wait to the minimum, but the reader
 never reports it, so a value near a rule's threshold backs off like any other.
 
@@ -268,20 +275,21 @@ stateDiagram-v2
 ```
 
 Before a digit, a character that does not fit starts the number over. After a
-digit, it ends the number, and the rest of the region is ignored. A number
-that reaches 24 characters also ends.
+digit, it ends the number, and the rest of the region is ignored, so `12/50`
+reads as 12. A region with more than 24 characters (`MAX_CHARACTERS`) is a read
+error.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/99>: `1,234` reads as 1,
-  `.5` reads as 5, and a long number is cut short, all without an error.
+- [#99](https://github.com/TheLunchTrae/appy-tappy/issues/99): `1,234` reads as 1,
+  and `.5` reads as 5, both without an error.
 
 ### Rule state
 
 Each rule in an engine session (`crates/engine/src/lib.rs`) has a `RuleState`
 of three fields: `armed`, `active`, and `last_fired`. Saved automations make
 `Becomes` rules that re-arm when their condition is false, so this is the
-machine that runs today.
+machine that saved automations use.
 
 ```mermaid
 stateDiagram-v2
@@ -300,11 +308,12 @@ stateDiagram-v2
   another rule makes on the same value.
 - A session that ends or stops releases every active rule. One that ends
   because the application exited then fires the `Exited` rules.
-- The engine runs only when a sample arrives. It has no timer.
+- The engine runs only when a sample of any of the session's values arrives.
+  It has no timer.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/91>: a rule held back by
+- [#91](https://github.com/TheLunchTrae/appy-tappy/issues/91): a rule held back by
   its cooldown is checked again only on the next sample, so it never fires
   while the value holds still.
 
@@ -340,11 +349,11 @@ The journal lives only in memory.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/93>: one failure making
+- [#93](https://github.com/TheLunchTrae/appy-tappy/issues/93): one failure making
   the controls leaves the thread in **Draining** for the whole run.
-- <https://github.com/TheLunchTrae/appy-tappy/issues/94>: a failed undo is
+- [#94](https://github.com/TheLunchTrae/appy-tappy/issues/94): a failed undo is
   dropped with its entry and never tried again.
-- <https://github.com/TheLunchTrae/appy-tappy/issues/88>: a forced end loses the
+- [#88](https://github.com/TheLunchTrae/appy-tappy/issues/88): a forced end loses the
   in-memory journal.
 
 ### Tray thread
@@ -363,13 +372,12 @@ stateDiagram-v2
     MenuOpen --> [*]: stop closes the menu first
 ```
 
-The window procedure keeps no state. It posts each right-click, taskbar
-restart, and close request back to its own window. While the menu is open,
-Windows runs its own loop, which drops those posts.
+[Tray](architecture.md#tray) explains why a post made while the menu is open
+is dropped.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/88>: the end-of-session
+- [#88](https://github.com/TheLunchTrae/appy-tappy/issues/88): the end-of-session
   notice is acknowledged before the undo runs, and is dropped while the menu is
   open.
 
@@ -377,18 +385,18 @@ Open problems:
 
 The reload watch waits on the auto-reset named event `Local\AppyTappy.Reload`
 and sends `Reload` each time the setup app sets it. Several saves before the
-owner reads the files become one reload. The owner then reads the saved files,
+reload watch wakes become one reload. The owner then reads the saved files,
 sends detection the new watchlist, and calls `replan`.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/92>: a read that fails
+- [#92](https://github.com/TheLunchTrae/appy-tappy/issues/92): a read that fails
   stops every automation until the next save.
 
 ### Log rotation
 
 `Log` in `apps/runtime/src/log.rs` appends to `runtime.log`. A line that would
-take it past 512 KiB first renames it to `runtime.old.log` and opens a new
+take it past `LIMIT`, 512 KiB, first renames it to `runtime.old.log` and opens a new
 file.
 
 ```mermaid
@@ -396,14 +404,14 @@ stateDiagram-v2
     [*] --> Appending
     Appending --> Rotating: the next line passes 512 KiB
     Rotating --> Appending: renamed and reopened
-    Rotating --> Appending: the rename fails, the line is lost
+    Rotating --> Rotating: the rename fails, the line is lost and the next line tries again
     Rotating --> Broken: renamed, but the new file cannot open
     Broken --> Broken: every line tries to rename a missing file
 ```
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/101>: **Broken** lasts for
+- [#101](https://github.com/TheLunchTrae/appy-tappy/issues/101): **Broken** lasts for
   the rest of the run.
 
 ## Setup app
@@ -423,15 +431,19 @@ stateDiagram-v2
     Saving --> Page: saved, the page that lists it opens
     Saving --> Flow: the save fails, the flow shows why
     Flow --> Page: a tab is clicked
+    Saving --> Page: a tab is clicked, and the save goes on
+    Flow --> Flow: Add application in the value flow opens the application flow
 ```
 
 The unsaved work of a flow, such as its screenshots and recording, lives in the
-flow's component and in the owner thread. A tab click unmounts the component,
-and unmounting the capture view stops its capture.
+flow's components and in the owner thread. Leaving the value flow, by a tab or
+by **Add application**, unmounts it and stops its capture, which clears its
+screenshots and recording. **Change window** unmounts only the capture view: the
+capture and the recording keep running until the next pick stops them.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/89>: a tab click or
+- [#89](https://github.com/TheLunchTrae/appy-tappy/issues/89): a tab click or
   **Change window** throws the flow's work away without asking, and a save that
   finishes late can move the user to another page.
 
@@ -453,21 +465,28 @@ stateDiagram-v2
     Watching --> Closed: stop
     Failed --> Closed: stop
     Previewing --> Previewing: another window is picked, which stops and starts again
+    Failed --> Previewing: another window is picked
+    Previewing --> Watching: the automation editor watches a value
+    Watching --> Previewing: a window is picked
+    Watching --> WatchFailed: the watch reports an error
+    WatchFailed --> Closed: stop
 ```
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
   above.
 - **Failed** sets `failure`. Preview answers with it, but frames keep updating
   `latest`, and only a stop clears it.
+- **WatchFailed** closes the capture and keeps the watch's error for the editor
+  to show.
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/98>: one frame error stays
+- [#98](https://github.com/TheLunchTrae/appy-tappy/issues/98): one frame error stays
   shown until the window is picked again, and a screenshot can be taken after
   the window closed.
-- <https://github.com/TheLunchTrae/appy-tappy/issues/103>: choosing a new
+- [#103](https://github.com/TheLunchTrae/appy-tappy/issues/103): choosing a new
   shortcut and then leaving the button keeps the shortcut off.
 
 ### Recording
@@ -483,23 +502,23 @@ stateDiagram-v2
     Recording --> Stopped: Stop
     Stopped --> Recording: Record more, with the same settings
     Stopped --> Recording: Record with other settings starts a new recording
-    Recording --> None: Discard, another window, or the capture view closes
-    Stopped --> None: Discard, another window, or the capture view closes
+    Recording --> None: Discard, a window is picked, or the value flow closes
+    Stopped --> None: Discard, a window is picked, or the value flow closes
 ```
 
 - Each frame is cropped to the region. A crop of another window size sets the
   recording's `problem` and is skipped. A crop with no ink is skipped.
 - A crop whose characters are new is kept and sent to the text reader. A
-  recording keeps at most 200 readings.
+  recording keeps at most `MAX_READINGS`, 200, readings.
 - **Record more** needs the same region, ink, tolerance, and window size.
 - Saving a value takes the window size from the screenshot it names, and builds
   the check from the labeled screenshots and the recording.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/98>: a capture failure
+- [#98](https://github.com/TheLunchTrae/appy-tappy/issues/98): a capture failure
   leaves the recording in **Recording**, and the UI keeps saying so.
-- <https://github.com/TheLunchTrae/appy-tappy/issues/95>: a value can be saved
+- [#95](https://github.com/TheLunchTrae/appy-tappy/issues/95): a value can be saved
   with a window size that its region, labels, and recording were not drawn at.
 
 ### Text reader
@@ -523,9 +542,11 @@ stateDiagram-v2
     Off --> Opening: the overlay is turned on
     Opening --> Reading: the file and the window are found
     Opening --> Retrying: no window fits, or the file cannot be read
-    Retrying --> Opening: 5 polls pass
-    Reading --> Retrying: the window closes
+    Retrying --> Opening: 5 polls pass (RETRY_POLLS)
+    Reading --> Retrying: the capture reports an error, such as a closed window
     Reading --> Reading: the window takes another size
+    Reading --> Opening: a save changes values or applications
+    Retrying --> Opening: a save changes values or applications
     Reading --> Off: the overlay is turned off
     Retrying --> Off: the overlay is turned off
 ```
@@ -536,7 +557,7 @@ change.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/97>: removing an
+- [#97](https://github.com/TheLunchTrae/appy-tappy/issues/97): removing an
   application does not run `sync`, so its window stays open, and a panel cannot
   be closed.
 
@@ -544,12 +565,14 @@ Open problems:
 
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
-one. Each save reads the file, changes it, and writes it back, then tells the
-runtime to read the saved files again.
+one. Each save reads the file, changes it, and writes it back. After a request
+that saves values, automations, or applications, the setup app tells the
+runtime to read the saved files again. Turning an overlay on or off and moving a
+panel write the application's file without telling the runtime.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/100>: two copies of the
+- [#100](https://github.com/TheLunchTrae/appy-tappy/issues/100): two copies of the
   setup app can overwrite each other's saves, and a crash leaves the temporary
   file behind.
 
@@ -569,13 +592,17 @@ stateDiagram-v2
     Scanning --> Scanning: memory_scan_first starts over
     Attached --> Detached: process_detach
     Scanning --> Detached: process_detach
+    Scanning --> Attached: process_attach for another process
+    Attached --> Detached: process_attach fails after the user allows it
+    Scanning --> Detached: process_attach fails after the user allows it
+    Scanning --> Attached: memory_scan_first fails
 ```
 
-A process the user refuses is refused again without asking for the rest of the
-session.
+A program the user refuses is refused again without asking for the rest of the
+session, whatever its process ID.
 
 Open problems:
 
-- <https://github.com/TheLunchTrae/appy-tappy/issues/102>: an attach that fails
+- [#102](https://github.com/TheLunchTrae/appy-tappy/issues/102): an attach that fails
   after the user allows it drops the process already attached, and a first scan
   that fails drops the old scan.
