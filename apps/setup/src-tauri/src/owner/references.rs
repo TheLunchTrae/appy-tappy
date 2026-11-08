@@ -30,7 +30,7 @@ impl<H: Host> Owner<H> {
         &self,
         reference: &ReferenceRef,
     ) -> Result<SavedReference, String> {
-        let file = self.app_file(&reference.app)?;
+        let file = self.stores()?.app_file(&reference.app)?;
         let saved = file
             .reference(&reference.id)
             .ok_or_else(|| format!("{} no longer has that reference.", file.name))?
@@ -78,7 +78,7 @@ impl<H: Host> Owner<H> {
             return Err("That reference belongs to another application.".to_owned());
         }
         let app = spec.app.clone();
-        let mut file = self.app_file(&app)?;
+        let mut file = self.stores()?.app_file(&app)?;
         let id = editing.as_ref().map_or_else(
             || {
                 let taken: Vec<&str> = file
@@ -121,7 +121,7 @@ impl<H: Host> Owner<H> {
     /// pictures, unless a value reads with it.
     pub(super) fn delete_reference(&self, app: &str, reference: &str) -> Result<(), String> {
         let store = &self.stores()?.apps;
-        let mut file = self.app_file(app)?;
+        let mut file = self.stores()?.app_file(app)?;
         let Some(saved) = file.reference(reference) else {
             return Ok(());
         };

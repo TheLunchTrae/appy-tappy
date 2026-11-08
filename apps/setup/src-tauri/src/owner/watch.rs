@@ -52,20 +52,14 @@ fn watch_message(generation: u64, frame: io::Result<Frame<'_>>) -> Message {
 
 impl<H: Host> Owner<H> {
     pub(super) fn watch(&mut self, app: &str, value: &str) -> Result<u64, String> {
-        let store = &self.stores()?.apps;
-        let file = store
-            .load()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .find(|stored| stored.id == app)
-            .ok_or_else(|| "That application is no longer saved.".to_owned())?
-            .file?;
+        let stores = self.stores()?;
+        let file = stores.app_file(app)?;
         let saved = file
             .values
             .iter()
             .find(|saved| saved.id == value)
             .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
-        let folder = store.folder(app);
+        let folder = stores.apps.folder(app);
         let check = saved::build(&saved.screen, &file.references, |name| {
             fs::read(folder.join(name))
         })

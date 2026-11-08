@@ -19,7 +19,9 @@ use rten::Model;
 use rten_imageproc::{Point, Rect, RotatedRect};
 
 use crate::owner::Message;
-use crate::recording::{Line, Text};
+
+use super::Text;
+use super::ink::Line;
 
 /// The text reader's model file, in the `models` folder beside the setup
 /// app's program.
