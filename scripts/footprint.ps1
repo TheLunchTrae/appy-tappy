@@ -41,6 +41,9 @@ $ActiveSample = 30
 # How long after the idle after sample the threads and handles are counted
 # once more, to tell threads Windows ends on its own from ones left behind.
 $LongIdle = 120
+# Attach and detach cycles after that, each counted, to tell a leak that
+# grows with every attach from what the first attaches set up once.
+$MoreCycles = 6
 
 $ProbeTitle = 'AppyTappy footprint probe'
 $ProbeExecutable = 'appytappy-footprint-probe.exe'
@@ -433,6 +436,24 @@ public static class Probe {
     $script:details += "$LongIdle s after the idle after sample: $(Get-Threads)"
     # The stopped trace's writer has long finished its file by now.
     Measure-Trace
+
+    # More attach and detach cycles, to tell what each one leaves behind
+    # from what only the first ones set up.
+    for ($cycle = 4; $cycle -lt 4 + $MoreCycles; $cycle++) {
+        $reads = Measure-Log 'reading its values'
+        $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
+        $null = $probe.Handle
+        Wait-Log '): attached' 30 $cycle
+        Wait-Log 'reading its values' 10 ($reads + 1)
+        Start-Sleep -Seconds 2
+        Stop-Process -Id $probe.Id
+        $probe.WaitForExit()
+        $probe = $null
+        Wait-Log '): detached' 10 $cycle
+        $script:details += "Just after detach $($cycle): $(Get-Threads)"
+    }
+    Start-Sleep -Seconds $LongIdle
+    $script:details += "$LongIdle s after detach $(3 + $MoreCycles): $(Get-Threads)"
 }
 catch {
     $Failures.Add($_.Exception.Message)
