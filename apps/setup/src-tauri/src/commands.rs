@@ -12,7 +12,7 @@
 use std::sync::mpsc::Sender;
 
 use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, WindowDef};
-use appytappy_config::automation_file::{AutomationDef, WhenDef};
+use appytappy_config::automation_file::{AutomationDef, ClickAtDef, WhenDef};
 use appytappy_config::settings_file::SettingsFile;
 use appytappy_sources::HostSystem;
 use tauri::ipc::Response;
@@ -24,8 +24,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{self, Card, OverlayView};
 use crate::owner::{
-    AppSummary, Live, Message, Owner, Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId,
-    SavedValue,
+    AppSummary, ClickPictureView, FoundClick, Live, Message, Owner, Reading, ReferenceSaveSpec,
+    Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -163,6 +163,39 @@ pub(crate) async fn match_windows(
     window: WindowDef,
 ) -> Result<Vec<WindowFit>, String> {
     ask(&app, move |owner| owner.match_windows(&window)).await?
+}
+
+/// Keeps `region` of the screenshot `screenshot` as a click picture.
+#[tauri::command]
+pub(crate) async fn add_click_picture(
+    app: AppHandle,
+    screenshot: usize,
+    region: RegionSpec,
+) -> Result<ClickPictureView, String> {
+    ask(&app, move |owner| {
+        owner.add_click_picture(screenshot, region)
+    })
+    .await?
+}
+
+/// The click picture `image`, at most `max_width` wide.
+#[tauri::command]
+pub(crate) async fn click_picture(
+    app: AppHandle,
+    image: String,
+    max_width: u32,
+) -> Result<Response, String> {
+    ask(&app, move |owner| {
+        owner.click_picture_pixels(&image, max_width)
+    })
+    .await?
+    .map(|bytes| pixels(Some(bytes)))
+}
+
+/// Where a click at `at` lands on the picked window's newest frame.
+#[tauri::command]
+pub(crate) async fn find_click(app: AppHandle, at: ClickAtDef) -> Result<FoundClick, String> {
+    ask(&app, move |owner| owner.find_click(&at)).await?
 }
 
 /// The saved applications and their values.
