@@ -10,7 +10,8 @@ lockfile_platforms = ["linux-x64", "macos-arm64", "windows-x64"]
 # Inline tasks are POSIX sh on every platform. On Windows mise would run them
 # with cmd, and its own inline shell setting is read only from the environment
 # or the global config, so this project default covers local runs and CI alike.
-# It is mise's Unix default, so Linux and macOS run tasks as before.
+# It covers tasks only, not hooks or tool installs. On Linux and macOS it also
+# runs simple commands that mise would otherwise start directly through sh.
 [task_config]
 shell = "sh -o errexit -c"
 

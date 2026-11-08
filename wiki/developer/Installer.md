@@ -188,9 +188,12 @@ another update; a new key needs every user to install one release by hand.
 #### What guards the key
 
 The environment's tag limit is the main guard: a run reaches the secrets only
-from a `v*` tag, so a branch, a pull request or a manual run of any workflow
-cannot. These repository settings, set by hand, decide who can make such a
-tag and which workflows run:
+when its ref is a `v*` tag, so no branch or pull request run can. The limit
+checks the ref, not the event, so a manual run started on a `v*` tag would
+pass it. Only the sign job names the environment, and it runs only for a tag
+push, so a manual run of the release workflow skips it. A new job that names
+the environment needs the same condition. These repository settings, set by
+hand, decide who can make such a tag and which workflows run:
 
 - **Tag rulesets.** "Tags: Restrict creation" blocks every tag outside `v*`,
   "Release tags: Restrict creation" blocks `v*` tags for everyone but
@@ -208,9 +211,15 @@ tag and which workflows run:
 
 A new workflow file falls under "Other workflows: Restrict runs", so it runs
 automatically only once it has a policy of its own and is left out of that
-one. Tags cannot be deleted, so a test tag would stay for good: the first run
-that signs is the real `v0.1.0` release. A manual run of the release workflow
-still builds a test installer, and skips the sign and release jobs.
+one.
+
+Tags cannot be moved or deleted, so a test tag would stay for good, and no
+test build can exercise signing: the first run that signs is a real release.
+If that run fails on a setting, such as a missing environment secret, fix the
+setting and re-run the failed jobs, which reuse the same tag and commit. After
+14 days the installer artifact is gone, so re-run all jobs instead. If the fix
+needs a code change, that version is used up: bump the version and push a new
+tag.
 
 ## winget
 
