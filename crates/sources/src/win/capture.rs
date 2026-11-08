@@ -582,7 +582,7 @@ impl Capturer {
     }
 
     /// Ends the capture and releases the system's objects. Closing the
-    /// Direct3D device's WinRT wrapper releases the device it holds even if
+    /// Direct3D device's Windows Runtime wrapper releases the device it holds even if
     /// the system still holds the wrapper.
     fn stop(self) {
         #[expect(
