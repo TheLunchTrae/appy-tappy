@@ -48,6 +48,9 @@ pub struct SettingsFile {
     pub screenshot_shortcut: String,
     /// The runtime trace, which records what the runtime reads and does.
     pub trace: TraceDef,
+    /// Whether the runtime starts with automations enabled or disabled as
+    /// the tray last left them. Off, it starts with them enabled.
+    pub remember_enabled: bool,
 }
 
 impl Default for SettingsFile {
@@ -57,6 +60,7 @@ impl Default for SettingsFile {
             read_interval: ReadIntervalDef::default(),
             screenshot_shortcut: "F9".to_owned(),
             trace: TraceDef::default(),
+            remember_enabled: false,
         }
     }
 }
@@ -340,6 +344,21 @@ mod tests {
             settings,
             Ok(SettingsFile {
                 screenshot_shortcut: "F8".to_owned(),
+                ..SettingsFile::default()
+            })
+        );
+    }
+
+    #[test]
+    fn automations_start_enabled_unless_the_file_says_to_remember() {
+        assert!(!SettingsFile::default().remember_enabled);
+        let json = SettingsFile::default().to_json();
+        assert!(json.contains("\"rememberEnabled\": false"), "{json}");
+        let remember = SettingsFile::parse(r#"{"format": 1, "rememberEnabled": true}"#);
+        assert_eq!(
+            remember,
+            Ok(SettingsFile {
+                remember_enabled: true,
                 ..SettingsFile::default()
             })
         );

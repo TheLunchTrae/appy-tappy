@@ -12,6 +12,8 @@ import { deleteValue, errorText, markChecked, removeFix } from '../lib/api.ts';
 import { readingText, usedBy } from '../lib/automation.ts';
 import { buildState, checkedText } from '../lib/build.ts';
 import { checkSummary } from '../lib/describe.ts';
+import { Hint } from '../components/Hint.tsx';
+import { MARK_CHECKED_HINT } from '../lib/hints.ts';
 import { hex } from '../lib/pixels.ts';
 import { background } from '../lib/repeat.ts';
 import {
@@ -25,7 +27,6 @@ import {
   sizeText,
 } from '../lib/sizes.ts';
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
-import { Hint } from '../components/Hint.tsx';
 import type { Fixing } from './NewValue.tsx';
 
 interface AppRowsProps {
@@ -168,9 +169,12 @@ function AppRows({
                   ? `Changed since its values were checked (${build.change}). Check that each value still reads right.`
                   : 'Which build its values were checked against is not recorded yet.'}
               </span>
-              <button type="button" className="btn small" onClick={onMarkChecked}>
-                Mark as checked
-              </button>
+              <span className="with-hint">
+                <button type="button" className="btn small" onClick={onMarkChecked}>
+                  Mark as checked
+                </button>
+                <Hint topic="Mark as checked">{MARK_CHECKED_HINT}</Hint>
+              </span>
             </div>
           )}
         </td>

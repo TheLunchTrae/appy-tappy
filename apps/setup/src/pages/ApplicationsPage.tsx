@@ -3,7 +3,9 @@ import { useRef, useState } from 'react';
 import type { AntiCheatDef, AppSummary, OverlayModeDef } from '../lib/bindings.ts';
 import { Question, useQuestion } from '../components/Question.tsx';
 import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
+import { Hint } from '../components/Hint.tsx';
 import { ANTI_CHEAT_NAMES } from '../lib/describe.ts';
+import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
 
@@ -250,8 +252,18 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
             <tr>
               <th scope="col">Application</th>
               <th scope="col">Found by</th>
-              <th scope="col">Anti-cheat</th>
-              <th scope="col">Overlay</th>
+              <th scope="col" aria-label="Anti-cheat">
+                <span className="with-hint">
+                  Anti-cheat
+                  <Hint topic="Anti-cheat">{ANTI_CHEAT_HINT}</Hint>
+                </span>
+              </th>
+              <th scope="col" aria-label="Overlay">
+                <span className="with-hint">
+                  Overlay
+                  <Hint topic="Overlay">{OVERLAY_HINT}</Hint>
+                </span>
+              </th>
               <th scope="col">Running</th>
               <th scope="col">
                 <span className="visually-hidden">Change</span>

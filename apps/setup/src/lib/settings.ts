@@ -132,7 +132,8 @@ export function sameSettings(one: SettingsFile, other: SettingsFile): boolean {
     one.readInterval.fastestMs === other.readInterval.fastestMs &&
     one.readInterval.slowestMs === other.readInterval.slowestMs &&
     one.screenshotShortcut === other.screenshotShortcut &&
-    sameTrace(one.trace, other.trace)
+    sameTrace(one.trace, other.trace) &&
+    one.rememberEnabled === other.rememberEnabled
   );
 }
 

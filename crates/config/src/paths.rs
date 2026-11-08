@@ -72,6 +72,13 @@ impl Locations {
         self.local.join("traces")
     }
 
+    /// The file where the runtime keeps whether automations are enabled, as
+    /// the tray last left them.
+    #[must_use]
+    pub fn enabled(&self) -> PathBuf {
+        self.local.join("enabled.txt")
+    }
+
     /// The folder that holds one folder per application, each with its
     /// authoring file and pictures.
     #[must_use]
@@ -121,6 +128,10 @@ mod tests {
         .expect("absolute paths");
         assert_eq!(locations.logs(), local.join("AppyTappy").join("logs"));
         assert_eq!(locations.traces(), local.join("AppyTappy").join("traces"));
+        assert_eq!(
+            locations.enabled(),
+            local.join("AppyTappy").join("enabled.txt")
+        );
         assert_eq!(locations.apps(), roaming.join("AppyTappy").join("apps"));
         assert_eq!(
             locations.automations(),

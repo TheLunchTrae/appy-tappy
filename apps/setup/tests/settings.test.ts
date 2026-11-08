@@ -51,10 +51,12 @@ describe('sameSettings', () => {
       },
       format: DEFAULT_SETTINGS.format,
       trace: { ...DEFAULT_SETTINGS.trace, record: [...DEFAULT_SETTINGS.trace.record].reverse() },
+      rememberEnabled: DEFAULT_SETTINGS.rememberEnabled,
     };
     expect(sameSettings(DEFAULT_SETTINGS, reordered)).toBe(true);
     expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, format: 2 })).toBe(false);
     expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, screenshotShortcut: 'F8' })).toBe(false);
+    expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, rememberEnabled: true })).toBe(false);
     for (const which of ['fastestMs', 'slowestMs'] as const) {
       const readInterval = { ...DEFAULT_SETTINGS.readInterval, [which]: 1 };
       expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, readInterval })).toBe(false);

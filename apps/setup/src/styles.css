@@ -307,14 +307,14 @@ select {
   font-size: 12px;
 }
 
-/* Tables */
+/* Tables. Separate borders round the corners without clipping, so a column header's hint can open past the table. */
 .table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: hidden;
 }
 
 .table th {
@@ -334,6 +334,14 @@ select {
 
 .table tr:last-child td {
   border-bottom: 0;
+}
+
+.table tr:last-child td:first-child {
+  border-bottom-left-radius: 7px;
+}
+
+.table tr:last-child td:last-child {
+  border-bottom-right-radius: 7px;
 }
 
 .table .group td {
@@ -1067,6 +1075,36 @@ select {
   display: none;
 }
 
+/* A heading, column header, setting or button with a ? hint beside it. Its explanation opens under it at a readable
+   width, since the row it sits in can be narrower or wider than the text. */
+.with-hint {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.with-hint > .hint-wrap > .tip {
+  right: auto;
+  width: min(320px, 80vw);
+  font-weight: 400;
+}
+
+/* A hint in a table opens toward the table's left, so explanations near its right edge stay on the page. */
+.table .with-hint > .hint-wrap > .tip {
+  left: auto;
+  right: 0;
+}
+
+/* A column header's hint keeps the header row its usual height. */
+.table th .hint-btn {
+  margin-block: -6px;
+}
+
+.card > .with-hint + .set-row {
+  border-top: 0;
+}
+
 .tip .eg {
   color: var(--muted);
 }
@@ -1679,10 +1717,23 @@ select {
 }
 
 .set-row .what {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* A setting's name with a ? hint beside it. The hint's explanation spans the setting's text, and the button keeps
+   the line's height. */
+.set-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.set-name .hint-btn {
+  margin: -4px 0;
 }
 
 .num {

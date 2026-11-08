@@ -45,7 +45,9 @@ on, so it must stay small. Every design choice below follows from that split.
    `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
 3. The runtime reads the saved files when it starts and again on each reload,
    checks them, and logs any automation that cannot run. The rest run.
-4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`.
+4. The runtime writes its log to `%LOCALAPPDATA%\AppyTappy\logs\`, and
+   keeps the tray's last Enabled choice in
+   `%LOCALAPPDATA%\AppyTappy\enabled.txt`.
 
 Apart from that one event, the two programs share only files: no sockets,
 pipes, or shared memory. The runtime reads the same files the setup app saves;
@@ -385,8 +387,9 @@ Right-clicking it opens a small menu:
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
   fire, the readers stop, and what the automations changed is undone, but
   detection keeps running, so turning it back on finds the applications
-  already attached. The runtime starts enabled, and the setting is
-  not kept across restarts.
+  already attached. The runtime starts enabled, unless the settings'
+  `rememberEnabled` is true; then it starts as the tray last left it, as
+  [Files and handoff](#files-and-handoff) describes.
 - **Active automations.** A submenu that lists, by name, the automations that
   run now: those of the attached applications, while automations are on. With
   none, it shows a grayed `None`.
@@ -552,8 +555,8 @@ changing.
     [Setup app](Setup-app.md#saved-files) describes each file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
-    describes, the runtime's log in `logs\`, and the
-    [runtime trace](Trace.md)'s files in `traces\`.
+    describes, the runtime's log in `logs\`, the
+    [runtime trace](Trace.md)'s files in `traces\`, and `enabled.txt`.
 - **Writing.** Only the setup app writes the saved files, through
   `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
   file beside the old one, is flushed to disk with `sync_all`, and is renamed
@@ -564,6 +567,20 @@ changing.
   for a moment, so a failed rename is tried again a few times, as
   `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
   setup app shows the error.
+- **The enabled file.** The runtime writes one file of its own,
+  `enabled.txt`, through `EnabledStore` in the same module and in the same
+  way. It holds one line, `on` or `off`: what the user last picked from the
+  tray's Enabled item. The owner writes it on each pick, whatever the
+  settings say, so turning `rememberEnabled` on while the runtime runs
+  remembers the picks that follow. A file that cannot be written is logged,
+  and the pick still applies. The owner reads it once, when the settings
+  first read, even on a retry, and only when they say `rememberEnabled` and
+  the user has not picked from the tray in this run; settings read later
+  leave the state to the tray. Only `off` means disabled: a file that is
+  missing, cannot be read, or holds anything else means enabled. The tray
+  starts before that first read and gets a fresh menu after it, so its check
+  mark shows the state the runtime starts in. Quitting disables automations
+  to undo them, but that is not a pick and writes nothing.
 - **Reloading.** After each save of an application, a value, a reference, an
   anti-cheat class, a checked build, an automation, or the settings that
   works, the setup app sets the named event `Local\AppyTappy.Reload`, and the
