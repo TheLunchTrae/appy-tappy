@@ -94,8 +94,7 @@ the application stop when you move it away from **None**.
 
 The overlay shows an application's values as AppyTappy reads them right now,
 so you can check that they read right while you use the application. Turn it
-on with the application's **Overlay** menu on the
-**Applications** page:
+on with the application's **Overlay** menu on the **Applications** page:
 
 - **Off.**
 - **Over the window** shows the readings in the top-left corner of the

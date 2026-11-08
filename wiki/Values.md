@@ -138,11 +138,11 @@ application's name, such as **checked against 1.4.2.0 on Nov 8, 2026**.
 When the application runs a different build, the Values page says so under the
 application's name, such as **Changed since its values were checked (1.4.2.0
 then, 1.5.0.0 now)**. AppyTappy still reads the values. Check what each one
-reads now, such as with the application's [overlay](Applications.md#overlay), and make any
-that read wrong again. Then select **Mark as checked**, which records the build
-that runs now. The application has to be running for that. While it runs and
-no build is recorded, such as for values made before AppyTappy recorded
-builds, the Values page offers **Mark as checked** too.
+reads now, such as with the application's [overlay](Applications.md#overlay),
+and make any that read wrong again. Then select **Mark as checked**, which
+records the build that runs now. The application has to be running for that.
+While it runs and no build is recorded, such as for values made before AppyTappy
+recorded builds, the Values page offers **Mark as checked** too.
 
 [AppyTappy's log](Troubleshooting.md#appytappys-log) says so as well, each time
 the application starts while it has an automation that can run. AppyTappy finds

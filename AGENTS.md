@@ -139,10 +139,10 @@ version-numbered names.
   what the user sees updates the user guide.
 - `wiki/` publishes to the GitHub wiki on each push to `main`. Edit `wiki/`,
   never the wiki itself, and link between pages with relative `.md` links. A
-  page's file name is its wiki page's name, with hyphens for spaces, its level
-  1 heading matches that name, and every page other than `Home.md` needs a
-  line in `wiki/_Sidebar.md`; [Wiki](wiki/Development.md#wiki) says what else
-  the workflow expects.
+  page's file name is its wiki page's name, with hyphens for spaces, and every
+  page other than `Home.md` starts with a level 1 heading that matches that
+  name and needs a line in `wiki/_Sidebar.md`;
+  [Wiki](wiki/Development.md#wiki) says what else the workflow expects.
 - Record owner decisions on one current developer page and replace a decision
   when it changes.
 - Follow the

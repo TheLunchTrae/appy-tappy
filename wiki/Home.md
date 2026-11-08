@@ -4,7 +4,7 @@ AppyTappy watches the windows of other programs on your Windows PC and acts
 when something in them changes, such as pausing your music when a progress bar
 fills up. New to it? Start with [Getting started](Getting-started.md).
 
-## Using AppyTappy
+## User guide
 
 - [Getting started](Getting-started.md): install AppyTappy, make your first
   automation, update, and uninstall.

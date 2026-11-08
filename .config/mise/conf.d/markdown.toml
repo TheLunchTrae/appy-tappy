@@ -74,22 +74,24 @@ depends = ["md:standards:check", "md:links:deep", "md:audit"]
 
 # wiki/ publishes to the GitHub wiki; wiki/Development.md#wiki says how.
 [tasks."md:wiki:check"]
-description = "Check that wiki/ is flat and the sidebar links every page"
+description = "Check that wiki/ is flat and its pages publish as written"
 run = '''
 set -eu
 status=0
-for dir in wiki/*/; do
-  [ -d "$dir" ] || continue
-  echo "$dir: the GitHub wiki has no folders, so wiki/ has none either." >&2
-  status=1
+fail() { echo "$1" >&2; status=1; }
+for dir in wiki/*/ wiki/.[!.]*/; do
+  [ -d "$dir" ] && fail "$dir: the GitHub wiki has no folders, so wiki/ has none either."
 done
+# The Wiki workflow drops .md only from bare Name.md links, so other forms would break.
+if grep -nE '\]\((\.|/|<)|\]\([^):#[:space:]]*/|\]\([^)[:space:]]+\.md[[:space:]]|^ {0,3}\[[^]^]+\]:[[:space:]]' wiki/*.md >&2; then
+  fail "wiki/: link pages as bare Name.md links, and other files by their full GitHub address."
+fi
 for page in wiki/*.md; do
   name=${page#wiki/}
   case $name in Home.md | _*) continue ;; esac
-  if ! grep -qF "]($name)" wiki/_Sidebar.md; then
-    echo "$page: add a link to it in wiki/_Sidebar.md." >&2
-    status=1
-  fi
+  title=$(printf '%s' "${name%.md}" | tr - ' ')
+  [ "$(head -n 1 "$page")" = "# $title" ] || fail "$page: start it with '# $title', the title the wiki shows."
+  grep -qE "\]\(${name}(#[^)]*)?\)" wiki/_Sidebar.md || fail "$page: add a link to it in wiki/_Sidebar.md."
 done
 exit "$status"
 '''

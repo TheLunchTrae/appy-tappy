@@ -5,7 +5,7 @@ when something in them changes. For example, it can pause your music when a
 progress bar fills up, or turn the volume down while a number on screen is
 above 90.
 
-In this guide, an **application** is any program with a window that you want
+In the user guide, an **application** is any program with a window that you want
 AppyTappy to watch: a game, a media player, a browser, or anything else.
 
 AppyTappy has two parts:
@@ -63,15 +63,6 @@ A **?** beside a field, heading, or column header in AppyTappy Setup explains
 it. Hold the pointer over it, or move to it with Tab, to read the explanation,
 and press Esc to hide it.
 
-## Leave before you save
-
-While you make or change an application, a value, a reference, or an
-automation, selecting a page, even the one it opened from, first asks whether
-to leave without saving when you have changed something, because what you have
-not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
-save is still under way, the pages, **Leave**, **Change window**, and
-**Discard** or **Cancel** wait for it to finish.
-
 ## Update
 
 When a newer version is out, AppyTappy Setup says so when it opens, at the end
@@ -108,3 +99,12 @@ in the uninstaller.
 
 If the installer or the uninstaller asks you to close AppyTappy Setup and you
 cancel, the background part stays closed until you next sign in.
+
+## Leave before you save
+
+While you make or change an application, a value, a reference, or an
+automation, selecting a page, even the one it opened from, first asks whether
+to leave without saving when you have changed something, because what you have
+not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
+save is still under way, the pages, **Leave**, **Change window**, and
+**Discard** or **Cancel** wait for it to finish.

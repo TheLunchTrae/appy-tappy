@@ -2,7 +2,7 @@
 
 **[Home](Home.md)**
 
-**[Using AppyTappy](Home.md#using-appytappy)**
+**[User guide](Home.md#user-guide)**
 
 - [Getting started](Getting-started.md)
 - [Applications](Applications.md)

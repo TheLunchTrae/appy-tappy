@@ -11,7 +11,8 @@ AppyTappy has two programs that share a set of library crates:
 
 The setup app runs rarely, so it can afford a heavier UI. The runtime is always
 on, so it must stay small. Every design choice below follows from that split.
-[`CONTEXT.md`](https://github.com/TheLunchTrae/appy-tappy/blob/main/CONTEXT.md) defines the domain terms.
+[`CONTEXT.md`](https://github.com/TheLunchTrae/appy-tappy/blob/main/CONTEXT.md)
+defines the domain terms.
 
 ## Components and data flow
 
@@ -111,12 +112,12 @@ where they are nearly empty. The `windows` CI job lints and documents them on
 Windows. Their Windows code can run only there, so that job also runs the
 member crates' tests.
 
-Logic that can be wrong belongs in `config` or `engine`. A Windows adapter
-turns one API call into one typed value or error and holds no decisions of its
-own. Mutation testing cannot check adapter code: the Linux gate compiles it
-out, and cargo-mutants reports its mutants as missed. So each crate keeps its
-Windows code in `win.rs` modules (not `windows.rs`, whose name would clash with
-the `windows` crate), and `.cargo/mutants.toml` excludes those files with the
+Logic that can be wrong belongs in `config` or `engine`. A Windows adapter turns
+one API call into one typed value or error and holds no decisions of its own.
+Mutation testing cannot check adapter code: the Linux gate compiles it out, and
+cargo-mutants reports its mutants as missed. So each crate keeps its Windows
+code in `win.rs` modules (not `windows.rs`, whose name would clash with the
+`windows` crate), and `.cargo/mutants.toml` excludes those files with the
 owner's approval.
 [`AGENTS.md`](https://github.com/TheLunchTrae/appy-tappy/blob/main/AGENTS.md#tests-and-mutation)
 requires that approval for any configuration exclusion.
@@ -451,9 +452,9 @@ The runtime runs all day beside games, so it has to stay small and use next to
 no CPU. `mise run rust:footprint` builds the runtime the installer ships, with
 the `dist` profile, and
 [`scripts/footprint.ps1`](https://github.com/TheLunchTrae/appy-tappy/blob/main/scripts/footprint.ps1)
-runs it on Windows and fails when a measurement exceeds its target. The `footprint` CI job runs it.
-The targets, and how long each phase settles and samples, are the constants at
-the top of the script.
+runs it on Windows and fails when a measurement exceeds its target. The
+`footprint` CI job runs it. The targets, and how long each phase settles and
+samples, are the constants at the top of the script.
 
 The script gives the runtime scratch app data folders that hold one
 application with three values, two color checks and a bar fill, and an
@@ -719,7 +720,7 @@ because a Linux-only GTK dependency is unmaintained and never ships. The
 setup app's entry point and commands, which only forward to the owner thread,
 are left out of mutation testing. The UI has its own Bun lockfile and `ui:`
 mise tasks, which the gate runs first because the Rust side embeds the built
-UI. The [user guide](Home.md) describes the screens, and
+UI. The [user guide](Home.md#user-guide) describes the screens, and
 [Setup app](Setup-app.md) how they work.
 
 The overlay ([#36](https://github.com/TheLunchTrae/appy-tappy/issues/36))
@@ -758,12 +759,12 @@ methods. A `win.rs` module's
 submodules, such as screen capture in `sources/src/win/capture.rs` and the
 tray in `platform/src/win/tray.rs`, follow the same rules.
 
-The owner approved changing the workspace lint from `forbid` to `deny` with
-the first `unsafe` Windows call, in `sources`, as
-[`AGENTS.md`](https://github.com/TheLunchTrae/appy-tappy/blob/main/AGENTS.md#exceptions-and-workspace-policy) describes.
-`unsafe` may appear only in the `win.rs` modules of `sources`, `actions`, and
-`platform`, and each block carries a reasoned expectation and a `SAFETY`
-comment. Every crate root without such a module, including `config`,
+The owner approved changing the workspace lint from `forbid` to `deny` with the
+first `unsafe` Windows call, in `sources`, as
+[`AGENTS.md`](https://github.com/TheLunchTrae/appy-tappy/blob/main/AGENTS.md#exceptions-and-workspace-policy)
+describes. `unsafe` may appear only in the `win.rs` modules of `sources`,
+`actions`, and `platform`, and each block carries a reasoned expectation and a
+`SAFETY` comment. Every crate root without such a module, including `config`,
 `engine`, the runtime, the MCP server, and the setup app, keeps
 `#![forbid(unsafe_code)]`.
 
