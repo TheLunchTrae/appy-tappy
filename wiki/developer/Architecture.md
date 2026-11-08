@@ -295,7 +295,11 @@ as the user sees it. The runtime shows an icon in the taskbar's notification
 area: the setup app's icon, which the runtime's build script also links into its
 program file from `apps/runtime/runtime.rc`. Pointing at it shows a tooltip with
 the state, such as `AppyTappy: idle`, or `AppyTappy: disabled` while automations
-are off. Right-clicking it opens a small menu:
+are off. While the action thread cannot make the media and audio controls, the
+tooltip adds `actions cannot run`, as in `AppyTappy: attached, actions cannot
+run`, and the menu starts with a grayed `Actions cannot run` line; see
+[When the controls cannot start](Actions.md#when-the-controls-cannot-start).
+Right-clicking it opens a small menu:
 
 - **Enabled.** A check mark that turns automations on and off. Off, rules do not
   fire, the readers stop, and what the automations changed is undone, but

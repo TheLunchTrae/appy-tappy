@@ -34,6 +34,12 @@ impl Backoff {
         now >= self.retry_at
     }
 
+    /// The earliest time to try again.
+    #[must_use]
+    pub const fn retry_at(&self) -> Instant {
+        self.retry_at
+    }
+
     /// Waits longer after another failure, at `now`.
     pub fn failed_again(&mut self, now: Instant) {
         self.retry_at = now.checked_add(self.wait).unwrap_or(now);

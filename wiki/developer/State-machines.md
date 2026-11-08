@@ -339,7 +339,7 @@ stateDiagram-v2
     Making --> Ready: the controls are made
     Making --> Missing: the controls cannot be made
     Missing --> Missing: a job during the wait, or making them fails again and the wait doubles
-    Missing --> Ready: a job after the wait, and the controls are made
+    Missing --> Ready: the wait ends or a job comes after it, and the controls are made
     Ready --> Ready: Run or Undo job, or a pending restore is due
     Ready --> LastTry: the job channel closes
     LastTry --> [*]: each pending restore tried once more
@@ -347,9 +347,14 @@ stateDiagram-v2
 ```
 
 - **Missing.** A `Run` job logs that its actions did not run, and an `Undo` job
-  has nothing to undo. The first job after the wait makes the controls again.
-  The wait starts at 1 second and doubles after each failure, up to a minute.
-  The log says when actions can run again.
+  has nothing to undo. When the wait ends, or the first job after it comes,
+  the worker makes the controls again. The wait starts at 1 second and doubles
+  after each failure, up to a minute. The log says when actions can run again.
+- **Telling the owner.** `act::run` sends `ActionReport::CanRun(false)` when the
+  worker reaches **Missing** and `CanRun(true)` when it leaves it, and only
+  then; the owner takes it that actions can run until it hears otherwise. The
+  owner keeps the last report in the model's `actions_can_run`, and the tray
+  shows it.
 - **Ready.** After each job, the worker tries the pending restores that are
   due. While any restore is pending, it waits for the next job only until the
   next one is due, or 10 seconds (`VOLUME_RETRY`) for a volume restore.
@@ -378,11 +383,6 @@ one audio session's volume, the entries form a stack:
 
 The journal lives only in memory, so a forced end, a crash, or an
 end-of-session wait that runs out loses what it had not undone.
-
-Open problems:
-
-- [#93](https://github.com/TheLunchTrae/appy-tappy/issues/93): the owner cannot
-  yet tell the tray that actions cannot run, so only the log shows **Missing**.
 
 ### Tray thread
 

@@ -1,8 +1,9 @@
 //! What the tray icon shows and what its menu does.
 //!
 //! The menu has an Enabled check mark, an Active automations submenu that
-//! lists the automations that run now, and Quit. The platform
-//! crate draws it; this module decides what it says.
+//! lists the automations that run now, and Quit. While actions cannot run,
+//! a grayed line above them and the tooltip say so. The platform crate
+//! draws it; this module decides what it says.
 
 use std::num::NonZeroU16;
 
@@ -30,12 +31,23 @@ pub(crate) enum Command {
     Quit,
 }
 
+/// What the tray says while the action thread cannot run actions.
+const CANNOT_RUN: &str = "Actions cannot run";
+
 /// The tooltip and menu for `model`.
 pub(crate) fn menu(model: &Model) -> TrayMenu {
-    let tooltip = if model.enabled() {
-        format!("AppyTappy: {}", model.state())
+    let tooltip = match (model.enabled(), model.actions_can_run()) {
+        (false, _) => "AppyTappy: disabled".to_owned(),
+        (true, true) => format!("AppyTappy: {}", model.state()),
+        (true, false) => format!("AppyTappy: {}, actions cannot run", model.state()),
+    };
+    let warning = if model.actions_can_run() {
+        Vec::new()
     } else {
-        "AppyTappy: disabled".to_owned()
+        vec![
+            MenuItem::Inactive(CANNOT_RUN.to_owned()),
+            MenuItem::Separator,
+        ]
     };
     let active = model.active_automations();
     let automations = if active.is_empty() {
@@ -46,26 +58,25 @@ pub(crate) fn menu(model: &Model) -> TrayMenu {
             .map(|name| MenuItem::Note(name.to_owned()))
             .collect()
     };
-    TrayMenu {
-        tooltip,
-        items: vec![
-            MenuItem::Action {
-                id: if model.enabled() { DISABLE } else { ENABLE },
-                label: "Enabled".to_owned(),
-                checked: model.enabled(),
-            },
-            MenuItem::Submenu {
-                label: "Active automations".to_owned(),
-                items: automations,
-            },
-            MenuItem::Separator,
-            MenuItem::Action {
-                id: QUIT,
-                label: "Quit".to_owned(),
-                checked: false,
-            },
-        ],
-    }
+    let mut items = warning;
+    items.extend([
+        MenuItem::Action {
+            id: if model.enabled() { DISABLE } else { ENABLE },
+            label: "Enabled".to_owned(),
+            checked: model.enabled(),
+        },
+        MenuItem::Submenu {
+            label: "Active automations".to_owned(),
+            items: automations,
+        },
+        MenuItem::Separator,
+        MenuItem::Action {
+            id: QUIT,
+            label: "Quit".to_owned(),
+            checked: false,
+        },
+    ]);
+    TrayMenu { tooltip, items }
 }
 
 /// What the menu item `id` asks for.
@@ -138,6 +149,39 @@ mod tests {
                 checked: false,
             })
         );
+    }
+
+    #[test]
+    fn the_tray_says_when_actions_cannot_run() {
+        let mut model = Model::default();
+        model.set_actions_can_run(false);
+        let cannot = menu(&model);
+        assert_eq!(cannot.tooltip, "AppyTappy: idle, actions cannot run");
+        assert_eq!(
+            cannot.items.get(..3),
+            Some(
+                &[
+                    MenuItem::Inactive("Actions cannot run".to_owned()),
+                    MenuItem::Separator,
+                    MenuItem::Action {
+                        id: DISABLE,
+                        label: "Enabled".to_owned(),
+                        checked: true,
+                    },
+                ][..]
+            )
+        );
+        model.set_enabled(false);
+        let disabled = menu(&model);
+        assert_eq!(disabled.tooltip, "AppyTappy: disabled");
+        assert_eq!(
+            disabled.items.first(),
+            Some(&MenuItem::Inactive("Actions cannot run".to_owned())),
+            "the menu still says so while automations are off"
+        );
+        model.set_enabled(true);
+        model.set_actions_can_run(true);
+        assert_eq!(menu(&model), menu(&Model::default()), "the line goes again");
     }
 
     #[test]
