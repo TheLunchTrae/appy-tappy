@@ -13,6 +13,17 @@ does not need administrator rights.
 3. Follow the installer's steps. Its last page can open AppyTappy Setup for
    you.
 
+To check that the installer you downloaded came from AppyTappy's own release,
+install the [GitHub CLI](https://cli.github.com/) and run this in the folder
+you downloaded it to, with your installer's file name:
+
+```sh
+gh attestation verify "AppyTappy Setup_0.1.0_x64-setup.exe" -R TheLunchTrae/appy-tappy
+```
+
+It prints **Verification succeeded!** for an installer from a release. This
+step is optional.
+
 Installing does three things:
 
 - It adds **AppyTappy** to the Start menu. That opens AppyTappy Setup.

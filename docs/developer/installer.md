@@ -73,7 +73,8 @@ a Windows runner:
 
 - **A pushed `v*` tag** publishes a GitHub release of that tag with the
   installer attached and generated notes. The build fails when the tag does not
-  name the workspace version.
+  name the workspace version. Before publishing, the release job attests the
+  installer's build provenance.
 - **A manual run** on any branch or tag, from the workflow's **Run workflow**
   button, makes a test build.
 
@@ -81,3 +82,24 @@ Nothing else starts it, so pull requests and pushes to branches build no
 installer.
 
 A test build's installer is in its run's artifacts for 14 days.
+
+## Attestation
+
+A release's installer has a
+[build provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds):
+a signed record of the workflow run, commit, and tag that built it, stored on
+the repository. Because the installer is not signed, this is the way to check
+that a download came from this repository's release workflow. It does not
+change the SmartScreen warning.
+
+Check a downloaded installer with the [GitHub CLI](https://cli.github.com/):
+
+```sh
+gh attestation verify "AppyTappy Setup_0.1.0_x64-setup.exe" -R TheLunchTrae/appy-tappy
+```
+
+Only the release job attests, and only for a pushed `v*` tag. Test builds have
+no attestation, so a passing check means the installer came from a release
+tag. Add `--source-ref refs/tags/v0.1.0` to check that it came from one
+release in particular. The attesting job alone gets the `id-token` and
+`attestations` permissions, so the build steps cannot sign anything.
