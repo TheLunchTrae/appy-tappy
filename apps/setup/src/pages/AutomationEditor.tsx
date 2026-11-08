@@ -40,15 +40,26 @@ import { background, useRepeat } from '../lib/repeat.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
 
-/** The action menu's choices: each media command, then setting a volume, then pressing keys. */
-type ActionChoice = MediaCommand | 'volume' | 'keys';
+/** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
+type ActionChoice = MediaCommand | Exclude<ActionDraft['kind'], 'media'>;
 
-const ACTION_CHOICES: readonly ActionChoice[] = ['pause', 'play', 'next', 'previous', 'volume', 'keys'];
+const ACTION_CHOICES: readonly ActionChoice[] = [
+  'pause',
+  'play',
+  'next',
+  'previous',
+  'volume',
+  'keys',
+  'open',
+  'sound',
+];
 
 const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = {
   ...MEDIA_NAMES,
   volume: 'Set volume',
   keys: 'Press keys',
+  open: 'Open a program or link',
+  sound: 'Play a sound',
 };
 
 interface KeysFieldProps {
@@ -202,9 +213,9 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
           const picked = ACTION_CHOICES.find((option) => option === event.target.value);
           if (picked !== undefined) {
             onChange(
-              picked === 'volume' || picked === 'keys'
-                ? { ...action, kind: picked }
-                : { ...action, kind: 'media', command: picked },
+              picked === 'pause' || picked === 'play' || picked === 'next' || picked === 'previous'
+                ? { ...action, kind: 'media', command: picked }
+                : { ...action, kind: picked },
             );
           }
         }}
@@ -221,6 +232,28 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
           keys={action.keys}
           onChange={(keys) => {
             onChange({ ...action, keys });
+          }}
+        />
+      ) : action.kind === 'open' ? (
+        <input
+          className="input path-field"
+          aria-label={`${label}: program, file or link`}
+          placeholder="C:\Tools\Timer.exe or https://example.com"
+          spellCheck={false}
+          value={action.opens}
+          onChange={(event) => {
+            onChange({ ...action, opens: event.target.value });
+          }}
+        />
+      ) : action.kind === 'sound' ? (
+        <input
+          className="input path-field"
+          aria-label={`${label}: WAV file`}
+          placeholder="C:\Sounds\Ding.wav"
+          spellCheck={false}
+          value={action.sound}
+          onChange={(event) => {
+            onChange({ ...action, sound: event.target.value });
           }}
         />
       ) : (
@@ -388,6 +421,8 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
   const undoWords = built.ok ? undoText(built.automation.actions) : null;
   const pressesKeys = draft.actions.some((action) => action.kind === 'keys');
+  const usesPaths = draft.actions.some((action) => action.kind === 'open' || action.kind === 'sound');
+  const opens = draft.actions.some((action) => action.kind === 'open');
   const keysWarning = choice === null ? null : keysBlocked(draft.actions, choice.antiCheat, choice.appName);
 
   const update = (change: Partial<Draft>): void => {
@@ -580,6 +615,13 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
             <p className="note">
               Keys are pressed only while {choice?.appName ?? 'the application'} is the window in front, so they never
               reach another application.
+            </p>
+          ) : null}
+          {usesPaths ? (
+            <p className="note">
+              To get a file's full path, right-click it in File Explorer and select Copy as path (hold Shift as you
+              right-click on Windows 10).
+              {opens ? ' What opens may take you out of a full-screen game.' : ''}
             </p>
           ) : null}
           <button

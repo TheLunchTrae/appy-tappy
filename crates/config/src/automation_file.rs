@@ -21,7 +21,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::action::{
-    Action, AppName, KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
+    Action, AppName, KeyChord, MediaCommand, MediaTarget, OpenTarget, SoundFile, VolumeLevel,
+    VolumeTarget,
 };
 use crate::anti_cheat::{AntiCheatClass, allows_input};
 use crate::app_file::{AppFile, ValueKind, id_from_name};
@@ -223,6 +224,17 @@ pub enum ActionDef {
         /// The keys, such as `Ctrl+Shift+M`; [`KeyChord::parse`] reads them.
         keys: String,
     },
+    /// Opens a program, a file, or a web link.
+    Open {
+        /// A full path or an `http` or `https` link; [`OpenTarget::parse`]
+        /// reads it.
+        target: String,
+    },
+    /// Plays a WAV file.
+    Sound {
+        /// The file's full path; [`SoundFile::parse`] reads it.
+        file: String,
+    },
 }
 
 impl ActionDef {
@@ -231,7 +243,9 @@ impl ActionDef {
     /// # Errors
     ///
     /// Returns the problem as a sentence: an executable name that is empty or
-    /// too long, a volume over 100, or keys that do not read as a key press.
+    /// too long, a volume over 100, keys that do not read as a key press, a
+    /// target to open that is not a full path or a web link, or a sound that
+    /// is not a full path to a WAV file.
     pub fn to_action(&self) -> Result<Action, String> {
         let app = |name: &Option<String>| {
             name.as_deref()
@@ -255,6 +269,12 @@ impl ActionDef {
             },
             Self::Keys { keys } => {
                 Action::PressKeys(KeyChord::parse(keys).map_err(|invalid| invalid.to_string())?)
+            },
+            Self::Open { target } => {
+                Action::Open(OpenTarget::parse(target).map_err(|invalid| invalid.to_string())?)
+            },
+            Self::Sound { file } => {
+                Action::PlaySound(SoundFile::parse(file).map_err(|invalid| invalid.to_string())?)
             },
         })
     }
@@ -304,12 +324,10 @@ impl AutomationDef {
             restore,
         )
         .map_err(|error| match error {
-            RuleError::NothingToRestore => {
-                "none of these actions can be undone, because a skipped \
-                                            track cannot be unskipped and pressed keys cannot be \
-                                            unpressed; turn off undo or add another action"
-                    .to_owned()
-            },
+            RuleError::NothingToRestore => "none of these actions can be undone, because only \
+                                             pausing, playing, and setting a volume can be; turn \
+                                             off undo or add one of those"
+                .to_owned(),
             other => other.to_string(),
         })
     }
@@ -841,13 +859,49 @@ mod tests {
             command: MediaCommandDef::Next,
             app: None,
         }];
-        assert!(problem(skip_only).contains("cannot be unskipped"));
+        assert!(problem(skip_only).contains("none of these actions can be undone"));
 
         let mut keys_only = pause_music();
         keys_only.actions = vec![ActionDef::Keys {
             keys: "F9".to_owned(),
         }];
-        assert!(problem(keys_only).contains("cannot be unpressed"));
+        assert!(problem(keys_only).contains("none of these actions can be undone"));
+
+        for (kind, action) in [
+            (
+                "open",
+                ActionDef::Open {
+                    target: "https://example.com".to_owned(),
+                },
+            ),
+            (
+                "sound",
+                ActionDef::Sound {
+                    file: r"C:\Ding.wav".to_owned(),
+                },
+            ),
+        ] {
+            let mut only = pause_music();
+            only.actions = vec![action];
+            assert!(
+                problem(only).contains("none of these actions can be undone"),
+                "{kind}"
+            );
+        }
+
+        let mut bad_open = pause_music();
+        bad_open.undo = false;
+        bad_open.actions = vec![ActionDef::Open {
+            target: "Timer.exe".to_owned(),
+        }];
+        assert!(problem(bad_open).contains("full path"));
+
+        let mut bad_sound = pause_music();
+        bad_sound.undo = false;
+        bad_sound.actions = vec![ActionDef::Sound {
+            file: r"C:\Ding.mp3".to_owned(),
+        }];
+        assert!(problem(bad_sound).contains("WAV"));
 
         let mut bad_keys = pause_music();
         bad_keys.undo = false;
@@ -872,6 +926,24 @@ mod tests {
             json,
             "the file keeps the keys as written"
         );
+    }
+
+    #[test]
+    fn open_and_sound_actions_are_saved_as_written_and_read_as_actions() {
+        for (json, action) in [
+            (
+                r#"{"kind":"open","target":"https://example.com/timer"}"#,
+                Action::Open(OpenTarget::parse("https://example.com/timer").expect("valid")),
+            ),
+            (
+                r#"{"kind":"sound","file":"C:\\Sounds\\Ding.wav"}"#,
+                Action::PlaySound(SoundFile::parse(r"C:\Sounds\Ding.wav").expect("valid")),
+            ),
+        ] {
+            let def: ActionDef = serde_json::from_str(json).expect("valid");
+            assert_eq!(def.to_action(), Ok(action), "{json}");
+            assert_eq!(serde_json::to_string(&def).expect("serializes"), json);
+        }
     }
 
     #[test]

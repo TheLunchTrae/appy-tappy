@@ -7,7 +7,11 @@
 //! audio session's app takes a process snapshot, which never opens a process,
 //! so no action opens a watched app's process. Key presses go through
 //! `SendInput`, which types into whichever window has the keyboard focus,
-//! after asking which process that window belongs to.
+//! after asking which process that window belongs to. Opening a program,
+//! file, or link goes through `ShellExecuteExW`, the call behind File
+//! Explorer's open, on a short-lived thread of its own, so a slow program
+//! cannot hold up the action worker for longer than [`OPEN_TIMEOUT`]. A sound
+//! plays through `PlaySoundW`, which returns once the sound starts.
 //!
 //! The media session manager may not be ready yet, such as right after
 //! sign-in, so the controls start without it and ask for it again when a
@@ -20,11 +24,14 @@ use std::collections::BTreeMap;
 use std::io;
 use std::marker::PhantomData;
 use std::mem::size_of;
+use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
 use std::ptr;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use appytappy_config::action::{Key, MediaCommand, Modifier, VolumeLevel};
+use appytappy_config::action::{Key, MediaCommand, Modifier, OpenTarget, VolumeLevel};
 use appytappy_config::anti_cheat::ProcessId;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
@@ -34,11 +41,12 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, ERROR_NOT_FOU
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
-    ISimpleAudioVolume, MMDeviceEnumerator, eConsole, eRender,
+    ISimpleAudioVolume, MMDeviceEnumerator, PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT,
+    eConsole, eRender,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
-    CoUninitialize,
+    CLSCTX_ALL, COINIT, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -50,7 +58,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR,
     VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows::Win32::UI::Shell::{
+    SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetWindowThreadProcessId, SW_SHOWNOACTIVATE,
+};
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
@@ -63,18 +76,24 @@ const MEDIA_TIMEOUT: Duration = Duration::from_secs(2);
 /// How often a pending media request is checked.
 const MEDIA_POLL: Duration = Duration::from_millis(5);
 
-/// This thread's membership in the COM multithreaded apartment, which Core
-/// Audio needs. It ends on drop, on the thread that joined, because the type
-/// cannot move between threads.
+/// How long opening a program, file, or link may take before it counts as
+/// failed, so a program that is slow to start cannot stall the action
+/// worker. What it opens may still open after that.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// This thread's membership in a COM apartment: the multithreaded one,
+/// which Core Audio needs, or a single-threaded one, which some of the
+/// shell's handlers for opening files need. It ends on drop, on the thread
+/// that joined, because the type cannot move between threads.
 #[derive(Debug)]
 struct Apartment(PhantomData<*const ()>);
 
 impl Apartment {
-    fn join() -> io::Result<Self> {
+    fn join(kind: COINIT) -> io::Result<Self> {
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the call takes no pointers; a success, including S_FALSE for a
         // thread that already joined, is balanced by CoUninitialize on drop.
-        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok()?;
+        unsafe { CoInitializeEx(None, kind) }.ok()?;
         Ok(Self(PhantomData))
     }
 }
@@ -153,7 +172,7 @@ impl WindowsControls {
     ///
     /// Returns the operating system's error.
     pub fn new() -> io::Result<Self> {
-        let apartment = Apartment::join()?;
+        let apartment = Apartment::join(COINIT_MULTITHREADED)?;
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the class ID is a static GUID, and the result is a new owned interface.
         let devices = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }?;
@@ -405,6 +424,76 @@ impl Controls for WindowsControls {
     fn hold(&mut self, time: Duration) {
         thread::sleep(time);
     }
+
+    fn open(&mut self, target: &OpenTarget) -> io::Result<()> {
+        let file = wide(target.as_str().encode_utf16());
+        let (done, outcome) = mpsc::channel();
+        // The thread is not joined: after a timeout it finishes on its own,
+        // and its answer goes nowhere.
+        thread::Builder::new()
+            .name("open".to_owned())
+            .spawn(move || {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "after a timeout nobody waits for the answer"
+                )]
+                let _ = done.send(shell_open(&file));
+            })?;
+        match outcome.recv_timeout(OPEN_TIMEOUT) {
+            Ok(opened) => opened,
+            Err(RecvTimeoutError::Timeout) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "opening it did not finish within 2 seconds, so it may still open",
+            )),
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(io::Error::other("the thread that opens it stopped"))
+            },
+        }
+    }
+
+    fn play_sound(&mut self, file: &Path) -> io::Result<bool> {
+        let name = wide(file.as_os_str().encode_wide());
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `name` is a nul-terminated UTF-16 path that lives through
+        // the call. For a file name, PlaySoundW copies the name before it
+        // returns; only a sound in memory must outlive an asynchronous call.
+        let started = unsafe {
+            PlaySoundW(
+                PCWSTR(name.as_ptr()),
+                None,
+                SND_FILENAME | SND_ASYNC | SND_NODEFAULT,
+            )
+        };
+        Ok(started.as_bool())
+    }
+}
+
+/// UTF-16 `units` with the nul that ends a Windows string.
+fn wide(units: impl Iterator<Item = u16>) -> Vec<u16> {
+    units.chain([0]).collect()
+}
+
+/// Opens `file`, a nul-terminated UTF-16 path or link, with its default
+/// action and no arguments, showing no error dialog. It asks the opened
+/// window not to take the keyboard focus, though a program may take it
+/// anyway. It runs on a thread of its own in a single-threaded apartment,
+/// as the shell asks of its callers.
+fn shell_open(file: &[u16]) -> io::Result<()> {
+    let _apartment = Apartment::join(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)?;
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>()).map_err(io::Error::other)?,
+        // The thread ends after the call, so the call must finish first.
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpFile: PCWSTR(file.as_ptr()),
+        nShow: SW_SHOWNOACTIVATE.0,
+        ..Default::default()
+    };
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: `info` is a SHELLEXECUTEINFOW whose cbSize is set and whose
+    // file points to a nul-terminated string that outlives the call; every
+    // other pointer is null, which the call allows.
+    unsafe { ShellExecuteExW(&raw mut info) }?;
+    Ok(())
 }
 
 /// The keys that count as `modifier` held down: either Ctrl, Alt, or

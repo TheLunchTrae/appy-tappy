@@ -217,8 +217,15 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                     self.record(owner, change, restores);
                 }
             },
-            // Pressed keys cannot be unpressed, so they leave no record.
+            // Pressed keys cannot be unpressed, and nothing opened or played
+            // has a state to put back, so they leave no record.
             Action::PressKeys(keys) => self.press(keys, watched)?,
+            Action::Open(target) => self.controls.open(target)?,
+            Action::PlaySound(file) => {
+                if !self.controls.play_sound(file.path())? {
+                    return Err(ActionError::SoundNotPlayed);
+                }
+            },
         }
         Ok(())
     }
@@ -496,9 +503,10 @@ fn send<C: Controls>(
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::path::Path;
     use std::time::Duration;
 
-    use appytappy_config::action::{AppName, Modifier};
+    use appytappy_config::action::{AppName, Modifier, OpenTarget, SoundFile};
 
     use super::*;
 
@@ -607,6 +615,19 @@ mod tests {
 
         fn hold(&mut self, time: Duration) {
             self.log.push(format!("hold {}ms", time.as_millis()));
+        }
+
+        fn open(&mut self, target: &OpenTarget) -> io::Result<()> {
+            if self.broken == Some("shell") {
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
+            self.log.push(format!("open {}", target.as_str()));
+            Ok(())
+        }
+
+        fn play_sound(&mut self, file: &Path) -> io::Result<bool> {
+            self.log.push(format!("sound {}", file.display()));
+            Ok(self.broken != Some("sound"))
         }
     }
 
@@ -1576,6 +1597,43 @@ mod tests {
             actions.controls().log,
             ["keys Ctrl↓ M↓", "hold 40ms", "keys M↑", "keys Ctrl↑"]
         );
+    }
+
+    #[test]
+    fn opening_and_playing_run_in_order_and_leave_nothing_to_undo() {
+        let mut actions = Actions::<char, _>::new(Fake {
+            sessions: vec![session(1, "Player.exe", true)],
+            current: Some(1),
+            ..Fake::default()
+        });
+        let open = Action::Open(OpenTarget::parse("https://example.com").expect("valid"));
+        let sound = Action::PlaySound(SoundFile::parse(r"C:\Ding.wav").expect("valid"));
+        for action in [&current(MediaCommand::Pause), &open, &sound] {
+            actions
+                .perform('a', action, Restore::OnRelease, &watched())
+                .expect("ran");
+        }
+        actions.release('a', Instant::now()).expect("released");
+        assert_eq!(
+            actions.controls().log,
+            [
+                "Pause 1",
+                "open https://example.com",
+                r"sound C:\Ding.wav",
+                "Play 1"
+            ],
+            "the release undoes only the pause"
+        );
+        actions.controls().broken = Some("sound");
+        assert!(matches!(
+            actions.perform('a', &sound, Restore::Never, &watched()),
+            Err(ActionError::SoundNotPlayed)
+        ));
+        actions.controls().broken = Some("shell");
+        assert!(matches!(
+            actions.perform('a', &open, Restore::Never, &watched()),
+            Err(ActionError::Os(error)) if error.kind() == io::ErrorKind::NotFound
+        ));
     }
 
     #[test]

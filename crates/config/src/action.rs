@@ -4,6 +4,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 /// The longest app name, in bytes.
 const MAX_APP_NAME_LEN: usize = 256;
@@ -336,6 +337,134 @@ impl fmt::Display for InvalidKeys {
 
 impl Error for InvalidKeys {}
 
+/// The longest target an open action or a sound action names, in bytes.
+const MAX_TARGET_LEN: usize = 2048;
+
+/// Whether `text` is a full Windows path: a drive letter, a colon and a
+/// backslash or slash, such as `C:\Tools\Timer.exe`, or a network path that
+/// starts with two backslashes. A relative path would depend on the
+/// runtime's working folder, which the user never sees.
+fn is_full_windows_path(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let drive = matches!(
+        bytes,
+        [letter, b':', b'\\' | b'/', ..] if letter.is_ascii_alphabetic()
+    );
+    drive || text.starts_with(r"\\")
+}
+
+/// Whether `text` fits in a target: not empty, at most [`MAX_TARGET_LEN`]
+/// bytes, and no control characters.
+fn fits_target(text: &str) -> bool {
+    !text.is_empty() && text.len() <= MAX_TARGET_LEN && !text.chars().any(char::is_control)
+}
+
+/// What an open action opens: a program or a file by its full path, which
+/// Windows opens with the program the file type is set to, or a web link.
+///
+/// A link is `http` or `https` only. Other link types hand their text to
+/// whichever program registered them, and some of those have run commands
+/// from a crafted link, so an automation from someone else must not reach
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenTarget(Box<str>);
+
+impl OpenTarget {
+    /// Validates `target`, ignoring spaces around it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidOpenTarget`] for anything but a full path or an
+    /// `http` or `https` link of 1 to 2048 bytes without control
+    /// characters, or a link with a space in it.
+    pub fn parse(target: &str) -> Result<Self, InvalidOpenTarget> {
+        let target = target.trim();
+        if !fits_target(target) {
+            return Err(InvalidOpenTarget);
+        }
+        let link = ["http://", "https://"].into_iter().find_map(|scheme| {
+            target
+                .get(..scheme.len())
+                .filter(|start| start.eq_ignore_ascii_case(scheme))
+                .map(|_| target.get(scheme.len()..).unwrap_or_default())
+        });
+        let valid = match link {
+            Some(rest) => !rest.is_empty() && !rest.contains(char::is_whitespace),
+            None => is_full_windows_path(target),
+        };
+        if valid {
+            Ok(Self(target.into()))
+        } else {
+            Err(InvalidOpenTarget)
+        }
+    }
+
+    /// The target as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// An open action's target was not a full path or a web link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidOpenTarget;
+
+impl fmt::Display for InvalidOpenTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(
+            "open a program or file by its full path, such as C:\\Tools\\Timer.exe, or a web \
+             link that starts with http:// or https://",
+        )
+    }
+}
+
+impl Error for InvalidOpenTarget {}
+
+/// The WAV file a sound action plays, by its full path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoundFile(PathBuf);
+
+impl SoundFile {
+    /// Validates `path`, ignoring spaces around it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidSoundFile`] for anything but a full path of 1 to 2048
+    /// bytes without control characters that ends in `.wav`, ignoring case.
+    pub fn parse(path: &str) -> Result<Self, InvalidSoundFile> {
+        let path = path.trim();
+        let wav = path
+            .len()
+            .checked_sub(".wav".len())
+            .and_then(|start| path.get(start..))
+            .is_some_and(|end| end.eq_ignore_ascii_case(".wav"));
+        if fits_target(path) && is_full_windows_path(path) && wav {
+            Ok(Self(PathBuf::from(path)))
+        } else {
+            Err(InvalidSoundFile)
+        }
+    }
+
+    /// The file's path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// A sound action's file was not a full path to a WAV file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidSoundFile;
+
+impl fmt::Display for InvalidSoundFile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("play a WAV file by its full path, such as C:\\Sounds\\Ding.wav")
+    }
+}
+
+impl Error for InvalidSoundFile {}
+
 /// A side effect from the runtime's fixed set.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -355,12 +484,18 @@ pub enum Action {
     },
     /// Presses keys, which go to whichever window has the keyboard focus.
     PressKeys(KeyChord),
+    /// Opens a program, a file, or a web link, as opening it from File
+    /// Explorer or the Run box would, with nothing passed to it.
+    Open(OpenTarget),
+    /// Starts playing a WAV file, without waiting for it to end.
+    PlaySound(SoundFile),
 }
 
 impl Action {
     /// Whether a rule can undo this action on release: pausing or playing
     /// can be reversed and a volume can be set back, but a skipped track
-    /// cannot be unskipped and a pressed key cannot be unpressed.
+    /// cannot be unskipped, a pressed key cannot be unpressed, and what was
+    /// opened or played has nothing to put back.
     #[must_use]
     pub const fn restorable(&self) -> bool {
         !matches!(
@@ -369,6 +504,8 @@ impl Action {
                 command: MediaCommand::Next | MediaCommand::Previous,
                 ..
             } | Self::PressKeys(_)
+                | Self::Open(_)
+                | Self::PlaySound(_)
         )
     }
 
@@ -490,6 +627,86 @@ mod tests {
             }
             .injects_input()
         );
+    }
+
+    #[test]
+    fn open_targets_are_full_paths_or_web_links() {
+        let rest = MAX_TARGET_LEN
+            .checked_sub("https://".len())
+            .expect("long enough");
+        let longest = format!("https://{}", "a".repeat(rest));
+        for (text, read) in [
+            (r"C:\Tools\Timer.exe", r"C:\Tools\Timer.exe"),
+            ("  d:/notes/today.txt ", "d:/notes/today.txt"),
+            (r"\\server\share\run.bat", r"\\server\share\run.bat"),
+            ("https://example.com/a?b=c", "https://example.com/a?b=c"),
+            ("HTTP://example.com", "HTTP://example.com"),
+            (longest.as_str(), longest.as_str()),
+        ] {
+            assert_eq!(
+                OpenTarget::parse(text).map(|target| target.as_str().to_owned()),
+                Ok(read.to_owned()),
+                "{text:?}"
+            );
+        }
+        let too_long = format!("{longest}a");
+        for text in [
+            "",
+            "   ",
+            "Timer.exe",
+            r"Tools\Timer.exe",
+            "C:Timer.exe",
+            "1:/x",
+            "https://",
+            "https://example.com/a b",
+            "ftp://example.com",
+            "file:///C:/Tools/Timer.exe",
+            "search-ms:query=x",
+            "C:\\Tools\nTimer.exe",
+            too_long.as_str(),
+        ] {
+            assert_eq!(OpenTarget::parse(text), Err(InvalidOpenTarget), "{text:?}");
+        }
+        assert!(InvalidOpenTarget.to_string().contains("https://"));
+    }
+
+    #[test]
+    fn sound_files_are_full_paths_to_wav_files() {
+        for (text, read) in [
+            (r"C:\Sounds\Ding.wav", r"C:\Sounds\Ding.wav"),
+            (" c:/sounds/ding.WAV ", "c:/sounds/ding.WAV"),
+            (r"\\server\sounds\ding.wav", r"\\server\sounds\ding.wav"),
+        ] {
+            assert_eq!(
+                SoundFile::parse(text).map(|file| file.path().to_path_buf()),
+                Ok(PathBuf::from(read)),
+                "{text:?}"
+            );
+        }
+        for text in [
+            "",
+            ".wav",
+            "Ding.wav",
+            r"C:\Sounds\Ding.mp3",
+            r"C:\Sounds\Ding.wave",
+            "https://example.com/ding.wav",
+            "C:\\Sounds\u{7}.wav",
+            "C:\\\u{e9}.wa",
+        ] {
+            assert_eq!(SoundFile::parse(text), Err(InvalidSoundFile), "{text:?}");
+        }
+        assert!(InvalidSoundFile.to_string().contains("WAV"));
+    }
+
+    #[test]
+    fn opening_and_playing_neither_inject_input_nor_restore() {
+        for action in [
+            Action::Open(OpenTarget::parse("https://example.com").expect("valid")),
+            Action::PlaySound(SoundFile::parse(r"C:\Ding.wav").expect("valid")),
+        ] {
+            assert!(!action.injects_input(), "{action:?}");
+            assert!(!action.restorable(), "{action:?}");
+        }
     }
 
     #[test]

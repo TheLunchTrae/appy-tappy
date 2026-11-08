@@ -935,6 +935,11 @@ select {
   align-items: center;
 }
 
+.path-field {
+  grid-column: span 3;
+  min-width: 0;
+}
+
 .keys-field .input {
   flex: 1;
   min-width: 0;

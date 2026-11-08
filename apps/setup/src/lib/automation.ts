@@ -184,6 +184,11 @@ export const MEDIA_NAMES: Readonly<Record<MediaCommand, string>> = {
   previous: 'Previous track',
 };
 
+/** The last part of a Windows path, such as `Ding.wav` for `C:\Sounds\Ding.wav`. */
+function fileName(path: string): string {
+  return path.split(/[\\/]/u).at(-1) ?? path;
+}
+
 /** An action in a few words, such as `Pause media · Player.exe`. */
 export function actionText(action: ActionDef): string {
   switch (action.kind) {
@@ -193,12 +198,16 @@ export function actionText(action: ActionDef): string {
       return `Volume · ${action.app ?? 'system'} ${action.percent}%`;
     case 'keys':
       return `Press ${action.keys}`;
+    case 'open':
+      return `Open ${action.target}`;
+    case 'sound':
+      return `Play ${fileName(action.file)}`;
   }
 }
 
 /**
- * Whether undo can put back what `action` changed: a skipped track cannot be unskipped, and pressed keys
- * cannot be unpressed.
+ * Whether undo can put back what `action` changed: a skipped track cannot be unskipped, pressed keys cannot
+ * be unpressed, and what was opened or played has nothing to put back.
  */
 export function undoable(action: ActionDef): boolean {
   switch (action.kind) {
@@ -207,6 +216,8 @@ export function undoable(action: ActionDef): boolean {
     case 'volume':
       return true;
     case 'keys':
+    case 'open':
+    case 'sound':
       return false;
   }
 }
@@ -264,6 +275,10 @@ export interface ActionDraft {
   readonly app: string;
   /** The keys to press, such as `Ctrl+Shift+M`. */
   readonly keys: string;
+  /** What an open action opens, as typed: a full path or a web link. */
+  readonly opens: string;
+  /** The WAV file a sound action plays, as typed. */
+  readonly sound: string;
 }
 
 /** An automation as the editor holds it. */
@@ -287,7 +302,7 @@ export interface Draft {
 
 /** A new action row of `kind`. */
 export function newAction(key: number, kind: ActionDraft['kind'] = 'media'): ActionDraft {
-  return { key, kind, command: 'pause', percent: '20', target: 'default', app: '', keys: '' };
+  return { key, kind, command: 'pause', percent: '20', target: 'default', app: '', keys: '', opens: '', sound: '' };
 }
 
 /** A new automation: pause whatever is playing, and undo it afterwards. */
@@ -320,9 +335,11 @@ export function toDraft(automation: AutomationDef): Draft {
       kind: action.kind,
       command: action.kind === 'media' ? action.command : 'pause',
       percent: action.kind === 'volume' ? String(action.percent) : '20',
-      target: action.kind === 'keys' || action.app === null ? 'default' : 'app',
-      app: action.kind === 'keys' ? '' : (action.app ?? ''),
+      target: (action.kind === 'media' || action.kind === 'volume') && action.app !== null ? 'app' : 'default',
+      app: action.kind === 'media' || action.kind === 'volume' ? (action.app ?? '') : '',
       keys: action.kind === 'keys' ? action.keys : '',
+      opens: action.kind === 'open' ? action.target : '',
+      sound: action.kind === 'sound' ? action.file : '',
     })),
     undo: automation.undo,
     cooldown: String(automation.cooldownMs / 1000),
@@ -377,7 +394,49 @@ function typedNumber(text: string): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+/**
+ * A path or link as typed, without spaces around it or the quotes that File Explorer's Copy as path puts around
+ * a path.
+ */
+function typedPath(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')
+    ? trimmed.slice(1, -1).trim()
+    : trimmed;
+}
+
+/**
+ * Whether `text` is a full Windows path, such as `C:\Tools\Timer.exe` or `\\server\share\file`: a relative one
+ * would depend on a folder the user never sees.
+ */
+function isFullPath(text: string): boolean {
+  return /^[a-z]:[\\/]/iu.test(text) || text.startsWith('\\\\');
+}
+
+/** Whether `text` is a web link: `http` or `https` only, as the runtime opens no other kind. */
+function isWebLink(text: string): boolean {
+  return /^https?:\/\/\S+$/iu.test(text);
+}
+
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
+  if (draft.kind === 'open') {
+    const target = typedPath(draft.opens);
+    if (target === '') {
+      return `Enter what action ${position} opens: a program's full path, such as C:\\Tools\\Timer.exe, or a web link.`;
+    }
+    return isFullPath(target) || isWebLink(target)
+      ? { kind: 'open', target }
+      : `Action ${position} opens a program or file by its full path, such as C:\\Tools\\Timer.exe, or a link that starts with http:// or https://.`;
+  }
+  if (draft.kind === 'sound') {
+    const file = typedPath(draft.sound);
+    if (file === '') {
+      return `Enter the full path of the WAV file action ${position} plays, such as C:\\Sounds\\Ding.wav.`;
+    }
+    return isFullPath(file) && /\.wav$/iu.test(file)
+      ? { kind: 'sound', file }
+      : `Action ${position} plays a WAV file by its full path, such as C:\\Sounds\\Ding.wav.`;
+  }
   if (draft.kind === 'keys') {
     if (draft.keys.trim() === '') {
       return `Choose the keys for action ${position} to press.`;
@@ -454,13 +513,19 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
     actions.push(built);
   }
   if (draft.undo && !actions.some(undoable)) {
-    const skips = actions.some((action) => action.kind === 'media');
-    const presses = actions.some((action) => action.kind === 'keys');
+    const has = (kind: ActionDef['kind']): boolean => actions.some((action) => action.kind === kind);
     const why = [
-      skips ? 'a skipped track cannot be unskipped' : null,
-      presses ? 'pressed keys cannot be unpressed' : null,
+      has('media') ? 'a skipped track cannot be unskipped' : null,
+      has('keys') ? 'pressed keys cannot be unpressed' : null,
+      has('open') ? 'what opened stays open' : null,
+      has('sound') ? 'a played sound cannot be unplayed' : null,
     ].filter((part) => part !== null);
-    return { ok: false, next: `Turn off undo: ${why.join(', and ')}.` };
+    // Each part is a clause, so a comma comes before the last one's `and`.
+    const last = why.pop() ?? '';
+    return {
+      ok: false,
+      next: `Turn off undo: ${[why.join(', '), last].filter((part) => part !== '').join(', and ')}.`,
+    };
   }
   const blocked = keysBlocked(actions, choice.antiCheat, choice.appName);
   if (blocked !== null) {

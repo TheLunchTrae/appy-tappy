@@ -16,6 +16,9 @@ calls that crate; the engine only says which rule fired.
   mixer.
 - **Press keys:** one key, with any of Ctrl, Alt, Shift, and Win held, such
   as `Ctrl+Shift+M`. See [Key presses](#key-presses).
+- **Open:** a program or a file by its full path, or an `http` or `https`
+  link. See [Opening](#opening).
+- **Play a sound:** a WAV file by its full path. See [Sounds](#sounds).
 
 An app is named the way Windows reports it, ignoring ASCII case. For media, that
 is the session's app ID: usually the executable name, such as `Player.exe`, for
@@ -78,6 +81,45 @@ automations. Changing the class in the setup app makes the runtime read them
 again at once, so it stops running that automation; a class changed by
 editing `app.json` by hand counts from the next reload or restart.
 
+## Opening
+
+An open action names a full path, such as `C:\Tools\Timer.exe`, or a
+network path that starts with `\\`, or a link that starts with `http://` or
+`https://`, up to 2048 bytes. A relative path would depend on the runtime's
+working folder, which the user never sees, so it is refused.
+
+It uses `ShellExecuteExW` with the default verb, as opening the target from
+File Explorer does: a program runs, a file opens in the program its type is
+set to, and a link opens in the default browser. It passes nothing to what it
+opens, so no reading of the watched application can reach a program's command
+line. It asks Windows to show the window without taking the keyboard focus,
+though a program may take it anyway, and it shows no error dialog; a failure,
+such as a file that is not there, goes to the log.
+
+The shell asks its callers for a single-threaded COM apartment, while Core
+Audio's controls need the action thread in the multithreaded one, so each open
+runs on a short-lived thread of its own. The action thread waits for it for at
+most 2 seconds, so a program that is slow to start cannot hold up the actions
+behind it. After that the log says it may still open, and it may.
+
+Links are only `http` and `https`, because a link of another kind goes to
+whichever program registered that kind, and some such programs have run
+commands from a crafted link. An automations file from someone else can still
+open any program or file on the computer and any web page, so read its open
+actions before you use it.
+
+## Sounds
+
+A sound action names a WAV file by its full path, which ends in `.wav`. It
+uses `PlaySoundW`, which returns once the sound starts, so the action thread
+does not wait for it to end. A new sound stops one that is still playing. When
+the file is missing or is not a WAV file, or no playback device is connected,
+the sound does not play and the log says so. It plays on the default playback
+device, at the volume Windows gives AppyTappy in the volume mixer.
+
+Neither opening nor a sound is restricted by anti-cheat class: neither sends
+input or touches the watched application's process.
+
 ## Restoring
 
 A rule that restores on release undoes its actions when it is released (see
@@ -89,8 +131,8 @@ it touched, just before it acted:
 - **Set volume** puts back each audio session's own level, or the device's.
   A restore goes to the same device or session the action changed, even if
   the default device has changed since.
-- **Next**, **previous**, and **press keys** cannot be undone. A rule that
-  restores needs at least one action that can.
+- **Next**, **previous**, **press keys**, **open**, and **play a sound**
+  cannot be undone. A rule that restores needs at least one action that can.
 
 A rule's actions are undone newest first. When several restoring rules change
 the same session or volume, the original state comes back only when the last
@@ -146,8 +188,8 @@ were missing changed nothing, so its release has nothing to undo.
 - **Sending keys to another application:** keys go only to the watched
   application while it is in front, so a hotkey meant for another application
   cannot be sent.
-- **Running a command or opening a URL:** configs may be shared, and a
-  shared config should not be able to run programs.
+- **Arguments for a program, and links other than `http` and `https`:** see
+  [Opening](#opening).
 - **HTTP and WebSocket calls** (to streaming or smart-home software): useful,
   but each needs its own connection settings and error handling, so they can
   come after the core set works.

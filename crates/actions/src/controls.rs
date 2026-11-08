@@ -2,9 +2,10 @@
 //! process that [`Controls`] lists, and the calls that act on them.
 
 use std::io;
+use std::path::Path;
 use std::time::Duration;
 
-use appytappy_config::action::{MediaCommand, Modifier, VolumeLevel};
+use appytappy_config::action::{MediaCommand, Modifier, OpenTarget, VolumeLevel};
 use appytappy_config::anti_cheat::ProcessId;
 
 use crate::Stroke;
@@ -110,4 +111,25 @@ pub trait Controls {
 
     /// Waits for `time`, while pressed keys are held down.
     fn hold(&mut self, time: Duration);
+
+    /// Opens `target` the way opening it from File Explorer would: a program
+    /// runs, a file opens in the program its type is set to, and a link
+    /// opens in the default browser. It passes nothing to what it opens and
+    /// shows no error dialog.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error, such as for a file that is not
+    /// there, or a timeout when opening takes too long to answer.
+    fn open(&mut self, target: &OpenTarget) -> io::Result<()>;
+
+    /// Starts playing the WAV file at `file` and returns without waiting for
+    /// it to end. A sound that is still playing stops. Returns whether it
+    /// started: it does not for a file that is missing or is not a WAV
+    /// file, or with no playback device.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn play_sound(&mut self, file: &Path) -> io::Result<bool>;
 }
