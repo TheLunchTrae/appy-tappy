@@ -5,8 +5,14 @@
 //! and reads the JSON the Rust side does. The types it reaches from those
 //! roots come along. This module adds what the page checks a draft against
 //! before it saves: `appytappy-config`'s limits, the keys a key press can
-//! name, what each kind of action does, and the default settings. The save
-//! still checks everything again.
+//! name, what each kind of action does, the trace categories, and the default
+//! settings. The save still checks everything again.
+//!
+//! The page also reads a typed path, link, key press or app name itself, so
+//! the user sees what to fix as they type. The file holds what the Rust
+//! parsers make of a fixed list of samples, one for each way a parser accepts
+//! or refuses, and a page test checks that the page reads every sample the
+//! same.
 //!
 //! The test renders the file and fails when the checked-in one differs, so
 //! the gate's `cargo test` catches drift. With `UPDATE_BINDINGS=1` set, it
@@ -15,11 +21,14 @@
 use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
+use std::iter;
 use std::path::PathBuf;
 
 use appytappy_config::action::{
-    MAX_APP_NAME_LEN, MAX_FUNCTION_KEY, MAX_TARGET_LEN, Modifier, NAMED_KEYS,
+    AppName, KeyChord, MAX_APP_NAME_LEN, MAX_FUNCTION_KEY, MAX_TARGET_LEN, Modifier, NAMED_KEYS,
+    OpenTarget, SoundFile,
 };
 use appytappy_config::app_file::{AntiCheatDef, MAX_STATES, OverlayModeDef, WindowDef};
 use appytappy_config::automation_file::{
@@ -27,6 +36,7 @@ use appytappy_config::automation_file::{
 };
 use appytappy_config::settings_file::{
     FASTEST_READ_MS, MAX_TRACE_FILE_MB, MAX_TRACE_FILES, SLOWEST_READ_MS, SettingsFile,
+    TraceCategory,
 };
 use appytappy_config::signal::NO_STATE;
 use serde::Serialize;
@@ -128,9 +138,22 @@ fn declarations() -> String {
     found.declared.into_values().collect::<Vec<_>>().join("\n")
 }
 
-/// `value` as its JSON text, which TypeScript reads as a literal.
+/// `value` as its JSON text, which TypeScript reads as a literal. Every
+/// character beyond ASCII is escaped, so a sample's invisible or look-alike
+/// character shows in the file as its code.
 fn literal(value: &impl Serialize) -> String {
-    serde_json::to_string_pretty(value).expect("plain data serializes")
+    let text = serde_json::to_string_pretty(value).expect("plain data serializes");
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_ascii() {
+            escaped.push(character);
+        } else {
+            for unit in character.encode_utf16(&mut [0; 2]) {
+                write!(escaped, "\\u{unit:04x}").expect("a String takes any text");
+            }
+        }
+    }
+    escaped
 }
 
 /// The name serde gives `value`, a unit variant.
@@ -196,10 +219,176 @@ fn action_facts() -> serde_json::Value {
     json!({ "injectsInput": injects_input, "undoable": undoable })
 }
 
+/// Every trace category, in the order the page lists them. A category added
+/// to [`TraceCategory`] stops the match compiling until it has a place.
+fn trace_categories() -> Vec<TraceCategory> {
+    let after = |category: &TraceCategory| match category {
+        TraceCategory::Readings => Some(TraceCategory::Changes),
+        TraceCategory::Changes => Some(TraceCategory::Rules),
+        TraceCategory::Rules => Some(TraceCategory::Actions),
+        TraceCategory::Actions => Some(TraceCategory::Lifecycle),
+        TraceCategory::Lifecycle => None,
+    };
+    iter::successors(Some(TraceCategory::Readings), after).collect()
+}
+
+/// A path of exactly `bytes` bytes, ending in `end`, with two two-byte
+/// characters, so a page that counts characters instead of bytes reads it
+/// as shorter than it is.
+fn path_of(bytes: usize, end: &str) -> String {
+    let fill = r"C:\éé"
+        .len()
+        .checked_add(end.len())
+        .and_then(|ends| bytes.checked_sub(ends))
+        .expect("long enough for its start and end");
+    format!(r"C:\éé{}{end}", "a".repeat(fill))
+}
+
+/// What `parse` makes of each sample: the text it keeps, or `None` when it
+/// refuses the sample.
+fn cases(samples: &[String], parse: impl Fn(&str) -> Option<String>) -> serde_json::Value {
+    samples
+        .iter()
+        .map(|text| json!({ "text": text, "read": parse(text) }))
+        .collect()
+}
+
+/// The samples the parsers read, one for each way they accept or refuse,
+/// with what each makes of them. They include the characters a page's own
+/// reading could treat differently: a byte order mark, which is not white
+/// space, and the Kelvin sign and long s, which only Unicode case folding
+/// reads as `k` and `s`.
+fn parse_cases() -> serde_json::Value {
+    let strings = |samples: &[&str]| {
+        samples
+            .iter()
+            .map(|&text| text.to_owned())
+            .collect::<Vec<_>>()
+    };
+    let longest_link = format!(
+        "https://éé{}",
+        "a".repeat(
+            MAX_TARGET_LEN
+                .checked_sub("https://éé".len())
+                .expect("long enough")
+        )
+    );
+    let mut open = strings(&[
+        r"C:\Tools\Timer.exe",
+        "  d:/notes/today.txt ",
+        "\u{a0}C:\\Timer.exe\u{3000}",
+        "https://example.com/a?b=c",
+        "HTTP://example.com",
+        "https://a\u{feff}b",
+        "",
+        "   ",
+        "\u{feff}C:\\Timer.exe",
+        "Timer.exe",
+        r"Tools\Timer.exe",
+        "C:Timer.exe",
+        "1:/x",
+        "\u{212a}:\\Timer.exe",
+        "https://",
+        "https://example.com/a b",
+        "https://a\u{3000}b",
+        "http\u{17f}://example.com",
+        "ftp://example.com",
+        "file:///C:/Tools/Timer.exe",
+        "search-ms:query=x",
+        r"\\server\share\run.bat",
+        r"\\?\UNC\server\share\run.bat",
+        "C:\\Tools\nTimer.exe",
+        "C:\\Tools\u{85}Timer.exe",
+    ]);
+    open.extend([
+        path_of(MAX_TARGET_LEN, ".exe"),
+        path_of(MAX_TARGET_LEN.checked_add(1).expect("small"), ".exe"),
+        format!("{longest_link}a"),
+        longest_link,
+    ]);
+    let mut sound = strings(&[
+        r"C:\Sounds\Ding.wav",
+        " c:/sounds/ding.WAV ",
+        "",
+        ".wav",
+        "Ding.wav",
+        r"C:\Sounds\Ding.mp3",
+        r"C:\Sounds\Ding.wave",
+        "https://example.com/ding.wav",
+        r"\\server\sounds\ding.wav",
+        "\u{212a}:\\Ding.wav",
+        "\u{feff}C:\\Ding.wav",
+        "C:\\Sounds\u{7}.wav",
+        "C:\\\u{e9}.wa",
+    ]);
+    sound.extend([
+        path_of(MAX_TARGET_LEN, ".wav"),
+        path_of(MAX_TARGET_LEN.checked_add(1).expect("small"), ".wav"),
+    ]);
+    let keys = strings(&[
+        "Ctrl+Shift+M",
+        "shift + ctrl + m",
+        "Win+Alt+5",
+        "Ctrl+Shift+Alt+Win+M",
+        "F9",
+        "f1",
+        "F24",
+        "ctrl+pagedown",
+        "Space",
+        "a",
+        "Ctrl+\u{a0}M\u{3000}",
+        "",
+        "Ctrl",
+        "Ctrl+",
+        "Ctrl+Ctrl+M",
+        "M+Ctrl",
+        "M+N",
+        "F0",
+        "F25",
+        "F01",
+        "F+1",
+        "F256",
+        "Ctrl+Shift+Alt+Win+Meta+M",
+        "\u{c4}",
+        "PrintScreen",
+        "Bac\u{212a}space",
+        "\u{17f}hift+M",
+        "\u{feff}F9",
+    ]);
+    let mut app = strings(&[
+        "Player.exe",
+        " Player.exe ",
+        "\u{feff}Player.exe",
+        "",
+        "Player\n.exe",
+        "\u{7}",
+        "Player\u{85}.exe",
+    ]);
+    let longest_app = format!(
+        "éé{}",
+        "a".repeat(
+            MAX_APP_NAME_LEN
+                .checked_sub("éé".len())
+                .expect("long enough")
+        )
+    );
+    app.extend([format!("{longest_app}a"), longest_app]);
+    json!({
+        "openTarget": cases(&open, |text| OpenTarget::parse(text).ok().map(|target| target.as_str().to_owned())),
+        "soundFile": cases(&sound, |text| {
+            SoundFile::parse(text)
+                .ok()
+                .map(|file| file.path().to_str().expect("read from text").to_owned())
+        }),
+        "keys": cases(&keys, |text| KeyChord::parse(text).ok().map(|keys| keys.to_string())),
+        "appName": cases(&app, |text| AppName::new(text).ok().map(|name| name.as_str().to_owned())),
+    })
+}
+
 /// The limits and facts the page checks a draft against.
 fn constants() -> String {
     let limits = json!({
-        "maxAppNameBytes": MAX_APP_NAME_LEN,
+        "maxActionAppBytes": MAX_APP_NAME_LEN,
         "maxCooldownMs": MAX_COOLDOWN_MS,
         "maxStates": MAX_STATES,
         "maxTargetBytes": MAX_TARGET_LEN,
@@ -215,7 +404,7 @@ fn constants() -> String {
     });
     [
         format!(
-            "/** The longest names, paths and cooldowns, the most states, and the settings' ranges the saved files take. */\nexport const LIMITS = {} as const;\n",
+            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states, and the settings' ranges, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
             literal(&limits)
         ),
         format!(
@@ -229,6 +418,14 @@ fn constants() -> String {
         format!(
             "/** Whether each kind of action sends input, and whether undo can put it back, by kind and a media action's command. */\nexport const ACTIONS = {} as const;\n",
             literal(&action_facts())
+        ),
+        format!(
+            "/** Every trace category, in the order the page lists them. */\nexport const TRACE_CATEGORIES = {} as const satisfies readonly TraceCategory[];\n",
+            literal(&trace_categories())
+        ),
+        format!(
+            "/**\n * What the Rust side makes of sample paths, links, key presses and app names: the text it keeps, or null when it\n * refuses one. The page's own checks must read each the same.\n */\nexport const PARSE_CASES = {} as const;\n",
+            literal(&parse_cases())
         ),
         format!(
             "/** The settings a new install starts with. */\nexport const DEFAULT_SETTINGS: SettingsFile = {};\n",

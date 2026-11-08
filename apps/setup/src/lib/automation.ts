@@ -19,6 +19,7 @@ import {
   type WhenDef,
 } from './bindings.ts';
 import { spellKeys } from './shortcut.ts';
+import { asciiLower, hasControl, trimmed, utf8Bytes } from './text.ts';
 
 /** What a value reads: a number, yes or no, or a state's name. */
 export type ValueKind = 'number' | 'flag' | 'state';
@@ -380,8 +381,8 @@ const DECIMAL = /^-?(?:\d{1,3}(?:,\d{3})+(?:\.\d*)?|\d+(?:\.\d*)?|\.\d+)$/u;
 
 /** A number typed into a field, or null when it is not a plain decimal number or too large to hold. */
 function typedNumber(text: string): number | null {
-  const trimmed = text.trim();
-  const number = DECIMAL.test(trimmed) ? Number(trimmed.replaceAll(',', '')) : Number.NaN;
+  const typed = text.trim();
+  const number = DECIMAL.test(typed) ? Number(typed.replaceAll(',', '')) : Number.NaN;
   return Number.isFinite(number) ? number : null;
 }
 
@@ -390,10 +391,8 @@ function typedNumber(text: string): number | null {
  * a path.
  */
 function typedPath(text: string): string {
-  const trimmed = text.trim();
-  return trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')
-    ? trimmed.slice(1, -1).trim()
-    : trimmed;
+  const path = trimmed(text);
+  return path.length >= 2 && path.startsWith('"') && path.endsWith('"') ? trimmed(path.slice(1, -1)) : path;
 }
 
 /**
@@ -402,15 +401,20 @@ function typedPath(text: string): string {
  * refuses it.
  */
 function isFullPath(text: string): boolean {
-  return /^[a-z]:[\\/]/iu.test(text);
+  return /^[A-Za-z]:[\\/]/u.test(text);
+}
+
+/** Whether `text` fits in an open or sound action: not empty, not too long, and no control characters. */
+function fitsTarget(text: string): boolean {
+  return text !== '' && !hasControl(text) && utf8Bytes(text) <= LIMITS.maxTargetBytes;
 }
 
 /** Why the path or link `text` of action `position` can't be saved whatever its kind, or `null` when it can be. */
 function targetProblem(text: string, position: number): string | null {
-  if (/\p{Cc}/u.test(text)) {
+  if (hasControl(text)) {
     return `The path or link in action ${position} has a tab or line break in it. Remove it.`;
   }
-  if (new TextEncoder().encode(text).length > LIMITS.maxTargetBytes) {
+  if (utf8Bytes(text) > LIMITS.maxTargetBytes) {
     return `The path or link in action ${position} is too long to save. Shorten it.`;
   }
   return null;
@@ -418,7 +422,27 @@ function targetProblem(text: string, position: number): string | null {
 
 /** Whether `text` is a web link: `http` or `https` only, as the runtime opens no other kind. */
 function isWebLink(text: string): boolean {
-  return /^https?:\/\/\S+$/iu.test(text);
+  return /^https?:\/\/\P{White_Space}+$/u.test(asciiLower(text));
+}
+
+/**
+ * What an open action keeps of `text`, as the Rust side reads it: a full path or a web link without the spaces
+ * around it, or null when it is neither.
+ */
+export function openTarget(text: string): string | null {
+  const target = trimmed(text);
+  return fitsTarget(target) && (isFullPath(target) || isWebLink(target)) ? target : null;
+}
+
+/** What a sound action keeps of `text`, as the Rust side reads it: a WAV file's full path, or null. */
+export function soundFile(text: string): string | null {
+  const file = trimmed(text);
+  return fitsTarget(file) && isFullPath(file) && asciiLower(file).endsWith('.wav') ? file : null;
+}
+
+/** `text` as a media or volume action's app name, as the Rust side reads it, or null when it can't be one. */
+export function appName(text: string): string | null {
+  return text !== '' && !hasControl(text) && utf8Bytes(text) <= LIMITS.maxActionAppBytes ? text : null;
 }
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
@@ -431,8 +455,9 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
     if (problem !== null) {
       return problem;
     }
-    return isFullPath(target) || isWebLink(target)
-      ? { kind: 'open', target }
+    const opens = openTarget(target);
+    return opens !== null
+      ? { kind: 'open', target: opens }
       : `Action ${position} opens a program or file by its full path, such as C:\\Tools\\Timer.exe, or a link that starts with http:// or https://.`;
   }
   if (draft.kind === 'sound') {
@@ -444,12 +469,13 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
     if (problem !== null) {
       return problem;
     }
-    return isFullPath(file) && /\.wav$/iu.test(file)
-      ? { kind: 'sound', file }
+    const plays = soundFile(file);
+    return plays !== null
+      ? { kind: 'sound', file: plays }
       : `Action ${position} plays a WAV file by its full path, such as C:\\Sounds\\Ding.wav.`;
   }
   if (draft.kind === 'keys') {
-    if (draft.keys.trim() === '') {
+    if (trimmed(draft.keys) === '') {
       return `Choose the keys for action ${position} to press.`;
     }
     const keys = spellKeys(draft.keys);
@@ -457,14 +483,14 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
       ? `Spell the keys for action ${position} as any of Ctrl, Alt, Shift and Win, then one key such as M, 5, F9, Space or Enter, joined by +, such as Ctrl+Shift+M.`
       : { kind: 'keys', keys };
   }
-  const app = draft.target === 'app' ? draft.app.trim() : null;
+  const app = draft.target === 'app' ? trimmed(draft.app) : null;
   if (app === '') {
     return `Name the application for action ${position}, such as Player.exe.`;
   }
-  if (app !== null && /\p{Cc}/u.test(app)) {
+  if (app !== null && hasControl(app)) {
     return `The application name in action ${position} has a tab or line break in it. Remove it.`;
   }
-  if (app !== null && new TextEncoder().encode(app).length > LIMITS.maxAppNameBytes) {
+  if (app !== null && appName(app) === null) {
     return `The application name in action ${position} is too long to save. Shorten it.`;
   }
   if (draft.kind === 'media') {
