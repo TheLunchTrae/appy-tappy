@@ -256,6 +256,12 @@ impl Harness {
         command(&mut self.owner)
     }
 
+    /// Forgets the reloads that arrived so far, so a later
+    /// [`Harness::reloads`] counts only those that follow.
+    pub(super) fn forget_reloads(&self) {
+        while self.reloads.try_recv().is_ok() {}
+    }
+
     /// How many times the owner asked the runtime to read the saved files
     /// again since the last time this was asked.
     pub(super) fn reloads(&self) -> usize {

@@ -126,12 +126,15 @@ impl<H: Host> Owner<H> {
     /// Removes the reference `reference` of the application `app` and its
     /// pictures, unless a value reads with it.
     pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
-        // A reference already gone changed nothing, so no one is told.
-        let Some(file) = self.delete_reference_files(app, reference)? else {
-            return Ok(());
-        };
-        self.tell(Changed::Values);
-        self.prune(app, &file)
+        if let Some(file) = self.delete_reference_files(app, reference)? {
+            self.tell(Changed::Values);
+            self.prune(app, &file)
+        } else {
+            // A reference already gone changed nothing, so no one is told,
+            // but pictures an earlier delete left behind are removed.
+            let file = self.stores()?.app_file(app)?;
+            self.prune(app, &file)
+        }
     }
 
     /// Removes the reference `reference` from the application's file,
@@ -368,7 +371,7 @@ mod tests {
             harness.ask(delete("digits")),
             Err("Progress reads with Red digits. Change or remove it first.".to_owned())
         );
-        let _saved_before = harness.reloads();
+        harness.forget_reloads();
         harness
             .ask(|owner| owner.delete("example", "progress"))
             .expect("removes the value");
@@ -399,7 +402,7 @@ mod tests {
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        let _saved_before = harness.reloads();
+        harness.forget_reloads();
         harness
             .ask(|owner| owner.save_reference(&reference("example", "Digits", None)))
             .expect("saves");
