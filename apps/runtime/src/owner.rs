@@ -312,7 +312,7 @@ impl appytappy_actions::Controls for NoControls {
         &mut self,
         (): &(),
         _level: appytappy_config::action::VolumeLevel,
-    ) -> io::Result<()> {
+    ) -> io::Result<bool> {
         match self.0 {}
     }
 

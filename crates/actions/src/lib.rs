@@ -9,6 +9,7 @@
 //!
 //! See `docs/developer/architecture.md` for this crate's boundaries.
 
+mod backoff;
 mod controls;
 mod error;
 mod journal;
@@ -16,7 +17,8 @@ mod keys;
 #[cfg(windows)]
 pub mod win;
 
+pub use backoff::Backoff;
 pub use controls::{Controls, MediaSession, Volume};
 pub use error::ActionError;
-pub use journal::{Actions, Watched};
+pub use journal::{Actions, MEDIA_RETRY, Watched};
 pub use keys::{HOLD, Stroke, strokes};

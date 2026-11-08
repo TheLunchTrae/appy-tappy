@@ -158,7 +158,9 @@ Each thread below is a plain `std::thread`, and each channel is a
   because Windows ties them to the thread that made them. It keeps the restore
   journal: the state each restoring rule
   changed, such as the volume before a change, so a release can put it back
-  even when several rules changed the same thing.
+  even when several rules changed the same thing. A restore that fails is
+  tried again, and controls that cannot be made are made again when a later
+  automation fires (see [Actions](actions.md#when-the-controls-cannot-start)).
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save, and sends `Reload`. The owner reads the
   saved applications and automations again. An application whose automations

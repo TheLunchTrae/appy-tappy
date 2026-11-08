@@ -17,7 +17,7 @@
 use std::env;
 use std::io;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_actions::win::{MediaKey, WindowsControls};
 use appytappy_actions::{Actions, Controls, Watched};
@@ -104,10 +104,12 @@ fn pauses_and_resumes_the_player() {
     let held = actions.perform(2_u8, &pause, Restore::OnRelease, &watched());
     thread::sleep(SETTLE);
     let while_paused = playing(actions.controls());
-    let first_release = actions.release(1);
+    let first_release = actions.release(1, Instant::now());
     thread::sleep(SETTLE);
     let while_held = playing(actions.controls());
-    actions.release(2).expect("the player resumes");
+    actions
+        .release(2, Instant::now())
+        .expect("the player resumes");
     thread::sleep(SETTLE);
     paused.expect("the player pauses");
     held.expect("the second pause holds the player");
@@ -137,7 +139,9 @@ fn lowers_and_restores_the_player_volume() {
     let lowered = actions.perform(0_u8, &lower, Restore::OnRelease, &watched());
     let while_lowered = levels(actions.controls());
     thread::sleep(SETTLE);
-    actions.release(0).expect("the volume goes back");
+    actions
+        .release(0, Instant::now())
+        .expect("the volume goes back");
     lowered.expect("the volume changes");
     let while_lowered = while_lowered.expect("readable");
     assert!(
