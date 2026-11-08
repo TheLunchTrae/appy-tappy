@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import {
-  type AppSummary,
-  type Fallback,
-  type MatchField,
-  type WindowChoice,
-  type WindowDef,
-  type WindowList,
-  errorText,
-  listWindows,
-  saveApp,
-} from '../lib/api.ts';
+import type { AppSummary, FallbackDef, WindowChoice, WindowDef, WindowList } from '../lib/bindings.ts';
+import { type MatchField, errorText, listWindows, saveApp } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
 import {
   EXECUTABLE_NOTE,
@@ -203,7 +194,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
                     aria-describedby="hint-fallback"
                     value={window.fallback}
                     onChange={(event) => {
-                      const picked = FALLBACKS.find((fallback: Fallback) => fallback === event.target.value);
+                      const picked = FALLBACKS.find((fallback: FallbackDef) => fallback === event.target.value);
                       if (picked !== undefined) {
                         setWindow({ ...window, fallback: picked });
                       }

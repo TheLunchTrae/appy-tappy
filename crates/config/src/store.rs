@@ -1,14 +1,15 @@
-//! Reading and writing the authoring files.
+//! Reading and writing the authoring files, and the one file the runtime
+//! writes.
 //!
 //! Each application has a folder under [`crate::paths::Locations::apps`]
 //! named by its ID, holding `app.json` and the pictures its values name.
 //! The automations live in one file of their own, at
 //! [`crate::paths::Locations::automations`], with the pictures their clicks
 //! look for in the [`CLICK_PICTURES`] folder beside it, and the settings in
-//! another file, at
-//! [`crate::paths::Locations::settings`]. Every write goes to a temporary
-//! file first and then replaces the old file in one step, so a reader never
-//! sees half a file.
+//! another file, at [`crate::paths::Locations::settings`]. The runtime keeps
+//! whether automations are enabled at [`crate::paths::Locations::enabled`].
+//! Every write goes to a temporary file first and then replaces the old file
+//! in one step, so a reader never sees half a file.
 
 use std::fs;
 use std::io::{self, Write};
@@ -344,6 +345,52 @@ impl SettingsStore {
             fs::create_dir_all(folder)?;
         }
         write_atomic(&self.path, file.to_json().as_bytes())?;
+        if let Some(folder) = folder {
+            remove_leftovers(folder);
+        }
+        Ok(())
+    }
+}
+
+/// What the enabled file holds while automations are disabled. Anything
+/// else, such as `on`, means enabled.
+const DISABLED: &str = "off";
+
+/// The file where the runtime keeps whether automations are enabled, as the
+/// tray last left them: one line, `on` or `off`. Only the runtime writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnabledStore {
+    path: PathBuf,
+}
+
+impl EnabledStore {
+    /// The store at `path`, such as [`crate::paths::Locations::enabled`].
+    #[must_use]
+    pub const fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// Whether automations were left enabled. Only a file that says `off`
+    /// means disabled; a file that is missing, cannot be read, or says
+    /// anything else means enabled, as a runtime that never saved one starts.
+    #[must_use]
+    pub fn load(&self) -> bool {
+        !fs::read_to_string(&self.path).is_ok_and(|text| text.trim() == DISABLED)
+    }
+
+    /// Keeps whether automations are `enabled`, creating the folder it lives
+    /// in. Temporary files that an earlier run left beside it go too.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from a write.
+    pub fn save(&self, enabled: bool) -> io::Result<()> {
+        let folder = self.path.parent();
+        if let Some(folder) = folder {
+            fs::create_dir_all(folder)?;
+        }
+        let line = if enabled { "on\n" } else { "off\n" };
+        write_atomic(&self.path, line.as_bytes())?;
         if let Some(folder) = folder {
             remove_leftovers(folder);
         }
@@ -709,6 +756,36 @@ mod tests {
         fs::remove_file(&path).expect("remove the file");
         fs::create_dir(&path).expect("a folder in its place");
         assert!(store.load().is_err(), "a folder is not the defaults");
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_enabled_file_loads_back_and_anything_but_off_is_enabled() {
+        let root = scratch("enabled");
+        let path = root.join("local").join("enabled.txt");
+        let store = EnabledStore::new(path.clone());
+        assert!(store.load(), "a missing file is enabled");
+        store.save(false).expect("saves, creating the folder");
+        assert_eq!(fs::read_to_string(&path).expect("reads"), "off\n");
+        assert!(!store.load(), "off is disabled");
+        store.save(true).expect("replaces");
+        assert_eq!(fs::read_to_string(&path).expect("reads"), "on\n");
+        assert!(store.load(), "on is enabled");
+        for (text, enabled) in [
+            ("off", false),
+            (" off\r\n", false),
+            ("garbage", true),
+            ("", true),
+        ] {
+            fs::write(&path, text).expect("write");
+            assert_eq!(store.load(), enabled, "{text:?}");
+        }
+        fs::write(&path, [0xff, b'o', b'f', b'f']).expect("write");
+        assert!(store.load(), "a file that is not text is enabled");
+        fs::remove_file(&path).expect("remove the file");
+        fs::create_dir(&path).expect("a folder in its place");
+        assert!(store.load(), "a file that cannot be read is enabled");
+        assert!(store.save(false).is_err(), "a folder cannot be replaced");
         fs::remove_dir_all(root).expect("clean up");
     }
 

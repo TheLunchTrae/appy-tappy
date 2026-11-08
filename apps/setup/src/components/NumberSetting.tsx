@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 
+import type { SettingsFile } from '../lib/bindings.ts';
 import { errorText } from '../lib/api.ts';
-import { type Settings, readWhole, useSettings } from '../lib/settings.ts';
+import { readWhole, useSettings } from '../lib/settings.ts';
 
 interface NumberProps {
   readonly id: string;
@@ -15,7 +16,7 @@ interface NumberProps {
   /** What to fix when the field does not hold a whole number from `min` to `max`. */
   readonly invalid: string;
   /** The settings with the new number, made from the current ones, or what to fix. */
-  readonly update: (current: Settings, value: number) => Settings | { readonly problem: string };
+  readonly update: (current: SettingsFile, value: number) => SettingsFile | { readonly problem: string };
 }
 
 /**

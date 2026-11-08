@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
-import { type AppSummary, deleteReference, errorText } from '../lib/api.ts';
+import type { AppSummary } from '../lib/bindings.ts';
+import { deleteReference, errorText } from '../lib/api.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';

@@ -1,18 +1,18 @@
 // A click's target: where it lands in its application's window, as the
 // target screen sets it up and the automation editor shows it.
 
-import type { AntiCheat, AppSummary, ClickAtDef, ClickButton, ClickCorner } from './api.ts';
+import type { AntiCheatDef, AppSummary, ClickAtDef, ClickButtonDef, CornerDef } from './bindings.ts';
 import type { Point, Rect, Size } from './region.ts';
 
 /** What each button choice is called on screen. */
-export const BUTTON_NAMES: Readonly<Record<ClickButton, string>> = {
+export const BUTTON_NAMES: Readonly<Record<ClickButtonDef, string>> = {
   left: 'Left',
   right: 'Right',
   double: 'Double',
 };
 
 /** The button choices, in the order the target screen offers them. */
-export const BUTTONS: readonly ClickButton[] = ['left', 'right', 'double'];
+export const BUTTONS: readonly ClickButtonDef[] = ['left', 'right', 'double'];
 
 /** How alike a picture must look, as a new target starts: a little room for a highlighted button. */
 export const DEFAULT_TOLERANCE = 20;
@@ -30,7 +30,7 @@ export const MAX_SEARCH_PIXELS = 160_000;
 export function spotAt(point: Point, size: Size): ClickAtDef {
   const right = point.x >= size.width / 2;
   const bottom = point.y >= size.height / 2;
-  const corner: ClickCorner = bottom ? (right ? 'bottomRight' : 'bottomLeft') : right ? 'topRight' : 'topLeft';
+  const corner: CornerDef = bottom ? (right ? 'bottomRight' : 'bottomLeft') : right ? 'topRight' : 'topLeft';
   return {
     kind: 'spot',
     corner,
@@ -75,7 +75,7 @@ export function middle(size: Size): Point {
 }
 
 /** A button choice as a click's name, such as `Left click`. */
-export function clickName(button: ClickButton): string {
+export function clickName(button: ClickButtonDef): string {
   return `${BUTTON_NAMES[button]} click`;
 }
 
@@ -87,7 +87,7 @@ function spotWords(at: Extract<ClickAtDef, { kind: 'spot' }>): string {
 }
 
 /** A target in a few words, after its picture if it has one, such as `Left click on this picture, when it's found near where it was`. */
-export function targetSummary(button: ClickButton, at: ClickAtDef | null): string {
+export function targetSummary(button: ClickButtonDef, at: ClickAtDef | null): string {
   if (at === null) {
     return 'No target yet. Set up where it clicks.';
   }
@@ -99,14 +99,14 @@ export function targetSummary(button: ClickButton, at: ClickAtDef | null): strin
 /** The saved applications a click can click in: those whose files read fine. */
 export function clickApps(
   apps: readonly AppSummary[],
-): readonly { readonly id: string; readonly name: string; readonly antiCheat: AntiCheat }[] {
+): readonly { readonly id: string; readonly name: string; readonly antiCheat: AntiCheatDef }[] {
   return apps.flatMap((app) =>
     app.file === null ? [] : [{ id: app.id, name: app.file.name, antiCheat: app.file.antiCheat }],
   );
 }
 
 /** What each anti-cheat class is called in a sentence. */
-const ANTI_CHEAT_WORDS: Readonly<Record<AntiCheat, string>> = {
+const ANTI_CHEAT_WORDS: Readonly<Record<AntiCheatDef, string>> = {
   none: 'none',
   userMode: 'user-mode',
   kernelLevel: 'kernel-level',
@@ -118,8 +118,8 @@ const ANTI_CHEAT_WORDS: Readonly<Record<AntiCheat, string>> = {
  * can see a click, so both must have none, as the runtime also checks.
  */
 export function clickBlocked(
-  watched: { readonly name: string; readonly antiCheat: AntiCheat },
-  clicked: { readonly name: string; readonly antiCheat: AntiCheat } | null,
+  watched: { readonly name: string; readonly antiCheat: AntiCheatDef },
+  clicked: { readonly name: string; readonly antiCheat: AntiCheatDef } | null,
 ): string | null {
   const blocking = [watched, clicked].find((app) => app !== null && app.antiCheat !== 'none');
   if (blocking === undefined || blocking === null) {

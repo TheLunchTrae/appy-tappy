@@ -18,6 +18,7 @@ use super::host::Host;
 
 /// A click picture just kept, and the size of the window it was taken on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClickPictureView {
     /// Its file name among the click pictures.
@@ -31,9 +32,12 @@ pub(crate) struct ClickPictureView {
 /// Where a click would land in the window, from its top-left corner, and
 /// for a picture how alike the place found is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FoundClick {
+    /// Across, in pixels.
     pub(crate) x: u32,
+    /// Down, in pixels.
     pub(crate) y: u32,
     /// From 0 to 100 percent; `None` for a spot.
     pub(crate) likeness: Option<u8>,

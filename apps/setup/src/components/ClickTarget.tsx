@@ -1,10 +1,6 @@
 import { type PointerEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
 import {
-  type AppSummary,
-  type ClickAtDef,
-  type ClickButton,
-  type FoundClick,
   addClickPicture,
   clickPicture,
   errorText,
@@ -14,6 +10,7 @@ import {
   select,
   stopCapture,
 } from '../lib/api.ts';
+import type { AppSummary, ClickAtDef, ClickButtonDef, FoundClick, SelectionSpec } from '../lib/bindings.ts';
 import {
   BUTTONS,
   BUTTON_NAMES,
@@ -29,7 +26,7 @@ import {
 import type { Picture } from '../lib/pixels.ts';
 import { type Point, type Rect, type Size, contains, fit, toPicture } from '../lib/region.ts';
 import { background } from '../lib/repeat.ts';
-import { DEFAULT_COLOR_MATCH, type SelectTool, type SelectionSpec } from '../lib/selection.ts';
+import { DEFAULT_COLOR_MATCH, type SelectTool } from '../lib/selection.ts';
 import { useSize } from '../lib/size.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
 import { useScreenshots } from '../lib/useScreenshots.ts';
@@ -47,7 +44,7 @@ const THUMB_WIDTH = 220;
 /** A click's target as the automation editor keeps it. */
 interface ClickTargetValue {
   readonly app: string;
-  readonly button: ClickButton;
+  readonly button: ClickButtonDef;
   readonly at: ClickAtDef;
 }
 
@@ -144,13 +141,13 @@ interface StageProps {
   readonly automation: string;
   /** The target's place before this screen opened, kept until a new one is set up. */
   readonly initial: ClickAtDef | null;
-  readonly button: ClickButton;
+  readonly button: ClickButtonDef;
   readonly tolerance: number;
   /** The application field, disabled while a picture is kept or looked for. */
   readonly appField: (busy: boolean) => ReactNode;
   /** Opens the screen again on the application, to find its window anew. */
   readonly onLookAgain: () => void;
-  readonly onButton: (button: ClickButton) => void;
+  readonly onButton: (button: ClickButtonDef) => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onCancel: () => void;
   readonly onUse: (target: ClickTargetValue) => void;
@@ -800,7 +797,7 @@ interface Props {
   /** The automation's name, for the breadcrumb. */
   readonly automation: string;
   /** The target the click has, or null before it has one. */
-  readonly initial: { readonly app: string; readonly button: ClickButton; readonly at: ClickAtDef | null };
+  readonly initial: { readonly app: string; readonly button: ClickButtonDef; readonly at: ClickAtDef | null };
   readonly onCancel: () => void;
   readonly onUse: (target: ClickTargetValue) => void;
 }
@@ -809,7 +806,7 @@ interface Props {
 export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Props) {
   const choices = clickApps(apps);
   const [app, setApp] = useState(() => (initial.app === '' ? (choices[0]?.id ?? '') : initial.app));
-  const [button, setButton] = useState<ClickButton>(initial.button);
+  const [button, setButton] = useState<ClickButtonDef>(initial.button);
   const [tolerance, setTolerance] = useState(() =>
     initial.at?.kind === 'picture' ? initial.at.tolerance : DEFAULT_TOLERANCE,
   );
