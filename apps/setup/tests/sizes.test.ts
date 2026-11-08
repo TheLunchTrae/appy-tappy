@@ -98,7 +98,7 @@ describe('nowCell', () => {
 });
 
 describe('offersFix', () => {
-  test('offers a fix where a value does not read, except at the size it was first drawn at', () => {
+  test('offers a fix at any size but the one a value was first drawn at, once it read or did not', () => {
     const unread = (from: ReadFrom): NowCell => ({ kind: 'unread', problem: 'Cannot read.', from });
     expect(offersFix(unread('scaled'))).toBe(true);
     expect(offersFix(unread('fixed'))).toBe(true);
@@ -106,7 +106,10 @@ describe('offersFix', () => {
     expect(offersFix({ kind: 'noState', from: 'scaled' })).toBe(true);
     expect(offersFix({ kind: 'noState', from: 'drawn' })).toBe(false);
     expect(offersFix({ kind: 'notDrawn' })).toBe(true);
-    expect(offersFix({ kind: 'reading', text: '50', from: 'scaled' })).toBe(false);
+    // A reading may be wrong, so one from a scaled drawing or a fix may be fixed too.
+    expect(offersFix({ kind: 'reading', text: '50', from: 'scaled' })).toBe(true);
+    expect(offersFix({ kind: 'reading', text: '50', from: 'fixed' })).toBe(true);
+    expect(offersFix({ kind: 'reading', text: '50', from: 'drawn' })).toBe(false);
     expect(offersFix({ kind: 'waiting' })).toBe(false);
   });
 });

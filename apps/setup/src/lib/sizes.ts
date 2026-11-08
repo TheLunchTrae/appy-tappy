@@ -40,7 +40,8 @@ export const FIX_HINT =
 /** The hint beside the Values page's column for the window's size now. */
 export const NOW_HINT =
   "What each value reads at the window's size now, scaled from where it was drawn or read at its fix. A value " +
-  'that reads wrong here can be fixed at this size.';
+  'that reads wrong here can be fixed at this size, unless it was first drawn at this size. Delete that one and ' +
+  'make it again.';
 
 /** The hint beside Remove fix. */
 export const REMOVE_FIX_HINT =
@@ -175,15 +176,16 @@ export function nowCell(
   return problem === null ? { kind: 'waiting' } : { kind: 'unread', problem, from };
 }
 
-/** Whether the cell offers Fix at this size: for a value that is not drawn here, matches no state or does not read,
- * at a size other than the one it was first drawn at. There, editing the value draws it again instead. */
+/** Whether the cell offers Fix at this size: for a value that is not drawn here, or that reads here, wrongly or not
+ * at all, from a scaled drawing or a fix, which a new fix replaces. At the size it was first drawn at, a value that
+ * reads wrong is deleted and made again instead. */
 export function offersFix(cell: NowCell): boolean {
   switch (cell.kind) {
-    case 'reading':
     case 'waiting':
       return false;
     case 'notDrawn':
       return true;
+    case 'reading':
     case 'noState':
     case 'unread':
       return cell.from !== 'drawn';

@@ -180,9 +180,10 @@ the window closes or changes size, the runtime forgets the values it read.
 Each automation stays as it was until the values read next show whether its
 condition still holds, so it neither runs again nor undoes what it changed
 while the window is out of sight.
-A value that does not read at the window's size is not read, and the
-runtime logs once for each size why and that the window should be resized
-or the value fixed at that size.
+A value that does not read at the window's size is not read. Once the
+window has settled at that size, the runtime logs why and that the window
+should be resized or the value fixed at that size, once until the reason
+changes.
 
 ## Saved files
 

@@ -206,7 +206,7 @@ stateDiagram-v2
     Finding --> Capturing: the capture starts
     Capturing --> Capturing: Recovered, the backoff resets
     Capturing --> Capturing: Resizing, the size settles again from then
-    Capturing --> Capturing: a size where no value reads settles, sent to the frame handler
+    Capturing --> Capturing: a size where no value reads settles, why each is not read
     Capturing --> Closing: Lost or Failing from the frame handler
     Capturing --> Closing: a size where a value reads settles, Resized
     Capturing --> Closing: every CHECK_AGAIN, the window is hidden or no longer fits, or a better one fits or is another process's
@@ -224,7 +224,15 @@ stateDiagram-v2
   session's process (`Job::process`), as detection does: one of that process's
   windows when it owns one, and otherwise the first that shows. It captures the
   window only when it is that process's, and otherwise waits for the session
-  to follow the other process.
+  to follow the other process. Before the capture starts, `framed_at` asks
+  `System::frame_size` for the size the window's frames will have, the
+  window's bounds without its shadow (`DWMWA_EXTENDED_FRAME_BOUNDS`), and
+  places the values there when some value reads there, so a window that is
+  not at the first value's drawn size is not captured twice at each start.
+  The size is a guess: frames of another size are followed as below, and
+  after a capture ended with `Resized`, the next one starts at the size its
+  frames settled at, without guessing again. The first capture otherwise
+  starts at the first value's drawn size.
 - **Capturing.** `watch` waits on `control` until the next `CHECK_AGAIN` or
   until a new size settles, whichever comes first. The capture's frame handler
   runs on another thread and sends `Lost`, `Resizing`, `Failing`, or
@@ -236,14 +244,20 @@ stateDiagram-v2
   250 ms, starting again at each other size. The wait runs on this thread's
   timer, so a window that stops drawing once it is dragged still settles.
   The settled size is resolved once with `Placed::new`. When a value reads
-  there, the capture ends with `Resized`, which carries where each value reads
-  and each value's last problem, and starts again at those regions, once for
-  each settled size. When none does, the capture goes on and the handler gets
-  where each value is not read there, to say why. A size that settles back at
-  the capture's own size changes nothing. Windows can recreate the frame pool
-  at a new size in place, and `capture.rs` already does, but the capture's
-  crop and packing are fixed when it starts, so a new layout needs a new
-  capture.
+  there, the capture ends with `Resized`, which carries where each value reads,
+  and starts again at those regions, once for each settled size. When none
+  does, the capture goes on and this thread says why each value is not read
+  there (`say_unread`), at once, even when the window draws no more frames.
+  Each value's last problem moves between the two threads over channels:
+  the handler keeps it while frames show the capture's size, hands it to this
+  thread in its first `Resizing` for another size, and takes it back, as this
+  thread said it, on the first frame of its own size again. Nothing moves for
+  each frame. A capture started for a new size starts from those problems,
+  and one started after a capture ended any other way starts from none. A
+  size that settles back at the capture's own size changes nothing. Windows
+  can recreate the frame pool at a new size in place, and `capture.rs`
+  already does, but the capture's crop and packing are fixed when it starts,
+  so a new layout needs a new capture.
 - **Closing.** The thread closes the capture first, then drops what the closed
   capture sent after the message that ended it, still counting a `Stop` and a
   `Recovered`. When the 2 second check ended the capture, it then sends
@@ -261,9 +275,9 @@ stateDiagram-v2
 `FrameReader::handle` runs once per frame and decides what each frame means.
 Its state is `placed` (the window size whose values it reads, and where
 each value reads at it, resolved once), `told` (the other size it last told
-the reader frames show), `elsewhere` (the last settled size where no value
-reads, as the reader resolved it), `last` (each value's last reading),
-`problems` (each value's last problem), `seen` (whether it sent a reading
+the reader frames show), `last` (each value's last reading), `problems`
+(each value's last problem, handed to the reader while frames show
+another size), `heard` (where the reader gives it back), `seen` (whether it sent a reading
 since it last sent `Unseen`), `failures` (frames in a row that failed),
 `restarted` (whether the reader started this capture again after the last
 one ended), and `ended` (whether it told the reader its capture ended).
@@ -274,7 +288,6 @@ stateDiagram-v2
     Reading --> Reading: frame read, a Sample for each value that changed
     Reading --> Reading: frame error, logged once and counted
     Reading --> Reading: another size, Unseen, and Resizing once for each size
-    Reading --> Reading: a settled size at which no value reads, why each is not read
     Reading --> Reading: its own size again, Resizing
     Reading --> Ended: the capture ended, Unseen and Lost
     Reading --> Ended: RESTART_AFTER frame errors in a row, Unseen and Failing
@@ -299,9 +312,9 @@ stateDiagram-v2
   nothing is resolved for each frame. Only the reader resolves a size, once
   it settled.
 - A settled size at which no value reads keeps the capture, because a
-  restart would find the same size. The reader hands where each value is not
-  read there to the handler as `elsewhere`, and each value says once why it
-  is not read there.
+  restart would find the same size. The reader says once why each value is
+  not read there, and the handler reads nothing until frames show its own
+  size again.
 - A value that does not read at the capture's own size, such as one whose
   scaled region reaches outside the window, says why once and is not
   copied.

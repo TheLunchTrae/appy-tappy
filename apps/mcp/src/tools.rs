@@ -125,6 +125,7 @@ mod tests {
     use std::io;
 
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_sources::screen::Size;
     use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
 
     use super::*;
@@ -160,6 +161,10 @@ mod tests {
         }
 
         fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+
+        fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 

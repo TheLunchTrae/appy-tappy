@@ -145,10 +145,10 @@ shows each value's size and side under **Region**, such as
 
 While the application runs, the Values page adds a column for the window's
 size now, such as **At 3440 × 1440 now**, with what each value reads there.
-A value that shows **Matches no state** or **Doesn't read**, or isn't read
-at that size, has **Fix at this size** beside it. At the size a value was
-first drawn at, edit the value instead. **Matches no state** isn't always
-wrong: the region may show none of the states right now.
+Each value has **Fix at this size** beside it there, unless the window is at
+the size the value was first drawn at. At that size, a value that reads wrong
+is deleted and made again. **Matches no state** isn't always wrong: the
+region may show none of the states right now.
 
 1. Pick the application's window. AppyTappy takes a screenshot of it at its
    size now, with the region where the value would be read there: it

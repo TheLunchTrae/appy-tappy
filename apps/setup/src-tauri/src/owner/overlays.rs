@@ -347,6 +347,12 @@ mod tests {
         let view = harness.ask(overlay_state).expect("shows");
         let problem = view.values[0].problem.as_deref().expect("a problem");
         assert!(problem.starts_with("Cannot read: "), "{problem}");
+        // Back at the size the capture reads at, it is not started again
+        // once that size settles.
+        harness.wait(SETTLE);
+        harness.ask(overlay_state).expect("shows");
+        assert!(harness.closed.try_recv().is_err(), "the capture goes on");
+        assert!(harness.handlers.try_recv().is_err(), "and is not replaced");
 
         // A capture that stops closes, says why, and starts again about a
         // second later.
