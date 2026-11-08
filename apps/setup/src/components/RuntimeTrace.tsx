@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 
-import { LIMITS, type SettingsFile, type TraceCategory } from '../lib/bindings.ts';
+import { LIMITS, type SettingsFile, TRACE_CATEGORIES, type TraceCategory } from '../lib/bindings.ts';
 import { errorText } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
 import {
-  TRACE_CATEGORIES,
   type TraceLength,
   openTraceFolder,
   traceEnd,
