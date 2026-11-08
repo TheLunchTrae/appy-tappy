@@ -28,11 +28,11 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.2.1",
-    "knip": "6.43.0",
-    "oxfmt": "0.74.0",
-    "oxlint": "1.89.0",
+    "knip": "6.44.1",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vite": "8.3.5"
   },
   "packageManager": "bun@1.4.4"
