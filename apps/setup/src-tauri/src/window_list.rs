@@ -188,7 +188,7 @@ mod tests {
             collapsed,
             flat,
             window(8, 2, "   "),
-            window(10, 9, "AppyTappy setup"),
+            window(10, 9, "AppyTappy Setup"),
             window(11, 42, "Process already gone"),
         ];
 

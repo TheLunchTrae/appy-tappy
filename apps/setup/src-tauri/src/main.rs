@@ -1,4 +1,4 @@
-//! The AppyTappy setup app, where the user points at an application's window, takes
+//! AppyTappy Setup, the app where the user points at an application's window, takes
 //! screenshots, and sets up the values automations read.
 //!
 //! It is a separate program from the runtime: it opens on demand and exits

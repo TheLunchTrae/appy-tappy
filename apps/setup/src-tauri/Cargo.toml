@@ -1,6 +1,6 @@
 [package]
 name = "appytappy-setup"
-description = "The AppyTappy setup app, where the user points at an application to build automations."
+description = "AppyTappy Setup, the app where the user points at an application to build automations."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

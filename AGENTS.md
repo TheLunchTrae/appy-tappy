@@ -170,6 +170,9 @@ names such as Escape, and nothing else. Write **New automation** and
 itself and the Google style that the docs follow. The user guide names each
 control exactly as the app shows it.
 
+The setup app's name is **AppyTappy Setup**, a proper name that keeps both
+capitals wherever it appears, including its window title and messages.
+
 ## State machines
 
 [`docs/developer/state-machines.md`](docs/developer/state-machines.md) maps

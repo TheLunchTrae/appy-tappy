@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "AppyTappy setup",
+        "title": "AppyTappy Setup",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
