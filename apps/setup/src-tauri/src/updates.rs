@@ -200,13 +200,26 @@ pub(crate) async fn install_update(app: AppHandle, version: String) -> Result<()
 mod tests {
     use tauri_plugin_updater::Error;
 
-    use super::{agreed, failed};
+    use super::{Downloaded, agreed, failed};
 
     #[test]
     fn installs_only_the_release_the_user_agreed_to() {
         assert!(agreed("0.2.0", "0.2.0").is_ok());
         let other = agreed("0.3.0", "0.2.0").expect_err("another release needs the user again");
         assert!(other.contains("0.3.0"), "{other}");
+    }
+
+    #[test]
+    fn debug_output_names_the_installer_size_not_its_bytes() {
+        let downloaded = Downloaded {
+            version: "0.2.0".to_owned(),
+            manifest: serde_json::json!({ "version": "0.2.0" }),
+            installer: vec![7; 3],
+        };
+        let shown = format!("{downloaded:?}");
+        assert!(shown.contains("0.2.0"), "{shown}");
+        assert!(shown.contains("installer_bytes: 3"), "{shown}");
+        assert!(!shown.contains("[7, 7, 7]"), "{shown}");
     }
 
     #[test]
