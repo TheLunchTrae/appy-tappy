@@ -1,6 +1,5 @@
+import type { AppFile, BuildDef } from './bindings.ts';
 // Whether the build of an application that runs now is the one its values were checked against.
-
-import type { AppFile, BuildDef } from './api.ts';
 
 function sameBuild(a: BuildDef, b: BuildDef): boolean {
   return a.version === b.version && a.size === b.size && a.modified === b.modified;

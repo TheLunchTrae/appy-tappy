@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { type AppFile, errorText, listApps } from './api.ts';
+import type { AppFile } from './bindings.ts';
+import { errorText, listApps } from './api.ts';
 import { background } from './repeat.ts';
 
 /** A saved application's file, for its references and the values that read with them. */

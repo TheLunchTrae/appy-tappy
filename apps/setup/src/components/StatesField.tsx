@@ -2,16 +2,8 @@
 
 import { useMemo } from 'react';
 
-import type { Reading } from '../lib/api.ts';
-import {
-  type Draft,
-  type DraftState,
-  MAX_STATES,
-  stateOn,
-  withoutState,
-  withState,
-  withStateAt,
-} from '../lib/check.ts';
+import { LIMITS, type Reading } from '../lib/bindings.ts';
+import { type Draft, type DraftState, stateOn, withoutState, withState, withStateAt } from '../lib/check.ts';
 import { type Picture, cropPicture } from '../lib/pixels.ts';
 import type { Rect } from '../lib/region.ts';
 import type { Masking } from '../lib/selection.ts';
@@ -41,7 +33,7 @@ function addBlocked(draft: Draft, selected: number | null): string | null {
   if (stateOn(draft, selected) !== -1) {
     return 'A state is already taken from this screenshot.';
   }
-  return draft.states.length >= MAX_STATES ? `A value can tell apart at most ${MAX_STATES} states.` : null;
+  return draft.states.length >= LIMITS.maxStates ? `A value can tell apart at most ${LIMITS.maxStates} states.` : null;
 }
 
 interface CardProps {

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::click::Click;
 
 /// The longest app name, in bytes.
-const MAX_APP_NAME_LEN: usize = 256;
+pub const MAX_APP_NAME_LEN: usize = 256;
 
 /// An app as Windows reports it: a media session's app ID, such as
 /// `Player.exe`, or a process's executable name.
@@ -162,8 +162,11 @@ pub enum Key {
     Right,
 }
 
+/// The highest function key a key press can name: `F24`.
+pub const MAX_FUNCTION_KEY: u8 = 24;
+
 /// The named keys, as a key press spells them.
-const NAMED_KEYS: [(&str, Key); 15] = [
+pub const NAMED_KEYS: [(&str, Key); 15] = [
     ("Space", Key::Space),
     ("Enter", Key::Enter),
     ("Tab", Key::Tab),
@@ -199,7 +202,7 @@ impl Key {
                 return number
                     .parse()
                     .ok()
-                    .filter(|number| (1..=24).contains(number))
+                    .filter(|number| (1..=MAX_FUNCTION_KEY).contains(number))
                     .map(Self::Function);
             }
         }
@@ -340,7 +343,7 @@ impl fmt::Display for InvalidKeys {
 impl Error for InvalidKeys {}
 
 /// The longest target an open action or a sound action names, in bytes.
-const MAX_TARGET_LEN: usize = 2048;
+pub const MAX_TARGET_LEN: usize = 2048;
 
 /// Whether `text` is a full Windows path on a drive: a drive letter, a
 /// colon and a backslash or slash, such as `C:\Tools\Timer.exe`.

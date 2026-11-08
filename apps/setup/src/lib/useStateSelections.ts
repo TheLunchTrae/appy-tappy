@@ -2,18 +2,10 @@
 
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 
+import { LIMITS, type SelectStep } from './bindings.ts';
 import { errorText, select } from './api.ts';
-import { type Draft, MAX_STATES, stateOn, withStateStep } from './check.ts';
-import {
-  type Fitted,
-  type Masking,
-  type SelectStep,
-  type Selection,
-  ignoredPixels,
-  keptCount,
-  madeFor,
-  refit,
-} from './selection.ts';
+import { type Draft, stateOn, withStateStep } from './check.ts';
+import { type Fitted, type Masking, type Selection, ignoredPixels, keptCount, madeFor, refit } from './selection.ts';
 
 /** How long a selection waits after the last change before it is made, so a dragged slider asks once. */
 const SELECT_DELAY_MS = 80;
@@ -115,8 +107,8 @@ export function useStateSelections(
     if (selected === null) {
       return;
     }
-    if (stateOn(draft, selected) === -1 && draft.states.length >= MAX_STATES) {
-      setError(`A value can tell apart at most ${MAX_STATES} states. Remove one to select on this screenshot.`);
+    if (stateOn(draft, selected) === -1 && draft.states.length >= LIMITS.maxStates) {
+      setError(`A value can tell apart at most ${LIMITS.maxStates} states. Remove one to select on this screenshot.`);
       return;
     }
     setError(null);

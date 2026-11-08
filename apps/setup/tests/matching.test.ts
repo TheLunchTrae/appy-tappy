@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { WindowDef, WindowFit } from '../src/lib/api.ts';
+import type { WindowDef, WindowFit } from '../src/lib/bindings.ts';
 import {
   exactWindow,
   fallbackUseful,

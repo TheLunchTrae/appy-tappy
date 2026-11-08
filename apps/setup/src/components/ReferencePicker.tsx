@@ -1,6 +1,8 @@
-import type { AppFile } from '../lib/api.ts';
+import type { AppFile } from '../lib/bindings.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
+import { REFERENCE_HINT } from '../lib/hints.ts';
 import { CharacterChips } from './CharacterChips.tsx';
+import { Hint } from './Hint.tsx';
 
 interface Props {
   readonly appName: string;
@@ -24,7 +26,10 @@ export function ReferencePicker(props: Props) {
   return (
     <>
       <div className="field">
-        <span id="reference-title">Reference</span>
+        <span className="name">
+          <span id="reference-title">Reference</span>
+          <Hint topic="Reference">{REFERENCE_HINT}</Hint>
+        </span>
         <span className="note">
           The characters&apos; shapes and color this value is read with. Pick one made for {appName}, or make one.
         </span>

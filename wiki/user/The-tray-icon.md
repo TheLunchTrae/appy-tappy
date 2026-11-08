@@ -29,7 +29,9 @@ Right-click the icon to open its menu. While actions cannot run, a grayed
 
 - **Enabled** turns all automations off and on. Turning them off undoes what
   they changed, such as a paused song or a lowered volume. AppyTappy starts
-  with automations on each time it starts.
+  with automations on each time it starts, unless **Remember whether
+  automations are on** is on in [Settings](Settings.md#general); then it
+  starts with them as you last left them here.
 - **Active automations** lists, by name, the automations that run now: those
   of the applications that are running, while automations are on. With none,
   it shows **None**.
