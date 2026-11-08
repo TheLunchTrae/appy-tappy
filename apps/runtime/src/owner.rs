@@ -491,8 +491,16 @@ fn failed(
 
 /// The log line that says what the runtime runs.
 fn loaded_line(plan: &plan::Plan) -> String {
-    let automations: usize = plan.apps.values().map(|app| app.automations.len()).sum();
-    let names: Vec<&str> = plan.apps.values().map(|app| app.name.as_str()).collect();
+    let automations: usize = plan
+        .apps
+        .values()
+        .map(|app| app.labels.automations.len())
+        .sum();
+    let names: Vec<&str> = plan
+        .apps
+        .values()
+        .map(|app| app.labels.name.as_str())
+        .collect();
     match automations {
         0 => "no saved automation can run".to_owned(),
         1 => format!("1 automation runs for {}", names.join(", ")),
@@ -511,7 +519,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
         match order {
             Order::Read(job) => {
                 let id = job.session;
-                let name = job.plan.name.clone();
+                let name = job.plan.labels.name.clone();
                 match Reader::start(Arc::clone(&crew.system), job, crew.events.clone()) {
                     Ok(reader) => {
                         crew.readers.insert(id, reader);
@@ -538,7 +546,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
 /// The log line for an order, if it gets one.
 fn order_line(order: &Order) -> Option<String> {
     match order {
-        Order::Read(job) => Some(format!("{}: reading its values", job.plan.name)),
+        Order::Read(job) => Some(format!("{}: reading its values", job.plan.labels.name)),
         Order::StopReading(..) => None,
         Order::Act(act::Job::Run { automation, .. }) => Some(format!("{automation}: runs")),
         Order::Act(act::Job::Undo { automation, .. }) => Some(format!("{automation}: undone")),
@@ -678,7 +686,7 @@ fn describe(model: &Model, change: &Change) -> Option<String> {
         Change::Exited { app, process } => format!("{app} exited (process {process}): detached"),
         Change::Identified { app, build } => {
             let plan = model.plan(app)?;
-            return build_change(&plan.name, plan.checked.as_ref(), build);
+            return build_change(&plan.labels.name, plan.labels.checked.as_ref(), build);
         },
         Change::ScanFailed(problem) => format!("process snapshots fail: {problem}"),
         Change::ScanRestored => "process snapshots work again".to_owned(),
@@ -886,7 +894,7 @@ mod tests {
         let checked = build(Some("1.4.2.0"), 1_024);
         let mut model = Model::default();
         let mut plan = app_plan("Example App", &["Pause music"]);
-        Arc::get_mut(&mut plan).expect("unshared").checked = Some(checked.clone());
+        Arc::get_mut(&mut plan).expect("unshared").labels.checked = Some(checked.clone());
         model.replan(BTreeMap::from([
             ("example".to_owned(), plan),
             ("unchecked".to_owned(), app_plan("Unchecked", &["Mute"])),
@@ -938,21 +946,26 @@ mod tests {
     /// An app plan named `name` whose automations are only names.
     fn app_plan(name: &str, automations: &[&str]) -> Arc<plan::AppPlan> {
         Arc::new(plan::AppPlan {
-            name: name.to_owned(),
-            window: WindowMatch {
-                title: Pattern::new("*"),
-                class: Pattern::new("*"),
-                executable: Pattern::new("Example.exe"),
-                must_match: MustMatch {
-                    title: true,
-                    class: true,
-                },
-                fallback: false,
+            labels: plan::Labels {
+                name: name.to_owned(),
+                automations: automations.iter().map(|&name| name.to_owned()).collect(),
+                values: Vec::new(),
+                checked: None,
             },
-            values: Vec::new(),
-            rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
-            automations: automations.iter().map(|&name| name.to_owned()).collect(),
-            checked: None,
+            runs: plan::Runs {
+                window: WindowMatch {
+                    title: Pattern::new("*"),
+                    class: Pattern::new("*"),
+                    executable: Pattern::new("Example.exe"),
+                    must_match: MustMatch {
+                        title: true,
+                        class: true,
+                    },
+                    fallback: false,
+                },
+                values: Vec::new(),
+                rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
+            },
         })
     }
 

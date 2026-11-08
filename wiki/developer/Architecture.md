@@ -179,10 +179,11 @@ Each thread below is a plain `std::thread`, and each channel is a
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save that changes what the runtime runs, and
   sends `Reload`. The owner reads the
-  saved applications and automations again. An application whose automations
-  did not change keeps running untouched; one whose automations changed starts
-  over, undoing what they changed first. A change only to the build its
-  values were checked against restarts nothing. An automation that cannot
+  saved applications and automations again. An application starts over,
+  undoing what its automations changed first, only when what it runs changed:
+  its window match, its values' checks or its automations' rules. Renaming the
+  application, a value or an automation, or marking its values as checked,
+  restarts nothing, and the log and the tray show the new names at once. An automation that cannot
   run, such as one whose value lost a picture or one that breaks a rule after
   a hand edit, is logged, and the rest run. When the applications' folder or the
   automations' file cannot be read as a whole, such as while another program

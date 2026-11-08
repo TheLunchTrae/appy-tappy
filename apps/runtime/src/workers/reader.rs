@@ -257,7 +257,13 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
 ) {
     // The window size whose values the capture reads, until a frame shows
     // the window has another. A plan always has a value to read.
-    let Some(mut size) = job.plan.values.first().map(|value| value.check.window_size) else {
+    let Some(mut size) = job
+        .plan
+        .runs
+        .values
+        .first()
+        .map(|value| value.check.window_size)
+    else {
         return;
     };
     // The last problem sent, so each is sent once until it changes.
@@ -457,7 +463,7 @@ enum Found {
 /// it is the session's process's.
 fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Found> {
     let processes = system.processes()?;
-    let best = best_windows(&job.plan.window, processes, system.windows()?);
+    let best = best_windows(&job.plan.runs.window, processes, system.windows()?);
     let shown = |handle| shows(system.window_place(handle));
     Ok(match read_window(&best, Some(job.process), shown) {
         Some((window, _)) if window.process != job.process => Found::Elsewhere,
@@ -471,18 +477,18 @@ fn elsewhere(job: &Job) -> String {
     format!(
         "the window that fits {}'s window best belongs to another process, so it is read once \
          the session follows that process",
-        job.plan.name
+        job.plan.labels.name
     )
 }
 
 fn minimized(job: &Job) -> String {
-    format!("{}'s window is minimized or hidden", job.plan.name)
+    format!("{}'s window is minimized or hidden", job.plan.labels.name)
 }
 
 fn no_window(job: &Job) -> String {
     format!(
         "no window of {} fits {}'s window yet",
-        job.executable, job.plan.name
+        job.executable, job.plan.labels.name
     )
 }
 
@@ -494,7 +500,7 @@ fn moved_on<S: System>(system: &S, job: &Job, window: u64) -> Option<String> {
         return Some(minimized(job));
     }
     let processes = system.processes().ok()?;
-    let best = best_windows(&job.plan.window, processes, system.windows().ok()?);
+    let best = best_windows(&job.plan.runs.window, processes, system.windows().ok()?);
     if best.is_empty() {
         return Some(no_window(job));
     }
@@ -507,7 +513,7 @@ fn moved_on<S: System>(system: &S, job: &Job, window: u64) -> Option<String> {
     Some(if best.iter().any(|entry| entry.process == job.process) {
         format!(
             "another window fits {}'s window better, so it is read instead",
-            job.plan.name
+            job.plan.labels.name
         )
     } else {
         elsewhere(job)
@@ -555,6 +561,7 @@ impl<E: From<Reading>> FrameReader<E> {
     fn new(job: &Job, size: Size, events: Sender<E>, control: Sender<Control>) -> Option<Self> {
         let drawn: Vec<Option<Region>> = job
             .plan
+            .runs
             .values
             .iter()
             .map(|value| (value.check.window_size == size).then_some(value.check.region))
@@ -564,7 +571,7 @@ impl<E: From<Reading>> FrameReader<E> {
             .into_iter()
             .map(|region| region.and_then(|region| within(region, bounds)))
             .collect();
-        let count = job.plan.values.len();
+        let count = job.plan.runs.values.len();
         Some(Self {
             session: job.session,
             plan: Arc::clone(&job.plan),
@@ -623,6 +630,7 @@ impl<E: From<Reading>> FrameReader<E> {
         }
         let other_values = self
             .plan
+            .runs
             .values
             .iter()
             .any(|value| value.check.window_size == window_size);
@@ -634,7 +642,7 @@ impl<E: From<Reading>> FrameReader<E> {
             }
         }
         let mut changed = false;
-        for position in 0..self.plan.values.len() {
+        for position in 0..self.plan.runs.values.len() {
             let read = self.read(position, window_size, frame.as_ref());
             match read {
                 Some(Ok(reading)) => changed |= self.record(position, reading, frame.as_ref()),
@@ -674,7 +682,7 @@ impl<E: From<Reading>> FrameReader<E> {
         window_size: Size,
         frame: Option<&Frame<'_>>,
     ) -> Option<Result<Value, String>> {
-        let value = self.plan.values.get(position)?;
+        let value = self.plan.runs.values.get(position)?;
         // A frame of another size reaches here only when no value was drawn
         // at it. Values drawn at another size than this reader's are read
         // by the reader for that size, so they wait quietly.
@@ -684,17 +692,16 @@ impl<E: From<Reading>> FrameReader<E> {
             return Some(Err(format!(
                 "{} was drawn when the window was {}, and the window is now another size; \
                  resize the window or draw the value again",
-                value.name, value.check.window_size
+                self.plan.value_name(position),
+                value.check.window_size
             )));
         }
         let region = (*self.regions.get(position)?)?;
         let image = frame?.image.crop(region)?;
         Some(
-            value
-                .check
-                .check
-                .read(&image)
-                .map_err(|error| format!("{} cannot be read: {error}", value.name)),
+            value.check.check.read(&image).map_err(|error| {
+                format!("{} cannot be read: {error}", self.plan.value_name(position))
+            }),
         )
     }
 
@@ -706,7 +713,7 @@ impl<E: From<Reading>> FrameReader<E> {
         }
         let (Some(last), Some(value), Some(frame)) = (
             self.last.get_mut(position),
-            self.plan.values.get(position),
+            self.plan.runs.values.get(position),
             frame,
         ) else {
             return false;
@@ -830,7 +837,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::plan::ValuePlan;
+    use crate::plan::{Labels, Runs, ValuePlan};
 
     const RED: Rgb = Rgb {
         red: 255,
@@ -857,7 +864,6 @@ mod tests {
     fn drawn_at(name: &str, x: u32, y: u32, window_size: Size) -> ValuePlan {
         ValuePlan {
             signal: SignalName::new(name).expect("valid"),
-            name: name.to_owned(),
             check: SavedCheck {
                 window_size,
                 region: Region::new(x, y, 2, 2).expect("not empty"),
@@ -871,21 +877,29 @@ mod tests {
 
     fn plan(values: Vec<ValuePlan>) -> Arc<AppPlan> {
         Arc::new(AppPlan {
-            name: "Example App".to_owned(),
-            window: WindowMatch {
-                title: Pattern::new("Main*"),
-                class: Pattern::new("*"),
-                executable: Pattern::new("Example.exe"),
-                must_match: MustMatch {
-                    title: true,
-                    class: true,
-                },
-                fallback: false,
+            labels: Labels {
+                name: "Example App".to_owned(),
+                automations: Vec::new(),
+                values: values
+                    .iter()
+                    .map(|value| value.signal.to_string())
+                    .collect(),
+                checked: None,
             },
-            values,
-            rules: Arc::<[Rule]>::from(Vec::new()),
-            automations: Vec::new(),
-            checked: None,
+            runs: Runs {
+                window: WindowMatch {
+                    title: Pattern::new("Main*"),
+                    class: Pattern::new("*"),
+                    executable: Pattern::new("Example.exe"),
+                    must_match: MustMatch {
+                        title: true,
+                        class: true,
+                    },
+                    fallback: false,
+                },
+                values,
+                rules: Arc::<[Rule]>::from(Vec::new()),
+            },
         })
     }
 
