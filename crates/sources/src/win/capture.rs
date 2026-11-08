@@ -14,9 +14,13 @@
 //! does: its handler receives a [`io::ErrorKind::NotConnected`] error that
 //! says why, and the thread stops. That happens when the Direct3D device is
 //! lost, such as after a graphics driver reset or update, and when the frame
-//! pool cannot follow the window to a new size. While it waits for frames,
-//! the thread checks the device every [`DEVICE_CHECK`], because a lost
-//! device may stop frames altogether rather than fail them.
+//! pool cannot follow the window to a new size. A closed window and a lost
+//! device stop frames rather than fail them, so while no frame arrives the
+//! thread checks every [`IDLE_CHECK`] that the window is still there and the
+//! device still works. The capture item's own Closed event would say sooner
+//! that the window closed, but registering a handler for it left a thread
+//! handle, events and thread pool waits open after every capture, even once
+//! the handler was removed.
 //!
 //! The thread joins the Windows Runtime's multithreaded apartment for its
 //! whole life and leaves it once every object is released, so the system
@@ -57,6 +61,7 @@ use windows::Win32::System::WinRT::Direct3D11::{
 };
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
+use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 use windows::core::{Interface, factory};
 
 use super::WindowsSystem;
@@ -73,8 +78,9 @@ const POOL_BUFFERS: i32 = 2;
 /// How long `start` waits for the capture thread to set up.
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How often the thread checks its Direct3D device while no frame arrives.
-const DEVICE_CHECK: Duration = Duration::from_secs(2);
+/// How often the thread checks its window and its Direct3D device while no
+/// frame arrives.
+const IDLE_CHECK: Duration = Duration::from_secs(2);
 
 /// Windows time spans count 100-nanosecond ticks.
 const TICKS_PER_SECOND: i128 = 10_000_000;
@@ -83,8 +89,6 @@ const TICKS_PER_SECOND: i128 = 10_000_000;
 enum Event {
     /// The system has a new frame in the pool.
     Frame,
-    /// The window closed, so no more frames will come.
-    Closed,
     /// The session is closing.
     Stop,
 }
@@ -136,7 +140,6 @@ impl std::fmt::Debug for Event {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::Frame => "Frame",
-            Self::Closed => "Closed",
             Self::Stop => "Stop",
         })
     }
@@ -268,8 +271,11 @@ struct Held {
 
 /// Every Direct3D and capture object of one session, owned by its thread.
 struct Capturer {
-    item: GraphicsCaptureItem,
-    closed: i64,
+    window: HWND,
+    /// The process that owned the window when the capture started, so a
+    /// window handle that Windows reused for another process's window reads
+    /// as closed.
+    owner: u32,
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     winrt_device: IDirect3DDevice,
@@ -319,11 +325,7 @@ impl Capturer {
             frames.send(Event::Frame);
             Ok(())
         }))?;
-        let ended = wake.clone();
-        let closed = item.Closed(&TypedEventHandler::new(move |_, _| {
-            ended.send(Event::Closed);
-            Ok(())
-        }))?;
+        let owner = window_owner(window).ok_or_else(windows::core::Error::from_thread)?;
         let session = pool.CreateCaptureSession(&item)?;
         configure(&session);
         ask_interval(&session, throttle);
@@ -333,8 +335,8 @@ impl Capturer {
         // SAFETY: `frequency` is a live i64 the call writes.
         unsafe { QueryPerformanceFrequency(&raw mut frequency) }?;
         Ok(Self {
-            item,
-            closed,
+            window,
+            owner,
             device,
             context,
             winrt_device,
@@ -360,20 +362,16 @@ impl Capturer {
             let event = if held.is_some() {
                 events.recv_timeout(clock.remaining(Instant::now()))
             } else {
-                events.recv_timeout(DEVICE_CHECK)
+                events.recv_timeout(IDLE_CHECK)
             };
             match event {
                 Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(Event::Closed) => {
-                    end(handler, ended("the captured window closed"));
-                    break;
-                },
                 Ok(Event::Frame) => self.take_newest(&mut held),
                 Err(RecvTimeoutError::Timeout) => {
                     if held.is_none()
-                        && let Some(lost) = self.lost_device()
+                        && let Some(ending) = self.closed_window().or_else(|| self.lost_device())
                     {
-                        end(handler, lost);
+                        end(handler, ending);
                         break;
                     }
                 },
@@ -464,6 +462,12 @@ impl Capturer {
                 None => Some(handler(Err(error))),
             },
         }
+    }
+
+    /// Why the capture cannot go on because its window closed, or `None`
+    /// while the window is there.
+    fn closed_window(&self) -> Option<io::Error> {
+        (window_owner(self.window) != Some(self.owner)).then(|| ended("the captured window closed"))
     }
 
     /// Why the Direct3D device can no longer be used, such as after a
@@ -641,7 +645,6 @@ impl Capturer {
         )]
         let _ = (
             self.pool.RemoveFrameArrived(self.arrived),
-            self.item.RemoveClosed(self.closed),
             self.session.Close(),
             self.pool.Close(),
         );
@@ -705,6 +708,18 @@ fn ask_interval(session: &GraphicsCaptureSession, interval: Duration) {
         reason = "the setting is optional and missing on older Windows versions"
     )]
     let _ = session.SetMinUpdateInterval(TimeSpan { Duration: ticks });
+}
+
+/// The ID of the process that owns `window`, or `None` when no window has
+/// that handle.
+fn window_owner(window: HWND) -> Option<u32> {
+    let mut process = 0_u32;
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes a window handle by value and writes `process`,
+    // a live local; a handle that names no window returns 0 and writes
+    // nothing.
+    let thread = unsafe { GetWindowThreadProcessId(window, Some(&raw mut process)) };
+    (thread != 0).then_some(process)
 }
 
 /// The error that tells a handler its capture ended.
