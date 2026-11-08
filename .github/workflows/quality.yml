@@ -19,10 +19,10 @@ jobs:
   # The mandatory gate. Pushes to main and manual runs take the full mutation
   # sweep, split into shards: this job runs the first and the mutants job runs
   # the rest. Every other event mutation-tests only the code it changes,
-  # against its base, so the checkout is not shallow. A pull request checks
-  # out its merge into the base branch's current tip, which is that merge's
-  # first parent; the event's base.sha can be an older tip, and a diff from
-  # it would also hold everything merged to the base branch since then.
+  # against its base, so the checkout is not shallow. A pull request diffs
+  # against the fetched base branch, not the event's base.sha. That sha can be
+  # an older tip than the one the checked-out merge sits on, and a diff from it
+  # would also hold everything merged to the base branch since then.
   quality:
     name: quality
     runs-on: ubuntu-26.04
@@ -32,7 +32,7 @@ jobs:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MUTANTS_LANE: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'full' || 'diff' }}
       MUTANTS_SHARD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && '0/4' || '' }}
-      MUTANTS_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.merge_group.base_sha }}
+      MUTANTS_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.merge_group.base_sha }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
