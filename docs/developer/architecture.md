@@ -134,7 +134,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   applications are attached, and one engine session per attached application
   that has automations, which holds its signal values and rule state. It applies each event as a
   `(state, event) -> (state, effects)` transition. Effects are action requests
-  and orders to start or stop a worker.
+  and orders to start or stop a worker. It also wakes when a cooldown that
+  held back a rule ends, as [Evaluation](rules.md#evaluation) describes.
 - **Lifecycle.** Reports when a watched application starts and exits. It matches
   processes to applications by the executable name in a process snapshot
   (`CreateToolhelp32Snapshot`), which does not open any process, so it is safe

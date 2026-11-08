@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::Instant;
 
 use appytappy_config::paths::Locations;
@@ -37,6 +37,9 @@ enum Event {
     Reading(Reading),
     /// An action could not run.
     ActionFailed(ActionFailed),
+    /// An automation that its cooldown held back is due, and no event came
+    /// before.
+    Due,
 }
 
 impl From<Change> for Event {
@@ -168,7 +171,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     };
     let orders = model.replan(first.apps);
     carry(orders, &mut crew, log);
-    for event in &events {
+    while let Some(event) = next(&events, model.next_due()) {
         match handle(&mut model, log, event) {
             Step::Carry(orders) => carry(orders, &mut crew, log),
             Step::Reload => {
@@ -307,6 +310,25 @@ impl appytappy_actions::Controls for NoControls {
     #[mutants::skip]
     fn hold(&mut self, _time: std::time::Duration) {
         match self.0 {}
+    }
+}
+
+/// Waits for the next event, or, when an automation is `due`, until then at
+/// most. Returns `None` once nobody can send another event.
+fn next(events: &Receiver<Event>, due: Option<Instant>) -> Option<Event> {
+    let Some(due) = due else {
+        return events.recv().ok();
+    };
+    // A due time that passed goes first, so a busy channel cannot hold back
+    // an automation that is due.
+    let now = Instant::now();
+    if due <= now {
+        return Some(Event::Due);
+    }
+    match events.recv_timeout(due.saturating_duration_since(now)) {
+        Ok(event) => Some(event),
+        Err(RecvTimeoutError::Timeout) => Some(Event::Due),
+        Err(RecvTimeoutError::Disconnected) => None,
     }
 }
 
@@ -452,6 +474,7 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
             note(log, &message);
             Step::Carry(Vec::new())
         },
+        Event::Due => Step::Carry(model.recheck(Instant::now())),
     }
 }
 
@@ -474,6 +497,7 @@ mod tests {
     use std::fs;
     use std::num::NonZeroU16;
     use std::process;
+    use std::time::Duration;
 
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
@@ -566,6 +590,33 @@ mod tests {
                 "{line:?} should end with {message:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_owner_wakes_when_an_automation_is_due() {
+        let (sender, events) = mpsc::channel();
+        let passed = Instant::now();
+        let later = passed
+            .checked_add(Duration::from_secs(60))
+            .expect("a test time fits in an Instant");
+        assert!(matches!(
+            next(&events, passed.checked_add(Duration::from_millis(10))),
+            Some(Event::Due)
+        ));
+        sender.send(Event::Reload).expect("send");
+        assert!(
+            matches!(next(&events, Some(passed)), Some(Event::Due)),
+            "a due time that passed goes before a waiting event"
+        );
+        assert!(
+            matches!(next(&events, Some(later)), Some(Event::Reload)),
+            "an event goes before a due time still to come"
+        );
+        sender.send(Event::DetectionEnded).expect("send");
+        assert!(matches!(next(&events, None), Some(Event::DetectionEnded)));
+        drop(sender);
+        assert!(next(&events, Some(later)).is_none());
+        assert!(next(&events, None).is_none());
     }
 
     #[test]

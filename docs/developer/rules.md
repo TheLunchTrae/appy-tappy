@@ -65,10 +65,10 @@ A rule never re-arms while its own condition holds, so it fires once for each
 stretch of holding.
 
 Every rule also has a **cooldown**: after it fires, it cannot fire again until
-the cooldown has passed. A Becomes rule held back by its cooldown stays armed
-and fires on the first value after the cooldown that still makes its
-condition hold. An event that arrives during an On rule's cooldown is
-dropped. The cooldown only limits firing again: there is no hold time, so a
+the cooldown has passed. A Becomes rule held back by its cooldown stays armed,
+and if its condition still holds when the cooldown ends, it fires then, even
+when no new value arrives. An event that arrives during an On rule's cooldown
+is dropped. The cooldown only limits firing again: there is no hold time, so a
 rule fires on the first value that makes its condition hold.
 
 ## Restoring
@@ -89,14 +89,21 @@ the focus.
 
 ## Evaluation
 
-The engine evaluates rules on events, not on a timer. The runtime's owner thread
-keeps one session per running application. A session starts when the application
-starts, with every rule armed and no signal values, and ends when the
-application exits. It takes three kinds of events, each with the time it
-happened: a signal's new value, a focus change, and the application's exit. For
-each event it returns effects: release a rule, or fire it. Releases come first,
-then fires, each in rule order, so a restore never undoes a change that another
-rule makes for the same event.
+The engine evaluates rules on events, and on a timer only for the end of a
+cooldown. The runtime's owner thread keeps one session per running application.
+A session starts when the application starts, with every rule armed and no
+signal values, and ends when the application exits. It takes three kinds of
+events, each with the time it happened: a signal's new value, a focus change,
+and the application's exit. For each event it returns effects: release a rule,
+or fire it. Releases come first, then fires, each in rule order, so a restore
+never undoes a change that another rule makes for the same event.
+
+A value that holds still sends no new sample, so a Becomes rule that its
+cooldown held back could wait forever. A session therefore reports when the
+next such rule is due (`Session::next_due`): the time its cooldown ends, for a
+rule that is armed and whose condition holds on the values recorded. The owner
+thread waits for its next event until then at most, and if none comes, checks
+those rules again at that time (`Session::recheck`).
 
 The first focus report of a session fires the matching focus rules, whether the
 application has the focus or not. A report that repeats the current focus does

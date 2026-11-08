@@ -116,8 +116,8 @@ Whether undo is on or not, an automation runs once each time its condition
 becomes true. It runs again only after the condition has stopped being true
 and then becomes true again. **Wait before it can run again, in seconds**
 also keeps it from running again until that many seconds after it last ran.
-If its condition became true during the wait, it runs the next time the value
-changes and still makes the condition true.
+If its condition became true during the wait and is still true when the wait
+ends, it runs then.
 
 ## Delete an automation
 
