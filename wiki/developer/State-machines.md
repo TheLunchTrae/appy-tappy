@@ -176,6 +176,12 @@ stateDiagram-v2
 - **Unseen.** When the reader says the values can no longer be seen, the owner
   calls `forget_values`. The rules keep their state, so a rule that fired stays
   fired until new readings decide its condition.
+- **A new read interval.** `restart_readers` stops each running application's
+  reader that reads at another interval and starts it again in the same
+  session, and calls `forget_values` first, as for `Unseen`, because the new
+  reader sends its first readings whether or not they changed. A reading the
+  old reader sent just before it stopped can still arrive after that, a few
+  milliseconds old.
 
 ### Reader thread
 
@@ -278,8 +284,10 @@ stateDiagram-v2
     Slow --> Fast: a value changed
 ```
 
-The reader always uses `ReadInterval::DEFAULT`, so **Fast** is 16 ms and
-**Slow** is 500 ms.
+**Fast** and **Slow** are the fastest and slowest reads from the settings,
+16 ms and 500 ms by default. The reader's job carries them, so a new read
+interval stops the reader and starts it again in the same session, after the
+owner forgets the session's values.
 After a read that waits 64 ms or more, the capture asks Windows for frames no
 more often than the wait, never below the minimum, so a window whose values
 hold still is copied into the frame pool about twice a second rather than every
@@ -457,17 +465,22 @@ while the menu is open, but it still calls the procedure, so neither is lost.
 
 The reload watch waits on the auto-reset named event `Local\AppyTappy.Reload`
 and sends `Reload` each time the setup app sets it. Several saves before the
-reload watch wakes become one reload. The owner then reads the saved files
-(`reread`). When they read, it sends detection the new watchlist and calls
-`replan`. When they cannot be read as a whole, such as while another program
-holds a file, the owner keeps the plan it has and reads them again. Its state
-is `retry`, an optional `Retry` with a time and the tries left, and `had`,
-whether any read has worked yet.
+reload watch wakes become one reload. `read_saved` reads the settings first and
+gives the model their read interval, so the readers that `replan` starts read
+at it. It then reads the saved applications and automations; when they read,
+the owner sends detection the new watchlist and `replan` switches to their
+plan. Last, `restart_readers` starts over the readers the plan kept running at
+the old interval, so no reader starts twice. When either read fails, such as
+while another program holds a file, the owner keeps what it has (the plan, or
+the settings, or the defaults when they never read) and reads the files that
+failed again, and only those. Its state is `Reloads`: `retry`, an optional
+`Retry` with a time and the tries left; `failing`, which files the try reads;
+and `had` and `had_settings`, whether each read has worked yet.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Current: the first read works
-    [*] --> Retrying: the first read fails, so nothing runs
+    [*] --> Retrying: the first read fails, so nothing runs, or the settings are the defaults
     Current --> Current: a save, and the read works
     Current --> Retrying: a save, and the read fails, so the plan keeps running
     Retrying --> Current: a save or a try reads the files

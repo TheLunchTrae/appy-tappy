@@ -23,7 +23,7 @@ on, so it must stay small. Every design choice below follows from that split.
   └───────────────┬──────────────────────────┬──────────────┘
     reads, writes │                          │ sets after saves the runtime uses
      saved files  ▼                          ▼
-          applications, automations    Reload event
+   applications, automations, settings Reload event
                   │ read at start          │
                   │ and on each reload     │
                   ▼                        ▼
@@ -39,8 +39,8 @@ on, so it must stay small. Every design choice below follows from that split.
 ```
 
 1. The setup app saves each application, with the values drawn on its
-   window, and each automation as files. [Setup app](Setup-app.md#saved-files)
-   describes them.
+   window, each automation, and the settings as files.
+   [Setup app](Setup-app.md#saved-files) describes them.
 2. After each save that changes what the runtime runs, it sets the named event
    `Local\AppyTappy.Reload`, as [Files and handoff](#files-and-handoff) lists.
 3. The runtime reads the saved files when it starts and again on each reload,
@@ -180,10 +180,13 @@ Each thread below is a plain `std::thread`, and each channel is a
   automation fires (see [Actions](Actions.md#when-the-controls-cannot-start)).
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save that changes what the runtime runs, and
-  sends `Reload`. The owner reads the saved applications and automations
-  again. An application starts over, undoing what its automations changed
-  first, only when what it runs changed: its window match, its values' checks
-  or its automations' rules. Renaming the application, a value or an
+  sends `Reload`. The owner reads the settings, then the saved applications
+  and automations, again. A new read interval restarts each reader the new
+  plan keeps, in its session, so automations keep their state and nothing is
+  undone; settings that cannot be read are logged, and the runtime keeps the
+  ones it has. An application starts over, undoing what its automations
+  changed first, only when what it runs changed: its window match, its values'
+  checks or its automations' rules. Renaming the application, a value or an
   automation, or marking its values as checked, restarts nothing, and the log
   and the tray show the new names at once. An automation that cannot run, such
   as one whose value lost a picture or one that breaks a rule after a hand
@@ -340,7 +343,10 @@ failure, and 2 for a command line it does not understand, but the runtime is
 a windowed program, so a console does not wait for it: the code shows only to
 an installer or to `start /wait`. The [installer](Installer.md) runs
 `--autostart on`, and its uninstaller removes the value itself; the runtime
-never turns autostart on by itself.
+never turns autostart on by itself. The setup app's Settings page turns the
+same value on and off, with the quoted path of the runtime beside its own
+program, and reads whether it is there. Autostart is not in the settings file,
+because Windows reads the registry and the uninstaller cleans it up.
 
 The log is `runtime.log` in `%LOCALAPPDATA%\AppyTappy\logs\`, one
 timestamped line per start, exit, state change, and problem. A line that
@@ -520,8 +526,8 @@ changing.
     roam with the user's profile. Each application has a folder in `apps\`,
     named by its ID, that holds its `app.json` and the pictures its references
     learned from and its state checks compare against. Every automation is in
-    one file, `automations.json`. [Setup app](Setup-app.md#saved-files)
-    describes `app.json` and `automations.json`.
+    one file, `automations.json`, and the settings in `settings.json`.
+    [Setup app](Setup-app.md#saved-files) describes each file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
     describes, and the runtime's log in `logs\`.
@@ -536,16 +542,16 @@ changing.
   `RENAME_ATTEMPTS` and `RENAME_WAIT` set, and then the save fails and the
   setup app shows the error.
 - **Reloading.** After each save of an application, a value, a reference, an
-  anti-cheat class, a checked build, or an automation that works, the setup
-  app sets the named event `Local\AppyTappy.Reload`, and the runtime reads
-  every `app.json` and `automations.json` again, as the
-  [reload watch](#the-runtime) describes. Each save passes its result and
-  what it changed to `Owner::after` in `apps/setup/src-tauri/src/owner.rs`,
-  which sets the event only when the save worked. Turning an overlay on or
-  off, changing its mode, and moving its panel also write `app.json`, but they
-  do not set the event, because the runtime does not use the overlay. A
-  runtime that is not running reads the files when it starts, so the setup app
-  ignores a failure to set the event.
+  anti-cheat class, a checked build, an automation, or the settings that
+  works, the setup app sets the named event `Local\AppyTappy.Reload`, and the
+  runtime reads `settings.json`, every `app.json`, and `automations.json`
+  again, as the [reload watch](#the-runtime) describes. Each save passes its
+  result and what it changed to `Owner::after` in
+  `apps/setup/src-tauri/src/owner.rs`, which sets the event only when the save
+  worked. Turning an overlay on or off, changing its mode, and moving its
+  panel also write `app.json`, but they do not set the event, because the
+  runtime does not use the overlay. A runtime that is not running reads the
+  files when it starts, so the setup app ignores a failure to set the event.
 - **Reading.** The runtime reads the files with the same `config` code the
   setup app uses, and checks everything again before use, because the files
   are outside its control and a person can edit them by hand. Each `app.json`
@@ -555,9 +561,13 @@ changing.
   check from its pictures. `apps/runtime/src/plan.rs` turns what passes into
   the plan the runtime runs, in memory; nothing it builds is written to disk.
   An automation that fails a check is logged and left out, and the rest run.
-- **Format.** `app.json` and `automations.json` each carry a `format` number,
-  and the `FORMAT` constant in `app_file.rs` and `automation_file.rs` sets the
-  one version this build reads and writes. Neither program converts another
+- **Format.** `app.json`, `automations.json`, and `settings.json` each carry a
+  `format` number, and the `FORMAT` constant in `app_file.rs`,
+  `automation_file.rs`, and `settings_file.rs` sets the one version this build
+  reads and writes. A setting that `settings.json` leaves out takes its
+  default; one it does not know makes the file unreadable, and then the runtime
+  keeps the settings it has, or the defaults at start, and the Settings page
+  shows the defaults and says why. Neither program converts another
   version. An `app.json` with another version counts as unreadable, so its
   application's automations do not run, and the log names its folder. An
   `automations.json` with another version cannot be read as a whole: the

@@ -3,7 +3,8 @@
 //! Each application has a folder under [`crate::paths::Locations::apps`]
 //! named by its ID, holding `app.json` and the pictures its values name.
 //! The automations live in one file of their own, at
-//! [`crate::paths::Locations::automations`]. Every write goes to a temporary
+//! [`crate::paths::Locations::automations`], and the settings in another, at
+//! [`crate::paths::Locations::settings`]. Every write goes to a temporary
 //! file first and then replaces the old file in one step, so a reader never
 //! sees half a file.
 
@@ -16,6 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::app_file::{AppFile, is_image_name};
 use crate::automation_file::AutomationsFile;
+use crate::settings_file::SettingsFile;
 
 /// The authoring file's name in an application's folder.
 pub const APP_FILE: &str = "app.json";
@@ -202,6 +204,55 @@ impl AutomationStore {
     /// Returns an error when the file does not pass
     /// [`AutomationsFile::check`] or a write fails.
     pub fn save(&self, file: &AutomationsFile) -> io::Result<()> {
+        file.check().map_err(|error| invalid(error.to_string()))?;
+        let folder = self.path.parent();
+        if let Some(folder) = folder {
+            fs::create_dir_all(folder)?;
+        }
+        write_atomic(&self.path, file.to_json().as_bytes())?;
+        if let Some(folder) = folder {
+            remove_leftovers(folder);
+        }
+        Ok(())
+    }
+}
+
+/// The file that holds AppyTappy's settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsStore {
+    path: PathBuf,
+}
+
+impl SettingsStore {
+    /// The store at `path`, such as [`crate::paths::Locations::settings`].
+    #[must_use]
+    pub const fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// The settings. A file that does not exist yet holds the defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from reading the file, or an invalid-data error
+    /// saying why the file is broken.
+    pub fn load(&self) -> io::Result<SettingsFile> {
+        match fs::read_to_string(&self.path) {
+            Ok(json) => SettingsFile::parse(&json)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string())),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(SettingsFile::default()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Replaces the settings with `file`, creating the folder it lives in.
+    /// Temporary files that an earlier run left beside it go too.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-input error saying what to fix when the file does
+    /// not pass [`SettingsFile::check`], or the error from a write.
+    pub fn save(&self, file: &SettingsFile) -> io::Result<()> {
         file.check().map_err(|error| invalid(error.to_string()))?;
         let folder = self.path.parent();
         if let Some(folder) = folder {
@@ -532,6 +583,47 @@ mod tests {
             .collect();
         left.sort();
         assert_eq!(left, ["app.json", "kept.png", "notes.txt"]);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn settings_load_back_and_a_broken_file_says_why() {
+        let root = scratch("settings");
+        let path = root.join("roaming").join("settings.json");
+        let store = SettingsStore::new(path.clone());
+        assert_eq!(store.load().expect("missing file"), SettingsFile::default());
+        let file = SettingsFile {
+            screenshot_shortcut: "Control+Shift+S".to_owned(),
+            ..SettingsFile::default()
+        };
+        store.save(&file).expect("saves, creating the folder");
+        assert_eq!(store.load().expect("loads"), file);
+
+        let mut out_of_range = file.clone();
+        out_of_range.read_interval.fastest_ms = 0;
+        let refused = store.save(&out_of_range).expect_err("out of range");
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            refused.to_string(),
+            "Reads must wait between 1 and 10000 ms."
+        );
+        assert_eq!(store.load().expect("unchanged"), file);
+
+        fs::write(&path, b"{").expect("write");
+        let error = store.load().expect_err("broken");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            error
+                .to_string()
+                .starts_with("the settings file is not valid"),
+            "{error}"
+        );
+
+        // Only a missing file stands for the defaults; one that cannot be
+        // read, such as a folder in its place, is an error.
+        fs::remove_file(&path).expect("remove the file");
+        fs::create_dir(&path).expect("a folder in its place");
+        assert!(store.load().is_err(), "a folder is not the defaults");
         fs::remove_dir_all(root).expect("clean up");
     }
 

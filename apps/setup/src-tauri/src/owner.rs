@@ -20,6 +20,7 @@ mod messages;
 mod overlays;
 mod recording;
 mod references;
+mod settings;
 #[cfg(test)]
 mod test_support;
 mod update;
@@ -62,8 +63,8 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(250);
 #[derive(Debug)]
 pub(crate) struct Owner<H: Host> {
     host: H,
-    /// Where the applications' and automations' files live, or why that is
-    /// unknown.
+    /// Where the applications', automations' and settings files live, or
+    /// why that is unknown.
     stores: Result<Stores, String>,
     /// The setup app's own process, left out of the window list.
     own_process: u32,
@@ -262,8 +263,9 @@ impl<H: Host> Owner<H> {
 /// What a save changed, which says who reads it again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Changed {
-    /// What only the runtime reads: the automations, an application's
-    /// anti-cheat setting, and the build its values were checked against.
+    /// What only the runtime reads: the settings, the automations, an
+    /// application's anti-cheat setting, and the build its values were
+    /// checked against.
     Runtime,
     /// An application, its values, or the references they read with, which
     /// the runtime and the overlays read.

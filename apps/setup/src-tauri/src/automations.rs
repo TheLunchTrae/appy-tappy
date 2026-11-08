@@ -328,7 +328,7 @@ mod tests {
     use appytappy_config::automation_file::{
         ActionDef, ComparisonDef, FORMAT as AUTOMATIONS_FORMAT, MediaCommandDef, TargetDef, WhenDef,
     };
-    use appytappy_config::store::{AppStore, AutomationStore};
+    use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
     use appytappy_config::window_match::WindowFacts;
 
     use super::*;
@@ -344,6 +344,7 @@ mod tests {
         let stores = Stores {
             apps: AppStore::new(folder.join("apps")),
             automations: AutomationStore::new(folder.join("automations.json")),
+            settings: SettingsStore::new(folder.join("settings.json")),
         };
         let white = ColorDef {
             red: 255,

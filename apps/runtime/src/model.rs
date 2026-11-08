@@ -17,6 +17,7 @@ use appytappy_actions::Watched;
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_engine::{Effect, Session};
+use appytappy_sources::schedule::ReadInterval;
 
 use crate::lifecycle::Change;
 use crate::plan::AppPlan;
@@ -73,6 +74,8 @@ struct Running {
     session: Session,
     /// The process the session follows.
     watched: Watched,
+    /// How often its reader reads.
+    interval: ReadInterval,
 }
 
 /// The owner thread's state.
@@ -93,6 +96,8 @@ pub(crate) struct Model {
     plan: BTreeMap<String, Arc<AppPlan>>,
     /// The apps whose automations run now, by app ID.
     running: BTreeMap<String, Running>,
+    /// How often readers read, from the settings.
+    interval: ReadInterval,
     /// The next session's ID.
     next: u64,
 }
@@ -106,6 +111,7 @@ impl Default for Model {
             actions_can_run: true,
             plan: BTreeMap::new(),
             running: BTreeMap::new(),
+            interval: ReadInterval::DEFAULT,
             next: 0,
         }
     }
@@ -246,6 +252,45 @@ impl Model {
         orders
     }
 
+    /// How often readers read.
+    pub(crate) const fn interval(&self) -> ReadInterval {
+        self.interval
+    }
+
+    /// Sets how often readers read. Readers that start from now on read at
+    /// `interval`; [`Model::restart_readers`] moves the running ones to it.
+    pub(crate) const fn set_interval(&mut self, interval: ReadInterval) {
+        self.interval = interval;
+    }
+
+    /// Starts over each running app's reader that reads at another interval
+    /// than the model's, in the same session, so its automations keep their
+    /// state and nothing is undone. Its values are forgotten first, as when a
+    /// reader can no longer see them, because the new reader sends each
+    /// value as it first reads it. A reading the old reader sent just before
+    /// it stopped can still arrive after that, a few milliseconds old.
+    pub(crate) fn restart_readers(&mut self) -> Vec<Order> {
+        let interval = self.interval;
+        self.running
+            .values_mut()
+            .filter(|running| running.interval != interval)
+            .flat_map(|running| {
+                running.interval = interval;
+                running.session.forget_values();
+                [
+                    Order::StopReading(running.id, running.plan.labels.name.clone()),
+                    Order::Read(reader::Job {
+                        session: running.id,
+                        plan: Arc::clone(&running.plan),
+                        process: running.watched.process,
+                        executable: running.watched.executable.clone(),
+                        interval,
+                    }),
+                ]
+            })
+            .collect()
+    }
+
     /// Records a value a session's reader read at `at`. A reading from a
     /// session that ended is dropped.
     pub(crate) fn sample(
@@ -313,6 +358,7 @@ impl Model {
             plan: Arc::clone(plan),
             process: attached.process,
             executable: attached.executable.clone(),
+            interval: self.interval,
         })];
         let watched = Watched {
             process: attached.process,
@@ -327,6 +373,7 @@ impl Model {
                 plan,
                 session,
                 watched,
+                interval: self.interval,
             },
         );
         orders
@@ -398,94 +445,14 @@ fn acts(id: SessionId, plan: &AppPlan, watched: &Watched, effects: Vec<Effect>) 
 mod tests {
     use std::time::Duration;
 
-    use appytappy_config::action::{Action, MediaCommand, MediaTarget};
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::BuildDef;
     use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
-    use appytappy_config::signal::Number;
-    use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_engine::RuleIndex;
-    use appytappy_sources::screen::check::{BarFill, Check};
-    use appytappy_sources::screen::saved::SavedCheck;
-    use appytappy_sources::screen::{Region, Size};
-    use appytappy_sources::system::Rgb;
 
     use super::*;
-    use crate::plan::{Labels, Runs, ValuePlan};
-
-    fn signal() -> SignalName {
-        SignalName::new("progress").expect("valid")
-    }
-
-    fn number(raw: f64) -> Value {
-        Value::Number(Number::new(raw).expect("finite"))
-    }
-
-    fn pause() -> Box<[Action]> {
-        Box::new([Action::Media {
-            target: MediaTarget::Current,
-            command: MediaCommand::Pause,
-        }])
-    }
-
-    /// An app whose one automation pauses media while progress is at least
-    /// `threshold`, and undoes it after.
-    fn plan(name: &str, threshold: f64) -> Arc<AppPlan> {
-        let condition =
-            Condition::compare(signal(), Comparison::AtLeast, number(threshold)).expect("valid");
-        let rule = Rule::new(
-            Trigger::Becomes {
-                condition,
-                rearm: Rearm::WhenFalse,
-            },
-            pause(),
-            Duration::ZERO,
-            Restore::OnRelease,
-        )
-        .expect("valid");
-        let black = Rgb {
-            red: 0,
-            green: 0,
-            blue: 0,
-        };
-        let white = Rgb {
-            red: 255,
-            green: 255,
-            blue: 255,
-        };
-        Arc::new(AppPlan {
-            labels: Labels {
-                name: name.to_owned(),
-                automations: vec![format!("Pause {name}")],
-                values: vec!["Progress".to_owned()],
-                checked: None,
-            },
-            runs: Runs {
-                window: WindowMatch {
-                    title: Pattern::new("*"),
-                    class: Pattern::new("*"),
-                    executable: Pattern::new("Example.exe"),
-                    must_match: MustMatch {
-                        title: false,
-                        class: false,
-                    },
-                    fallback: false,
-                },
-                values: vec![ValuePlan {
-                    signal: signal(),
-                    check: SavedCheck {
-                        window_size: Size {
-                            width: 800,
-                            height: 600,
-                        },
-                        region: Region::new(0, 0, 10, 2).expect("not empty"),
-                        check: Check::BarFill(BarFill::new(white, black).expect("different")),
-                    },
-                }],
-                rules: Arc::from(vec![rule]),
-            },
-        })
-    }
+    use crate::plan::examples::{number, pause, plan, plan_with_cooldown, signal};
+    use crate::plan::{Labels, Runs};
 
     fn plans(apps: &[(&str, &Arc<AppPlan>)]) -> BTreeMap<String, Arc<AppPlan>> {
         apps.iter()
@@ -763,6 +730,92 @@ mod tests {
         assert_eq!(model.active_automations(), ["Pause B"]);
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
         assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
+    }
+
+    #[test]
+    fn a_new_read_interval_restarts_each_reader_in_its_session() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
+        model.apply(started("a", 7), now);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        model.set_interval(ReadInterval::DEFAULT);
+        assert_eq!(
+            model.restart_readers(),
+            [],
+            "the same interval changes nothing"
+        );
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        model.set_interval(slower);
+        let orders = model.restart_readers();
+        assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"], "b is not running");
+        let Some(Order::Read(job)) = orders.last() else {
+            panic!("a read order");
+        };
+        assert_eq!(job.interval, slower);
+        assert_eq!(
+            model.active_automations(),
+            ["Pause A"],
+            "the automation stays run"
+        );
+        assert_eq!(model.restart_readers(), [], "a moves to it once");
+        let Some(Order::Read(job)) = model.apply(started("b", 8), now).first().cloned() else {
+            panic!("b is read");
+        };
+        assert_eq!(
+            job.interval, slower,
+            "a new reader reads at the new interval"
+        );
+    }
+
+    #[test]
+    fn a_new_read_interval_forgets_the_values_read_before() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[(
+            "a",
+            &plan_with_cooldown("A", Duration::from_secs(60)),
+        )]));
+        model.apply(started("a", 7), now);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        model.sample(SessionId(0), signal(), number(10.0), now);
+        model.sample(SessionId(0), signal(), number(95.0), now);
+        assert!(model.next_due().is_some(), "held back by its cooldown");
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        model.set_interval(slower);
+        model.restart_readers();
+        assert_eq!(model.next_due(), None, "nothing holds on unseen values");
+        assert_eq!(model.recheck(now + Duration::from_secs(61)), []);
+    }
+
+    #[test]
+    fn a_reload_that_changes_the_plan_and_the_interval_restarts_a_reader_once() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
+        model.apply(started("a", 7), now);
+        model.apply(started("b", 8), now);
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        // As the owner does on a reload: the interval, then the plan, then
+        // the readers the plan left running.
+        model.set_interval(slower);
+        let mut orders = model.replan(plans(&[("a", &plan("A", 80.0)), ("b", &plan("B", 90.0))]));
+        orders.extend(model.restart_readers());
+        assert_eq!(
+            kinds(&orders),
+            ["stop 0 A", "read 2 A", "stop 1 B", "read 1 B"],
+            "a starts again for its plan, b for the interval"
+        );
+        assert!(
+            orders.iter().all(|order| match order {
+                Order::Read(job) => job.interval == slower,
+                _ => true,
+            }),
+            "both read at the new interval"
+        );
     }
 
     #[test]

@@ -77,9 +77,9 @@ This page covers what the user guide leaves out.
   application's anti-cheat class to be `none`
   ([Key presses](Actions.md#key-presses)).
 - **Reload.** Saving or removing an application, saving or deleting a value,
-  a reference or an automation, switching an automation on or off, and
-  changing an anti-cheat class set the reload event, so the runtime reads the
-  files again at once. Overlay changes do not, since
+  a reference or an automation, switching an automation on or off, changing
+  an anti-cheat class, and changing a setting set the reload event, so the
+  runtime reads the files again at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](Architecture.md#the-runtime)
   describes how it reads them.
 
@@ -255,6 +255,17 @@ build was of the values or the executable that are gone. The Values page shows
 the runtime's log, as [Build detection](Architecture.md#build-detection)
 describes.
 
+The settings live in `%APPDATA%\AppyTappy\settings.json`. A setting the
+file leaves out takes its default:
+
+```json
+{
+  "format": 1,
+  "readInterval": { "fastestMs": 16, "slowestMs": 500 },
+  "screenshotShortcut": "F9"
+}
+```
+
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
 its `panel` holds its place and size in screen pixels, as `x`, `y`, `width`,
@@ -278,7 +289,8 @@ or `"none"`, as its target. A state check is saved with its states in order:
 An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
-`appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`) and
+`appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
+`settings_file.rs`) and
 the files (`store.rs`). Each save writes a temporary file and renames it over
 the old one, so a crash never leaves half a file; a later save in that folder
 removes a temporary file that a crash left between the two steps, once it is ten

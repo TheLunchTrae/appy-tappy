@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   type AppSummary,
@@ -19,20 +19,32 @@ import { NewValue } from './pages/NewValue.tsx';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
+import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
+import {
+  DEFAULT_SETTINGS,
+  type Settings,
+  SettingsContext,
+  type SettingsHandle,
+  type SettingsUpdate,
+  loadSettings,
+  saveSettings,
+  sameSettings,
+} from './lib/settings.ts';
 import { type Held, onLeave } from './lib/unsaved.ts';
 
-type Page = 'automations' | 'applications' | 'values' | 'references';
+type Page = 'automations' | 'applications' | 'values' | 'references' | 'settings';
 
 /**
  * The pages, Automations first since running them is what the app is for, then in the order something new is set
- * up: the application, then the values read from it.
+ * up: the application, then the values read from it. Settings come last.
  */
 const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
   { id: 'automations', name: 'Automations' },
   { id: 'applications', name: 'Applications' },
   { id: 'values', name: 'Values' },
   { id: 'references', name: 'References' },
+  { id: 'settings', name: 'Settings' },
 ];
 
 /** What the window shows in place of a page: a flow that makes or changes something. */
@@ -70,6 +82,55 @@ export function App() {
   const [automations, setAutomations] = useState<readonly AutomationSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settingsProblem, setSettingsProblem] = useState<string | null>(null);
+  // The saved settings as the last save left them, and the changes still to run, one after another, after the load.
+  const savedSettings = useRef<Settings>(DEFAULT_SETTINGS);
+  const [settingsLoad] = useState(() => Promise.withResolvers<undefined>());
+  const settingsQueue = useRef<Promise<unknown>>(settingsLoad.promise);
+  useEffect(() => {
+    loadSettings()
+      .then(
+        (view) => {
+          savedSettings.current = view.settings;
+          setSettings(view.settings);
+          setSettingsProblem(view.problem);
+        },
+        (error: unknown) => {
+          setSettingsProblem(errorText(error));
+        },
+      )
+      .finally(() => {
+        settingsLoad.resolve(undefined);
+      });
+  }, [settingsLoad]);
+  const settingsHandle = useMemo<SettingsHandle>(
+    () => ({
+      settings,
+      change: async (update: SettingsUpdate): Promise<string | null> => {
+        const run = async (): Promise<string | null> => {
+          const next = update(savedSettings.current);
+          if ('problem' in next) {
+            return next.problem;
+          }
+          // A second ask for the same change, such as Enter and then leaving the field, saves nothing.
+          if (!sameSettings(next, savedSettings.current)) {
+            await saveSettings(next);
+            savedSettings.current = next;
+            setSettings(next);
+          }
+          setSettingsProblem(null);
+          return null;
+        };
+        const result = settingsQueue.current.then(run);
+        settingsQueue.current = result.catch(() => {
+          // The caller hears of the failure; the next change runs either way.
+        });
+        return result;
+      },
+    }),
+    [settings],
+  );
 
   const refresh = useCallback(async (): Promise<void> => {
     // The two files are read apart, so a broken automations file still lists the values.
@@ -99,6 +160,7 @@ export function App() {
     automations: automations === null ? null : automations.length,
     applications: apps === null ? null : apps.length,
     references: apps === null ? null : apps.reduce((total, app) => total + (app.file?.references.length ?? 0), 0),
+    settings: null,
   };
 
   const open = (next: Flow | null): void => {
@@ -254,51 +316,55 @@ export function App() {
             }}
           />
         );
+      case 'settings':
+        return <SettingsPage problem={settingsProblem} />;
     }
   })();
 
   return (
-    <div className="shell">
-      <nav className="nav" aria-label="Pages">
-        {PAGES.map(({ id, name }) => {
-          const count = counts[id];
-          return (
-            <button
-              key={id}
-              type="button"
-              className="tab"
-              ref={id === askedFor ? control : undefined}
-              aria-current={page === id && flow === null ? 'page' : undefined}
-              disabled={held === 'saving'}
-              onClick={() => {
-                pressTab(id);
+    <SettingsContext value={settingsHandle}>
+      <div className="shell">
+        <nav className="nav" aria-label="Pages">
+          {PAGES.map(({ id, name }) => {
+            const count = counts[id];
+            return (
+              <button
+                key={id}
+                type="button"
+                className="tab"
+                ref={id === askedFor ? control : undefined}
+                aria-current={page === id && flow === null ? 'page' : undefined}
+                disabled={held === 'saving'}
+                onClick={() => {
+                  pressTab(id);
+                }}
+              >
+                {name}
+                {count === null ? null : <span className="count">{count}</span>}
+              </button>
+            );
+          })}
+          {leaving === null || flow === null ? null : (
+            <Question
+              refs={refs}
+              label="Leave without saving?"
+              keepLabel="Stay"
+              actLabel="Leave"
+              busy={held === 'saving'}
+              onKeep={() => {
+                setLeaving(null);
+              }}
+              onAct={() => {
+                goTo(leaving);
               }}
             >
-              {name}
-              {count === null ? null : <span className="count">{count}</span>}
-            </button>
-          );
-        })}
-        {leaving === null || flow === null ? null : (
-          <Question
-            refs={refs}
-            label="Leave without saving?"
-            keepLabel="Stay"
-            actLabel="Leave"
-            busy={held === 'saving'}
-            onKeep={() => {
-              setLeaving(null);
-            }}
-            onAct={() => {
-              goTo(leaving);
-            }}
-          >
-            {LOST[flow.kind]}
-          </Question>
-        )}
-        <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />
-      </nav>
-      {content}
-    </div>
+              {LOST[flow.kind]}
+            </Question>
+          )}
+          <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />
+        </nav>
+        {content}
+      </div>
+    </SettingsContext>
   );
 }

@@ -144,7 +144,7 @@ mod tests {
         ActionDef, AutomationDef, AutomationsFile, ComparisonDef, MediaCommandDef, TargetDef,
         WhenDef,
     };
-    use appytappy_config::store::{AppStore, AutomationStore};
+    use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
     use appytappy_config::window_match::WindowFacts;
 
     use super::*;
@@ -158,6 +158,7 @@ mod tests {
         let stores = Stores {
             apps: AppStore::new(folder.join("apps")),
             automations: AutomationStore::new(folder.join("automations.json")),
+            settings: SettingsStore::new(folder.join("settings.json")),
         };
         (stores, folder)
     }

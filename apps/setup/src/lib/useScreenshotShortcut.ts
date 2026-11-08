@@ -1,33 +1,26 @@
 // The global shortcut that takes a screenshot, and choosing a new one.
 
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { type ShortcutEvent, register, unregister } from '@tauri-apps/plugin-global-shortcut';
 
 import { background } from './repeat.ts';
-import { accelerator, shortcutLabel } from './shortcut.ts';
-import { loadShortcut, saveShortcut } from './storage.ts';
+import { shortcutLabel } from './shortcut.ts';
+import { useShortcutChoice } from './useShortcutChoice.ts';
 
 /**
- * The global shortcut that takes a screenshot with `onPress`, and the user's choice of a new one. It is on while the
- * component that uses it shows, except while the user is choosing.
+ * The global shortcut that takes a screenshot with `onPress`, and the user's choice of a new one, which is saved in
+ * the settings. It is on while the component that uses it shows, except while the user is choosing.
  */
-export function useScreenshotShortcut(onPress: () => Promise<void>): {
-  /** The shortcut as the button shows it, such as F9. */
-  readonly label: string;
-  /** Whether the next keys pressed on the button become the shortcut. */
-  readonly choosing: boolean;
-  /** Why the shortcut could not be set up, or null. */
+export function useScreenshotShortcut(onPress: () => Promise<void>): Omit<
+  ReturnType<typeof useShortcutChoice>,
+  'shortcut'
+> & {
+  /** Why the shortcut could not be set up, or null. Saving a new one does not hide it. */
   readonly error: string | null;
-  /** Starts choosing, or stops without a new shortcut. */
-  readonly toggle: () => void;
-  /** Stops choosing without a new shortcut, such as when focus leaves the button. */
-  readonly cancel: () => void;
-  /** The button's key handler: while choosing, Escape stops and a shortcut's keys become the shortcut. */
-  readonly onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 } {
-  const [shortcut, setShortcut] = useState(loadShortcut);
-  const [choosing, setChoosing] = useState(false);
+  const { shortcut, ...choice } = useShortcutChoice();
+  const { choosing } = choice;
   const [error, setError] = useState<string | null>(null);
   const latest = useRef(onPress);
   useEffect(() => {
@@ -69,32 +62,5 @@ export function useScreenshotShortcut(onPress: () => Promise<void>): {
     };
   }, [shortcut, choosing]);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (!choosing) {
-      return;
-    }
-    event.preventDefault();
-    if (event.code === 'Escape') {
-      setChoosing(false);
-      return;
-    }
-    const next = accelerator(event);
-    if (next !== null) {
-      setShortcut(next);
-      saveShortcut(next);
-      setChoosing(false);
-    }
-  };
-  return {
-    label: shortcutLabel(shortcut),
-    choosing,
-    error,
-    toggle: () => {
-      setChoosing((current) => !current);
-    },
-    cancel: () => {
-      setChoosing(false);
-    },
-    onKeyDown,
-  };
+  return { ...choice, error };
 }

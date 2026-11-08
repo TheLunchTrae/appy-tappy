@@ -9,6 +9,7 @@
 - [References](user/References.md)
 - [Automations](user/Automations.md)
 - [Overlay](user/Overlay.md)
+- [Settings](user/Settings.md)
 - [Troubleshooting](user/Troubleshooting.md)
 
 **[Developer docs](developer/Developer-docs.md)**

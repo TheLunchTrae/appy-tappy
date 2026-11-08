@@ -1657,3 +1657,43 @@ select {
   flex: none;
   width: 72px;
 }
+
+/* Settings */
+.settings {
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.card h2 + .set-row {
+  border-top: 0;
+}
+
+.set-row .what {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.num {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.num .input {
+  width: 80px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

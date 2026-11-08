@@ -32,3 +32,13 @@ pub fn enable_autostart(value: &str, command: &OsStr) -> io::Result<()> {
 pub fn disable_autostart(value: &str) -> io::Result<()> {
     host::disable_autostart(value)
 }
+
+/// Whether the `Run` key holds the value `value`, so Windows runs its
+/// command when the user signs in.
+///
+/// # Errors
+///
+/// Returns the operating system's error.
+pub fn autostart_enabled(value: &str) -> io::Result<bool> {
+    host::autostart_enabled(value)
+}

@@ -41,6 +41,8 @@ That is all. The background part runs the automation from then on.
 - [Automations](user/Automations.md): what to do, and when.
 - [Overlay](user/Overlay.md): see your values as AppyTappy reads them, over the
   window or in a small panel.
+- [Settings](user/Settings.md): starting with Windows, the screenshot
+  shortcut, and how often values are read.
 - [Troubleshooting](user/Troubleshooting.md)
 
 In this guide, an **application** is any program with a window that you want

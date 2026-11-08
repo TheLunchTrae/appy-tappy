@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{BuildDef, WindowDef};
-use appytappy_config::store::{AppStore, AutomationStore};
+use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
@@ -200,6 +200,7 @@ pub(super) fn scratch_store(name: &str) -> (Stores, std::path::PathBuf) {
     let stores = Stores {
         apps: AppStore::new(folder.join("apps")),
         automations: AutomationStore::new(folder.join("automations.json")),
+        settings: SettingsStore::new(folder.join("settings.json")),
     };
     (stores, folder)
 }

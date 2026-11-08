@@ -41,10 +41,11 @@ parts fit.
 - **Runtime.** The always-on background program.
 - **Sample.** One value a source read for a signal.
 - **Saved files.** The files the setup app saves: each application's
-  `app.json` with its pictures, and `automations.json`. The runtime reads them
-  when it starts and again each time the setup app saves an application, a
-  value, a reference, an anti-cheat class, or an automation; saving only an
-  overlay's settings does not tell it. `appytappy-config` calls each one an authoring file.
+  `app.json` with its pictures, `automations.json`, and `settings.json`. The
+  runtime reads them when it starts and again each time the setup app saves an
+  application, a value, a reference, an anti-cheat class, an automation, or the
+  settings; saving only an overlay's settings does not tell it.
+  `appytappy-config` calls each one an authoring file.
 - **Session.** One run of an application, from its start to its exit, or until
   the runtime stops it for a pause or a config change. Rule state resets with
   each session.

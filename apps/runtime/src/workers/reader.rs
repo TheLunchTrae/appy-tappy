@@ -87,6 +87,8 @@ pub(crate) struct Job {
     /// The attached process's executable, such as `Example.exe`, for the
     /// log.
     pub(crate) executable: String,
+    /// How often to read the values, from the settings.
+    pub(crate) interval: ReadInterval,
 }
 
 /// What a reader reports.
@@ -330,7 +332,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         };
         frames.carry(&recovery);
         let crop = Crop::Layout(frames.layout.clone());
-        let throttle = ReadInterval::DEFAULT.min();
+        let throttle = job.interval.min();
         let handler = Box::new(move |frame: io::Result<Frame<'_>>| frames.handle(frame));
         let session = match system.start(window, crop, throttle, handler) {
             Ok(session) => session,
@@ -580,7 +582,7 @@ impl<E: From<Reading>> FrameReader<E> {
             restarted: false,
             seen: false,
             ended: false,
-            schedule: ReadSchedule::new(ReadInterval::DEFAULT),
+            schedule: ReadSchedule::new(job.interval),
             events,
             control,
         })
@@ -885,6 +887,7 @@ mod tests {
             plan: plan(values),
             process: ProcessId::new(43),
             executable: "Example.exe".to_owned(),
+            interval: ReadInterval::DEFAULT,
         }
     }
 

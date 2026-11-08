@@ -457,7 +457,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 onBlur={shortcut.cancel}
                 onKeyDown={shortcut.onKeyDown}
               >
-                {shortcut.choosing ? 'Press the new shortcut, or Esc' : 'Change shortcut'}
+                Change shortcut
               </button>
               <button
                 type="button"
@@ -471,7 +471,11 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             </div>
           )}
         </div>
+        <p className="note" role="status">
+          {shortcut.choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
+        </p>
         {shortcut.error === null ? null : <p className="warn">{shortcut.error}</p>}
+        {shortcut.saveError === null ? null : <p className="warn">{shortcut.saveError}</p>}
         {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
         {reviewing && recording !== null ? (
           <ReviewSheet
