@@ -458,11 +458,13 @@ automation on each. It runs the runtime through four phases:
 4. **Idle after.** The probe has exited and the runtime has detached.
 
 Before the last phase, a settle check measures nothing but has to pass. The
-probe starts once more with its values dim gray and repaints the strip for five
-seconds, so the capture asks for a frame only every half second. Then it turns
-the values silver in one last repaint and draws nothing more. The check fails
-unless the runtime reads that change, which shows that Windows holds back a
-frame drawn inside the interval rather than dropping it.
+probe starts once more with its values dim gray and repaints the strip for
+eight seconds after its window shows, so the capture asks for a frame only every
+half second. Then it turns the values silver in one last repaint and draws
+nothing more. The check fails if the runtime never reads that change, as
+happens if Windows drops a frame drawn inside the interval. It also fails if
+the change comes less than two seconds after the runtime attached, since it
+would then test nothing.
 
 It checks these against their targets:
 

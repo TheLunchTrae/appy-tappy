@@ -157,9 +157,9 @@ try {
     # display scale. Given `steady`, it keeps the values' part silver and
     # repaints only a strip below them, so the window changes while its
     # values hold still. Given `settle`, it does the same with the values'
-    # part dim gray for five seconds, long enough for the capture to ask for
-    # few frames, then in one repaint turns that part silver, stops the strip
-    # and draws nothing more.
+    # part dim gray for eight seconds from when the window shows, long enough
+    # for the capture to ask for few frames, then in one repaint turns that
+    # part silver, stops the strip and draws nothing more.
     $probeExe = Join-Path $scratch $ProbeExecutable
     Add-Type -OutputType WindowsApplication -OutputAssembly $probeExe -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System.Drawing;
@@ -188,11 +188,11 @@ public static class Probe {
         form.Controls.Add(strip);
         form.BackColor = settle ? Color.DimGray : Color.Silver;
         var frame = 0;
-        var ticks = 0;
+        var shown = new System.Diagnostics.Stopwatch();
+        form.Shown += (sender, shownEvent) => shown.Start();
         var timer = new Timer { Interval = 16 };
         timer.Tick += (sender, tick) => {
-            ticks++;
-            if (settle && ticks * 16 >= 5000) {
+            if (settle && shown.ElapsedMilliseconds >= 8000) {
                 form.BackColor = Color.Silver;
                 timer.Stop();
                 return;
@@ -248,13 +248,21 @@ public static class Probe {
     Wait-Log '): detached' 10 2
 
     # Settle: `light` turns true in the probe's last repaint, while the
-    # capture asks for a frame only every half second. Unless Windows
-    # delivers that repaint once the interval passes, it is never read.
+    # capture asks for a frame only every half second. If Windows drops that
+    # repaint rather than delivering it once the interval passes, it is never
+    # read. The check first makes sure the repaint comes after the runtime
+    # attached and read for a while, or it would test nothing.
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"", 'settle' -PassThru
     $null = $probe.Handle
     Wait-Log '): attached' 30 3
+    Start-Sleep -Seconds 2
+    if (@(Select-String -Path $log -SimpleMatch -Pattern 'Light: runs').Count -ge 3) {
+        throw 'the settle probe turned silver before the runtime had read it for two seconds, so the settle check would test nothing'
+    }
     try { Wait-Log 'Light: runs' 20 3 }
     catch { throw "the settle check failed, so a change drawn while the capture asked for few frames may be lost: $($_.Exception.Message)" }
+    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured', 'capture ended badly'
+    if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
     Stop-Process -Id $probe.Id
     $probe.WaitForExit()
     $probe = $null

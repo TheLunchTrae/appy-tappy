@@ -348,7 +348,7 @@ impl Capturer {
     /// still costs the system fewer copies too. The system is expected to
     /// hold back a change drawn inside that time and deliver it once the time
     /// has passed, which is when the handler would have read again anyway;
-    /// the footprint check's settle phase tests that on Windows.
+    /// the footprint check's settle check tests that on Windows.
     fn follow(&mut self, wait: Duration) {
         let interval = frame_interval(wait, self.throttle);
         if interval != self.asked {

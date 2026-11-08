@@ -65,8 +65,9 @@ pub enum Activity {
 
 /// The adaptive wait between reads within a [`ReadInterval`].
 ///
-/// After a change, the wait drops to the minimum. Each steady read doubles it, up to the maximum, so a value that
-/// holds still for a while is read rarely and a moving one at full speed.
+/// After a change, the wait drops to the minimum. Each steady read doubles
+/// it, up to the maximum, so a value that holds still for a while is read
+/// rarely and a moving one at full speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadSchedule {
     interval: ReadInterval,
