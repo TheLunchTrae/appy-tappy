@@ -24,6 +24,7 @@ import {
   type ValueChoice,
   buildAutomation,
   buildWhen,
+  clicksBlocked,
   findValue,
   keysBlocked,
   liveAnnouncement,
@@ -36,7 +37,10 @@ import {
   valueChoices,
   withSource,
 } from '../lib/automation.ts';
+import { clickApps, targetSummary } from '../lib/click.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
+import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
+import { Hint } from '../components/Hint.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
 
@@ -52,6 +56,7 @@ const ACTION_CHOICES: readonly ActionChoice[] = [
   'keys',
   'open',
   'sound',
+  'click',
 ];
 
 const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = {
@@ -60,6 +65,7 @@ const ACTION_NAMES: Readonly<Record<ActionChoice, string>> = {
   keys: 'Press keys',
   open: 'Open a program, file, or link',
   sound: 'Play a sound',
+  click: 'Click in another application',
 };
 
 interface KeysFieldProps {
@@ -190,16 +196,103 @@ function ActionTarget({ action, label, onChange }: ActionTargetProps) {
   );
 }
 
+interface ClickFieldsProps {
+  readonly action: ActionDraft;
+  readonly label: string;
+  readonly apps: readonly AppSummary[];
+  readonly onChange: (action: ActionDraft) => void;
+  readonly onTarget: () => void;
+}
+
+/** The application a click clicks in, what its target is, and whether the focus goes back after. */
+function ClickFields({ action, label, apps, onChange, onTarget }: ClickFieldsProps) {
+  const choices = clickApps(apps);
+  const known = choices.some((choice) => choice.id === action.clickApp);
+  const hintApp = `hint-click-app-${action.key}`;
+  const hintTarget = `hint-click-target-${action.key}`;
+  const hintFocus = `hint-click-focus-${action.key}`;
+  return (
+    <>
+      <span className="click-app keys-field">
+        <select
+          className="input"
+          aria-label={`${label}: application to click in`}
+          aria-describedby={hintApp}
+          value={action.clickApp}
+          onChange={(event) => {
+            // A target belongs to its application's window, so another application needs a new one.
+            onChange({ ...action, clickApp: event.target.value, at: null });
+          }}
+        >
+          {known ? null : (
+            <option value="" disabled>
+              {action.clickApp === '' ? 'Pick an application' : `${action.clickApp} (not saved)`}
+            </option>
+          )}
+          {choices.map((choice) => (
+            <option key={choice.id} value={choice.id}>
+              In {choice.name}
+            </option>
+          ))}
+        </select>
+        <Hint topic={`${label}: application to click in`} id={hintApp}>
+          The saved application whose window gets the click. It can be the one the value comes from, or another one.
+        </Hint>
+      </span>
+      <span className="click-row">
+        <span className="target-sum">
+          {action.at?.kind === 'picture' ? (
+            <ClickPictureThumb image={action.at.image} label={`${label}: the picture it clicks on`} />
+          ) : null}
+          <span>{targetSummary(action.button, action.at)}</span>
+        </span>
+        <button
+          type="button"
+          className="btn small"
+          aria-describedby={hintTarget}
+          disabled={action.clickApp === ''}
+          onClick={onTarget}
+        >
+          {action.at === null ? 'Set up the target' : 'Change the target'}
+        </button>
+        <Hint topic={`${label}: target`} id={hintTarget}>
+          Where in the window the click lands: a spot, or a picture such as a button that AppyTappy looks for each time.
+          You set it up on a screenshot of the window, so the application must be open.
+        </Hint>
+      </span>
+      <span className="click-options">
+        <label>
+          <input
+            type="checkbox"
+            aria-describedby={hintFocus}
+            checked={action.returnFocus}
+            onChange={(event) => {
+              onChange({ ...action, returnFocus: event.target.checked });
+            }}
+          />
+          Go back to the window that was in front
+        </label>
+        <Hint topic="Go back to the window that was in front" id={hintFocus}>
+          After the click, the window you were using gets the focus back, so you can carry on. Turn it off when the
+          click opens something you want to use, such as a menu.
+        </Hint>
+      </span>
+    </>
+  );
+}
+
 interface ActionRowProps {
   readonly action: ActionDraft;
   readonly position: number;
   readonly count: number;
+  readonly apps: readonly AppSummary[];
+  readonly onTarget: () => void;
   readonly onChange: (action: ActionDraft) => void;
   readonly onMove: (by: -1 | 1) => void;
   readonly onRemove: () => void;
 }
 
-function ActionRow({ action, position, count, onChange, onMove, onRemove }: ActionRowProps) {
+function ActionRow({ action, position, count, apps, onTarget, onChange, onMove, onRemove }: ActionRowProps) {
   const choice: ActionChoice = action.kind === 'media' ? action.command : action.kind;
   const label = `Action ${position}`;
   return (
@@ -226,7 +319,9 @@ function ActionRow({ action, position, count, onChange, onMove, onRemove }: Acti
           </option>
         ))}
       </select>
-      {action.kind === 'keys' ? (
+      {action.kind === 'click' ? (
+        <ClickFields action={action} label={label} apps={apps} onChange={onChange} onTarget={onTarget} />
+      ) : action.kind === 'keys' ? (
         <KeysField
           label={label}
           keys={action.keys}
@@ -394,6 +489,8 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
   const [saving, setSaving] = useState(false);
   useReportHeld(onHeld, held(saving, start, draft));
   const [executables, setExecutables] = useState<readonly string[]>([]);
+  // The click action whose target is being set up, by its key, or null while the editor shows.
+  const [targeting, setTargeting] = useState<number | null>(null);
 
   // The running applications' executables, offered as the applications an action can target.
   useEffect(() => {
@@ -416,7 +513,7 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
 
   const choices = useMemo(() => valueChoices(apps), [apps]);
   const choice = draft.source === null ? null : findValue(choices, draft.source);
-  const built = buildAutomation(draft, choices, existing?.id ?? '');
+  const built = buildAutomation(draft, choices, existing?.id ?? '', apps);
   const typedWhen = choice === null ? null : buildWhen(draft, choice);
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
   const undoWords = built.ok ? undoText(built.automation.actions) : null;
@@ -424,6 +521,11 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
   const usesPaths = draft.actions.some((action) => action.kind === 'open' || action.kind === 'sound');
   const opens = draft.actions.some((action) => action.kind === 'open');
   const keysWarning = choice === null ? null : keysBlocked(draft.actions, choice.antiCheat, choice.appName);
+  const clickedApps = draft.actions.flatMap((action) =>
+    action.kind === 'click' && action.clickApp !== '' ? [action.clickApp] : [],
+  );
+  const clickWarning = choice === null ? null : clicksBlocked(clickedApps, choice, apps);
+  const clickedNames = [...new Set(clickedApps.map((id) => apps.find((app) => app.id === id)?.file?.name ?? id))];
 
   const update = (change: Partial<Draft>): void => {
     setDraft((current) => ({ ...current, ...change }));
@@ -449,6 +551,36 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
   };
 
   const appsWithValues = apps.filter((app) => app.file !== null && app.file.values.length > 0);
+  const targeted = targeting === null ? undefined : draft.actions.find((action) => action.key === targeting);
+  if (targeted !== undefined) {
+    return (
+      <ClickTarget
+        apps={apps}
+        automation={draft.name.trim() === '' ? (existing?.name ?? 'New automation') : draft.name.trim()}
+        initial={{ app: targeted.clickApp, button: targeted.button, at: targeted.at }}
+        onCancel={() => {
+          setTargeting(null);
+        }}
+        onUse={(target) => {
+          setActions((actions) =>
+            actions.map((old) =>
+              old.key === targeted.key
+                ? {
+                    ...old,
+                    clickApp: target.app,
+                    button: target.button,
+                    at: target.at,
+                    // A right click usually opens a menu, which going back to the window in front would close.
+                    returnFocus: target.button === old.button ? old.returnFocus : target.button !== 'right',
+                  }
+                : old,
+            ),
+          );
+          setTargeting(null);
+        }}
+      />
+    );
+  }
   const runningApp = choice === null ? null : apps.find((app) => app.id === choice.app);
 
   return (
@@ -591,6 +723,10 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
                 action={action}
                 position={index + 1}
                 count={draft.actions.length}
+                apps={apps}
+                onTarget={() => {
+                  setTargeting(action.key);
+                }}
                 onChange={(changed) => {
                   setActions((actions) => actions.map((old) => (old.key === action.key ? changed : old)));
                 }}
@@ -611,6 +747,16 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
             ))}
           </ol>
           {keysWarning === null ? null : <p className="warn">{keysWarning}</p>}
+          {clickWarning === null ? null : <p className="warn">{clickWarning}</p>}
+          {clickedNames.length === 0 || choice === null ? null : (
+            <p className="note">
+              The click happens only while{' '}
+              {[choice.appName, ...clickedNames.filter((name) => name !== choice.appName)].join(' or ')} is the window
+              in front. AppyTappy brings {clickedNames.join(' and ')} to the front for a moment, clicks, puts the cursor
+              back, and goes back to the window that was in front if you ask it to. A picture that is not found is not
+              clicked.
+            </p>
+          )}
           {pressesKeys ? (
             <p className="note">
               Keys are pressed only while {choice?.appName ?? 'the application'} is the window in front, so they never

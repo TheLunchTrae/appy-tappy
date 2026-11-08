@@ -319,7 +319,55 @@ export type ActionDef =
   /** Opens a program or file by its full path, or an `http` or `https` link. */
   | { readonly kind: 'open'; readonly target: string }
   /** Plays a WAV file by its full path. */
-  | { readonly kind: 'sound'; readonly file: string };
+  | { readonly kind: 'sound'; readonly file: string }
+  /** Clicks in a window of the saved application `app`, by its ID. */
+  | {
+      readonly kind: 'click';
+      readonly app: string;
+      readonly button: ClickButton;
+      /** Whether the window that was in front gets the focus back after. */
+      readonly returnFocus: boolean;
+      readonly at: ClickAtDef;
+    };
+
+/** Which mouse button a click presses, and a double click with the left one. */
+export type ClickButton = 'left' | 'right' | 'double';
+
+/** A corner of a window a spot is measured from. */
+export type ClickCorner = 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
+
+/** Where a click lands, as the automations file spells it. */
+export type ClickAtDef =
+  /** The same place every time, `x` across and `y` up or down from `corner`. */
+  | { readonly kind: 'spot'; readonly corner: ClickCorner; readonly x: number; readonly y: number }
+  /** A place on a picture, wherever it is found in the area `search`. */
+  | {
+      readonly kind: 'picture';
+      /** The picture's file name among the click pictures. */
+      readonly image: string;
+      /** The window's size when the picture was taken. */
+      readonly windowSize: Size;
+      readonly search: Rect;
+      /** Where on the picture to press, from its top-left corner. */
+      readonly press: { readonly x: number; readonly y: number };
+      /** How far each compared pixel's red, green, and blue may be from the picture's, on average. */
+      readonly tolerance: number;
+    };
+
+/** A click picture just kept, and the size of the window it was taken on. */
+export interface ClickPictureView {
+  readonly image: string;
+  readonly windowWidth: number;
+  readonly windowHeight: number;
+}
+
+/** Where a click lands, from the window's top-left corner, and how alike the place found for a picture is. */
+export interface FoundClick {
+  readonly x: number;
+  readonly y: number;
+  /** From 0 to 100 percent, or null for a spot. */
+  readonly likeness: number | null;
+}
 
 /** What a condition compares a value with. */
 export type Target = number | boolean | string;
@@ -457,6 +505,21 @@ export async function stopWatching(watch: number): Promise<void> {
 /** The running windows `window` takes, the best fit first. */
 export async function matchWindows(window: WindowDef): Promise<readonly WindowFit[]> {
   return invoke<readonly WindowFit[]>('match_windows', { window });
+}
+
+/** Keeps `region` of screenshot `index` as a new click picture. One that no saved automation names goes the next time automations are saved. */
+export async function addClickPicture(index: number, region: Rect): Promise<ClickPictureView> {
+  return invoke<ClickPictureView>('add_click_picture', { screenshot: index, region });
+}
+
+/** The click picture `image`, at most `maxWidth` wide. */
+export async function clickPicture(image: string, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('click_picture', { image, maxWidth }));
+}
+
+/** Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere. */
+export async function findClick(at: ClickAtDef): Promise<FoundClick> {
+  return invoke<FoundClick>('find_click', { at });
 }
 
 export async function listApps(): Promise<readonly AppSummary[]> {

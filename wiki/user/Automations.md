@@ -63,6 +63,8 @@ automation starts nothing over.
   [Opening and sounds](#opening-and-sounds).
 - **Play a sound** plays a WAV file. See
   [Opening and sounds](#opening-and-sounds).
+- **Click in another application** clicks a spot or a picture, such as a
+  button, in the window of a saved application. See [Clicks](#clicks).
 
 Media and volume actions choose what they change:
 
@@ -124,6 +126,64 @@ still press keys of its own, and anti-cheat can treat that as cheating.
 
 An automations file from someone else can open any program or file on your
 computer, so check its actions before you use it.
+
+## Clicks
+
+**Click in another application** clicks in the window of a saved application,
+such as a scene button in a streaming app when a value in another application
+changes. Pick the application, then select **Set up the target**. The
+application must be open, because you set up the target on a screenshot of
+its window.
+
+On the target screen, take a screenshot when the window shows what to click,
+then choose **Where to click**:
+
+- **A spot** clicks the same place every time. Click where the click should
+  land. AppyTappy measures the spot from the window corner nearest it, so it
+  stays put when the window is resized.
+- **A picture** clicks only when the picture is found near where it was. Mark
+  the picture, such as a button, with **Box**, **Snap**, or **Click**, then
+  select **Where to click on it** and click the place. It starts in the
+  middle.
+
+For a picture, **How alike it must look** sets how far its colors may be from
+the window's. Raise it if the button changes a little, such as when it is
+highlighted; lower it if a similar button could be clicked instead. AppyTappy
+looks for the picture up to 50 pixels around where it was, in an area of at
+most 400 by 400 pixels, and only while the window has the size it had when
+the picture was taken.
+
+**Click** sets the button: **Left**, **Right**, or **Double**, which clicks the
+left button twice. **Find it now** looks for the target on the live window and
+shows where the click would land, without clicking. **Use this target** keeps
+it.
+
+When the click runs, AppyTappy brings the application's window to the front
+for a moment, moves the cursor there, clicks, and puts the cursor back. With
+**Go back to the window that was in front** on, the window you were using gets
+the focus back. Choosing a right click turns it off, since going back would close the
+menu a right click usually opens.
+
+AppyTappy clicks only when it is safe to:
+
+- only while the watched application or the one it clicks in is the window in
+  front;
+- only while you hold no mouse button and no Ctrl, Alt, Shift, or Win, so it
+  never turns into a drag or a Ctrl-click;
+- only when the target's window is the one showing at that place, so it never
+  clicks a window that covers it;
+- for a picture, only when the picture is found.
+
+Otherwise it skips the click and notes why in
+[its log](Troubleshooting.md#appytappys-log).
+
+Clicks work only when both the watched application and the one clicked in
+have anti-cheat set to **None** on the Applications page, because anti-cheat
+can see clicks that AppyTappy makes. A click cannot be undone, so turn undo
+off for an automation that clicks.
+
+Windows does not let AppyTappy click in a program that runs as administrator,
+and it gives no sign that it dropped the click.
 
 ## Undo and running again
 

@@ -7,6 +7,8 @@ import type {
   AutomationDef,
   AutomationSummary,
   CheckDef,
+  ClickAtDef,
+  ClickButton,
   Comparison,
   Live,
   MediaCommand,
@@ -15,6 +17,7 @@ import type {
   ValueDef,
   WhenDef,
 } from './api.ts';
+import { clickBlocked, clickName } from './click.ts';
 import { spellKeys } from './shortcut.ts';
 
 /** What a value reads: a number, yes or no, or a state's name. */
@@ -189,8 +192,11 @@ function fileName(path: string): string {
   return path.split(/[\\/]/u).at(-1) ?? path;
 }
 
-/** An action in a few words, such as `Pause media · Player.exe`. */
-export function actionText(action: ActionDef): string {
+/**
+ * An action in a few words, such as `Pause media · Player.exe`; `appName` names a saved application by its ID, for a
+ * click.
+ */
+export function actionText(action: ActionDef, appName: (id: string) => string = (id) => id): string {
   switch (action.kind) {
     case 'media':
       return `${MEDIA_NAMES[action.command]} · ${action.app ?? 'whatever is playing'}`;
@@ -202,6 +208,8 @@ export function actionText(action: ActionDef): string {
       return `Open ${action.target}`;
     case 'sound':
       return `Play ${fileName(action.file)}`;
+    case 'click':
+      return `${clickName(action.button)} · ${appName(action.app)}`;
   }
 }
 
@@ -218,6 +226,7 @@ export function undoable(action: ActionDef): boolean {
     case 'keys':
     case 'open':
     case 'sound':
+    case 'click':
       return false;
   }
 }
@@ -279,6 +288,13 @@ export interface ActionDraft {
   readonly opens: string;
   /** The WAV file a sound action plays, as typed. */
   readonly sound: string;
+  /** The ID of the saved application a click clicks in, or empty before one is picked. */
+  readonly clickApp: string;
+  readonly button: ClickButton;
+  /** Whether a click gives the focus back to the window that was in front. */
+  readonly returnFocus: boolean;
+  /** Where a click lands, or null before its target is set up. */
+  readonly at: ClickAtDef | null;
 }
 
 /** An automation as the editor holds it. */
@@ -302,7 +318,21 @@ export interface Draft {
 
 /** A new action row of `kind`. */
 export function newAction(key: number, kind: ActionDraft['kind'] = 'media'): ActionDraft {
-  return { key, kind, command: 'pause', percent: '20', target: 'default', app: '', keys: '', opens: '', sound: '' };
+  return {
+    key,
+    kind,
+    command: 'pause',
+    percent: '20',
+    target: 'default',
+    app: '',
+    keys: '',
+    opens: '',
+    sound: '',
+    clickApp: '',
+    button: 'left',
+    returnFocus: true,
+    at: null,
+  };
 }
 
 /** A new automation: pause whatever is playing, and undo it afterwards. */
@@ -340,6 +370,10 @@ export function toDraft(automation: AutomationDef): Draft {
       keys: action.kind === 'keys' ? action.keys : '',
       opens: action.kind === 'open' ? action.target : '',
       sound: action.kind === 'sound' ? action.file : '',
+      clickApp: action.kind === 'click' ? action.app : '',
+      button: action.kind === 'click' ? action.button : 'left',
+      returnFocus: action.kind === 'click' ? action.returnFocus : true,
+      at: action.kind === 'click' ? action.at : null,
     })),
     undo: automation.undo,
     cooldown: String(automation.cooldownMs / 1000),
@@ -434,6 +468,15 @@ function isWebLink(text: string): boolean {
 }
 
 function buildAction(draft: ActionDraft, position: number): ActionDef | string {
+  if (draft.kind === 'click') {
+    if (draft.clickApp === '') {
+      return `Pick the application action ${position} clicks in.`;
+    }
+    if (draft.at === null) {
+      return `Set up where action ${position} clicks.`;
+    }
+    return { kind: 'click', app: draft.clickApp, button: draft.button, returnFocus: draft.returnFocus, at: draft.at };
+  }
   if (draft.kind === 'open') {
     const target = typedPath(draft.opens);
     if (target === '') {
@@ -510,8 +553,41 @@ export type Built =
   | { readonly ok: true; readonly automation: AutomationDef }
   | { readonly ok: false; readonly next: string };
 
-/** Builds the automation `draft` describes, watching a value among `choices`; `id` is the saved one's, or empty. */
-export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], id: string): Built {
+/**
+ * Why clicks in the applications `clickedIn`, by their IDs, cannot run for the value `choice`, or null when they
+ * can: anti-cheat can see a click, so the watched application and each one clicked in need none.
+ */
+export function clicksBlocked(
+  clickedIn: readonly string[],
+  choice: ValueChoice,
+  apps: readonly AppSummary[],
+): string | null {
+  if (clickedIn.length === 0) {
+    return null;
+  }
+  for (const id of clickedIn) {
+    const clicked = apps.find((app) => app.id === id)?.file ?? null;
+    const blocked = clickBlocked(
+      { name: choice.appName, antiCheat: choice.antiCheat },
+      clicked === null ? null : { name: clicked.name, antiCheat: clicked.antiCheat },
+    );
+    if (blocked !== null) {
+      return blocked;
+    }
+  }
+  return null;
+}
+
+/**
+ * Builds the automation `draft` describes, watching a value among `choices`; `id` is the saved one's, or empty.
+ * `apps` are the saved applications a click may click in.
+ */
+export function buildAutomation(
+  draft: Draft,
+  choices: readonly ValueChoice[],
+  id: string,
+  apps: readonly AppSummary[] = [],
+): Built {
   const name = draft.name.trim();
   if (name === '') {
     return { ok: false, next: 'Name the automation.' };
@@ -542,6 +618,7 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
       has('keys') ? 'pressed keys cannot be unpressed' : null,
       has('open') ? 'what opened stays open' : null,
       has('sound') ? 'a played sound cannot be unplayed' : null,
+      has('click') ? 'a click cannot be undone' : null,
     ].filter((part) => part !== null);
     // Each part is a clause, so a comma comes before the last one's `and`.
     const last = why.pop() ?? '';
@@ -550,9 +627,20 @@ export function buildAutomation(draft: Draft, choices: readonly ValueChoice[], i
       next: `Turn off undo: ${[why.join(', '), last].filter((part) => part !== '').join(', and ')}.`,
     };
   }
-  const blocked = keysBlocked(actions, choice.antiCheat, choice.appName);
+  const blocked =
+    keysBlocked(actions, choice.antiCheat, choice.appName) ??
+    clicksBlocked(
+      actions.flatMap((action) => (action.kind === 'click' ? [action.app] : [])),
+      choice,
+      apps,
+    );
   if (blocked !== null) {
     return { ok: false, next: blocked };
+  }
+  for (const [index, action] of actions.entries()) {
+    if (action.kind === 'click' && !apps.some((app) => app.id === action.app && app.file !== null)) {
+      return { ok: false, next: `The application action ${index + 1} clicks in is not saved. Pick another.` };
+    }
   }
   const cooldown = typedNumber(draft.cooldown);
   if (cooldown === null || cooldown < 0 || cooldown > MAX_COOLDOWN_SECONDS) {

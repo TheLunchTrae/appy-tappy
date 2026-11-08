@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/api.ts';
+import type { AntiCheat, AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/api.ts';
 import {
   EMPTY_DRAFT,
   actionText,
@@ -583,5 +583,104 @@ describe('typed numbers', () => {
     }
     const draft = { ...EMPTY_DRAFT, source: { app: 'example', value: 'progress' }, number: '9'.repeat(400) };
     expect(buildWhen(draft, progress)).toBe('Enter the number Progress is compared with, such as 90 or 12.5.');
+  });
+});
+
+describe('clicks', () => {
+  const streaming = {
+    id: 'streaming',
+    file: {
+      format: 1,
+      name: 'Streaming app',
+      window: {
+        title: 'Streaming',
+        class: '',
+        executable: 'Streaming.exe',
+        mustMatch: { title: false, class: false },
+        fallback: 'none' as const,
+      },
+      antiCheat: 'none' as const,
+      values: [],
+      references: [],
+    },
+    error: null,
+    windows: [],
+    running: null,
+  };
+  const withAntiCheat = (watched: AntiCheat, clicked: AntiCheat): readonly AppSummary[] => [
+    ...apps.map((app) => (app.file === null ? app : { ...app, file: { ...app.file, antiCheat: watched } })),
+    { ...streaming, file: { ...streaming.file, antiCheat: clicked } },
+  ];
+  const click: AutomationDef = {
+    ...pauseMusic,
+    actions: [
+      {
+        kind: 'click',
+        app: 'streaming',
+        button: 'left',
+        returnFocus: true,
+        at: {
+          kind: 'picture',
+          image: 'click-1.png',
+          windowSize: { width: 1280, height: 720 },
+          search: { x: 0, y: 300, width: 188, height: 120 },
+          press: { x: 62, y: 10 },
+          tolerance: 20,
+        },
+      },
+    ],
+    undo: false,
+  };
+
+  test('round-trip through the editor when neither application has anti-cheat', () => {
+    const free = withAntiCheat('none', 'none');
+    expect(buildAutomation(toDraft(click), valueChoices(free), 'pause_music', free)).toEqual({
+      ok: true,
+      automation: click,
+    });
+  });
+
+  test('need an application, a target, and no anti-cheat on either side', () => {
+    const free = withAntiCheat('none', 'none');
+    const draft = toDraft(click);
+    const [first] = draft.actions;
+    if (first === undefined) {
+      throw new Error('one action');
+    }
+    const build = (action: typeof first, summaries: readonly AppSummary[] = free) =>
+      buildAutomation({ ...draft, actions: [action] }, valueChoices(summaries), 'pause_music', summaries);
+    expect(build({ ...first, clickApp: '' })).toEqual({ ok: false, next: 'Pick the application action 1 clicks in.' });
+    expect(build({ ...first, at: null })).toEqual({ ok: false, next: 'Set up where action 1 clicks.' });
+    expect(build({ ...first, clickApp: 'gone' })).toEqual({
+      ok: false,
+      next: 'The application action 1 clicks in is not saved. Pick another.',
+    });
+    expect(build(first, withAntiCheat('none', 'userMode'))).toEqual({
+      ok: false,
+      next: "Streaming app's anti-cheat is user-mode, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None on the Applications page.",
+    });
+    expect(build(first, withAntiCheat('unknown', 'none'))).toEqual({
+      ok: false,
+      next: "Example App's anti-cheat is not set, so AppyTappy cannot click while it runs: anti-cheat can see clicks that AppyTappy makes. A click needs the watched application and the one it clicks in both set to None on the Applications page.",
+    });
+  });
+
+  test('a click cannot be undone, and names its application', () => {
+    const [action] = click.actions;
+    if (action === undefined) {
+      throw new Error('one action');
+    }
+    expect(undoable(action)).toBe(false);
+    expect(actionText(action, (id) => (id === 'streaming' ? 'Streaming app' : id))).toBe('Left click · Streaming app');
+    const free = withAntiCheat('none', 'none');
+    expect(buildAutomation({ ...toDraft(click), undo: true }, valueChoices(free), 'pause_music', free)).toEqual({
+      ok: false,
+      next: 'Turn off undo: a click cannot be undone.',
+    });
+  });
+
+  test('a new click starts with the left button, going back to the window in front, and no target', () => {
+    const action = newAction(3, 'click');
+    expect([action.clickApp, action.button, action.returnFocus, action.at]).toEqual(['', 'left', true, null]);
   });
 });

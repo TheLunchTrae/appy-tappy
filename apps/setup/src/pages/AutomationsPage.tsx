@@ -82,7 +82,7 @@ function Row({ summary, apps, choices, toggling, confirming, onConfirm, onToggle
           {automation.actions.map((action, index) => (
             // The actions never reorder while listed, so their place names them.
             <li key={index} className="chip">
-              {actionText(action)}
+              {actionText(action, (id) => apps.find((candidate) => candidate.id === id)?.file?.name ?? id)}
             </li>
           ))}
         </ol>
