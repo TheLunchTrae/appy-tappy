@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
-import { type AppSummary, type AutomationSummary, deleteValue, errorText, markChecked } from '../lib/api.ts';
+import type { AppSummary, AutomationSummary } from '../lib/bindings.ts';
+import { deleteValue, errorText, markChecked } from '../lib/api.ts';
 import { usedBy } from '../lib/automation.ts';
 import { buildState, checkedText } from '../lib/build.ts';
 import { checkSummary } from '../lib/describe.ts';

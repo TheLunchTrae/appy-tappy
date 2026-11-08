@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { type ReferenceDef, type ReferenceRef, errorText, saveReference, saveValue } from '../lib/api.ts';
+import type { ReferenceDef, ReferenceRef } from '../lib/bindings.ts';
+import { errorText, saveReference, saveValue } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type Built,

@@ -1,6 +1,6 @@
 // The inspector's fields that values and references share.
 
-import type { Reading } from '../lib/api.ts';
+import type { Reading } from '../lib/bindings.ts';
 import { readingText } from '../lib/automation.ts';
 import type { CheckState } from '../lib/check.ts';
 import { REGION_HINT, TOLERANCE_HINT } from '../lib/hints.ts';

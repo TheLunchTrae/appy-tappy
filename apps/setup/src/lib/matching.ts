@@ -1,6 +1,7 @@
 // How an application's window match is edited and described.
 
-import type { Fallback, LooseField, MatchField, WindowChoice, WindowDef, WindowFit } from './api.ts';
+import type { FallbackDef, WindowChoice, WindowDef, WindowFit } from './bindings.ts';
+import type { LooseField, MatchField } from './api.ts';
 
 /** The fields in the order the editor shows them. */
 export const FIELDS: readonly MatchField[] = ['title', 'class', 'executable'];
@@ -40,13 +41,13 @@ export const FALLBACK_HINT =
   'What AppyTappy uses when the program is running but none of its windows matches everything you ticked. None treats the application as closed until one does.';
 
 /** Each fallback, as the menu says it. */
-export const FALLBACK_NAMES: Readonly<Record<Fallback, string>> = {
+export const FALLBACK_NAMES: Readonly<Record<FallbackDef, string>> = {
   none: 'None (treat it as closed)',
   executable: 'Any window of the same executable',
 };
 
 /** The fallbacks in the order the menu shows them. */
-export const FALLBACKS: readonly Fallback[] = ['none', 'executable'];
+export const FALLBACKS: readonly FallbackDef[] = ['none', 'executable'];
 
 /** A match for the picked window that requires only its executable, which suits apps whose title changes. */
 export function exactWindow(window: Pick<WindowChoice, MatchField>): WindowDef {

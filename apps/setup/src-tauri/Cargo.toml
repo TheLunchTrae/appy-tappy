@@ -53,6 +53,14 @@ tauri-plugin-single-instance = "=2.5.5"
 # slow request never freezes the window; Tauri does not re-export it.
 tokio = { version = "=1.54.1", features = ["sync"] }
 
+[dev-dependencies]
+# The bindings test writes the TypeScript types of the commands' arguments and
+# answers and checks them against the page's bindings.ts, so the page cannot
+# drift from the Rust side. Only the tests derive them, so the program builds
+# without ts-rs.
+appytappy-config = { version = "=0.1.0", path = "../../../crates/config", features = ["ts"] }
+ts-rs = "=12.0.1"
+
 [build-dependencies]
 # Embeds the app's configuration, icon, and Windows manifest.
 tauri-build = { version = "=2.7.4", features = [] }

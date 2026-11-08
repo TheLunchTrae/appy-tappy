@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-import {
-  type AppSummary,
-  type AutomationSummary,
-  deleteAutomation,
-  errorText,
-  setAutomationEnabled,
-} from '../lib/api.ts';
+import type { AppSummary, AutomationSummary } from '../lib/bindings.ts';
+import { deleteAutomation, errorText, setAutomationEnabled } from '../lib/api.ts';
 import {
   COMPARISON_NAMES,
   type ValueChoice,

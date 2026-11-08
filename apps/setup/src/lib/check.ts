@@ -1,17 +1,19 @@
 // The check the user is setting up, and when it is complete enough to try.
 
-import type {
-  CharactersSpec,
-  CheckSpec,
-  RecordedLabel,
-  RecordingSettings,
-  ReferenceDef,
-  ReferenceRef,
-  StateSpec,
-} from './api.ts';
+import {
+  type CheckSpec,
+  LIMITS,
+  type RecordedLabel,
+  type RecordingSettings,
+  type ReferenceDef,
+  type ReferenceRef,
+  type SelectStep,
+  type StateSpec,
+} from './bindings.ts';
+import type { CharactersSpec } from './api.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
-import { DEFAULT_COLOR_MATCH, type SelectStep, withStep } from './selection.ts';
+import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
 
 /** The kinds of check, in the order the capture screen offers them. */
 export const CHECK_KINDS = ['number', 'barFill', 'color', 'state'] as const;
@@ -33,9 +35,6 @@ export const DEFAULT_TOLERANCE: Readonly<Record<CheckKind, number>> = {
   color: 24,
   state: 16,
 };
-
-/** The most states a state check can tell apart. */
-export const MAX_STATES = 16;
 
 /** One look of a state check, as the user sets it up. */
 export interface DraftState {
@@ -295,7 +294,7 @@ function nextStateName(draft: Draft): string {
  * unchanged when a state already comes from that screenshot or the check has as many states as it can hold.
  */
 export function withState(draft: Draft, screenshot: number): Draft {
-  if (stateOn(draft, screenshot) !== -1 || draft.states.length >= MAX_STATES) {
+  if (stateOn(draft, screenshot) !== -1 || draft.states.length >= LIMITS.maxStates) {
     return draft;
   }
   return { ...draft, states: [...draft.states, { name: nextStateName(draft), screenshot, steps: [] }] };

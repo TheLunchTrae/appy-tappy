@@ -2,16 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import {
-  type RecordingSettings,
-  type RecordingView,
-  discardRecording,
-  errorText,
-  recordedReading,
-  recordingState,
-  startRecording,
-  stopRecording,
-} from './api.ts';
+import type { RecordingSettings, RecordingView } from './bindings.ts';
+import { discardRecording, errorText, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
 

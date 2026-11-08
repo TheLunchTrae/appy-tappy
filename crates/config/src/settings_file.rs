@@ -36,6 +36,7 @@ pub const MAX_TRACE_FILES: u32 = 100;
 
 /// Every setting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct SettingsFile {
     /// The format version, [`FORMAT`].
@@ -63,6 +64,7 @@ impl Default for SettingsFile {
 /// The runtime trace: whether the runtime records what it reads and does to
 /// a file, what it records, and how much disk the files may take.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct TraceDef {
     /// Whether the runtime records.
@@ -71,6 +73,7 @@ pub struct TraceDef {
     /// record until it is turned off. The setup app sets it when the trace
     /// is turned on, so a forgotten trace ends without the runtime writing
     /// this file.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub until: Option<u64>,
     /// What the runtime records.
     pub record: BTreeSet<TraceCategory>,
@@ -102,6 +105,7 @@ impl Default for TraceDef {
 
 /// What a trace can record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum TraceCategory {
     /// Every read of every value: how long the check took, what it read,
@@ -121,6 +125,7 @@ pub enum TraceCategory {
 /// How often the runtime reads a value: as often as `fastest_ms` allows while
 /// it changes, and at least every `slowest_ms` while it holds still.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReadIntervalDef {
     /// The shortest wait between two reads, in milliseconds.
