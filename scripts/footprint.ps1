@@ -14,7 +14,8 @@
 # it closes. The trace phase has no targets: it reports what recording costs.
 # Between the steady and idle phases, a settle check opens the window once
 # more, changes a value once and then stops drawing, and fails unless the
-# runtime sees that change.
+# runtime sees that change. Last, a handle check opens and closes the window
+# a few more times and fails when the runtime's handles keep growing.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -41,12 +42,18 @@ $CpuSamples = 3
 $Settle = 5
 $IdleSample = 60
 $ActiveSample = 30
-# How long after the idle after sample the threads and handles are counted
-# once more, to tell threads Windows ends on its own from ones left behind.
-$LongIdle = 120
-# Attach and detach cycles after that, each counted, to tell a leak that
-# grows with every attach from what the first attaches set up once.
-$MoreCycles = 6
+# The handle check: attach and detach cycles after the idle after phase,
+# and how long the runtime then waits before its handles are counted. The
+# first attaches load libraries and set up thread pools once, so the check
+# compares with the count just after the third detach. A capture that left
+# its handles behind added about 10 a cycle. A clean one added 1 or 2 over
+# six cycles counted two minutes later, and about 1 a cycle counted at once,
+# while Windows still keeps idle thread pool workers. So 3 cycles and at most
+# 8 more handles than after the third detach tell the two apart with room on
+# both sides.
+$MoreCycles = 3
+$HandleWait = 30
+$HandleGrowthLimit = 8
 
 $ProbeTitle = 'AppyTappy footprint probe'
 $ProbeExecutable = 'appytappy-footprint-probe.exe'
@@ -94,8 +101,6 @@ $script:details = @()
 $script:firstCpu = @{}
 $script:memory = @{}
 $script:cpu = @{}
-$script:threads = @{}
-$script:handles = @{}
 $script:process = $null
 $probe = $null
 $peak = $null
@@ -117,61 +122,11 @@ function Wait-Log([string]$Line, [int]$Seconds, [int]$Count = 1) {
     throw "the runtime's log did not say '$Line' within $Seconds seconds"
 }
 
-# Each thread's own start address. The Threads list's StartAddress is the
-# thunk that every thread starts in, inside ntdll.dll, so this asks Windows
-# for the address the thread was created to run instead.
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-
-public static class ThreadStart {
-    [DllImport("kernel32.dll")]
-    static extern IntPtr OpenThread(uint access, bool inherit, uint id);
-    [DllImport("kernel32.dll")]
-    static extern bool CloseHandle(IntPtr handle);
-    [DllImport("ntdll.dll")]
-    static extern int NtQueryInformationThread(IntPtr thread, int kind, out IntPtr start, int size, IntPtr written);
-
-    // 0 when the thread has gone or Windows will not say.
-    public static long Of(int id) {
-        // THREAD_QUERY_INFORMATION, and ThreadQuerySetWin32StartAddress.
-        IntPtr thread = OpenThread(0x0040, false, (uint)id);
-        if (thread == IntPtr.Zero) { return 0; }
-        try {
-            IntPtr start;
-            return NtQueryInformationThread(thread, 9, out start, IntPtr.Size, IntPtr.Zero) == 0 ? start.ToInt64() : 0;
-        }
-        finally { CloseHandle(thread); }
-    }
-}
-'@
-
-# The runtime's threads, counted by where each one starts: a module and the
-# offset into it, so two kinds of thread from one module count apart. The
-# runtime's own threads start in its executable, Windows' thread pool workers
-# at one offset in ntdll.dll, and a driver's threads in a graphics DLL. A
-# thread whose start Windows will not give, or that no module holds, counts
-# as unknown.
-function Get-ThreadStarts {
-    $script:process.Refresh()
-    $modules = @($script:process.Modules | ForEach-Object {
-            $base = $_.BaseAddress.ToInt64()
-            [pscustomobject]@{ Name = $_.ModuleName; Start = $base; End = $base + $_.ModuleMemorySize }
-        })
-    $counts = @{}
-    foreach ($thread in $script:process.Threads) {
-        $address = [ThreadStart]::Of($thread.Id)
-        $owner = $modules | Where-Object { $address -ge $_.Start -and $address -lt $_.End } | Select-Object -First 1
-        $name = if ($null -eq $owner) { 'unknown' } else { '{0}+0x{1:x}' -f $owner.Name, ($address - $owner.Start) }
-        $counts[$name] = 1 + [int]$counts[$name]
-    }
-    ($counts.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name) $($_.Value)" }) -join ', '
-}
-
 # The runtime's handles counted by object type, such as Event or Section,
-# read from the system's handle list. A type is named by copying one of its
-# handles into this script and asking for its type; a type whose handle
-# cannot be copied shows by its number.
+# read from the system's handle list, to say what grew when the handle check
+# fails. A type is named by copying one of its handles into this script and
+# asking for its type; a type whose handle cannot be copied shows by its
+# number.
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -263,12 +218,6 @@ function Get-HandleTypes {
     [HandleTypes]::Of($script:process.Id)
 }
 
-# The runtime's thread and handle counts, and where its threads started.
-function Get-Threads {
-    $script:process.Refresh()
-    "$($script:process.Threads.Count) threads ($(Get-ThreadStarts)), $($script:process.HandleCount) handles"
-}
-
 function Get-PrivateWorkingSet([int]$Id) {
     $counter = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess=$Id"
     if ($null -eq $counter -or -not $counter.WorkingSetPrivate) { throw "Windows reported no private working set for process $Id" }
@@ -315,9 +264,7 @@ function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double
         Add-Measure "$Name memory" (Format-Bytes $memory)
         Add-Measure "$Name CPU" ('{0:N3} %' -f $cpu)
     }
-    $script:threads[$Name] = $script:process.Threads.Count
-    $script:handles[$Name] = $script:process.HandleCount
-    $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $(Get-Threads)"
+    $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $($script:process.Threads.Count) threads, $($script:process.HandleCount) handles"
 }
 
 # Every value has to read without a problem, or an active sample measured
@@ -479,7 +426,6 @@ public static class Probe {
     Wait-Log 'automations run for Footprint probe' 10
 
     Measure-Phase 'Idle' $IdleSample $IdleMemoryLimit $IdleCpuLimit
-    $script:details += "Handles at idle: $(Get-HandleTypes)"
 
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
     $null = $probe.Handle
@@ -509,7 +455,6 @@ public static class Probe {
     $probe.WaitForExit()
     $probe = $null
     Wait-Log '): detached' 10
-    $script:details += "Just after the first detach: $(Get-Threads)"
 
     $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"", 'steady' -PassThru
     $null = $probe.Handle
@@ -524,7 +469,6 @@ public static class Probe {
     $probe.WaitForExit()
     $probe = $null
     Wait-Log '): detached' 10 2
-    $script:details += "Just after the second detach: $(Get-Threads)"
 
     # Settle: `light` turns true in the probe's last repaint, while the
     # capture asks for a frame only every half second. If Windows drops that
@@ -546,18 +490,15 @@ public static class Probe {
     $probe = $null
     Wait-Log '): detached' 10 3
 
-    $script:details += "Just after the third detach: $(Get-Threads)"
-    $script:details += "Handles just after the third detach: $(Get-HandleTypes)"
+    $script:process.Refresh()
+    $afterThird = $script:process.HandleCount
+    $typesAfterThird = Get-HandleTypes
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
-    Add-Measure 'Idle after threads' "$($script:threads['Idle after']), $($script:threads['Idle']) at idle"
-    Add-Measure 'Idle after handles' "$($script:handles['Idle after']), $($script:handles['Idle']) at idle"
-    Start-Sleep -Seconds $LongIdle
-    $script:details += "$LongIdle s after the idle after sample: $(Get-Threads)"
     # The stopped trace's writer has long finished its file by now.
     Measure-Trace
 
-    # More attach and detach cycles, to tell what each one leaves behind
-    # from what only the first ones set up.
+    # The handle check: more attach and detach cycles, then the count after
+    # a wait, against the count just after the third detach.
     for ($cycle = 4; $cycle -lt 4 + $MoreCycles; $cycle++) {
         $reads = Measure-Log 'reading its values'
         $probe = Start-Process -FilePath $probeExe -ArgumentList "`"$ProbeTitle`"" -PassThru
@@ -569,11 +510,16 @@ public static class Probe {
         $probe.WaitForExit()
         $probe = $null
         Wait-Log '): detached' 10 $cycle
-        $script:details += "Just after detach $($cycle): $(Get-Threads)"
     }
-    Start-Sleep -Seconds $LongIdle
-    $script:details += "$LongIdle s after detach $(3 + $MoreCycles): $(Get-Threads)"
-    $script:details += "Handles then: $(Get-HandleTypes)"
+    Start-Sleep -Seconds $HandleWait
+    $script:process.Refresh()
+    $afterMore = $script:process.HandleCount
+    $within = $afterMore -le $afterThird + $HandleGrowthLimit
+    Add-Row "Handles $HandleWait s after $MoreCycles more detaches" "$afterMore, $afterThird after the third detach" "$($afterThird + $HandleGrowthLimit)" $within
+    if (-not $within) {
+        $script:details += "Handles by type after the third detach: $typesAfterThird"
+        $script:details += "Handles by type $HandleWait s after the last detach: $(Get-HandleTypes)"
+    }
 }
 catch {
     $Failures.Add($_.Exception.Message)

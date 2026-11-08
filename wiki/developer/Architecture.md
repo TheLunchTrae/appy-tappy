@@ -477,12 +477,7 @@ automation on each. It runs the runtime through five phases:
 5. **Idle after.** The trace has stopped, the probe has exited, and the
    runtime has detached. The trace's buffer is freed once its last handle
    and its writer end, so a handle left behind shows here as memory over the
-   target. The report sets this phase's thread and handle counts beside the
-   first idle phase's, and counts them once more two minutes later, so a
-   thread that Windows ends on its own tells apart from one left behind.
-   Each phase's details count the threads by the module each one started
-   in: the runtime's own executable for the threads it spawns, `ntdll.dll`
-   for Windows' thread pool, and a graphics DLL for a driver's threads.
+   target.
 
 Before the last phase, a settle check measures nothing but has to pass. The
 probe starts once more with its values dim gray and repaints the strip for
@@ -492,6 +487,17 @@ nothing more. The check fails if the runtime never reads that change, as
 happens if Windows drops a frame drawn inside the interval. It also fails if
 the change comes less than two seconds after the runtime attached, since it
 would then test nothing.
+
+After the last phase, a handle check also measures nothing but has to pass.
+The probe opens and closes three more times, the runtime attaching and
+detaching each time, and 30 seconds after the last detach the runtime may hold
+at most 8 more handles than it did just after the third detach. The first
+attaches load libraries and set up thread pools once, which is why the check
+starts from the third detach. A capture that left its handles behind added
+about 10 a cycle, while a clean one adds one or two, mostly idle thread pool
+workers that Windows ends later; the script's comment gives the numbers. When
+the check fails, the details count the runtime's handles by type, such as
+Event or Thread, at both points, to show what grew.
 
 It checks these against their targets:
 
