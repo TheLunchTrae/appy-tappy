@@ -190,14 +190,6 @@ pub(crate) fn compile(
             automations: Vec::new(),
             clicks: ClickTargets::default(),
         });
-        let clicks = rule.actions().iter().filter_map(|action| match action {
-            Action::Click(click) => Some(click),
-            _ => None,
-        });
-        if let Err(reason) = draft.clicks.add(clicks, &readable, &mut click_picture) {
-            problem(&reason);
-            continue;
-        }
         let ready = built.entry((app_id, value.id.as_str())).or_insert_with(|| {
             let check = saved::build(&value.screen, &app.references, |name| picture(app_id, name))
                 .map_err(|error| format!("{} of {}: {error}", value.name, app.name))?;
@@ -207,6 +199,16 @@ pub(crate) fn compile(
         });
         if let Err(reason) = ready {
             problem(reason);
+            continue;
+        }
+        // Added only once the rest of the automation is known to run, so a
+        // rejected one leaves no click targets behind.
+        let clicks = rule.actions().iter().filter_map(|action| match action {
+            Action::Click(click) => Some(click),
+            _ => None,
+        });
+        if let Err(reason) = draft.clicks.add(clicks, &readable, &mut click_picture) {
+            problem(&reason);
             continue;
         }
         draft.rules.push(rule);
