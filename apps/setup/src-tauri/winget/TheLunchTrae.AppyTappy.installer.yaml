@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+# A template that `mise run winget:manifest` fills in
+# (wiki/developer/Installer.md#winget).
+PackageIdentifier: TheLunchTrae.AppyTappy
+PackageVersion: {{version}}
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/TheLunchTrae/appy-tappy/releases/download/v{{version}}/AppyTappy_{{version}}_x64-setup.exe
+    InstallerSha256: {{sha256}}
+ManifestType: installer
+ManifestVersion: 1.10.0

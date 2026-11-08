@@ -41,7 +41,7 @@ const GONE: &str = "AppyTappy Setup is closing.";
 
 /// Runs `work` on the owner thread, with the setup app's state, and awaits
 /// what it returns.
-async fn ask<T: Send + 'static>(
+pub(crate) async fn ask<T: Send + 'static>(
     app: &AppHandle,
     work: impl FnOnce(&mut Owner<HostSystem>) -> T + Send + 'static,
 ) -> Result<T, String> {

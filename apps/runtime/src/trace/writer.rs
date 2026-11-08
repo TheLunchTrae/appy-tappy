@@ -482,7 +482,7 @@ fn dropped_row(record: &Record, started: Instant) -> String {
 /// started.
 fn row(record: &Record, started: Instant, names: &BTreeMap<SessionId, Arc<AppPlan>>) -> String {
     let plan = record.session.and_then(|session| names.get(&session));
-    let app = plan.map_or("", |plan| plan.name.as_str());
+    let app = plan.map_or("", |plan| plan.labels.name.as_str());
     let item = plan
         .zip(record.item)
         .and_then(|(plan, item)| item_name(plan, record.what, item))
@@ -523,10 +523,10 @@ fn row(record: &Record, started: Instant, names: &BTreeMap<SessionId, Arc<AppPla
 fn item_name(plan: &AppPlan, what: What, item: usize) -> Option<&str> {
     match what {
         What::Read | What::Changed | What::Received => {
-            plan.values.get(item).map(|value| value.name.as_str())
+            plan.labels.values.get(item).map(String::as_str)
         },
         What::Fired | What::Held | What::Released | What::Queued | What::Started | What::Done => {
-            plan.automations.get(item).map(String::as_str)
+            plan.labels.automations.get(item).map(String::as_str)
         },
         What::Handled | What::Snapshot | What::Reading | What::Stopped | What::Reloaded => None,
     }

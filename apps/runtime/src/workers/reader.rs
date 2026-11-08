@@ -117,6 +117,18 @@ pub(crate) enum Reading {
         /// What is wrong, as a sentence fragment for the log.
         problem: String,
     },
+    /// Something keeps one value from being read. The log puts the value's
+    /// newest name before `problem`, so a renamed value shows its new name.
+    /// Each is sent once until a different one, or a good read, replaces it.
+    ValueProblem {
+        /// The session.
+        session: SessionId,
+        /// The value's position among the application's values.
+        value: usize,
+        /// What is wrong, as a sentence fragment that follows the value's
+        /// name.
+        problem: String,
+    },
     /// The values read so far can no longer be seen: the window closed, was
     /// minimized or hidden, took a size at which they were not drawn, or
     /// gave way to a window that fits better, no window fits any more, such
@@ -263,7 +275,13 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
 ) {
     // The window size whose values the capture reads, until a frame shows
     // the window has another. A plan always has a value to read.
-    let Some(mut size) = job.plan.values.first().map(|value| value.check.window_size) else {
+    let Some(mut size) = job
+        .plan
+        .runs
+        .values
+        .first()
+        .map(|value| value.check.window_size)
+    else {
         return;
     };
     // The last problem sent, so each is sent once until it changes.
@@ -288,7 +306,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
         let window = match find_window(system, job) {
             Ok(Found::Shown(window)) => window,
             Ok(Found::Minimized) => {
-                if !report(&mut reported, minimized(job)) || !wait() {
+                if !report(&mut reported, minimized()) || !wait() {
                     return;
                 }
                 continue;
@@ -300,7 +318,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 continue;
             },
             Ok(Found::Elsewhere) => {
-                if !report(&mut reported, elsewhere(job)) || !wait() {
+                if !report(&mut reported, elsewhere()) || !wait() {
                     return;
                 }
                 continue;
@@ -463,7 +481,7 @@ enum Found {
 /// it is the session's process's.
 fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Found> {
     let processes = system.processes()?;
-    let best = best_windows(&job.plan.window, processes, system.windows()?);
+    let best = best_windows(&job.plan.runs.window, processes, system.windows()?);
     let shown = |handle| shows(system.window_place(handle));
     Ok(match read_window(&best, Some(job.process), shown) {
         Some((window, _)) if window.process != job.process => Found::Elsewhere,
@@ -473,23 +491,18 @@ fn find_window<S: System>(system: &S, job: &Job) -> io::Result<Found> {
     })
 }
 
-fn elsewhere(job: &Job) -> String {
-    format!(
-        "the window that fits {}'s window best belongs to another process, so it is read once \
-         the session follows that process",
-        job.plan.name
-    )
+fn elsewhere() -> String {
+    "the window that fits best belongs to another process, so it is read once the session \
+     follows that process"
+        .to_owned()
 }
 
-fn minimized(job: &Job) -> String {
-    format!("{}'s window is minimized or hidden", job.plan.name)
+fn minimized() -> String {
+    "its window is minimized or hidden".to_owned()
 }
 
 fn no_window(job: &Job) -> String {
-    format!(
-        "no window of {} fits {}'s window yet",
-        job.executable, job.plan.name
-    )
+    format!("no window of {} fits yet", job.executable)
 }
 
 /// Why the reader should stop capturing `window`, a window of the session's
@@ -497,10 +510,10 @@ fn no_window(job: &Job) -> String {
 /// as well as any window. A check that fails keeps the capture.
 fn moved_on<S: System>(system: &S, job: &Job, window: u64) -> Option<String> {
     if !shows(system.window_place(window)) {
-        return Some(minimized(job));
+        return Some(minimized());
     }
     let processes = system.processes().ok()?;
-    let best = best_windows(&job.plan.window, processes, system.windows().ok()?);
+    let best = best_windows(&job.plan.runs.window, processes, system.windows().ok()?);
     if best.is_empty() {
         return Some(no_window(job));
     }
@@ -511,12 +524,9 @@ fn moved_on<S: System>(system: &S, job: &Job, window: u64) -> Option<String> {
         return None;
     }
     Some(if best.iter().any(|entry| entry.process == job.process) {
-        format!(
-            "another window fits {}'s window better, so it is read instead",
-            job.plan.name
-        )
+        "another window fits better, so it is read instead".to_owned()
     } else {
-        elsewhere(job)
+        elsewhere()
     })
 }
 
@@ -563,6 +573,7 @@ impl<E: From<Reading>> FrameReader<E> {
     fn new(job: &Job, size: Size, events: Sender<E>, control: Sender<Control>) -> Option<Self> {
         let drawn: Vec<Option<Region>> = job
             .plan
+            .runs
             .values
             .iter()
             .map(|value| (value.check.window_size == size).then_some(value.check.region))
@@ -572,7 +583,7 @@ impl<E: From<Reading>> FrameReader<E> {
             .into_iter()
             .map(|region| region.and_then(|region| within(region, bounds)))
             .collect();
-        let count = job.plan.values.len();
+        let count = job.plan.runs.values.len();
         Some(Self {
             session: job.session,
             plan: Arc::clone(&job.plan),
@@ -632,6 +643,7 @@ impl<E: From<Reading>> FrameReader<E> {
         }
         let other_values = self
             .plan
+            .runs
             .values
             .iter()
             .any(|value| value.check.window_size == window_size);
@@ -646,7 +658,7 @@ impl<E: From<Reading>> FrameReader<E> {
         // The clock is read only when each reading is traced.
         let timed = self.trace.wants(TraceCategory::Readings);
         let session = self.session;
-        for position in 0..self.plan.values.len() {
+        for position in 0..self.plan.runs.values.len() {
             let started = timed.then(Instant::now);
             let read = self.read(position, window_size, frame.as_ref());
             if let (Some(started), Some(Ok(value)), Some(frame)) = (started, &read, &frame) {
@@ -698,7 +710,7 @@ impl<E: From<Reading>> FrameReader<E> {
         window_size: Size,
         frame: Option<&Frame<'_>>,
     ) -> Option<Result<Value, String>> {
-        let value = self.plan.values.get(position)?;
+        let value = self.plan.runs.values.get(position)?;
         // A frame of another size reaches here only when no value was drawn
         // at it. Values drawn at another size than this reader's are read
         // by the reader for that size, so they wait quietly.
@@ -706,9 +718,9 @@ impl<E: From<Reading>> FrameReader<E> {
             // The message leaves out the window's size, so dragging a
             // window's corner logs it once rather than once for each size.
             return Some(Err(format!(
-                "{} was drawn when the window was {}, and the window is now another size; \
-                 resize the window or draw the value again",
-                value.name, value.check.window_size
+                "was drawn when the window was {}, and the window is now another size; resize \
+                 the window or draw the value again",
+                value.check.window_size
             )));
         }
         let region = (*self.regions.get(position)?)?;
@@ -718,7 +730,7 @@ impl<E: From<Reading>> FrameReader<E> {
                 .check
                 .check
                 .read(&image)
-                .map_err(|error| format!("{} cannot be read: {error}", value.name)),
+                .map_err(|error| format!("cannot be read: {error}")),
         )
     }
 
@@ -730,7 +742,7 @@ impl<E: From<Reading>> FrameReader<E> {
         }
         let (Some(last), Some(value), Some(frame)) = (
             self.last.get_mut(position),
-            self.plan.values.get(position),
+            self.plan.runs.values.get(position),
             frame,
         ) else {
             return false;
@@ -768,7 +780,15 @@ impl<E: From<Reading>> FrameReader<E> {
         };
         if slot.as_ref() != Some(&problem) {
             *slot = Some(problem.clone());
-            self.problem(problem);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a failed send means the owner stopped this session"
+            )]
+            let _ = self.events.send(E::from(Reading::ValueProblem {
+                session: self.session,
+                value: position,
+                problem,
+            }));
         }
     }
 
@@ -850,19 +870,17 @@ fn within(region: Region, bounds: Region) -> Option<Region> {
 mod tests {
     use std::sync::mpsc::{SyncSender, TryRecvError};
 
-    use appytappy_config::anti_cheat::{ProcessAccessPermit, ProcessId};
+    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::rule::Rule;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{Check, ColorMatch};
     use appytappy_sources::screen::digits::DigitReader;
     use appytappy_sources::screen::saved::SavedCheck;
     use appytappy_sources::screen::{FrameHandler, Image};
-    use appytappy_sources::system::{
-        AccessAnswer, Bounds, NoProcess, ProcessEntry, Rgb, WindowEntry, WindowPlace,
-    };
+    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
 
     use super::*;
-    use crate::plan::ValuePlan;
+    use crate::plan::{Labels, Runs, ValuePlan};
 
     const RED: Rgb = Rgb {
         red: 255,
@@ -889,7 +907,6 @@ mod tests {
     fn drawn_at(name: &str, x: u32, y: u32, window_size: Size) -> ValuePlan {
         ValuePlan {
             signal: SignalName::new(name).expect("valid"),
-            name: name.to_owned(),
             check: SavedCheck {
                 window_size,
                 region: Region::new(x, y, 2, 2).expect("not empty"),
@@ -903,21 +920,29 @@ mod tests {
 
     fn plan(values: Vec<ValuePlan>) -> Arc<AppPlan> {
         Arc::new(AppPlan {
-            name: "Example App".to_owned(),
-            window: WindowMatch {
-                title: Pattern::new("Main*"),
-                class: Pattern::new("*"),
-                executable: Pattern::new("Example.exe"),
-                must_match: MustMatch {
-                    title: true,
-                    class: true,
-                },
-                fallback: false,
+            labels: Labels {
+                name: "Example App".to_owned(),
+                automations: Vec::new(),
+                values: values
+                    .iter()
+                    .map(|value| value.signal.to_string())
+                    .collect(),
+                checked: None,
             },
-            values,
-            rules: Arc::<[Rule]>::from(Vec::new()),
-            automations: Vec::new(),
-            checked: None,
+            runs: Runs {
+                window: WindowMatch {
+                    title: Pattern::new("Main*"),
+                    class: Pattern::new("*"),
+                    executable: Pattern::new("Example.exe"),
+                    must_match: MustMatch {
+                        title: true,
+                        class: true,
+                    },
+                    fallback: false,
+                },
+                values,
+                rules: Arc::<[Rule]>::from(Vec::new()),
+            },
         })
     }
 
@@ -965,7 +990,9 @@ mod tests {
             .try_iter()
             .filter_map(|reading| match reading {
                 Reading::Sample { signal, value, .. } => Some((signal.to_string(), value)),
-                Reading::Problem { .. } | Reading::Unseen { .. } => None,
+                Reading::Problem { .. } | Reading::ValueProblem { .. } | Reading::Unseen { .. } => {
+                    None
+                },
             })
             .collect()
     }
@@ -975,6 +1002,9 @@ mod tests {
             .try_iter()
             .filter_map(|reading| match reading {
                 Reading::Problem { problem, .. } => Some(problem),
+                Reading::ValueProblem { value, problem, .. } => {
+                    Some(format!("value {value} {problem}"))
+                },
                 Reading::Sample { .. } | Reading::Unseen { .. } => None,
             })
             .collect()
@@ -1071,8 +1101,8 @@ mod tests {
         assert_eq!(
             problems(&readings),
             [
-                "icon was drawn when the window was 800x600, and the window is now another size; \
-             resize the window or draw the value again"
+                "value 0 was drawn when the window was 800x600, and the window is now another \
+                 size; resize the window or draw the value again"
             ]
         );
         assert_eq!(
@@ -1091,10 +1121,11 @@ mod tests {
                 Reading::Unseen {
                     session: SessionId(3)
                 },
-                Reading::Problem {
+                Reading::ValueProblem {
                     session: SessionId(3),
-                    problem: "icon was drawn when the window was 800x600, and the window is \
-                              now another size; resize the window or draw the value again"
+                    value: 0,
+                    problem: "was drawn when the window was 800x600, and the window is now \
+                              another size; resize the window or draw the value again"
                         .to_owned()
                 }
             ],
@@ -1153,7 +1184,7 @@ mod tests {
         frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(
             problems(&readings),
-            ["count cannot be read: the region's number could not be read"]
+            ["value 0 cannot be read: the region's number could not be read"]
         );
     }
 
@@ -1415,8 +1446,6 @@ mod tests {
     }
 
     impl System for FakeSystem {
-        type Process = NoProcess;
-
         fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
             Ok(self.processes.clone())
         }
@@ -1453,14 +1482,6 @@ mod tests {
             &self,
             _process: appytappy_config::anti_cheat::ProcessId,
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn open(&self, _: &ProcessAccessPermit) -> io::Result<NoProcess> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
@@ -1541,7 +1562,7 @@ mod tests {
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Problem {
                 session: SessionId(3),
-                problem: "no window of Example.exe fits Example App's window yet".to_owned()
+                problem: "no window of Example.exe fits yet".to_owned()
             })
         );
         assert!(!desk.asks_soon(), "it waits before looking again");
@@ -1668,9 +1689,10 @@ mod tests {
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Problem {
                 session: SessionId(3),
-                problem: "the window that fits Example App's window best belongs to another \
-                          process, so it is read once the session follows that process"
-                    .to_owned()
+                problem:
+                    "the window that fits best belongs to another process, so it is read once the \
+                          session follows that process"
+                        .to_owned()
             })
         );
         assert!(!desk.asks_soon(), "it waits before looking again");
@@ -1726,7 +1748,7 @@ mod tests {
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Problem {
                 session: SessionId(3),
-                problem: "Example App's window is minimized or hidden".to_owned()
+                problem: "its window is minimized or hidden".to_owned()
             })
         );
         assert!(!desk.asks_soon(), "it waits before looking again");
@@ -1761,8 +1783,6 @@ mod tests {
     }
 
     impl System for Still {
-        type Process = NoProcess;
-
         fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
             Ok([42, 43]
                 .into_iter()
@@ -1795,14 +1815,6 @@ mod tests {
             }))
         }
 
-        fn ask_memory_access(&self, _: &ProcessEntry, _: &[&str]) -> io::Result<AccessAnswer> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn open(&self, _: &ProcessAccessPermit) -> io::Result<NoProcess> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
         fn executable_build(
             &self,
             _process: appytappy_config::anti_cheat::ProcessId,
@@ -1822,7 +1834,7 @@ mod tests {
             |window, windows, minimized| moved_on(&Still { windows, minimized }, &icon, window);
         assert_eq!(
             check(4, Ok(desktop()), vec![4]).as_deref(),
-            Some("Example App's window is minimized or hidden")
+            Some("its window is minimized or hidden")
         );
         assert_eq!(check(4, Ok(desktop()), Vec::new()), None, "4 fits best");
         let mut tied = desktop();
@@ -1830,7 +1842,7 @@ mod tests {
         assert_eq!(check(5, Ok(tied), Vec::new()), None, "5 fits as well as 4");
         assert_eq!(
             check(2, Ok(desktop()), Vec::new()).as_deref(),
-            Some("another window fits Example App's window better, so it is read instead"),
+            Some("another window fits better, so it is read instead"),
             "a launcher's window gives way to the main window"
         );
         assert_eq!(
@@ -1840,7 +1852,7 @@ mod tests {
         );
         assert_eq!(
             check(4, Ok(vec![window(1, 7, "Main window", true)]), Vec::new()).as_deref(),
-            Some("no window of Example.exe fits Example App's window yet"),
+            Some("no window of Example.exe fits yet"),
             "every window that fits closed"
         );
         let copies = || {
@@ -1857,8 +1869,8 @@ mod tests {
         assert_eq!(
             check(4, Ok(vec![window(6, 42, "Main window", true)]), Vec::new()).as_deref(),
             Some(
-                "the window that fits Example App's window best belongs to another process, so \
-                 it is read once the session follows that process"
+                "the window that fits best belongs to another process, so it is read once the \
+                 session follows that process"
             ),
             "only another copy's window fits"
         );
@@ -1926,9 +1938,7 @@ mod tests {
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Problem {
                 session: SessionId(3),
-                problem: "another window fits Example App's window better, so it is read \
-                          instead"
-                    .to_owned()
+                problem: "another window fits better, so it is read instead".to_owned()
             })
         );
         assert_eq!(

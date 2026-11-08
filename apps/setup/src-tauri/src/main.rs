@@ -18,6 +18,7 @@ mod recording;
 mod selection;
 mod settings;
 mod stores;
+mod updates;
 mod window_list;
 
 use std::env;
@@ -75,6 +76,7 @@ fn main() -> ExitCode {
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Bridge(sender.clone()))
+        .setup(|app| Ok(updates::set_up(app)?))
         .on_window_event(overlay::window::on_event)
         .invoke_handler(tauri::generate_handler![
             commands::list_windows,
@@ -119,6 +121,9 @@ fn main() -> ExitCode {
             commands::set_starts_with_windows,
             commands::trace_folder,
             commands::open_trace_folder,
+            updates::check_for_update,
+            updates::download_update,
+            updates::install_update,
         ])
         .build(tauri::generate_context!())
         .map_or(1, |app| app.run_return(|_app, _event| {}));

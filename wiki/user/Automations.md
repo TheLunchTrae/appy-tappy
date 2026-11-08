@@ -44,9 +44,11 @@ On the Automations page, select **New automation**. To change one, select
 
 Saving, deleting, or switching an automation takes effect at once, and so
 does any other change that affects an application's automations, such as
-changing its anti-cheat setting. Such a change starts all of that
+changing its anti-cheat setting. A change to what runs, such as an
+automation's condition or actions, or a value's region, starts all of that
 application's automations over: they undo what they changed first, and one
-whose condition still holds runs again.
+whose condition still holds runs again. Renaming an application, a value or an
+automation starts nothing over.
 
 ## Actions
 

@@ -95,8 +95,18 @@ select {
   max-width: none;
 }
 
-.nav .confirm-none {
+.nav .confirm-none,
+.update {
   margin-left: auto;
+}
+
+/* The update notice keeps to one line at the nav's end. */
+.update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .tab[aria-current='page'] {

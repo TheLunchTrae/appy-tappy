@@ -296,6 +296,11 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             {
                 break;
             }
+            // A rename starts no reader over, so the trace learns the new
+            // names here.
+            for (id, plan) in model.sessions() {
+                crew.tracing.name(id, plan);
+            }
             carry(saved.orders, &mut crew, log);
             crew.trace.record(What::Reloaded, |record| Record {
                 took: started.map(|started| record.at.saturating_duration_since(started)),
@@ -801,8 +806,16 @@ fn interval_line(interval: ReadInterval) -> String {
 
 /// The log line that says what the runtime runs.
 fn loaded_line(plan: &plan::Plan) -> String {
-    let automations: usize = plan.apps.values().map(|app| app.automations.len()).sum();
-    let names: Vec<&str> = plan.apps.values().map(|app| app.name.as_str()).collect();
+    let automations: usize = plan
+        .apps
+        .values()
+        .map(|app| app.labels.automations.len())
+        .sum();
+    let names: Vec<&str> = plan
+        .apps
+        .values()
+        .map(|app| app.labels.name.as_str())
+        .collect();
     match automations {
         0 => "no saved automation can run".to_owned(),
         1 => format!("1 automation runs for {}", names.join(", ")),
@@ -821,7 +834,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
         match order {
             Order::Read(job) => {
                 let id = job.session;
-                let name = job.plan.name.clone();
+                let name = job.plan.labels.name.clone();
                 crew.tracing.name(id, &job.plan);
                 match Reader::start(Arc::clone(&crew.system), job, crew.events.clone()) {
                     Ok(reader) => {
@@ -880,7 +893,7 @@ fn record_rule(trace: &mut Trace, what: What, (session, rule): act::Owner, cause
 /// The log line for an order, if it gets one.
 fn order_line(order: &Order) -> Option<String> {
     match order {
-        Order::Read(job) => Some(format!("{}: reading its values", job.plan.name)),
+        Order::Read(job) => Some(format!("{}: reading its values", job.plan.labels.name)),
         Order::StopReading(..) | Order::Held(..) | Order::Act(act::Job::Trace(_)) => None,
         Order::Act(act::Job::Run { automation, .. }) => Some(format!("{automation}: runs")),
         Order::Act(act::Job::Undo { automation, .. }) => Some(format!("{automation}: undone")),
@@ -945,6 +958,17 @@ fn handle(model: &mut Model, log: &mut Log, event: Event) -> Step {
         Event::Reading(Reading::Problem { session, problem }) => {
             if let Some(name) = model.app_name(session) {
                 note(log, &format!("{name}: {problem}"));
+            }
+            Step::Carry(Vec::new())
+        },
+        Event::Reading(Reading::ValueProblem {
+            session,
+            value,
+            problem,
+        }) => {
+            if let Some(plan) = model.session_plan(session) {
+                let (app, value) = (&plan.labels.name, plan.value_name(value));
+                note(log, &format!("{app}: {value} {problem}"));
             }
             Step::Carry(Vec::new())
         },
@@ -1024,7 +1048,7 @@ fn describe(model: &Model, change: &Change) -> Option<String> {
         Change::Exited { app, process } => format!("{app} exited (process {process}): detached"),
         Change::Identified { app, build } => {
             let plan = model.plan(app)?;
-            return build_change(&plan.name, plan.checked.as_ref(), build);
+            return build_change(&plan.labels.name, plan.labels.checked.as_ref(), build);
         },
         Change::ScanFailed(problem) => format!("process snapshots fail: {problem}"),
         Change::ScanRestored => "process snapshots work again".to_owned(),
@@ -1232,7 +1256,7 @@ mod tests {
         let checked = build(Some("1.4.2.0"), 1_024);
         let mut model = Model::default();
         let mut plan = app_plan("Example App", &["Pause music"]);
-        Arc::get_mut(&mut plan).expect("unshared").checked = Some(checked.clone());
+        Arc::get_mut(&mut plan).expect("unshared").labels.checked = Some(checked.clone());
         model.replan(BTreeMap::from([
             ("example".to_owned(), plan),
             ("unchecked".to_owned(), app_plan("Unchecked", &["Mute"])),
@@ -1281,24 +1305,77 @@ mod tests {
         assert_eq!(line("gone", Ok(checked)), None);
     }
 
+    #[test]
+    fn a_value_s_problem_is_logged_with_its_newest_name() {
+        let folder = env::temp_dir().join(format!("appytappy-value-names-{}", process::id()));
+        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let named = |app: &str, value: &str| {
+            let mut plan = app_plan(app, &["Pause"]);
+            Arc::get_mut(&mut plan).expect("unshared").labels.values = vec![value.to_owned()];
+            BTreeMap::from([("example".to_owned(), plan)])
+        };
+        let mut model = Model::default();
+        model.replan(named("Example App", "Progress"));
+        let started = Event::from(Change::Started {
+            app: "example".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        let problem = || {
+            Event::from(Reading::ValueProblem {
+                session: SessionId(0),
+                value: 0,
+                problem: "cannot be read: too dark".to_owned(),
+            })
+        };
+        handle(&mut model, &mut log, started);
+        handle(&mut model, &mut log, problem());
+        assert_eq!(model.replan(named("Renamed", "Health")), []);
+        handle(&mut model, &mut log, problem());
+        let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
+        fs::remove_dir_all(&folder).expect("clean up");
+        let problems: Vec<&str> = written
+            .lines()
+            .filter(|line| line.contains("too dark"))
+            .collect();
+        assert_eq!(problems.len(), 2, "{written:?}");
+        assert!(
+            problems.first().is_some_and(
+                |line| line.ends_with("Example App: Progress cannot be read: too dark")
+            ),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .get(1)
+                .is_some_and(|line| line.ends_with("Renamed: Health cannot be read: too dark")),
+            "{problems:?}"
+        );
+    }
+
     /// An app plan named `name` whose automations are only names.
     fn app_plan(name: &str, automations: &[&str]) -> Arc<plan::AppPlan> {
         Arc::new(plan::AppPlan {
-            name: name.to_owned(),
-            window: WindowMatch {
-                title: Pattern::new("*"),
-                class: Pattern::new("*"),
-                executable: Pattern::new("Example.exe"),
-                must_match: MustMatch {
-                    title: true,
-                    class: true,
-                },
-                fallback: false,
+            labels: plan::Labels {
+                name: name.to_owned(),
+                automations: automations.iter().map(|&name| name.to_owned()).collect(),
+                values: Vec::new(),
+                checked: None,
             },
-            values: Vec::new(),
-            rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
-            automations: automations.iter().map(|&name| name.to_owned()).collect(),
-            checked: None,
+            runs: plan::Runs {
+                window: WindowMatch {
+                    title: Pattern::new("*"),
+                    class: Pattern::new("*"),
+                    executable: Pattern::new("Example.exe"),
+                    must_match: MustMatch {
+                        title: true,
+                        class: true,
+                    },
+                    fallback: false,
+                },
+                values: Vec::new(),
+                rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
+            },
         })
     }
 
