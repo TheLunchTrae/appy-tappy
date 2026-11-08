@@ -235,6 +235,21 @@ pub fn best_window(
     processes: Vec<ProcessEntry>,
     windows: Vec<WindowEntry>,
 ) -> Option<u64> {
+    best_windows(window, processes, windows)
+        .first()
+        .map(|entry| entry.handle)
+}
+
+/// The visible windows that `window` fits best, all with the same fit, in
+/// the order they are listed; [`best_window`] takes the first.
+///
+/// Only windows of a process whose executable `window` fits count.
+#[must_use]
+pub fn best_windows(
+    window: &WindowMatch,
+    processes: Vec<ProcessEntry>,
+    windows: Vec<WindowEntry>,
+) -> Vec<WindowEntry> {
     let executables: BTreeMap<_, _> = processes
         .into_iter()
         .filter(|process| window.executable.matches(&process.executable))
@@ -253,10 +268,19 @@ pub fn best_window(
         class: &entry.class,
         executable,
     }));
-    ranked
-        .first()
-        .and_then(|&(position, _)| candidates.get(position))
-        .map(|(entry, _)| entry.handle)
+    let best = ranked.first().map(|&(_, fit)| fit);
+    // Within a fit, `rank` keeps the listed order.
+    let tied: Vec<usize> = ranked
+        .into_iter()
+        .take_while(|&(_, fit)| Some(fit) == best)
+        .map(|(position, _)| position)
+        .collect();
+    candidates
+        .into_iter()
+        .enumerate()
+        .filter(|(position, _)| tied.binary_search(position).is_ok())
+        .map(|(_, (entry, _))| entry)
+        .collect()
 }
 
 #[cfg(test)]
@@ -311,6 +335,21 @@ mod tests {
                 window(7, 1, "Example App", true),
             ]),
             Some(6)
+        );
+        let tied = best_windows(
+            &example,
+            processes(),
+            vec![
+                window(5, 1, "Launcher", true),
+                window(6, 1, "Example App", true),
+                window(7, 2, "Example App", true),
+                window(8, 1, "Example App", true),
+            ],
+        );
+        assert_eq!(
+            tied.iter().map(|entry| entry.handle).collect::<Vec<_>>(),
+            [6, 8],
+            "every window with the best fit, in listed order"
         );
     }
 
