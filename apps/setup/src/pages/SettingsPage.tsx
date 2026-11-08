@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { errorText } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
@@ -12,7 +12,7 @@ import {
   useSettings,
   withWait,
 } from '../lib/settings.ts';
-import { accelerator, shortcutLabel } from '../lib/shortcut.ts';
+import { useShortcutChoice } from '../lib/useShortcutChoice.ts';
 
 interface Props {
   /** Why the saved settings cannot be read, when the page shows the defaults. */
@@ -94,53 +94,31 @@ function StartWithWindows() {
 }
 
 /** The screenshot shortcut, and a button that records a new one from the next key press. */
-function ScreenshotShortcut({ onError }: { readonly onError: (error: string | null) => void }) {
-  const { settings, change } = useSettings();
-  const [changing, setChanging] = useState(false);
-  const onKey = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (!changing) {
-      return;
-    }
-    event.preventDefault();
-    if (event.code === 'Escape') {
-      setChanging(false);
-      return;
-    }
-    const next = accelerator(event);
-    if (next !== null) {
-      setChanging(false);
-      change((current) => ({ ...current, screenshotShortcut: next })).then(
-        (problem) => {
-          onError(problem);
-        },
-        (failure: unknown) => {
-          onError(errorText(failure));
-        },
-      );
-    }
-  };
+function ScreenshotShortcut() {
+  const { label, choosing, saveError, toggle, cancel, onKeyDown } = useShortcutChoice();
   return (
     <div className="set-row">
       <div className="what">
         <span>Screenshot shortcut</span>
         <span className="note">Takes a screenshot of the picked window while you make a value or a reference.</span>
         <span className="note" role="status">
-          {changing ? 'Press the new shortcut, or Esc to keep this one.' : null}
+          {choosing ? 'Press the new shortcut, or Esc to keep this one.' : null}
         </span>
+        {saveError === null ? null : (
+          <span className="warn" role="alert">
+            {saveError}
+          </span>
+        )}
       </div>
-      <span className="chip">{shortcutLabel(settings.screenshotShortcut)}</span>
+      <span className="chip">{label}</span>
       <button
         type="button"
         className="btn small"
         aria-label="Change screenshot shortcut"
-        aria-pressed={changing}
-        onClick={() => {
-          setChanging((current) => !current);
-        }}
-        onBlur={() => {
-          setChanging(false);
-        }}
-        onKeyDown={onKey}
+        aria-pressed={choosing}
+        onClick={toggle}
+        onBlur={cancel}
+        onKeyDown={onKeyDown}
       >
         Change
       </button>
@@ -237,7 +215,6 @@ function Wait({ which, label, note }: WaitProps) {
 
 /** The settings that apply to AppyTappy as a whole. Each change is saved as it is made. */
 export function SettingsPage({ problem }: Props) {
-  const [generalError, setGeneralError] = useState<string | null>(null);
   return (
     <main className="page">
       <div className="page-head">
@@ -253,12 +230,7 @@ export function SettingsPage({ problem }: Props) {
         <section className="card" aria-labelledby="settings-general">
           <h2 id="settings-general">General</h2>
           <StartWithWindows />
-          <ScreenshotShortcut onError={setGeneralError} />
-          {generalError === null ? null : (
-            <p className="warn" role="alert">
-              {generalError}
-            </p>
-          )}
+          <ScreenshotShortcut />
         </section>
         <section className="card" aria-labelledby="settings-reading">
           <h2 id="settings-reading">Reading</h2>

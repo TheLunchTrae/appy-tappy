@@ -36,6 +36,7 @@ impl<H: Host> Owner<H> {
         clippy::unused_self,
         reason = "a command runs on the owner, which keeps the registry's reads and writes in order"
     )]
+    #[mutants::skip] // Reads the registry, checked by hand on Windows.
     pub(crate) fn starts_with_windows(&self) -> Result<bool, String> {
         settings::starts_with_windows()
     }
@@ -45,7 +46,51 @@ impl<H: Host> Owner<H> {
         clippy::unused_self,
         reason = "a command runs on the owner, which keeps the registry's reads and writes in order"
     )]
+    #[mutants::skip] // Writes the registry, checked by hand on Windows.
     pub(crate) fn set_starts_with_windows(&self, on: bool) -> Result<(), String> {
         settings::set_starts_with_windows(on)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile};
+
+    use crate::owner::test_support::{harness_with, scratch_store};
+
+    #[test]
+    fn a_settings_save_that_worked_tells_the_runtime() {
+        let (stores, root) = scratch_store("owner-settings");
+        let mut harness = harness_with(false, Ok(stores));
+        let faster = SettingsFile {
+            read_interval: ReadIntervalDef {
+                fastest_ms: 8,
+                slowest_ms: 400,
+            },
+            ..SettingsFile::default()
+        };
+        assert_eq!(harness.ask(|owner| owner.save_settings(&faster)), Ok(()));
+        assert_eq!(harness.reloads(), 1, "the runtime reads the settings again");
+        assert_eq!(harness.ask(|owner| owner.settings()).settings, faster);
+
+        let backwards = SettingsFile {
+            read_interval: ReadIntervalDef {
+                fastest_ms: 500,
+                slowest_ms: 100,
+            },
+            ..SettingsFile::default()
+        };
+        assert!(
+            harness
+                .ask(|owner| owner.save_settings(&backwards))
+                .is_err()
+        );
+        assert_eq!(harness.reloads(), 0, "a save that failed tells no one");
+        assert_eq!(
+            harness.ask(|owner| owner.settings()).settings,
+            faster,
+            "the saved settings stay"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 }
