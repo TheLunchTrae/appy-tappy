@@ -17,8 +17,14 @@
 //! pool cannot follow the window to a new size. While it waits for frames,
 //! the thread checks the device every [`DEVICE_CHECK`], because a lost
 //! device may stop frames altogether rather than fail them.
+//!
+//! The thread joins the Windows Runtime's multithreaded apartment for its
+//! whole life and leaves it once every object is released, so the system
+//! cleans up what the thread's calls set up before the thread ends, instead
+//! of the thread borrowing the apartment another thread keeps open.
 
 use std::io;
+use std::marker::PhantomData;
 use std::ptr;
 use std::slice;
 use std::sync::Once;
@@ -50,6 +56,7 @@ use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
 };
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
+use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::core::{Interface, factory};
 
 use super::WindowsSystem;
@@ -192,6 +199,19 @@ fn run(
     ready: &SyncSender<io::Result<()>>,
 ) {
     let window = HWND(ptr::without_provenance_mut(window));
+    // Declared first, so it leaves the apartment after everything else here
+    // is dropped.
+    let _apartment = match Apartment::join() {
+        Ok(apartment) => apartment,
+        Err(error) => {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a send fails only when `start` stopped waiting, and nobody is left to tell"
+            )]
+            let _ = ready.send(Err(error.into()));
+            return;
+        },
+    };
     let mut capture = match Capturer::start(window, throttle, wake) {
         Ok(capture) => capture,
         Err(error) => {
@@ -210,6 +230,33 @@ fn run(
     let _ = ready.send(Ok(()));
     capture.handle_frames(&crop, &mut handler, events);
     capture.stop();
+}
+
+/// The capture thread's membership in the Windows Runtime's multithreaded
+/// apartment. It ends on drop, on the thread that joined, because the type
+/// cannot move between threads.
+struct Apartment(PhantomData<*const ()>);
+
+impl Apartment {
+    fn join() -> windows::core::Result<Self> {
+        #[expect(unsafe_code, reason = "a Windows Runtime call")]
+        // SAFETY: the call takes a flag; a success, including S_FALSE for a
+        // thread that already joined, is balanced by RoUninitialize on drop.
+        unsafe { RoInitialize(RO_INIT_MULTITHREADED) }?;
+        Ok(Self(PhantomData))
+    }
+}
+
+impl Drop for Apartment {
+    fn drop(&mut self) {
+        #[expect(unsafe_code, reason = "a Windows Runtime call")]
+        // SAFETY: this value's successful RoInitialize ran on this thread,
+        // since the type is not Send, and the capture's objects are released
+        // before it, because `run` declares it first.
+        unsafe {
+            RoUninitialize();
+        };
+    }
 }
 
 /// A frame held until the handler's wait ends.
@@ -581,9 +628,12 @@ impl Capturer {
         Ok(texture)
     }
 
-    /// Ends the capture and releases the system's objects. Closing the
-    /// Direct3D device's Windows Runtime wrapper releases the device it holds even if
-    /// the system still holds the wrapper.
+    /// Ends the capture and releases the system's objects. Direct3D destroys
+    /// released objects only when its context next flushes, so the context
+    /// drops what it holds and flushes once the frame pool and the staging
+    /// texture are let go. Closing the Direct3D device's Windows Runtime
+    /// wrapper releases the device it holds even if the system still holds
+    /// the wrapper.
     fn stop(self) {
         #[expect(
             clippy::let_underscore_must_use,
@@ -594,8 +644,20 @@ impl Capturer {
             self.item.RemoveClosed(self.closed),
             self.session.Close(),
             self.pool.Close(),
-            self.winrt_device.Close(),
         );
+        drop(self.staging);
+        #[expect(unsafe_code, reason = "Win32 calls")]
+        // SAFETY: both calls take no arguments; `context` is live, and this
+        // thread is the only one that uses it.
+        unsafe {
+            self.context.ClearState();
+            self.context.Flush();
+        };
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the session is ending, and a failure to close leaves nothing to retry"
+        )]
+        let _ = self.winrt_device.Close();
     }
 }
 

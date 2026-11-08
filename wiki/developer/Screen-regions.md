@@ -152,4 +152,7 @@ The capture asks Windows to drop the yellow border that marks a captured
 window. Windows versions without that option keep the border. Leave to drop
 it holds for the whole process, so only a process's first capture asks for
 it: asking on every capture left handles open after each detach. A capture
-that stops closes its Direct3D device too.
+that stops flushes its Direct3D device, which destroys what it released, and
+closes the device too. Each capture's thread joins the Windows Runtime's
+multithreaded apartment while it runs and leaves it once it has released
+everything, so Windows cleans up the thread's calls before the thread ends.
