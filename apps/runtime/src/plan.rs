@@ -47,7 +47,8 @@ pub(crate) struct AppPlan {
     /// Each rule's automation's name, in the same order.
     pub(crate) automations: Vec<String>,
     /// The build its values were last checked against, if the setup app
-    /// recorded one.
+    /// recorded one. Only the log reads it, from the newest plan: a change to
+    /// it restarts nothing, so a running session may hold an older one.
     pub(crate) checked: Option<BuildDef>,
 }
 

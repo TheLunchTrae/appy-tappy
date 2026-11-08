@@ -214,9 +214,9 @@ impl Model {
             .collect()
     }
 
-    /// Switches to a new plan. An app whose part changed starts over with
-    /// it, undoing what its automations changed; an app whose part did not
-    /// change keeps running untouched.
+    /// Switches to a new plan. An app whose part runs differently, as
+    /// [`AppPlan::runs_as`] compares them, starts over with it, undoing what
+    /// its automations changed; any other app keeps running untouched.
     pub(crate) fn replan(&mut self, plan: BTreeMap<String, Arc<AppPlan>>) -> Vec<Order> {
         let changed: Vec<String> = self
             .running

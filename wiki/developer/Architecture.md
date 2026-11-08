@@ -182,9 +182,9 @@ Each thread below is a plain `std::thread`, and each channel is a
   saved applications and automations again. An application whose automations
   did not change keeps running untouched; one whose automations changed starts
   over, undoing what they changed first. A change only to the build its
-  values were checked against restarts nothing. An automation that cannot run, such
-  as one whose value lost a picture or one that breaks a rule after a hand
-  edit, is logged, and the rest run. When the applications' folder or the
+  values were checked against restarts nothing. An automation that cannot
+  run, such as one whose value lost a picture or one that breaks a rule after
+  a hand edit, is logged, and the rest run. When the applications' folder or the
   automations' file cannot be read as a whole, such as while another program
   holds the file, the runtime logs it, keeps running the plan it has, and
   reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
