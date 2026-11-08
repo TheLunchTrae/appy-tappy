@@ -3,9 +3,10 @@
 //!
 //! The setup app saves each application's values in its own folder and the
 //! automations in one file. [`load`] reads them and keeps what can run: each
-//! enabled automation becomes a rule, and each value an automation watches
-//! becomes a ready check. An application is watched only when at least one
-//! of its automations can run. Whatever cannot run is named in
+//! enabled automation that `AutomationDef::compile` accepts becomes a rule,
+//! the same check the setup app's save makes, and each value an automation
+//! watches becomes a ready check. An application is watched only when at
+//! least one of its automations can run. Whatever cannot run is named in
 //! [`Plan::problems`] for the log, and the rest still runs. Only a store that
 //! cannot be read as a whole makes [`load`] fail.
 
@@ -16,7 +17,7 @@ use std::sync::Arc;
 
 use appytappy_config::action::Action;
 use appytappy_config::app_file::{AppFile, BuildDef};
-use appytappy_config::automation_file::AutomationsFile;
+use appytappy_config::automation_file::{AutomationsFile, Compiled};
 use appytappy_config::rule::Rule;
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::{AppStore, AutomationStore, StoredApp};
@@ -131,8 +132,9 @@ pub(crate) fn load(apps: &AppStore, automations: &AutomationStore) -> Result<Pla
 }
 
 /// An application's part of the plan while it is being compiled.
-#[derive(Default)]
-struct Draft {
+struct Draft<'apps> {
+    /// The application's file.
+    file: &'apps AppFile,
     values: Vec<ValuePlan>,
     value_names: Vec<String>,
     rules: Vec<Rule>,
@@ -150,72 +152,55 @@ pub(crate) fn compile(
     mut picture: impl FnMut(&str, &str) -> io::Result<Vec<u8>>,
     mut click_picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Plan {
-    let good: Vec<(&str, &AppFile)> = apps
-        .iter()
-        .filter_map(|app| Some((app.id.as_str(), app.file.as_ref().ok()?)))
-        .collect();
-    let mut drafts: BTreeMap<&str, Draft> = BTreeMap::new();
+    let mut drafts: BTreeMap<&str, Draft<'_>> = BTreeMap::new();
     // Each value's check is built once, however many automations watch it.
     let mut built: BTreeMap<(&str, &str), Result<(), String>> = BTreeMap::new();
     let mut problems = Vec::new();
+    // The applications whose files read, which clicks find their targets in.
+    let readable: Vec<(&str, &AppFile)> = apps
+        .iter()
+        .filter_map(|app| app.file.as_ref().ok().map(|file| (app.id.as_str(), file)))
+        .collect();
     for automation in automations
         .automations
         .iter()
         .filter(|automation| automation.enabled)
     {
-        let when = &automation.when;
         let mut problem = |problem: &str| {
             problems.push(format!("{} cannot run: {problem}", automation.name));
         };
-        if let Some(reason) = automations.problem(automation) {
-            problem(&reason);
-            continue;
-        }
-        if let Some(broken) = apps
-            .iter()
-            .find(|app| app.id == when.app && app.file.is_err())
-        {
-            problem(&format!(
-                "the app.json in the {} folder cannot be read",
-                broken.id
-            ));
-            continue;
-        }
-        if let Err(reason) = automation.check_against(good.iter().copied()) {
-            problem(&reason);
-            continue;
-        }
-        let Some((app_id, file, value)) = good.iter().find_map(|&(id, file)| {
-            let value = file.values.iter().find(|value| value.id == when.value)?;
-            (id == when.app).then_some((id, file, value))
-        }) else {
-            continue;
-        };
-        let Ok(signal) = SignalName::new(&value.id) else {
-            problem(&format!("{} has an ID it cannot use", value.name));
-            continue;
-        };
-        let rule = match automation.to_rule(signal.clone()) {
-            Ok(rule) => rule,
+        let Compiled {
+            rule,
+            signal,
+            app_id,
+            app,
+            value,
+        } = match automation.compile(apps) {
+            Ok(compiled) => compiled,
             Err(reason) => {
                 problem(&reason);
                 continue;
             },
         };
-        let draft = drafts.entry(app_id).or_default();
+        let draft = drafts.entry(app_id).or_insert_with(|| Draft {
+            file: app,
+            values: Vec::new(),
+            value_names: Vec::new(),
+            rules: Vec::new(),
+            automations: Vec::new(),
+            clicks: ClickTargets::default(),
+        });
         let clicks = rule.actions().iter().filter_map(|action| match action {
             Action::Click(click) => Some(click),
             _ => None,
         });
-        if let Err(reason) = draft.clicks.add(clicks, &good, &mut click_picture) {
+        if let Err(reason) = draft.clicks.add(clicks, &readable, &mut click_picture) {
             problem(&reason);
             continue;
         }
         let ready = built.entry((app_id, value.id.as_str())).or_insert_with(|| {
-            let check = saved::build(&value.screen, &file.references, |name| {
-                picture(app_id, name)
-            })
-            .map_err(|error| format!("{} of {}: {error}", value.name, file.name))?;
+            let check = saved::build(&value.screen, &app.references, |name| picture(app_id, name))
+                .map_err(|error| format!("{} of {}: {error}", value.name, app.name))?;
             draft.values.push(ValuePlan { signal, check });
             draft.value_names.push(value.name.clone());
             Ok(())
@@ -230,8 +215,8 @@ pub(crate) fn compile(
     let apps = drafts
         .into_iter()
         .filter(|(_, draft)| !draft.rules.is_empty())
-        .filter_map(|(id, draft)| {
-            let (_, file) = good.iter().find(|(good_id, _)| *good_id == id)?;
+        .map(|(id, draft)| {
+            let file = draft.file;
             let plan = AppPlan {
                 labels: Labels {
                     name: file.name.clone(),
@@ -246,7 +231,7 @@ pub(crate) fn compile(
                     clicks: Arc::new(draft.clicks),
                 },
             };
-            Some((id.to_owned(), Arc::new(plan)))
+            (id.to_owned(), Arc::new(plan))
         })
         .collect();
     Plan { apps, problems }
@@ -552,6 +537,12 @@ mod tests {
             automation("picture", "example", "icon", state("Shown")),
             automation("again", "example", "icon", state("none")),
             automation("good", "example", "progress", TargetDef::Number(90.0)),
+            // The runtime never reads an automation's ID, so one that a hand
+            // edit broke, and repeated, still runs.
+            AutomationDef {
+                id: "Good".to_owned(),
+                ..automation("good", "example", "progress", TargetDef::Number(80.0))
+            },
             AutomationDef {
                 actions: Vec::new(),
                 ..automation("empty", "example", "progress", TargetDef::Number(90.0))
@@ -562,7 +553,7 @@ mod tests {
             plan.problems,
             [
                 "Automation gone cannot run: its application is no longer saved",
-                "Automation broken cannot run: the app.json in the broken folder cannot be read",
+                "Automation broken cannot run: its application's app.json, in the broken folder, cannot be read",
                 "Automation missing cannot run: Example App no longer has the value it watches",
                 "Automation kind cannot run: The progress reads a number, so compare it with a number",
                 "Automation picture cannot run: The icon of Example App: its picture icon.png cannot be read",
@@ -571,7 +562,10 @@ mod tests {
             ]
         );
         let example = plan.apps.get("example").expect("the good automation runs");
-        assert_eq!(example.labels.automations, ["Automation good"]);
+        assert_eq!(
+            example.labels.automations,
+            ["Automation good", "Automation good"]
+        );
         assert_eq!(example.runs.values.len(), 1);
     }
 
