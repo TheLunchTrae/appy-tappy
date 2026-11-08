@@ -6,7 +6,9 @@
 //! values drawn at the window's current size and captures only the smallest
 //! part of the window that holds them. Nothing is sent into the application:
 //! the capture is the same one the automation editor uses, and the overlay
-//! is a window of the setup app's own (see `overlay_window`).
+//! is a window of the setup app's own (see [`window`]).
+
+pub(crate) mod window;
 
 use std::collections::BTreeMap;
 use std::io;

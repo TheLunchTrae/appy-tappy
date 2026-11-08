@@ -17,8 +17,7 @@ use tokio::sync::oneshot;
 
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
-use crate::overlay::{Card, OverlayView};
-use crate::overlay_window;
+use crate::overlay::{self, Card, OverlayView};
 use crate::owner::{AppSummary, Live, Message, Reading, Reply, Request, SaveSpec, SavedValue};
 use crate::recording::RecordingView;
 use crate::window_list::WindowList;
@@ -240,7 +239,7 @@ pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), 
 #[tauri::command]
 pub(crate) async fn sync_overlays(app: AppHandle) -> Result<(), String> {
     let wanted = ask(&app, Request::Overlays).await??;
-    overlay_window::sync(&app, &wanted).map_err(|error| error.to_string())
+    overlay::window::sync(&app, &wanted).map_err(|error| error.to_string())
 }
 
 /// Turns `application`'s overlay on or off and sets where it shows, then

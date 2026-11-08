@@ -12,7 +12,6 @@ mod check_spec;
 mod commands;
 mod ocr;
 mod overlay;
-mod overlay_window;
 mod owner;
 mod pixels;
 mod recording;
@@ -66,7 +65,7 @@ fn main() -> ExitCode {
     let code = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Bridge(sender.clone()))
-        .on_window_event(overlay_window::on_event)
+        .on_window_event(overlay::window::on_event)
         .invoke_handler(tauri::generate_handler![
             commands::list_windows,
             commands::pick_window,
