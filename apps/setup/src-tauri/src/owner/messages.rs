@@ -326,6 +326,8 @@ mod tests {
             owner.stop();
             sender.send(()).expect("test listens");
         });
+        // The work is a closure, so a logged message names only what it is.
+        assert_eq!(format!("{run:?}"), "Run");
         assert!(harness.owner.handle(Message::Run(run)).is_continue());
         assert_eq!(told.try_recv(), Ok(()));
     }
