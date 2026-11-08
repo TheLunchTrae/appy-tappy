@@ -688,6 +688,10 @@ mod tests {
             targets(&[picture((200, 100), area(0, 0, 4, 1), (0, 0))]),
             Err("its picture patch-1.png is larger than the area it is looked for in".to_owned())
         );
+        assert!(
+            targets(&[picture((200, 100), area(0, 0, 4, 2), (3, 1))]).is_ok(),
+            "a picture as large as its area, pressed at its last pixel, is looked for"
+        );
         for press in [(4, 0), (0, 2)] {
             assert_eq!(
                 targets(&[picture((200, 100), area(0, 0, 10, 10), press)]),
