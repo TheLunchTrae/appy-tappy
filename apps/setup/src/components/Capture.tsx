@@ -322,7 +322,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
         onSaved();
         return;
       }
-      await appFile.load(saved.app);
+      await appFile.reload();
       closeEditor();
       setDraft((current) => ({ ...current, kind: 'number', reference: saved.reference }));
     } catch (error: unknown) {

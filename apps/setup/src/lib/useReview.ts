@@ -1,3 +1,5 @@
+// Reviewing a recording's readings before they teach a reference.
+
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type RecordedLabel, type RecordingView, type ReferenceRef, errorText, reviewProblems } from './api.ts';

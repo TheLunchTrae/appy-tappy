@@ -1,3 +1,5 @@
+// The check the capture screen sets up on the live frame, and what it reads.
+
 import { useCallback, useEffect, useState } from 'react';
 
 import { type Reading, errorText, readValue, setCheck } from './api.ts';

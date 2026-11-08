@@ -1,3 +1,5 @@
+// The saved application file the capture screen's references and values read with.
+
 import { useCallback, useEffect, useState } from 'react';
 
 import { type AppFile, errorText, listApps } from './api.ts';
@@ -7,12 +9,12 @@ import { background } from './repeat.ts';
 export function useAppFile(app: string): {
   readonly file: AppFile | null;
   readonly error: string | null;
-  /** Reads `app`'s file again, such as after a save added to it. */
-  readonly load: (app: string) => Promise<void>;
+  /** Reads the file again, such as after a save added to it. */
+  readonly reload: () => Promise<void>;
 } {
   const [file, setFile] = useState<AppFile | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async (app: string): Promise<void> => {
+  const reload = useCallback(async (): Promise<void> => {
     try {
       const found = (await listApps()).find((summary) => summary.id === app);
       setFile(found?.file ?? null);
@@ -20,9 +22,9 @@ export function useAppFile(app: string): {
     } catch (error: unknown) {
       setError(errorText(error));
     }
-  }, []);
+  }, [app]);
   useEffect(() => {
-    background(load(app));
-  }, [load, app]);
-  return { file, error, load };
+    background(reload());
+  }, [reload]);
+  return { file, error, reload };
 }

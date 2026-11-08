@@ -1,3 +1,5 @@
+// The selections a state value's steps make on their screenshots, and the region they fit.
+
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 
 import { errorText, select } from './api.ts';
