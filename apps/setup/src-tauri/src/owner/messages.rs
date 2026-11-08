@@ -5,7 +5,7 @@
 use std::fmt;
 use std::time::Instant;
 
-use appytappy_config::app_file::{AppFile, BuildDef, PanelDef};
+use appytappy_config::app_file::{AppFile, BuildDef, PanelDef, PinDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::HostSystem;
 use appytappy_sources::screen::{Image, Size};
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::check_spec::CheckSpec;
-use crate::overlay::FrameRead;
+use crate::overlay::{FrameRead, Purpose};
 use crate::recording::Text;
 
 use super::{Host, Owner};
@@ -106,6 +106,25 @@ pub(crate) struct SaveSpec {
     /// The check, with the session's screenshots it names.
     pub(crate) check: CheckSpec,
     /// The screenshot the region was drawn on, whose size the value keeps.
+    pub(crate) screenshot: usize,
+    /// The side of the window the region stays at as the window changes
+    /// size.
+    pub(crate) pin: PinDef,
+}
+
+/// A saved value drawn again at another window size, as the UI describes
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FixSpec {
+    /// The saved application.
+    pub(crate) app: String,
+    /// The value's ID.
+    pub(crate) value: String,
+    /// The check at this size: of the value's kind, with each of its
+    /// states in order, or for a number, the reference to read with.
+    pub(crate) check: CheckSpec,
+    /// The screenshot the region was drawn on, whose size the fix is for.
     pub(crate) screenshot: usize,
 }
 
@@ -247,8 +266,11 @@ pub(crate) enum Message<H: Host = HostSystem> {
         /// Why, and whether the capture ended.
         failure: CaptureFailure,
     },
-    /// An application's overlay read its values, or stopped and why.
+    /// An application's overlay, or the Values page's reading of its
+    /// values, read them, or stopped and why.
     Overlay {
+        /// Who the capture reads for.
+        purpose: Purpose,
         /// The application's ID.
         app: String,
         /// Which of its captures sent it; readings from an earlier one are

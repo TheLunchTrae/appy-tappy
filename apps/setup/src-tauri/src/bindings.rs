@@ -38,7 +38,7 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayView;
 use crate::owner::{
-    AppSummary, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, FixSpec, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -106,6 +106,7 @@ fn declarations() -> String {
     found.visit::<AutomationSummary>();
     found.visit::<CheckSpec>();
     found.visit::<ColorSpec>();
+    found.visit::<FixSpec>();
     found.visit::<Live>();
     found.visit::<OverlayModeDef>();
     found.visit::<OverlayView>();

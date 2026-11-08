@@ -313,6 +313,7 @@ pub(super) fn spec(app: &str, value_name: &str, check: &str) -> SaveSpec {
         value_name: value_name.to_owned(),
         check: serde_json::from_str(check).expect("valid JSON"),
         screenshot: 0,
+        pin: appytappy_config::app_file::PinDef::TopLeft,
     }
 }
 
@@ -328,6 +329,7 @@ pub(super) fn add_example_app(harness: &mut Harness) {
                     class: "ExampleWindow",
                     executable: "Example.exe",
                 }),
+                size_changes: appytappy_config::app_file::SizeChangesDef::Often,
             },
         )
     });

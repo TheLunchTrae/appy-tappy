@@ -12,11 +12,13 @@ pub mod check;
 pub mod digits;
 pub mod mask;
 pub mod saved;
+pub mod scale;
 pub mod select;
 
 mod capture;
 mod image;
 mod layout;
+mod resample;
 
 pub use capture::{Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession};
 pub use image::{FrameBuffer, Image, ImageError, OutsideWindow, Region, Size};

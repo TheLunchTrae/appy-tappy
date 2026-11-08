@@ -533,7 +533,7 @@ mod tests {
     use super::*;
     use crate::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, ReferenceDef, RegionDef, SampleDef,
-        ScreenDef, SizeDef, StateDef, ValueDef, WindowDef, sample_name,
+        ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef, sample_name,
     };
     use crate::window_match::WindowFacts;
 
@@ -553,6 +553,8 @@ mod tests {
                     height: 10,
                 },
                 check,
+                pin: None,
+                fixes: Vec::new(),
             },
         }
     }
@@ -571,6 +573,7 @@ mod tests {
                 class: "ExampleWindow",
                 executable: "Example.exe",
             }),
+            size_changes: SizeChangesDef::Often,
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,

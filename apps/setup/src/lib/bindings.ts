@@ -62,6 +62,12 @@ name: string,
  */
 window: WindowDef,
 /**
+ * How often its window changes size, which says whether its values
+ * scale with the window. [`SizeChangesDef::Often`] when the file leaves
+ * it out.
+ */
+sizeChanges: SizeChangesDef,
+/**
  * How the application protects itself from other programs.
  */
 antiCheat: AntiCheatDef,
@@ -86,8 +92,8 @@ overlay?: OverlayDef,
 checked?: CheckedDef, }>;
 
 /**
- * An application's name and how to find its window, as the editor sends
- * them.
+ * An application's name, how to find its window, and how often that window
+ * changes size, as the editor sends them.
  */
 export type AppSpec = DeepReadonly<{
 /**
@@ -97,7 +103,12 @@ name: string,
 /**
  * How to recognize the application's window.
  */
-window: WindowDef, }>;
+window: WindowDef,
+/**
+ * How often its window changes size, which decides whether its values
+ * scale to sizes they were not drawn at.
+ */
+sizeChanges: SizeChangesDef, }>;
 
 /**
  * A saved application, as the Values page lists it.
@@ -321,6 +332,53 @@ export type ComparisonDef = DeepReadonly<"below" | "atMost" | "equals" | "notEqu
 export type FallbackDef = DeepReadonly<"none" | "executable">;
 
 /**
+ * A value drawn again at one window size, which it reads there exactly
+ * instead of scaling its first drawing.
+ */
+export type FixDef = DeepReadonly<{
+/**
+ * The window's size when it was drawn.
+ */
+windowSize: SizeDef,
+/**
+ * The region at that size.
+ */
+region: RegionDef,
+/**
+ * For a state check, each state's picture at this size, in the order
+ * of the check's states; empty for any other check. Always written.
+ */
+images: Array<string>,
+/**
+ * For a number check, the [`ReferenceDef::id`] of a reference learned
+ * at this size, or `None` to read with the check's own.
+ */
+reference?: string, }>;
+
+/**
+ * A saved value drawn again at another window size, as the UI describes
+ * it.
+ */
+export type FixSpec = DeepReadonly<{
+/**
+ * The saved application.
+ */
+app: string,
+/**
+ * The value's ID.
+ */
+value: string,
+/**
+ * The check at this size: of the value's kind, with each of its
+ * states in order, or for a number, the reference to read with.
+ */
+check: CheckSpec,
+/**
+ * The screenshot the region was drawn on, whose size the fix is for.
+ */
+screenshot: number, }>;
+
+/**
  * What one screenshot's region shows, typed by the user so a reference
  * learns its characters.
  */
@@ -409,6 +467,11 @@ mode: OverlayModeDef,
  */
 message: string | null,
 /**
+ * The size of the window the readings are from, or `None` before a
+ * frame arrived.
+ */
+windowSize: SizeDef | null,
+/**
  * Each value's name and reading, in the order they were saved.
  */
 values: Array<ValueView>, }>;
@@ -433,6 +496,13 @@ width: number,
  * The height.
  */
 height: number, }>;
+
+/**
+ * The side or corner of the window a value's region keeps its distance
+ * from as the window changes size: one of nine, top, middle or bottom by
+ * left, center or right.
+ */
+export type PinDef = DeepReadonly<"topLeft" | "topCenter" | "topRight" | "middleLeft" | "center" | "middleRight" | "bottomLeft" | "bottomCenter" | "bottomRight">;
 
 /**
  * How often the runtime reads a value: as often as `fastest_ms` allows while
@@ -668,7 +738,12 @@ check: CheckSpec,
 /**
  * The screenshot the region was drawn on, whose size the value keeps.
  */
-screenshot: number, }>;
+screenshot: number,
+/**
+ * The side of the window the region stays at as the window changes
+ * size.
+ */
+pin: PinDef, }>;
 
 /**
  * Where a reference was saved.
@@ -698,11 +773,17 @@ value: string, }>;
 
 /**
  * A value read from a region of the window's frame.
+ *
+ * Its drawing is the window size it was drawn at, its region, and its
+ * check. At any other size it reads its fix for that size, if it has one,
+ * or else, while its application's window changes size
+ * [often](SizeChangesDef::Often), its region scaled from this drawing and
+ * kept at its pin's distance from that side of the window.
  */
 export type ScreenDef = DeepReadonly<{
 /**
  * The window's size when the region was drawn. A region's pixels mean
- * something only at this size.
+ * something only at this size, or scaled from it.
  */
 windowSize: SizeDef,
 /**
@@ -712,7 +793,18 @@ region: RegionDef,
 /**
  * The check.
  */
-check: CheckDef, }>;
+check: CheckDef,
+/**
+ * The side of the window the region stays at as the window changes
+ * size, or `None` for the side [`PinDef::guess`] picks.
+ */
+pin?: PinDef,
+/**
+ * The value drawn again at other window sizes, each read exactly at its
+ * own size. Always written, even when empty, since the setup app reads
+ * the file's JSON as is.
+ */
+fixes: Array<FixDef>, }>;
 
 /**
  * One thing the user did to select.
@@ -781,6 +873,11 @@ settings: SettingsFile,
  * the defaults and saving replaces the file.
  */
 problem: string | null, }>;
+
+/**
+ * How often an application's window changes size, as the user answered.
+ */
+export type SizeChangesDef = DeepReadonly<"often" | "rarely">;
 
 /**
  * A size in pixels.

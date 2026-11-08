@@ -14,7 +14,7 @@ import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
-import { NewValue } from './pages/NewValue.tsx';
+import { type Fixing, NewValue } from './pages/NewValue.tsx';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
@@ -46,7 +46,7 @@ const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
 
 /** What the window shows in place of a page: a flow that makes or changes something. */
 type Flow =
-  | { readonly kind: 'value' }
+  | { readonly kind: 'value'; readonly fixing: Fixing | null }
   | { readonly kind: 'automation'; readonly existing: AutomationDef | null }
   | { readonly kind: 'application'; readonly existing: AppSummary | null }
   | { readonly kind: 'reference'; readonly existing: SavedRef | null };
@@ -195,6 +195,7 @@ export function App() {
       return (
         <NewValue
           apps={apps ?? []}
+          fixing={flow.fixing}
           onCancel={() => {
             open(null);
           }}
@@ -266,7 +267,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'value' });
+              open({ kind: 'value', fixing: null });
+            }}
+            onFix={(fixing) => {
+              open({ kind: 'value', fixing });
             }}
           />
         );

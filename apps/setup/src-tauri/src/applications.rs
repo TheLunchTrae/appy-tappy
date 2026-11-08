@@ -1,10 +1,11 @@
 //! Adding, changing, and removing applications.
 //!
 //! The Applications page is the one place an application is made, renamed,
-//! told how to find its window, or removed. A new application starts with no
+//! told how to find its window and how often that window changes size, or
+//! removed. A new application starts with no
 //! values; the Values page adds them to an application saved here.
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, FORMAT, WindowDef};
+use appytappy_config::app_file::{AntiCheatDef, AppFile, FORMAT, SizeChangesDef, WindowDef};
 use appytappy_config::store::new_app_id;
 use appytappy_config::window_match::Pattern;
 use serde::Deserialize;
@@ -12,8 +13,8 @@ use serde::Deserialize;
 use crate::automations;
 use crate::stores::Stores;
 
-/// An application's name and how to find its window, as the editor sends
-/// them.
+/// An application's name, how to find its window, and how often that window
+/// changes size, as the editor sends them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AppSpec {
@@ -21,6 +22,9 @@ pub(crate) struct AppSpec {
     pub(crate) name: String,
     /// How to recognize the application's window.
     pub(crate) window: WindowDef,
+    /// How often its window changes size, which decides whether its values
+    /// scale to sizes they were not drawn at.
+    pub(crate) size_changes: SizeChangesDef,
 }
 
 /// Saves `spec` over the application `existing`, or as a new application
@@ -91,6 +95,7 @@ pub(crate) fn save(
             format: FORMAT,
             name: String::new(),
             window: spec.window.clone(),
+            size_changes: spec.size_changes,
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
@@ -110,6 +115,7 @@ pub(crate) fn save(
         file.checked = None;
     }
     file.window = spec.window;
+    file.size_changes = spec.size_changes;
     stores
         .apps
         .save(&id, &file, &[])
@@ -171,6 +177,7 @@ mod tests {
                 class: "ExampleWindow",
                 executable,
             }),
+            size_changes: SizeChangesDef::Often,
         }
     }
 
@@ -185,12 +192,14 @@ mod tests {
             class: true,
         };
         changed.window.fallback = FallbackDef::Executable;
+        changed.size_changes = SizeChangesDef::Rarely;
         assert_eq!(save(&stores, Some(&id), changed.clone()), Ok(id.clone()));
         let apps = stores.apps.load().expect("loads");
         assert_eq!(apps.len(), 1);
         let file = apps[0].file.as_ref().expect("readable");
         assert_eq!(file.name, "Renamed");
         assert_eq!(file.window, changed.window);
+        assert_eq!(file.size_changes, SizeChangesDef::Rarely);
         assert_eq!(file.anti_cheat, AntiCheatDef::Unknown);
         assert_eq!(file.values, Vec::new());
         assert_eq!(

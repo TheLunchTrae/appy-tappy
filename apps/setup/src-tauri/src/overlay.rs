@@ -2,11 +2,16 @@
 //! overlay is on, one capture of its window that reads its values.
 //!
 //! The capture reads the values on its own thread and sends only their
-//! readings, so no frame is copied here. Like the runtime, it reads the
-//! values drawn at the window's current size and copies only their regions,
+//! readings, so no frame is copied here. Like the runtime, it places each
+//! value at the window's current size once, as its saved check resolves
+//! that size, and copies only the regions of the values that read there,
 //! packed by a [`Layout`]. Nothing is sent into the application:
 //! the capture is the same one the automation editor uses, and the overlay
 //! is a window of the setup app's own (see [`window`]).
+//!
+//! The Values page reads an application's values the same way, with a
+//! second set of these captures that opens whether the overlay is on or
+//! not (see [`Purpose`]).
 
 pub(crate) mod window;
 
@@ -15,9 +20,9 @@ use std::io;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use appytappy_config::app_file::{AppFile, OverlayDef, OverlayModeDef, PanelDef};
+use appytappy_config::app_file::{AppFile, OverlayDef, OverlayModeDef, PanelDef, SizeDef};
 use appytappy_sources::screen::check::Check;
-use appytappy_sources::screen::saved::{self, SavedCheck};
+use appytappy_sources::screen::saved::{self, SavedValue, Unread};
 use appytappy_sources::screen::{
     CaptureSession, Crop, Frame, FrameHandler, Layout, OutsideWindow, Region, Size,
 };
@@ -38,14 +43,24 @@ pub(crate) const RETRY_POLLS: u32 = 5;
 /// saves once it settles rather than at every step.
 pub(crate) const SETTLE_POLLS: u32 = 3;
 
+/// Who a set of captures reads for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Purpose {
+    /// The overlays, which open only for an application whose overlay is
+    /// on.
+    Overlay,
+    /// The Values page, which reads the values of the application it shows
+    /// whether its overlay is on or not.
+    ValuesPage,
+}
+
 /// What one value read on a frame.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ValueRead {
     /// Its reading.
     Read(Reading),
-    /// The window has this size, not the one the value was drawn at, so its
-    /// region means nothing on it.
-    Resized(Size),
+    /// It is not read on a window of this size, and why.
+    NotRead(Size, Unread),
     /// The check could not read it, and why.
     Unreadable(String),
 }
@@ -70,6 +85,9 @@ pub(crate) struct OverlayView {
     /// Why there are no readings, such as that the application is not
     /// running, or `None` while there are.
     pub(crate) message: Option<String>,
+    /// The size of the window the readings are from, or `None` before a
+    /// frame arrived.
+    pub(crate) window_size: Option<SizeDef>,
     /// Each value's name and reading, in the order they were saved.
     pub(crate) values: Vec<ValueView>,
 }
@@ -148,10 +166,12 @@ struct Overlay<S> {
     mode: OverlayModeDef,
     /// Each value's name, and its check or why it cannot be read, in the
     /// order they were saved.
-    values: Vec<(String, Result<SavedCheck, String>)>,
+    values: Vec<(String, Result<SavedValue, String>)>,
     /// The window size whose values the capture reads, or `None` before a
     /// frame showed another.
     size: Option<Size>,
+    /// The size of the window the newest frame showed.
+    now: Option<Size>,
     /// How to find the window.
     window_match: appytappy_config::window_match::WindowMatch,
     /// The running capture.
@@ -171,6 +191,8 @@ struct Overlay<S> {
 /// Every open overlay, by application ID.
 #[derive(Debug)]
 pub(crate) struct Overlays<S> {
+    /// Who its captures read for.
+    purpose: Purpose,
     /// The next capture's generation.
     next: u64,
     open: BTreeMap<String, Overlay<S>>,
@@ -184,9 +206,10 @@ pub(crate) struct Overlays<S> {
 }
 
 impl<S: CaptureSession> Overlays<S> {
-    /// No overlays.
-    pub(crate) const fn new() -> Self {
+    /// No overlays, which read for `purpose`.
+    pub(crate) const fn new(purpose: Purpose) -> Self {
         Self {
+            purpose,
             next: 0,
             open: BTreeMap::new(),
             failed: BTreeMap::new(),
@@ -215,8 +238,10 @@ impl<S: CaptureSession> Overlays<S> {
                 }
                 self.failed.remove(app);
             }
-            let opened = file()
-                .and_then(|(file, folder)| open(&file, |name| std::fs::read(folder.join(name))));
+            let purpose = self.purpose;
+            let opened = file().and_then(|(file, folder)| {
+                open(&file, purpose, |name| std::fs::read(folder.join(name)))
+            });
             match opened {
                 Ok(overlay) => {
                     self.open.insert(app.to_owned(), overlay);
@@ -235,7 +260,7 @@ impl<S: CaptureSession> Overlays<S> {
             .ok_or_else(|| "The overlay closed.".to_owned())?;
         if overlay.session.is_none() {
             if overlay.wait == 0 {
-                match start(host, messages, app, generation, overlay) {
+                match start(host, messages, self.purpose, app, generation, overlay) {
                     Ok(()) => self.next = self.next.wrapping_add(1),
                     Err(message) => {
                         overlay.message = Some(message);
@@ -283,8 +308,8 @@ impl<S: CaptureSession> Overlays<S> {
 
     /// Keeps what `app`'s capture with `generation` read, or why it stopped.
     /// A stopped capture closes, and a poll about a second later looks for
-    /// the window again. A window that changed to a size some values were
-    /// drawn at gets a capture of those values on the next poll.
+    /// the window again. A window that changed to a size some values read at
+    /// gets a capture of those values on the next poll.
     pub(crate) fn read(
         &mut self,
         app: &str,
@@ -300,18 +325,31 @@ impl<S: CaptureSession> Overlays<S> {
         };
         match read {
             Ok(FrameRead::Values(values)) => {
+                overlay.now = overlay.size;
                 overlay.latest = Some(values);
                 Ok(())
             },
             Ok(FrameRead::Resized(size)) => {
-                let drawn = overlay
+                overlay.now = Some(size);
+                let placed: Vec<Result<Region, Unread>> = overlay
                     .values
                     .iter()
-                    .any(|(_, check)| check.as_ref().is_ok_and(|check| check.window_size == size));
-                if !drawn {
-                    // Nothing was drawn at this size, so the capture goes on
-                    // until the window is a size that was.
-                    overlay.latest = Some(vec![ValueRead::Resized(size); overlay.values.len()]);
+                    .map(|(_, check)| {
+                        check
+                            .as_ref()
+                            .map_or(Err(Unread::NotDrawn), |check| check.region_at(size))
+                    })
+                    .collect();
+                if !placed.iter().any(Result::is_ok) {
+                    // Nothing reads at this size, so the capture goes on
+                    // until the window is a size where something does.
+                    overlay.latest = Some(
+                        placed
+                            .into_iter()
+                            .filter_map(Result::err)
+                            .map(|unread| ValueRead::NotRead(size, unread))
+                            .collect(),
+                    );
                     return Ok(());
                 }
                 overlay.size = Some(size);
@@ -322,6 +360,7 @@ impl<S: CaptureSession> Overlays<S> {
             },
             Err(error) => {
                 overlay.latest = None;
+                overlay.now = None;
                 overlay.window = None;
                 overlay.message = Some(format!("{} cannot be read: {error}.", overlay.name));
                 overlay.wait = RETRY_POLLS;
@@ -386,31 +425,46 @@ impl<S: CaptureSession> Overlays<S> {
     }
 }
 
-/// The overlay `file` describes, without a capture yet. A value whose check
-/// cannot be built says why in its line, and the others still read.
+/// The overlay `file` describes, without a capture yet, for `purpose`. A
+/// value whose check cannot be built says why in its line, and the others
+/// still read.
 fn open<S>(
     file: &AppFile,
+    purpose: Purpose,
     picture: impl FnMut(&str) -> io::Result<Vec<u8>> + Clone,
 ) -> Result<Overlay<S>, String> {
-    let overlay = file
-        .overlay
-        .filter(|overlay| overlay.enabled)
-        .ok_or_else(|| format!("The overlay for {} is off.", file.name))?;
+    let mode = match purpose {
+        Purpose::Overlay => {
+            file.overlay
+                .filter(|overlay| overlay.enabled)
+                .ok_or_else(|| format!("The overlay for {} is off.", file.name))?
+                .mode
+        },
+        Purpose::ValuesPage => file
+            .overlay
+            .map_or(OverlayModeDef::Overlay, |overlay| overlay.mode),
+    };
     let values = file
         .values
         .iter()
         .map(|value| {
-            let check = saved::build(&value.screen, &file.references, picture.clone())
-                .map_err(|error| format!("Cannot read: {error}."));
+            let check = saved::build(
+                &value.screen,
+                &file.references,
+                file.size_changes,
+                picture.clone(),
+            )
+            .map_err(|error| format!("Cannot read: {error}."));
             (value.name.clone(), check)
         })
         .collect();
     Ok(Overlay {
         generation: 0,
         name: file.name.clone(),
-        mode: overlay.mode,
+        mode,
         values,
         size: None,
+        now: None,
         window_match: file.window.to_match(),
         session: None,
         window: None,
@@ -421,28 +475,35 @@ fn open<S>(
     })
 }
 
-/// What to capture for the values drawn at `size`, and where each value sits
-/// in the captured image, or `None` for a value drawn at another size or that
-/// cannot be read.
+/// What to capture for the values that read at `size`, and where each value
+/// sits in the captured image, or why it does not read there. `None` when
+/// no value reads there.
 fn crop_for(
-    values: &[(String, Result<SavedCheck, String>)],
+    values: &[(String, Result<SavedValue, String>)],
     size: Size,
-) -> Option<(Layout, Vec<Option<Readable>>)> {
-    let drawn = || {
-        values.iter().map(move |(_, check)| {
+) -> Option<(Layout, Vec<Result<Readable, Unread>>)> {
+    let placed: Vec<_> = values
+        .iter()
+        .map(|(_, check)| {
+            let check = check.as_ref().map_err(|_broken| Unread::NotDrawn)?;
             check
-                .as_ref()
-                .ok()
-                .filter(|check| check.window_size == size)
+                .at(size)
+                .map(|at| (at.region, check.check(&at).clone()))
         })
-    };
-    let layout = Layout::new(drawn().map(|check| check.map(|check| check.region)))?;
-    let readables = drawn()
+        .collect();
+    let layout = Layout::new(
+        placed
+            .iter()
+            .map(|place| place.as_ref().ok().map(|(region, _)| *region)),
+    )?;
+    let readables = placed
+        .into_iter()
         .enumerate()
-        .map(|(position, check)| {
-            Some(Readable {
-                region: layout.packed(position)?,
-                check: check?.check.clone(),
+        .map(|(position, place)| {
+            let (_, check) = place?;
+            Ok(Readable {
+                region: layout.packed(position).ok_or(Unread::Outside)?,
+                check,
             })
         })
         .collect();
@@ -453,6 +514,7 @@ fn crop_for(
 fn start<H: Host>(
     host: &H,
     messages: &Sender<Message<H>>,
+    purpose: Purpose,
     app: &str,
     generation: u64,
     overlay: &mut Overlay<H::Session>,
@@ -464,7 +526,7 @@ fn start<H: Host>(
             overlay
                 .values
                 .iter()
-                .find_map(|(_, check)| check.as_ref().ok().map(|check| check.window_size))
+                .find_map(|(_, check)| check.as_ref().ok().map(|check| check.drawn.window_size))
         })
         .ok_or_else(no_values)?;
     let (crop, readables) = crop_for(&overlay.values, size).ok_or_else(no_values)?;
@@ -481,6 +543,7 @@ fn start<H: Host>(
             reason = "a failed send means the owner stopped and will close this capture"
         )]
         let _ = messages.send(Message::Overlay {
+            purpose,
             app: app.clone(),
             generation,
             read: read_all(size, &readables, frame),
@@ -495,15 +558,17 @@ fn start<H: Host>(
     overlay.session = Some(session);
     overlay.window = Some(window);
     overlay.latest = None;
+    overlay.now = None;
     overlay.message = None;
     Ok(())
 }
 
-/// What each value drawn at `size` reads on `frame`. A frame of a window of
-/// another size says so, and a value drawn at another size reads as that.
+/// What each value placed at `size` reads on `frame`. A frame of a window of
+/// another size says so, and a value that does not read at `size` says
+/// why.
 fn read_all(
     size: Size,
-    readables: &[Option<Readable>],
+    readables: &[Result<Readable, Unread>],
     frame: io::Result<Frame<'_>>,
 ) -> Result<FrameRead, String> {
     let frame = match frame {
@@ -527,11 +592,12 @@ fn read_all(
         readables
             .iter()
             .map(|readable| {
-                let Some(readable) = readable else {
-                    return ValueRead::Resized(size);
+                let readable = match readable {
+                    Ok(readable) => readable,
+                    Err(unread) => return ValueRead::NotRead(size, *unread),
                 };
-                frame.image.crop(readable.region).map_or_else(
-                    || ValueRead::Resized(size),
+                frame.image.crop(readable.region).map_or(
+                    ValueRead::NotRead(size, Unread::Outside),
                     |image| match readable.check.read(&image) {
                         Ok(value) => ValueRead::Read(value.into()),
                         Err(error) => ValueRead::Unreadable(error.to_string()),
@@ -575,13 +641,9 @@ fn view<S>(overlay: &Overlay<S>, minimized: bool) -> OverlayView {
                 (Err(problem), _) => (None, Some(problem.clone())),
                 (Ok(_), None) => (None, None),
                 (Ok(_), Some(ValueRead::Read(reading))) => (Some(reading.clone()), None),
-                (Ok(check), Some(ValueRead::Resized(size))) => (
-                    None,
-                    Some(format!(
-                        "Drawn on a {} window; it is {size} now.",
-                        check.window_size
-                    )),
-                ),
+                (Ok(_), Some(ValueRead::NotRead(size, unread))) => {
+                    (None, Some(format!("Not read at {size}: {unread}.")))
+                },
                 (Ok(_), Some(ValueRead::Unreadable(error))) => {
                     (None, Some(format!("Cannot read: {error}.")))
                 },
@@ -597,6 +659,10 @@ fn view<S>(overlay: &Overlay<S>, minimized: bool) -> OverlayView {
         name: overlay.name.clone(),
         mode: overlay.mode,
         message,
+        window_size: overlay.now.map(|size| SizeDef {
+            width: size.width,
+            height: size.height,
+        }),
         values,
     }
 }
@@ -650,7 +716,7 @@ mod tests {
             height: 2,
         };
         let outside = |window_size| Err(OutsideWindow { window_size }.into());
-        let readables = [None];
+        let readables = [Err(Unread::NotDrawn)];
         assert_eq!(
             read_all(size, &readables, outside(size)),
             Ok(FrameRead::Values(vec![ValueRead::Unreadable(

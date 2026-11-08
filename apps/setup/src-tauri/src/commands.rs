@@ -11,7 +11,7 @@
 
 use std::sync::mpsc::Sender;
 
-use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, WindowDef};
+use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, SizeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, WhenDef};
 use appytappy_config::settings_file::SettingsFile;
 use appytappy_sources::HostSystem;
@@ -24,8 +24,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{self, Card, OverlayView};
 use crate::owner::{
-    AppSummary, Live, Message, Owner, Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId,
-    SavedValue,
+    AppSummary, FixSpec, Live, Message, Owner, Reading, ReferenceSaveSpec, Run, SaveSpec,
+    SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -201,6 +201,46 @@ pub(crate) async fn save_value(app: AppHandle, spec: SaveSpec) -> Result<SavedVa
     ask(&app, move |owner| owner.save(&spec)).await?
 }
 
+/// Where the saved value `value` of the application `application` starts
+/// on a window of `width` by `height` in the fix flow: its fix at that
+/// size, or its first drawing scaled to it, or `None` when that scales past
+/// the window.
+#[tauri::command]
+pub(crate) async fn place_value(
+    app: AppHandle,
+    application: String,
+    value: String,
+    width: u32,
+    height: u32,
+) -> Result<Option<RegionSpec>, String> {
+    ask(&app, move |owner| {
+        owner.place_value(&application, &value, SizeDef { width, height })
+    })
+    .await?
+}
+
+/// Saves a fix of a saved value at the size of the screenshot `spec` names,
+/// replacing its fix at that size.
+#[tauri::command]
+pub(crate) async fn save_fix(app: AppHandle, spec: FixSpec) -> Result<SavedValue, String> {
+    ask(&app, move |owner| owner.save_fix(&spec)).await?
+}
+
+/// Removes the fix of a saved value at `width` by `height`.
+#[tauri::command]
+pub(crate) async fn remove_fix(
+    app: AppHandle,
+    application: String,
+    value: String,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    ask(&app, move |owner| {
+        owner.remove_fix(&application, &value, SizeDef { width, height })
+    })
+    .await?
+}
+
 /// Saves a reference, replacing the saved one it names.
 #[tauri::command]
 pub(crate) async fn save_reference(
@@ -320,6 +360,22 @@ pub(crate) async fn overlay_state(
     application: String,
 ) -> Result<OverlayView, String> {
     ask(&app, move |owner| owner.overlay_state(&application)).await?
+}
+
+/// What `application`'s values read now, for the Values page, whether its
+/// overlay is on or not. The first call starts reading its window.
+#[tauri::command]
+pub(crate) async fn live_values(
+    app: AppHandle,
+    application: String,
+) -> Result<OverlayView, String> {
+    ask(&app, move |owner| owner.live_values(&application)).await?
+}
+
+/// Stops reading values for the Values page.
+#[tauri::command]
+pub(crate) async fn stop_live_values(app: AppHandle) -> Result<(), String> {
+    ask(&app, |owner| owner.stop_live_values(None)).await
 }
 
 /// Keeps the size of `application`'s overlay card in logical pixels, which

@@ -15,6 +15,7 @@ const file: AppFile = {
     mustMatch: { title: false, class: false },
     fallback: 'none',
   },
+  sizeChanges: 'often',
   antiCheat: 'unknown',
   values: [],
   references: [],

@@ -26,7 +26,7 @@ test("referenceCharacters reads a reference's samples", () => {
 });
 
 test('readers names the number values that read with a reference', () => {
-  const screen = { windowSize: { width: 10, height: 10 }, region: { x: 0, y: 0, width: 1, height: 1 } };
+  const screen = { windowSize: { width: 10, height: 10 }, region: { x: 0, y: 0, width: 1, height: 1 }, fixes: [] };
   const file: AppFile = {
     format: 2,
     name: 'Example App',
@@ -37,6 +37,7 @@ test('readers names the number values that read with a reference', () => {
       mustMatch: { title: true, class: false },
       fallback: 'none',
     },
+    sizeChanges: 'often',
     antiCheat: 'unknown',
     references: [],
     values: [

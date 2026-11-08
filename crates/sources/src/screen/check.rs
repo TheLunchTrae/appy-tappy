@@ -12,6 +12,7 @@ use appytappy_config::signal::{Number, StateName, Value};
 
 use super::digits::{DigitReader, ReadError};
 use super::mask::{Mask, MaskError};
+use super::resample::resample;
 use super::{Image, Size};
 use crate::system::Rgb;
 
@@ -209,6 +210,23 @@ impl ImageMatch {
         &self.picture
     }
 
+    /// This check for a region of `size`, with its picture and mask redrawn,
+    /// or `None` when `size` is empty or the redrawn mask keeps no pixel.
+    ///
+    /// Shrinking averages the pixels each new pixel covers, and growing
+    /// takes the nearest one. A pixel of the mask is kept when at least half
+    /// the pixels it covers are, and takes the color of only those.
+    #[must_use]
+    pub fn resized(&self, size: Size) -> Option<Self> {
+        let mut kept = vec![false; self.picture.pixels().len()];
+        for span in &self.spans {
+            kept.get_mut(span.clone()).unwrap_or_default().fill(true);
+        }
+        let (picture, kept) = resample(&self.picture, &kept, size)?;
+        let mask = Mask::new(size, kept).ok()?;
+        Self::new(picture, Some(&mask), self.tolerance).ok()
+    }
+
     /// Whether `image` is within the tolerance of the picture over the
     /// compared pixels.
     ///
@@ -296,6 +314,18 @@ impl StateMatch {
             states: states.into_boxed_slice(),
             none: StateName::none(),
         }
+    }
+
+    /// This check for a region of `size`, each state's picture redrawn with
+    /// [`ImageMatch::resized`], or `None` when one of them cannot be.
+    #[must_use]
+    pub fn resized(&self, size: Size) -> Option<Self> {
+        let states = self
+            .states
+            .iter()
+            .map(|(name, picture)| Some((name.clone(), picture.resized(size)?)))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self::new(states))
     }
 
     /// The state `image` shows, or [`StateName::none`].
@@ -671,6 +701,62 @@ mod tests {
             Ok(false)
         );
         assert_eq!(check.picture(), &picture);
+    }
+
+    #[test]
+    fn a_resized_match_keeps_its_mask_and_tolerance() {
+        let picture = row(&[WHITE, GREEN, GREEN, WHITE]);
+        let mask = Mask::new(picture.size(), vec![false, true, true, false]).unwrap();
+        let check = ImageMatch::new(picture, Some(&mask), 4).unwrap();
+        let wide = Size {
+            width: 8,
+            height: 1,
+        };
+        let resized = check.resized(wide).expect("keeps pixels");
+        assert_eq!(resized.picture().size(), wide);
+        // The background left out at both ends stays out at twice the size.
+        let changed = row(&[GRAY, GRAY, GREEN, GREEN, GREEN, GREEN, GRAY, GRAY]);
+        assert_eq!(resized.matches(&changed), Ok(true));
+        let off = Rgb { red: 64, ..GREEN };
+        let close = row(&[GRAY, GRAY, GREEN, GREEN, GREEN, off, GRAY, GRAY]);
+        assert_eq!(
+            resized.matches(&close),
+            Ok(true),
+            "24 over 12 channels is 2"
+        );
+        let thing = row(&[GRAY, GRAY, GRAY, GREEN, GREEN, GREEN, GRAY, GRAY]);
+        assert_eq!(resized.matches(&thing), Ok(false));
+        // A one pixel region keeps only half the thing it would cover.
+        let one = Size {
+            width: 1,
+            height: 1,
+        };
+        let shrunk = check.resized(one).expect("half is enough");
+        assert_eq!(shrunk.matches(&solid(1, GREEN)), Ok(true));
+        let edge = ImageMatch::new(
+            row(&[WHITE, WHITE, WHITE, GREEN]),
+            Some(
+                &Mask::new(
+                    Size {
+                        width: 4,
+                        height: 1,
+                    },
+                    vec![false, false, false, true],
+                )
+                .unwrap(),
+            ),
+            0,
+        )
+        .unwrap();
+        assert!(
+            edge.resized(one).is_none(),
+            "a quarter of a pixel keeps none"
+        );
+        let states = StateMatch::new(vec![(StateName::new("Shown").unwrap(), check)]);
+        let resized = states.resized(wide).expect("keeps pixels");
+        assert_eq!(resized.read(&changed), Ok(StateName::new("Shown").unwrap()));
+        let none = StateMatch::new(vec![(StateName::new("Edge").unwrap(), edge)]);
+        assert!(none.resized(one).is_none());
     }
 
     #[test]

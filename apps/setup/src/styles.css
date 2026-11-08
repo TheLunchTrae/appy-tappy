@@ -1738,3 +1738,81 @@ select {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* A question answered by picking one of a few options, each with what it means. */
+.choices {
+  position: relative;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.choices legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.choice:has(input:checked) {
+  background: var(--raise);
+}
+
+.choice input {
+  margin-top: 3px;
+}
+
+.choice > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.choice-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The side a value stays at, as a 3 by 3 grid of the window's sides and corners. */
+.pins {
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 20px);
+  gap: 3px;
+  padding: 3px;
+  width: max-content;
+  background: var(--base);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.pins button {
+  border: 0;
+  border-radius: 3px;
+  background: var(--raise);
+  cursor: pointer;
+}
+
+.pins button[aria-pressed='true'] {
+  background: var(--capture);
+}
+
+/* A value's reading at the window's size now, or why it has none. */
+.now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

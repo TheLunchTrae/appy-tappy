@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import type { AppSummary, FallbackDef, WindowChoice, WindowDef, WindowList } from '../lib/bindings.ts';
+import type { AppSummary, FallbackDef, SizeChangesDef, WindowChoice, WindowDef, WindowList } from '../lib/bindings.ts';
 import { type MatchField, errorText, listWindows, saveApp } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
 import {
@@ -20,6 +20,7 @@ import {
   withMustMatch,
 } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
+import { SIZE_CHANGES, SIZE_CHANGES_HINT, SIZE_CHANGE_TEXT } from '../lib/sizes.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { WindowsPanel, useWindowFits } from '../components/WindowsPanel.tsx';
 
@@ -32,7 +33,13 @@ interface Props {
   readonly onHeld: (held: Held) => void;
 }
 
-/** Adding an application, or changing one's name and how its window is found. */
+/** How a screen reader names the answer `option` to the size-change question, with its note. */
+function choiceLabel(option: SizeChangesDef): string {
+  const { name, note } = SIZE_CHANGE_TEXT[option];
+  return note === null ? name : `${name}, ${note.toLowerCase()}`;
+}
+
+/** Adding an application, or changing one's name, how its window is found and how often that window changes size. */
 export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props) {
   const saved = existing?.file ?? null;
   const [list, setList] = useState<WindowList | null>(null);
@@ -41,10 +48,18 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
   const [selected, setSelected] = useState<number | null>(null);
   const [name, setName] = useState(saved?.name ?? '');
   const [window, setWindow] = useState<WindowDef | null>(saved?.window ?? null);
+  const [sizeChanges, setSizeChanges] = useState<SizeChangesDef>(saved?.sizeChanges ?? 'often');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { fits, error: fitError } = useWindowFits(window, listed);
-  useReportHeld(onHeld, held(busy, { name: saved?.name ?? '', window: saved?.window ?? null }, { name, window }));
+  useReportHeld(
+    onHeld,
+    held(
+      busy,
+      { name: saved?.name ?? '', window: saved?.window ?? null, sizeChanges: saved?.sizeChanges ?? 'often' },
+      { name, window, sizeChanges },
+    ),
+  );
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -84,7 +99,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
     }
     setBusy(true);
     try {
-      await saveApp(existing?.id ?? null, { name: name.trim(), window });
+      await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges });
       onSaved();
     } catch (error: unknown) {
       setSaveError(errorText(error));
@@ -208,6 +223,39 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
                   </select>
                 </div>
               ) : null}
+              <fieldset className="choices" aria-describedby="hint-size-changes">
+                <legend className="group-title">
+                  <span>How often does this window change size?</span>
+                  <Hint topic="How often the window changes size" id="hint-size-changes">
+                    {SIZE_CHANGES_HINT}
+                  </Hint>
+                </legend>
+                {SIZE_CHANGES.map((option) => (
+                  <label key={option} className="choice" aria-label={choiceLabel(option)}>
+                    <input
+                      type="radio"
+                      name="size-changes"
+                      aria-describedby={`size-changes-${option}`}
+                      value={option}
+                      checked={sizeChanges === option}
+                      onChange={() => {
+                        setSizeChanges(option);
+                      }}
+                    />
+                    <span>
+                      <span className="choice-name">
+                        {SIZE_CHANGE_TEXT[option].name}
+                        {SIZE_CHANGE_TEXT[option].note === null ? null : (
+                          <small className="pill">{SIZE_CHANGE_TEXT[option].note}</small>
+                        )}
+                      </span>
+                      <small id={`size-changes-${option}`} className="note">
+                        {SIZE_CHANGE_TEXT[option].description}
+                      </small>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
               <p className={fitError === null ? 'note' : 'warn'} role="status">
                 {fitError === null
                   ? fitCount(fits)
