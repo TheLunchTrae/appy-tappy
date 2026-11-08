@@ -15,7 +15,7 @@ mise run standards:check
 ```
 
 [Platform](../../AGENTS.md#platform) says which tasks run on Windows and which
-need Linux, and how to set up mise in Git Bash.
+need Linux, and that mise runs from Git Bash on Windows.
 
 ## Test builds
 

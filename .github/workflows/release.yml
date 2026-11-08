@@ -29,7 +29,6 @@ jobs:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       # The same settings as the windows job in quality.yml.
-      MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
       - name: Check out repository
@@ -37,7 +36,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned tools
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: '2026.10.19'
           install: true
@@ -63,14 +62,16 @@ jobs:
 
   # Signs the installer for the updater and writes latest.json, which the
   # setup app reads to find a newer release. Only this job gets the update
-  # key's private half, so nothing that builds the installer can read it. A
-  # repository without the update key skips it, and the release then carries
-  # no latest.json.
+  # key's private half, so nothing that builds the installer can read it. The
+  # half lives in the update-signing environment, which only v* tags can
+  # deploy to. A repository without the update key skips it, and the release
+  # then carries no latest.json.
   sign:
     name: sign
     needs: installer
     if: github.event_name == 'push' && github.ref_type == 'tag' && vars.UPDATER_PUBLIC_KEY != ''
     runs-on: ubuntu-26.04
+    environment: update-signing
     timeout-minutes: 10
     outputs:
       artifact-id: ${{ steps.keep.outputs.artifact-id }}
@@ -84,7 +85,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned tools
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: '2026.10.19'
           install: true

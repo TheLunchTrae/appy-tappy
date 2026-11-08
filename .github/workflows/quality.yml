@@ -42,7 +42,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install pinned tools
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: '2026.10.19'
           install: true
@@ -113,7 +113,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned tools
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: '2026.10.19'
           install: true
@@ -141,10 +141,6 @@ jobs:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       CARGO_INCREMENTAL: '0'
-      # Inline tasks are POSIX sh. mise reads this setting only from the
-      # environment or global config, so CI sets it here; AGENTS.md gives the
-      # same setting for Windows workstations.
-      MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
       # Tasks would otherwise install every tool, not only install_args.
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
@@ -153,7 +149,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned tools
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: '2026.10.19'
           install: true
@@ -215,7 +211,6 @@ jobs:
       MISE_LOCKED: '1'
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       CARGO_INCREMENTAL: '0'
-      MISE_WINDOWS_DEFAULT_INLINE_SHELL_ARGS: sh -c -o errexit
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
     steps:
       - name: Check out repository
@@ -223,7 +218,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned tools
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: '2026.10.19'
           install: true
