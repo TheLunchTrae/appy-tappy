@@ -61,15 +61,17 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MOUSEEVENTF_LEFTDOWN,
     MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MapVirtualKeyW,
     SendInput, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
-    VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT,
-    VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    VK_HOME, VK_INSERT, VK_LBUTTON, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MBUTTON,
+    VK_MENU, VK_NEXT, VK_PRIOR, VK_RBUTTON, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE,
+    VK_TAB, VK_UP,
 };
 use windows::Win32::UI::Shell::{
     SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId,
-    SW_SHOWNOACTIVATE, SetCursorPos, SetForegroundWindow, WindowFromPoint,
+    GA_ROOT, GetAncestor, GetCursorPos, GetForegroundWindow, GetSystemMetrics,
+    GetWindowThreadProcessId, SM_SWAPBUTTON, SW_SHOWNOACTIVATE, SetCursorPos, SetForegroundWindow,
+    WindowFromPoint,
 };
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
@@ -490,11 +492,29 @@ impl Controls for WindowsControls {
         Ok(())
     }
 
+    fn buttons_held(&mut self) -> io::Result<bool> {
+        Ok([VK_LBUTTON, VK_RBUTTON, VK_MBUTTON]
+            .into_iter()
+            .any(|button| {
+                #[expect(unsafe_code, reason = "a Win32 call")]
+                // SAFETY: the call takes one integer and reads no memory.
+                let state = unsafe { GetAsyncKeyState(i32::from(button.0)) };
+                // The high bit is set while the button is down.
+                state < 0
+            }))
+    }
+
     fn send_presses(&mut self, presses: &[Press]) -> io::Result<usize> {
         if presses.is_empty() {
             return Ok(0);
         }
-        let inputs: Vec<INPUT> = presses.iter().copied().map(mouse_input).collect();
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes one integer and reads no memory.
+        let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+        let inputs: Vec<INPUT> = presses
+            .iter()
+            .map(|&press| mouse_input(press, swapped))
+            .collect();
         let size = i32::try_from(size_of::<INPUT>()).map_err(io::Error::other)?;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: the slice holds initialized mouse inputs, and `size` is the
@@ -684,8 +704,14 @@ fn input(stroke: Stroke) -> INPUT {
 }
 
 /// The mouse input for one press, at wherever the cursor is.
-fn mouse_input(press: Press) -> INPUT {
-    let flags = match (press.button, press.down) {
+fn mouse_input(press: Press, swapped: bool) -> INPUT {
+    // Injected events name the physical buttons, so with the buttons
+    // swapped in Windows' settings the left click is the right button.
+    let button = match (press.button, swapped) {
+        (MouseButton::Left, false) | (MouseButton::Right, true) => MouseButton::Left,
+        (MouseButton::Right, false) | (MouseButton::Left, true) => MouseButton::Right,
+    };
+    let flags = match (button, press.down) {
         (MouseButton::Left, true) => MOUSEEVENTF_LEFTDOWN,
         (MouseButton::Left, false) => MOUSEEVENTF_LEFTUP,
         (MouseButton::Right, true) => MOUSEEVENTF_RIGHTDOWN,

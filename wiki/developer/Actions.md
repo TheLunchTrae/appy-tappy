@@ -152,7 +152,9 @@ in that application's window it lands:
 
 The runtime places a click just before it runs, on the action thread, because
 where it lands depends on where the window is now. It finds the target's
-window the way the reader does, with the application's window match. A
+window the way the reader does, with the application's window match, but
+never a window taken only as the fallback: that may be another of the
+application's windows, where the spot or the picture means something else. A
 window that is not open, is minimized, or is hidden is not clicked. The
 place is measured in the window's frame as the screen shows it, which the
 desktop window manager reports without the invisible borders that the
@@ -160,8 +162,9 @@ window's own bounds take in, so it matches what a capture of the window
 shows. For a picture, the window must have the size the picture was taken
 at; the runtime then grabs one frame of the area, waits up to a second for
 it, and looks for the picture there (see
-[Screen regions](Screen-regions.md)). Nothing is clicked when it is not
-found, and the log says why.
+[Screen regions](Screen-regions.md)). It reads the window's frame again after
+the grab, and a window that moved meanwhile is not clicked. Nothing is
+clicked when the picture is not found, and the log says why.
 
 The search compares the picture's kept pixels with each place it fits in the
 area and takes the closest place within its tolerance: the average distance
@@ -170,20 +173,36 @@ compares a place pixel by pixel, it checks a bound from each row's summed
 channels, which running sums of the area give in a few steps, and it stops
 comparing a place once that place cannot beat the best so far. A 40×20
 picture in a 180×120 area takes about 8 ms, so the setup app draws the area
-around where the picture shows rather than across the whole window.
+around where the picture shows rather than across the whole window. An area
+holds at most 160,000 pixels, such as 400 by 400, because other actions wait
+for the search.
 
 A click clicks only while the watched application or the application it
 clicks in has the keyboard focus, because anti-cheat was checked for those
-two, and only when the click's window is the one that shows at its place,
-so it never lands in a window that covers it. It then moves the cursor
-there with `SetCursorPos`, presses through `SendInput`, waits 40 ms so an
-application that reads the cursor once a frame still sees it there, and
-moves the cursor back. A double click is two presses in one call, well
-inside the double-click time. When Windows drops some presses, a button that
-went down goes up again. With return focus on, which is the default, the
-window that was in front asks for the focus back. Windows may refuse that
-while another program holds the foreground; the log then says the click
-landed but the focus did not go back.
+two, and only while no mouse button or modifier key is held, so it is never
+a drag or a Ctrl-click. It brings the click's window to the front first with
+`SetForegroundWindow`, because a game in front may keep the cursor inside
+its window or hold the mouse, and would then get the press itself. Windows
+may refuse that while another program holds the foreground, and the click
+is then skipped. It clicks only when the click's window is the one that
+shows at its place, so it never lands in a window that covers it. It then
+moves the cursor there with `SetCursorPos` and reads the cursor back, since
+Windows keeps the cursor inside a window that confines it without failing
+the move; a cursor that did not get there skips the press. It presses
+through `SendInput`, one button event at a time, holding each button down
+20 ms so an application that reads the buttons once a frame sees it, waits
+40 ms so one that reads the cursor once a frame still sees it there, and
+moves the cursor back. A double click stays well inside the double-click
+time. Injected events name the physical buttons, so with the buttons
+swapped in Windows' settings the adapter swaps them back. When Windows drops
+a press, a button that went down goes up again. With return focus on, which
+is the default, the window that was in front asks for the focus back;
+Windows may refuse that too, and the log then says the click landed but the
+focus did not go back. A right click that opens a menu usually wants return
+focus off, since the menu closes when the focus goes back. Windows does not
+let a program send input to a program running as administrator, and
+`SendInput` does not say when it was blocked, so a click in such a window
+is logged as done although nothing happened.
 
 Both applications need the anti-cheat class `none`, the watched one and the
 one it clicks in, because a click is injected input too. Saving an
@@ -293,6 +312,7 @@ so a failed check leaves it as it was.
 A click is checked by hand. Save a click on a spot and one on a picture in
 another application's window, with both applications' anti-cheat set to
 none, and check that each lands where the setup app showed it, on a window
-with and without a title bar and on a second monitor with another scale;
-that a window covering the place stops the click; and that the focus goes
-back to the watched application.
+with and without a title bar, maximized, and on a second monitor with
+another scale; that a window covering the place stops the click; that a
+game that keeps the cursor inside its window gets no click; and that the
+focus goes back to the watched application.

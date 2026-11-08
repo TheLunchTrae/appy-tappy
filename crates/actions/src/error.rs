@@ -43,6 +43,16 @@ pub enum ActionError {
         /// How many there were.
         of: usize,
     },
+    /// A click did not click, because a mouse button or a modifier key was
+    /// held down.
+    HeldDown,
+    /// A click did not click, because Windows did not bring the named
+    /// application's window to the front.
+    NotBroughtToFront(String),
+    /// A click did not click, because the cursor could not reach its place
+    /// in the named application's window, such as while another window
+    /// confines the cursor.
+    CursorBlocked(String),
     /// A click reached the journal without a place: the runtime places
     /// clicks and runs them through [`crate::Actions::click`].
     Unplaced,
@@ -80,6 +90,17 @@ impl fmt::Display for ActionError {
             Self::ButtonsDropped { sent, of } => {
                 write!(formatter, "Windows took only {sent} of {of} mouse button events")
             },
+            Self::HeldDown => formatter.write_str(
+                "the click did not click, because a mouse button or a modifier key was held down",
+            ),
+            Self::NotBroughtToFront(target) => write!(
+                formatter,
+                "the click did not click, because Windows did not bring {target} to the front"
+            ),
+            Self::CursorBlocked(target) => write!(
+                formatter,
+                "the click did not click, because the cursor could not reach its place in {target}"
+            ),
             Self::Unplaced => formatter.write_str("the click was not placed on the screen"),
             Self::FocusNotReturned => formatter.write_str(
                 "the click landed, but Windows did not give the focus back to the window that was in front",
@@ -102,6 +123,9 @@ impl Error for ActionError {
             | Self::ClickNotInFront { .. }
             | Self::Covered(_)
             | Self::ButtonsDropped { .. }
+            | Self::HeldDown
+            | Self::NotBroughtToFront(_)
+            | Self::CursorBlocked(_)
             | Self::Unplaced
             | Self::FocusNotReturned => None,
         }
@@ -144,6 +168,15 @@ mod tests {
                 "only 1 of 4 mouse",
             ),
             (ActionError::FocusNotReturned, "focus back"),
+            (ActionError::HeldDown, "held down"),
+            (
+                ActionError::NotBroughtToFront("Target App".to_owned()),
+                "bring Target App to the front",
+            ),
+            (
+                ActionError::CursorBlocked("Target App".to_owned()),
+                "reach its place in Target App",
+            ),
             (ActionError::Unplaced, "not placed"),
         ] {
             assert!(error.to_string().contains(words), "{error}");

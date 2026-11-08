@@ -149,6 +149,13 @@ pub trait Controls {
     /// blocks input.
     fn move_cursor(&mut self, x: i32, y: i32) -> io::Result<()>;
 
+    /// Whether a mouse button is held down now.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn buttons_held(&mut self) -> io::Result<bool>;
+
     /// Sends `presses`, in order, where the cursor is. Answers how many of
     /// them the operating system took, from the first; it takes fewer when
     /// another program blocks input.

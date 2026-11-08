@@ -478,6 +478,11 @@ impl appytappy_actions::Controls for NoControls {
     }
 
     #[mutants::skip]
+    fn buttons_held(&mut self) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
     fn send_presses(&mut self, _presses: &[appytappy_actions::Press]) -> io::Result<usize> {
         match self.0 {}
     }

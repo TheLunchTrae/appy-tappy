@@ -13,6 +13,11 @@ use crate::store::is_app_id;
 /// pixels: wider than any screen, so a bad number fails here and not later.
 pub const MAX_CLICK_DISTANCE: u32 = 16_384;
 
+/// The most pixels the area a picture is looked for in may hold, such as
+/// 400 by 400. The search takes longer the bigger the area, and actions
+/// wait for it.
+pub const MAX_SEARCH_PIXELS: u64 = 160_000;
+
 /// A click in a window of another saved application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Click {
@@ -167,8 +172,8 @@ impl ClickPicture {
     /// # Errors
     ///
     /// Returns [`InvalidClick`] when the image name is not a picture file
-    /// name, the window or the area is empty, or the area does not fit the
-    /// window.
+    /// name, the window or the area is empty, the area does not fit the
+    /// window, or it holds more than [`MAX_SEARCH_PIXELS`].
     pub fn new(
         image: &str,
         (window_width, window_height): (u32, u32),
@@ -190,6 +195,9 @@ impl ClickPicture {
             || !fits(search.y, search.height, window_height)
         {
             return Err(InvalidClick::Area);
+        }
+        if u64::from(search.width).saturating_mul(u64::from(search.height)) > MAX_SEARCH_PIXELS {
+            return Err(InvalidClick::LargeArea);
         }
         Ok(Self {
             image: image.to_owned(),
@@ -213,6 +221,8 @@ pub enum InvalidClick {
     Image,
     /// The area is empty or does not fit the window it was drawn on.
     Area,
+    /// The area holds more than [`MAX_SEARCH_PIXELS`].
+    LargeArea,
 }
 
 impl fmt::Display for InvalidClick {
@@ -225,6 +235,10 @@ impl fmt::Display for InvalidClick {
                  hyphens, and underscores"
             },
             Self::Area => "the area a click looks for its picture in must lie inside the window",
+            Self::LargeArea => {
+                "the area a click looks for its picture in can hold at most 160000 pixels, such as \
+                 400 by 400"
+            },
         })
     }
 }
@@ -334,6 +348,14 @@ mod tests {
             );
         }
         assert!(picture((MAX_CLICK_DISTANCE, MAX_CLICK_DISTANCE), area(0, 0, 1, 1)).is_ok());
+        assert!(picture((1000, 1000), area(0, 0, 400, 400)).is_ok());
+        for search in [area(0, 0, 400, 401), area(0, 0, 401, 400)] {
+            assert_eq!(
+                picture((1000, 1000), search),
+                Err(InvalidClick::LargeArea),
+                "{search:?}"
+            );
+        }
     }
 
     #[test]
@@ -350,5 +372,6 @@ mod tests {
         assert!(InvalidClick::App.to_string().contains("application"));
         assert!(InvalidClick::Image.to_string().contains(".png"));
         assert!(InvalidClick::Area.to_string().contains("inside the window"));
+        assert!(InvalidClick::LargeArea.to_string().contains("160000"));
     }
 }

@@ -10,8 +10,8 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::rule::Restore;
 
 use crate::{
-    ActionError, CLICK_HOLD, Controls, HOLD, MediaSession, PlacedClick, Press, Stroke, Volume,
-    presses, strokes,
+    ActionError, CLICK_HOLD, Controls, HOLD, MediaSession, PRESS_HOLD, PlacedClick, Press, Stroke,
+    Volume, presses, strokes,
 };
 
 /// How long a failed media restore waits before its one more try.
@@ -241,12 +241,17 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
     ///
     /// It clicks only while the watched application or the one it clicks in
     /// has the keyboard focus, because those are the applications whose
-    /// anti-cheat was checked, and only when the click's window is the one
-    /// showing at its place, so it never lands in a window that covers it.
-    /// It moves the cursor there, presses, waits [`CLICK_HOLD`], and moves
-    /// the cursor back. With [`PlacedClick::return_focus`], the window that
-    /// was in front gets the focus back. A button that went down goes up
-    /// again, even when Windows drops some presses.
+    /// anti-cheat was checked, and only while no mouse button or modifier
+    /// key is held, so the click is never a drag or a Ctrl-click. It brings
+    /// the click's window to the front first, so a window in front that
+    /// holds the mouse, such as a game that keeps the cursor inside it,
+    /// does not get the press. It clicks only when the click's window is
+    /// the one showing at its place, so it never lands in a window that
+    /// covers it, and only when the cursor reached the place. It presses,
+    /// holding each button down [`PRESS_HOLD`], waits [`CLICK_HOLD`], and
+    /// moves the cursor back. With [`PlacedClick::return_focus`], the window
+    /// that was in front gets the focus back. A button that went down goes
+    /// up again, even when Windows drops a press.
     ///
     /// # Errors
     ///
@@ -260,25 +265,22 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                 target: click.app.clone(),
             });
         }
-        let (x, y) = click.at;
-        if self.controls.window_at(x, y)? != Some(click.window) {
-            return Err(ActionError::Covered(click.app.clone()));
+        if self.controls.buttons_held()? || !self.controls.held_modifiers()?.is_empty() {
+            return Err(ActionError::HeldDown);
         }
         let front = self.controls.front_window()?;
-        let (cursor_x, cursor_y) = self.controls.cursor()?;
-        self.controls.move_cursor(x, y)?;
-        let pressed = self.press_buttons(&presses(click.button));
-        self.controls.hold(CLICK_HOLD);
-        let moved_back = self.controls.move_cursor(cursor_x, cursor_y);
-        // Even a click that failed may have brought its window forward.
+        if front != Some(click.window) && !self.controls.bring_to_front(click.window)? {
+            return Err(ActionError::NotBroughtToFront(click.app.clone()));
+        }
+        let clicked = self.click_in_front(click);
+        // Even a click that failed brought its window forward.
         let returned = match front {
             Some(front) if click.return_focus && front != click.window => {
                 self.controls.bring_to_front(front)
             },
             _ => Ok(true),
         };
-        pressed?;
-        moved_back?;
+        clicked?;
         if returned? {
             Ok(())
         } else {
@@ -286,14 +288,53 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         }
     }
 
-    /// Sends `presses`, and lets go of a button that went down when Windows
-    /// dropped the rest.
+    /// Clicks `click` once its window is in front, and puts the cursor
+    /// back.
+    fn click_in_front(&mut self, click: &PlacedClick) -> Result<(), ActionError> {
+        let (x, y) = click.at;
+        if self.controls.window_at(x, y)? != Some(click.window) {
+            return Err(ActionError::Covered(click.app.clone()));
+        }
+        let (cursor_x, cursor_y) = self.controls.cursor()?;
+        self.controls.move_cursor(x, y)?;
+        // Windows keeps the cursor inside a window that confines it without
+        // failing the move, so the press waits until the cursor is there.
+        let pressed = match self.controls.cursor() {
+            Ok(at) if at == (x, y) => self.press_buttons(&presses(click.button)),
+            Ok(_) => Err(ActionError::CursorBlocked(click.app.clone())),
+            Err(error) => Err(error.into()),
+        };
+        if pressed.is_ok() {
+            self.controls.hold(CLICK_HOLD);
+        }
+        let moved_back = self.controls.move_cursor(cursor_x, cursor_y);
+        pressed?;
+        moved_back?;
+        Ok(())
+    }
+
+    /// Sends `presses` one at a time, holding each button down
+    /// [`PRESS_HOLD`], since an application that reads the buttons once a
+    /// frame would miss a press that goes down and up at once. A button that
+    /// went down goes up again when Windows drops or fails the next press.
     fn press_buttons(&mut self, presses: &[Press]) -> Result<(), ActionError> {
-        let sent = self.controls.send_presses(presses)?;
-        if sent < presses.len() {
-            // Presses go down and up in turn, so only the last one sent can
-            // be a button still down.
-            if let Some(&last) = presses.get(..sent).and_then(<[Press]>::last)
+        let mut last: Option<Press> = None;
+        for (sent, &press) in presses.iter().enumerate() {
+            let failed = match self.controls.send_presses(&[press]) {
+                Ok(0) => ActionError::ButtonsDropped {
+                    sent,
+                    of: presses.len(),
+                },
+                Ok(_) => {
+                    if press.down {
+                        self.controls.hold(PRESS_HOLD);
+                    }
+                    last = Some(press);
+                    continue;
+                },
+                Err(error) => error.into(),
+            };
+            if let Some(last) = last
                 && last.down
             {
                 #[expect(
@@ -302,10 +343,7 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                 )]
                 let _ = self.controls.send_presses(&[last.reversed()]);
             }
-            return Err(ActionError::ButtonsDropped {
-                sent,
-                of: presses.len(),
-            });
+            return Err(failed);
         }
         Ok(())
     }
@@ -610,9 +648,13 @@ mod tests {
         front: Option<u64>,
         /// The window that shows at every place.
         under: Option<u64>,
-        /// Whether a window asked to come to the front stays behind.
-        stays_behind: bool,
+        /// The windows that stay behind when asked to come to the front.
+        stays_behind: Vec<u64>,
         cursor: (i32, i32),
+        /// Where a window that confines the cursor stops every move.
+        confined: Option<(i32, i32)>,
+        /// Whether a mouse button is held down.
+        button_down: bool,
         /// Whether each next cursor move fails, first first; once it runs
         /// out, a move works.
         moves_fail: Vec<bool>,
@@ -715,7 +757,7 @@ mod tests {
 
         fn bring_to_front(&mut self, window: u64) -> io::Result<bool> {
             self.log.push(format!("front {window}"));
-            if !self.stays_behind {
+            if !self.stays_behind.contains(&window) {
                 self.front = Some(window);
             }
             Ok(self.front == Some(window))
@@ -730,8 +772,12 @@ mod tests {
                 return Err(io::Error::other("input blocked"));
             }
             self.log.push(format!("cursor {x},{y}"));
-            self.cursor = (x, y);
+            self.cursor = self.confined.unwrap_or((x, y));
             Ok(())
+        }
+
+        fn buttons_held(&mut self) -> io::Result<bool> {
+            Ok(self.button_down)
         }
 
         fn send_presses(&mut self, presses: &[Press]) -> io::Result<usize> {
@@ -1823,9 +1869,15 @@ mod tests {
         assert_eq!(
             actions.controls().log,
             [
+                "front 9",
                 "under 100,200",
                 "cursor 100,200",
-                "buttons Left↓ Left↑ Left↓ Left↑",
+                "buttons Left↓",
+                "hold 20ms",
+                "buttons Left↑",
+                "buttons Left↓",
+                "hold 20ms",
+                "buttons Left↑",
                 "hold 40ms",
                 "cursor 5,5",
                 "front 1"
@@ -1843,9 +1895,12 @@ mod tests {
         assert_eq!(
             actions.controls().log,
             [
+                "front 9",
                 "under 100,200",
                 "cursor 100,200",
-                "buttons Right↓ Right↑",
+                "buttons Right↓",
+                "hold 20ms",
+                "buttons Right↑",
                 "hold 40ms",
                 "cursor 5,5"
             ]
@@ -1888,6 +1943,34 @@ mod tests {
     }
 
     #[test]
+    fn a_click_waits_for_held_buttons_and_modifiers() {
+        let mut actions = screen(7);
+        actions.controls().button_down = true;
+        assert!(matches!(
+            actions.click(&placed(ClickButton::Left, true), &watched()),
+            Err(ActionError::HeldDown)
+        ));
+        let mut actions = screen(7);
+        actions.controls().held = vec![Modifier::Ctrl];
+        assert!(matches!(
+            actions.click(&placed(ClickButton::Left, true), &watched()),
+            Err(ActionError::HeldDown)
+        ));
+        assert_eq!(actions.controls().log, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_click_needs_its_window_in_front() {
+        let mut actions = screen(7);
+        actions.controls().stays_behind = vec![9];
+        assert!(matches!(
+            actions.click(&placed(ClickButton::Left, true), &watched()),
+            Err(ActionError::NotBroughtToFront(app)) if app == "Target App"
+        ));
+        assert_eq!(actions.controls().log, ["front 9"]);
+    }
+
+    #[test]
     fn a_click_does_not_land_in_a_window_that_covers_its_place() {
         let mut actions = screen(8);
         actions.controls().under = Some(4);
@@ -1895,19 +1978,43 @@ mod tests {
             actions.click(&placed(ClickButton::Left, true), &watched()),
             Err(ActionError::Covered(app)) if app == "Target App"
         ));
-        assert_eq!(actions.controls().log, ["under 100,200"]);
+        assert_eq!(
+            actions.controls().log,
+            ["front 9", "under 100,200", "front 1"],
+            "the focus goes back"
+        );
+    }
+
+    #[test]
+    fn a_click_does_not_press_where_the_cursor_was_stopped() {
+        let mut actions = screen(8);
+        actions.controls().confined = Some((60, 200));
+        assert!(matches!(
+            actions.click(&placed(ClickButton::Left, true), &watched()),
+            Err(ActionError::CursorBlocked(app)) if app == "Target App"
+        ));
+        assert_eq!(
+            actions.controls().log,
+            [
+                "front 9",
+                "under 100,200",
+                "cursor 100,200",
+                "cursor 5,5",
+                "front 1"
+            ]
+        );
     }
 
     #[test]
     fn a_button_that_went_down_goes_up_when_presses_are_dropped() {
         for (takes, sent, of, release) in [
-            (1, 1, 2, Some("buttons Left↑")),
-            (0, 0, 2, None),
-            (2, 2, 4, None),
-            (3, 3, 4, Some("buttons Left↑")),
+            (vec![1, 0], 1, 2, Some("buttons Left↑")),
+            (vec![0], 0, 2, None),
+            (vec![1, 1, 0], 2, 4, None),
+            (vec![1, 1, 1, 0], 3, 4, Some("buttons Left↑")),
         ] {
             let mut actions = screen(7);
-            actions.controls().takes = vec![takes];
+            actions.controls().takes = takes;
             let button = if of == 2 {
                 ClickButton::Left
             } else {
@@ -1922,27 +2029,31 @@ mod tests {
             );
             let controls = actions.controls();
             let log = &controls.log;
+            let after = log
+                .iter()
+                .skip_while(|line| *line != "buttons ")
+                .nth(1)
+                .map(String::as_str);
             assert_eq!(
-                log.iter()
-                    .filter(|line| line.starts_with("buttons"))
-                    .nth(1)
-                    .map(String::as_str),
+                after.filter(|line| line.starts_with("buttons")),
                 release,
                 "{log:?}"
             );
+            assert!(!log.contains(&"hold 40ms".to_owned()), "{log:?}");
             assert_eq!(controls.cursor, (5, 5), "{log:?}");
             assert_eq!(log.last().map(String::as_str), Some("front 1"), "{log:?}");
         }
+        let mut actions = screen(7);
+        actions.controls().broken = Some("mouse");
+        assert!(matches!(
+            actions.click(&placed(ClickButton::Left, true), &watched()),
+            Err(ActionError::Os(_))
+        ));
+        assert_eq!(actions.controls().cursor, (5, 5));
     }
 
     #[test]
     fn a_click_that_cannot_put_things_back_says_so() {
-        let mut actions = screen(7);
-        actions.controls().stays_behind = true;
-        assert!(matches!(
-            actions.click(&placed(ClickButton::Left, true), &watched()),
-            Err(ActionError::FocusNotReturned)
-        ));
         let mut actions = screen(7);
         actions.controls().moves_fail = vec![false, true];
         assert!(matches!(
@@ -1960,14 +2071,20 @@ mod tests {
             actions.click(&placed(ClickButton::Left, true), &watched()),
             Err(ActionError::Os(_))
         ));
-        assert_eq!(actions.controls().log, ["under 100,200"]);
+        assert_eq!(
+            actions.controls().log,
+            ["front 9", "under 100,200", "front 1"]
+        );
+    }
+
+    #[test]
+    fn a_click_whose_window_keeps_the_focus_says_so() {
         let mut actions = screen(7);
-        actions.controls().broken = Some("mouse");
+        actions.controls().stays_behind = vec![1];
         assert!(matches!(
             actions.click(&placed(ClickButton::Left, true), &watched()),
-            Err(ActionError::Os(_))
+            Err(ActionError::FocusNotReturned)
         ));
-        assert_eq!(actions.controls().cursor, (5, 5));
     }
 
     #[test]

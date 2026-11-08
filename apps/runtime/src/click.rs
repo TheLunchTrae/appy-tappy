@@ -29,8 +29,9 @@ const GRAB_WAIT: Duration = Duration::from_secs(1);
 pub(crate) struct ClickTargets {
     /// Each application clicked in, by ID.
     apps: BTreeMap<String, Target>,
-    /// The search for each click picture, by its file name.
-    pictures: BTreeMap<String, PictureSearch>,
+    /// The search for each click picture, by its file name and tolerance,
+    /// since two clicks may look for one picture with different ones.
+    pictures: BTreeMap<(String, u8), PictureSearch>,
 }
 
 /// An application a click clicks in.
@@ -64,20 +65,28 @@ impl ClickTargets {
             let Some((_, file)) = apps.iter().find(|(id, _)| *id == click.app) else {
                 return Err("the application it clicks in is no longer saved".to_owned());
             };
+            let mut window = file.window.to_match();
+            // A window taken only because none qualified may be another of
+            // the application's windows, where the spot or the picture
+            // means something else.
+            window.fallback = false;
             targets.push((
                 click.app.clone(),
                 Target {
                     name: file.name.clone(),
-                    window: file.window.to_match(),
+                    window,
                 },
             ));
-            if let ClickAt::Picture(wanted) = &click.at
-                && !self.pictures.contains_key(&wanted.image)
-            {
+            // Each click's picture is checked against its own area and
+            // press, even when another click looks for the same picture.
+            if let ClickAt::Picture(wanted) = &click.at {
                 let bytes = picture(&wanted.image).map_err(|error| {
                     format!("its picture {} cannot be read: {error}", wanted.image)
                 })?;
-                pictures.push((wanted.image.clone(), search(wanted, &bytes)?));
+                pictures.push((
+                    (wanted.image.clone(), wanted.tolerance),
+                    search(wanted, &bytes)?,
+                ));
             }
         }
         self.apps.extend(targets);
@@ -147,7 +156,7 @@ pub(crate) fn place<S: System + Capture>(
         ClickAt::Picture(wanted) => {
             let search = targets
                 .pictures
-                .get(&wanted.image)
+                .get(&(wanted.image.clone(), wanted.tolerance))
                 .ok_or_else(|| format!("its picture {} was not loaded", wanted.image))?;
             let taken = Size {
                 width: wanted.window_width,
@@ -169,6 +178,13 @@ pub(crate) fn place<S: System + Capture>(
                 .map_err(|error| format!("{name}'s window cannot be captured: {error}"))?;
             if frame_size != taken {
                 return Err(other_size(frame_size));
+            }
+            // The grab takes a moment, and a window that moved meanwhile
+            // would put the click off by as much.
+            if screen.frame_bounds(window.handle).map_err(failed)? != Some(bounds) {
+                return Err(format!(
+                    "{name}'s window moved while its picture was looked for"
+                ));
             }
             let found = search
                 .find(&image)
@@ -221,6 +237,7 @@ mod tests {
     use appytappy_config::click::{Area, ClickButton, Corner, Spot};
     use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler};
     use appytappy_sources::system::{ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use std::sync::mpsc;
     use std::time::Instant;
 
     use super::*;
@@ -288,6 +305,9 @@ mod tests {
         shown: bool,
         bounds: Option<Bounds>,
         frame: Image,
+        /// The frame bounds each next read answers, first first; once it
+        /// runs out, a read answers `bounds`.
+        reads: Option<mpsc::Receiver<Bounds>>,
     }
 
     impl Screen {
@@ -301,6 +321,7 @@ mod tests {
                     bottom: 600,
                 }),
                 frame: window_image(),
+                reads: None,
             }
         }
     }
@@ -340,7 +361,8 @@ mod tests {
         }
 
         fn frame_bounds(&self, _window: u64) -> io::Result<Option<Bounds>> {
-            Ok(self.bounds)
+            let next = self.reads.as_ref().and_then(|reads| reads.try_recv().ok());
+            Ok(next.or(self.bounds))
         }
 
         fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
@@ -507,6 +529,65 @@ mod tests {
         assert_eq!(
             place(&Screen::new(), &other, &targets),
             Err("the application it clicks in is no longer saved".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_picture_is_not_clicked_in_a_window_that_moved_while_it_was_looked_for() {
+        let click = picture((200, 100), area(100, 40, 100, 60), (3, 1));
+        let targets = targets(std::slice::from_ref(&click)).unwrap();
+        let (sender, reads) = mpsc::channel();
+        let screen = Screen {
+            reads: Some(reads),
+            ..Screen::new()
+        };
+        let bounds = screen.bounds.unwrap();
+        sender.send(bounds).unwrap();
+        sender
+            .send(Bounds {
+                left: 1001,
+                right: 1201,
+                ..bounds
+            })
+            .unwrap();
+        assert_eq!(
+            place(&screen, &click, &targets),
+            Err("Target App's window moved while its picture was looked for".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_window_taken_only_as_the_fallback_is_not_clicked() {
+        let click = spot(Corner::TopLeft, 0, 0);
+        let mut file = app_file("Target App");
+        file.window.title = "Main".to_owned();
+        file.window.must_match.title = true;
+        file.window.fallback = FallbackDef::Executable;
+        let mut targets = ClickTargets::default();
+        targets
+            .add([&click], &[("target", &file)], |_| Ok(Vec::new()))
+            .unwrap();
+        assert_eq!(
+            place(&Screen::new(), &click, &targets),
+            Err("Target App has no window open".to_owned())
+        );
+    }
+
+    #[test]
+    fn clicks_sharing_a_picture_each_keep_their_tolerance_and_press() {
+        let strict = picture((200, 100), area(100, 40, 100, 60), (3, 1));
+        let mut loose = strict.clone();
+        if let ClickAt::Picture(wanted) = &mut loose.at {
+            wanted.tolerance = 30;
+        }
+        assert_eq!(targets(&[strict.clone(), loose]).unwrap().pictures.len(), 2);
+        let mut outside = strict.clone();
+        if let ClickAt::Picture(wanted) = &mut outside.at {
+            wanted.press = (9, 0);
+        }
+        assert_eq!(
+            targets(&[strict, outside]),
+            Err("the place it presses lies outside its picture patch-1.png".to_owned())
         );
     }
 

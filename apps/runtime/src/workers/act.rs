@@ -490,6 +490,10 @@ mod tests {
             Ok(())
         }
 
+        fn buttons_held(&mut self) -> io::Result<bool> {
+            Ok(false)
+        }
+
         fn send_presses(&mut self, presses: &[Press]) -> io::Result<usize> {
             Ok(presses.len())
         }

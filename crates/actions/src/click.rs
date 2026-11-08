@@ -40,6 +40,10 @@ impl Press {
 /// there.
 pub const CLICK_HOLD: Duration = Duration::from_millis(40);
 
+/// How long a click holds its button down, so an application that reads
+/// the buttons once a frame still sees it down.
+pub const PRESS_HOLD: Duration = Duration::from_millis(20);
+
 /// The presses that click `button`: down and up, twice for a double click.
 #[must_use]
 pub fn presses(button: ClickButton) -> Vec<Press> {
