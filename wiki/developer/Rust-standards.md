@@ -103,10 +103,11 @@ then local `main`, so it needs full Git history. Untracked files fail the
 lane; stage them with `git add -N`. A diff that selects no mutants passes.
 
 `rust:standards:check` runs `rust:mutants:gate`, which picks the lane from
-`MUTANTS_LANE`: `full`, the default, or `diff`. CI runs the `diff` lane
-for pull requests and merge groups, against the base that
+`MUTANTS_LANE`: `full`, the default, or `diff`. CI runs the `diff` lane for
+pull requests and merge groups, against the base that
 `.github/workflows/quality.yml` sets, so the quality job fits its time limit.
-Pushes to main and manual runs take the full sweep, split into shards across the `quality` and `mutants` jobs:
+Pushes to main and manual runs take the full sweep, split into shards across
+the `quality` and `mutants` jobs:
 `MUTANTS_SHARD=k/n` makes `rust:mutants` run shard `k` of `n`, counted from
 zero, and `.github/workflows/quality.yml` sets the shard count.
 
