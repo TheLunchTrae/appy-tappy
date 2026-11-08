@@ -225,11 +225,10 @@ impl System for Unsupported {
 
 /// The handle of the visible window that `window` fits best.
 ///
-/// Only windows of a process whose executable `window` fits count. Ties go
-/// to the process with the lowest ID, then to the window listed first, so
-/// two copies of an application are told apart the same way each time. The
-/// runtime and the setup app both find an application's window this way,
-/// so the setup app reads the window the runtime would.
+/// Only windows of a process whose executable `window` fits count, and ties
+/// go to the window listed first, usually the front-most. The setup app
+/// finds an application's window this way; the runtime picks among the
+/// same tied windows with [`read_window`].
 #[must_use]
 pub fn best_window(
     window: &WindowMatch,
@@ -241,9 +240,8 @@ pub fn best_window(
         .map(|entry| entry.handle)
 }
 
-/// The visible windows that `window` fits best, all with the same fit, by
-/// process ID and then in the order they are listed; [`best_window`] takes
-/// the first.
+/// The visible windows that `window` fits best, all with the same fit, in
+/// the order they are listed; [`best_window`] takes the first.
 ///
 /// Only windows of a process whose executable `window` fits count.
 #[must_use]
@@ -277,15 +275,48 @@ pub fn best_windows(
         .take_while(|&(_, fit)| Some(fit) == best)
         .map(|(position, _)| position)
         .collect();
-    let mut best: Vec<WindowEntry> = candidates
+    candidates
         .into_iter()
         .enumerate()
         .filter(|(position, _)| tied.binary_search(position).is_ok())
         .map(|(_, (entry, _))| entry)
-        .collect();
-    // A stable sort keeps the listed order within a process.
-    best.sort_by_key(|entry| entry.process);
-    best
+        .collect()
+}
+
+/// The window the runtime reads among `best`, the windows tied for the best
+/// fit from [`best_windows`], and whether it shows.
+///
+/// When `current`, the process a session follows, owns one of them, it is
+/// one of its windows, so a second copy of the application does not take
+/// the session over. Otherwise any of them counts. Among those it is the
+/// first that `shown` says shows, or the first when none does.
+///
+/// Detection follows the process that owns this window and the reader
+/// reads it, so the two agree on one process.
+#[must_use]
+pub fn read_window(
+    best: &[WindowEntry],
+    current: Option<ProcessId>,
+    mut shown: impl FnMut(u64) -> bool,
+) -> Option<(&WindowEntry, bool)> {
+    let owns = |entry: &&WindowEntry| Some(entry.process) == current;
+    let pool: Vec<&WindowEntry> = if best.iter().any(|entry| owns(&entry)) {
+        best.iter().filter(owns).collect()
+    } else {
+        best.iter().collect()
+    };
+    match pool.iter().copied().find(|entry| shown(entry.handle)) {
+        Some(entry) => Some((entry, true)),
+        None => pool.first().map(|&entry| (entry, false)),
+    }
+}
+
+/// Whether a window shows, from its place. A window whose place cannot be
+/// read counts as shown, so a failing check never stops a capture that
+/// works.
+#[must_use]
+pub fn shows(place: io::Result<Option<WindowPlace>>) -> bool {
+    !matches!(place, Ok(None | Some(WindowPlace { shown: false, .. })))
 }
 
 #[cfg(test)]
@@ -360,9 +391,69 @@ mod tests {
         );
         assert_eq!(
             tied.iter().map(|entry| entry.handle).collect::<Vec<_>>(),
-            [6, 8, 9],
-            "every window with the best fit, by process and then in listed order"
+            [9, 6, 8],
+            "every window with the best fit, in listed order"
         );
+    }
+
+    #[test]
+    fn the_window_read_is_the_current_processs_then_one_that_shows() {
+        // Copy 40's window is listed first but minimized; copy 42 shows.
+        let tied = [
+            window(5, 40, "Example App", true),
+            window(6, 42, "Example App", true),
+            window(7, 40, "Example App", true),
+        ];
+        let minimized = [5];
+        let read = |current: Option<u32>, minimized: &[u64]| {
+            read_window(&tied, current.map(ProcessId::new), |handle| {
+                !minimized.contains(&handle)
+            })
+            .map(|(entry, shown)| (entry.handle, shown))
+        };
+        assert_eq!(
+            read(None, &minimized),
+            Some((6, true)),
+            "the first that shows"
+        );
+        assert_eq!(read(None, &[]), Some((5, true)), "the first listed");
+        assert_eq!(
+            read(Some(42), &[]),
+            Some((6, true)),
+            "the current process's"
+        );
+        assert_eq!(
+            read(Some(40), &minimized),
+            Some((7, true)),
+            "the current process's window that shows"
+        );
+        assert_eq!(
+            read(Some(40), &[5, 7]),
+            Some((5, false)),
+            "the current process keeps it while its windows are minimized"
+        );
+        assert_eq!(read(Some(43), &[5, 6, 7]), Some((5, false)), "none shows");
+        assert_eq!(read_window(&[], None, |_| true), None);
+    }
+
+    #[test]
+    fn a_window_shows_unless_its_place_says_otherwise() {
+        let place = |shown| {
+            Ok(Some(WindowPlace {
+                bounds: Bounds {
+                    left: 0,
+                    top: 0,
+                    right: 4,
+                    bottom: 2,
+                },
+                shown,
+                front: false,
+            }))
+        };
+        assert!(shows(place(true)));
+        assert!(!shows(place(false)));
+        assert!(!shows(Ok(None)), "gone");
+        assert!(shows(Err(io::Error::other("denied"))), "unknown");
     }
 
     #[test]

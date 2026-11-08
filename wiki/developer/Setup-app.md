@@ -153,10 +153,10 @@ them as `mustMatch`, with a flag for the title and the class, and `fallback`:
 runtime attaches to an application by its process's executable. A window
 qualifies when its executable and every required field match. Fallback
 windows count only when no window qualifies. Windows rank by fewer missed
-fields, then by the title matching. On a tie the runtime takes the window
-of the process with the lowest ID, then the one Windows lists first, usually
-the front-most, so the setup app marks every window that ties for the best
-fit as a best match.
+fields, then by the title matching. On a tie the runtime keeps a window of
+the process its session already follows, and otherwise takes the first that
+Windows lists, usually the front-most, that is not minimized, so the setup
+app marks every window that ties for the best fit as a best match.
 The setup app uses the match to show which applications are running, and the
 runtime finds each application's window with the same rules. A value's region
 means something only while the window has the size it had when the region was

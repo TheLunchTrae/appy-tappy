@@ -255,16 +255,20 @@ runtime, turns those events into snapshots:
 Each snapshot ends the session of an application whose process is gone, then
 starts one for an application that runs without one. When several running
 processes fit the application's executable pattern, such as two copies or a
-helper beside the application, the snapshot also lists the windows, and the
-session follows the process that owns the window the application's
-[window match](setup-app.md#window-matching) fits best. That is the window the
-reader reads, so the values, the session, and the check that a key press goes
-to the application in front all agree on one process. When another process
-comes to own the best window, such as the application opening its window
-after a helper started first, the session ends and starts again on that
-process. While no window fits, a session keeps its process, and a new one
-follows the process with the lowest ID. So a second copy of an application
-starts no second session, and it takes over when the first exits. A process ID that
+helper beside the application, the snapshot also lists the windows and
+checks which show, and the session follows the process that owns the window
+the reader reads. Both pick it the same way (`read_window` in
+`crates/sources/src/system.rs`) among the windows the application's
+[window match](setup-app.md#window-matching) fits best: one of the session's
+own process while it owns one, and otherwise the first that is not
+minimized, then the first. So the values, the session, and the check that a
+key press goes to the application in front all agree on one process. When
+the session's process owns no such window and another does, such as the
+application opening its window after a helper started first, the session
+ends and starts again on that process. While no window fits, a session keeps
+its process, and a new one follows the process with the lowest ID. So a
+second copy of an application starts no second session, and it takes over
+when the first exits. A process ID that
 Windows reused for another executable ends the session. An application
 relaunched within 5 seconds that gets its old process ID back keeps its session,
 because a snapshot cannot tell the two processes apart. A crashed application is
