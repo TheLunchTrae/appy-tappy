@@ -30,6 +30,9 @@ Linux and is the required gate. `windows` runs `rust:lint`, `rust:doc`, and
 `rust:test:members` on Windows, and also `rust:bench` on pushes to main and
 manual runs. `footprint` runs `rust:footprint` on Windows, and `mutants` shares
 the full mutation sweep with `quality` on pushes to main and manual runs.
+`quality`, `windows`, and `footprint` restore a Rust build cache that only
+pushes to main save, once for each set of manifests, `Cargo.lock` and
+toolchain.
 
 - Inline mise tasks are POSIX `sh`. On a Windows workstation, run mise from
   Git Bash and set this in the global mise config
