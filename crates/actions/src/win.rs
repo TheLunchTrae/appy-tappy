@@ -8,6 +8,12 @@
 //! so no action opens a watched app's process. Key presses go through
 //! `SendInput`, which types into whichever window has the keyboard focus,
 //! after asking which process that window belongs to.
+//!
+//! The media session manager may not be ready yet, such as right after
+//! sign-in, so the controls start without it and ask for it again each time
+//! a media action needs it. A volume control that stops working, such as
+//! after its device was unplugged and plugged back in, is found again by its
+//! ID.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -44,7 +50,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-use windows::core::{GUID, IUnknown, Interface, PWSTR, RuntimeType};
+use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
 use crate::{Controls, MediaSession, Stroke, Volume};
@@ -109,7 +115,8 @@ pub struct VolumeKey {
 #[derive(Debug, Clone)]
 enum VolumeControl {
     Device(IAudioEndpointVolume),
-    Session(ISimpleAudioVolume),
+    /// An audio session, and the endpoint ID of the device it plays on.
+    Session(ISimpleAudioVolume, String),
 }
 
 impl PartialEq for VolumeKey {
@@ -117,7 +124,7 @@ impl PartialEq for VolumeKey {
         let same_kind = matches!(
             (&self.control, &other.control),
             (VolumeControl::Device(_), VolumeControl::Device(_))
-                | (VolumeControl::Session(_), VolumeControl::Session(_))
+                | (VolumeControl::Session(..), VolumeControl::Session(..))
         );
         same_kind && self.id == other.id
     }
@@ -130,29 +137,85 @@ impl PartialEq for VolumeKey {
 /// another.
 #[derive(Debug)]
 pub struct WindowsControls {
-    media: GlobalSystemMediaTransportControlsSessionManager,
+    /// The media session manager, once Windows gave it.
+    media: Option<GlobalSystemMediaTransportControlsSessionManager>,
     devices: IMMDeviceEnumerator,
     // Dropped last, after the COM objects above.
     _apartment: Apartment,
 }
 
 impl WindowsControls {
-    /// Connects to the media session manager and the audio devices.
+    /// Connects to the audio devices, and to the media session manager if
+    /// it is ready.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error.
     pub fn new() -> io::Result<Self> {
         let apartment = Apartment::join()?;
-        let media = finish(&GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?)?;
         #[expect(unsafe_code, reason = "a COM call")]
         // SAFETY: the class ID is a static GUID, and the result is a new owned interface.
         let devices = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }?;
+        // A manager that is not ready yet is asked for again by the first
+        // media action, so volume and key actions run meanwhile.
+        let media = media_manager().ok();
         Ok(Self {
             media,
             devices,
             _apartment: apartment,
         })
+    }
+
+    /// The media session manager, asked for again when Windows did not give
+    /// it before.
+    fn media(&mut self) -> io::Result<&GlobalSystemMediaTransportControlsSessionManager> {
+        if self.media.is_none() {
+            self.media = Some(media_manager().map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("the media session manager is not ready: {error}"),
+                )
+            })?);
+        }
+        self.media
+            .as_ref()
+            .ok_or_else(|| io::Error::other("the media session manager is missing"))
+    }
+
+    /// The device whose endpoint ID is `id`.
+    fn device(&self, id: &str) -> io::Result<IMMDevice> {
+        let wide: Vec<u16> = id.encode_utf16().chain([0]).collect();
+        #[expect(unsafe_code, reason = "a COM call")]
+        // SAFETY: `wide` is a nul-terminated UTF-16 string that outlives the
+        // call, and the result is a new owned interface.
+        Ok(unsafe { self.devices.GetDevice(PCWSTR(wide.as_ptr())) }?)
+    }
+
+    /// Finds the control `key` names again, by its ID, for when the
+    /// interface it holds stopped working.
+    fn find_again(&self, key: &VolumeKey) -> io::Result<VolumeControl> {
+        match &key.control {
+            VolumeControl::Device(_) => {
+                let device = self.device(&key.id)?;
+                #[expect(unsafe_code, reason = "a COM call")]
+                // SAFETY: the call activates an interface the type parameter
+                // names, with no activation parameters.
+                let control: IAudioEndpointVolume = unsafe { device.Activate(CLSCTX_ALL, None) }?;
+                Ok(VolumeControl::Device(control))
+            },
+            VolumeControl::Session(_, device_id) => {
+                let device = self.device(device_id)?;
+                for (id, session) in sessions(&device)? {
+                    if id == key.id {
+                        return Ok(VolumeControl::Session(session.cast()?, device_id.clone()));
+                    }
+                }
+                Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "the audio session is gone",
+                ))
+            },
+        }
     }
 
     /// The default playback device, or `None` when there is none.
@@ -189,7 +252,7 @@ impl Controls for WindowsControls {
     fn current_media(&mut self) -> io::Result<Option<MediaSession<MediaKey>>> {
         // With no current session, the call returns null, which arrives as an
         // error carrying a success code.
-        match self.media.GetCurrentSession() {
+        match self.media()?.GetCurrentSession() {
             Ok(session) => media_session(session).map(Some),
             Err(error) if error.code().is_ok() => Ok(None),
             Err(error) => Err(error.into()),
@@ -197,7 +260,7 @@ impl Controls for WindowsControls {
     }
 
     fn media_sessions(&mut self) -> io::Result<Vec<MediaSession<MediaKey>>> {
-        self.media
+        self.media()?
             .GetSessions()?
             .into_iter()
             .map(media_session)
@@ -243,22 +306,11 @@ impl Controls for WindowsControls {
             return Ok(Vec::new());
         };
         #[expect(unsafe_code, reason = "a COM call")]
-        // SAFETY: the call activates an interface the type parameter names, with no
-        // activation parameters.
-        let manager: IAudioSessionManager2 = unsafe { device.Activate(CLSCTX_ALL, None) }?;
-        #[expect(unsafe_code, reason = "a COM call")]
-        // SAFETY: the call takes no arguments and returns a new owned interface.
-        let sessions = unsafe { manager.GetSessionEnumerator() }?;
-        #[expect(unsafe_code, reason = "a COM call")]
-        // SAFETY: the call takes no arguments.
-        let count = unsafe { sessions.GetCount() }?;
+        // SAFETY: the call takes no arguments and returns a string the caller owns.
+        let device_id = take_string(unsafe { device.GetId() }?)?;
         let executables = executables()?;
         let mut volumes = Vec::new();
-        for index in 0..count {
-            #[expect(unsafe_code, reason = "a COM call")]
-            // SAFETY: `index` is below the count the enumerator reported.
-            let session = unsafe { sessions.GetSession(index) }?;
-            let details: IAudioSessionControl2 = session.cast()?;
+        for (id, details) in sessions(&device)? {
             #[expect(unsafe_code, reason = "a COM call")]
             // SAFETY: the call takes no arguments. For a session that spans several
             // processes it still succeeds and names the process that created it.
@@ -266,16 +318,13 @@ impl Controls for WindowsControls {
             let Some(executable) = executables.get(&process) else {
                 continue;
             };
-            #[expect(unsafe_code, reason = "a COM call")]
-            // SAFETY: the call takes no arguments and returns a string the caller owns.
-            let id = take_string(unsafe { details.GetSessionInstanceIdentifier() }?)?;
-            let control: ISimpleAudioVolume = session.cast()?;
+            let control: ISimpleAudioVolume = details.cast()?;
             #[expect(unsafe_code, reason = "a COM call")]
             // SAFETY: the call takes no arguments.
             let level = level(unsafe { control.GetMasterVolume() }?)?;
             let key = VolumeKey {
                 id,
-                control: VolumeControl::Session(control),
+                control: VolumeControl::Session(control, device_id.clone()),
             };
             volumes.push((executable.clone(), Volume { key, level }));
         }
@@ -283,19 +332,12 @@ impl Controls for WindowsControls {
     }
 
     fn set_volume(&mut self, control: &VolumeKey, level: VolumeLevel) -> io::Result<()> {
-        match &control.control {
-            VolumeControl::Device(device) => {
-                #[expect(unsafe_code, reason = "a COM call")]
-                // SAFETY: the level is in 0 to 1, and a null event context is allowed.
-                unsafe { device.SetMasterVolumeLevelScalar(level.scalar(), ptr::null::<GUID>()) }?;
-            },
-            VolumeControl::Session(session) => {
-                #[expect(unsafe_code, reason = "a COM call")]
-                // SAFETY: the level is in 0 to 1, and a null event context is allowed.
-                unsafe { session.SetMasterVolume(level.scalar(), ptr::null::<GUID>()) }?;
-            },
-        }
-        Ok(())
+        // An interface whose device went away keeps failing even after the
+        // device returns, so a failure finds the control again by its ID.
+        set_level(&control.control, level).or_else(|error| {
+            let found = self.find_again(control).map_err(|_gone| error)?;
+            set_level(&found, level)
+        })
     }
 
     fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
@@ -431,6 +473,54 @@ fn virtual_key(key: Key) -> (VIRTUAL_KEY, bool) {
         Key::Left => (VK_LEFT, true),
         Key::Right => (VK_RIGHT, true),
     }
+}
+
+/// Asks Windows for the media session manager.
+fn media_manager() -> io::Result<GlobalSystemMediaTransportControlsSessionManager> {
+    finish(&GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?)
+}
+
+/// Sets one control's level.
+fn set_level(control: &VolumeControl, level: VolumeLevel) -> io::Result<()> {
+    match control {
+        VolumeControl::Device(device) => {
+            #[expect(unsafe_code, reason = "a COM call")]
+            // SAFETY: the level is in 0 to 1, and a null event context is allowed.
+            unsafe { device.SetMasterVolumeLevelScalar(level.scalar(), ptr::null::<GUID>()) }?;
+        },
+        VolumeControl::Session(session, _) => {
+            #[expect(unsafe_code, reason = "a COM call")]
+            // SAFETY: the level is in 0 to 1, and a null event context is allowed.
+            unsafe { session.SetMasterVolume(level.scalar(), ptr::null::<GUID>()) }?;
+        },
+    }
+    Ok(())
+}
+
+/// Every audio session on `device`, each with its instance ID.
+fn sessions(device: &IMMDevice) -> io::Result<Vec<(String, IAudioSessionControl2)>> {
+    #[expect(unsafe_code, reason = "a COM call")]
+    // SAFETY: the call activates an interface the type parameter names, with no
+    // activation parameters.
+    let manager: IAudioSessionManager2 = unsafe { device.Activate(CLSCTX_ALL, None) }?;
+    #[expect(unsafe_code, reason = "a COM call")]
+    // SAFETY: the call takes no arguments and returns a new owned interface.
+    let enumerator = unsafe { manager.GetSessionEnumerator() }?;
+    #[expect(unsafe_code, reason = "a COM call")]
+    // SAFETY: the call takes no arguments.
+    let count = unsafe { enumerator.GetCount() }?;
+    let mut sessions = Vec::new();
+    for index in 0..count {
+        #[expect(unsafe_code, reason = "a COM call")]
+        // SAFETY: `index` is below the count the enumerator reported.
+        let session = unsafe { enumerator.GetSession(index) }?;
+        let details: IAudioSessionControl2 = session.cast()?;
+        #[expect(unsafe_code, reason = "a COM call")]
+        // SAFETY: the call takes no arguments and returns a string the caller owns.
+        let id = take_string(unsafe { details.GetSessionInstanceIdentifier() }?)?;
+        sessions.push((id, details));
+    }
+    Ok(sessions)
 }
 
 /// Waits for `request`, for at most [`MEDIA_TIMEOUT`], and cancels it if it

@@ -66,3 +66,8 @@ window. Switch it to borderless or windowed fullscreen, or use
   another name than its executable; try **Whatever is playing** instead.
 - Volume actions change only the default playback device.
 - The log names each action that failed, and why.
+- Right after you sign in to Windows, the media controls may not be ready
+  yet. AppyTappy tries again each time an automation fires, and the log says
+  when actions can run.
+- When putting the volume back fails, for example because your headset was
+  unplugged, AppyTappy keeps trying and puts it back once the headset returns.

@@ -38,6 +38,16 @@ enum Change<M, V> {
     },
 }
 
+impl<M, V> Change<M, V> {
+    /// Whether a restore of it that failed is tried only once more. A media
+    /// request that failed, such as one the player was too busy to answer in
+    /// time, is worth one more try after a short wait, while a volume
+    /// control can come back whenever its device does.
+    const fn retried_once(&self) -> bool {
+        matches!(self, Self::Media { .. })
+    }
+}
+
 impl<M: PartialEq, V: PartialEq> Change<M, V> {
     fn same_target(&self, other: &Self) -> bool {
         match (self, other) {
@@ -91,12 +101,21 @@ struct Entry<O, M, V> {
 /// session that was already paused, still holds its target, but releasing
 /// it sends nothing unless it took over another rule's "before" state.
 ///
+/// A restore that fails is kept pending rather than forgotten:
+/// [`Actions::retry_restores`] tries a volume restore again until it works,
+/// such as once a disconnected headset returns, and a media restore once
+/// more. A later change of the same target takes over a pending restore's
+/// "before" state, as a later journal entry would, and a permanent change
+/// drops it.
+///
 /// `O` names a rule: the runtime passes the watched app and the rule's
 /// position.
 #[derive(Debug)]
 pub struct Actions<O, C: Controls> {
     controls: C,
     journal: Vec<Entry<O, C::Media, C::Volume>>,
+    /// Released changes whose restore failed, oldest first.
+    pending: Vec<Change<C::Media, C::Volume>>,
 }
 
 impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
@@ -106,6 +125,7 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         Self {
             controls,
             journal: Vec::new(),
+            pending: Vec::new(),
         }
     }
 
@@ -235,7 +255,8 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         Ok(())
     }
 
-    /// Undoes what `owner` changed, newest first, and forgets it.
+    /// Undoes what `owner` changed, newest first, and forgets it. A restore
+    /// that fails is kept pending for [`Actions::retry_restores`].
     ///
     /// # Errors
     ///
@@ -251,15 +272,61 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
             });
             if let Some(later) = later {
                 later.change.inherit(entry.change);
-            } else if let Err(error) = self.undo(entry.change) {
+            } else if let Err(error) = self.undo(&entry.change) {
                 failure.get_or_insert(error);
+                self.pending.push(entry.change);
             }
         }
         failure.map_or(Ok(()), Err)
     }
 
-    fn record(&mut self, owner: O, change: Change<C::Media, C::Volume>, restores: bool) {
+    /// Tries each pending restore again. One that works is done; a volume
+    /// restore that fails stays pending, and a media restore is given up
+    /// after this try.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error of a restore given up, after trying every
+    /// pending restore.
+    pub fn retry_restores(&mut self) -> Result<(), ActionError> {
+        let mut given_up = None;
+        for pending in std::mem::take(&mut self.pending) {
+            if let Err(error) = self.undo(&pending) {
+                if pending.retried_once() {
+                    given_up.get_or_insert(error);
+                } else {
+                    self.pending.push(pending);
+                }
+            }
+        }
+        given_up.map_or(Ok(()), Err)
+    }
+
+    /// Whether a pending restore is tried only once more, so the caller
+    /// should call [`Actions::retry_restores`] soon rather than wait for its
+    /// next action.
+    #[must_use]
+    pub fn retries_soon(&self) -> bool {
+        self.pending.iter().any(Change::retried_once)
+    }
+
+    /// Whether any restore is pending, so the caller should call
+    /// [`Actions::retry_restores`] now and then even when no action comes.
+    #[must_use]
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    fn record(&mut self, owner: O, mut change: Change<C::Media, C::Volume>, restores: bool) {
+        let pending = self
+            .pending
+            .iter()
+            .position(|pending| pending.same_target(&change))
+            .map(|position| self.pending.remove(position));
         if restores {
+            if let Some(pending) = pending {
+                change.inherit(pending);
+            }
             self.journal.push(Entry { owner, change });
         } else {
             self.journal
@@ -267,10 +334,10 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
         }
     }
 
-    fn undo(&mut self, change: Change<C::Media, C::Volume>) -> Result<(), ActionError> {
-        match change {
+    fn undo(&mut self, change: &Change<C::Media, C::Volume>) -> Result<(), ActionError> {
+        match *change {
             Change::Media {
-                session,
+                ref session,
                 before,
                 after,
             } if before != after => {
@@ -279,13 +346,13 @@ impl<O: Copy + PartialEq, C: Controls> Actions<O, C> {
                 } else {
                     MediaCommand::Pause
                 };
-                send(&mut self.controls, &session, command)
+                send(&mut self.controls, session, command)
             },
             Change::Volume {
-                control,
+                ref control,
                 before,
                 after,
-            } if before != after => Ok(self.controls.set_volume(&control, before)?),
+            } if before != after => Ok(self.controls.set_volume(control, before)?),
             Change::Media { .. } | Change::Volume { .. } => Ok(()),
         }
     }
@@ -971,10 +1038,113 @@ mod tests {
         actions.controls().broken = Some("music");
         assert!(matches!(actions.release('a'), Err(ActionError::Os(_))));
         assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
-        // A failed entry is forgotten, so releasing again does nothing.
+        // The rule is released, so releasing it again does nothing.
         actions.controls().broken = None;
         actions.release('a').expect("nothing left");
         assert_eq!(actions.controls().level("music"), Some(percent(10)));
+    }
+
+    #[test]
+    fn a_failed_volume_restore_is_tried_again_until_it_works() {
+        let mut actions = speakers();
+        actions
+            .perform(
+                'a',
+                &volume(VolumeTarget::System, 20),
+                Restore::OnRelease,
+                &watched(),
+            )
+            .expect("set");
+        actions.controls().broken = Some("speakers");
+        assert!(matches!(actions.release('a'), Err(ActionError::Os(_))));
+        assert!(!actions.retries_soon(), "it waits for later actions");
+        assert!(actions.has_pending());
+        actions
+            .retry_restores()
+            .expect("still pending, not given up");
+        assert_eq!(actions.controls().level("speakers"), Some(percent(20)));
+        actions.controls().broken = None;
+        actions.retry_restores().expect("restored");
+        assert!(!actions.has_pending());
+        assert_eq!(actions.controls().level("speakers"), Some(percent(80)));
+        actions.retry_restores().expect("nothing left");
+        assert_eq!(
+            actions.controls().log,
+            ["speakers 0.2", "speakers 0.8"],
+            "a restore that worked is not sent again"
+        );
+    }
+
+    #[test]
+    fn a_failed_media_restore_is_tried_once_more() {
+        let mut actions = player(true);
+        let pause = current(MediaCommand::Pause);
+        actions
+            .perform('a', &pause, Restore::OnRelease, &watched())
+            .expect("paused");
+        actions.controls().refuse = true;
+        assert!(matches!(actions.release('a'), Err(ActionError::Refused)));
+        assert!(actions.retries_soon());
+        assert!(matches!(
+            actions.retry_restores(),
+            Err(ActionError::Refused)
+        ));
+        assert!(!actions.retries_soon(), "it was given up");
+        assert!(!actions.has_pending());
+        actions.controls().refuse = false;
+        actions.retry_restores().expect("nothing left");
+        assert!(!actions.controls().playing(1));
+        assert_eq!(actions.controls().log, ["Pause 1", "Play 1", "Play 1"]);
+
+        let mut actions = player(true);
+        actions
+            .perform('a', &pause, Restore::OnRelease, &watched())
+            .expect("paused");
+        actions.controls().refuse = true;
+        assert!(actions.release('a').is_err());
+        actions.controls().refuse = false;
+        actions.retry_restores().expect("resumed");
+        assert!(actions.controls().playing(1));
+    }
+
+    #[test]
+    fn a_later_change_takes_over_a_pending_restore() {
+        let mut actions = speakers();
+        let lower = |level| volume(VolumeTarget::System, level);
+        actions
+            .perform('a', &lower(20), Restore::OnRelease, &watched())
+            .expect("set");
+        actions.controls().broken = Some("speakers");
+        assert!(actions.release('a').is_err());
+        actions.controls().broken = None;
+        actions
+            .perform('b', &lower(10), Restore::OnRelease, &watched())
+            .expect("set");
+        actions.retry_restores().expect("nothing pending");
+        assert_eq!(actions.controls().level("speakers"), Some(percent(10)));
+        actions.release('b').expect("restored");
+        assert_eq!(
+            actions.controls().level("speakers"),
+            Some(percent(80)),
+            "back to the level before the first change"
+        );
+
+        let mut actions = speakers();
+        actions
+            .perform('a', &lower(20), Restore::OnRelease, &watched())
+            .expect("set");
+        actions.controls().broken = Some("speakers");
+        assert!(actions.release('a').is_err());
+        actions.controls().broken = None;
+        actions
+            .perform('n', &lower(50), Restore::Never, &watched())
+            .expect("set");
+        actions.retry_restores().expect("nothing pending");
+        assert_eq!(
+            actions.controls().level("speakers"),
+            Some(percent(50)),
+            "a permanent change drops the pending restore"
+        );
     }
 
     #[test]
