@@ -182,6 +182,17 @@ pub(crate) fn compile(
                 continue;
             },
         };
+        // The clicks are checked before the value is built, so one that
+        // cannot run adds no value check for the runtime to read.
+        let mut clicks = ClickTargets::default();
+        let wanted = rule.actions().iter().filter_map(|action| match action {
+            Action::Click(click) => Some(click),
+            _ => None,
+        });
+        if let Err(reason) = clicks.add(wanted, &readable, &mut click_picture) {
+            problem(&reason);
+            continue;
+        }
         let draft = drafts.entry(app_id).or_insert_with(|| Draft {
             file: app,
             values: Vec::new(),
@@ -201,16 +212,9 @@ pub(crate) fn compile(
             problem(reason);
             continue;
         }
-        // Added only once the rest of the automation is known to run, so a
-        // rejected one leaves no click targets behind.
-        let clicks = rule.actions().iter().filter_map(|action| match action {
-            Action::Click(click) => Some(click),
-            _ => None,
-        });
-        if let Err(reason) = draft.clicks.add(clicks, &readable, &mut click_picture) {
-            problem(&reason);
-            continue;
-        }
+        // Kept only once the value check is built too, so a rejected
+        // automation leaves neither a click target nor a value check behind.
+        draft.clicks.merge(clicks);
         draft.rules.push(rule);
         draft.automations.push(automation.name.clone());
     }

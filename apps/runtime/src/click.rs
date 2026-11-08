@@ -93,6 +93,12 @@ impl ClickTargets {
         self.pictures.extend(pictures);
         Ok(())
     }
+
+    /// Adds everything `other` holds.
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.apps.extend(other.apps);
+        self.pictures.extend(other.pictures);
+    }
 }
 
 /// The search for `wanted`'s picture, decoded from `bytes`.
