@@ -148,3 +148,18 @@ with the trace off and then with every category recorded, and its summary
 reports the memory and CPU the trace added, the size of the files, the rows
 recorded each second, and any records dropped. The trace phase has no target,
 so a costlier trace shows in the summary without failing the run.
+
+With every category recorded, three values in the probe's window, and the
+8,192-record buffer, the run on 2026-11-08 measured:
+
+- **Memory:** 1.08 MB more, 4.28 MB in all against 3.20 MB with the trace
+  off. Nearly all of it is the buffer, and the idle phase after the trace
+  stops is back to its usual size.
+- **CPU:** 0.26 % of one core more. Three runs that day measured from 0.05 %
+  less to 0.78 % more, so the trace's CPU cost is within the runner's noise.
+- **Files:** about 130 rows a second, 0.29 MB for 35 seconds, so close to
+  30 MB an hour.
+- **Dropped records:** none.
+
+An earlier run with a 65,536-record buffer added 9.66 MB, which is why the
+buffer holds 8,192.
