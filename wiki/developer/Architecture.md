@@ -447,7 +447,7 @@ the top of the script.
 
 The script gives the runtime scratch app data folders that hold one
 application with three values, two color checks and a bar fill, and an
-automation on each. It runs the runtime through three phases:
+automation on each. It runs the runtime through four phases:
 
 1. **Idle.** The application is not running.
 2. **Active.** A probe program the script compiles shows the application's
@@ -456,7 +456,14 @@ automation on each. It runs the runtime through three phases:
    fires once, which shows the reads work; its action targets a program that
    does not exist, so it changes nothing. The phase fails if any value cannot
    be read.
-3. **Idle after.** The probe has exited and the runtime has detached.
+3. **Active, trace on.** The same load with the
+   [runtime trace](Trace.md) recording every category, which costs the most.
+   The script saves the settings and sets the reload event, as the setup app
+   does, and turns the trace off again at the end of the phase. This phase has
+   no targets: it reports what recording costs, as
+   [Overhead](Trace.md#overhead) describes.
+4. **Idle after.** The trace has stopped, the probe has exited, and the
+   runtime has detached.
 
 It checks these against their targets:
 
@@ -475,7 +482,10 @@ It checks these against their targets:
   so an idle sample runs long enough that its target spans several ticks.
 
 The script also prints each phase's full working set, commit size, threads,
-and handles, and the CI job shows the table in its run summary.
+and handles, and the CI job shows the table in its run summary. For the trace
+phase it also reports the trace files' size, their rows and rows a second, the
+records the trace dropped, and the memory and CPU the trace added to the
+active phase.
 
 ## Sources, rules, and actions
 

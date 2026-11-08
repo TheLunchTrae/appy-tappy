@@ -8,8 +8,10 @@
 # it. One automation fires once, which proves the runtime reads the window;
 # its action sets the volume of a program that does not exist, so it changes
 # nothing. The runtime runs idle while the window is closed, active while it
-# is open and repainting every 16 ms the way a game does, and idle again once
-# it closes.
+# is open and repainting every 16 ms the way a game does, active again with
+# the runtime trace recording everything, and idle again once the trace stops
+# and the window closes. The trace phase has no targets: it reports what
+# recording costs.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -45,6 +47,11 @@ function Add-Row([string]$Measure, [string]$Value, [string]$Limit, [bool]$Within
     if (-not $Within) { $Failures.Add("$Measure is $Value, over its target of $Limit") }
 }
 
+# A measurement with no target, which the run reports and never fails on.
+function Add-Measure([string]$Measure, [string]$Value) {
+    $Rows.Add("| $Measure | $Value | none | measured |")
+}
+
 function Format-Bytes([long]$Bytes) {
     '{0:N2} MB ({1:N0} bytes)' -f ($Bytes / 1MB), $Bytes
 }
@@ -69,7 +76,10 @@ $local = Join-Path $scratch 'local'
 $roaming = Join-Path $scratch 'roaming'
 $appFolder = Join-Path $roaming 'AppyTappy\apps\probe'
 $log = Join-Path $local 'AppyTappy\logs\runtime.log'
+$traces = Join-Path $local 'AppyTappy\traces'
 $script:details = @()
+$script:memory = @{}
+$script:cpu = @{}
 $script:process = $null
 $probe = $null
 $peak = $null
@@ -91,7 +101,8 @@ function Get-PrivateWorkingSet([int]$Id) {
 }
 
 # Measures one phase: CPU over the sample as a share of one core, and the
-# private working set at its end.
+# private working set at its end. A phase with a memory limit of 0 has no
+# targets, so it only reports.
 function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double]$CpuLimit) {
     Start-Sleep -Seconds $Settle
     $script:process.Refresh()
@@ -102,9 +113,64 @@ function Measure-Phase([string]$Name, [int]$Seconds, [long]$MemoryLimit, [double
     if ($script:process.HasExited) { throw "the runtime exited with code $($script:process.ExitCode) during the $Name sample" }
     $cpu = 100 * ($script:process.TotalProcessorTime - $before).TotalSeconds / $clock.Elapsed.TotalSeconds
     $memory = Get-PrivateWorkingSet $script:process.Id
-    Add-Row "$Name memory" (Format-Bytes $memory) (Format-Bytes $MemoryLimit) ($memory -le $MemoryLimit)
-    Add-Row "$Name CPU" ('{0:N3} %' -f $cpu) ('{0:N3} %' -f $CpuLimit) ($cpu -le $CpuLimit)
+    $script:memory[$Name] = $memory
+    $script:cpu[$Name] = $cpu
+    if ($MemoryLimit -gt 0) {
+        Add-Row "$Name memory" (Format-Bytes $memory) (Format-Bytes $MemoryLimit) ($memory -le $MemoryLimit)
+        Add-Row "$Name CPU" ('{0:N3} %' -f $cpu) ('{0:N3} %' -f $CpuLimit) ($cpu -le $CpuLimit)
+    }
+    else {
+        Add-Measure "$Name memory" (Format-Bytes $memory)
+        Add-Measure "$Name CPU" ('{0:N3} %' -f $cpu)
+    }
     $script:details += "$($Name): working set $(Format-Bytes $script:process.WorkingSet64), commit $(Format-Bytes $script:process.PrivateMemorySize64), $($script:process.Threads.Count) threads, $($script:process.HandleCount) handles"
+}
+
+# Every value has to read without a problem, or an active sample measured
+# the error path instead of the reads.
+function Assert-Read {
+    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured', 'capture ended badly'
+    if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
+}
+
+# Saves settings with the trace on or off, recording every category with no
+# end time, and asks the runtime to read them, as the setup app does after a
+# save.
+function Set-Trace([bool]$On) {
+    $settings = @{
+        format = 1
+        trace = @{ on = $On; until = $null; record = @('readings', 'changes', 'rules', 'actions', 'lifecycle'); fileLimitMb = 50; keepFiles = 5 }
+    }
+    [IO.File]::WriteAllText((Join-Path $roaming 'AppyTappy\settings.json'), (ConvertTo-Json $settings -Depth 5), $utf8)
+    $reload = [Threading.EventWaitHandle]::OpenExisting('Local\AppyTappy.Reload')
+    try { $null = $reload.Set() } finally { $reload.Dispose() }
+}
+
+# Reports the trace files: their size, their rows, the rows recorded each
+# second, and the records the trace dropped because its buffer was full.
+function Measure-Trace {
+    $failed = Select-String -Path $log -SimpleMatch -Pattern 'the trace cannot start', 'the trace stopped badly'
+    if ($failed) { throw "the trace could not record: $(@($failed)[0].Line)" }
+    $files = @(Get-ChildItem -Path $traces -Filter 'trace-*.csv' -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { throw "the trace wrote no file to $traces" }
+    $rows = 0
+    $dropped = 0
+    $last = 0
+    foreach ($file in $files) {
+        foreach ($line in [IO.File]::ReadLines($file.FullName)) {
+            if ($line.StartsWith('time_ns,')) { continue }
+            $fields = $line.Split(',')
+            $rows += 1
+            $last = [Math]::Max($last, [long]$fields[0])
+            if ($fields[2] -eq 'dropped') { $dropped += [long]$fields[5] }
+        }
+    }
+    $bytes = ($files | Measure-Object -Property Length -Sum).Sum
+    $seconds = $last / 1e9
+    Add-Measure 'Trace files' "$($files.Count), $(Format-Bytes $bytes)"
+    Add-Measure 'Trace rows' ('{0:N0} over {1:N1} s, {2:N0} a second' -f $rows, $seconds, ($rows / [Math]::Max($seconds, 1)))
+    Add-Measure 'Trace records dropped' ('{0:N0}' -f $dropped)
+    Add-Measure 'Trace on adds' ('{0} memory, {1:N3} % CPU' -f (Format-Bytes ($script:memory['Active, trace on'] - $script:memory['Active'])), ($script:cpu['Active, trace on'] - $script:cpu['Active']))
 }
 
 try {
@@ -196,16 +262,24 @@ public static class Probe {
     Wait-Log 'attached' 30
     Wait-Log 'Light: runs' 30
     Measure-Phase 'Active' $ActiveSample $ActiveMemoryLimit $ActiveCpuLimit
-    # Every value has to read without a problem, or the active sample
-    # measured the error path instead of the reads.
-    $unread = Select-String -Path $log -SimpleMatch -Pattern 'cannot be read', 'cannot be captured', 'capture ended badly'
-    if ($unread) { throw "the runtime could not read the probe: $(@($unread)[0].Line)" }
+    Assert-Read
+
+    # The same load with the trace recording every category, which costs the
+    # most. Turning it on restarts the readers, which the settle time covers.
+    Set-Trace $true
+    Wait-Log 'the trace records to' 10
+    Measure-Phase 'Active, trace on' $ActiveSample 0 0
+    Assert-Read
+    Set-Trace $false
+    Wait-Log 'the trace stopped' 10
 
     Stop-Process -Id $probe.Id
     $probe.WaitForExit()
     $probe = $null
     Wait-Log 'detached' 10
     Measure-Phase 'Idle after' $IdleSample $ActiveMemoryLimit $IdleCpuLimit
+    # The stopped trace's writer has long finished its file by now.
+    Measure-Trace
 }
 catch {
     $Failures.Add($_.Exception.Message)
