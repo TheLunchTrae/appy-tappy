@@ -405,6 +405,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             fitted.current = { steps: new Set(made_.map((selection) => selection.steps)), region };
             const on = made[0]?.state.screenshot ?? null;
             setDraft((latest) => ({ ...latest, region, drawnOn: latest.drawnOn ?? on }));
+          } else if (last !== null) {
+            // The region stays, but these steps are no longer new to it.
+            const steps = new Set([...last.steps, ...made_.map((selection) => selection.steps)]);
+            fitted.current = { steps, region: last.region };
           }
         })
         .catch((error: unknown) => {
