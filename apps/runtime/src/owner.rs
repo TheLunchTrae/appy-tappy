@@ -339,7 +339,13 @@ fn next(events: &Receiver<Event>, due: Option<Instant>) -> Option<Event> {
     let Some(due) = due else {
         return events.recv().ok();
     };
-    match events.recv_timeout(due.saturating_duration_since(Instant::now())) {
+    // A due time that passed goes first, so a busy channel cannot hold back
+    // an automation that is due.
+    let now = Instant::now();
+    if due <= now {
+        return Some(Event::Due);
+    }
+    match events.recv_timeout(due.saturating_duration_since(now)) {
         Ok(event) => Some(event),
         Err(RecvTimeoutError::Timeout) => Some(Event::Due),
         Err(RecvTimeoutError::Disconnected) => None,
@@ -580,6 +586,7 @@ mod tests {
     use std::fs;
     use std::num::NonZeroU16;
     use std::process;
+    use std::time::Duration;
 
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
@@ -677,17 +684,27 @@ mod tests {
     #[test]
     fn the_owner_wakes_when_an_automation_is_due() {
         let (sender, events) = mpsc::channel();
-        let soon = Instant::now();
-        assert!(matches!(next(&events, Some(soon)), Some(Event::Due)));
+        let passed = Instant::now();
+        let later = passed
+            .checked_add(Duration::from_secs(60))
+            .expect("a test time fits in an Instant");
+        assert!(matches!(
+            next(&events, passed.checked_add(Duration::from_millis(10))),
+            Some(Event::Due)
+        ));
         sender.send(Event::Reload).expect("send");
         assert!(
-            matches!(next(&events, Some(soon)), Some(Event::Reload)),
-            "an event that came first goes first"
+            matches!(next(&events, Some(passed)), Some(Event::Due)),
+            "a due time that passed goes before a waiting event"
+        );
+        assert!(
+            matches!(next(&events, Some(later)), Some(Event::Reload)),
+            "an event goes before a due time still to come"
         );
         sender.send(Event::DetectionEnded).expect("send");
         assert!(matches!(next(&events, None), Some(Event::DetectionEnded)));
         drop(sender);
-        assert!(next(&events, Some(soon)).is_none());
+        assert!(next(&events, Some(later)).is_none());
         assert!(next(&events, None).is_none());
     }
 
