@@ -12,11 +12,11 @@ publish.workspace = true
 appytappy-config = { version = "=0.1.0", path = "../config" }
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
-# in `win.rs` calls: media sessions, Core Audio, COM, the process snapshot
-# that names each audio session's executable, `SendInput` for key
+# in `win.rs` calls: media sessions, Core Audio, COM, `SendInput` for key
 # presses, `ShellExecuteExW` for opening a program, file, or link (its
-# settings structure names a registry key type), and `PlaySoundW` for
-# sounds. `windows-future` is the part of the same bindings that `windows`
+# settings structure names a registry key type), `PlaySoundW` for
+# sounds, and attaching to another thread's input to bring a window to the
+# front. `windows-future` is the part of the same bindings that `windows`
 # already uses for requests that finish later; naming it lets the adapter
 # wait for a media request with a timeout.
 [target.'cfg(windows)'.dependencies]
@@ -28,14 +28,19 @@ windows = { version = "=0.62.2", features = [
   "Win32_Media_Audio_Endpoints",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
-  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Registry",
+  "Win32_System_Threading",
   "Win32_System_Variant",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 windows-future = "=0.3.2"
+
+# The manual media player test names audio sessions from the same process
+# list the runtime hands the controls.
+[target.'cfg(windows)'.dev-dependencies]
+appytappy-sources = { version = "=0.1.0", path = "../sources" }
 
 [lints]
 workspace = true

@@ -222,8 +222,9 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     });
     let (jobs, job_events) = mpsc::channel();
     let reports = sender.clone();
+    let acting = Arc::clone(&system);
     let actor = spawn("actions", move || {
-        act::run(controls, &job_events, &reports);
+        act::run(|| controls(&acting), acting.as_ref(), &job_events, &reports);
     });
     let (detector, actor) = match (detector, actor) {
         (Ok(detector), Ok(actor)) => (detector, actor),
@@ -386,16 +387,22 @@ fn show(tray: Option<&Tray>, model: &Model, shown: &mut TrayMenu) {
 }
 
 /// The operating system's media and audio controls, made on the action
-/// thread.
+/// thread. They name each audio session's app from `system`'s process
+/// list, which detection uses too, taken fresh for each volume action.
 #[cfg(windows)]
 #[mutants::skip] // Makes the real controls, checked by hand on Windows.
-fn controls() -> io::Result<appytappy_actions::win::WindowsControls> {
-    appytappy_actions::win::WindowsControls::new()
+fn controls(system: &Arc<HostSystem>) -> io::Result<appytappy_actions::win::WindowsControls> {
+    let system = Arc::clone(system);
+    appytappy_actions::win::WindowsControls::new(Box::new(move || {
+        system
+            .processes()
+            .map(appytappy_sources::system::executables)
+    }))
 }
 
 /// Off Windows there are no controls, so no action can run.
 #[cfg(not(windows))]
-fn controls() -> io::Result<NoControls> {
+fn controls(_system: &Arc<HostSystem>) -> io::Result<NoControls> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "actions run only on Windows",
@@ -462,6 +469,41 @@ impl appytappy_actions::Controls for NoControls {
 
     #[mutants::skip]
     fn send_strokes(&mut self, _strokes: &[appytappy_actions::Stroke]) -> io::Result<usize> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn front_window(&mut self) -> io::Result<Option<u64>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn window_at(&mut self, _x: i32, _y: i32) -> io::Result<Option<u64>> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn bring_to_front(&mut self, _window: u64) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn cursor(&mut self) -> io::Result<(i32, i32)> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn move_cursor(&mut self, _x: i32, _y: i32) -> io::Result<()> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn buttons_held(&mut self) -> io::Result<bool> {
+        match self.0 {}
+    }
+
+    #[mutants::skip]
+    fn send_presses(&mut self, _presses: &[appytappy_actions::Press]) -> io::Result<usize> {
         match self.0 {}
     }
 
@@ -1139,7 +1181,9 @@ mod tests {
     #[test]
     fn off_windows_actions_cannot_run() {
         assert_eq!(
-            controls().expect_err("unsupported").kind(),
+            controls(&Arc::new(HostSystem::default()))
+                .expect_err("unsupported")
+                .kind(),
             io::ErrorKind::Unsupported
         );
     }
@@ -1446,6 +1490,7 @@ mod tests {
                 },
                 values: Vec::new(),
                 rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
+                clicks: Arc::default(),
             },
         })
     }
@@ -2144,6 +2189,7 @@ mod tests {
                     executable: "Example.exe".to_owned(),
                 },
                 actions: Box::new([]),
+                clicks: Arc::default(),
                 restore: appytappy_config::rule::Restore::OnRelease,
                 cause: None,
             }),
