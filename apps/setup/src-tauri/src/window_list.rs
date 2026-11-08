@@ -94,25 +94,47 @@ pub(crate) fn list(
     }
 }
 
-/// The handles of the `windows` that `window` matches, the best fits first.
+/// A running window that an application's window match takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowFit {
+    /// The window's handle.
+    pub(crate) handle: u64,
+    /// Whether it is taken only because no window qualifies.
+    pub(crate) fallback: bool,
+    /// Whether no other window fits better. The runtime reads one of the
+    /// best windows, the one Windows lists first, so a value has to be drawn
+    /// on one of them.
+    pub(crate) best: bool,
+}
+
+/// The `windows` that `window` takes, the best fits first.
 #[must_use]
-pub(crate) fn matching(windows: &[WindowChoice], window: &WindowDef) -> Vec<u64> {
+pub(crate) fn matching(windows: &[WindowChoice], window: &WindowDef) -> Vec<WindowFit> {
     let matcher = window.to_match();
     let facts = windows.iter().map(|choice| WindowFacts {
         title: &choice.title,
         class: &choice.class,
         executable: &choice.executable,
     });
-    matcher
-        .rank(facts)
+    let ranked = matcher.rank(facts);
+    let top = ranked.first().map(|&(_, fit)| fit);
+    ranked
         .into_iter()
-        .filter_map(|position| windows.get(position).map(|choice| choice.handle))
+        .filter_map(|(position, fit)| {
+            windows.get(position).map(|choice| WindowFit {
+                handle: choice.handle,
+                fallback: fit.is_fallback(),
+                best: Some(fit) == top,
+            })
+        })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::app_file::FallbackDef;
     use appytappy_sources::system::Bounds;
 
     use super::*;
@@ -217,17 +239,45 @@ mod tests {
             settings,
             window(3, 1, "Example App"),
         ];
-        let offered = list(windows, &processes, 0).windows;
+        let offered = list(windows.clone(), &processes, 0).windows;
         let exact = WindowDef::exact(WindowFacts {
             title: "Example App",
             class: "AppWindow",
             executable: "example.exe",
         });
-        assert_eq!(matching(&offered, &exact), [3, 5]);
+        let fit = |handle, fallback, best| WindowFit {
+            handle,
+            fallback,
+            best,
+        };
+        assert_eq!(
+            matching(&offered, &exact),
+            [fit(3, false, true), fit(5, false, false)]
+        );
+        // A second instance fits as well, so either may be the one read.
+        let mut twins = windows;
+        twins.push(window(8, 1, "Example App"));
+        assert_eq!(
+            matching(&list(twins, &processes, 0).windows, &exact),
+            [
+                fit(3, false, true),
+                fit(8, false, true),
+                fit(5, false, false)
+            ]
+        );
+        let mut title_only = exact.clone();
+        title_only.must_match.title = true;
+        title_only.fallback = FallbackDef::Executable;
+        assert_eq!(matching(&offered, &title_only), [fit(3, false, true)]);
+        title_only.title = "Missing".to_owned();
+        assert_eq!(
+            matching(&offered, &title_only),
+            [fit(3, true, true), fit(5, true, false)]
+        );
         let nothing = WindowDef {
             executable: "Other.exe".to_owned(),
             ..exact
         };
-        assert_eq!(matching(&offered, &nothing), [0_u64; 0]);
+        assert_eq!(matching(&offered, &nothing), []);
     }
 }

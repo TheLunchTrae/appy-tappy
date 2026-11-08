@@ -198,8 +198,8 @@ mod tests {
     use std::process;
 
     use appytappy_config::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, PriorityDef, RegionDef, ScreenDef,
-        SizeDef, ValueDef, WindowDef,
+        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
+        RegionDef, ScreenDef, SizeDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
@@ -242,7 +242,11 @@ mod tests {
                 title: "*".to_owned(),
                 class: "*".to_owned(),
                 executable: "Example*.exe".to_owned(),
-                priority: PriorityDef::TitleElseExecutable,
+                must_match: MustMatchDef {
+                    title: false,
+                    class: false,
+                },
+                fallback: FallbackDef::None,
             },
             anti_cheat: AntiCheatDef::None,
             overlay: None,

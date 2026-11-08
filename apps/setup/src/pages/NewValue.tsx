@@ -9,10 +9,11 @@ interface Props {
   readonly apps: readonly AppSummary[];
   readonly onCancel: () => void;
   readonly onSaved: () => void;
+  readonly onAddApplication: () => void;
 }
 
 /** Making a value: pick the window, then capture and check what to read. */
-export function NewValue({ apps, onCancel, onSaved }: Props) {
+export function NewValue({ apps, onCancel, onSaved, onAddApplication }: Props) {
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
   // Leaving the flow stops the window's capture, which would otherwise keep
@@ -29,6 +30,7 @@ export function NewValue({ apps, onCancel, onSaved }: Props) {
         apps={apps}
         initial={choice}
         onCancel={onCancel}
+        onAddApplication={onAddApplication}
         onPick={(picked) => {
           setChoice(picked);
           setPicking(false);

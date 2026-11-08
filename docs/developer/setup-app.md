@@ -15,9 +15,15 @@ This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
 
-- **Picker.** A saved application whose window match fits the picked window
-  is chosen, so a second value joins the first. A new application's match
-  starts from the window's exact title, class, and executable.
+- **Picker.** A value's picker only chooses a saved application; the
+  Applications page adds, edits, and removes them. Picking a window a saved
+  application finds chooses that application. Capture stays off until the
+  open windows are matched, and then only allows a window that fits the
+  application's match as well as any other, since the runtime reads one of
+  those.
+- **Application editor.** A new application's match starts from the picked
+  window's title, class, and executable and requires only the executable, with
+  no fallback. An application that an automation uses cannot be removed.
 - **Screenshots.** The owner thread keeps the session's screenshots until
   another window is picked or the user leaves the new value. The screenshot
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
@@ -33,9 +39,10 @@ This page covers what the user guide leaves out.
   target is the kind the condition compares. A key press action also needs the
   application's anti-cheat class to be `none`
   ([Key presses](actions.md#key-presses)).
-- **Reload.** Saving or deleting a value or an automation, switching an
-  automation on or off, and changing an anti-cheat class set the reload event,
-  so the runtime reads the files again at once. Overlay changes do not, since
+- **Reload.** Saving or removing an application, saving or deleting a value
+  or an automation, switching an automation on or off, and changing an
+  anti-cheat class set the reload event, so the runtime reads the files again
+  at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](architecture.md#the-runtime)
   describes how it reads them.
 
@@ -99,8 +106,15 @@ it beside the debug build.
 ## Window matching
 
 [How AppyTappy finds the window](../user/applications.md#how-appytappy-finds-the-window)
-gives the patterns and the fallback setting. The file stores the fallback as
-`priority`: `title`, `titleElseClass`, or `titleElseExecutable`, the default.
+gives the patterns, the must-match fields, and the fallback. The file stores
+them as `mustMatch`, with a flag for the title and the class, and `fallback`:
+`none` or `executable`. The executable always has to match, because the
+runtime attaches to an application by its process's executable. A window
+qualifies when its executable and every required field match. Fallback
+windows count only when no window qualifies. Windows rank by fewer missed
+fields, then by the title matching. On a tie the runtime takes the window
+Windows lists first, usually the front-most, so the setup app marks every
+window that ties for the best fit as a best match.
 The setup app uses the match to show which applications are running, and the
 runtime finds each application's window with the same rules. A value's region
 means something only while the window has the size it had when the region was
@@ -128,7 +142,8 @@ check's reference.
     "title": "Example App*",
     "class": "ExampleWindow",
     "executable": "Example.exe",
-    "priority": "titleElseExecutable"
+    "mustMatch": { "title": false, "class": false },
+    "fallback": "none"
   },
   "antiCheat": "none",
   "overlay": { "enabled": true, "mode": "pictureInPicture" },

@@ -633,8 +633,6 @@ export function Capture({ choice, onCancel, onChangeWindow, onSaved }: Props) {
     try {
       await saveValue({
         app: choice.app,
-        name: choice.name,
-        window: choice.matcher,
         valueName: valueName.trim(),
         check: built.spec,
         screenshot: drawnOn,

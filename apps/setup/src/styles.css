@@ -911,6 +911,151 @@ select {
   max-width: 260px;
 }
 
+/* A label with a ? hint beside it. The hint's explanation spans its row, so it fits the side panel. */
+.field,
+.match-row,
+.group-title {
+  position: relative;
+}
+
+.name,
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hint-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: help;
+}
+
+.hint-btn > span {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.hint-btn:hover > span,
+.hint-btn:focus-visible > span {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.tip {
+  position: absolute;
+  z-index: 5;
+  top: 24px;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--raise);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.tip[hidden] {
+  display: none;
+}
+
+.tip .eg {
+  color: var(--muted);
+}
+
+/* A field the window match uses: its name, its pattern and whether it must match. */
+.match-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 10px;
+  align-items: center;
+}
+
+.match-row > .name {
+  grid-column: 1 / -1;
+}
+
+.must {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.must input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--capture);
+}
+
+.must:has(input:disabled) {
+  color: var(--muted);
+  cursor: default;
+}
+
+.window-list small.ok {
+  color: var(--holds);
+}
+
+.window-list small.fallback {
+  color: var(--capture);
+}
+
+/* How an application's window is found, a line for what must match and one for the rest. */
+.recog {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.table .recog {
+  display: table-cell;
+}
+
+.table .recog > span {
+  display: block;
+}
+
+.row-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.row-actions .btn + .btn {
+  margin-left: 6px;
+}
+
+.row-actions .confirm-none {
+  min-width: 240px;
+  margin-left: auto;
+  white-space: normal;
+  text-align: left;
+}
+
 .editor-foot {
   display: flex;
   align-items: center;

@@ -346,7 +346,7 @@ mod tests {
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::rule::{Comparison, Condition, Rearm, Restore, Rule, Trigger};
     use appytappy_config::signal::Number;
-    use appytappy_config::window_match::{MatchPriority, Pattern, WindowMatch};
+    use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_engine::RuleIndex;
     use appytappy_sources::screen::check::{BarFill, Check};
     use appytappy_sources::screen::saved::SavedCheck;
@@ -402,7 +402,11 @@ mod tests {
                 title: Pattern::new("*"),
                 class: Pattern::new("*"),
                 executable: Pattern::new("Example.exe"),
-                priority: MatchPriority::TitleElseExecutable,
+                must_match: MustMatch {
+                    title: false,
+                    class: false,
+                },
+                fallback: false,
             },
             values: vec![ValuePlan {
                 signal: signal(),

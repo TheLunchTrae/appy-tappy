@@ -11,11 +11,12 @@ use appytappy_sources::screen::{Image, Size};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
+use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, FrameRead, OverlayView, OverlayWindow, Place};
 use crate::recording::{RecordingView, Text};
-use crate::window_list::WindowList;
+use crate::window_list::{WindowFit, WindowList};
 
 /// Where a request's answer goes.
 pub(crate) type Reply<T> = oneshot::Sender<T>;
@@ -85,13 +86,8 @@ pub(crate) enum Seen {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SaveSpec {
-    /// The saved application to add the value to, or `None` for a new one
-    /// named `name` and recognized by `window`.
-    pub(crate) app: Option<String>,
-    /// A new application's name.
-    pub(crate) name: String,
-    /// How to recognize a new application's window.
-    pub(crate) window: WindowDef,
+    /// The saved application to add the value to.
+    pub(crate) app: String,
     /// The value's name, such as `Progress`.
     pub(crate) value_name: String,
     /// The check, with the session's screenshots it names.
@@ -245,11 +241,29 @@ pub(crate) enum Request {
     MatchWindows {
         /// How to recognize the window.
         window: WindowDef,
-        /// The handles.
-        reply: Reply<Result<Vec<u64>, String>>,
+        /// The windows it takes, the best fit first.
+        reply: Reply<Result<Vec<WindowFit>, String>>,
     },
     /// The saved applications.
     ListApps(Reply<Result<Vec<AppSummary>, String>>),
+    /// Saves an application's name and window match, as a new application
+    /// when `existing` is `None`.
+    SaveApp {
+        /// The application's ID, or `None` for a new one.
+        existing: Option<String>,
+        /// Its name and window match.
+        spec: AppSpec,
+        /// Its ID, or what to fix.
+        reply: Reply<Result<String, String>>,
+    },
+    /// Removes an application with its values, unless an automation watches
+    /// one of them.
+    RemoveApp {
+        /// The application's ID.
+        app: String,
+        /// Answered once it is removed, or with why it cannot be.
+        reply: Reply<Result<(), String>>,
+    },
     /// Saves a value.
     SaveValue {
         /// The value.
@@ -423,6 +437,8 @@ impl Request {
             self,
             Self::SaveValue { .. }
                 | Self::DeleteValue { .. }
+                | Self::SaveApp { .. }
+                | Self::RemoveApp { .. }
                 | Self::SetAntiCheat { .. }
                 | Self::SaveAutomation { .. }
                 | Self::SetAutomationEnabled { .. }
@@ -435,7 +451,11 @@ impl Request {
     pub(super) const fn changes_values(&self) -> bool {
         matches!(
             self,
-            Self::SaveValue { .. } | Self::DeleteValue { .. } | Self::SetOverlay { .. }
+            Self::SaveValue { .. }
+                | Self::DeleteValue { .. }
+                | Self::SaveApp { .. }
+                | Self::RemoveApp { .. }
+                | Self::SetOverlay { .. }
         )
     }
 }
@@ -460,7 +480,7 @@ mod tests {
         .expect("the UI's spelling");
         let saves = [
             Request::SaveValue {
-                spec: spec(None, "x", BAR),
+                spec: Box::new(spec("example", "x", BAR)),
                 reply: oneshot::channel().0,
             },
             Request::SaveAutomation {
@@ -485,6 +505,22 @@ mod tests {
             Request::SetAntiCheat {
                 app: "example".to_owned(),
                 class: AntiCheatDef::None,
+                reply: oneshot::channel().0,
+            },
+            Request::SaveApp {
+                existing: Some("example".to_owned()),
+                spec: crate::applications::AppSpec {
+                    name: "Example App".to_owned(),
+                    window: WindowDef::exact(appytappy_config::window_match::WindowFacts {
+                        title: "Example App",
+                        class: "ExampleWindow",
+                        executable: "Example.exe",
+                    }),
+                },
+                reply: oneshot::channel().0,
+            },
+            Request::RemoveApp {
+                app: "example".to_owned(),
                 reply: oneshot::channel().0,
             },
         ];

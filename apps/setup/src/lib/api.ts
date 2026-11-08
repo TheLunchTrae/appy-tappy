@@ -21,15 +21,37 @@ export interface WindowList {
   readonly antiCheat: readonly string[];
 }
 
-/** How far a window match falls back when no window fits all its patterns. */
-export type MatchPriority = 'title' | 'titleElseClass' | 'titleElseExecutable';
+/** One of the things an application's window is recognized by. */
+export type MatchField = 'title' | 'class' | 'executable';
 
-/** How an application's window is recognized. `*` and `?` are wildcards; case is ignored. */
+/** A field that may be allowed to differ; the executable always has to match. */
+export type LooseField = Exclude<MatchField, 'executable'>;
+
+/** What to take when no window qualifies: nothing, or any window of the executable. */
+export type Fallback = 'none' | 'executable';
+
+/**
+ * How an application's window is recognized. `*` and `?` are wildcards; case is ignored. A window qualifies when
+ * its executable and every field in `mustMatch` match; among those, the one matching the most fields wins.
+ */
 export interface WindowDef {
   readonly title: string;
   readonly class: string;
   readonly executable: string;
-  readonly priority: MatchPriority;
+  readonly mustMatch: Readonly<Record<LooseField, boolean>>;
+  readonly fallback: Fallback;
+}
+
+/** A running window an application's window match takes. */
+export interface WindowFit {
+  readonly handle: number;
+  /** Whether it is taken only because no window qualifies. */
+  readonly fallback: boolean;
+  /**
+   * Whether no other window fits better. The runtime reads one of the best windows, the one Windows lists first,
+   * so a value has to be drawn on one of them.
+   */
+  readonly best: boolean;
 }
 
 /** How strongly an application's anti-cheat protects it. */
@@ -77,12 +99,18 @@ interface AppFile {
   readonly overlay?: OverlayDef;
 }
 
-/** A saved application, with the running windows that match it. */
+/** A saved application, with the handles of the running windows its window match takes, the best first. */
 export interface AppSummary {
   readonly id: string;
   readonly file: AppFile | null;
   readonly error: string | null;
   readonly windows: readonly number[];
+}
+
+/** An application's name and how its window is recognized, as the editor saves them. */
+export interface AppSpec {
+  readonly name: string;
+  readonly window: WindowDef;
 }
 
 /** A check as the capture screen describes it, naming this session's screenshots by index. */
@@ -176,11 +204,10 @@ export type Live =
   /** The capture stopped, such as when the window closed. */
   | { readonly kind: 'lost'; readonly message: string };
 
-/** A value to save, with a new application when `app` is null. */
+/** A value to save to a saved application. */
 export interface SaveSpec {
-  readonly app: string | null;
-  readonly name: string;
-  readonly window: WindowDef;
+  /** The saved application to add the value to. */
+  readonly app: string;
   readonly valueName: string;
   readonly check: CheckSpec;
   /** The screenshot the region was drawn on, whose size the value keeps. */
@@ -330,13 +357,23 @@ export async function stopWatching(watch: number): Promise<void> {
   await invoke('stop_watching', { watch });
 }
 
-/** The handles of the running windows `window` matches, the best fit first. */
-export async function matchWindows(window: WindowDef): Promise<readonly number[]> {
-  return invoke<readonly number[]>('match_windows', { window });
+/** The running windows `window` takes, the best fit first. */
+export async function matchWindows(window: WindowDef): Promise<readonly WindowFit[]> {
+  return invoke<readonly WindowFit[]>('match_windows', { window });
 }
 
 export async function listApps(): Promise<readonly AppSummary[]> {
   return invoke<readonly AppSummary[]>('list_apps');
+}
+
+/** Saves `spec` over the application `existing`, or as a new one; returns its ID. */
+export async function saveApp(existing: string | null, spec: AppSpec): Promise<string> {
+  return invoke<string>('save_app', { existing, spec });
+}
+
+/** Removes an application with its values, unless an automation uses one of them. */
+export async function removeApp(application: string): Promise<void> {
+  await invoke('remove_app', { application });
 }
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {

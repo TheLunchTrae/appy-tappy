@@ -1,39 +1,67 @@
 # Applications
 
-An application is a program whose window AppyTappy watches. You add one when
-you [make its first value](values.md#make-a-value): picking its window in the
-list of open windows saves the application with that value.
+An application is a program whose window AppyTappy watches. Add it before you
+[make its values](values.md#make-a-value), since every value belongs to one.
 
 The **Applications** page in AppyTappy Setup lists each saved application:
-how AppyTappy recognizes its window, its anti-cheat setting, how many of its
-windows are open now, and its [overlay](overlay.md).
+how AppyTappy finds its window, its anti-cheat setting, its
+[overlay](overlay.md), and how many of its windows are open now.
+
+## Add, change, or remove an application
+
+- **Add.** Select **Add application**, pick the program's window in the list
+  of open windows, and choose what has to match to
+  [find it again](#how-appytappy-finds-the-window). Give it a name and select
+  **Save application**.
+- **Change.** Select **Edit** on its row to change its name or how its window
+  is found. Its values stay as they are.
+- **Remove.** Select **Remove** on its row and confirm. Its values go with it.
+  An application whose values an automation uses can't be removed until that
+  automation is changed or deleted.
+
+If AppyTappy can't read a saved application, such as one saved by an older
+version, its row says so and AppyTappy never finds its window. Remove it and
+add it again.
 
 ## How AppyTappy finds the window
 
-AppyTappy recognizes an application's window by three things, the way OBS
-does:
+AppyTappy finds an application's window by three things.
+The ? beside each one in AppyTappy Setup explains it too.
 
-- **Window title**, such as `Example App - Save 3`.
-- **Window class**, a name the program gives its windows, such as
-  `ExampleWindow`.
-- **Executable**, the program's file name, such as `Example.exe`.
+- **Window title** is the name in the window's title bar, such as
+  `Example App - Save 3`. Many programs change it as they run, such as to
+  show the song or file that is open.
+- **Window class** is a hidden type name that Windows gives every kind of
+  window, such as `ExampleWindow`. You never see it on screen. It stays the
+  same while the program runs, but programs built with the same toolkit can
+  share one, so on its own it may not tell two programs apart.
+- **Executable** is the program's file, such as `Example.exe`. It always has
+  to match, because AppyTappy notices the application starting and closing by
+  this program.
 
-When you pick a window, AppyTappy fills in all three from it. You can change
-them before you save the first value; after that, they stay as they are. Each
-is a pattern: `*` matches any run of characters and `?` matches any one
-character, and capital letters don't matter. For example, `Example App*`
-matches the title `Example App` and also `Example App - Save 3`. As you edit
-the patterns, AppyTappy counts the open windows they match.
+When you pick a window, AppyTappy fills in all three from it. Each is a
+pattern: `*` matches any run of characters and `?` matches any one character,
+and capital letters don't matter. For example, `Example App*` matches the
+title `Example App` and also `Example App - Save 3`.
 
-Many programs change their title as they run, so the title often won't
-match later. **When no window matches all three** says what AppyTappy does
-then:
+The executable always has to match. Tick **Must match** beside the title or
+the class when a window has to match that too to count. At first neither is
+ticked, so a title that changes doesn't matter. When several windows count,
+AppyTappy uses the one that matches the most of the three, and on a tie the
+title counts most, then the class.
 
-- **Only a window that matches all three.**
-- **Otherwise one with the same class and executable.**
-- **Otherwise any window of the executable.** This is the default.
+**If no window qualifies** shows once the title or the class is ticked. It
+says what AppyTappy does when the program is running but none of its windows
+matches everything ticked:
 
-The executable always has to match.
+- **None** treats the application as closed until a window qualifies. This is
+  the default.
+- **Any window of the same executable** uses one of the program's other
+  windows instead.
+
+While you edit, the list of windows marks the one AppyTappy would use as
+**best match**, the others that qualify as **matches**, and those it would take
+only as the fallback as **fallback**.
 
 ## Anti-cheat
 

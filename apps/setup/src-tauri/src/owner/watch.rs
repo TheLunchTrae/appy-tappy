@@ -151,7 +151,8 @@ mod tests {
     use crate::check_spec::CheckSpec;
     use crate::owner::messages::{Reading, Reply, Request};
     use crate::owner::test_support::{
-        Harness, REFERENCE, WINDOW, frame_image, harness_with, scratch_store, spec, with_saved_bar,
+        Harness, REFERENCE, WINDOW, add_example_app, frame_image, harness_with, scratch_store,
+        spec, with_saved_bar,
     };
 
     use super::*;
@@ -364,12 +365,18 @@ mod tests {
         let (stores, root) = scratch_store("unwatched");
         let apps = stores.apps.clone();
         let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Request::Screenshot), Ok(0));
-        let save = |spec| move |reply| Request::SaveValue { spec, reply };
+        let save = |spec| {
+            move |reply| Request::SaveValue {
+                spec: Box::new(spec),
+                reply,
+            }
+        };
         harness
-            .ask(save(spec(None, "Icon visible", REFERENCE)))
+            .ask(save(spec("example", "Icon visible", REFERENCE)))
             .expect("saves");
         let folder = apps.folder("example");
         let picture = folder.join("icon_visible.png");

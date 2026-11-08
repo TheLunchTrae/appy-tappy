@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::anti_cheat::AntiCheatClass;
 use crate::signal::SignalName;
-use crate::window_match::{MatchPriority, Pattern, WindowFacts, WindowMatch};
+use crate::window_match::{MustMatch, Pattern, WindowFacts, WindowMatch};
 
 /// The format version this build writes and reads.
 pub const FORMAT: u32 = 1;
@@ -98,46 +98,37 @@ pub struct WindowDef {
     pub title: String,
     /// The pattern for the window's class name.
     pub class: String,
-    /// The pattern for the file name of the window's executable.
+    /// The pattern for the file name of the window's executable, which
+    /// always has to match.
     pub executable: String,
-    /// How far to fall back when no window fits all three.
-    pub priority: PriorityDef,
+    /// The fields besides the executable a window has to match to qualify.
+    pub must_match: MustMatchDef,
+    /// What to take when no window qualifies.
+    pub fallback: FallbackDef,
 }
 
-/// [`MatchPriority`] as the file spells it.
+/// [`MustMatch`] as the file spells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MustMatchDef {
+    /// The title has to match.
+    pub title: bool,
+    /// The class has to match.
+    pub class: bool,
+}
+
+/// [`WindowMatch::fallback`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum PriorityDef {
-    /// [`MatchPriority::Title`].
-    Title,
-    /// [`MatchPriority::TitleElseClass`].
-    TitleElseClass,
-    /// [`MatchPriority::TitleElseExecutable`].
-    TitleElseExecutable,
-}
-
-impl From<PriorityDef> for MatchPriority {
-    fn from(priority: PriorityDef) -> Self {
-        match priority {
-            PriorityDef::Title => Self::Title,
-            PriorityDef::TitleElseClass => Self::TitleElseClass,
-            PriorityDef::TitleElseExecutable => Self::TitleElseExecutable,
-        }
-    }
-}
-
-impl From<MatchPriority> for PriorityDef {
-    fn from(priority: MatchPriority) -> Self {
-        match priority {
-            MatchPriority::Title => Self::Title,
-            MatchPriority::TitleElseClass => Self::TitleElseClass,
-            MatchPriority::TitleElseExecutable => Self::TitleElseExecutable,
-        }
-    }
+pub enum FallbackDef {
+    /// No fallback: the application counts as closed.
+    None,
+    /// Any window of the executable.
+    Executable,
 }
 
 impl WindowDef {
-    /// The window as the setup app picked it, falling back as
+    /// The window as the setup app picked it, requiring what
     /// [`WindowMatch::exact`] does.
     #[must_use]
     pub fn exact(window: WindowFacts<'_>) -> Self {
@@ -147,22 +138,30 @@ impl WindowDef {
     /// The matcher this describes.
     #[must_use]
     pub fn to_match(&self) -> WindowMatch {
+        let MustMatchDef { title, class } = self.must_match;
         WindowMatch {
             title: Pattern::new(&self.title),
             class: Pattern::new(&self.class),
             executable: Pattern::new(&self.executable),
-            priority: self.priority.into(),
+            must_match: MustMatch { title, class },
+            fallback: self.fallback == FallbackDef::Executable,
         }
     }
 }
 
 impl From<&WindowMatch> for WindowDef {
     fn from(matcher: &WindowMatch) -> Self {
+        let MustMatch { title, class } = matcher.must_match;
         Self {
             title: matcher.title.as_str().to_owned(),
             class: matcher.class.as_str().to_owned(),
             executable: matcher.executable.as_str().to_owned(),
-            priority: matcher.priority.into(),
+            must_match: MustMatchDef { title, class },
+            fallback: if matcher.fallback {
+                FallbackDef::Executable
+            } else {
+                FallbackDef::None
+            },
         }
     }
 }
@@ -351,7 +350,7 @@ impl AppFile {
     }
 
     /// Checks the rules JSON alone cannot: the format version, a name for
-    /// the application and each value, valid and unique value IDs, regions
+    /// the application and each value, a window match that requires a field, valid and unique value IDs, regions
     /// inside their window, picture file names, and at least one sample for
     /// a number.
     ///
@@ -564,7 +563,8 @@ mod tests {
         let json = file.to_json();
         assert!(json.ends_with("}\n"));
         assert!(json.contains("\"antiCheat\": \"unknown\""));
-        assert!(json.contains("\"priority\": \"titleElseExecutable\""));
+        assert!(json.contains("\"fallback\": \"none\""));
+        assert!(json.contains("\"mustMatch\""));
         assert!(json.contains("\"kind\": \"number\""));
         assert!(json.contains("\"windowSize\""));
         assert_eq!(AppFile::parse(&json), Ok(file));
@@ -620,23 +620,26 @@ mod tests {
     fn the_window_def_describes_its_matcher() {
         let def = dash().window;
         assert_eq!(def.title, "Example App");
-        assert_eq!(def.priority, PriorityDef::TitleElseExecutable);
-        let matcher = def.to_match();
-        assert_eq!(WindowDef::from(&matcher), def);
-        for (priority, matches) in [
-            (PriorityDef::Title, MatchPriority::Title),
-            (PriorityDef::TitleElseClass, MatchPriority::TitleElseClass),
-            (
-                PriorityDef::TitleElseExecutable,
-                MatchPriority::TitleElseExecutable,
-            ),
-        ] {
-            let def = WindowDef {
-                priority,
-                ..def.clone()
-            };
-            assert_eq!(def.to_match().priority, matches);
-            assert_eq!(WindowDef::from(&def.to_match()).priority, priority);
+        assert_eq!(
+            def.must_match,
+            MustMatchDef {
+                title: false,
+                class: false
+            }
+        );
+        assert_eq!(def.fallback, FallbackDef::None);
+        for (fallback, takes_any) in [(FallbackDef::None, false), (FallbackDef::Executable, true)] {
+            for (title, class) in [(true, false), (false, true)] {
+                let def = WindowDef {
+                    must_match: MustMatchDef { title, class },
+                    fallback,
+                    ..def.clone()
+                };
+                let matcher = def.to_match();
+                assert_eq!(matcher.must_match, MustMatch { title, class });
+                assert_eq!(matcher.fallback, takes_any);
+                assert_eq!(WindowDef::from(&matcher), def);
+            }
         }
     }
 
