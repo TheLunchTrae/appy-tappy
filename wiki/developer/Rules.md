@@ -100,8 +100,10 @@ A session starts when the application starts, with every rule armed and no
 signal values, and ends when the application exits. It takes three kinds of
 events, each with the time it happened: a signal's new value, a focus change,
 and the application's exit. For each event it returns effects: release a rule,
-or fire it. Releases come first, then fires, each in rule order, so a restore
-never undoes a change that another rule makes for the same event.
+fire it, or report that its cooldown held it back. Releases come first, then
+fires, each in rule order, so a restore never undoes a change that another rule
+makes for the same event. A held rule runs nothing; the runtime trace records
+it ([Trace](Trace.md)).
 
 A value that holds still sends no new sample, so a Becomes rule that its
 cooldown held back could wait forever. A session therefore reports when the

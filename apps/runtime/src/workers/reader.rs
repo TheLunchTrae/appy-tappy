@@ -47,6 +47,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::{SignalName, Value};
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
 use appytappy_sources::screen::{
@@ -55,6 +56,7 @@ use appytappy_sources::screen::{
 use appytappy_sources::system::{System, best_windows, read_window, shows};
 
 use crate::plan::AppPlan;
+use crate::trace::{Record, Trace, What};
 
 /// How often a reader looks for a window while none fits.
 pub(crate) const FIND_AGAIN: Duration = Duration::from_secs(1);
@@ -89,6 +91,8 @@ pub(crate) struct Job {
     pub(crate) executable: String,
     /// How often to read the values, from the settings.
     pub(crate) interval: ReadInterval,
+    /// The trace its frame handler records each reading to.
+    pub(crate) trace: Trace,
 }
 
 /// What a reader reports.
@@ -554,6 +558,8 @@ struct FrameReader<E> {
     /// of them, so nothing it sends follows the reader's `Unseen`.
     ended: bool,
     schedule: ReadSchedule,
+    /// Where it records each reading and change, when the trace is on.
+    trace: Trace,
     events: Sender<E>,
     control: Sender<Control>,
 }
@@ -583,6 +589,7 @@ impl<E: From<Reading>> FrameReader<E> {
             seen: false,
             ended: false,
             schedule: ReadSchedule::new(job.interval),
+            trace: job.trace.clone(),
             events,
             control,
         })
@@ -639,8 +646,23 @@ impl<E: From<Reading>> FrameReader<E> {
             }
         }
         let mut changed = false;
+        // The clock is read only when each reading is traced.
+        let timed = self.trace.wants(TraceCategory::Readings);
+        let session = self.session;
         for position in 0..self.plan.runs.values.len() {
+            let started = timed.then(Instant::now);
             let read = self.read(position, window_size, frame.as_ref());
+            if let (Some(started), Some(Ok(value)), Some(frame)) = (started, &read, &frame) {
+                let took = started.elapsed();
+                self.trace.record(What::Read, |record| Record {
+                    session: Some(session),
+                    item: Some(position),
+                    value: Some(value.clone()),
+                    took: Some(took),
+                    cause: Some(frame.received),
+                    ..record
+                });
+            }
             match read {
                 Some(Ok(reading)) => changed |= self.record(position, reading, frame.as_ref()),
                 Some(Err(problem)) => self.report(position, problem),
@@ -721,6 +743,14 @@ impl<E: From<Reading>> FrameReader<E> {
         }
         *last = Some(reading.clone());
         self.seen = true;
+        let session = self.session;
+        self.trace.record(What::Changed, |record| Record {
+            session: Some(session),
+            item: Some(position),
+            value: Some(reading.clone()),
+            cause: Some(frame.received),
+            ..record
+        });
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a failed send means the owner stopped this session"
@@ -888,6 +918,7 @@ mod tests {
             process: ProcessId::new(43),
             executable: "Example.exe".to_owned(),
             interval: ReadInterval::DEFAULT,
+            trace: Trace::OFF,
         }
     }
 
@@ -991,6 +1022,49 @@ mod tests {
                 ("left".to_owned(), Value::Flag(false)),
                 ("right".to_owned(), Value::Flag(true))
             ]
+        );
+    }
+
+    #[test]
+    fn each_read_and_each_change_is_traced_with_its_value_and_its_frame() {
+        let (events, _readings) = mpsc::channel::<Reading>();
+        let (control, _control) = mpsc::channel();
+        let (trace, entries) =
+            Trace::for_test(1, &[TraceCategory::Readings, TraceCategory::Changes]);
+        let job = Job {
+            trace,
+            ..job(vec![red_at("left", 10, 20), red_at("right", 16, 22)])
+        };
+        let mut frames = FrameReader::new(&job, WINDOW, events, control).expect("values to read");
+        let left_red = frame_image(8, 4, |x, y| x < 2 && y < 2);
+        let arrived = frame(&left_red, WINDOW);
+        let received = arrived.received;
+        frames.handle(Ok(arrived));
+        let rows: Vec<_> = crate::trace::sent(&entries)
+            .into_iter()
+            .map(|record| {
+                (
+                    record.what,
+                    record.session,
+                    record.item,
+                    record.value,
+                    record.took.is_some(),
+                    record.cause,
+                )
+            })
+            .collect();
+        let cause = Some(received);
+        let session = Some(SessionId(3));
+        let (on, off) = (Some(Value::Flag(true)), Some(Value::Flag(false)));
+        assert_eq!(
+            rows,
+            [
+                (What::Read, session, Some(0), on.clone(), true, cause),
+                (What::Changed, session, Some(0), on, false, cause),
+                (What::Read, session, Some(1), off.clone(), true, cause),
+                (What::Changed, session, Some(1), off, false, cause),
+            ],
+            "a read says how long it took; a change does not"
         );
     }
 

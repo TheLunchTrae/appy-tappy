@@ -10,6 +10,9 @@ use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
 
 use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Threading::{
+    GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_LOWEST,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowPos,
 };
@@ -80,4 +83,12 @@ pub(crate) fn show_without_focus(window: usize) -> io::Result<()> {
         )
     }
     .map_err(io::Error::from)
+}
+
+pub(crate) fn lower_thread_priority() -> io::Result<()> {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the pseudo handle of the current thread is always valid, and the
+    // priority is one of the documented levels.
+    unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST) }
+        .map_err(io::Error::from)
 }

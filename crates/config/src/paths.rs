@@ -66,6 +66,12 @@ impl Locations {
         self.local.join("logs")
     }
 
+    /// The folder for the runtime's trace files.
+    #[must_use]
+    pub fn traces(&self) -> PathBuf {
+        self.local.join("traces")
+    }
+
     /// The folder that holds one folder per application, each with its
     /// authoring file and pictures.
     #[must_use]
@@ -114,6 +120,7 @@ mod tests {
         )
         .expect("absolute paths");
         assert_eq!(locations.logs(), local.join("AppyTappy").join("logs"));
+        assert_eq!(locations.traces(), local.join("AppyTappy").join("traces"));
         assert_eq!(locations.apps(), roaming.join("AppyTappy").join("apps"));
         assert_eq!(
             locations.automations(),

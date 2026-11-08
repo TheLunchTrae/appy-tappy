@@ -8,9 +8,11 @@
 
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::SettingsFile;
 use appytappy_platform::AUTOSTART_VALUE;
 use serde::Serialize;
@@ -82,13 +84,57 @@ pub(crate) fn set_starts_with_windows(on: bool) -> Result<(), String> {
     })
 }
 
+/// The folder the runtime writes its trace files to.
+///
+/// # Errors
+///
+/// Returns why the folder cannot be found, as a sentence.
+#[mutants::skip] // Reads the environment, which the tests leave alone; `Locations` is tested.
+pub(crate) fn trace_folder() -> Result<PathBuf, String> {
+    Locations::from_env()
+        .map(|locations| locations.traces())
+        .map_err(|error| {
+            format!("AppyTappy cannot find where the runtime keeps its traces: {error}.")
+        })
+}
+
+/// Opens the trace folder in File Explorer. The folder is made first, so it
+/// opens before the first trace too.
+#[mutants::skip] // Opens a window, checked by hand on Windows.
+pub(crate) fn open_trace_folder() -> Result<(), String> {
+    let folder = trace_folder()?;
+    fs::create_dir_all(&folder)
+        .and_then(|()| open_folder(&folder))
+        .map_err(|error| format!("AppyTappy cannot open the trace folder: {error}."))
+}
+
+/// Shows `folder` in File Explorer.
+#[cfg(windows)]
+#[mutants::skip] // Opens a window, checked by hand on Windows.
+fn open_folder(folder: &Path) -> io::Result<()> {
+    std::process::Command::new("explorer.exe")
+        .arg(folder)
+        .spawn()
+        .map(drop)
+}
+
+/// Off Windows there is no File Explorer to show a folder in.
+#[cfg(not(windows))]
+#[mutants::skip] // The setup app runs only on Windows.
+fn open_folder(_folder: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "folders open only on Windows",
+    ))
+}
+
 /// The runtime's program beside the setup app's program `setup`.
 ///
 /// # Errors
 ///
 /// Returns a not-found error when it is not there, as when the setup app
 /// runs from a build folder rather than where it was installed.
-fn runtime_beside(setup: &Path) -> io::Result<std::path::PathBuf> {
+fn runtime_beside(setup: &Path) -> io::Result<PathBuf> {
     let runtime = setup.with_file_name(RUNTIME_PROGRAM);
     if runtime.is_file() {
         Ok(runtime)
@@ -113,7 +159,6 @@ fn command(runtime: &Path) -> OsString {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
     use std::process;
 
     use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};

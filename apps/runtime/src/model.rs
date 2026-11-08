@@ -21,7 +21,8 @@ use appytappy_sources::schedule::ReadInterval;
 
 use crate::lifecycle::Change;
 use crate::plan::AppPlan;
-use crate::workers::act::Job;
+use crate::trace::Trace;
+use crate::workers::act::{Job, Owner};
 use crate::workers::reader::{self, SessionId};
 
 /// The runtime's state, as the log and the tray report it.
@@ -55,6 +56,9 @@ pub(crate) enum Order {
     StopReading(SessionId, String),
     /// Run or undo an automation's actions.
     Act(Job),
+    /// Nothing runs: an automation's cooldown held it back. The trace
+    /// records it, with when the frame arrived whose reading it was.
+    Held(Owner, Option<Instant>),
 }
 
 /// An attached app's process.
@@ -76,6 +80,8 @@ struct Running {
     watched: Watched,
     /// How often its reader reads.
     interval: ReadInterval,
+    /// The trace its reader records to.
+    trace: Trace,
 }
 
 /// The owner thread's state.
@@ -98,6 +104,8 @@ pub(crate) struct Model {
     running: BTreeMap<String, Running>,
     /// How often readers read, from the settings.
     interval: ReadInterval,
+    /// The trace readers record to, from the settings.
+    trace: Trace,
     /// The next session's ID.
     next: u64,
 }
@@ -112,6 +120,7 @@ impl Default for Model {
             plan: BTreeMap::new(),
             running: BTreeMap::new(),
             interval: ReadInterval::DEFAULT,
+            trace: Trace::OFF,
             next: 0,
         }
     }
@@ -168,6 +177,27 @@ impl Model {
             .values()
             .find(|running| running.id == id)
             .map(|running| &*running.plan)
+    }
+
+    /// Each running session with its application's newest plan, so the trace
+    /// names what a reload renamed without starting it over.
+    pub(crate) fn sessions(&self) -> impl Iterator<Item = (SessionId, &Arc<AppPlan>)> {
+        self.running
+            .values()
+            .map(|running| (running.id, &running.plan))
+    }
+
+    /// Where `signal` is among the values that session `id` reads, for the
+    /// trace.
+    pub(crate) fn value_position(&self, id: SessionId, signal: &SignalName) -> Option<usize> {
+        self.running
+            .values()
+            .find(|running| running.id == id)?
+            .plan
+            .runs
+            .values
+            .iter()
+            .position(|value| value.signal == *signal)
     }
 
     /// Applies what detection found at `at`.
@@ -257,25 +287,35 @@ impl Model {
         self.interval
     }
 
-    /// Sets how often readers read. Readers that start from now on read at
-    /// `interval`; [`Model::restart_readers`] moves the running ones to it.
-    pub(crate) const fn set_interval(&mut self, interval: ReadInterval) {
+    /// Sets how often readers read and the trace they record to. Readers
+    /// that start from now on use them; [`Model::restart_readers`] moves the
+    /// running ones to them.
+    pub(crate) fn set_reading(&mut self, interval: ReadInterval, trace: Trace) {
         self.interval = interval;
+        self.trace = trace;
+    }
+
+    /// The trace readers record to.
+    pub(crate) const fn trace(&self) -> &Trace {
+        &self.trace
     }
 
     /// Starts over each running app's reader that reads at another interval
-    /// than the model's, in the same session, so its automations keep their
-    /// state and nothing is undone. Its values are forgotten first, as when a
-    /// reader can no longer see them, because the new reader sends each
-    /// value as it first reads it. A reading the old reader sent just before
-    /// it stopped can still arrive after that, a few milliseconds old.
+    /// or records to another trace than the model's, in the same session, so
+    /// its automations keep their state and nothing is undone. Its values are
+    /// forgotten first, as when a reader can no longer see them, because the
+    /// new reader sends each value as it first reads it. A reading the old
+    /// reader sent just before it stopped can still arrive after that, a few
+    /// milliseconds old.
     pub(crate) fn restart_readers(&mut self) -> Vec<Order> {
         let interval = self.interval;
+        let trace = &self.trace;
         self.running
             .values_mut()
-            .filter(|running| running.interval != interval)
+            .filter(|running| running.interval != interval || running.trace != *trace)
             .flat_map(|running| {
                 running.interval = interval;
+                running.trace = trace.clone();
                 running.session.forget_values();
                 [
                     Order::StopReading(running.id, running.plan.labels.name.clone()),
@@ -285,6 +325,7 @@ impl Model {
                         process: running.watched.process,
                         executable: running.watched.executable.clone(),
                         interval,
+                        trace: trace.clone(),
                     }),
                 ]
             })
@@ -304,7 +345,7 @@ impl Model {
             return Vec::new();
         };
         let effects = running.session.sample(signal, value, at);
-        acts(id, &running.plan, &running.watched, effects)
+        acts(id, &running.plan, &running.watched, effects, Some(at))
     }
 
     /// When a running automation that its cooldown held back is next due,
@@ -323,7 +364,7 @@ impl Model {
             .values_mut()
             .flat_map(|running| {
                 let effects = running.session.recheck(at);
-                acts(running.id, &running.plan, &running.watched, effects)
+                acts(running.id, &running.plan, &running.watched, effects, None)
             })
             .collect()
     }
@@ -359,12 +400,13 @@ impl Model {
             process: attached.process,
             executable: attached.executable.clone(),
             interval: self.interval,
+            trace: self.trace.clone(),
         })];
         let watched = Watched {
             process: attached.process,
             executable: attached.executable.clone(),
         };
-        orders.extend(acts(id, plan, &watched, effects));
+        orders.extend(acts(id, plan, &watched, effects, None));
         let plan = Arc::clone(plan);
         self.running.insert(
             app.to_owned(),
@@ -374,6 +416,7 @@ impl Model {
                 session,
                 watched,
                 interval: self.interval,
+                trace: self.trace.clone(),
             },
         );
         orders
@@ -390,7 +433,13 @@ impl Model {
         };
         let name = running.plan.labels.name.clone();
         let mut orders = vec![Order::StopReading(running.id, name)];
-        orders.extend(acts(running.id, &running.plan, &running.watched, effects));
+        orders.extend(acts(
+            running.id,
+            &running.plan,
+            &running.watched,
+            effects,
+            None,
+        ));
         orders
     }
 }
@@ -415,26 +464,38 @@ enum Stop {
     Paused,
 }
 
-/// The action jobs for a session's `effects`.
-fn acts(id: SessionId, plan: &AppPlan, watched: &Watched, effects: Vec<Effect>) -> Vec<Order> {
+/// The orders for a session's `effects`, caused by the reading of the
+/// frame that arrived at `cause`, if any.
+fn acts(
+    id: SessionId,
+    plan: &AppPlan,
+    watched: &Watched,
+    effects: Vec<Effect>,
+    cause: Option<Instant>,
+) -> Vec<Order> {
     effects
         .into_iter()
         .filter_map(|effect| {
-            let (Effect::Fire(rule) | Effect::Release(rule)) = effect;
-            let automation = plan.labels.automations.get(rule.0)?.clone();
+            let (Effect::Fire(rule) | Effect::Release(rule) | Effect::Held(rule)) = effect;
             let owner = (id, rule);
             let job = match effect {
                 Effect::Fire(_) => {
                     let fired = plan.runs.rules.get(rule.0)?;
                     Job::Run {
                         owner,
-                        automation,
+                        automation: plan.labels.automations.get(rule.0)?.clone(),
                         watched: watched.clone(),
                         actions: fired.actions().into(),
                         restore: fired.restore(),
+                        cause,
                     }
                 },
-                Effect::Release(_) => Job::Undo { owner, automation },
+                Effect::Release(_) => Job::Undo {
+                    owner,
+                    automation: plan.labels.automations.get(rule.0)?.clone(),
+                    cause,
+                },
+                Effect::Held(_) => return Some(Order::Held(owner, cause)),
             };
             Some(Order::Act(job))
         })
@@ -451,6 +512,8 @@ mod tests {
     use appytappy_engine::RuleIndex;
 
     use super::*;
+    use appytappy_config::settings_file::TraceCategory;
+
     use crate::plan::examples::{number, pause, plan, plan_with_cooldown, signal};
     use crate::plan::{Labels, Runs};
 
@@ -485,9 +548,11 @@ mod tests {
                 Order::Act(Job::Run {
                     owner, automation, ..
                 }) => format!("run {} {automation}", owner.0.0),
-                Order::Act(Job::Undo { owner, automation }) => {
-                    format!("undo {} {automation}", owner.0.0)
-                },
+                Order::Act(Job::Undo {
+                    owner, automation, ..
+                }) => format!("undo {} {automation}", owner.0.0),
+                Order::Act(Job::Trace(_)) => "trace".to_owned(),
+                Order::Held((id, rule), _) => format!("held {} {}", id.0, rule.0),
             })
             .collect()
     }
@@ -649,7 +714,8 @@ mod tests {
         model.sample(SessionId(0), signal(), number(10.0), later(1));
         assert_eq!(
             model.sample(SessionId(0), signal(), number(95.0), later(2)),
-            []
+            [Order::Held((SessionId(0), RuleIndex(0)), Some(later(2)))],
+            "held, for the trace"
         );
         assert_eq!(model.next_due(), Some(later(10)));
         assert_eq!(model.recheck(later(9)), []);
@@ -682,8 +748,32 @@ mod tests {
                 },
                 actions: pause(),
                 restore: Restore::OnRelease,
+                cause: Some(now),
             })]
         );
+    }
+
+    #[test]
+    fn a_rule_its_cooldown_holds_back_is_an_order_for_the_trace_only() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[(
+            "a",
+            &plan_with_cooldown("A", Duration::from_secs(60)),
+        )]));
+        model.apply(started("a", 7), now);
+        assert_eq!(
+            kinds(&model.sample(SessionId(0), signal(), number(95.0), now)),
+            ["run 0 Pause A"]
+        );
+        model.sample(SessionId(0), signal(), number(10.0), now);
+        let later = now + Duration::from_secs(1);
+        assert_eq!(
+            model.sample(SessionId(0), signal(), number(95.0), later),
+            [Order::Held((SessionId(0), RuleIndex(0)), Some(later))]
+        );
+        assert_eq!(model.value_position(SessionId(0), &signal()), Some(0));
+        assert_eq!(model.value_position(SessionId(9), &signal()), None);
     }
 
     #[test]
@@ -739,7 +829,7 @@ mod tests {
         model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
         model.apply(started("a", 7), now);
         model.sample(SessionId(0), signal(), number(95.0), now);
-        model.set_interval(ReadInterval::DEFAULT);
+        model.set_reading(ReadInterval::DEFAULT, Trace::OFF);
         assert_eq!(
             model.restart_readers(),
             [],
@@ -747,7 +837,7 @@ mod tests {
         );
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_interval(slower);
+        model.set_reading(slower, Trace::OFF);
         let orders = model.restart_readers();
         assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"], "b is not running");
         let Some(Order::Read(job)) = orders.last() else {
@@ -784,7 +874,7 @@ mod tests {
         assert!(model.next_due().is_some(), "held back by its cooldown");
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_interval(slower);
+        model.set_reading(slower, Trace::OFF);
         model.restart_readers();
         assert_eq!(model.next_due(), None, "nothing holds on unseen values");
         assert_eq!(model.recheck(now + Duration::from_secs(61)), []);
@@ -801,7 +891,7 @@ mod tests {
             .expect("in order");
         // As the owner does on a reload: the interval, then the plan, then
         // the readers the plan left running.
-        model.set_interval(slower);
+        model.set_reading(slower, Trace::OFF);
         let mut orders = model.replan(plans(&[("a", &plan("A", 80.0)), ("b", &plan("B", 90.0))]));
         orders.extend(model.restart_readers());
         assert_eq!(
@@ -816,6 +906,30 @@ mod tests {
             }),
             "both read at the new interval"
         );
+    }
+
+    #[test]
+    fn a_new_trace_restarts_each_reader_in_its_session() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7), now);
+        let (trace, _entries) = Trace::for_test(1, &[TraceCategory::Readings]);
+        model.set_reading(ReadInterval::DEFAULT, trace.clone());
+        let orders = model.restart_readers();
+        assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"]);
+        let Some(Order::Read(job)) = orders.last() else {
+            panic!("a read order");
+        };
+        assert_eq!(job.trace, trace);
+        model.set_reading(ReadInterval::DEFAULT, trace);
+        assert_eq!(
+            model.restart_readers(),
+            [],
+            "the same trace changes nothing"
+        );
+        model.set_reading(ReadInterval::DEFAULT, Trace::OFF);
+        assert_eq!(kinds(&model.restart_readers()), ["stop 0 A", "read 0 A"]);
     }
 
     #[test]
@@ -837,6 +951,15 @@ mod tests {
         );
         assert_eq!(model.active_automations(), ["Pause renamed"]);
         assert_eq!(model.app_name(SessionId(0)), Some("Renamed"));
+        let sessions: Vec<_> = model
+            .sessions()
+            .map(|(id, plan)| (id, plan.labels.name.as_str()))
+            .collect();
+        assert_eq!(
+            sessions,
+            [(SessionId(0), "Renamed")],
+            "the trace's names too"
+        );
         assert_eq!(
             kinds(&model.sample(SessionId(0), signal(), number(50.0), now)),
             ["undo 0 Pause renamed"]

@@ -32,6 +32,8 @@ use appytappy_config::window_match::WindowMatch;
 use appytappy_platform::WindowEvent;
 use appytappy_sources::system::{ProcessEntry, WindowEntry, best_windows, read_window};
 
+use crate::trace::{Detail, Record, Trace, What};
+
 /// How long after the first window event of a burst the snapshot runs.
 pub(crate) const SETTLE: Duration = Duration::from_millis(250);
 
@@ -68,6 +70,8 @@ pub(crate) enum Input {
     Window(WindowEvent),
     /// The saved files changed, so these are the apps to watch now.
     Watch(Watchlist),
+    /// Record each process snapshot to this trace from now on.
+    Trace(Trace),
 }
 
 impl From<WindowEvent> for Input {
@@ -373,11 +377,22 @@ pub(crate) fn run<E: From<Change>>(
             changes.send(E::from(change)).is_ok()
         })
     };
+    let mut trace = Trace::OFF;
     loop {
         let now = Instant::now();
         let input = match lifecycle.deadline() {
             Some(due) if due <= now => {
-                if !send(lifecycle.scan(snapshot(), &mut windows, &mut shown, now)) {
+                let processes = snapshot();
+                if trace.wants(What::Snapshot.category()) {
+                    let took = now.elapsed();
+                    let count = processes.as_ref().map_or(0, Vec::len);
+                    trace.record(What::Snapshot, |record| Record {
+                        took: Some(took),
+                        detail: Detail::Count(count),
+                        ..record
+                    });
+                }
+                if !send(lifecycle.scan(processes, &mut windows, &mut shown, now)) {
                     return;
                 }
                 continue;
@@ -399,6 +414,7 @@ pub(crate) fn run<E: From<Change>>(
                     return;
                 }
             },
+            Input::Trace(next) => trace = next,
         }
     }
 }
@@ -408,6 +424,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
+    use appytappy_config::settings_file::TraceCategory;
     use appytappy_config::window_match::{MustMatch, Pattern};
     use appytappy_sources::system::Bounds;
 
@@ -710,11 +727,21 @@ mod tests {
                 build: Ok(build()),
             }
         );
+        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Lifecycle]);
+        inputs.send(Input::Trace(trace)).expect("send");
         let destroyed_at = Instant::now();
         inputs
             .send(Input::from(WindowEvent::Destroyed))
             .expect("send");
         assert_eq!(changes.recv_timeout(wait).expect("exit"), exited(42));
+        let Ok(crate::trace::writer::Entry::Record(snapshot)) = entries.try_recv() else {
+            panic!("the snapshot after the trace started is recorded");
+        };
+        assert_eq!(
+            (snapshot.what, snapshot.detail),
+            (What::Snapshot, Detail::Count(0))
+        );
+        assert!(snapshot.took.is_some());
         assert!(
             destroyed_at.elapsed() >= SETTLE,
             "the snapshot waited for the burst to settle"

@@ -119,6 +119,8 @@ fn main() -> ExitCode {
             commands::save_settings,
             commands::starts_with_windows,
             commands::set_starts_with_windows,
+            commands::trace_folder,
+            commands::open_trace_folder,
             updates::check_for_update,
             updates::download_update,
             updates::install_update,

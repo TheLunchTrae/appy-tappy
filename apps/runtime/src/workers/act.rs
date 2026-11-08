@@ -24,6 +24,7 @@ use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
 use appytappy_engine::RuleIndex;
 
+use crate::trace::{Detail, Record, Trace, What};
 use crate::workers::reader::SessionId;
 
 /// How often a failed volume restore is tried again while no job comes.
@@ -49,6 +50,8 @@ pub(crate) enum Job {
         actions: Box<[Action]>,
         /// Whether its changes are undone when it is released.
         restore: Restore,
+        /// When the frame arrived whose reading fired it, for the trace.
+        cause: Option<Instant>,
     },
     /// Undo what an automation changed.
     Undo {
@@ -56,7 +59,33 @@ pub(crate) enum Job {
         owner: Owner,
         /// Its name, for the log.
         automation: String,
+        /// When the frame arrived whose reading released it, for the trace.
+        cause: Option<Instant>,
     },
+    /// Record to this trace from now on.
+    Trace(Trace),
+}
+
+impl Job {
+    /// The automation the job runs or undoes, and the reading that caused
+    /// it, or `None` for a job that runs nothing.
+    fn traced(&self) -> Option<(Owner, Option<Instant>)> {
+        match self {
+            Self::Run { owner, cause, .. } | Self::Undo { owner, cause, .. } => {
+                Some((*owner, *cause))
+            },
+            Self::Trace(_) => None,
+        }
+    }
+}
+
+/// What a job did.
+#[derive(Debug)]
+struct Done {
+    /// Lines for the log.
+    notes: Vec<String>,
+    /// Whether an action, or the undo, failed or could not run.
+    failed: bool,
 }
 
 /// What the action thread tells the owner.
@@ -99,6 +128,7 @@ pub(crate) fn run<C, E>(
     if !report(notes, worker.can_run()) {
         return;
     }
+    let mut trace = Trace::OFF;
     loop {
         let job = match worker.retry_in(Instant::now()) {
             Some(wait) => match jobs.recv_timeout(wait) {
@@ -112,7 +142,34 @@ pub(crate) fn run<C, E>(
             },
         };
         let notes = match job {
-            Some(job) => worker.job(job, Instant::now()),
+            Some(Job::Trace(next)) => {
+                trace = next;
+                continue;
+            },
+            Some(job) => {
+                let traced = job.traced();
+                let started = trace.wants(What::Started.category()).then(Instant::now);
+                if let Some(((session, rule), cause)) = traced {
+                    trace.record(What::Started, |record| Record {
+                        session: Some(session),
+                        item: Some(rule.0),
+                        cause,
+                        ..record
+                    });
+                }
+                let done = worker.job(job, Instant::now());
+                if let Some(((session, rule), cause)) = traced {
+                    trace.record(What::Done, |record| Record {
+                        session: Some(session),
+                        item: Some(rule.0),
+                        took: started.map(|started| record.at.saturating_duration_since(started)),
+                        cause,
+                        detail: Detail::Note(if done.failed { "failed" } else { "ok" }),
+                        ..record
+                    });
+                }
+                done.notes
+            },
             None => worker.retry(Instant::now()),
         };
         if !report(notes, worker.can_run()) {
@@ -168,44 +225,59 @@ where
     /// They come after the job, so a pending restore of a target the job
     /// changes is taken over by the job instead of being sent just before
     /// it.
-    fn job(&mut self, job: Job, now: Instant) -> Vec<String> {
+    fn job(&mut self, job: Job, now: Instant) -> Done {
         let mut notes = self.make_again(now);
         let actions = match &mut self.actions {
             Ok(actions) => actions,
             Err(missing) => {
                 // A job that comes while the controls are missing changes
                 // nothing, so an undo has nothing to put back.
+                let failed = matches!(job, Job::Run { .. });
                 if let Job::Run { automation, .. } = job {
                     notes.push(format!(
                         "{automation}: its actions did not run, because the controls cannot be made: {}",
                         missing.error
                     ));
                 }
-                return notes;
+                return Done { notes, failed };
             },
         };
-        match job {
+        let failures = match job {
             Job::Run {
                 owner,
                 automation,
                 watched,
                 actions: steps,
                 restore,
-            } => notes.extend(steps.iter().enumerate().filter_map(|(position, step)| {
-                let error = actions.perform(owner, step, restore, &watched).err()?;
-                Some(format!(
-                    "{automation}: action {} failed: {error}",
-                    position.saturating_add(1)
-                ))
-            })),
-            Job::Undo { owner, automation } => {
-                notes.extend(actions.release(owner, now).err().map(|error| {
-                    format!("{automation}: undoing failed, so it is tried again: {error}")
-                }));
+                ..
+            } => {
+                let failures: Vec<String> = steps
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(position, step)| {
+                        let error = actions.perform(owner, step, restore, &watched).err()?;
+                        Some(format!(
+                            "{automation}: action {} failed: {error}",
+                            position.saturating_add(1)
+                        ))
+                    })
+                    .collect();
+                failures
             },
-        }
+            Job::Undo {
+                owner, automation, ..
+            } => actions
+                .release(owner, now)
+                .err()
+                .map(|error| format!("{automation}: undoing failed, so it is tried again: {error}"))
+                .into_iter()
+                .collect(),
+            Job::Trace(_) => Vec::new(),
+        };
+        let failed = !failures.is_empty();
+        notes.extend(failures);
         notes.extend(given_up(actions.retry_restores(now)));
-        notes
+        Done { notes, failed }
     }
 
     /// Whether the controls are made, so actions can run.
@@ -415,6 +487,7 @@ mod tests {
             },
             actions,
             restore: Restore::OnRelease,
+            cause: None,
         }
     }
 
@@ -422,6 +495,7 @@ mod tests {
         Job::Undo {
             owner: OWNER,
             automation: AUTOMATION.to_owned(),
+            cause: None,
         }
     }
 
@@ -451,6 +525,74 @@ mod tests {
                 "Pause near the end: action 2 failed: the volume target has no audio session"
                     .to_owned()
             )]
+        );
+    }
+
+    #[test]
+    fn each_job_is_traced_when_it_starts_and_when_it_is_done() {
+        let (trace, entries) = crate::trace::Trace::for_test(
+            1,
+            &[appytappy_config::settings_file::TraceCategory::Actions],
+        );
+        let fired_by = Instant::now();
+        let released_by = fired_by
+            .checked_add(Duration::from_millis(5))
+            .expect("in range");
+        let (jobs, received) = mpsc::channel();
+        jobs.send(Job::Trace(trace)).expect("send");
+        let mut run_job = fire(pause_then_mute());
+        if let Job::Run { cause, .. } = &mut run_job {
+            *cause = Some(fired_by);
+        }
+        jobs.send(run_job).expect("send");
+        jobs.send(Job::Undo {
+            owner: OWNER,
+            automation: AUTOMATION.to_owned(),
+            cause: Some(released_by),
+        })
+        .expect("send");
+        drop(jobs);
+        let (reports, _reported) = mpsc::channel::<ActionReport>();
+        let (commands, _sent) = mpsc::channel();
+        run(once(OnePlayer::new(commands)), &received, &reports);
+        let rows: Vec<_> = crate::trace::sent(&entries)
+            .into_iter()
+            .map(|record| {
+                (
+                    record.what,
+                    record.session,
+                    record.item,
+                    record.took.is_some(),
+                    record.cause,
+                    record.detail,
+                )
+            })
+            .collect();
+        let (session, rule) = (Some(OWNER.0), Some(OWNER.1.0));
+        let (fired, released) = (Some(fired_by), Some(released_by));
+        assert_eq!(
+            rows,
+            [
+                (What::Started, session, rule, false, fired, Detail::None),
+                (
+                    What::Done,
+                    session,
+                    rule,
+                    true,
+                    fired,
+                    Detail::Note("failed")
+                ),
+                (What::Started, session, rule, false, released, Detail::None),
+                (
+                    What::Done,
+                    session,
+                    rule,
+                    true,
+                    released,
+                    Detail::Note("ok")
+                ),
+            ],
+            "the run's second action fails and the undo works"
         );
     }
 
@@ -491,20 +633,20 @@ mod tests {
             (6, &not_run[..]),
         ] {
             assert_eq!(
-                worker.job(fire(pause()), at(seconds)),
+                worker.job(fire(pause()), at(seconds)).notes,
                 expected,
                 "at {seconds}s"
             );
         }
         assert_eq!(
-            worker.job(release(), at(6)),
+            worker.job(release(), at(6)).notes,
             Vec::<String>::new(),
             "nothing to undo"
         );
         assert_eq!(worker.retry_in(at(6)), Some(Duration::from_secs(1)));
         assert_eq!(worker.retry(at(6)), Vec::<String>::new(), "not due yet");
         assert_eq!(
-            worker.job(fire(pause()), at(7)),
+            worker.job(fire(pause()), at(7)).notes,
             ["actions can run now"],
             "the fourth try works, at 1 + 2 + 4 seconds"
         );
@@ -566,9 +708,9 @@ mod tests {
         let start = Instant::now();
         let (mut worker, notes) = Worker::start(once(player), start);
         assert_eq!(notes, Vec::<String>::new());
-        assert_eq!(worker.job(fire(pause()), start), Vec::<String>::new());
+        assert_eq!(worker.job(fire(pause()), start).notes, Vec::<String>::new());
         assert_eq!(
-            worker.job(release(), start),
+            worker.job(release(), start).notes,
             [
                 "Pause near the end: undoing failed, so it is tried again: the media session did not take the command"
             ]
@@ -617,16 +759,22 @@ mod tests {
                 },
                 actions: mute,
                 restore: Restore::OnRelease,
+                cause: None,
             },
             start,
         );
-        assert_eq!(worker.job(release(), start).len(), 1, "the play is refused");
+        assert_eq!(
+            worker.job(release(), start).notes.len(),
+            1,
+            "the play is refused"
+        );
         let soon = start + Duration::from_millis(10);
         let undo_other = Job::Undo {
             owner: other,
             automation: "Mute".to_owned(),
+            cause: None,
         };
-        assert_eq!(worker.job(undo_other, soon), Vec::<String>::new());
+        assert_eq!(worker.job(undo_other, soon).notes, Vec::<String>::new());
         assert_eq!(
             sent.try_iter().collect::<Vec<_>>(),
             [MediaCommand::Pause, MediaCommand::Play],
@@ -649,16 +797,20 @@ mod tests {
         let start = Instant::now();
         let (mut worker, _notes) = Worker::start(once(player), start);
         worker.job(fire(pause()), start);
-        assert_eq!(worker.job(release(), start).len(), 1, "the play is refused");
+        assert_eq!(
+            worker.job(release(), start).notes.len(),
+            1,
+            "the play is refused"
+        );
         let due = start + MEDIA_RETRY;
-        assert_eq!(worker.job(fire(pause()), due), Vec::<String>::new());
+        assert_eq!(worker.job(fire(pause()), due).notes, Vec::<String>::new());
         assert_eq!(
             sent.try_iter().collect::<Vec<_>>(),
             [MediaCommand::Pause, MediaCommand::Play],
             "the pause that comes is not undone just before it"
         );
         assert_eq!(worker.retry_in(due), None, "the job took the restore over");
-        assert_eq!(worker.job(release(), due), Vec::<String>::new());
+        assert_eq!(worker.job(release(), due).notes, Vec::<String>::new());
         assert_eq!(sent.try_iter().collect::<Vec<_>>(), [MediaCommand::Play]);
     }
 
@@ -713,12 +865,12 @@ mod tests {
             }])
         };
         assert_eq!(
-            worker.job(fire(mute()), Instant::now()),
+            worker.job(fire(mute()), Instant::now()).notes,
             Vec::<String>::new()
         );
         controls(&mut worker).unplugged = true;
         assert_eq!(
-            worker.job(release(), Instant::now()).len(),
+            worker.job(release(), Instant::now()).notes.len(),
             1,
             "the failed undo is logged"
         );
@@ -733,8 +885,9 @@ mod tests {
         let next = Job::Undo {
             owner: (SessionId(2), RuleIndex(0)),
             automation: "Another".to_owned(),
+            cause: None,
         };
-        assert_eq!(worker.job(next, Instant::now()), Vec::<String>::new());
+        assert_eq!(worker.job(next, Instant::now()).notes, Vec::<String>::new());
         assert_eq!(
             controls(&mut worker).volume,
             Some(percent(80)),

@@ -181,14 +181,14 @@ Each thread below is a plain `std::thread`, and each channel is a
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save that changes what the runtime runs, and
   sends `Reload`. The owner reads the settings, then the saved applications
-  and automations, again. A new read interval restarts each reader the new
-  plan keeps, in its session, so automations keep their state and nothing is
+  and automations, again. A new read interval or trace restarts each reader
+  the new plan keeps, in its session, so automations keep their state and nothing is
   undone; settings that cannot be read are logged, and the runtime keeps the
   ones it has. An application starts over, undoing what its automations
   changed first, only when what it runs changed: its window match, its values'
   checks or its automations' rules. Renaming the application, a value or an
-  automation, or marking its values as checked, restarts nothing, and the log
-  and the tray show the new names at once. An automation that cannot run, such
+  automation, or marking its values as checked, restarts nothing, and the log,
+  the tray and the [trace](Trace.md) show the new names at once. An automation that cannot run, such
   as one whose value lost a picture or one that breaks a rule after a hand
   edit, is logged, and the rest run. When the applications' folder or the
   automations' file cannot be read as a whole, such as while another program
@@ -196,6 +196,10 @@ Each thread below is a plain `std::thread`, and each channel is a
   reads them again a few times, as `RETRY_WAIT` and `RETRIES` in
   `apps/runtime/src/owner.rs` set, before it waits for the next save.
   [Files and handoff](#files-and-handoff) describes what it reads.
+- **Trace writer.** Only while the [runtime trace](Trace.md) records. Owns
+  the trace files and turns the records the other threads send it into CSV
+  rows, at the lowest thread priority. The owner starts and stops it as the
+  settings say.
 - **Tray thread.** Owns the hidden window behind the tray icon, runs its
   Windows message loop, and sends the user's menu picks, Windows' requests
   to close, and its own early end to the owner.
@@ -446,7 +450,7 @@ the top of the script.
 
 The script gives the runtime scratch app data folders that hold one
 application with three values, two color checks and a bar fill, and an
-automation on each. It runs the runtime through four phases:
+automation on each. It runs the runtime through five phases:
 
 1. **Idle.** The application is not running.
 2. **Active.** A probe program the script compiles shows the application's
@@ -455,13 +459,22 @@ automation on each. It runs the runtime through four phases:
    fires once, which shows the reads work; its action targets a program that
    does not exist, so it changes nothing. The phase fails if any value cannot
    be read.
-3. **Steady.** The probe starts again and keeps repainting every 16 ms, but
+3. **Active, trace on.** The same load with the
+   [runtime trace](Trace.md) recording every category, which costs the most.
+   The script saves the settings and sets the reload event, as the setup app
+   does, and turns the trace off again at the end of the phase. This phase has
+   no targets: it reports what recording costs, as
+   [Overhead](Trace.md#overhead) describes.
+4. **Steady.** The probe starts again and keeps repainting every 16 ms, but
    only a strip below the values, so the window changes while its values hold
    still. The runtime's reads back off to their slowest, and its capture asks
    Windows for frames only that often. Most of what that saves is the
    compositor's work, which this script does not measure; the runtime's own
    CPU and memory share the active targets.
-4. **Idle after.** The probe has exited and the runtime has detached.
+5. **Idle after.** The trace has stopped, the probe has exited, and the
+   runtime has detached. The trace's buffer is freed once its last handle
+   and its writer end, so a handle left behind shows here as memory over the
+   target.
 
 Before the last phase, a settle check measures nothing but has to pass. The
 probe starts once more with its values dim gray and repaints the strip for
@@ -489,7 +502,10 @@ It checks these against their targets:
   so an idle sample runs long enough that its target spans several ticks.
 
 The script also prints each phase's full working set, commit size, threads,
-and handles, and the CI job shows the table in its run summary.
+and handles, and the CI job shows the table in its run summary. For the trace
+phase it also reports the trace files' size, their rows and rows a second, the
+records the trace dropped, and the memory and CPU the trace added to the
+active phase.
 
 ## Sources, rules, and actions
 
@@ -530,7 +546,8 @@ changing.
     [Setup app](Setup-app.md#saved-files) describes each file.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
-    describes, and the runtime's log in `logs\`.
+    describes, the runtime's log in `logs\`, and the
+    [runtime trace](Trace.md)'s files in `traces\`.
 - **Writing.** Only the setup app writes the saved files, through
   `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
   file beside the old one, is flushed to disk with `sync_all`, and is renamed

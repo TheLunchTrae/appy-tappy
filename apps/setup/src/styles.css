@@ -1692,6 +1692,47 @@ select {
   color: var(--muted);
 }
 
+.set-row > select {
+  width: auto;
+  flex: none;
+}
+
+.trace-record {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trace-record legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.trace-category {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.trace-category input {
+  margin-top: 3px;
+}
+
+.trace-category .what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.note.path {
+  font-family: var(--mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
 .num .input {
   width: 80px;
   text-align: right;
