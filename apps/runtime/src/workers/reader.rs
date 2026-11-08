@@ -1461,6 +1461,26 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_stopped_while_it_waits_after_a_capture_ended_ends_at_once() {
+        let (system, desk) = FakeSystem::new();
+        let (events, readings) = mpsc::channel::<Reading>();
+        let reader = Reader::start(system, job(vec![red_at("icon", 0, 0)]), events).expect("start");
+        desk.answer(Ok(desktop()));
+        let (_, _, mut handler) = desk.capture();
+        handler(Err(io::Error::new(io::ErrorKind::NotConnected, "closed")));
+        assert_eq!(
+            readings.recv_timeout(PATIENCE),
+            Ok(Reading::Problem {
+                session: SessionId(3),
+                problem: "its capture ended: closed".to_owned()
+            })
+        );
+        // It waits before it looks again, and the stop ends that wait.
+        drop(handler);
+        stopped(reader, desk, &readings);
+    }
+
+    #[test]
     fn a_reader_that_cannot_list_windows_says_so_once_and_waits() {
         let (system, desk) = FakeSystem::new();
         let (events, readings) = mpsc::channel::<Reading>();
