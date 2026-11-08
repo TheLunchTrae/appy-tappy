@@ -26,7 +26,7 @@ interface AntiCheatCellProps {
   readonly confirming: boolean;
   readonly onConfirm: (confirming: boolean) => void;
   readonly onSet: (antiCheat: AntiCheat) => void;
-  /** Whether a change is saving, which locks the menu and the question's answers. */
+  /** Whether a change is saving, which locks the question's answers. */
   readonly busy: boolean;
 }
 
@@ -60,7 +60,6 @@ function AntiCheatCell({ name, antiCheat, confirming, onConfirm, onSet, busy }: 
     <select
       ref={control}
       className="input"
-      disabled={busy}
       aria-label={`${name}: anti-cheat`}
       value={antiCheat}
       onChange={(event) => {
