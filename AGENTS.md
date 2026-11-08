@@ -26,10 +26,10 @@ and no task covers it.
 
 AppyTappy ships for Windows only. CI runs these jobs from
 `.github/workflows/quality.yml`: `quality` runs `mise run standards:check` on
-Linux and is the required gate, `windows` runs `rust:fmt:check`,
-`rust:lint`, `rust:doc`, and `rust:test:members` on Windows, `footprint` runs
-`rust:footprint` on Windows, and `mutants` shares the full mutation sweep with
-`quality` on pushes to main and manual runs.
+Linux and is the required gate. `windows` runs `rust:lint`, `rust:doc`, and
+`rust:test:members` on Windows, and also `rust:bench` on pushes to main and
+manual runs. `footprint` runs `rust:footprint` on Windows, and `mutants` shares
+the full mutation sweep with `quality` on pushes to main and manual runs.
 
 - Inline mise tasks are POSIX `sh`. On a Windows workstation, run mise from
   Git Bash and set this in the global mise config
