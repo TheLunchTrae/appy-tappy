@@ -143,17 +143,22 @@ impl<S: System> Session<S> {
 
     /// Attaches to the process `args` names. The process attached before
     /// stays attached until the new one is ready, so a failed attach keeps
-    /// it and its scan.
+    /// it and its scan. The error names it, unless the user refused its
+    /// program, because the error then says the program is refused.
     fn process_attach(&mut self, args: AttachArgs) -> Outcome {
         match self.open_attachment(args) {
             Ok((attached, result)) => {
                 self.attached = Some(attached);
                 Ok(result)
             },
-            Err(error) => Err(attach_error(
-                error,
-                self.attached.as_ref().map(|old| &old.entry),
-            )),
+            Err(error) => {
+                let still = self
+                    .attached
+                    .as_ref()
+                    .map(|old| &old.entry)
+                    .filter(|old| !self.refused.contains(&old.executable.to_lowercase()));
+                Err(attach_error(error, still))
+            },
         }
     }
 
@@ -704,6 +709,19 @@ mod tests {
             "EXAMPLE.EXE",
             "the process attached first, not the one that failed its check"
         );
+    }
+
+    #[test]
+    fn refusing_the_attached_program_does_not_call_it_still_attached() {
+        let (mut session, _questions) = attached();
+        session.system.answer = AccessAnswer::Refused;
+        let error = call(&mut session, "process_attach", json!({ "pid": 10 })).unwrap_err();
+        assert!(
+            error.starts_with("the user did not allow reading Example.exe's memory"),
+            "{error}"
+        );
+        assert!(!error.contains("still attached"), "{error}");
+        assert!(session.attached.is_some(), "the process stays attached");
     }
 
     #[test]

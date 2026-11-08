@@ -31,7 +31,7 @@ protected applications too, such as ones with anti-cheat. One process is
 attached at a time: a new `process_attach` replaces the one attached before
 only once the new one is open and checked, so an attach that fails leaves the
 earlier process and its scan in place, and its error says which process is
-still attached. A new `memory_scan_first` drops the previous scan before it
+still attached, unless the user refused that process's program. A new `memory_scan_first` drops the previous scan before it
 starts, because an unknown-value scan can snapshot gigabytes of memory, so
 when it fails its error says the previous scan was dropped. Tool names are
 `area_verb`, so the definition and config tools that come next slot in as
