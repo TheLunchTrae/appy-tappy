@@ -214,6 +214,10 @@ pub(super) fn scratch_store(name: &str) -> (Stores, std::path::PathBuf) {
     stores::scratch(&format!("setup-{name}"))
 }
 
+/// What a [`harness`] answers to anything that needs its stores.
+pub(super) const NO_STORE: &str =
+    "AppyTappy cannot find where to keep your values: no store in this test.";
+
 pub(super) fn harness(refuse: bool) -> Harness {
     harness_with(refuse, Err("no store in this test".to_owned()))
 }

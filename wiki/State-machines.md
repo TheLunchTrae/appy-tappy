@@ -860,11 +860,13 @@ they tell who reads what it changed, as its `Changed` kind says:
 
 A save that failed before it wrote anything changed nothing, so it tells
 neither, and an overlay that was reading goes on reading. A delete tells them
-once it has written the application's file, even when removing a picture the
-file no longer names fails afterwards, and removing an application tells them
-even when the removal fails partway. Each save of an application's file
-removes the pictures it no longer names, after it tells them. Moving a panel
-writes the application's file without telling anyone.
+once it has written the application's file, and removing an application tells
+them even when the removal fails partway. After each save of an application's
+file, the setup app removes the pictures the file no longer names. That
+removal is best effort: one that fails does not fail the save, and the next
+save tries again. Deleting a reference that is already gone saves nothing and
+tells no one, but still removes the pictures an earlier delete left behind.
+Moving a panel writes the application's file without telling anyone.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another

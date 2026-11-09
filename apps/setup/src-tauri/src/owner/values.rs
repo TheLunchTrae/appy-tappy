@@ -284,8 +284,8 @@ mod tests {
     use appytappy_sources::screen::{Image, Size};
 
     use crate::owner::test_support::{
-        BAR, FakeHost, Harness, STATE, add_example_app, example_build, frame_image, harness,
-        harness_with, scratch_store, spec, with_saved_bar,
+        BAR, FakeHost, Harness, NO_STORE, STATE, add_example_app, example_build, frame_image,
+        harness, harness_with, scratch_store, spec, with_saved_bar,
     };
 
     use super::*;
@@ -452,7 +452,7 @@ mod tests {
         .expect("the UI's spelling");
         harness.forget_reloads();
         let id = harness
-            .ask(|owner| owner.update_runtime(|stores| automations::save(stores, None, automation)))
+            .ask(|owner| owner.save_automation(None, automation))
             .expect("saves");
         assert_eq!(id, "pause_music");
         assert_eq!(harness.reloads(), 1, "the runtime reads the automations");
@@ -462,13 +462,11 @@ mod tests {
         );
         assert_eq!(harness.reloads(), 0, "a delete that failed tells no one");
         harness
-            .ask(|owner| {
-                owner.update_runtime(|stores| automations::set_enabled(stores, &id, false))
-            })
+            .ask(|owner| owner.set_automation_enabled(&id, false))
             .expect("turns off");
         assert_eq!(harness.reloads(), 1);
         let listed = harness
-            .ask(|owner| owner.stores().and_then(automations::list))
+            .ask(|owner| owner.list_automations())
             .expect("lists");
         assert_eq!(listed.len(), 1);
         assert!(!listed[0].automation.enabled);
@@ -481,11 +479,11 @@ mod tests {
             }
         );
         harness
-            .ask(|owner| owner.update_runtime(|stores| automations::delete(stores, &id)))
+            .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
         assert_eq!(harness.reloads(), 1);
         assert_eq!(
-            harness.ask(|owner| owner.stores().and_then(automations::list)),
+            harness.ask(|owner| owner.list_automations()),
             Ok(Vec::new())
         );
 
@@ -500,11 +498,8 @@ mod tests {
             "cooldownMs": 0
         }))
         .expect("the UI's spelling");
-        let save_press = |harness: &mut Harness| {
-            harness.ask(|owner| {
-                owner.update_runtime(|stores| automations::save(stores, None, press.clone()))
-            })
-        };
+        let save_press =
+            |harness: &mut Harness| harness.ask(|owner| owner.save_automation(None, press.clone()));
         assert!(
             save_press(&mut harness)
                 .is_err_and(|error| error.contains("anti-cheat is set to none")),
@@ -521,7 +516,7 @@ mod tests {
         );
         let id = save_press(&mut harness).expect("saves");
         let listed = harness
-            .ask(|owner| owner.stores().and_then(automations::list))
+            .ask(|owner| owner.list_automations())
             .expect("lists");
         assert_eq!(
             listed[0].automation.actions,
@@ -533,7 +528,7 @@ mod tests {
         assert_eq!(listed[0].problem, None);
         set(&mut harness, AntiCheatDef::KernelLevel).expect("sets");
         let listed = harness
-            .ask(|owner| owner.stores().and_then(automations::list))
+            .ask(|owner| owner.list_automations())
             .expect("lists");
         assert!(
             listed[0]
@@ -543,7 +538,7 @@ mod tests {
             "{listed:?}"
         );
         harness
-            .ask(|owner| owner.update_runtime(|stores| automations::delete(stores, &id)))
+            .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
         assert_eq!(
             set(&mut harness, AntiCheatDef::None).map(drop),
@@ -567,12 +562,10 @@ mod tests {
         }))
         .expect("the UI's spelling");
         let id = harness
-            .ask(|owner| {
-                owner.update_runtime(|stores| automations::save(stores, None, open_and_play))
-            })
+            .ask(|owner| owner.save_automation(None, open_and_play))
             .expect("saves");
         let listed = harness
-            .ask(|owner| owner.stores().and_then(automations::list))
+            .ask(|owner| owner.list_automations())
             .expect("lists");
         assert_eq!(
             listed[0].automation.actions,
@@ -586,7 +579,7 @@ mod tests {
             ]
         );
         harness
-            .ask(|owner| owner.update_runtime(|stores| automations::delete(stores, &id)))
+            .ask(|owner| owner.delete_automation(&id))
             .expect("removes");
 
         harness
@@ -765,17 +758,14 @@ mod tests {
     #[test]
     fn without_a_store_saving_and_listing_say_why() {
         let mut harness = harness(false);
-        assert_eq!(
-            harness.ask(Owner::apps),
-            Err("no store in this test".to_owned())
-        );
+        assert_eq!(harness.ask(Owner::apps), Err(NO_STORE.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.save(&spec("example", "x", BAR))),
-            Err("no store in this test".to_owned())
+            Err(NO_STORE.to_owned())
         );
         assert_eq!(
             harness.ask(|owner| owner.delete("a", "b")),
-            Err("no store in this test".to_owned())
+            Err(NO_STORE.to_owned())
         );
         assert_eq!(
             harness.ask(|owner| owner.save_app(
@@ -790,15 +780,15 @@ mod tests {
                     size_changes: appytappy_config::app_file::SizeChangesDef::Often,
                 }
             )),
-            Err("no store in this test".to_owned())
+            Err(NO_STORE.to_owned())
         );
         assert_eq!(
             harness.ask(|owner| owner.remove_app("a")),
-            Err("no store in this test".to_owned())
+            Err(NO_STORE.to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.stores().and_then(automations::list)),
-            Err("no store in this test".to_owned())
+            harness.ask(|owner| owner.list_automations()),
+            Err(NO_STORE.to_owned())
         );
         let automation: AutomationDef = serde_json::from_value(serde_json::json!({
             "id": "", "name": "x", "enabled": true,
@@ -807,20 +797,16 @@ mod tests {
         }))
         .expect("the UI's spelling");
         assert_eq!(
-            harness
-                .ask(|owner| owner
-                    .update_runtime(|stores| automations::save(stores, None, automation))),
-            Err("no store in this test".to_owned())
+            harness.ask(|owner| owner.save_automation(None, automation)),
+            Err(NO_STORE.to_owned())
         );
         assert_eq!(
-            harness
-                .ask(|owner| owner
-                    .update_runtime(|stores| automations::set_enabled(stores, "x", true))),
-            Err("no store in this test".to_owned())
+            harness.ask(|owner| owner.set_automation_enabled("x", true)),
+            Err(NO_STORE.to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.update_runtime(|stores| automations::delete(stores, "x"))),
-            Err("no store in this test".to_owned())
+            harness.ask(|owner| owner.delete_automation("x")),
+            Err(NO_STORE.to_owned())
         );
     }
 }

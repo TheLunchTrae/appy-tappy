@@ -225,14 +225,7 @@ fn open<R: Runtime>(
             .build()
         },
     };
-    let window = match built {
-        Ok(window) => window,
-        // Two syncs can race to open the same window, such as one from the
-        // main window opening and one from a changed setting; the window the
-        // other opened is the one wanted.
-        Err(_) if handle.get_webview_window(label).is_some() => return Ok(()),
-        Err(error) => return Err(error),
-    };
+    let window = built?;
     let set_up = match (overlay.mode, panel) {
         (OverlayModeDef::Overlay, _) => set_up_overlay(handle, &window, &overlay.app),
         (OverlayModeDef::PictureInPicture, Some(panel)) => window

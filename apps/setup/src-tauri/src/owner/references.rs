@@ -127,10 +127,10 @@ impl<H: Host> Owner<H> {
     /// reference already gone changed nothing, so no one is told, but
     /// pictures an earlier delete left behind are removed.
     pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
-        self.update_app(app, Changed::Values, |_owner, found| {
+        let gone = self.update_app(app, Changed::Values, |_owner, found| {
             let file = &mut found.file;
             let Some(saved) = file.reference(reference) else {
-                return Ok(Edit::Keep(()));
+                return Ok(Edit::Keep(Some(file.clone())));
             };
             let users: Vec<&str> = file
                 .values
@@ -148,9 +148,12 @@ impl<H: Host> Owner<H> {
                 ));
             }
             file.references.retain(|saved| saved.id != reference);
-            Ok(Edit::Save((), Vec::new()))
-        })
-        .map(|saved| saved.answer)
+            Ok(Edit::Save(None, Vec::new()))
+        })?;
+        match gone.answer {
+            Some(file) => self.prune(app, &file),
+            None => Ok(()),
+        }
     }
 }
 
@@ -383,9 +386,23 @@ mod tests {
         assert_eq!(harness.reloads(), 1, "the runtime reads the values again");
         assert_eq!(harness.ask(delete("digits")), Ok(()));
         assert_eq!(harness.reloads(), 1, "and the references");
+        assert!(!folder.join("ref-digits-1.png").exists());
+        // A picture an earlier delete left behind goes with the next delete,
+        // even of a reference already gone, while the kept pictures stay.
+        let kept: Vec<_> = std::fs::read_dir(&folder)
+            .expect("lists the pictures")
+            .map(|entry| entry.expect("an entry").file_name())
+            .collect();
+        std::fs::write(folder.join("ref-digits-1.png"), b"left behind").expect("a leftover");
         assert_eq!(harness.ask(delete("digits")), Ok(()), "already gone");
         assert_eq!(harness.reloads(), 0, "nothing changed");
-        assert!(!folder.join("ref-digits-1.png").exists());
+        assert!(
+            !folder.join("ref-digits-1.png").exists(),
+            "the leftover is gone"
+        );
+        for name in &kept {
+            assert!(folder.join(name).exists(), "{name:?} stays");
+        }
         let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(

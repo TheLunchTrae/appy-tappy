@@ -50,7 +50,7 @@ fn main() -> ExitCode {
     let (sender, messages) = mpsc::channel();
     let stores = Locations::from_env()
         .map(Stores::from)
-        .map_err(|error| format!("AppyTappy cannot find where to keep your values: {error}."));
+        .map_err(|error| error.to_string());
     // The text reader reads recorded readings on a thread of its own, and
     // ends once the owner drops its sender.
     let (jobs, inbox) = mpsc::channel();

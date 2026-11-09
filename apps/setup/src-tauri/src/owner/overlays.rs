@@ -6,7 +6,7 @@ use appytappy_config::app_file::{OverlayDef, OverlayModeDef, PanelDef};
 use crate::overlay::{self, Card, OverlayView, OverlayWindow, Place};
 
 use super::host::Host;
-use super::{Changed, Edit, Owner};
+use super::{Changed, Edit, Owner, known};
 
 impl<H: Host> Owner<H> {
     /// The overlays that are on, for their windows to open.
@@ -93,7 +93,7 @@ impl<H: Host> Owner<H> {
     /// page, whether its overlay is on or not. The first call starts a
     /// capture of its window, which [`Owner::stop_live_values`] stops.
     pub(crate) fn live_values(&mut self, app: &str) -> Result<OverlayView, String> {
-        let stores = self.stores.as_ref().map_err(Clone::clone);
+        let stores = known(&self.stores);
         self.live
             .view(&self.host, &self.messages, app, || stores?.app(app))
     }
@@ -109,7 +109,7 @@ impl<H: Host> Owner<H> {
     }
 
     pub(super) fn overlay_view(&mut self, app: &str) -> Result<OverlayView, String> {
-        let stores = self.stores.as_ref().map_err(Clone::clone);
+        let stores = known(&self.stores);
         self.overlays
             .view(&self.host, &self.messages, app, || stores?.app(app))
     }
@@ -149,7 +149,6 @@ mod tests {
     use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{Crop, FrameHandler, Image, OutsideWindow, Region, Size};
 
-    use crate::automations;
     use crate::overlay::{
         Card, FrameRead, OVERLAY_INTERVAL, Place, RETRY_POLLS, SETTLE_POLLS, ValueRead, ValueView,
     };
@@ -718,8 +717,7 @@ mod tests {
         );
         assert!(
             harness
-                .ask(|owner| owner
-                    .update_runtime(|stores| automations::set_enabled(stores, "missing", false)))
+                .ask(|owner| owner.set_automation_enabled("missing", false))
                 .is_err()
         );
         assert!(harness.closed.try_recv().is_err(), "the overlay goes on");
