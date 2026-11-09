@@ -4,10 +4,11 @@
 //! placing it needs, [`ClickTargets`]: that application's window match and
 //! the search for each picture a click looks for. When a click runs,
 //! [`place`] takes the application's window that [`session_window`] picks,
-//! of any of its processes, and turns the click's spot, or where its picture is found in one frame of
-//! its area, into a place on the screen. A click whose window is missing,
-//! minimized, or another size than its picture was taken at, or whose
-//! picture is not there, is not placed, and the log says why.
+//! of any of its processes, and turns the click's spot, or where its
+//! picture is found in one frame of its area, into a place on the screen. A
+//! click whose window is missing, minimized, or another size than its
+//! picture was taken at, or whose picture is not there, is not placed, and
+//! the log says why.
 
 use std::collections::BTreeMap;
 use std::io;
