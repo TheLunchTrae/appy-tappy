@@ -8,9 +8,10 @@
 //! The file is JSON, so a person can read it and a text diff shows a change.
 //!
 //! [`AppFile::parse`] checks the rules for the file as a whole: names, IDs,
-//! picture file names, and references. Whether each value can be read is up
-//! to `saved::build` in `appytappy-sources`, which reads the pictures the
-//! file names, so a value that cannot be read stops only itself.
+//! picture file names, references, the window match, and each check's states
+//! and colors. Whether each value can be read is up to `saved::build` in
+//! `appytappy-sources`, which reads the pictures the file names, so a value
+//! that cannot be read stops only itself.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -225,7 +226,70 @@ impl WindowDef {
             fallback: self.fallback == FallbackDef::Executable,
         }
     }
+
+    /// Checks that the match can tell the application apart: an executable
+    /// pattern that names enough of a program, and a pattern for each field
+    /// that must match.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WindowDefError`] naming the first problem.
+    pub fn check(&self) -> Result<(), WindowDefError> {
+        let executable = self.executable.trim().to_ascii_lowercase();
+        if executable.is_empty() {
+            return Err(WindowDefError::NoExecutable);
+        }
+        // A pattern with less than two characters of its own beside any
+        // `.exe`, such as `*` or `*.*`, or one that takes two unrelated
+        // programs, such as `*exe`, matches nearly every program, so the
+        // application would always look running.
+        let named = executable
+            .strip_suffix(".exe")
+            .unwrap_or(&executable)
+            .chars()
+            .filter(|each| !matches!(each, '*' | '?' | '.'))
+            .count();
+        let pattern = Pattern::new(&executable);
+        if named < 2 || (pattern.matches("a.exe") && pattern.matches("zq.exe")) {
+            return Err(WindowDefError::BroadExecutable);
+        }
+        for (required, pattern, error) in [
+            (self.must_match.title, &self.title, WindowDefError::NoTitle),
+            (self.must_match.class, &self.class, WindowDefError::NoClass),
+        ] {
+            if required && pattern.trim().is_empty() {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
 }
+
+/// A window match cannot tell its application apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowDefError {
+    /// The executable pattern is empty.
+    NoExecutable,
+    /// The executable pattern matches nearly every program.
+    BroadExecutable,
+    /// The title must match, but its pattern is empty.
+    NoTitle,
+    /// The class must match, but its pattern is empty.
+    NoClass,
+}
+
+impl fmt::Display for WindowDefError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NoExecutable => "its executable is empty",
+            Self::BroadExecutable => "its executable pattern matches nearly every program",
+            Self::NoTitle => "its title must match but is empty",
+            Self::NoClass => "its class must match but is empty",
+        })
+    }
+}
+
+impl Error for WindowDefError {}
 
 impl From<&WindowMatch> for WindowDef {
     fn from(matcher: &WindowMatch) -> Self {
@@ -647,7 +711,95 @@ impl CheckDef {
             && (name == StateName::none().as_str()
                 || self.states().iter().any(|state| state.name == name))
     }
+
+    /// Checks the rules the check's own settings can break: a state check's
+    /// states, as [`check_states`] says, and a bar's colors, as
+    /// [`check_bar`] says.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`CheckDefError`] naming the first problem.
+    pub fn check(&self) -> Result<(), CheckDefError> {
+        match self {
+            Self::BarFill { filled, empty } => check_bar(*filled, *empty),
+            Self::State { states, .. } => {
+                let names: Vec<&str> = states.iter().map(|state| state.name.as_str()).collect();
+                check_states(&names)
+            },
+            Self::Number { .. } | Self::Color { .. } => Ok(()),
+        }
+    }
 }
+
+/// Checks a state check's state `names`: at least one and at most
+/// [`MAX_STATES`], and no name twice. Names that differ only in case count
+/// as the same, since they read alike.
+///
+/// # Errors
+///
+/// Returns a [`CheckDefError`] naming the first problem.
+pub fn check_states(names: &[&str]) -> Result<(), CheckDefError> {
+    if names.is_empty() {
+        return Err(CheckDefError::NoStates);
+    }
+    if names.len() > MAX_STATES {
+        return Err(CheckDefError::TooManyStates);
+    }
+    let mut seen = BTreeSet::new();
+    for name in names {
+        if !seen.insert(name.to_lowercase()) {
+            return Err(CheckDefError::SameStateName((*name).to_owned()));
+        }
+    }
+    Ok(())
+}
+
+/// Checks that a bar's `filled` and `empty` colors differ, so its fill can
+/// be told.
+///
+/// # Errors
+///
+/// Returns [`CheckDefError::SameColors`] when they are the same.
+pub fn check_bar(filled: ColorDef, empty: ColorDef) -> Result<(), CheckDefError> {
+    if filled == empty {
+        Err(CheckDefError::SameColors)
+    } else {
+        Ok(())
+    }
+}
+
+/// A value's check breaks a rule of its own settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckDefError {
+    /// A state check has no states.
+    NoStates,
+    /// A state check has more than [`MAX_STATES`] states.
+    TooManyStates,
+    /// Two states have this name, or names that differ only in case.
+    SameStateName(String),
+    /// The bar's filled and empty colors are the same.
+    SameColors,
+}
+
+impl fmt::Display for CheckDefError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoStates => formatter.write_str("its state check has no state"),
+            Self::TooManyStates => write!(
+                formatter,
+                "its state check has more than {MAX_STATES} states"
+            ),
+            Self::SameStateName(name) => {
+                write!(formatter, "two of its states are named {name:?}")
+            },
+            Self::SameColors => {
+                formatter.write_str("its bar's filled and empty colors are the same")
+            },
+        }
+    }
+}
+
+impl Error for CheckDefError {}
 
 /// The kind of value a check reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -703,12 +855,13 @@ impl AppFile {
         self.references.iter().find(|reference| reference.id == id)
     }
 
-    /// Checks the rules JSON alone cannot, for the file as a whole: the
-    /// format version, a name for the application and each value and
-    /// reference, valid and unique IDs, picture file names, and at least one
-    /// sample for a reference. Whether a value's check can be read is up to
-    /// `appytappy-sources`' `saved::build`, so a value that cannot be read
-    /// stops only itself.
+    /// Checks the rules JSON alone cannot: the format version, a name for
+    /// the application and each value and reference, a window match that
+    /// passes [`WindowDef::check`], valid and unique IDs, picture file names,
+    /// at least one sample for a reference, and checks that pass
+    /// [`CheckDef::check`]. Whether a value's pictures and region can be
+    /// read is up to `appytappy-sources`' `saved::build`, so a value that
+    /// cannot be read stops only itself.
     ///
     /// # Errors
     ///
@@ -720,6 +873,7 @@ impl AppFile {
         if self.name.trim().is_empty() {
             return Err(AppFileError::NoName);
         }
+        self.window.check().map_err(AppFileError::Window)?;
         let mut references = BTreeSet::new();
         for reference in &self.references {
             let problem = |problem: String| AppFileError::Reference(reference.id.clone(), problem);
@@ -760,11 +914,17 @@ fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
 }
 
 /// Checks one value's part of the file's rules, answering the problem as a
-/// sentence: a name, and picture names the folder can hold.
+/// sentence: a name, a check that passes [`CheckDef::check`], and picture
+/// names the folder can hold.
 fn check_value(value: &ValueDef) -> Result<(), String> {
     if value.name.trim().is_empty() {
         return Err("it has no name".to_owned());
     }
+    value
+        .screen
+        .check
+        .check()
+        .map_err(|error| error.to_string())?;
     value.screen.images().try_for_each(check_image)
 }
 
@@ -808,6 +968,8 @@ pub enum AppFileError {
     Format(u32),
     /// The application has no name.
     NoName,
+    /// The window match cannot tell the application apart.
+    Window(WindowDefError),
     /// A value, named by its ID, breaks a rule.
     Value(String, String),
     /// A reference, named by its ID, breaks a rule.
@@ -823,6 +985,7 @@ impl fmt::Display for AppFileError {
                 "the file has format {format}, but this version of AppyTappy reads format {FORMAT}"
             ),
             Self::NoName => formatter.write_str("the application has no name"),
+            Self::Window(error) => write!(formatter, "the window match: {error}"),
             Self::Value(id, problem) => write!(formatter, "value {id:?}: {problem}"),
             Self::Reference(id, problem) => write!(formatter, "reference {id:?}: {problem}"),
         }
@@ -1364,6 +1527,13 @@ mod tests {
             file
         };
         let escape = with(states(&[("Paused", "../app.png")]));
+        let no_states = with(states(&[]));
+        let one_color = with(CheckDef::BarFill {
+            filled: RED,
+            empty: RED,
+        });
+        let mut broad = dash();
+        broad.window.executable = "*".to_owned();
         let cases = [
             (
                 format,
@@ -1388,6 +1558,18 @@ mod tests {
                 "reference \"percent\": picture \"../1.png\" must be",
             ),
             (escape, "value \"progress\": picture \"../app.png\" must be"),
+            (
+                no_states,
+                "value \"progress\": its state check has no state",
+            ),
+            (
+                one_color,
+                "value \"progress\": its bar's filled and empty colors are the same",
+            ),
+            (
+                broad,
+                "the window match: its executable pattern matches nearly every program",
+            ),
         ];
         for (file, message) in cases {
             let error = AppFile::parse(&file.to_json()).expect_err(message);
@@ -1397,13 +1579,122 @@ mod tests {
         // a value that cannot be read leaves the rest of the file usable.
         let mut unreadable = dash();
         unreadable.values[0].screen.region.height = 0;
-        unreadable.values[0].screen.check = states(&[]);
         assert!(AppFile::parse(&unreadable.to_json()).is_ok());
         let error = AppFile::parse("{\"format\": 1}").expect_err("missing fields");
         assert!(error.to_string().starts_with("the file is not valid: "));
         let mut json = dash().to_json();
         json = json.replacen("\"format\"", "\"extra\": 1, \"format\"", 1);
         assert!(matches!(AppFile::parse(&json), Err(AppFileError::Json(_))));
+    }
+
+    #[test]
+    fn a_state_check_needs_a_few_states_named_once_and_a_bar_two_colors() {
+        assert_eq!(check_states(&[]), Err(CheckDefError::NoStates));
+        let names: Vec<String> = (0..=MAX_STATES).map(|state| format!("S{state}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        assert_eq!(check_states(&names), Err(CheckDefError::TooManyStates));
+        let most = names.get(..MAX_STATES).expect("one more than the most");
+        assert_eq!(check_states(most), Ok(()));
+        assert_eq!(
+            check_states(&["Paused", "Live", "paused"]),
+            Err(CheckDefError::SameStateName("paused".to_owned()))
+        );
+        assert_eq!(check_states(&["Paused"]), Ok(()));
+        let gray = ColorDef {
+            red: 40,
+            green: 40,
+            blue: 40,
+        };
+        assert_eq!(check_bar(RED, RED), Err(CheckDefError::SameColors));
+        assert_eq!(check_bar(RED, gray), Ok(()));
+        let cases = [
+            (CheckDefError::NoStates, "its state check has no state"),
+            (
+                CheckDefError::TooManyStates,
+                "its state check has more than 16 states",
+            ),
+            (
+                CheckDefError::SameStateName("Live".to_owned()),
+                "two of its states are named \"Live\"",
+            ),
+            (
+                CheckDefError::SameColors,
+                "its bar's filled and empty colors are the same",
+            ),
+        ];
+        for (error, message) in cases {
+            assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn each_check_kind_keeps_its_own_rules() {
+        let same = states(&[("Paused", "status-1.png"), ("PAUSED", "status-2.png")]);
+        assert_eq!(
+            same.check(),
+            Err(CheckDefError::SameStateName("PAUSED".to_owned()))
+        );
+        assert_eq!(states(&[]).check(), Err(CheckDefError::NoStates));
+        let bar = |empty| CheckDef::BarFill { filled: RED, empty };
+        assert_eq!(bar(RED).check(), Err(CheckDefError::SameColors));
+        assert_eq!(
+            bar(ColorDef {
+                red: 0,
+                green: 0,
+                blue: 0
+            })
+            .check(),
+            Ok(())
+        );
+        assert_eq!(dash().values[0].screen.check.check(), Ok(()));
+        let color = CheckDef::Color {
+            color: RED,
+            tolerance: 3,
+        };
+        assert_eq!(color.check(), Ok(()));
+    }
+
+    #[test]
+    fn a_window_match_names_enough_of_its_executable() {
+        let window = |executable: &str| WindowDef {
+            executable: executable.to_owned(),
+            ..dash().window
+        };
+        assert_eq!(window(" ").check(), Err(WindowDefError::NoExecutable));
+        for every in [
+            "*", " *.EXE ", "?*", ".exe", "*.*", "*.e*", "*e", "*exe", "*ex*", "*e*e",
+        ] {
+            assert_eq!(
+                window(every).check(),
+                Err(WindowDefError::BroadExecutable),
+                "{every}"
+            );
+        }
+        // Two characters of its own are enough when the pattern takes only
+        // one of two unrelated programs.
+        for named in ["zq*", "Example.exe", "Ex*.exe"] {
+            assert_eq!(window(named).check(), Ok(()), "{named}");
+        }
+        let mut blank = window("Example.exe");
+        blank.title = String::new();
+        blank.class = " ".to_owned();
+        assert_eq!(blank.check(), Ok(()), "neither has to match");
+        blank.must_match.class = true;
+        assert_eq!(blank.check(), Err(WindowDefError::NoClass));
+        blank.must_match.title = true;
+        assert_eq!(blank.check(), Err(WindowDefError::NoTitle));
+        let cases = [
+            (WindowDefError::NoExecutable, "its executable is empty"),
+            (
+                WindowDefError::BroadExecutable,
+                "its executable pattern matches nearly every program",
+            ),
+            (WindowDefError::NoTitle, "its title must match but is empty"),
+            (WindowDefError::NoClass, "its class must match but is empty"),
+        ];
+        for (error, message) in cases {
+            assert_eq!(error.to_string(), message);
+        }
     }
 
     #[test]

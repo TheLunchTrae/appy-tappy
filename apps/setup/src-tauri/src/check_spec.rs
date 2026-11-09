@@ -8,11 +8,9 @@
 //! way, as [`CheckSpec::Characters`], so the UI can see what it reads before
 //! it is saved.
 
-use std::collections::BTreeSet;
-
 use appytappy_config::app_file::{
-    CheckDef, ColorDef, MAX_STATES, ReferenceDef, RegionDef, SampleDef, StateDef, sample_name,
-    state_image_name,
+    CheckDef, CheckDefError, ColorDef, ReferenceDef, RegionDef, SampleDef, StateDef, check_bar,
+    check_states, sample_name, state_image_name,
 };
 use appytappy_config::signal::StateName;
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
@@ -458,8 +456,9 @@ pub(crate) fn drawn_size(
 ///
 /// Returns a [`SpecError`] that tells the user what to fix: an empty region,
 /// a region, screenshot, recorded reading, or saved reference that does not
-/// exist, two bar colors that are the same, or a label the reference cannot
-/// learn from.
+/// exist, a rule of the application's file that the check's settings break,
+/// such as two bar colors that are the same, or a label the reference
+/// cannot learn from.
 pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionCheck, SpecError> {
     let region = match spec {
         CheckSpec::Number { region, .. }
@@ -500,10 +499,15 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
                 whole: false,
             }
         },
-        CheckSpec::BarFill { filled, empty, .. } => Check::BarFill(
-            BarFill::new((*filled).into(), (*empty).into())
-                .map_err(|_same| SpecError::SameColors)?,
-        ),
+        CheckSpec::BarFill { filled, empty, .. } => {
+            check_bar((*filled).into(), (*empty).into()).map_err(SpecError::Check)?;
+            // `check_bar` refused the same colors, the one thing
+            // `BarFill::new` refuses.
+            Check::BarFill(
+                BarFill::new((*filled).into(), (*empty).into())
+                    .map_err(|_same| SpecError::Check(CheckDefError::SameColors))?,
+            )
+        },
         CheckSpec::Color {
             color, tolerance, ..
         } => Check::Color(ColorMatch {
@@ -517,6 +521,8 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
             ..
         } => {
             drawn_size(spec, session, *drawn_on)?;
+            let names: Vec<&str> = states.iter().map(|state| state.name.as_str()).collect();
+            check_states(&names).map_err(SpecError::Check)?;
             Check::State(StateMatch::new(state_pictures(
                 session.screenshots,
                 region,
@@ -533,31 +539,19 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
 ///
 /// # Errors
 ///
-/// Returns a [`SpecError`] when there is no state or more than
-/// [`MAX_STATES`], a name breaks the rules or is used twice, or a picture
-/// cannot be cut.
+/// Returns a [`SpecError`] when a name breaks the rules or a picture cannot
+/// be cut.
 fn state_pictures(
     screenshots: &[Image],
     region: Region,
     states: &[StateSpec],
     tolerance: u8,
 ) -> Result<Vec<(StateName, ImageMatch)>, SpecError> {
-    if states.is_empty() {
-        return Err(SpecError::NoStates);
-    }
-    if states.len() > MAX_STATES {
-        return Err(SpecError::TooManyStates);
-    }
-    let mut names = BTreeSet::new();
     states
         .iter()
         .map(|state| {
             let name = StateName::new(&state.name)
                 .map_err(|error| SpecError::StateName(sentence(&error.to_string())))?;
-            // Names that differ only in case read alike, as the file says.
-            if !names.insert(state.name.to_lowercase()) {
-                return Err(SpecError::SameStateName(state.name.clone()));
-            }
             let (picture, mask) = picture_of(screenshots, region, state)?;
             // The mask is the region's, so its size is always the picture's.
             let picture = ImageMatch::new(picture, mask.as_ref(), tolerance)

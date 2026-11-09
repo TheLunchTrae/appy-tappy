@@ -619,6 +619,7 @@ changing.
   app uses, and checks everything again before use, because the files are
   outside its control and a person can edit them by hand. Each `app.json` must
   parse and pass `AppFile::parse`'s checks, which cover the file as a whole,
+  its window match, and each check's states and bar colors,
   each automation must pass `AutomationDef::compile` against the saved
   applications, and each value it watches must pass `saved::build` with its
   pictures. Saving a value in the setup app calls `saved::build`, and saving an
@@ -670,10 +671,13 @@ design enforces the block in three places:
    that only their checked constructors make, and neither has `Deserialize` or
    `Default`, so code that skips validation does not compile. The screen
    source has no such split: `saved::build` in `appytappy-sources` takes the
-   raw `ScreenDef` and `ReferenceDef` from `app.json` and checks them as it
-   builds the check it reads with. It is the one owner of the rules for a
-   readable value, such as a state check's states, so one value that breaks
-   them stops only itself.
+   raw `ScreenDef` and `ReferenceDef` from `app.json` and builds the check it
+   reads with. `CheckDef::check` in `config` owns how many states a state
+   check has, that their names differ, and that a bar's two colors differ,
+   so a file that breaks one does not load; `saved::build` and the setup
+   app's check editor report its error. A value that breaks a rule that
+   `saved::build` checks itself, such as a region that fits or a picture of
+   the region's size, stops only itself.
 
 Nothing in AppyTappy opens another application's process. [Build
 detection](#build-detection) reads only the executable file, and process and
