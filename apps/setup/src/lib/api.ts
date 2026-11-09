@@ -1,5 +1,5 @@
-// The setup app's commands. Their arguments and answers are the Rust side's
-// own types, which bindings.ts holds.
+// Generated from the setup app's command table by its bindings test. Do not edit it;
+// change the table in `commands/table.rs` and run `UPDATE_BINDINGS=1 cargo test -p appytappy-setup bindings`.
 
 import { invoke } from '@tauri-apps/api/core';
 
@@ -27,6 +27,8 @@ import type {
   SavedValue,
   SelectionSpec,
   SelectionView,
+  SettingsFile,
+  SettingsView,
   UpdateOffer,
   WhenDef,
   WindowDef,
@@ -34,15 +36,6 @@ import type {
   WindowList,
 } from './bindings.ts';
 import { type Picture, decodePicture } from './pixels.ts';
-
-/** One of the things an application's window is recognized by. */
-export type MatchField = 'title' | 'class' | 'executable';
-
-/** A field that may be allowed to differ; the executable always has to match. */
-export type LooseField = Exclude<MatchField, 'executable'>;
-
-/** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
-export type CharactersSpec = Extract<CheckSpec, { readonly kind: 'characters' }>;
 
 /** The message of a failed command, which the Rust side writes for the user. */
 export function errorText(error: unknown): string {
@@ -77,9 +70,9 @@ export async function screenshot(index: number, maxWidth: number): Promise<Pictu
   return decodePicture(await invoke<ArrayBuffer>('screenshot', { index, maxWidth }));
 }
 
-/** What `selection`'s steps select on screenshot `index`, or null when they leave nothing selected. */
-export async function select(index: number, selection: SelectionSpec): Promise<SelectionView | null> {
-  return invoke<SelectionView | null>('select', { screenshot: index, selection });
+/** What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected. */
+export async function select(screenshot: number, selection: SelectionSpec): Promise<SelectionView | null> {
+  return invoke<SelectionView | null>('select', { screenshot, selection });
 }
 
 export async function setCheck(spec: CheckSpec): Promise<void> {
@@ -91,14 +84,11 @@ export async function readValue(): Promise<Reading | null> {
   return invoke<Reading | null>('read_value');
 }
 
-/** Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped recording, which needs the same region, ink and window size; otherwise starts a new one. */
-export async function startRecording(
-  region: RegionSpec,
-  ink: ColorSpec,
-  tolerance: number,
-  screenshot: number,
-  more: boolean,
-): Promise<void> {
+/**
+ * Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
+ * recording, which needs the same region, ink and window size; otherwise starts a new one.
+ */
+export async function startRecording(region: RegionSpec, ink: ColorSpec, tolerance: number, screenshot: number, more: boolean): Promise<void> {
   await invoke('start_recording', { region, ink, tolerance, screenshot, more });
 }
 
@@ -122,17 +112,26 @@ export async function recordedReading(index: number, maxWidth: number): Promise<
   return decodePicture(await invoke<ArrayBuffer>('recorded_reading', { index, maxWidth }));
 }
 
-/** Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it can. */
-export async function reviewProblems(spec: CharactersSpec): Promise<readonly (string | null)[]> {
-  return invoke<readonly (string | null)[]>('review_problems', { spec });
+/**
+ * Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
+ * can.
+ */
+export async function reviewProblems(spec: CheckSpec): Promise<ReadonlyArray<string | null>> {
+  return invoke<ReadonlyArray<string | null>>('review_problems', { spec });
 }
 
-/** Captures a saved value's region on its application's window, replacing any capture, and returns the watch's number. */
+/**
+ * Captures a saved value's region on its application's window, replacing any capture, and returns the
+ * watch's number.
+ */
 export async function watchValue(application: string, value: string): Promise<number> {
   return invoke<number>('watch_value', { application, value });
 }
 
-/** What the watch's value reads now, and whether `when` holds for it. Fails once the watch was stopped or replaced. */
+/**
+ * What the watch's value reads now, and whether `when` holds for it. Fails once the watch was stopped or
+ * replaced.
+ */
 export async function watchedReading(watch: number, when: WhenDef | null): Promise<Live> {
   return invoke<Live>('watched_reading', { watch, when });
 }
@@ -143,20 +142,16 @@ export async function stopWatching(watch: number): Promise<void> {
 }
 
 /** The running windows `window` takes, the best fit first. */
-export async function matchWindows(window: WindowDef): Promise<readonly WindowFit[]> {
-  return invoke<readonly WindowFit[]>('match_windows', { window });
+export async function matchWindows(window: WindowDef): Promise<ReadonlyArray<WindowFit>> {
+  return invoke<ReadonlyArray<WindowFit>>('match_windows', { window });
 }
 
 /**
- * Keeps `region` of screenshot `index` as a new click picture, comparing only what `selection` picks when it is given.
- * One that no saved automation names goes the next time automations are saved.
+ * Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
+ * when it is given. One that no saved automation names goes the next time automations are saved.
  */
-export async function addClickPicture(
-  index: number,
-  region: RegionSpec,
-  selection: SelectionSpec | null,
-): Promise<ClickPictureView> {
-  return invoke<ClickPictureView>('add_click_picture', { screenshot: index, region, selection });
+export async function addClickPicture(screenshot: number, region: RegionSpec, selection: SelectionSpec | null): Promise<ClickPictureView> {
+  return invoke<ClickPictureView>('add_click_picture', { screenshot, region, selection });
 }
 
 /** The click picture `image`, at most `maxWidth` wide. */
@@ -169,13 +164,8 @@ export async function findClick(at: ClickAtDef): Promise<FoundClick> {
   return invoke<FoundClick>('find_click', { at });
 }
 
-export async function listApps(): Promise<readonly AppSummary[]> {
-  return invoke<readonly AppSummary[]>('list_apps');
-}
-
-/** Records the build of `application` that runs now as the one its values were checked against. */
-export async function markChecked(application: string): Promise<void> {
-  await invoke('mark_checked', { application });
+export async function listApps(): Promise<ReadonlyArray<AppSummary>> {
+  return invoke<ReadonlyArray<AppSummary>>('list_apps');
 }
 
 /** Saves `spec` over the application `existing`, or as a new one; returns its ID. */
@@ -184,8 +174,9 @@ export async function saveApp(existing: string | null, spec: AppSpec): Promise<s
 }
 
 /**
- * Removes an application with its values, unless an automation uses one of them, and closes its overlay. The removal
- * worked when this resolves; the answer is why an overlay window could not open or close, or null.
+ * Removes an application with its values, unless an automation uses one of them, and closes its overlay.
+ * The removal worked when this resolves; the answer is why an overlay window could not open or close, or
+ * null.
  */
 export async function removeApp(application: string): Promise<string | null> {
   return invoke<string | null>('remove_app', { application });
@@ -195,13 +186,11 @@ export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
   return invoke<SavedValue>('save_value', { spec });
 }
 
-/** Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would not fit. */
-export async function placeValue(
-  application: string,
-  value: string,
-  width: number,
-  height: number,
-): Promise<RegionSpec | null> {
+/**
+ * Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would
+ * not fit.
+ */
+export async function placeValue(application: string, value: string, width: number, height: number): Promise<RegionSpec | null> {
   return invoke<RegionSpec | null>('place_value', { application, value, width, height });
 }
 
@@ -241,11 +230,16 @@ export async function deleteReference(application: string, reference: string): P
 
 /** Sets how the application `application` protects itself from other programs. */
 export async function setAntiCheat(application: string, antiCheat: AntiCheatDef): Promise<void> {
-  await invoke('set_anti_cheat', { application, class: antiCheat });
+  await invoke('set_anti_cheat', { application, antiCheat });
 }
 
-export async function listAutomations(): Promise<readonly AutomationSummary[]> {
-  return invoke<readonly AutomationSummary[]>('list_automations');
+/** Records the build of `application` that runs now as the one its values were checked against. */
+export async function markChecked(application: string): Promise<void> {
+  await invoke('mark_checked', { application });
+}
+
+export async function listAutomations(): Promise<ReadonlyArray<AutomationSummary>> {
+  return invoke<ReadonlyArray<AutomationSummary>>('list_automations');
 }
 
 /** Saves `automation` over the automation `existing`, or as a new one; returns its ID. */
@@ -267,8 +261,8 @@ export async function syncOverlays(): Promise<void> {
 }
 
 /**
- * Turns an application's overlay on or off and sets where it shows. The setting is saved when this resolves; the
- * answer is why an overlay window could not open or close, or null.
+ * Turns an application's overlay on or off and sets where it shows. The setting is saved when this
+ * resolves; the answer is why an overlay window could not open or close, or null.
  */
 export async function setOverlay(application: string, enabled: boolean, mode: OverlayModeDef): Promise<string | null> {
   return invoke<string | null>('set_overlay', { application, enabled, mode });
@@ -279,9 +273,41 @@ export async function overlayState(application: string): Promise<OverlayView> {
   return invoke<OverlayView>('overlay_state', { application });
 }
 
-/** Tells the setup app the size of an overlay's card in CSS pixels, which its window over the application takes. */
+/**
+ * Tells the setup app the size of an overlay's card in CSS pixels, which its window over the application
+ * takes.
+ */
 export async function overlayCard(application: string, width: number, height: number): Promise<void> {
   await invoke('overlay_card', { application, width, height });
+}
+
+/** The saved settings, or the defaults and why the file cannot be read. */
+export async function loadSettings(): Promise<SettingsView> {
+  return invoke<SettingsView>('load_settings');
+}
+
+/** Saves every setting; rejects with what to fix. */
+export async function saveSettings(settings: SettingsFile): Promise<void> {
+  await invoke('save_settings', { settings });
+}
+
+/** Whether the runtime starts when the user signs in to Windows. */
+export async function startsWithWindows(): Promise<boolean> {
+  return invoke<boolean>('starts_with_windows');
+}
+
+export async function setStartsWithWindows(on: boolean): Promise<void> {
+  await invoke('set_starts_with_windows', { on });
+}
+
+/** The folder the runtime writes its trace files to. */
+export async function traceFolder(): Promise<string> {
+  return invoke<string>('trace_folder');
+}
+
+/** Opens the trace folder in File Explorer. */
+export async function openTraceFolder(): Promise<void> {
+  await invoke('open_trace_folder');
 }
 
 /** The newer release on GitHub, or null when this one is the newest or this build does not update itself. */
@@ -290,17 +316,18 @@ export async function checkForUpdate(): Promise<UpdateOffer | null> {
 }
 
 /**
- * Downloads the newest release and checks its signature; AppyTappy Setup keeps it until {@link installUpdate}. The
- * release it downloaded can be newer than the one offered, if one came out since. It rejects when the check or the
- * download fails.
+ * Downloads the newest release and checks its signature; AppyTappy Setup keeps it until
+ * {@link installUpdate}. The release it downloaded can be newer than the one offered, if one came out
+ * since. It rejects when the check or the download fails.
  */
 export async function downloadUpdate(): Promise<UpdateOffer> {
   return invoke<UpdateOffer>('download_update');
 }
 
 /**
- * Runs the downloaded installer for `version`, which closes AppyTappy Setup and the background part, updates both,
- * and starts them again. It rejects when the update fails before the installer starts, and never settles otherwise.
+ * Runs the downloaded installer for `version`, which closes AppyTappy Setup and the background part,
+ * updates both, and starts them again. It rejects when the update fails before the installer starts, and
+ * never settles otherwise.
  */
 export async function installUpdate(version: string): Promise<void> {
   await invoke('install_update', { version });

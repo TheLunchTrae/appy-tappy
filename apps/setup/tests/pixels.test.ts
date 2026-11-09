@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { PICTURES } from '../src/lib/bindings.ts';
 import { colorAt, cropPicture, decodePicture, hex } from '../src/lib/pixels.ts';
 
 function encoded(width: number, height: number, pixels: readonly number[]): ArrayBuffer {
@@ -17,6 +18,16 @@ describe('decodePicture', () => {
     expect(picture?.width).toBe(2);
     expect(picture?.height).toBe(1);
     expect([...(picture?.data ?? [])]).toEqual([1, 2, 3, 255, 4, 5, 6, 255]);
+  });
+
+  test('reads a picture as the Rust side encodes it', () => {
+    const { encoded: bytes, width, height, rgba } = PICTURES.sample;
+    const picture = decodePicture(new Uint8Array(bytes).buffer);
+    expect({ width: picture?.width, height: picture?.height, rgba: [...(picture?.data ?? [])] }).toEqual({
+      width,
+      height,
+      rgba: [...rgba],
+    });
   });
 
   test('finds no picture in an empty answer', () => {

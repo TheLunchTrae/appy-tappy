@@ -9,7 +9,7 @@ use appytappy_sources::screen::Image;
 
 /// The bytes before the pixels: the width, then the height, as
 /// little-endian `u32` values.
-const HEADER_BYTES: usize = 8;
+pub(crate) const HEADER_BYTES: usize = 8;
 
 /// Encodes `image` for the UI, scaled down by whole-pixel sampling so it is
 /// at most `max_width` pixels wide. The result is the width and the height as

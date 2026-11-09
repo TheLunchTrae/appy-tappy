@@ -1,6 +1,6 @@
 // The inspector's fields that values and references share.
 
-import type { Reading } from '../lib/bindings.ts';
+import { LIMITS, type Reading } from '../lib/bindings.ts';
 import { readingText } from '../lib/automation.ts';
 import type { CheckState } from '../lib/check.ts';
 import { REGION_HINT, TOLERANCE_HINT } from '../lib/hints.ts';
@@ -8,9 +8,6 @@ import { type Color, hex } from '../lib/pixels.ts';
 import type { Rect } from '../lib/region.ts';
 import { Hint } from './Hint.tsx';
 import type { ReactNode } from 'react';
-
-/** The tolerance's highest value, as a color channel's. */
-const MAX_TOLERANCE = 255;
 
 export function RegionFields({
   region,
@@ -125,7 +122,7 @@ export function ToleranceField({
           id="tolerance"
           type="range"
           min={0}
-          max={MAX_TOLERANCE}
+          max={LIMITS.maxTolerance}
           aria-describedby="hint-tolerance"
           value={value}
           onChange={(event) => {
@@ -136,14 +133,14 @@ export function ToleranceField({
           className="input"
           type="number"
           min={0}
-          max={MAX_TOLERANCE}
+          max={LIMITS.maxTolerance}
           aria-label="Tolerance, typed"
           aria-describedby="hint-tolerance"
           value={value}
           onChange={(event) => {
             const typed = Number.parseInt(event.target.value, 10);
             if (Number.isInteger(typed)) {
-              onChange(Math.min(MAX_TOLERANCE, Math.max(0, typed)));
+              onChange(Math.min(LIMITS.maxTolerance, Math.max(0, typed)));
             }
           }}
         />

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 
 import { LIMITS, type ReadIntervalDef } from '../lib/bindings.ts';
-import { errorText } from '../lib/api.ts';
+import { errorText, setStartsWithWindows, startsWithWindows } from '../lib/api.ts';
 import { READING_HINT, SHORTCUT_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 import { Hint } from '../components/Hint.tsx';
 import { NumberSetting } from '../components/NumberSetting.tsx';
 import { RuntimeTrace } from '../components/RuntimeTrace.tsx';
-import { setStartsWithWindows, startsWithWindows, useSettings, withWait } from '../lib/settings.ts';
+import { useSettings, withWait } from '../lib/settings.ts';
 import { useShortcutChoice } from '../lib/useShortcutChoice.ts';
 
 interface Props {

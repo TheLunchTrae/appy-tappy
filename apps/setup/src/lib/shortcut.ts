@@ -1,7 +1,7 @@
 // The screenshot shortcut, as a global-shortcut accelerator such as `Control+Shift+S`, and the keys of a key press
 // action.
 
-import { KEY_NAMES } from './bindings.ts';
+import { KEY_NAMES, SHORTCUT_KEYS } from './bindings.ts';
 import { asciiLower, trimmed } from './text.ts';
 
 /** The keys of a key press that a shortcut reads. */
@@ -13,27 +13,49 @@ export interface KeyPress {
   readonly metaKey: boolean;
 }
 
-const NAMED_KEYS: Readonly<Record<string, string>> = {
-  Space: 'Space',
-  Insert: 'Insert',
-  Delete: 'Delete',
-  Home: 'Home',
-  End: 'End',
-  PageUp: 'PageUp',
-  PageDown: 'PageDown',
-  ArrowUp: 'Up',
-  ArrowDown: 'Down',
-  ArrowLeft: 'Left',
-  ArrowRight: 'Right',
-  PrintScreen: 'PrintScreen',
-  Pause: 'Pause',
+/** A screenshot shortcut's named key. */
+type ShortcutKey = (typeof SHORTCUT_KEYS.named)[number];
+
+/** The browser's `code` for each named key a shortcut can end with, and its name in a sentence. */
+const SHORTCUT_KEY_CODES: Readonly<Record<ShortcutKey, { readonly code: string; readonly words: string }>> = {
+  Space: { code: 'Space', words: 'Space' },
+  Up: { code: 'ArrowUp', words: 'an arrow' },
+  Down: { code: 'ArrowDown', words: 'an arrow' },
+  Left: { code: 'ArrowLeft', words: 'an arrow' },
+  Right: { code: 'ArrowRight', words: 'an arrow' },
+  Insert: { code: 'Insert', words: 'Insert' },
+  Delete: { code: 'Delete', words: 'Delete' },
+  Home: { code: 'Home', words: 'Home' },
+  End: { code: 'End', words: 'End' },
+  PageUp: { code: 'PageUp', words: 'Page Up' },
+  PageDown: { code: 'PageDown', words: 'Page Down' },
+  PrintScreen: { code: 'PrintScreen', words: 'Print Screen' },
+  Pause: { code: 'Pause', words: 'Pause' },
 };
+
+/** Which key press flag holds each modifier a shortcut can hold down, and its keycap name. */
+const SHORTCUT_MODIFIERS: Readonly<
+  Record<
+    (typeof SHORTCUT_KEYS.modifiers)[number],
+    { readonly flag: keyof Omit<KeyPress, 'code'>; readonly keycap: string }
+  >
+> = {
+  Control: { flag: 'ctrlKey', keycap: 'Ctrl' },
+  Alt: { flag: 'altKey', keycap: 'Alt' },
+  Shift: { flag: 'shiftKey', keycap: 'Shift' },
+  Super: { flag: 'metaKey', keycap: 'Win' },
+};
+
+/** Whether the shortcut key `name` may stand alone without stealing typing. */
+function alone(name: ShortcutKey): boolean {
+  return (SHORTCUT_KEYS.alone as readonly ShortcutKey[]).includes(name);
+}
 
 /** The accelerator key for `code`, and whether it may stand alone without stealing typing. */
 function key(code: string): { readonly name: string; readonly alone: boolean } | null {
-  const function_ = /^F([1-9]|1\d|2[0-4])$/u.exec(code);
-  if (function_ !== null) {
-    return { name: code, alone: true };
+  const number = /^F([1-9]\d*)$/u.exec(code)?.[1];
+  if (number !== undefined) {
+    return Number(number) <= SHORTCUT_KEYS.maxFunctionKey ? { name: code, alone: true } : null;
   }
   const letter = /^Key([A-Z])$/u.exec(code)?.[1];
   if (letter !== undefined) {
@@ -43,11 +65,8 @@ function key(code: string): { readonly name: string; readonly alone: boolean } |
   if (digit !== undefined) {
     return { name: digit, alone: false };
   }
-  const named = NAMED_KEYS[code];
-  if (named !== undefined) {
-    return { name: named, alone: code === 'PrintScreen' || code === 'Pause' };
-  }
-  return null;
+  const named = SHORTCUT_KEYS.named.find((name) => SHORTCUT_KEY_CODES[name].code === code);
+  return named === undefined ? null : { name: named, alone: alone(named) };
 }
 
 /**
@@ -60,16 +79,26 @@ export function accelerator(press: KeyPress): string | null {
   if (found === null) {
     return null;
   }
-  const modifiers = [
-    press.ctrlKey ? 'Control' : null,
-    press.altKey ? 'Alt' : null,
-    press.shiftKey ? 'Shift' : null,
-    press.metaKey ? 'Super' : null,
-  ].filter((modifier) => modifier !== null);
+  const modifiers = SHORTCUT_KEYS.modifiers.filter((modifier) => press[SHORTCUT_MODIFIERS[modifier].flag]);
   if (modifiers.length === 0 && !found.alone) {
     return null;
   }
   return [...modifiers, found.name].join('+');
+}
+
+/** `items` joined as a sentence lists them, such as `a, b, or c`. */
+function listed(items: readonly string[], type: 'conjunction' | 'disjunction'): string {
+  return new Intl.ListFormat('en', { type }).format(items);
+}
+
+/** Which shortcuts the screenshot shortcut can be, in words. */
+export function shortcutKeysInWords(): string {
+  const words = (names: readonly ShortcutKey[]): string[] => [
+    ...new Set(names.map((name) => SHORTCUT_KEY_CODES[name].words)),
+  ];
+  const typing = SHORTCUT_KEYS.named.filter((name) => !alone(name));
+  const modifiers = SHORTCUT_KEYS.modifiers.map((modifier) => SHORTCUT_MODIFIERS[modifier].keycap);
+  return `${listed([`F1 to F${SHORTCUT_KEYS.maxFunctionKey}`, ...words(SHORTCUT_KEYS.alone)], 'conjunction')} work alone. ${listed(['A letter', 'a digit', ...words(typing)], 'disjunction')} needs ${listed(modifiers, 'disjunction')} with it, so it keeps working everywhere else. Other keys can't be the shortcut.`;
 }
 
 /** The accelerator as the keycap labels show it, such as `Ctrl+Shift+S`. */

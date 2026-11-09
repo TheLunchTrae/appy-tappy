@@ -366,8 +366,16 @@ dev-dependencies, so neither program builds with `ts-rs`.
 
 The test `bindings::bindings_match_the_rust_types` renders the file from the
 types each command takes and answers, and every type they reach, and fails when
-the checked-in file differs. After a change to one of those types, write the
-file again and commit it:
+the checked-in file differs. It renders `apps/setup/src/lib/api.ts` the same
+way: one function for each row of the command table,
+`apps/setup/src-tauri/src/commands/table.rs`, that calls the command by its
+name, sends its arguments under the camelCase keys Tauri reads, and types its
+answer. The table is the one list of commands: `main.rs` registers each row
+with Tauri, the compiler checks each row's argument and answer types against
+its command, and
+`bindings::the_command_table_names_each_argument_as_its_command_does` checks
+its argument names against the command's parameters. After a change to the
+table or to one of those types, write the files again and commit them:
 
 ```sh
 UPDATE_BINDINGS=1 cargo test -p appytappy-setup bindings
@@ -378,23 +386,31 @@ handle or a time, reaches the page as a `number`, and the test fails when a
 field would become a `bigint`, which JSON does not carry. The field says so
 with `#[cfg_attr(test, ts(type = "number"))]` in the setup app, or
 `#[cfg_attr(feature = "ts", ts(type = "number"))]` in `appytappy-config`,
-because only those builds derive the types. A new command still needs its call in
-`api.ts`, and a type that it takes or answers and that no other one reaches
-needs a line in the test's list. The page imports the types from
+because only those builds derive the types. A command's own `u64` argument or
+answer is `U64AsNumber` in the table, and a picture it answers as raw bytes is
+`Pixels`, which `api.ts` decodes. The page imports the types from
 `bindings.ts` and calls the commands through `api.ts`.
 
 The file also holds what the page checks a draft against before it saves:
 `LIMITS`, such as the longest app name a media or volume action names, the
-longest path or link, and the most states; `KEY_NAMES`, the keys a key press
-action can name; `ACTIONS`, whether each kind of action sends input and
-whether undo can put it back; `TRACE_CATEGORIES`; `NO_STATE`; and
-`DEFAULT_SETTINGS`. The test reads them from `appytappy-config`, so the page
-and the save agree, and the save still checks everything again. The UI's
-formatting, lint, and unused-type checks skip the generated file.
+longest path or link, the most states, the highest tolerance, and the most
+pixels a click's search area holds; `KEY_NAMES`, the keys a key press action
+can name; `SHORTCUT_KEYS`, the keys the screenshot shortcut can name;
+`ACTIONS`, whether each kind of action sends input and whether undo can put
+it back; `TRACE_CATEGORIES`; `NO_STATE`; and `DEFAULT_SETTINGS`. The test
+reads them from `appytappy-config`, so the page and the save agree, and the
+save still checks everything again. The hints that list keys or ranges are
+built from them. `OVERLAY_LABELS` holds how an overlay window's label starts,
+and `PICTURES` how a picture a command answers starts, with a sample picture
+that `apps/setup/tests/pixels.test.ts` decodes. The UI's formatting and lint
+checks skip both generated files, and its unused-type check skips
+`bindings.ts`.
 
-The page reads a typed path, link, key press, or app name itself, so the user
-sees what to fix as they type. `PARSE_CASES` holds what the Rust parsers make
-of a fixed list of samples, one for each way a parser accepts or refuses, and
+The page reads a typed path, link, key press, screenshot shortcut, or app name
+itself, so the user sees what to fix as they type, and places a click's spot
+in the window itself. `PARSE_CASES` holds what the Rust side makes of a fixed
+list of samples, one for each way a parser accepts or refuses, and where
+sample spots land in sample windows, and
 `apps/setup/tests/parse-cases.test.ts` fails when the page reads one
 differently. A parser that gains a rule needs a sample for it in
 `bindings.rs`.

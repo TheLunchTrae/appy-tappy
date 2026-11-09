@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { AppSummary, FallbackDef, SizeChangesDef, WindowChoice, WindowDef, WindowList } from '../lib/bindings.ts';
-import { type MatchField, errorText, listWindows, saveApp } from '../lib/api.ts';
+import { errorText, listWindows, saveApp } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
 import {
   EXECUTABLE_NOTE,
@@ -12,6 +12,7 @@ import {
   FIELD_NAMES,
   FIELDS,
   MUST_MATCH_HINT,
+  type MatchField,
   exactWindow,
   fallbackUseful,
   fitCount,

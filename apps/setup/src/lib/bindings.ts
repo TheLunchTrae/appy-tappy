@@ -1248,14 +1248,17 @@ antiCheat: Array<string>, }>;
 
 /**
  * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the
- * most states, and the settings' ranges, as the saved files take them.
+ * most states, the settings' ranges, the highest tolerance, and the most pixels a click's search area holds, as the
+ * saved files take them.
  */
 export const LIMITS = {
   "fastestReadMs": 1,
   "maxActionAppBytes": 256,
   "maxCooldownMs": 86400000,
+  "maxSearchPixels": 160000,
   "maxStates": 16,
   "maxTargetBytes": 2048,
+  "maxTolerance": 255,
   "maxTraceFileMb": 1000,
   "maxTraceFiles": 100,
   "slowestReadMs": 10000
@@ -1292,6 +1295,85 @@ export const KEY_NAMES = {
   ]
 } as const;
 
+/**
+ * The keys a screenshot shortcut can name: modifiers in the order they are written, named keys, the named keys
+ * that need no modifier, and function keys from F1, which need none either.
+ */
+export const SHORTCUT_KEYS = {
+  "alone": [
+    "PrintScreen",
+    "Pause"
+  ],
+  "maxFunctionKey": 24,
+  "modifiers": [
+    "Control",
+    "Alt",
+    "Shift",
+    "Super"
+  ],
+  "named": [
+    "Space",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "Insert",
+    "Delete",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "PrintScreen",
+    "Pause"
+  ]
+} as const;
+
+/** How an overlay window's label starts, before its application's ID, by its mode. */
+export const OVERLAY_LABELS = {
+  "overlay": "overlay-",
+  "pictureInPicture": "panel-"
+} as const satisfies Record<OverlayModeDef, string>;
+
+/**
+ * How a picture a command answers starts: the bytes of its little-endian width and height before the RGBA rows.
+ * The sample is a picture as the Rust side encodes it, and what it holds.
+ */
+export const PICTURES = {
+  "headerBytes": 8,
+  "sample": {
+    "encoded": [
+      2,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      30,
+      20,
+      10,
+      255,
+      60,
+      50,
+      40,
+      255
+    ],
+    "height": 1,
+    "rgba": [
+      30,
+      20,
+      10,
+      255,
+      60,
+      50,
+      40,
+      255
+    ],
+    "width": 2
+  }
+} as const;
+
 /** Whether each kind of action sends input, and whether undo can put it back, by kind and a media action's command. */
 export const ACTIONS = {
   "injectsInput": {
@@ -1325,8 +1407,9 @@ export const TRACE_CATEGORIES = [
 ] as const satisfies readonly TraceCategory[];
 
 /**
- * What the Rust side makes of sample paths, links, key presses and app names: the text it keeps, or null when it
- * refuses one. The page's own checks must read each the same.
+ * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it
+ * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read
+ * each the same.
  */
 export const PARSE_CASES = {
   "appName": [
@@ -1643,6 +1726,172 @@ export const PARSE_CASES = {
       "text": "https://\u00e9\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   ],
+  "screenshotShortcut": [
+    {
+      "read": "F9",
+      "text": "F9"
+    },
+    {
+      "read": "F1",
+      "text": "F1"
+    },
+    {
+      "read": "F24",
+      "text": "F24"
+    },
+    {
+      "read": "PrintScreen",
+      "text": "PrintScreen"
+    },
+    {
+      "read": "Pause",
+      "text": "Pause"
+    },
+    {
+      "read": "Control+Shift+S",
+      "text": "Control+Shift+S"
+    },
+    {
+      "read": "Control+Alt+Shift+Super+PrintScreen",
+      "text": "Control+Alt+Shift+Super+PrintScreen"
+    },
+    {
+      "read": "Alt+7",
+      "text": "Alt+7"
+    },
+    {
+      "read": "Super+Left",
+      "text": "Super+Left"
+    },
+    {
+      "read": "Control+Up",
+      "text": "Control+Up"
+    },
+    {
+      "read": "Shift+Down",
+      "text": "Shift+Down"
+    },
+    {
+      "read": "Alt+Right",
+      "text": "Alt+Right"
+    },
+    {
+      "read": "Control+Space",
+      "text": "Control+Space"
+    },
+    {
+      "read": "Control+Insert",
+      "text": "Control+Insert"
+    },
+    {
+      "read": "Control+Delete",
+      "text": "Control+Delete"
+    },
+    {
+      "read": "Control+Home",
+      "text": "Control+Home"
+    },
+    {
+      "read": "Control+End",
+      "text": "Control+End"
+    },
+    {
+      "read": "Control+PageUp",
+      "text": "Control+PageUp"
+    },
+    {
+      "read": "Shift+PageDown",
+      "text": "Shift+PageDown"
+    },
+    {
+      "read": "Control+F9",
+      "text": "Control+F9"
+    },
+    {
+      "read": "Super+Pause",
+      "text": "Super+Pause"
+    },
+    {
+      "read": null,
+      "text": ""
+    },
+    {
+      "read": null,
+      "text": " F9 "
+    },
+    {
+      "read": null,
+      "text": "F0"
+    },
+    {
+      "read": null,
+      "text": "F25"
+    },
+    {
+      "read": null,
+      "text": "F09"
+    },
+    {
+      "read": null,
+      "text": "S"
+    },
+    {
+      "read": null,
+      "text": "7"
+    },
+    {
+      "read": null,
+      "text": "Space"
+    },
+    {
+      "read": null,
+      "text": "Up"
+    },
+    {
+      "read": null,
+      "text": "Shift+Control+S"
+    },
+    {
+      "read": null,
+      "text": "Super+Alt+S"
+    },
+    {
+      "read": null,
+      "text": "Control+Control+S"
+    },
+    {
+      "read": null,
+      "text": "Control+"
+    },
+    {
+      "read": null,
+      "text": "Control"
+    },
+    {
+      "read": null,
+      "text": "Control+s"
+    },
+    {
+      "read": null,
+      "text": "Ctrl+S"
+    },
+    {
+      "read": null,
+      "text": "Win+S"
+    },
+    {
+      "read": null,
+      "text": "Control+Enter"
+    },
+    {
+      "read": null,
+      "text": "Control+Bogus"
+    },
+    {
+      "read": null,
+      "text": "Bogus"
+    }
+  ],
   "soundFile": [
     {
       "read": "C:\\Sounds\\Ding.wav",
@@ -1711,6 +1960,392 @@ export const PARSE_CASES = {
     {
       "read": null,
       "text": "C:\\\u00e9\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.wav"
+    }
+  ],
+  "spotPlacement": [
+    {
+      "at": {
+        "corner": "topLeft",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 0,
+        "y": 0
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topLeft",
+        "x": 9,
+        "y": 15
+      },
+      "place": {
+        "x": 9,
+        "y": 15
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topLeft",
+        "x": 1279,
+        "y": 719
+      },
+      "place": {
+        "x": 1279,
+        "y": 719
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topLeft",
+        "x": 1280,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topLeft",
+        "x": 0,
+        "y": 720
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topLeft",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 0,
+        "y": 0
+      },
+      "window": {
+        "height": 1,
+        "width": 1
+      }
+    },
+    {
+      "at": {
+        "corner": "topLeft",
+        "x": 0,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 0,
+        "width": 0
+      }
+    },
+    {
+      "at": {
+        "corner": "topRight",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 1279,
+        "y": 0
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topRight",
+        "x": 9,
+        "y": 15
+      },
+      "place": {
+        "x": 1270,
+        "y": 15
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topRight",
+        "x": 1279,
+        "y": 719
+      },
+      "place": {
+        "x": 0,
+        "y": 719
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topRight",
+        "x": 1280,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topRight",
+        "x": 0,
+        "y": 720
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "topRight",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 0,
+        "y": 0
+      },
+      "window": {
+        "height": 1,
+        "width": 1
+      }
+    },
+    {
+      "at": {
+        "corner": "topRight",
+        "x": 0,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 0,
+        "width": 0
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomLeft",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 0,
+        "y": 719
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomLeft",
+        "x": 9,
+        "y": 15
+      },
+      "place": {
+        "x": 9,
+        "y": 704
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomLeft",
+        "x": 1279,
+        "y": 719
+      },
+      "place": {
+        "x": 1279,
+        "y": 0
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomLeft",
+        "x": 1280,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomLeft",
+        "x": 0,
+        "y": 720
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomLeft",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 0,
+        "y": 0
+      },
+      "window": {
+        "height": 1,
+        "width": 1
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomLeft",
+        "x": 0,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 0,
+        "width": 0
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomRight",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 1279,
+        "y": 719
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomRight",
+        "x": 9,
+        "y": 15
+      },
+      "place": {
+        "x": 1270,
+        "y": 704
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomRight",
+        "x": 1279,
+        "y": 719
+      },
+      "place": {
+        "x": 0,
+        "y": 0
+      },
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomRight",
+        "x": 1280,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomRight",
+        "x": 0,
+        "y": 720
+      },
+      "place": null,
+      "window": {
+        "height": 720,
+        "width": 1280
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomRight",
+        "x": 0,
+        "y": 0
+      },
+      "place": {
+        "x": 0,
+        "y": 0
+      },
+      "window": {
+        "height": 1,
+        "width": 1
+      }
+    },
+    {
+      "at": {
+        "corner": "bottomRight",
+        "x": 0,
+        "y": 0
+      },
+      "place": null,
+      "window": {
+        "height": 0,
+        "width": 0
+      }
     }
   ]
 } as const;

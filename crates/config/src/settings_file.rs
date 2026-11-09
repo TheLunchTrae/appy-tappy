@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::action::MAX_FUNCTION_KEY;
+
 /// The format version this build writes and reads.
 pub const FORMAT: u32 = 1;
 
@@ -231,40 +233,43 @@ impl SettingsFile {
             )));
         }
         if !is_shortcut(&self.screenshot_shortcut) {
-            return Err(SettingsError::Setting(
-                "The screenshot shortcut must be F1 to F24, Print Screen, or Pause, or a letter, \
-                 digit, or other key with any of Ctrl, Alt, Shift and Win."
-                    .to_owned(),
-            ));
+            return Err(SettingsError::Setting(format!(
+                "The screenshot shortcut must be F1 to F{MAX_FUNCTION_KEY}, Print Screen, or Pause, \
+                 or a letter, digit, or other key with any of Ctrl, Alt, Shift and Win."
+            )));
         }
         Ok(())
     }
 }
 
-/// The keys a shortcut can hold down with its key, in the order they are
-/// written.
-const MODIFIERS: [&str; 4] = ["Control", "Alt", "Shift", "Super"];
+/// The keys a screenshot shortcut can hold down with its key, in the order
+/// they are written.
+pub const SHORTCUT_MODIFIERS: [&str; 4] = ["Control", "Alt", "Shift", "Super"];
 
-/// The keys other than letters, digits, and function keys that a shortcut
-/// can end with.
-const NAMED_KEYS: [&str; 13] = [
+/// The keys other than letters, digits, and function keys that a screenshot
+/// shortcut can end with.
+pub const SHORTCUT_NAMED_KEYS: [&str; 13] = [
     "Space",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
     "Insert",
     "Delete",
     "Home",
     "End",
     "PageUp",
     "PageDown",
-    "Up",
-    "Down",
-    "Left",
-    "Right",
     "PrintScreen",
     "Pause",
 ];
 
+/// The named keys a screenshot shortcut can be without a modifier, because
+/// no application types with them. Function keys can be too.
+pub const SHORTCUT_ALONE_KEYS: [&str; 2] = ["PrintScreen", "Pause"];
+
 /// Whether `shortcut` is an accelerator the setup app records, such as `F9`
-/// or `Control+Shift+S`: modifiers in [`MODIFIERS`] order, each at most
+/// or `Control+Shift+S`: modifiers in [`SHORTCUT_MODIFIERS`] order, each at most
 /// once, then one key. A key that types, such as a letter, needs a
 /// modifier, so the shortcut does not take that key from every other
 /// application.
@@ -273,20 +278,20 @@ fn is_shortcut(shortcut: &str) -> bool {
     let Some(key) = parts.pop() else {
         return false;
     };
-    let mut order = MODIFIERS.iter();
+    let mut order = SHORTCUT_MODIFIERS.iter();
     let modifiers_in_order = parts
         .iter()
         .all(|part| order.by_ref().any(|modifier| modifier == part));
     let function = key
         .strip_prefix('F')
         .and_then(|number| number.parse::<u8>().ok())
-        .is_some_and(|number| (1..=24).contains(&number) && !key.starts_with("F0"));
-    let alone = function || key == "PrintScreen" || key == "Pause";
+        .is_some_and(|number| (1..=MAX_FUNCTION_KEY).contains(&number) && !key.starts_with("F0"));
+    let alone = function || SHORTCUT_ALONE_KEYS.contains(&key);
     let typing = (key.len() == 1
         && key
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()))
-        || NAMED_KEYS.contains(&key);
+        || SHORTCUT_NAMED_KEYS.contains(&key);
     modifiers_in_order && (alone || (typing && !parts.is_empty()))
 }
 
