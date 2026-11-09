@@ -346,8 +346,9 @@ application or value. One automation that breaks a rule on its own, such as
 after a hand edit, is kept in the file and listed with its problem, and nothing
 runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask
-`AutomationDef::compile` and build the value it watches with `saved::build`, the
-same checks the runtime makes. An automation's ID is the setup app's own key:
+`Runnable::new` in `appytappy-sources`, which runs `AutomationDef::compile`,
+builds the value it watches with `saved::build`, and fits each click's picture,
+the same check the runtime runs. An automation's ID is the setup app's own key:
 the runtime does not read it, so an ID that a hand edit made invalid, or gave to
 more than one automation, stops nothing. When the setup app reads the file, it
 gives a new ID, made from the name, to each automation whose ID is invalid or

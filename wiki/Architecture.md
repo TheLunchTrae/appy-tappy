@@ -69,7 +69,7 @@ apps/
 crates/
   config/        appytappy-config: formats, validation, saved files, paths
   engine/        appytappy-engine: the rule evaluator
-  sources/       appytappy-sources: Windows source primitives
+  sources/       appytappy-sources: Windows source primitives, and whether an automation can run
   actions/       appytappy-actions: Windows actions
   platform/      appytappy-platform: the runtime's Windows host services
 ```
@@ -89,8 +89,11 @@ The table leaves out dev-dependencies, such as `sources` for the actions
 crate's manual media player test. Each crate's owning issue adds its code and
 its dependencies. Where issues #6 and #11 say "the core crate", they mean
 `appytappy-config` for formats, validation, and policy, and `appytappy-engine`
-for rule evaluation. `config` owns what a condition means, so the setup app and the runtime agree on it; `engine` owns
-the state of each game session. `apps/setup/src-tauri`
+for rule evaluation. `config` owns what a condition means, so the setup app and
+the runtime agree on it, and `appytappy_sources::automation` owns the one
+answer to whether an automation can run, `Runnable::new`, which adds the value
+check and the click pictures to the file's rules; `engine` owns the state of
+each game session. `apps/setup/src-tauri`
 is a workspace member like the other programs; the setup app takes `engine`
 once it previews automations.
 
@@ -619,14 +622,17 @@ changing.
   app uses, and checks everything again before use, because the files are
   outside its control and a person can edit them by hand. Each `app.json` must
   parse and pass `AppFile::parse`'s checks, which cover the file as a whole,
-  its window match, and each check's states and bar colors,
-  each automation must pass `AutomationDef::compile` against the saved
-  applications, and each value it watches must pass `saved::build` with its
-  pictures. Saving a value in the setup app calls `saved::build`, and saving an
-  automation calls `compile` and builds the value it watches, so what saves is
-  what runs. `apps/runtime/src/plan.rs` turns what passes into the plan the
-  runtime runs, in memory; nothing it builds is written to disk. An automation
-  or a value that fails a check is logged and left out, and the rest run.
+  its window match, and each check's states and bar colors, and each
+  automation must pass `Runnable::new` in `appytappy_sources::automation`:
+  `AutomationDef::compile` against the saved applications whose files read,
+  the value it watches through `saved::build` with its pictures, and each
+  click's picture through `ClickSearch`. Saving a value in the setup app calls
+  `saved::build`, and saving, turning on, and listing automations ask
+  `Runnable::new` too, so what saves is what runs. `apps/runtime/src/plan.rs`
+  turns what passes into the plan the runtime runs, in memory, and names each
+  `app.json` that does not read; nothing it builds is written to disk. An
+  automation or a value that fails a check is logged and left out, and the
+  rest run.
 - **Format.** `app.json`, `automations.json`, and `settings.json` each carry a
   `format` number, and the `FORMAT` constant in `app_file.rs`,
   `automation_file.rs`, and `settings_file.rs` sets the one version this build
@@ -665,7 +671,8 @@ design enforces the block in three places:
    Reading `automations.json` gives `AutomationDef` and `ActionDef`, which the
    engine and the action worker do not accept; only `AutomationDef::compile`
    and `ActionDef::to_action` in `config` turn them into a `Rule` and its
-   `Action`s, and `compile` reads the rule's actions to find a key press.
+   `Action`s, and `compile` reads the rule's actions to find one that sends
+   input, which `Action::input_sent` names.
    `Rule` has private
    fields, an action's values such as a key chord or a volume level are types
    that only their checked constructors make, and neither has `Deserialize` or
