@@ -171,7 +171,7 @@ export function pickedStatus(
   }
   const other = read === undefined ? null : titleOf(read.handle);
   return {
-    text: `${name} reads ${other === null ? 'another window' : `“${other}”`} instead, the one it would read, so the value would never be read here. Pick that window, or ${change}.`,
+    text: `${name} reads ${other === null ? 'another window' : `“${other}”`} instead, so the value would never be read here. Pick that window, or ${change}.`,
     ok: false,
   };
 }
