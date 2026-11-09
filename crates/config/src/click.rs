@@ -134,7 +134,7 @@ impl Spot {
 }
 
 /// A rectangle of a window in pixels from its top-left corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Area {
     /// The left edge.
     pub x: u32,
@@ -147,7 +147,8 @@ pub struct Area {
 }
 
 /// A picture to find in an area of the window, and where on it to press.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Its order only keys a map of the clicks' searches.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClickPicture {
     /// The picture's file name among the click pictures, such as
     /// `scene-button-1.png`. Its transparent pixels are not compared.

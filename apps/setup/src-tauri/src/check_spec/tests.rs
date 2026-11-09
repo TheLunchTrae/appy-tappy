@@ -2,6 +2,7 @@
 
 use std::error::Error as _;
 
+use appytappy_config::app_file::MAX_STATES;
 use appytappy_config::signal::{Number, Value};
 use appytappy_sources::screen::Size;
 
@@ -231,10 +232,12 @@ fn state_names_must_be_valid_and_differ() {
         build(&spec, session(&screenshots, None)).map(drop)
     };
     assert_eq!(problem(&["Paused", "Live"]), Ok(()));
-    assert_eq!(problem(&[]), Err(SpecError::NoStates));
+    assert_eq!(problem(&[]), Err(SpecError::Check(CheckDefError::NoStates)));
     assert_eq!(
         problem(&["Paused", "paused"]),
-        Err(SpecError::SameStateName("paused".to_owned()))
+        Err(SpecError::Check(CheckDefError::SameStateName(
+            "paused".to_owned()
+        )))
     );
     let none = problem(&["None"]).expect_err("reserved");
     assert_eq!(
@@ -246,18 +249,22 @@ fn state_names_must_be_valid_and_differ() {
     let names: Vec<String> = (0..=MAX_STATES).map(|index| format!("S{index}")).collect();
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let too_many = problem(&names).expect_err("too many");
-    assert_eq!(too_many, SpecError::TooManyStates);
+    assert_eq!(too_many, SpecError::Check(CheckDefError::TooManyStates));
     assert_eq!(
         too_many.to_string(),
         "A value can tell apart at most 16 states. Remove one."
     );
     assert_eq!(
-        SpecError::NoStates.to_string(),
+        SpecError::Check(CheckDefError::NoStates).to_string(),
         "Add a state from a screenshot."
     );
     assert_eq!(
-        SpecError::SameStateName("Live".to_owned()).to_string(),
+        SpecError::Check(CheckDefError::SameStateName("Live".to_owned())).to_string(),
         "Two states are named \"Live\". Give each state its own name."
+    );
+    assert_eq!(
+        SpecError::Check(CheckDefError::SameColors).to_string(),
+        "Pick a filled color and an empty color that differ."
     );
     assert_eq!(problem(&names[..MAX_STATES]), Ok(()));
 }
@@ -460,7 +467,7 @@ fn mistakes_come_back_as_errors_the_user_can_fix() {
                 filled: RED,
                 empty: RED,
             },
-            SpecError::SameColors,
+            SpecError::Check(CheckDefError::SameColors),
         ),
         (
             states(whole(), vec![state("Shown", 1)], 0),

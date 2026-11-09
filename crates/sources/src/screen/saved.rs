@@ -15,8 +15,8 @@ use std::fmt;
 use std::io;
 
 use appytappy_config::app_file::{
-    CheckDef, ColorDef, FixDef, MAX_FIXES, MAX_STATES, PinDef, ReferenceDef, RegionDef, ScreenDef,
-    SizeChangesDef, SizeDef, StateDef,
+    CheckDef, CheckDefError, ColorDef, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef,
+    ScreenDef, SizeChangesDef, SizeDef, StateDef,
 };
 use appytappy_config::signal::{InvalidStateName, StateName};
 
@@ -225,20 +225,20 @@ impl From<ColorDef> for Rgb {
 /// `picture` returns the bytes of a PNG file the check, a fix or a
 /// reference names, such as `status-1.png`.
 ///
-/// This is the one place that decides whether a saved value can be read: the
-/// application's file checks only what the whole file needs, so a value that
-/// breaks a rule here stops only itself.
+/// This is the one place that decides whether a saved value's pictures and
+/// regions can be read, so a value that breaks a rule here stops only
+/// itself. The rules of the check's own settings are the file's, which
+/// [`CheckDef::check`] states and this reports as [`SavedError::Check`].
 ///
 /// # Errors
 ///
-/// Returns a [`SavedError`] when a region is empty or does not fit the
-/// window size it was drawn at, a picture cannot be read or decoded or a
-/// state's picture is not its region's size, a state check has no states or
-/// too many, a state's name is invalid or two states share a name or a
-/// picture, the bar's two colors are the same, a number's reference is
-/// missing or cannot learn from one of its pictures, or the value has too
-/// many fixes, two drawings at one size, or a fix whose pictures or
-/// reference do not suit its check.
+/// Returns a [`SavedError`] when the check breaks a rule of
+/// [`CheckDef::check`], a region is empty or does not fit the window size it
+/// was drawn at, a picture cannot be read or decoded or a state's picture is
+/// not its region's size, a state's name is invalid or two states share a
+/// picture, a number's reference is missing or cannot learn from one of its
+/// pictures, or the value has too many fixes, two drawings at one size, or a
+/// fix whose pictures or reference do not suit its check.
 pub fn build(
     screen: &ScreenDef,
     references: &[ReferenceDef],
@@ -246,21 +246,24 @@ pub fn build(
     mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Result<SavedValue, SavedError> {
     let (region, window_size) = place(screen.region, screen.window_size)?;
+    screen.check.check().map_err(SavedError::Check)?;
+    let mut images = state_images(screen.check.states())?;
     let check = match &screen.check {
         CheckDef::Number { reference, whole } => Check::Number {
             reader: reader(find(references, reference)?, &mut picture)?,
             whole: *whole,
         },
+        // `CheckDef::check` refused the same colors, the one thing
+        // `BarFill::new` refuses.
         CheckDef::BarFill { filled, empty } => Check::BarFill(
             BarFill::new((*filled).into(), (*empty).into())
-                .map_err(|_same| SavedError::SameColors)?,
+                .map_err(|_same| SavedError::Check(CheckDefError::SameColors))?,
         ),
         CheckDef::Color { color, tolerance } => Check::Color(ColorMatch {
             color: (*color).into(),
             tolerance: *tolerance,
         }),
         CheckDef::State { states, tolerance } => {
-            check_states(states)?;
             let images: Vec<&str> = states.iter().map(|state| state.image.as_str()).collect();
             state_match(states, &images, region.size(), *tolerance, &mut picture)?
         },
@@ -269,12 +272,6 @@ pub fn build(
         return Err(SavedError::TooManyFixes);
     }
     let mut sizes = BTreeSet::from([(window_size.width, window_size.height)]);
-    let mut images: BTreeSet<&str> = screen
-        .check
-        .states()
-        .iter()
-        .map(|state| state.image.as_str())
-        .collect();
     let fixes = screen
         .fixes
         .iter()
@@ -397,27 +394,15 @@ fn state_match(
     Ok(Check::State(StateMatch::new(states)))
 }
 
-/// Checks a state check's states: at least one and at most [`MAX_STATES`],
-/// and no name or picture twice. Names that differ only in case count as the
-/// same, since they read alike.
-fn check_states(states: &[StateDef]) -> Result<(), SavedError> {
-    if states.is_empty() {
-        return Err(SavedError::NoStates);
-    }
-    if states.len() > MAX_STATES {
-        return Err(SavedError::TooManyStates);
-    }
-    let mut names = BTreeSet::new();
+/// The file names of `states`' pictures, once no two states use one.
+fn state_images(states: &[StateDef]) -> Result<BTreeSet<&str>, SavedError> {
     let mut images = BTreeSet::new();
     for state in states {
-        if !names.insert(state.name.to_lowercase()) {
-            return Err(SavedError::SameStateName(state.name.clone()));
-        }
         if !images.insert(state.image.as_str()) {
             return Err(SavedError::SamePicture(state.image.clone()));
         }
     }
-    Ok(())
+    Ok(images)
 }
 
 /// A reader with the characters `reference` learns from its pictures, which
@@ -532,10 +517,8 @@ pub enum SavedError {
         /// The region's size.
         expected: Size,
     },
-    /// The bar's filled and empty colors are the same.
-    SameColors,
-    /// A state check has no states.
-    NoStates,
+    /// The check breaks a rule of its own settings.
+    Check(CheckDefError),
     /// The value has more than [`MAX_FIXES`] fixes.
     TooManyFixes,
     /// A fix is at the window size of the first drawing or another fix.
@@ -556,10 +539,6 @@ pub enum SavedError {
         /// Why.
         source: Box<SavedError>,
     },
-    /// A state check has more than [`MAX_STATES`] states.
-    TooManyStates,
-    /// Two states have this name, or names that differ only in case.
-    SameStateName(String),
     /// Two states use this picture.
     SamePicture(String),
     /// A state's name breaks the naming rules.
@@ -601,10 +580,7 @@ impl fmt::Display for SavedError {
                 formatter,
                 "its picture {name} is {found} but its region is {expected}"
             ),
-            Self::SameColors => {
-                formatter.write_str("its bar's filled and empty colors are the same")
-            },
-            Self::NoStates => formatter.write_str("its state check has no state"),
+            Self::Check(error) => write!(formatter, "{error}"),
             Self::TooManyFixes => write!(formatter, "it has more than {MAX_FIXES} fixes"),
             Self::SameSize => formatter.write_str("it is drawn at this size already"),
             Self::FixPictures { found, states } => write!(
@@ -618,13 +594,6 @@ impl fmt::Display for SavedError {
                 window_size,
                 source,
             } => write!(formatter, "at {window_size}, {source}"),
-            Self::TooManyStates => write!(
-                formatter,
-                "its state check has more than {MAX_STATES} states"
-            ),
-            Self::SameStateName(name) => {
-                write!(formatter, "two of its states are named {name:?}")
-            },
             Self::SamePicture(name) => {
                 write!(formatter, "two of its states use the picture {name}")
             },
@@ -652,14 +621,11 @@ impl Error for SavedError {
             Self::EmptyRegion
             | Self::OutsideWindow { .. }
             | Self::PictureSize { .. }
-            | Self::SameColors
-            | Self::NoStates
+            | Self::Check(_)
             | Self::TooManyFixes
             | Self::SameSize
             | Self::FixPictures { .. }
             | Self::FixReference
-            | Self::TooManyStates
-            | Self::SameStateName(_)
             | Self::SamePicture(_)
             | Self::StateName(_)
             | Self::NoReference { .. } => None,
@@ -852,7 +818,10 @@ mod tests {
             OFTEN,
             from(&BTreeMap::new()),
         );
-        assert!(matches!(same, Err(SavedError::SameColors)), "{same:?}");
+        assert!(
+            matches!(same, Err(SavedError::Check(CheckDefError::SameColors))),
+            "{same:?}"
+        );
     }
 
     #[test]
@@ -1025,42 +994,28 @@ mod tests {
             matches!(edge, Err(SavedError::PictureSize { .. })),
             "touching the edge fits, so only the picture is wrong: {edge:?}"
         );
-        assert_eq!(
-            SavedError::SameColors.to_string(),
-            "its bar's filled and empty colors are the same"
-        );
     }
 
     #[test]
-    fn a_state_check_needs_a_few_states_each_named_and_pictured_once() {
+    fn a_state_check_needs_its_file_s_rules_and_each_picture_once() {
         let files = pictures(&[("a.png", &solid(4, RED)), ("b.png", &solid(4, GRAY))]);
         let refused = |states: &[(&str, &str)]| {
-            build(&state_check(states), &[], OFTEN, from(&files))
-                .expect_err("refused")
-                .to_string()
+            build(&state_check(states), &[], OFTEN, from(&files)).expect_err("refused")
         };
-        assert_eq!(refused(&[]), "its state check has no state");
-        let many: Vec<(String, String)> = (0..=MAX_STATES)
-            .map(|state| (format!("State {state}"), "a.png".to_owned()))
-            .collect();
-        let many: Vec<(&str, &str)> = many
-            .iter()
-            .map(|(name, image)| (name.as_str(), image.as_str()))
-            .collect();
-        assert_eq!(
-            refused(&many),
-            format!("its state check has more than {MAX_STATES} states")
+        let same = refused(&[("Paused", "a.png"), ("paused", "b.png")]);
+        assert!(
+            matches!(
+                &same,
+                SavedError::Check(CheckDefError::SameStateName(name)) if name == "paused"
+            ),
+            "{same:?}"
         );
-        let most = many.get(..MAX_STATES).expect("one more than the most");
-        assert_eq!(
-            refused(most),
-            "two of its states use the picture a.png",
-            "the most states pass the count"
-        );
-        assert_eq!(
-            refused(&[("Paused", "a.png"), ("paused", "b.png")]),
-            "two of its states are named \"paused\""
-        );
+        assert_eq!(same.to_string(), "two of its states are named \"paused\"");
+        assert!(matches!(
+            refused(&[]),
+            SavedError::Check(CheckDefError::NoStates)
+        ));
+        let refused = |states: &[(&str, &str)]| refused(states).to_string();
         assert_eq!(
             refused(&[("Paused", "a.png"), ("Live", "a.png")]),
             "two of its states use the picture a.png"

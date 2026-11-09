@@ -16,10 +16,10 @@ use std::time::Duration;
 
 use appytappy_actions::PlacedClick;
 use appytappy_config::app_file::AppFile;
-use appytappy_config::click::{Click, ClickAt, ClickPicture, InvalidClick};
+use appytappy_config::click::{Click, ClickAt, ClickPicture};
 use appytappy_config::window_match::WindowMatch;
-use appytappy_sources::screen::find::PictureSearch;
-use appytappy_sources::screen::{Capture, Image, Region, Size, grab};
+use appytappy_sources::screen::click::ClickSearch;
+use appytappy_sources::screen::{Capture, Size, grab};
 use appytappy_sources::system::{Bounds, Pick, SessionWindow, System, session_window, shows};
 
 /// How long a picture click waits for the frame it looks in.
@@ -30,9 +30,10 @@ const GRAB_WAIT: Duration = Duration::from_secs(1);
 pub(crate) struct ClickTargets {
     /// Each application clicked in, by ID.
     apps: BTreeMap<String, Target>,
-    /// The search for each click picture, by its file name and tolerance,
-    /// since two clicks may look for one picture with different ones.
-    pictures: BTreeMap<(String, u8), PictureSearch>,
+    /// The search for each click picture, by the whole picture click, since
+    /// two clicks may look for one picture with a different area, press, or
+    /// tolerance.
+    pictures: BTreeMap<ClickPicture, ClickSearch>,
 }
 
 /// An application a click clicks in.
@@ -45,80 +46,30 @@ struct Target {
 }
 
 impl ClickTargets {
-    /// Adds what the clicks among `actions` need: each target in `apps`,
-    /// the saved applications by ID, and each picture, whose bytes
-    /// `picture` reads by file name. Nothing is added when one cannot be.
-    ///
-    /// # Errors
-    ///
-    /// Returns why, as a sentence for the log, when a target is not among
-    /// `apps` or a picture cannot be read, cannot be looked for in its
-    /// area, or has its press outside it.
-    pub(crate) fn add<'action>(
+    /// Adds `apps`, the applications clicks click in, by ID, and
+    /// `pictures`, the search for each picture they look for, as
+    /// `appytappy_sources::automation::Runnable` makes them.
+    pub(crate) fn add<'apps>(
         &mut self,
-        clicks: impl IntoIterator<Item = &'action Click>,
-        apps: &[(&str, &AppFile)],
-        mut picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
-    ) -> Result<(), String> {
-        let mut targets = Vec::new();
-        let mut pictures = Vec::new();
-        for click in clicks {
-            let Some((_, file)) = apps.iter().find(|(id, _)| *id == click.app) else {
-                return Err("the application it clicks in is no longer saved".to_owned());
-            };
+        apps: impl IntoIterator<Item = &'apps (&'apps str, &'apps AppFile)>,
+        pictures: impl IntoIterator<Item = (ClickPicture, ClickSearch)>,
+    ) {
+        for (id, file) in apps {
             let mut window = file.window.to_match();
             // A window taken only because none qualified may be another of
             // the application's windows, where the spot or the picture
             // means something else.
             window.fallback = false;
-            targets.push((
-                click.app.clone(),
+            self.apps.insert(
+                (*id).to_owned(),
                 Target {
                     name: file.name.clone(),
                     window,
                 },
-            ));
-            // Each click's picture is checked against its own area and
-            // press, even when another click looks for the same picture.
-            if let ClickAt::Picture(wanted) = &click.at {
-                let bytes = picture(&wanted.image).map_err(|error| {
-                    format!("its picture {} cannot be read: {error}", wanted.image)
-                })?;
-                pictures.push((
-                    (wanted.image.clone(), wanted.tolerance),
-                    search(wanted, &bytes)?,
-                ));
-            }
+            );
         }
-        self.apps.extend(targets);
         self.pictures.extend(pictures);
-        Ok(())
     }
-
-    /// Adds everything `other` holds.
-    pub(crate) fn merge(&mut self, other: Self) {
-        self.apps.extend(other.apps);
-        self.pictures.extend(other.pictures);
-    }
-}
-
-/// The search for `wanted`'s picture, decoded from `bytes`.
-fn search(wanted: &ClickPicture, bytes: &[u8]) -> Result<PictureSearch, String> {
-    let name = &wanted.image;
-    let (image, mask) = Image::decode_png_masked(bytes)
-        .map_err(|error| format!("its picture {name} cannot be read: {error}"))?;
-    let size = image.size();
-    wanted
-        .fits_picture(size.width, size.height)
-        .map_err(|misfit| {
-            if misfit == InvalidClick::PressOutside {
-                format!("the place it presses lies outside its picture {name}")
-            } else {
-                format!("its picture {name} is larger than the area it is looked for in")
-            }
-        })?;
-    PictureSearch::new(image, mask.as_ref(), wanted.tolerance)
-        .map_err(|error| format!("its picture {name} cannot be used: {error}"))
 }
 
 /// Where `click` lands on the screen now, from `targets`, or why it does
@@ -136,7 +87,7 @@ pub(crate) fn place<S: System + Capture>(
     let target = targets
         .apps
         .get(&click.app)
-        .ok_or_else(|| "the application it clicks in is no longer saved".to_owned())?;
+        .ok_or_else(|| format!("the application {} it clicks in was not loaded", click.app))?;
     let name = &target.name;
     let failed = |error: io::Error| format!("{name}'s window cannot be found: {error}");
     let SessionWindow {
@@ -165,12 +116,9 @@ pub(crate) fn place<S: System + Capture>(
         ClickAt::Picture(wanted) => {
             let search = targets
                 .pictures
-                .get(&(wanted.image.clone(), wanted.tolerance))
+                .get(wanted)
                 .ok_or_else(|| format!("its picture {} was not loaded", wanted.image))?;
-            let taken = Size {
-                width: wanted.window_width,
-                height: wanted.window_height,
-            };
+            let taken = search.taken();
             let other_size = |size: Size| {
                 format!(
                     "{name}'s window is {}x{}, but its picture was taken at {}x{}",
@@ -180,16 +128,13 @@ pub(crate) fn place<S: System + Capture>(
             if size != taken {
                 return Err(other_size(size));
             }
-            let area = wanted.search;
-            let region = Region::new(area.x, area.y, area.width, area.height)
-                .ok_or_else(|| "its area is empty".to_owned())?;
-            let (frame_size, image) = grab(screen, window.handle, region, GRAB_WAIT)
+            let (frame_size, image) = grab(screen, window.handle, search.area(), GRAB_WAIT)
                 .map_err(|error| format!("{name}'s window cannot be captured: {error}"))?;
             if frame_size != taken {
                 return Err(other_size(frame_size));
             }
-            let found = search
-                .find(&image)
+            let landing = search
+                .locate(&image)
                 .ok_or_else(|| format!("its picture was not found in {name}'s window"))?;
             // The grab and the search take a moment, and a window that
             // moved meanwhile would put the click off by as much.
@@ -198,16 +143,7 @@ pub(crate) fn place<S: System + Capture>(
                     "{name}'s window moved while its picture was looked for"
                 ));
             }
-            let (press_x, press_y) = wanted.press;
-            area.x
-                .checked_add(found.x)
-                .and_then(|x| x.checked_add(press_x))
-                .zip(
-                    area.y
-                        .checked_add(found.y)
-                        .and_then(|y| y.checked_add(press_y)),
-                )
-                .ok_or_else(|| format!("its picture's place lies outside {name}'s window"))?
+            (landing.x, landing.y)
         },
     };
     let at = on_screen(bounds, x, y)
@@ -244,7 +180,7 @@ mod tests {
         AntiCheatDef, BuildDef, FORMAT, FallbackDef, MustMatchDef, SizeChangesDef, WindowDef,
     };
     use appytappy_config::click::{Area, ClickButton, Corner, Spot};
-    use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler};
+    use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Region};
     use appytappy_sources::system::{ProcessEntry, Rgb, WindowEntry, WindowPlace};
     use std::sync::mpsc;
     use std::time::Instant;
@@ -452,23 +388,26 @@ mod tests {
         }
     }
 
-    fn targets(clicks: &[Click]) -> Result<ClickTargets, String> {
+    /// What placing `clicks` in `Target App` needs, each picture being
+    /// [`patch_png`].
+    fn targets(clicks: &[Click]) -> ClickTargets {
         let file = app_file("Target App");
+        let pictures = clicks.iter().filter_map(|click| match &click.at {
+            ClickAt::Picture(wanted) => Some((
+                wanted.clone(),
+                ClickSearch::new(wanted, &patch_png()).unwrap(),
+            )),
+            ClickAt::Spot(_) => None,
+        });
         let mut targets = ClickTargets::default();
-        targets.add(clicks, &[("target", &file)], |name| {
-            if name == "patch-1.png" {
-                Ok(patch_png())
-            } else {
-                Err(io::Error::from(io::ErrorKind::NotFound))
-            }
-        })?;
-        Ok(targets)
+        targets.add(&[("target", &file)], pictures);
+        targets
     }
 
     #[test]
     fn a_spot_lands_from_its_corner_of_the_window_s_frame() {
         let click = spot(Corner::BottomRight, 10, 5);
-        let targets = targets(std::slice::from_ref(&click)).unwrap();
+        let targets = targets(std::slice::from_ref(&click));
         let placed = place(&Screen::new(), &click, &targets).unwrap();
         assert_eq!(
             placed,
@@ -486,7 +425,7 @@ mod tests {
     #[test]
     fn a_picture_lands_where_it_is_found_in_its_area() {
         let click = picture((200, 100), area(100, 40, 100, 60), (3, 1));
-        let targets = targets(std::slice::from_ref(&click)).unwrap();
+        let targets = targets(std::slice::from_ref(&click));
         let placed = place(&Screen::new(), &click, &targets).unwrap();
         assert_eq!(placed.at, (1153, 561));
         assert_eq!(placed.button, ClickButton::Double);
@@ -496,7 +435,8 @@ mod tests {
     #[test]
     fn a_click_is_not_placed_without_its_window_or_its_picture() {
         let click = picture((200, 100), area(100, 40, 100, 60), (0, 0));
-        let targets = targets(std::slice::from_ref(&click)).unwrap();
+        let fits = picture((200, 100), area(100, 40, 100, 59), (0, 0));
+        let targets = targets(&[click.clone(), fits.clone()]);
         let mut hidden = Screen::new();
         hidden.shown = false;
         assert_eq!(
@@ -526,15 +466,14 @@ mod tests {
             .frame
             .crop(Region::new(0, 0, 200, 99).unwrap())
             .unwrap();
-        let fits = picture((200, 100), area(100, 40, 100, 59), (0, 0));
         assert_eq!(
             place(&shrunk, &fits, &targets),
             Err("Target App's window is 200x99, but its picture was taken at 200x100".to_owned())
         );
-        let elsewhere = picture((200, 100), area(0, 0, 100, 60), (0, 0));
+        let unloaded = picture((200, 100), area(0, 0, 100, 60), (0, 0));
         assert_eq!(
-            place(&Screen::new(), &elsewhere, &targets),
-            Err("its picture was not found in Target App's window".to_owned())
+            place(&Screen::new(), &unloaded, &targets),
+            Err("its picture patch-1.png was not loaded".to_owned())
         );
         let other = Click {
             app: "other".to_owned(),
@@ -542,14 +481,14 @@ mod tests {
         };
         assert_eq!(
             place(&Screen::new(), &other, &targets),
-            Err("the application it clicks in is no longer saved".to_owned())
+            Err("the application other it clicks in was not loaded".to_owned())
         );
     }
 
     #[test]
     fn a_picture_is_not_clicked_in_a_window_that_moved_while_it_was_looked_for() {
         let click = picture((200, 100), area(100, 40, 100, 60), (3, 1));
-        let targets = targets(std::slice::from_ref(&click)).unwrap();
+        let targets = targets(std::slice::from_ref(&click));
         let (sender, reads) = mpsc::channel();
         let screen = Screen {
             reads: Some(reads),
@@ -578,12 +517,25 @@ mod tests {
         file.window.must_match.title = true;
         file.window.fallback = FallbackDef::Executable;
         let mut targets = ClickTargets::default();
-        targets
-            .add([&click], &[("target", &file)], |_| Ok(Vec::new()))
-            .unwrap();
+        targets.add(&[("target", &file)], []);
         assert_eq!(
             place(&Screen::new(), &click, &targets),
             Err("Target App has no window open".to_owned())
+        );
+    }
+
+    #[test]
+    fn clicks_sharing_a_picture_each_look_in_their_own_area() {
+        let near = picture((200, 100), area(100, 40, 100, 60), (3, 1));
+        let far = picture((200, 100), area(0, 0, 100, 60), (3, 1));
+        let targets = targets(&[near.clone(), far.clone()]);
+        assert_eq!(
+            place(&Screen::new(), &near, &targets).unwrap().at,
+            (1153, 561)
+        );
+        assert_eq!(
+            place(&Screen::new(), &far, &targets),
+            Err("its picture was not found in Target App's window".to_owned())
         );
     }
 
@@ -594,21 +546,25 @@ mod tests {
         if let ClickAt::Picture(wanted) = &mut loose.at {
             wanted.tolerance = 30;
         }
-        assert_eq!(targets(&[strict.clone(), loose]).unwrap().pictures.len(), 2);
-        let mut outside = strict.clone();
-        if let ClickAt::Picture(wanted) = &mut outside.at {
-            wanted.press = (9, 0);
+        let mut corner = strict.clone();
+        if let ClickAt::Picture(wanted) = &mut corner.at {
+            wanted.press = (0, 0);
         }
-        assert_eq!(
-            targets(&[strict, outside]),
-            Err("the place it presses lies outside its picture patch-1.png".to_owned())
-        );
+        let targets = targets(&[strict.clone(), loose.clone(), corner.clone()]);
+        assert_eq!(targets.pictures.len(), 3);
+        for (click, at) in [
+            (&strict, (1153, 561)),
+            (&loose, (1153, 561)),
+            (&corner, (1150, 560)),
+        ] {
+            assert_eq!(place(&Screen::new(), click, &targets).unwrap().at, at);
+        }
     }
 
     #[test]
     fn a_spot_outside_the_window_is_not_placed() {
         let click = spot(Corner::TopLeft, 200, 0);
-        let targets = targets(std::slice::from_ref(&click)).unwrap();
+        let targets = targets(std::slice::from_ref(&click));
         assert_eq!(
             place(&Screen::new(), &click, &targets),
             Err("its spot lies outside Target App's window".to_owned())
@@ -651,7 +607,7 @@ mod tests {
             }
         }
         let click = spot(Corner::TopLeft, 0, 0);
-        let targets = targets(std::slice::from_ref(&click)).unwrap();
+        let targets = targets(std::slice::from_ref(&click));
         assert_eq!(
             place(&Empty, &click, &targets),
             Err("Target App has no window open".to_owned())
@@ -662,76 +618,6 @@ mod tests {
                 .unwrap_err()
                 .starts_with("Target App's window cannot be found: ")
         );
-    }
-
-    #[test]
-    fn targets_need_their_application_and_a_usable_picture() {
-        let good = picture((200, 100), area(100, 40, 100, 60), (3, 1));
-        assert_eq!(
-            targets(&[spot(Corner::TopLeft, 0, 0), good.clone()])
-                .unwrap()
-                .pictures
-                .len(),
-            1
-        );
-        let missing = Click {
-            app: "other".to_owned(),
-            ..good.clone()
-        };
-        assert_eq!(
-            targets(&[missing]),
-            Err("the application it clicks in is no longer saved".to_owned())
-        );
-        let mut unread = picture((200, 100), area(100, 40, 100, 60), (0, 0));
-        if let ClickAt::Picture(wanted) = &mut unread.at {
-            wanted.image = "gone-1.png".to_owned();
-        }
-        assert!(
-            targets(&[unread])
-                .unwrap_err()
-                .starts_with("its picture gone-1.png cannot be read: ")
-        );
-        assert_eq!(
-            targets(&[picture((200, 100), area(0, 0, 3, 2), (0, 0))]),
-            Err("its picture patch-1.png is larger than the area it is looked for in".to_owned())
-        );
-        assert_eq!(
-            targets(&[picture((200, 100), area(0, 0, 4, 1), (0, 0))]),
-            Err("its picture patch-1.png is larger than the area it is looked for in".to_owned())
-        );
-        assert!(
-            targets(&[picture((200, 100), area(0, 0, 4, 2), (3, 1))]).is_ok(),
-            "a picture as large as its area, pressed at its last pixel, is looked for"
-        );
-        for press in [(4, 0), (0, 2)] {
-            assert_eq!(
-                targets(&[picture((200, 100), area(0, 0, 10, 10), press)]),
-                Err("the place it presses lies outside its picture patch-1.png".to_owned()),
-                "{press:?}"
-            );
-        }
-        let file = app_file("Target App");
-        let mut failed = ClickTargets::default();
-        let spot = spot(Corner::TopLeft, 0, 0);
-        assert!(
-            failed
-                .add([&spot, &missing_picture()], &[("target", &file)], |_| Err(
-                    io::Error::from(io::ErrorKind::NotFound)
-                ))
-                .is_err()
-        );
-        assert_eq!(failed, ClickTargets::default(), "nothing is added");
-        let broken = |_: &str| Ok(b"not a png".to_vec());
-        assert!(
-            ClickTargets::default()
-                .add([&good], &[("target", &file)], broken)
-                .unwrap_err()
-                .starts_with("its picture patch-1.png cannot be read: ")
-        );
-    }
-
-    fn missing_picture() -> Click {
-        picture((200, 100), area(100, 40, 100, 60), (0, 0))
     }
 
     #[test]
