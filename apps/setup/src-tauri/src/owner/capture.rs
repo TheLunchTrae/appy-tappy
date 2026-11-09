@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use appytappy_config::app_file::WindowDef;
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
+use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::check_spec::{self, CheckSpec, RegionCheck};
 use crate::pixels;
@@ -49,9 +50,15 @@ fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
 impl<H: Host> Owner<H> {
     /// Lists the windows the user can pick.
     pub(crate) fn window_list(&self) -> Result<WindowList, String> {
+        let (processes, windows) = self.desktop()?;
+        Ok(window_list::list(windows, &processes, self.own_process))
+    }
+
+    /// Every running process and top-level window.
+    pub(super) fn desktop(&self) -> Result<(Vec<ProcessEntry>, Vec<WindowEntry>), String> {
         let windows = self.host.windows().map_err(|error| error.to_string())?;
         let processes = self.host.processes().map_err(|error| error.to_string())?;
-        Ok(window_list::list(windows, &processes, self.own_process))
+        Ok((processes, windows))
     }
 
     /// Stops the capture and forgets its frames, screenshots, recording, and
@@ -210,10 +217,26 @@ impl<H: Host> Owner<H> {
         Ok(())
     }
 
-    /// The running windows that `window` matches, the best fit first.
+    /// The running windows that `window` matches, the one a new session
+    /// would read first.
     pub(crate) fn match_windows(&self, window: &WindowDef) -> Result<Vec<WindowFit>, String> {
-        self.window_list()
-            .map(|list| window_list::matching(&list.windows, window))
+        let (processes, windows) = self.desktop()?;
+        let read = self
+            .host
+            .read_window(&window.to_match(), processes.clone(), windows.clone())
+            .map(|read| read.entry.handle);
+        let list = window_list::list(windows, &processes, self.own_process);
+        Ok(window_list::matching(&list.windows, window, read))
+    }
+
+    /// The window a new session would read for `window`, or `None` while
+    /// none fits.
+    pub(crate) fn read_window(&self, window: &WindowDef) -> Result<Option<u64>, String> {
+        let (processes, windows) = self.desktop()?;
+        Ok(self
+            .host
+            .read_window(&window.to_match(), processes, windows)
+            .map(|read| read.entry.handle))
     }
 }
 
@@ -465,6 +488,43 @@ mod tests {
                 fallback: false,
                 best: true
             }])
+        );
+        assert_eq!(harness.ask(|owner| owner.read_window(&window)), Ok(Some(7)));
+        let elsewhere = WindowDef {
+            executable: "Other.exe".to_owned(),
+            ..window.clone()
+        };
+        assert_eq!(harness.ask(|owner| owner.read_window(&elsewhere)), Ok(None));
+        harness.owner.host.unlisted = true;
+        assert!(harness.ask(|owner| owner.read_window(&window)).is_err());
+    }
+
+    #[test]
+    fn the_window_marked_best_is_the_one_the_runtime_reads() {
+        let mut harness = harness(false);
+        // Window 6 of another copy fits as well and is listed first, but it
+        // is minimized, so the runtime reads window 7.
+        harness.owner.host.twin = Some(40);
+        let window = WindowDef::exact(appytappy_config::window_match::WindowFacts {
+            title: "Example App",
+            class: "ExampleWindow",
+            executable: "Example.exe",
+        });
+        let fit = |handle, best| WindowFit {
+            handle,
+            fallback: false,
+            best,
+        };
+        assert_eq!(
+            harness.ask(|owner| owner.match_windows(&window)),
+            Ok(vec![fit(7, true), fit(6, false)])
+        );
+        assert_eq!(harness.ask(|owner| owner.read_window(&window)), Ok(Some(7)));
+        harness.owner.host.minimized = true;
+        assert_eq!(
+            harness.ask(|owner| owner.match_windows(&window)),
+            Ok(vec![fit(6, true), fit(7, false)]),
+            "neither shows, so the first listed"
         );
     }
 

@@ -29,7 +29,7 @@ use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{
     CaptureSession, Crop, Frame, FrameHandler, Layout, OutsideWindow, Region, Size,
 };
-use appytappy_sources::system::{WindowPlace, best_window};
+use appytappy_sources::system::WindowPlace;
 use serde::Serialize;
 
 use crate::owner::{Host, Message, Reading};
@@ -596,7 +596,9 @@ fn start<H: Host>(
     };
     let processes = host.processes().map_err(|error| error.to_string())?;
     let windows = host.windows().map_err(|error| error.to_string())?;
-    let window = best_window(&overlay.window_match, processes, windows)
+    let window = host
+        .read_window(&overlay.window_match, processes, windows)
+        .map(|read| read.entry.handle)
         .ok_or_else(|| format!("Open {} to see its values.", overlay.name))?;
     let messages = messages.clone();
     let app = app.to_owned();

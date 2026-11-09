@@ -4,6 +4,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{
     AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, value_id,
 };
@@ -13,7 +14,7 @@ use crate::applications::{self, AppSpec};
 use crate::automations;
 use crate::check_spec::{self, Pictures};
 use crate::stores::SavedApp;
-use crate::window_list::{self, WindowChoice};
+use crate::window_list;
 
 use super::host::Host;
 use super::messages::{AppSummary, SaveSpec, SavedValue};
@@ -29,24 +30,38 @@ impl<H: Host> Owner<H> {
             .map_err(|error| error.to_string())?;
         // The saved files read fine without the running windows, so a
         // failed window listing only leaves each one's windows empty.
-        let windows = self
-            .window_list()
-            .map(|list| list.windows)
-            .unwrap_or_default();
-        // A process that has gone may give its ID to another build.
-        self.builds
-            .retain(|process, _| windows.iter().any(|window| window.process == *process));
-        Ok(stored
+        let (processes, all) = self.desktop().unwrap_or_default();
+        let windows = window_list::list(all.clone(), &processes, self.own_process).windows;
+        // Each application with the window a new session would read for it.
+        let apps: Vec<_> = stored
             .into_iter()
             .map(|app| {
                 let (file, error) = match app.file {
                     Ok(file) => (Some(file), None),
                     Err(error) => (None, Some(error)),
                 };
+                let read = file.as_ref().and_then(|file| {
+                    self.host
+                        .read_window(&file.window.to_match(), processes.clone(), all.clone())
+                });
+                (app.id, file, error, read)
+            })
+            .collect();
+        // A process that has gone may give its ID to another build.
+        self.builds.retain(|process, _| {
+            apps.iter().any(|(_, _, _, read)| {
+                read.as_ref()
+                    .is_some_and(|read| read.entry.process == *process)
+            })
+        });
+        Ok(apps
+            .into_iter()
+            .map(|(id, file, error, read)| {
                 let matched: Vec<u64> = file
                     .as_ref()
                     .map(|file| {
-                        window_list::matching(&windows, &file.window)
+                        let handle = read.as_ref().map(|read| read.entry.handle);
+                        window_list::matching(&windows, &file.window, handle)
                             .into_iter()
                             .map(|fit| fit.handle)
                             .collect()
@@ -57,9 +72,13 @@ impl<H: Host> Owner<H> {
                 let running = file
                     .as_ref()
                     .filter(|file| !file.values.is_empty())
-                    .and_then(|_| self.build_of(&windows, &matched).ok().flatten());
+                    .and_then(|_| {
+                        self.build_of(read.map(|read| read.entry.process))
+                            .ok()
+                            .flatten()
+                    });
                 AppSummary {
-                    id: app.id,
+                    id,
                     file,
                     error,
                     windows: matched,
@@ -131,30 +150,20 @@ impl<H: Host> Owner<H> {
         .map(|saved| saved.answer)
     }
 
-    /// The build that the best fit for `file`'s window runs, or `None`
-    /// while no window fits.
+    /// The build that the window a new session would read for `file` runs,
+    /// or `None` while no window fits.
     fn running_build(&mut self, file: &AppFile) -> Result<Option<BuildDef>, String> {
-        let windows = self.window_list()?.windows;
-        let matched: Vec<u64> = window_list::matching(&windows, &file.window)
-            .into_iter()
-            .map(|fit| fit.handle)
-            .collect();
-        self.build_of(&windows, &matched)
+        let (processes, windows) = self.desktop()?;
+        let read = self
+            .host
+            .read_window(&file.window.to_match(), processes, windows);
+        self.build_of(read.map(|read| read.entry.process))
     }
 
-    /// The build of the first of `matched`, which name windows of `windows`.
-    /// A build read once is kept for its process, and a failed read is tried
-    /// again next time.
-    fn build_of(
-        &mut self,
-        windows: &[WindowChoice],
-        matched: &[u64],
-    ) -> Result<Option<BuildDef>, String> {
-        let Some(process) = matched
-            .first()
-            .and_then(|&handle| windows.iter().find(|window| window.handle == handle))
-            .map(|window| window.process)
-        else {
+    /// The build of `process`, or `None` without one. A build read once is
+    /// kept for its process, and a failed read is tried again next time.
+    fn build_of(&mut self, process: Option<ProcessId>) -> Result<Option<BuildDef>, String> {
+        let Some(process) = process else {
             return Ok(None);
         };
         if let Some(build) = self.builds.get(&process) {

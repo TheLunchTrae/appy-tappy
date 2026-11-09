@@ -7,9 +7,12 @@ use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::HostSystem;
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
-use appytappy_sources::system::{ProcessEntry, System, WindowEntry, WindowPlace};
+use appytappy_sources::system::{
+    Pick, ProcessEntry, SessionWindow, System, WindowEntry, WindowPlace, session_window, shows,
+};
 use tauri::{AppHandle, Runtime, Wry};
 
 use crate::overlay::{self, OverlayWindow};
@@ -42,6 +45,19 @@ pub(crate) trait Host: 'static {
     ///
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
+
+    /// The window among `processes` and `windows` that a new session would
+    /// read for `window`, the one [`session_window`] picks.
+    fn read_window(
+        &self,
+        window: &WindowMatch,
+        processes: Vec<ProcessEntry>,
+        windows: Vec<WindowEntry>,
+    ) -> Option<SessionWindow> {
+        session_window(window, Pick::Any, processes, windows, |handle| {
+            shows(self.window_place(handle))
+        })
+    }
 
     /// The build of `process`'s executable, read without opening it.
     ///

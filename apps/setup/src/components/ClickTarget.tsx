@@ -5,8 +5,8 @@ import {
   clickPicture,
   errorText,
   findClick,
-  matchWindows,
   pickWindow,
+  readWindow,
   select,
   stopCapture,
 } from '../lib/api.ts';
@@ -200,7 +200,7 @@ function TargetStage({
     latestFile.current = file;
   });
 
-  // Picks the best window the application's rules take, never one taken only as a fallback, as the runtime does.
+  // Picks the window the runtime clicks in, which it finds by the application's rules without the fallback.
   useEffect(() => {
     let current = true;
     // A function, because the check after an await must see a cleanup made meanwhile.
@@ -214,9 +214,8 @@ function TargetStage({
     background(
       (async (): Promise<void> => {
         try {
-          const fits = await matchWindows({ ...file.window, fallback: 'none' });
-          const best = fits.find((candidate) => !candidate.fallback);
-          if (best === undefined) {
+          const read = await readWindow({ ...file.window, fallback: 'none' });
+          if (read === null) {
             if (isCurrent()) {
               setWindow({
                 kind: 'missing',
@@ -229,7 +228,7 @@ function TargetStage({
           if (!isCurrent()) {
             return;
           }
-          await pickWindow(best.handle);
+          await pickWindow(read);
           if (isCurrent()) {
             setWindow({ kind: 'picked' });
           }
