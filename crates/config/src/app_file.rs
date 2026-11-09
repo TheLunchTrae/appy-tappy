@@ -9,7 +9,7 @@
 //!
 //! [`AppFile::parse`] checks the rules for the file as a whole: names, IDs,
 //! picture file names, references, the window match, and each check's states
-//! and colors. Whether each value can be read is up to `saved::build` in
+//! and bar colors. Whether each value can be read is up to `saved::build` in
 //! `appytappy-sources`, which reads the pictures the file names, so a value
 //! that cannot be read stops only itself.
 
@@ -713,8 +713,7 @@ impl CheckDef {
     }
 
     /// Checks the rules the check's own settings can break: a state check's
-    /// states, as [`check_states`] says, and a bar's colors, as
-    /// [`check_bar`] says.
+    /// states, as [`check_states`] says, and that a bar's two colors differ.
     ///
     /// # Errors
     ///
@@ -756,11 +755,7 @@ pub fn check_states(names: &[&str]) -> Result<(), CheckDefError> {
 
 /// Checks that a bar's `filled` and `empty` colors differ, so its fill can
 /// be told.
-///
-/// # Errors
-///
-/// Returns [`CheckDefError::SameColors`] when they are the same.
-pub fn check_bar(filled: ColorDef, empty: ColorDef) -> Result<(), CheckDefError> {
+fn check_bar(filled: ColorDef, empty: ColorDef) -> Result<(), CheckDefError> {
     if filled == empty {
         Err(CheckDefError::SameColors)
     } else {

@@ -9,8 +9,8 @@
 //! it is saved.
 
 use appytappy_config::app_file::{
-    CheckDef, CheckDefError, ColorDef, ReferenceDef, RegionDef, SampleDef, StateDef, check_bar,
-    check_states, sample_name, state_image_name,
+    CheckDef, CheckDefError, ColorDef, ReferenceDef, RegionDef, SampleDef, StateDef, check_states,
+    sample_name, state_image_name,
 };
 use appytappy_config::signal::StateName;
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
@@ -499,15 +499,11 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
                 whole: false,
             }
         },
-        CheckSpec::BarFill { filled, empty, .. } => {
-            check_bar((*filled).into(), (*empty).into()).map_err(SpecError::Check)?;
-            // `check_bar` refused the same colors, the one thing
-            // `BarFill::new` refuses.
-            Check::BarFill(
-                BarFill::new((*filled).into(), (*empty).into())
-                    .map_err(|_same| SpecError::Check(CheckDefError::SameColors))?,
-            )
-        },
+        // `BarFill::new` refuses the same colors, as `CheckDef::check` does.
+        CheckSpec::BarFill { filled, empty, .. } => Check::BarFill(
+            BarFill::new((*filled).into(), (*empty).into())
+                .map_err(|_same| SpecError::Check(CheckDefError::SameColors))?,
+        ),
         CheckSpec::Color {
             color, tolerance, ..
         } => Check::Color(ColorMatch {

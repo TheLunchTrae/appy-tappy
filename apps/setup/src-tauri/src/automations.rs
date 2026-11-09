@@ -567,9 +567,14 @@ mod tests {
         );
         assert!(!list(&stores).expect("lists")[0].automation.enabled);
         fs::write(folder.join("apps").join("example").join("app.json"), b"{").expect("breaks");
-        assert_eq!(
-            list(&stores).expect("lists")[0].problem.as_deref(),
-            Some("Its application's app.json, in the example folder, cannot be read.")
+        let broken = "Its application's app.json, in the example folder, cannot be read: the file \
+                      is not valid: ";
+        let problem = list(&stores).expect("lists")[0].problem.clone();
+        assert!(
+            problem
+                .as_deref()
+                .is_some_and(|problem| problem.starts_with(broken)),
+            "{problem:?}"
         );
         fs::remove_dir_all(folder).expect("clean up");
     }

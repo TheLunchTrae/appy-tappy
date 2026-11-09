@@ -570,7 +570,7 @@ mod tests {
             plan.problems,
             [
                 "Automation gone cannot run: its application is no longer saved",
-                "Automation broken cannot run: its application's app.json, in the broken folder, cannot be read",
+                "Automation broken cannot run: its application's app.json, in the broken folder, cannot be read: not JSON",
                 "Automation missing cannot run: Example App no longer has the value it watches",
                 "Automation kind cannot run: The progress reads a number, so compare it with a number",
                 "Automation picture cannot run: The icon of Example App: its picture icon.png cannot be read",

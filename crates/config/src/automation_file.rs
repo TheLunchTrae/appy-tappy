@@ -496,9 +496,9 @@ impl AutomationDef {
         let Some(stored) = apps.iter().find(|app| app.id == self.when.app) else {
             return Err("its application is no longer saved".to_owned());
         };
-        let app = stored.file.as_ref().map_err(|_error| {
+        let app = stored.file.as_ref().map_err(|error| {
             format!(
-                "its application's app.json, in the {} folder, cannot be read",
+                "its application's app.json, in the {} folder, cannot be read: {error}",
                 stored.id
             )
         })?;
@@ -534,10 +534,10 @@ impl AutomationDef {
             let Some(target) = apps.iter().find(|app| app.id == click.app) else {
                 return Err("the application it clicks in is no longer saved".to_owned());
             };
-            let target = target.file.as_ref().map_err(|_error| {
+            let target = target.file.as_ref().map_err(|error| {
                 format!(
                     "the app.json of the application it clicks in, in the {} folder, cannot be \
-                     read",
+                     read: {error}",
                     target.id
                 )
             })?;
@@ -1389,11 +1389,9 @@ mod tests {
             id: "streaming_app".to_owned(),
             file: Err("broken".to_owned()),
         });
-        assert!(
-            click
-                .compile(&unreadable)
-                .is_err_and(|problem| problem.contains("streaming_app folder, cannot be read"))
-        );
+        assert!(click.compile(&unreadable).is_err_and(|problem| {
+            problem.ends_with("streaming_app folder, cannot be read: broken")
+        }));
         click.actions.push(ActionDef::Keys {
             keys: "F9".to_owned(),
         });
@@ -1553,7 +1551,10 @@ mod tests {
             pause_music()
                 .compile(&stored(Err("not JSON".to_owned())))
                 .map(drop),
-            Err("its application's app.json, in the example folder, cannot be read".to_owned())
+            Err(
+                "its application's app.json, in the example folder, cannot be read: not JSON"
+                    .to_owned()
+            )
         );
     }
 
