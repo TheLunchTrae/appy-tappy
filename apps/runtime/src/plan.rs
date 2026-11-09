@@ -3,8 +3,8 @@
 //!
 //! The setup app saves each application's values in its own folder and the
 //! automations in one file. [`load`] reads them and keeps what can run: each
-//! enabled automation that `AutomationDef::compile` accepts becomes a rule,
-//! the same check the setup app's save makes, and each value an automation
+//! enabled automation that [`Runnable::new`] accepts becomes a rule, the
+//! same check the setup app's save makes, and each value an automation
 //! watches becomes a ready check. An application is watched only when at
 //! least one of its automations can run. Whatever cannot run is named in
 //! [`Plan::problems`] for the log, and the rest still runs. Only a store that
@@ -15,14 +15,14 @@ use std::fs;
 use std::io;
 use std::sync::Arc;
 
-use appytappy_config::action::Action;
 use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_config::automation_file::{AutomationsFile, Compiled};
 use appytappy_config::rule::Rule;
 use appytappy_config::signal::SignalName;
-use appytappy_config::store::{AppStore, AutomationStore, StoredApp};
+use appytappy_config::store::{APP_FILE, AppStore, AutomationStore, StoredApp};
 use appytappy_config::window_match::WindowMatch;
-use appytappy_sources::screen::saved::{self, SavedValue};
+use appytappy_sources::automation::Runnable;
+use appytappy_sources::screen::saved::SavedValue;
 
 use crate::click::ClickTargets;
 use crate::lifecycle::Watchlist;
@@ -142,10 +142,12 @@ struct Draft<'apps> {
     clicks: ClickTargets,
 }
 
-/// Compiles `automations` against the saved applications `apps`. `picture`
-/// returns the bytes of a picture in an application's folder, given the
-/// application's ID and the picture's file name, and `click_picture` the
-/// bytes of a click picture, given its file name.
+/// Compiles `automations` against the saved applications `apps`, each
+/// enabled one through [`Runnable::new`]. An application whose file does not
+/// read is named in the problems. `picture` returns the bytes of a picture
+/// in an application's folder, given the application's ID and the picture's
+/// file name, and `click_picture` the bytes of a click picture, given its
+/// file name.
 pub(crate) fn compile(
     apps: &[StoredApp],
     automations: &AutomationsFile,
@@ -153,46 +155,42 @@ pub(crate) fn compile(
     mut click_picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
 ) -> Plan {
     let mut drafts: BTreeMap<&str, Draft<'_>> = BTreeMap::new();
-    // Each value's check is built once, however many automations watch it.
-    let mut built: BTreeMap<(&str, &str), Result<(), String>> = BTreeMap::new();
     let mut problems = Vec::new();
-    // The applications whose files read, which clicks find their targets in.
-    let readable: Vec<(&str, &AppFile)> = apps
-        .iter()
-        .filter_map(|app| app.file.as_ref().ok().map(|file| (app.id.as_str(), file)))
-        .collect();
+    // The applications whose files read, which automations run in.
+    let mut readable: Vec<(&str, &AppFile)> = Vec::new();
+    for app in apps {
+        match &app.file {
+            Ok(file) => readable.push((&app.id, file)),
+            Err(error) => problems.push(format!(
+                "the {APP_FILE} in the {} folder cannot be read: {error}",
+                app.id
+            )),
+        }
+    }
     for automation in automations
         .automations
         .iter()
         .filter(|automation| automation.enabled)
     {
-        let mut problem = |problem: &str| {
-            problems.push(format!("{} cannot run: {problem}", automation.name));
-        };
-        let Compiled {
-            rule,
-            signal,
-            app_id,
-            app,
-            value,
-        } = match automation.compile(apps) {
-            Ok(compiled) => compiled,
-            Err(reason) => {
-                problem(&reason);
+        let Runnable {
+            compiled:
+                Compiled {
+                    rule,
+                    signal,
+                    app_id,
+                    app,
+                    value,
+                    targets,
+                },
+            check,
+            pictures,
+        } = match Runnable::new(automation, &readable, &mut picture, &mut click_picture) {
+            Ok(runnable) => runnable,
+            Err(problem) => {
+                problems.push(format!("{} cannot run: {problem}", automation.name));
                 continue;
             },
         };
-        // The clicks are checked before the value is built, so one that
-        // cannot run adds no value check for the runtime to read.
-        let mut clicks = ClickTargets::default();
-        let wanted = rule.actions().iter().filter_map(|action| match action {
-            Action::Click(click) => Some(click),
-            _ => None,
-        });
-        if let Err(reason) = clicks.add(wanted, &readable, &mut click_picture) {
-            problem(&reason);
-            continue;
-        }
         let draft = drafts.entry(app_id).or_insert_with(|| Draft {
             file: app,
             values: Vec::new(),
@@ -201,28 +199,17 @@ pub(crate) fn compile(
             automations: Vec::new(),
             clicks: ClickTargets::default(),
         });
-        let ready = built.entry((app_id, value.id.as_str())).or_insert_with(|| {
-            let check = saved::build(&value.screen, &app.references, app.size_changes, |name| {
-                picture(app_id, name)
-            })
-            .map_err(|error| format!("{} of {}: {error}", value.name, app.name))?;
+        // Each value is read once, however many automations watch it.
+        if !draft.values.iter().any(|known| known.signal == signal) {
             draft.values.push(ValuePlan { signal, check });
             draft.value_names.push(value.name.clone());
-            Ok(())
-        });
-        if let Err(reason) = ready {
-            problem(reason);
-            continue;
         }
-        // Kept only once the value check is built too, so a rejected
-        // automation leaves neither a click target nor a value check behind.
-        draft.clicks.merge(clicks);
+        draft.clicks.add(&targets, pictures);
         draft.rules.push(rule);
         draft.automations.push(automation.name.clone());
     }
     let apps = drafts
         .into_iter()
-        .filter(|(_, draft)| !draft.rules.is_empty())
         .map(|(id, draft)| {
             let file = draft.file;
             let plan = AppPlan {
@@ -569,8 +556,11 @@ mod tests {
         assert_eq!(
             plan.problems,
             [
-                "Automation gone cannot run: its application is no longer saved",
-                "Automation broken cannot run: its application's app.json, in the broken folder, cannot be read",
+                "the app.json in the broken folder cannot be read: not JSON",
+                "Automation gone cannot run: its application removed is no longer saved or cannot \
+                 be read",
+                "Automation broken cannot run: its application broken is no longer saved or \
+                 cannot be read",
                 "Automation missing cannot run: Example App no longer has the value it watches",
                 "Automation kind cannot run: The progress reads a number, so compare it with a number",
                 "Automation picture cannot run: The icon of Example App: its picture icon.png cannot be read",
@@ -617,6 +607,8 @@ mod tests {
     #[test]
     fn clicks_keep_their_targets_and_pictures() {
         use appytappy_config::automation_file::{ClickAtDef, ClickButtonDef, CornerDef, PointDef};
+        use appytappy_config::click::ClickAt;
+        use appytappy_sources::screen::click::ClickSearch;
 
         let apps = [
             stored(
@@ -667,7 +659,7 @@ mod tests {
         .encode_png()
         .expect("encodes");
         let automations = file(vec![
-            click("spot", spot.clone()),
+            click("spot", spot),
             click("picture", picture("button-1.png")),
             click("missing", picture("gone-1.png")),
         ]);
@@ -696,27 +688,11 @@ mod tests {
         );
         let mut expected = ClickTargets::default();
         let target = app("Target App", Vec::new());
-        let at = |at: ClickAtDef| {
-            ActionDef::Click {
-                app: "target".to_owned(),
-                button: ClickButtonDef::Left,
-                return_focus: true,
-                at,
-            }
-            .to_action()
-            .expect("valid")
+        let Ok(ClickAt::Picture(wanted)) = picture("button-1.png").to_at() else {
+            panic!("a picture click");
         };
-        let clicks: Vec<Action> = vec![at(spot), at(picture("button-1.png"))];
-        expected
-            .add(
-                clicks.iter().filter_map(|action| match action {
-                    Action::Click(click) => Some(click),
-                    _ => None,
-                }),
-                &[("target", &target)],
-                |_| Ok(png.clone()),
-            )
-            .expect("adds");
+        let search = ClickSearch::new(&wanted, &png).expect("fits");
+        expected.add(&[("target", &target)], [(wanted, search)]);
         assert_eq!(*example.runs.clicks, expected);
 
         let only_missing = file(vec![click("missing", picture("gone-1.png"))]);

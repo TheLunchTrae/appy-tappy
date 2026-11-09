@@ -123,6 +123,21 @@ impl StateName {
         }
     }
 
+    /// Validates `name`, the state an automation compares a value with:
+    /// a state's name, or [`NO_STATE`] for none of them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidStateName`] naming the rule `name` breaks, as
+    /// [`Self::new`] does.
+    pub fn target(name: &str) -> Result<Self, InvalidStateName> {
+        if name == NO_STATE {
+            Ok(Self::none())
+        } else {
+            Self::new(name)
+        }
+    }
+
     /// The name [`NO_STATE`], read when the region looks like none of the
     /// states.
     #[must_use]
@@ -230,6 +245,22 @@ mod tests {
         }
         assert_eq!(StateName::none().as_str(), NO_STATE);
         assert_eq!(StateName::none().to_string(), "none");
+    }
+
+    #[test]
+    fn a_target_state_is_a_state_s_name_or_none() {
+        assert_eq!(StateName::target(NO_STATE), Ok(StateName::none()));
+        assert_eq!(
+            StateName::target("Paused").map(|name| name.to_string()),
+            Ok("Paused".to_owned())
+        );
+        for invalid in ["None", " "] {
+            assert_eq!(
+                StateName::target(invalid),
+                StateName::new(invalid),
+                "{invalid:?}"
+            );
+        }
     }
 
     #[test]
