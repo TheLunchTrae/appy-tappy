@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { LIMITS } from '../src/lib/bindings.ts';
-import { middle, placeSpot, searchArea, spotAt, targetSummary } from '../src/lib/click.ts';
+import { SEARCH_SIDE, middle, placeSpot, searchArea, spotAt, targetSummary } from '../src/lib/click.ts';
 
 const window = { width: 1280, height: 720 };
 
@@ -50,6 +50,10 @@ describe('search areas', () => {
     expect((area?.width ?? 0) * (area?.height ?? 0)).toBeLessThanOrEqual(LIMITS.maxSearchPixels);
     expect(area).toEqual({ x: 190, y: 190, width: 400, height: 400 });
     expect(searchArea({ x: 0, y: 0, width: 401, height: 400 }, window)).toBeNull();
+  });
+
+  test('can be a square, as the hint that names its largest side says', () => {
+    expect(SEARCH_SIDE * SEARCH_SIDE).toBe(LIMITS.maxSearchPixels);
   });
 });
 

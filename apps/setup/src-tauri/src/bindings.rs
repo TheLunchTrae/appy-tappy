@@ -38,7 +38,9 @@ use appytappy_config::action::{
     AppName, KeyChord, MAX_APP_NAME_LEN, MAX_FUNCTION_KEY, MAX_TARGET_LEN, Modifier, NAMED_KEYS,
     OpenTarget, SoundFile,
 };
-use appytappy_config::app_file::{AntiCheatDef, MAX_STATES, OverlayModeDef, WindowDef};
+use appytappy_config::app_file::{
+    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
+};
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, CornerDef, MAX_COOLDOWN_MS,
     MediaCommandDef, WhenDef,
@@ -181,7 +183,8 @@ fn commands(cfg: &Config) -> Vec<Command> {
 
 /// The names of the parameters `module`'s command `name` takes after its
 /// app handle, as its source spells them, which Tauri reads its arguments
-/// by.
+/// by. The command must be a plain `#[tauri::command]`, since an attribute
+/// such as `rename_all` changes the keys Tauri reads.
 fn parameters(module: &str, name: &str) -> Vec<String> {
     let file = source().join("src").join(format!("{module}.rs"));
     let text = fs::read_to_string(&file).expect("the command's module can be read");
@@ -191,7 +194,20 @@ fn parameters(module: &str, name: &str) -> Vec<String> {
         1,
         "{module}.rs should define the command {name} once"
     );
-    let (_before, rest) = text.split_once(&opening).expect("counted once");
+    let (before, rest) = text.split_once(&opening).expect("counted once");
+    let (attributes, _visibility) = before
+        .rsplit_once('\n')
+        .expect("the command starts a line of its own");
+    let attribute = attributes
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| *line != "#[mutants::skip]");
+    assert_eq!(
+        attribute,
+        Some("#[tauri::command]"),
+        "the command {name} should be a plain #[tauri::command], so Tauri reads its arguments under camelCase keys"
+    );
     let mut depth = 0_usize;
     let mut parts = vec![String::new()];
     for character in rest.chars() {
@@ -216,7 +232,12 @@ fn parameters(module: &str, name: &str) -> Vec<String> {
         Some("app"),
         "the command {name} takes the app's handle first"
     );
-    names.collect()
+    let names: Vec<String> = names.collect();
+    assert!(
+        names.iter().all(|name| !name.starts_with('_')),
+        "Tauri drops the leading underscore of {name}'s argument key, which the page's key keeps; rename the parameter"
+    );
+    names
 }
 
 /// `snake` in camelCase, as Tauri reads an argument's key and the page
@@ -760,6 +781,48 @@ fn picture_sample() -> serde_json::Value {
     })
 }
 
+/// A whole number type, by its highest value.
+trait Highest {
+    fn highest() -> u64;
+}
+
+impl Highest for u8 {
+    fn highest() -> u64 {
+        u8::MAX.into()
+    }
+}
+
+/// The highest value of the field `read` reads, from the field's own type,
+/// so the limit follows a change of that type.
+fn highest_of<S, T: Highest>(_read: fn(&S) -> Option<&T>) -> u64 {
+    T::highest()
+}
+
+/// The highest tolerance the page offers: a color's, a reference's ink's,
+/// a selection's color match, a state check's, and a click picture's.
+fn max_tolerance() -> u64 {
+    let each = [
+        highest_of(|check: &CheckSpec| match check {
+            CheckSpec::Color { tolerance, .. }
+            | CheckSpec::State { tolerance, .. }
+            | CheckSpec::Characters { tolerance, .. } => Some(tolerance),
+            CheckSpec::Number { .. } | CheckSpec::BarFill { .. } => None,
+        }),
+        highest_of(|reference: &ReferenceDef| Some(&reference.tolerance)),
+        highest_of(|selection: &SelectionSpec| Some(&selection.tolerance)),
+        highest_of(|at: &ClickAtDef| match at {
+            ClickAtDef::Picture { tolerance, .. } => Some(tolerance),
+            ClickAtDef::Spot { .. } => None,
+        }),
+    ];
+    let highest = each.iter().copied().max().expect("four fields");
+    assert!(
+        each.iter().all(|&one| one == highest),
+        "the tolerances differ in range; give the page a limit for each"
+    );
+    highest
+}
+
 /// The limits and facts the page checks a draft against.
 fn constants() -> String {
     let limits = json!({
@@ -771,8 +834,7 @@ fn constants() -> String {
         "maxTraceFiles": MAX_TRACE_FILES,
         "fastestReadMs": FASTEST_READ_MS,
         "slowestReadMs": SLOWEST_READ_MS,
-        // A color's and a click picture's tolerance is a byte.
-        "maxTolerance": u8::MAX,
+        "maxTolerance": max_tolerance(),
         "maxSearchPixels": MAX_SEARCH_PIXELS,
     });
     let shortcut = json!({

@@ -40,12 +40,10 @@ export const REGION_HINT =
   "X and Y are the region's top-left corner, counted in pixels from the window's top-left corner. Drawing on a screenshot fills these in; type here to nudge it.";
 
 /** The tolerance's scale for a check's colors. */
-export const TOLERANCE_HINT =
-  "From 0, an exact match, up to 255, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.";
+export const TOLERANCE_HINT = `From 0, an exact match, up to ${LIMITS.maxTolerance}, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.`;
 
 /** The tolerance's scale for a reference's characters' color. */
-export const INK_TOLERANCE_HINT =
-  'From 0, only the exact color, up to 255, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.';
+export const INK_TOLERANCE_HINT = `From 0, only the exact color, up to ${LIMITS.maxTolerance}, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.`;
 
 /** A bar fill's two colors. */
 export const BAR_COLORS_HINT =

@@ -689,8 +689,8 @@ function TargetStage({
                 <label htmlFor="click-tolerance">How alike it must look</label>
                 <Hint topic="How alike it must look" id="hint-click-tolerance">
                   How far each pixel&apos;s color may be from the picture&apos;s, on average, from 0 for exactly alike
-                  to 255. Raise it if the button changes a little, such as when it&apos;s highlighted. Lower it if a
-                  similar button could be clicked instead.
+                  to {LIMITS.maxTolerance}. Raise it if the button changes a little, such as when it&apos;s highlighted.
+                  Lower it if a similar button could be clicked instead.
                 </Hint>
               </span>
               <div className="range">
