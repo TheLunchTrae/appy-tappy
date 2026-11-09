@@ -897,13 +897,13 @@ mod tests {
         if let [ActionDef::Click { app, .. }] = clicks.actions.as_mut_slice() {
             "target".clone_into(app);
         }
-        let target = stores.app_file("example").expect("saved");
+        let target = stores.app("example").expect("saved").file;
         stores.apps.save("target", &target, &[]).expect("saves");
         let mut file = load(&stores).expect("loads");
         file.automations = vec![clicks];
         stores.automations.save(&file).expect("saves");
         assert_eq!(list(&stores).expect("lists")[0].problem, None);
-        fs::write(folder.join("apps").join("target").join("app.json"), b"{").expect("breaks");
+        fs::write(stores.apps.folder("target").join("app.json"), b"{").expect("breaks");
         let error = stores
             .apps
             .load()
