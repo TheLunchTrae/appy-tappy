@@ -11,7 +11,7 @@ use crate::check_spec::{self, CheckSpec, RegionSpec};
 use super::host::Host;
 use super::messages::{FixSpec, SavedValue};
 use super::values::read_back;
-use super::{Changed, Owner};
+use super::{Changed, Edit, Owner};
 
 impl<H: Host> Owner<H> {
     /// Where the value `value` of the application `app` starts on a window
@@ -23,106 +23,99 @@ impl<H: Host> Owner<H> {
         value: &str,
         size: SizeDef,
     ) -> Result<Option<RegionSpec>, String> {
-        let file = self.stores()?.app_file(app)?;
+        let file = self.stores()?.app(app)?.file;
         let saved = find(&file.values, value, &file.name)?;
         Ok(start_region(&saved.screen, size))
     }
 
     /// Saves `spec` as the fix of its value at its screenshot's size,
     /// replacing any fix it had at that size, and answers where it was
-    /// saved, or what to fix.
+    /// saved, or what to fix. The pictures of the fix it replaced go.
     pub(crate) fn save_fix(&mut self, spec: &FixSpec) -> Result<SavedValue, String> {
-        let saved = self.save_fix_quietly(spec);
-        let saved = self.after(Changed::Values, saved)?;
-        let file = self.stores()?.app_file(&spec.app)?;
-        // The pictures of the fix it replaced are no longer read.
-        self.prune(&spec.app, &file)?;
-        Ok(saved)
-    }
-
-    /// Saves the fix `spec` describes, without telling anyone.
-    fn save_fix_quietly(&self, spec: &FixSpec) -> Result<SavedValue, String> {
-        let stores = self.stores()?;
+        // Without the stores, nothing else the user could fix matters.
+        self.stores()?;
         if self.screenshots.get(spec.screenshot).is_none() {
             return Err("Take a screenshot first.".to_owned());
         }
         let size = self
             .with_session(|session| check_spec::drawn_size(&spec.check, session, spec.screenshot))
             .map_err(|error| error.to_string())?;
-        let mut file = stores.app_file(&spec.app)?;
-        let position = file
-            .values
-            .iter()
-            .position(|saved| saved.id == spec.value)
-            .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
-        let value = file
-            .values
-            .get(position)
-            .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
-        let window_size = SizeDef {
-            width: size.width,
-            height: size.height,
-        };
-        if window_size == value.screen.window_size {
-            return Err(format!(
-                "{} was drawn at this size, so it needs no fix here. Resize the window first.",
-                value.name
-            ));
-        }
-        same_kind(&value.screen.check, &spec.check)?;
-        let number = free_fix_number(&value.id, &value.screen.fixes);
-        let saved = self
-            .with_session(|session| {
-                check_spec::to_saved_fix(&spec.check, session, &spec.app, &value.id, Some(number))
-            })
-            .map_err(|error| error.to_string())?;
-        let reference = match (&value.screen.check, &saved.check) {
-            (CheckDef::Number { reference, .. }, CheckDef::Number { reference: own, .. })
-                if own != reference =>
-            {
-                Some(own.clone())
-            },
-            _ => None,
-        };
-        let fix = FixDef {
-            window_size,
-            region: saved.region,
-            images: saved
-                .check
-                .states()
+        self.update_app(&spec.app, Changed::Values, |owner, found| {
+            let file = &found.file;
+            let position = file
+                .values
                 .iter()
-                .map(|state| state.image.clone())
-                .collect(),
-            reference,
-        };
-        let mut screen = value.screen.clone();
-        match screen
-            .fixes
-            .iter_mut()
-            .find(|fix| fix.window_size == window_size)
-        {
-            Some(replaced) => *replaced = fix,
-            None => screen.fixes.push(fix),
-        }
-        read_back(
-            &screen,
-            &file.references,
-            file.size_changes,
-            &saved.pictures,
-            &stores.apps.folder(&spec.app),
-        )?;
-        let id = value.id.clone();
-        if let Some(value) = file.values.get_mut(position) {
-            value.screen = screen;
-        }
-        stores
-            .apps
-            .save(&spec.app, &file, &saved.pictures)
-            .map_err(|error| error.to_string())?;
-        Ok(SavedValue {
-            app: spec.app.clone(),
-            value: id,
+                .position(|saved| saved.id == spec.value)
+                .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
+            let value = file
+                .values
+                .get(position)
+                .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
+            let window_size = SizeDef {
+                width: size.width,
+                height: size.height,
+            };
+            if window_size == value.screen.window_size {
+                return Err(format!(
+                    "{} was drawn at this size, so it needs no fix here. Resize the window first.",
+                    value.name
+                ));
+            }
+            same_kind(&value.screen.check, &spec.check)?;
+            let number = free_fix_number(&value.id, &value.screen.fixes);
+            let saved = owner
+                .with_session(|session| {
+                    check_spec::to_saved_fix(
+                        &spec.check,
+                        session,
+                        &spec.app,
+                        &value.id,
+                        Some(number),
+                    )
+                })
+                .map_err(|error| error.to_string())?;
+            let reference = match (&value.screen.check, &saved.check) {
+                (CheckDef::Number { reference, .. }, CheckDef::Number { reference: own, .. })
+                    if own != reference =>
+                {
+                    Some(own.clone())
+                },
+                _ => None,
+            };
+            let fix = FixDef {
+                window_size,
+                region: saved.region,
+                images: saved
+                    .check
+                    .states()
+                    .iter()
+                    .map(|state| state.image.clone())
+                    .collect(),
+                reference,
+            };
+            let mut screen = value.screen.clone();
+            match screen
+                .fixes
+                .iter_mut()
+                .find(|fix| fix.window_size == window_size)
+            {
+                Some(replaced) => *replaced = fix,
+                None => screen.fixes.push(fix),
+            }
+            read_back(&screen, found, &saved.pictures)?;
+            let id = value.id.clone();
+            if let Some(value) = found.file.values.get_mut(position) {
+                value.screen = screen;
+            }
+            Ok(Edit::Save(
+                SavedValue {
+                    app: spec.app.clone(),
+                    value: id,
+                },
+                saved.pictures,
+            ))
         })
+        .map(|saved| saved.answer)
     }
 
     /// Removes the fix of the value `value` of the application `app` at the
@@ -134,8 +127,8 @@ impl<H: Host> Owner<H> {
         value: &str,
         size: SizeDef,
     ) -> Result<(), String> {
-        let removed = self.stores().and_then(|stores| {
-            let mut file = stores.app_file(app)?;
+        self.update_app(app, Changed::Values, |_owner, found| {
+            let file = &mut found.file;
             let name = file.name.clone();
             let saved = file
                 .values
@@ -150,14 +143,9 @@ impl<H: Host> Owner<H> {
                     saved.name, size.width, size.height
                 ));
             }
-            stores
-                .apps
-                .save(app, &file, &[])
-                .map_err(|error| error.to_string())?;
-            Ok(file)
-        });
-        let file = self.after(Changed::Values, removed)?;
-        self.prune(app, &file)
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.answer)
     }
 }
 

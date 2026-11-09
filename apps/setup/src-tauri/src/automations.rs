@@ -337,8 +337,8 @@ fn unused<'file>(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::{Path, PathBuf};
-    use std::{env, fs, process};
 
     use appytappy_config::app_file::{
         AntiCheatDef, AppFile, CheckDef, ColorDef, FORMAT, RegionDef, ScreenDef, SizeChangesDef,
@@ -349,25 +349,16 @@ mod tests {
         MediaCommandDef, PointDef, TargetDef, WhenDef,
     };
     use appytappy_config::click::InvalidClick;
-    use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
     use appytappy_config::window_match::WindowFacts;
     use appytappy_sources::screen::{Image, Size};
 
     use super::*;
+    use crate::stores;
 
     /// Fresh stores for one test, holding the application `example` with a
     /// yes-or-no value `icon_visible` and a number value `health`.
     fn stores(name: &str) -> (Stores, PathBuf) {
-        let folder =
-            env::temp_dir().join(format!("appytappy-automations-{name}-{}", process::id()));
-        if folder.exists() {
-            fs::remove_dir_all(&folder).expect("remove leftovers");
-        }
-        let stores = Stores {
-            apps: AppStore::new(folder.join("apps")),
-            automations: AutomationStore::new(folder.join("automations.json")),
-            settings: SettingsStore::new(folder.join("settings.json")),
-        };
+        let (stores, folder) = stores::scratch(&format!("automations-{name}"));
         let white = ColorDef {
             red: 255,
             green: 255,
@@ -574,7 +565,7 @@ mod tests {
             )
         );
         assert!(!list(&stores).expect("lists")[0].automation.enabled);
-        fs::write(folder.join("apps").join("example").join("app.json"), b"{").expect("breaks");
+        fs::write(stores.apps.folder("example").join("app.json"), b"{").expect("breaks");
         let error = stores.apps.load().expect("loads")[0]
             .file
             .clone()
@@ -598,7 +589,7 @@ mod tests {
         broken.actions.clear();
         file.automations.push(broken);
         // A hand edit, which the setup app's own save refuses.
-        fs::write(folder.join("automations.json"), file.to_json()).expect("writes");
+        fs::write(automations_file(&folder), file.to_json()).expect("writes");
         let problems: Vec<Option<String>> = list(&stores)
             .expect("one broken automation leaves the list readable")
             .into_iter()
@@ -616,13 +607,18 @@ mod tests {
         fs::remove_dir_all(folder).expect("clean up");
     }
 
+    /// The automations' file of the stores in `folder`.
+    fn automations_file(folder: &Path) -> PathBuf {
+        folder.join("AppyTappy").join("automations.json")
+    }
+
     /// Writes `automations` as the whole file, as a hand edit could.
     fn hand_edit(folder: &Path, automations: Vec<AutomationDef>) {
         let file = AutomationsFile {
             format: AUTOMATIONS_FORMAT,
             automations,
         };
-        fs::write(folder.join("automations.json"), file.to_json()).expect("writes");
+        fs::write(automations_file(folder), file.to_json()).expect("writes");
     }
 
     fn with_id(name: &str, id: &str) -> AutomationDef {
@@ -763,7 +759,7 @@ mod tests {
             )
         );
         assert_eq!(check_unused(&stores, "example", "health", "Health"), Ok(()));
-        fs::write(folder.join("automations.json"), b"{").expect("breaks");
+        fs::write(automations_file(&folder), b"{").expect("breaks");
         assert!(
             unused(&stores)
                 .is_err_and(|error| error.starts_with("AppyTappy cannot read your automations"))
@@ -776,7 +772,7 @@ mod tests {
     /// A draft that clicks on the click picture `image` in `example`, whose
     /// anti-cheat is set to none so it can click.
     fn clicking(stores: &Stores, name: &str, image: &str) -> AutomationDef {
-        let mut app = stores.app_file("example").expect("saved");
+        let mut app = stores.app("example").expect("saved").file;
         app.anti_cheat = AntiCheatDef::None;
         stores.apps.save("example", &app, &[]).expect("saves");
         let mut clicking = draft(name);
@@ -905,13 +901,13 @@ mod tests {
         if let [ActionDef::Click { app, .. }] = clicks.actions.as_mut_slice() {
             "target".clone_into(app);
         }
-        let target = stores.app_file("example").expect("saved");
+        let target = stores.app("example").expect("saved").file;
         stores.apps.save("target", &target, &[]).expect("saves");
         let mut file = load(&stores).expect("loads");
         file.automations = vec![clicks];
         stores.automations.save(&file).expect("saves");
         assert_eq!(list(&stores).expect("lists")[0].problem, None);
-        fs::write(folder.join("apps").join("target").join("app.json"), b"{").expect("breaks");
+        fs::write(stores.apps.folder("target").join("app.json"), b"{").expect("breaks");
         let error = stores
             .apps
             .load()

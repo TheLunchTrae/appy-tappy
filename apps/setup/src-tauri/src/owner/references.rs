@@ -2,16 +2,14 @@
 //! application. Saving one learns its samples, as the check that reads with
 //! it would, and deleting one waits until no value reads with it.
 
-use std::fs;
-
-use appytappy_config::app_file::{AppFile, new_reference_id, reference_id};
+use appytappy_config::app_file::{new_reference_id, reference_id};
 use appytappy_sources::screen::Image;
 
 use crate::check_spec::{self, ReferenceRef, SavedReference, Session};
 
 use super::host::Host;
 use super::messages::{ReferenceSaveSpec, SavedReferenceId};
-use super::{Changed, Owner};
+use super::{Changed, Edit, Owner};
 
 impl<H: Host> Owner<H> {
     /// Hands `work` the session's screenshots, recording and saved
@@ -30,17 +28,17 @@ impl<H: Host> Owner<H> {
         &self,
         reference: &ReferenceRef,
     ) -> Result<SavedReference, String> {
-        let file = self.stores()?.app_file(&reference.app)?;
-        let saved = file
+        let app = self.stores()?.app(&reference.app)?;
+        let saved = app
+            .file
             .reference(&reference.id)
-            .ok_or_else(|| format!("{} no longer has that reference.", file.name))?
+            .ok_or_else(|| format!("{} no longer has that reference.", app.file.name))?
             .clone();
-        let folder = self.stores()?.apps.folder(&reference.app);
         let pictures = saved
             .samples
             .iter()
             .map(|sample| {
-                fs::read(folder.join(&sample.image))
+                app.picture(&sample.image)
                     .ok()
                     .and_then(|bytes| Image::decode_png(&bytes).ok())
                     .ok_or_else(|| {
@@ -64,12 +62,6 @@ impl<H: Host> Owner<H> {
         &mut self,
         spec: &ReferenceSaveSpec,
     ) -> Result<SavedReferenceId, String> {
-        let saved = self.save_reference_files(spec);
-        self.after(Changed::Values, saved)
-    }
-
-    /// Saves the reference `spec` teaches, without telling anyone.
-    fn save_reference_files(&self, spec: &ReferenceSaveSpec) -> Result<SavedReferenceId, String> {
         let name = spec.reference_name.trim();
         if name.is_empty() {
             return Err("Name the reference first.".to_owned());
@@ -83,93 +75,85 @@ impl<H: Host> Owner<H> {
         {
             return Err("That reference belongs to another application.".to_owned());
         }
-        let app = spec.app.clone();
-        let mut file = self.stores()?.app_file(&app)?;
-        let id = editing.as_ref().map_or_else(
-            || {
-                let taken: Vec<&str> = file
-                    .references
-                    .iter()
-                    .map(|saved| saved.id.as_str())
-                    .collect();
-                new_reference_id(name, &taken)
-            },
-            |editing| editing.id.clone(),
-        );
-        // Names that make the same ID, such as "Digits" and "digits ", are
-        // one name.
-        let same = reference_id(name);
-        if let Some(other) = file
-            .references
-            .iter()
-            .find(|saved| saved.id != id && reference_id(&saved.name) == same)
-        {
-            return Err(format!(
-                "{} already has a reference named \"{}\". Pick another name.",
-                file.name, other.name
-            ));
-        }
-        let (reference, pictures) = self
-            .with_session(|session| check_spec::to_saved_reference(&spec.check, session, &id, name))
-            .map_err(|error| error.to_string())?;
-        match file.references.iter_mut().find(|saved| saved.id == id) {
-            Some(saved) => *saved = reference,
-            None => file.references.push(reference),
-        }
-        self.stores()?
-            .apps
-            .save(&app, &file, &pictures)
-            .map_err(|error| error.to_string())?;
-        Ok(SavedReferenceId { app, reference: id })
+        let app = &spec.app;
+        self.update_app(app, Changed::Values, |owner, found| {
+            let file = &mut found.file;
+            let id = editing.as_ref().map_or_else(
+                || {
+                    let taken: Vec<&str> = file
+                        .references
+                        .iter()
+                        .map(|saved| saved.id.as_str())
+                        .collect();
+                    new_reference_id(name, &taken)
+                },
+                |editing| editing.id.clone(),
+            );
+            // Names that make the same ID, such as "Digits" and "digits ",
+            // are one name.
+            let same = reference_id(name);
+            if let Some(other) = file
+                .references
+                .iter()
+                .find(|saved| saved.id != id && reference_id(&saved.name) == same)
+            {
+                return Err(format!(
+                    "{} already has a reference named \"{}\". Pick another name.",
+                    file.name, other.name
+                ));
+            }
+            let (reference, pictures) = owner
+                .with_session(|session| {
+                    check_spec::to_saved_reference(&spec.check, session, &id, name)
+                })
+                .map_err(|error| error.to_string())?;
+            match file.references.iter_mut().find(|saved| saved.id == id) {
+                Some(saved) => *saved = reference,
+                None => file.references.push(reference),
+            }
+            Ok(Edit::Save(
+                SavedReferenceId {
+                    app: app.clone(),
+                    reference: id,
+                },
+                pictures,
+            ))
+        })
+        .map(|saved| saved.answer)
     }
 
     /// Removes the reference `reference` of the application `app` and its
-    /// pictures, unless a value reads with it, in its check or in a fix.
+    /// pictures, unless a value reads with it, in its check or in a fix. A
+    /// reference already gone changed nothing, so no one is told, but
+    /// pictures an earlier delete left behind are removed.
     pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
-        if let Some(file) = self.delete_reference_files(app, reference)? {
-            self.tell(Changed::Values);
-            self.prune(app, &file)
-        } else {
-            // A reference already gone changed nothing, so no one is told,
-            // but pictures an earlier delete left behind are removed.
-            let file = self.stores()?.app_file(app)?;
-            self.prune(app, &file)
+        let gone = self.update_app(app, Changed::Values, |_owner, found| {
+            let file = &mut found.file;
+            let Some(saved) = file.reference(reference) else {
+                return Ok(Edit::Keep(Some(file.clone())));
+            };
+            let users: Vec<&str> = file
+                .values
+                .iter()
+                .filter(|value| value.screen.reads_with(reference))
+                .map(|value| value.name.as_str())
+                .collect();
+            if !users.is_empty() {
+                return Err(format!(
+                    "{} {} with {}. Change or remove {} first.",
+                    and_list(&users),
+                    if users.len() == 1 { "reads" } else { "read" },
+                    saved.name,
+                    if users.len() == 1 { "it" } else { "them" }
+                ));
+            }
+            file.references.retain(|saved| saved.id != reference);
+            Ok(Edit::Save(None, Vec::new()))
+        })?;
+        match gone.answer {
+            Some(file) => self.prune(app, &file),
+            None => Ok(()),
         }
-    }
-
-    /// Removes the reference `reference` from the application's file,
-    /// without telling anyone, and answers the file as saved, or `None`
-    /// when the file had no such reference.
-    fn delete_reference_files(
-        &self,
-        app: &str,
-        reference: &str,
-    ) -> Result<Option<AppFile>, String> {
-        let store = &self.stores()?.apps;
-        let mut file = self.stores()?.app_file(app)?;
-        let Some(saved) = file.reference(reference) else {
-            return Ok(None);
-        };
-        let users: Vec<&str> = file
-            .values
-            .iter()
-            .filter(|value| value.screen.reads_with(reference))
-            .map(|value| value.name.as_str())
-            .collect();
-        if !users.is_empty() {
-            return Err(format!(
-                "{} {} with {}. Change or remove {} first.",
-                and_list(&users),
-                if users.len() == 1 { "reads" } else { "read" },
-                saved.name,
-                if users.len() == 1 { "it" } else { "them" }
-            ));
-        }
-        file.references.retain(|saved| saved.id != reference);
-        store
-            .save(app, &file, &[])
-            .map_err(|error| error.to_string())?;
-        Ok(Some(file))
     }
 }
 
@@ -219,7 +203,7 @@ mod tests {
     #[test]
     fn a_reference_is_saved_read_with_and_deleted_once_unused() {
         let (stores, root) = scratch_store("references");
-        let apps_root = root.join("apps");
+        let apps_root = stores.apps.folder("");
         let mut harness = harness_with(false, Ok(stores));
         add_example_app(&mut harness);
         let mut handler = harness.pick();
@@ -370,7 +354,7 @@ mod tests {
         harness
             .ask(|owner| {
                 let stores = owner.stores()?;
-                let mut file = stores.app_file("example")?;
+                let mut file = stores.app("example")?.file;
                 let screen = &mut file.values[0].screen;
                 screen.check = CheckDef::Number {
                     reference: "small".to_owned(),
@@ -402,9 +386,23 @@ mod tests {
         assert_eq!(harness.reloads(), 1, "the runtime reads the values again");
         assert_eq!(harness.ask(delete("digits")), Ok(()));
         assert_eq!(harness.reloads(), 1, "and the references");
+        assert!(!folder.join("ref-digits-1.png").exists());
+        // A picture an earlier delete left behind goes with the next delete,
+        // even of a reference already gone, while the kept pictures stay.
+        let kept: Vec<_> = std::fs::read_dir(&folder)
+            .expect("lists the pictures")
+            .map(|entry| entry.expect("an entry").file_name())
+            .collect();
+        std::fs::write(folder.join("ref-digits-1.png"), b"left behind").expect("a leftover");
         assert_eq!(harness.ask(delete("digits")), Ok(()), "already gone");
         assert_eq!(harness.reloads(), 0, "nothing changed");
-        assert!(!folder.join("ref-digits-1.png").exists());
+        assert!(
+            !folder.join("ref-digits-1.png").exists(),
+            "the leftover is gone"
+        );
+        for name in &kept {
+            assert!(folder.join(name).exists(), "{name:?} stays");
+        }
         let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(
@@ -421,7 +419,7 @@ mod tests {
     #[test]
     fn a_saved_reference_missing_a_picture_says_how_to_recover() {
         let (stores, root) = scratch_store("references-missing");
-        let mut harness = harness_with(false, Ok(stores));
+        let mut harness = harness_with(false, Ok(stores.clone()));
         add_example_app(&mut harness);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
@@ -431,7 +429,7 @@ mod tests {
             .ask(|owner| owner.save_reference(&reference("example", "Digits", None)))
             .expect("saves");
         assert_eq!(harness.reloads(), 1, "the runtime reads the references");
-        std::fs::remove_file(root.join("apps").join("example").join("ref-digits-1.png"))
+        std::fs::remove_file(stores.apps.folder("example").join("ref-digits-1.png"))
             .expect("remove the picture");
         assert_eq!(
             harness

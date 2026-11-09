@@ -14,7 +14,6 @@ use std::sync::mpsc::Sender;
 use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, SizeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, ClickAtDef, WhenDef};
 use appytappy_config::settings_file::SettingsFile;
-use appytappy_sources::HostSystem;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
@@ -22,9 +21,9 @@ use tokio::sync::oneshot;
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
-use crate::overlay::{self, Card, OverlayView};
+use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, ClickPictureView, FixSpec, FoundClick, Live, Message, Owner, Reading,
+    AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
     ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
@@ -43,7 +42,7 @@ const GONE: &str = "AppyTappy Setup is closing.";
 /// what it returns.
 pub(crate) async fn ask<T: Send + 'static>(
     app: &AppHandle,
-    work: impl FnOnce(&mut Owner<HostSystem>) -> T + Send + 'static,
+    work: impl FnOnce(&mut Owner<Desktop>) -> T + Send + 'static,
 ) -> Result<T, String> {
     let (reply, answer) = oneshot::channel();
     app.state::<Bridge>()
@@ -234,8 +233,7 @@ pub(crate) async fn remove_app(
     app: AppHandle,
     application: String,
 ) -> Result<Option<String>, String> {
-    ask(&app, move |owner| owner.remove_app(&application)).await??;
-    Ok(sync_overlays(app).await.err())
+    ask(&app, move |owner| owner.remove_app(&application)).await?
 }
 
 /// Saves a value to the application `spec` names.
@@ -374,8 +372,7 @@ pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), 
 /// Opens a window for each overlay that is on, and closes the rest.
 #[tauri::command]
 pub(crate) async fn sync_overlays(app: AppHandle) -> Result<(), String> {
-    let wanted = ask(&app, |owner| owner.overlay_windows()).await??;
-    overlay::window::sync(&app, &wanted)
+    ask(&app, |owner| owner.sync_overlay_windows()).await?
 }
 
 /// Turns `application`'s overlay on or off and sets where it shows, then
@@ -392,8 +389,7 @@ pub(crate) async fn set_overlay(
     ask(&app, move |owner| {
         owner.set_overlay(&application, enabled, mode)
     })
-    .await??;
-    Ok(sync_overlays(app).await.err())
+    .await?
 }
 
 /// What `application`'s overlay shows now.

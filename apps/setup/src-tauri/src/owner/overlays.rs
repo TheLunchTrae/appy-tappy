@@ -6,11 +6,11 @@ use appytappy_config::app_file::{OverlayDef, OverlayModeDef, PanelDef};
 use crate::overlay::{self, Card, OverlayView, OverlayWindow, Place};
 
 use super::host::Host;
-use super::{Changed, Owner};
+use super::{Changed, Edit, Owner, known};
 
 impl<H: Host> Owner<H> {
     /// The overlays that are on, for their windows to open.
-    pub(crate) fn overlay_windows(&self) -> Result<Vec<OverlayWindow>, String> {
+    fn overlay_windows(&self) -> Result<Vec<OverlayWindow>, String> {
         let loaded = self
             .stores()?
             .apps
@@ -21,28 +21,38 @@ impl<H: Host> Owner<H> {
         })))
     }
 
+    /// Opens a window for each overlay that is on, and closes the rest.
+    ///
+    /// # Errors
+    ///
+    /// Returns why the applications cannot be read, or why a window could
+    /// not open or close.
+    pub(crate) fn sync_overlay_windows(&self) -> Result<(), String> {
+        let wanted = self.overlay_windows()?;
+        self.host.sync_overlay_windows(&wanted)
+    }
+
     /// Turns the overlay of the application `app` on or off, shown as
-    /// `mode`.
+    /// `mode`, and opens or closes its window to match. The setting is saved
+    /// once it answers `Ok`, which holds why an overlay window could not
+    /// open or close, if one could not.
     pub(crate) fn set_overlay(
         &mut self,
         app: &str,
         enabled: bool,
         mode: OverlayModeDef,
-    ) -> Result<(), String> {
-        let saved = self.stores().and_then(|stores| {
-            let mut file = stores.app_file(app)?;
+    ) -> Result<Option<String>, String> {
+        self.update_app(app, Changed::Overlay, |_owner, found| {
+            let file = &mut found.file;
             let panel = file.overlay.and_then(|overlay| overlay.panel);
             file.overlay = Some(OverlayDef {
                 enabled,
                 mode,
                 panel,
             });
-            stores
-                .apps
-                .save(app, &file, &[])
-                .map_err(|error| error.to_string())
-        });
-        self.after(Changed::Overlay, saved)
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.windows)
     }
 
     /// What the overlay of the application `app` shows now, keeping where
@@ -83,12 +93,9 @@ impl<H: Host> Owner<H> {
     /// page, whether its overlay is on or not. The first call starts a
     /// capture of its window, which [`Owner::stop_live_values`] stops.
     pub(crate) fn live_values(&mut self, app: &str) -> Result<OverlayView, String> {
-        let stores = self.stores.as_ref().map_err(Clone::clone);
-        self.live.view(&self.host, &self.messages, app, || {
-            let stores = stores?;
-            let file = stores.app_file(app)?;
-            Ok((file, stores.apps.folder(app)))
-        })
+        let stores = known(&self.stores);
+        self.live
+            .view(&self.host, &self.messages, app, || stores?.app(app))
     }
 
     /// Stops reading the values of the application `app` for the Values
@@ -102,12 +109,9 @@ impl<H: Host> Owner<H> {
     }
 
     pub(super) fn overlay_view(&mut self, app: &str) -> Result<OverlayView, String> {
-        let stores = self.stores.as_ref().map_err(Clone::clone);
-        self.overlays.view(&self.host, &self.messages, app, || {
-            let stores = stores?;
-            let file = stores.app_file(app)?;
-            Ok((file, stores.apps.folder(app)))
-        })
+        let stores = known(&self.stores);
+        self.overlays
+            .view(&self.host, &self.messages, app, || stores?.app(app))
     }
 
     /// Saves where the user put each panel, once it settled or, with `all`,
@@ -123,16 +127,17 @@ impl<H: Host> Owner<H> {
         }
     }
 
-    fn save_panel(&self, app: &str, panel: PanelDef) -> Result<(), String> {
-        let mut file = self.stores()?.app_file(app)?;
-        let Some(overlay) = &mut file.overlay else {
-            return Ok(());
-        };
-        overlay.panel = Some(panel);
-        self.stores()?
-            .apps
-            .save(app, &file, &[])
-            .map_err(|error| error.to_string())
+    /// Saves `panel` as where the user put the panel of the application
+    /// `app`'s overlay, unless it has none.
+    fn save_panel(&mut self, app: &str, panel: PanelDef) -> Result<(), String> {
+        self.update_app(app, Changed::Panel, |_owner, found| {
+            let Some(overlay) = &mut found.file.overlay else {
+                return Ok(Edit::Keep(()));
+            };
+            overlay.panel = Some(panel);
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.answer)
     }
 }
 
@@ -167,7 +172,7 @@ mod tests {
     fn set_overlay(
         enabled: bool,
         mode: OverlayModeDef,
-    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<(), String> {
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<Option<String>, String> {
         move |owner: &mut Owner<FakeHost>| owner.set_overlay("example", enabled, mode)
     }
 
@@ -227,7 +232,7 @@ mod tests {
     /// save did, without telling the overlays.
     fn change_app_file(harness: &Harness, change: impl FnOnce(&mut AppFile)) {
         let stores = harness.owner.stores().expect("stores");
-        let mut file = stores.app_file("example").expect("saved and readable");
+        let mut file = stores.app("example").expect("saved and readable").file;
         change(&mut file);
         stores.apps.save("example", &file, &[]).expect("saves");
     }

@@ -12,7 +12,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::SettingsFile;
 use appytappy_platform::AUTOSTART_VALUE;
 use serde::Serialize;
@@ -85,27 +84,12 @@ pub(crate) fn set_starts_with_windows(on: bool) -> Result<(), String> {
     })
 }
 
-/// The folder the runtime writes its trace files to.
-///
-/// # Errors
-///
-/// Returns why the folder cannot be found, as a sentence.
-#[mutants::skip] // Reads the environment, which the tests leave alone; `Locations` is tested.
-pub(crate) fn trace_folder() -> Result<PathBuf, String> {
-    Locations::from_env()
-        .map(|locations| locations.traces())
-        .map_err(|error| {
-            format!("AppyTappy cannot find where the runtime keeps its traces: {error}.")
-        })
-}
-
-/// Opens the trace folder in File Explorer. The folder is made first, so it
-/// opens before the first trace too.
+/// Opens the trace folder `folder` in File Explorer. The folder is made
+/// first, so it opens before the first trace too.
 #[mutants::skip] // Opens a window, checked by hand on Windows.
-pub(crate) fn open_trace_folder() -> Result<(), String> {
-    let folder = trace_folder()?;
-    fs::create_dir_all(&folder)
-        .and_then(|()| open_folder(&folder))
+pub(crate) fn open_trace_folder(folder: &Path) -> Result<(), String> {
+    fs::create_dir_all(folder)
+        .and_then(|()| open_folder(folder))
         .map_err(|error| format!("AppyTappy cannot open the trace folder: {error}."))
 }
 
@@ -162,21 +146,10 @@ mod tests {
     use std::fs;
     use std::process;
 
-    use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
-
     use super::*;
 
     fn stores(name: &str) -> (Stores, PathBuf) {
-        let folder = env::temp_dir().join(format!("appytappy-settings-{name}-{}", process::id()));
-        if folder.exists() {
-            fs::remove_dir_all(&folder).expect("remove leftovers");
-        }
-        let stores = Stores {
-            apps: AppStore::new(folder.join("apps")),
-            automations: AutomationStore::new(folder.join("automations.json")),
-            settings: SettingsStore::new(folder.join("settings.json")),
-        };
-        (stores, folder)
+        crate::stores::scratch(&format!("settings-{name}"))
     }
 
     #[test]
@@ -207,7 +180,7 @@ mod tests {
             save(&stores, &settings),
             Err("The fastest read cannot wait longer than the slowest.".to_owned())
         );
-        assert!(!folder.join("settings.json").exists());
+        assert!(!folder.join("AppyTappy").join("settings.json").exists());
         if folder.exists() {
             fs::remove_dir_all(folder).expect("clean up");
         }
@@ -216,8 +189,9 @@ mod tests {
     #[test]
     fn an_unreadable_file_shows_the_defaults_and_why() {
         let (stores, folder) = stores("broken");
-        fs::create_dir_all(&folder).expect("make the folder");
-        fs::write(folder.join("settings.json"), "{").expect("write");
+        let roaming = folder.join("AppyTappy");
+        fs::create_dir_all(&roaming).expect("make the folder");
+        fs::write(roaming.join("settings.json"), "{").expect("write");
         let view = load(&stores);
         assert_eq!(view.settings, SettingsFile::default());
         let problem = view.problem.expect("a problem");

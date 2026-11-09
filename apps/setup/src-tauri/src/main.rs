@@ -29,11 +29,10 @@ use std::sync::mpsc;
 use std::thread;
 
 use appytappy_config::paths::Locations;
-use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_sources::HostSystem;
 
 use crate::commands::Bridge;
-use crate::owner::{Message, Owner};
+use crate::owner::{Desktop, Message, Owner};
 use crate::recording::ocr;
 use crate::stores::Stores;
 
@@ -43,12 +42,8 @@ fn main() -> ExitCode {
     let system = HostSystem::default();
     let (sender, messages) = mpsc::channel();
     let stores = Locations::from_env()
-        .map(|locations| Stores {
-            apps: AppStore::new(locations.apps()),
-            automations: AutomationStore::new(locations.automations()),
-            settings: SettingsStore::new(locations.settings()),
-        })
-        .map_err(|error| format!("AppyTappy cannot find where to keep your values: {error}."));
+        .map(Stores::from)
+        .map_err(|error| error.to_string());
     // The text reader reads recorded readings on a thread of its own, and
     // ends once the owner drops its sender.
     let (jobs, inbox) = mpsc::channel();
@@ -63,14 +58,7 @@ fn main() -> ExitCode {
     else {
         return ExitCode::FAILURE;
     };
-    let owner = Owner::new(system, stores, process::id(), sender.clone(), jobs);
-    let Ok(owner_thread) = thread::Builder::new()
-        .name("owner".to_owned())
-        .spawn(move || owner::run(owner, &messages))
-    else {
-        return ExitCode::FAILURE;
-    };
-    let code = tauri::Builder::default()
+    let built = tauri::Builder::default()
         // A second copy that starts hands over to this one and exits, before
         // it opens a window. The plugin asks to be registered first.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -136,8 +124,25 @@ fn main() -> ExitCode {
             updates::download_update,
             updates::install_update,
         ])
-        .build(tauri::generate_context!())
-        .map_or(1, |app| app.run_return(|_app, _event| {}));
+        .build(tauri::generate_context!());
+    let Ok(app) = built else {
+        return ExitCode::FAILURE;
+    };
+    // The owner opens and closes the overlays' windows, so it starts once
+    // the app is built. A command waits in the channel until it does, and
+    // none comes before the app runs.
+    let host = Desktop {
+        system,
+        app: app.handle().clone(),
+    };
+    let owner = Owner::new(host, stores, process::id(), sender.clone(), jobs);
+    let Ok(owner_thread) = thread::Builder::new()
+        .name("owner".to_owned())
+        .spawn(move || owner::run(owner, &messages))
+    else {
+        return ExitCode::FAILURE;
+    };
+    let code = app.run_return(|_app, _event| {});
     // The owner stops its capture before it ends, so the join waits for it.
     // The owner's sender to the text reader goes with it, so the reader
     // ends after the reading it is on.

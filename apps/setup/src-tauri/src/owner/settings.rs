@@ -2,12 +2,14 @@
 //! a save worked, whether the runtime starts when the user signs in to
 //! Windows, and the folder its trace files go in.
 
+use std::path::Path;
+
 use appytappy_config::settings_file::SettingsFile;
 
 use crate::settings::{self, SettingsView};
 
+use super::Owner;
 use super::host::Host;
-use super::{Changed, Owner};
 
 impl<H: Host> Owner<H> {
     /// The saved settings, or the defaults and why they cannot be read.
@@ -23,10 +25,7 @@ impl<H: Host> Owner<H> {
 
     /// Saves every setting, or says what to fix.
     pub(crate) fn save_settings(&mut self, file: &SettingsFile) -> Result<(), String> {
-        let saved = self
-            .stores()
-            .and_then(|stores| settings::save(stores, file));
-        self.after(Changed::Runtime, saved)
+        self.update_runtime(|stores| settings::save(stores, file))
     }
 
     /// Whether the runtime starts when the user signs in to Windows. It
@@ -52,23 +51,25 @@ impl<H: Host> Owner<H> {
     }
 
     /// The folder the runtime writes its trace files to.
-    #[expect(
-        clippy::unused_self,
-        reason = "every command runs on the owner, so each has one place to look"
-    )]
-    #[mutants::skip] // Reads the environment, which the tests leave alone.
     pub(crate) fn trace_folder(&self) -> Result<String, String> {
-        settings::trace_folder().map(|folder| folder.display().to_string())
+        self.traces().map(|traces| traces.display().to_string())
     }
 
     /// Opens the trace folder in File Explorer.
-    #[expect(
-        clippy::unused_self,
-        reason = "every command runs on the owner, so each has one place to look"
-    )]
     #[mutants::skip] // Opens a window, checked by hand on Windows.
     pub(crate) fn open_trace_folder(&self) -> Result<(), String> {
-        settings::open_trace_folder()
+        settings::open_trace_folder(self.traces()?)
+    }
+
+    /// The folder the runtime writes its trace files to, or why it is
+    /// unknown, as the user reads it.
+    fn traces(&self) -> Result<&Path, String> {
+        self.stores
+            .as_ref()
+            .map(|stores| stores.traces.as_path())
+            .map_err(|reason| {
+                format!("AppyTappy cannot find where the runtime keeps its traces: {reason}.")
+            })
     }
 }
 
@@ -112,5 +113,22 @@ mod tests {
             "the saved settings stay"
         );
         std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_trace_folder_is_where_the_runtime_writes_its_traces() {
+        // Nothing is written, so there is nothing to clean up.
+        let (stores, _root) = scratch_store("owner-traces");
+        let traces = stores.traces.display().to_string();
+        let mut harness = harness_with(false, Ok(stores));
+        assert_eq!(harness.ask(|owner| owner.trace_folder()), Ok(traces));
+        assert_eq!(
+            harness_with(false, Err("APPDATA is not set".to_owned()))
+                .ask(|owner| owner.trace_folder()),
+            Err(
+                "AppyTappy cannot find where the runtime keeps its traces: APPDATA is not set."
+                    .to_owned()
+            )
+        );
     }
 }

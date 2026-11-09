@@ -8,7 +8,6 @@
 //! runtime does, and a drag across many sizes starts it again only once.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
 use std::time::Instant;
 
@@ -73,16 +72,15 @@ impl<H: Host> Owner<H> {
     /// watch's number. Like [`Owner::pick`], it drops the previous window's
     /// capture, screenshots and check.
     pub(crate) fn watch(&mut self, app: &str, value: &str) -> Result<u64, String> {
-        let stores = self.stores()?;
-        let file = stores.app_file(app)?;
+        let found = self.stores()?.app(app)?;
+        let file = &found.file;
         let saved = file
             .values
             .iter()
             .find(|saved| saved.id == value)
             .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
-        let folder = stores.apps.folder(app);
         let check = saved::build(&saved.screen, &file.references, file.size_changes, |name| {
-            fs::read(folder.join(name))
+            found.picture(name)
         })
         .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
         let (processes, windows) = self.desktop()?;
@@ -490,7 +488,7 @@ mod tests {
         );
         // Read only at the sizes it was drawn at, it says so.
         let stores = harness.owner.stores().expect("stores");
-        let mut file = stores.app_file("example").expect("saved");
+        let mut file = stores.app("example").expect("saved").file;
         file.size_changes = appytappy_config::app_file::SizeChangesDef::Rarely;
         stores.apps.save("example", &file, &[]).expect("saves");
         let (watch, mut handler) = watch_bar(&mut harness);

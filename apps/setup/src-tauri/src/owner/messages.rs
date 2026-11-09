@@ -7,7 +7,6 @@ use std::time::Instant;
 
 use appytappy_config::app_file::{AppFile, BuildDef, PanelDef, PinDef};
 use appytappy_config::signal::Value;
-use appytappy_sources::HostSystem;
 use appytappy_sources::screen::{Image, Size};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -16,7 +15,7 @@ use crate::check_spec::CheckSpec;
 use crate::overlay::{FrameRead, Purpose};
 use crate::recording::Text;
 
-use super::{Host, Owner};
+use super::{Desktop, Host, Owner};
 
 /// Where a request's answer goes.
 pub(crate) type Reply<T> = oneshot::Sender<T>;
@@ -237,7 +236,7 @@ impl<H: Host> fmt::Debug for Run<H> {
 /// What reaches the owner thread. Its host is the operating system's,
 /// except in the tests.
 #[derive(Debug)]
-pub(crate) enum Message<H: Host = HostSystem> {
+pub(crate) enum Message<H: Host = Desktop> {
     /// Work from a command or an overlay window.
     Run(Run<H>),
     /// The capture with this generation sent a frame.

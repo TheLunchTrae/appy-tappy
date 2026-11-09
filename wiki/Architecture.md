@@ -615,13 +615,15 @@ changing.
   anti-cheat class, a checked build, an automation, or the settings that
   works, the setup app sets the named event `Local\AppyTappy.Reload`, and the
   runtime reads `settings.json`, every `app.json`, and `automations.json`
-  again, as the [reload watch](#the-runtime) describes. Each save passes its
-  result and what it changed to `Owner::after` in
-  `apps/setup/src-tauri/src/owner.rs`, which sets the event only when the save
-  worked. Turning an overlay on or off, changing its mode, and moving its
-  panel also write `app.json`, but they do not set the event, because the
-  runtime does not use the overlay. A runtime that is not running reads the
-  files when it starts, so the setup app ignores a failure to set the event.
+  again, as the [reload watch](#the-runtime) describes. A save of an
+  application's file goes through `Owner::update_app` in
+  `apps/setup/src-tauri/src/owner.rs`, and a save of the automations or the
+  settings through `Owner::update_runtime`, each with what it changed; both
+  set the event only when the save worked. Turning an overlay on or off,
+  changing its mode, and moving its panel also write `app.json`, but they do
+  not set the event, because the runtime does not use the overlay. A runtime
+  that is not running reads the files when it starts, so the setup app ignores
+  a failure to set the event.
 - **Reading.** The runtime reads the files with the same `config` code the setup
   app uses, and checks everything again before use, because the files are
   outside its control and a person can edit them by hand. Each `app.json` must
