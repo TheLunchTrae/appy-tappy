@@ -23,8 +23,9 @@ event that causes it. `[*]` is where the machine starts or ends.
 Many messages travel between threads, so a message can arrive after the state
 it was about has gone. Four guards drop such stale messages:
 
-- **Session IDs.** The runtime gives each reader session a new `SessionId`. The
-  owner drops a reading whose session no longer runs.
+- **Session IDs.** The runtime gives each reader session a new `SessionId`
+  (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
+  longer runs.
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
   generation is dropped.
@@ -153,8 +154,11 @@ automations run while all of these hold:
   [Files and handoff](Architecture.md#files-and-handoff) describes.
 - The plan has automations for it.
 
-When they all hold, the application has an entry in `running`, with its engine
-session, its reader's `SessionId`, and its newest plan.
+When they all hold, the application has an entry in `running`, keyed by its
+reader's `SessionId`, with its engine session and its newest plan. The model
+holds no channel and no trace: each change returns `Order`s, the model's own
+type, and the owner turns each into a message for a reader or the action
+thread.
 
 ```mermaid
 stateDiagram-v2
@@ -172,44 +176,47 @@ stateDiagram-v2
 - **Running to Attached or Detached.** The engine session is stopped,
   which releases every rule that restores. The reader is stopped.
 - **A reload that changes what it runs.** `replan` compares each plan's
-  `Runs`: its window match, its values' checks and its rules. When they
-  differ, the application stops, which undoes what its automations changed,
-  and starts again in a new session.
-- **A reload that changes only names.** When only the plan's `Labels` differ,
-  its names or the build its values were checked against, the session keeps running
-  and takes the new plan, so the log and the tray use the new names. The
-  reader sends a value's problem by its position, and the owner logs it with
-  the value's newest name.
+  `Runs`: its window match, its values' checks and its rules, but not the
+  automations' names that each rule's entry carries. When they differ, the
+  application stops, which undoes what its automations changed, and starts
+  again in a new session.
+- **A reload that changes only names.** When only the plan's names differ, or
+  the build its values were checked against, the session keeps running and
+  takes the new plan, so the log and the tray use the new names. The reader
+  sends each value and each value's problem by its position, and the owner
+  logs a problem with the value's newest name.
 - **Unseen.** When the reader says the values can no longer be seen, the owner
   calls `forget_values`. The rules keep their state, so a rule that fired stays
   fired until new readings decide its condition.
-- **A new read interval or trace.** `restart_readers` stops each running
-  application's reader that reads at another interval, or records to another
-  trace, and starts it again in the same session, and calls `forget_values` first, as for `Unseen`, because the new
-  reader sends its first readings whether or not they changed. A reading the
-  old reader sent just before it stopped can still arrive after that, a few
-  milliseconds old.
+- **A new read interval.** `restart_readers` stops each running
+  application's reader that reads at another interval and starts it again in
+  the same session, and calls `forget_values` first, as for `Unseen`, because
+  the new reader sends its first readings whether or not they changed. A
+  reading the old reader sent just before it stopped can still arrive after
+  that, a few milliseconds old. A new trace restarts nothing: it reaches each
+  reader as a message, as [Runtime trace](#runtime-trace) describes.
 
 ### Reader thread
 
 Each running application has a reader thread (`read` in
 `apps/runtime/src/workers/reader.rs`). The thread's position in its loop is its
 state, along with `Recovery`: why the last capture ended and how long to wait
-before the next one.
+before the next one, and the trace it records to.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Finding
-    Finding --> Waiting: no window fits, it is minimized or another process's, or windows cannot be listed
+    Finding --> Waiting: no window of the session's process fits best, it is minimized, or windows cannot be listed
     Finding --> Waiting: the capture cannot start
     Waiting --> Finding: FIND_AGAIN passes
     Finding --> Capturing: the capture starts
     Capturing --> Capturing: Recovered, the backoff resets
+    Capturing --> Capturing: Trace, handed on to the frame handler
     Capturing --> Capturing: Resizing, the size settles again from then
     Capturing --> Capturing: a size where no value reads settles, why each is not read
     Capturing --> Closing: Lost or Failing from the frame handler
     Capturing --> Closing: a size where a value reads settles, Resized
-    Capturing --> Closing: every CHECK_AGAIN, the window is hidden or no longer fits, or a better one fits or is another process's
+    Capturing --> Closing: every CHECK_AGAIN, the window is hidden or session_window picks another
     Closing --> Finding: Resized, or the check, after Unseen
     Closing --> Backoff: Lost or Failing
     Backoff --> Finding: the backoff wait passes
@@ -219,16 +226,17 @@ stateDiagram-v2
     Backoff --> [*]: Stop
 ```
 
-- **Finding.** `find_window` lists the processes and windows, takes the windows
-  that fit best with `best_windows`, and picks one with `read_window` for the
-  session's process (`Job::process`), as detection does: one of that process's
-  windows when it owns one, and otherwise the first that shows. It captures the
-  window only when it is that process's, and otherwise waits for the session
-  to follow the other process. Before the capture starts, `framed_at` asks
-  `System::frame_size` for the size the window's frames will have, the
-  window's bounds without its shadow (`DWMWA_EXTENDED_FRAME_BOUNDS`), and
-  places the values there when some value reads there, so a window that is
-  not at the first value's drawn size is not captured twice at each start.
+- **Finding.** `find_window` lists the processes and windows and takes the one
+  `session_window` picks among the session's process's (`Job::watched`), as
+  detection does: of its windows that fit best, the one the last capture
+  read while it shows, such as after a resize, then the first that shows.
+  When the process owns none of the windows that fit best, such as while
+  another process's window fits better, it waits, and detection follows the
+  other process or keeps this one for its grace. Before the capture starts,
+  `framed_at` asks `System::frame_size` for the size the window's frames will
+  have, the window's bounds without its shadow (`DWMWA_EXTENDED_FRAME_BOUNDS`),
+  and places the values there when some value reads there, so a window that
+  is not at the first value's drawn size is not captured twice at each start.
   The size is a guess: frames of another size are followed as below, and
   after a capture ended with `Resized`, the next one starts at the size its
   frames settled at, without guessing again. The first capture otherwise
@@ -236,9 +244,11 @@ stateDiagram-v2
 - **Capturing.** `watch` waits on `control` until the next `CHECK_AGAIN` or
   until a new size settles, whichever comes first. The capture's frame handler
   runs on another thread and sends `Lost`, `Resizing`, `Failing`, or
-  `Recovered` back to this one. Each `CHECK_AGAIN`, `moved_on` checks that the
-  window still shows and still fits as well as any window, because a hidden
-  window sends no frames and no close.
+  `Recovered` back to this one. A `Trace` from the owner goes on to the frame
+  handler over its own channel, and the capture goes on. Each `CHECK_AGAIN`,
+  `moved_on` checks that the window still shows and that `session_window`
+  still picks it, which it does while the window shows and fits as well as
+  any, because a hidden window sends no frames and no close.
 - **Settling.** `Resizing` names the size frames show now, and a `Settle`
   (`crates/sources/src/screen/settle.rs`) waits for it to hold for `SETTLE`,
   250 ms, starting again at each other size. The wait runs on this thread's
@@ -267,6 +277,10 @@ stateDiagram-v2
   capture ends before it reads a frame. It logs the reason once until the reason
   changes. A restarted capture that reads a frame sends `Recovered`, which
   resets both.
+- **A new trace.** `Trace` from the owner reaches the thread in any state.
+  While it waits or closes a capture, the thread keeps it for its next
+  capture, which starts with it; while it captures, it hands it on too. No
+  state changes for it.
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
 
@@ -280,8 +294,9 @@ the reader frames show), `last` (each value's last reading), `problems`
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restarted` (whether the reader started this capture
-again after the last one ended), and `ended` (whether it told the reader
-its capture ended).
+again after the last one ended), `ended` (whether it told the reader
+its capture ended), and `trace` (what it records to, the newest that the
+reader handed it before the frame).
 
 ```mermaid
 stateDiagram-v2
@@ -518,11 +533,12 @@ and sends `Reload` each time the setup app sets it. Several saves before the
 reload watch wakes become one reload. `read_saved` reads the settings first,
 gives the model their read interval, and starts, keeps, or stops the trace as
 [Runtime trace](#runtime-trace) describes, so the readers that `replan` starts
-read at the new interval and record to the new trace. It then reads the saved
-applications and automations; when they read, the owner sends detection the
-new watchlist and `replan` switches to their plan. Last, `restart_readers`
-starts over the readers the plan kept running at the old interval or with the
-old trace, so no reader starts twice. When either read fails, such as while
+read at the new interval. It then reads the saved applications and
+automations; when they read, the owner sends detection the new watchlist and
+`replan` switches to their plan. Then `restart_readers` starts over the
+readers the plan kept running at the old interval, so no reader starts twice.
+Last, the trace writer gets each running session's newest plan, for its
+names. When either read fails, such as while
 another program holds a file, the owner keeps what it has (the plan, or the
 settings, or the defaults when they never read) and reads the files that
 failed again, and only those. Its state is `Reloads`: `retry`, an optional
@@ -578,10 +594,12 @@ stateDiagram-v2
   writer reports late (`TraceReport::Failed`) stops only the trace with its
   number. A trace whose writer cannot start, such as when the folder cannot be
   made, is logged and leaves the trace off.
-- **A new trace.** Whenever the trace changes, the owner sends the new handle
-  to the action thread and detection, and the readers start over with it. Two
-  handles are equal when they record the same categories of the same trace,
-  so the same settings change nothing.
+- **A new trace.** Whenever the trace changes, `Crew::set_trace` sends the new
+  handle to the action thread, detection, and each reader, and the owner
+  starts later readers with it. A reader keeps its capture and its values,
+  and hands the handle to its frame handler, which records to it from its
+  next frame. Two handles are equal when they record the same categories of
+  the same trace, so the same settings change nothing.
 - **Its time is up.** The owner wakes at the end time (`wake`) and stops the
   trace. The settings still say `on`; the setup app shows the trace stopped,
   and turning it on again sets a new end time.

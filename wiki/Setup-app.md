@@ -172,9 +172,12 @@ that must match. The setup app saves no such match, and the runtime does not
 load a file that has one. Fallback
 windows count only when no window qualifies. Windows rank by fewer missed
 fields, then by the title matching. On a tie the runtime keeps a window of
-the process its session already follows, and otherwise takes the first that
-Windows lists, usually the front-most, that is not minimized, so the setup
-app marks every window that ties for the best fit as a best match.
+the process its session already follows, and the window it reads while that
+shows, and otherwise takes the first that Windows lists, usually the
+front-most, that is not minimized
+([Lifecycle](Architecture.md#lifecycle)). The setup app marks as the best
+match the window a new session would read, and watches a value, shows an
+overlay, and finds a click's target in that window.
 The setup app uses the match to show which applications are running, and the
 runtime finds each application's window with the same rules. A value's region
 is drawn at one window size, and the runtime reads it at another by
@@ -392,8 +395,9 @@ field would become a `bigint`, which JSON does not carry. The field says so
 with `#[cfg_attr(test, ts(type = "number"))]` in the setup app, or
 `#[cfg_attr(feature = "ts", ts(type = "number"))]` in `appytappy-config`,
 because only those builds derive the types. A command's own `u64` argument or
-answer is `U64AsNumber` in the table, and a picture it answers as raw bytes is
-`Pixels`, which `api.ts` decodes. The page imports the types from
+answer is `U64AsNumber` in the table, or `OptionalU64AsNumber` when it can be
+missing, and a picture it answers as raw bytes is `Pixels`, which `api.ts`
+decodes. The page imports the types from
 `bindings.ts` and calls the commands through `api.ts`.
 
 The file also holds what the page checks a draft against before it saves:

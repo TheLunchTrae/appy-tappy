@@ -9,10 +9,11 @@
 //! argument and answer types, and the test the argument names. The doc
 //! comments are the page's; they become the page functions' docs.
 //!
-//! An argument or answer is its Rust type, except for two the page reads
+//! An argument or answer is its Rust type, except for three the page reads
 //! differently from their ts-rs type: `Pixels`, the raw bytes of a picture
-//! that the page decodes, and `U64AsNumber`, a `u64` the page takes as a
-//! number because it stays far below 2^53.
+//! that the page decodes, `U64AsNumber`, a `u64` the page takes as a number
+//! because it stays far below 2^53, and `OptionalU64AsNumber`, one that can
+//! be missing.
 
 /// Hands the table to `$then`, a macro that takes its entries.
 macro_rules! with_commands {
@@ -61,8 +62,10 @@ macro_rules! with_commands {
             commands::watched_reading(watch: U64AsNumber, when: Option<WhenDef>) -> Live;
             /// Stops the watch, unless another capture replaced it already.
             commands::stop_watching(watch: U64AsNumber) -> ();
-            /// The running windows `window` takes, the best fit first.
+            /// The running windows `window` takes, the one a new session would read first.
             commands::match_windows(window: WindowDef) -> Vec<WindowFit>;
+            /// The window a new session would read for `window`, or null while none fits.
+            commands::read_window(window: WindowDef) -> OptionalU64AsNumber;
             /// Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
             /// when it is given. One that no saved automation names goes the next time automations are saved.
             commands::add_click_picture(

@@ -131,6 +131,17 @@ impl Wire for U64AsNumber {
     fn visit(_found: &mut Declarations<'_>) {}
 }
 
+/// A [`U64AsNumber`] that can be missing, which the page reads as null.
+struct OptionalU64AsNumber;
+
+impl Wire for OptionalU64AsNumber {
+    type Rust = Option<u64>;
+    fn ts(cfg: &Config) -> String {
+        format!("{} | null", U64AsNumber::ts(cfg))
+    }
+    fn visit(_found: &mut Declarations<'_>) {}
+}
+
 /// One row of the command table.
 struct Command {
     /// The module that defines it, `commands` or `updates`.

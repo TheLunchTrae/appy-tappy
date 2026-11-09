@@ -192,29 +192,89 @@ pub fn executables(processes: Vec<ProcessEntry>) -> Vec<(ProcessId, String)> {
         .collect()
 }
 
-/// The handle of the visible window that `window` fits best.
+/// Which processes' windows a session may read, for [`session_window`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pick {
+    /// No session yet, such as for a click or the setup app: a window of
+    /// any process.
+    Any,
+    /// A session that follows this process and may move to another: one of
+    /// the process's windows while it owns one, so a second copy of the
+    /// application does not take the session over, and otherwise another
+    /// process's, which the session then follows instead.
+    Prefer(ProcessId),
+    /// A session that keeps this process: only the process's windows. A
+    /// reader reads only its session's process, and detection keeps a
+    /// process for a grace period after it owns no such window.
+    Only {
+        /// The process.
+        process: ProcessId,
+        /// The window the session reads now, which it keeps while it shows,
+        /// so windows that fit equally well do not swap back and forth.
+        reading: Option<u64>,
+    },
+}
+
+/// The window [`session_window`] picks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionWindow {
+    /// The window.
+    pub entry: WindowEntry,
+    /// Whether it shows, so it can be read now.
+    pub shown: bool,
+}
+
+/// The window a session reads for `window`, an application's window match,
+/// among `windows`.
 ///
-/// Only windows of a process whose executable `window` fits count, and ties
-/// go to the window listed first, usually the front-most. The setup app
-/// finds an application's window this way; the runtime picks among the
-/// same tied windows with [`read_window`].
+/// Detection follows the process that owns it, the reader reads it, a click
+/// lands in it, and the setup app marks it as the best match, so they agree
+/// on one window.
+///
+/// Only visible windows of a process whose executable `window` fits count,
+/// and of those only the ones that fit best. `pick` says whose of those
+/// count. Among them it is the window the session reads now while `shown`
+/// says it shows, then the first listed that shows, usually the front-most,
+/// then the first listed.
 #[must_use]
-pub fn best_window(
+pub fn session_window(
     window: &WindowMatch,
+    pick: Pick,
     processes: Vec<ProcessEntry>,
     windows: Vec<WindowEntry>,
-) -> Option<u64> {
-    best_windows(window, processes, windows)
-        .first()
-        .map(|entry| entry.handle)
+    mut shown: impl FnMut(u64) -> bool,
+) -> Option<SessionWindow> {
+    let best = best_windows(window, processes, windows);
+    let (owner, reading) = match pick {
+        Pick::Any => (None, None),
+        Pick::Prefer(process) => (
+            best.iter()
+                .any(|entry| entry.process == process)
+                .then_some(process),
+            None,
+        ),
+        Pick::Only { process, reading } => (Some(process), reading),
+    };
+    let pool: Vec<WindowEntry> = best
+        .into_iter()
+        .filter(|entry| owner.is_none_or(|owner| entry.process == owner))
+        .collect();
+    let showing = pool
+        .iter()
+        .position(|entry| Some(entry.handle) == reading && shown(entry.handle))
+        .or_else(|| pool.iter().position(|entry| shown(entry.handle)));
+    let at = showing.unwrap_or(0);
+    pool.into_iter().nth(at).map(|entry| SessionWindow {
+        entry,
+        shown: showing.is_some(),
+    })
 }
 
 /// The visible windows that `window` fits best, all with the same fit, in
-/// the order they are listed; [`best_window`] takes the first.
+/// the order they are listed.
 ///
 /// Only windows of a process whose executable `window` fits count.
-#[must_use]
-pub fn best_windows(
+fn best_windows(
     window: &WindowMatch,
     processes: Vec<ProcessEntry>,
     windows: Vec<WindowEntry>,
@@ -250,34 +310,6 @@ pub fn best_windows(
         .filter(|(position, _)| tied.binary_search(position).is_ok())
         .map(|(_, (entry, _))| entry)
         .collect()
-}
-
-/// The window the runtime reads among `best`, the windows tied for the best
-/// fit from [`best_windows`], and whether it shows.
-///
-/// When `current`, the process a session follows, owns one of them, it is
-/// one of its windows, so a second copy of the application does not take
-/// the session over. Otherwise any of them counts. Among those it is the
-/// first that `shown` says shows, or the first when none does.
-///
-/// Detection follows the process that owns this window and the reader
-/// reads it, so the two agree on one process.
-#[must_use]
-pub fn read_window(
-    best: &[WindowEntry],
-    current: Option<ProcessId>,
-    mut shown: impl FnMut(u64) -> bool,
-) -> Option<(&WindowEntry, bool)> {
-    let owns = |entry: &&WindowEntry| Some(entry.process) == current;
-    let pool: Vec<&WindowEntry> = if best.iter().any(|entry| owns(&entry)) {
-        best.iter().filter(owns).collect()
-    } else {
-        best.iter().collect()
-    };
-    match pool.iter().copied().find(|entry| shown(entry.handle)) {
-        Some(entry) => Some((entry, true)),
-        None => pool.first().map(|&entry| (entry, false)),
-    }
 }
 
 /// Whether a window shows, from its place. A window whose place cannot be
@@ -328,90 +360,141 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_best_window_is_visible_belongs_to_the_executable_and_fits_best() {
-        let example = WindowMatch::exact(WindowFacts {
+    fn example() -> WindowMatch {
+        WindowMatch::exact(WindowFacts {
             title: "Example App",
             class: "ExampleWindow",
             executable: "Example.exe",
-        });
-        let processes = || {
-            vec![
-                process(1, "Example.exe"),
-                process(2, "Other.exe"),
-                process(3, "Example.exe"),
-            ]
-        };
-        let best = |windows| best_window(&example, processes(), windows);
+        })
+    }
+
+    /// The handle of the window `pick` takes among `windows` of processes
+    /// 1 to 3, where 2 is another executable, with `minimized` not shown,
+    /// and whether it shows.
+    fn picked(
+        window: &WindowMatch,
+        pick: Pick,
+        windows: Vec<WindowEntry>,
+        minimized: &[u64],
+    ) -> Option<(u64, bool)> {
+        let processes = vec![
+            process(1, "Example.exe"),
+            process(2, "Other.exe"),
+            process(3, "Example.exe"),
+        ];
+        session_window(window, pick, processes, windows, |handle| {
+            !minimized.contains(&handle)
+        })
+        .map(|picked| (picked.entry.handle, picked.shown))
+    }
+
+    #[test]
+    fn the_session_window_is_visible_belongs_to_the_executable_and_fits_best() {
+        let best = |windows| picked(&example(), Pick::Any, windows, &[]);
         assert_eq!(best(vec![window(5, 1, "Example App", false)]), None);
         assert_eq!(best(vec![window(5, 2, "Example App", true)]), None);
         assert_eq!(best(vec![window(5, 9, "Example App", true)]), None);
         // An untitled window of the application still counts.
-        assert_eq!(best(vec![window(5, 1, "", true)]), Some(5));
+        assert_eq!(best(vec![window(5, 1, "", true)]), Some((5, true)));
         assert_eq!(
             best(vec![
                 window(5, 1, "Launcher", true),
                 window(6, 1, "Example App", true),
                 window(7, 1, "Example App", true),
             ]),
-            Some(6)
-        );
-        let tied = best_windows(
-            &example,
-            processes(),
-            vec![
-                window(5, 1, "Launcher", true),
-                window(9, 3, "Example App", true),
-                window(6, 1, "Example App", true),
-                window(7, 2, "Example App", true),
-                window(8, 1, "Example App", true),
-            ],
+            Some((6, true)),
+            "the first listed of the best"
         );
         assert_eq!(
-            tied.iter().map(|entry| entry.handle).collect::<Vec<_>>(),
-            [9, 6, 8],
-            "every window with the best fit, in listed order"
+            picked(
+                &example(),
+                Pick::Any,
+                vec![
+                    window(5, 1, "Launcher", true),
+                    window(6, 1, "Example App", true),
+                ],
+                &[6],
+            ),
+            Some((6, false)),
+            "a minimized window that fits best over one that shows"
         );
     }
 
     #[test]
-    fn the_window_read_is_the_current_process_window_then_one_that_shows() {
-        // Copy 40's window is listed first but minimized; copy 42 shows.
-        let tied = [
-            window(5, 40, "Example App", true),
-            window(6, 42, "Example App", true),
-            window(7, 40, "Example App", true),
-        ];
-        let minimized = [5];
-        let read = |current: Option<u32>, minimized: &[u64]| {
-            read_window(&tied, current.map(ProcessId::new), |handle| {
-                !minimized.contains(&handle)
-            })
-            .map(|(entry, shown)| (entry.handle, shown))
+    fn the_session_window_is_its_process_s_then_the_read_one_then_one_that_shows() {
+        // Copy 1's window is listed first but minimized; copy 3 shows.
+        let tied = || {
+            vec![
+                window(5, 1, "Example App", true),
+                window(6, 3, "Example App", true),
+                window(7, 1, "Example App", true),
+                window(8, 1, "Launcher", true),
+            ]
         };
-        assert_eq!(
-            read(None, &minimized),
-            Some((6, true)),
-            "the first that shows"
-        );
-        assert_eq!(read(None, &[]), Some((5, true)), "the first listed");
-        assert_eq!(
-            read(Some(42), &[]),
-            Some((6, true)),
-            "the current process's"
-        );
-        assert_eq!(
-            read(Some(40), &minimized),
-            Some((7, true)),
-            "the current process's window that shows"
-        );
-        assert_eq!(
-            read(Some(40), &[5, 7]),
-            Some((5, false)),
-            "the current process keeps it while its windows are minimized"
-        );
-        assert_eq!(read(Some(43), &[5, 6, 7]), Some((5, false)), "none shows");
-        assert_eq!(read_window(&[], None, |_| true), None);
+        let pick = |pick, minimized: &[u64]| picked(&example(), pick, tied(), minimized);
+        let only = |process, reading| Pick::Only {
+            process: ProcessId::new(process),
+            reading,
+        };
+        let prefer = |process| Pick::Prefer(ProcessId::new(process));
+        let cases = [
+            (Pick::Any, &[5][..], Some((6, true)), "the first that shows"),
+            (Pick::Any, &[], Some((5, true)), "the first listed"),
+            (Pick::Any, &[5, 6, 7], Some((5, false)), "none shows"),
+            (prefer(3), &[], Some((6, true)), "the process's own"),
+            (
+                prefer(1),
+                &[5],
+                Some((7, true)),
+                "the process's own that shows",
+            ),
+            (
+                prefer(1),
+                &[5, 7],
+                Some((5, false)),
+                "the process keeps it while its windows are minimized",
+            ),
+            (
+                prefer(4),
+                &[5],
+                Some((6, true)),
+                "another process's while it owns none",
+            ),
+            (only(3, None), &[], Some((6, true)), "the process's own"),
+            (only(4, None), &[], None, "never another process's"),
+            (only(1, Some(7)), &[], Some((7, true)), "the one it reads"),
+            (
+                only(1, Some(7)),
+                &[7],
+                Some((5, true)),
+                "the one it reads gives way once it is minimized",
+            ),
+            (
+                only(1, Some(8)),
+                &[],
+                Some((5, true)),
+                "the one it reads gives way once it no longer fits best",
+            ),
+        ];
+        for (with, minimized, expected, case) in cases {
+            assert_eq!(pick(with, minimized), expected, "{case}");
+        }
+        assert_eq!(picked(&example(), Pick::Any, Vec::new(), &[]), None);
+    }
+
+    #[test]
+    fn the_fallback_takes_a_window_of_the_executable_only() {
+        let mut example = example();
+        example.must_match.title = true;
+        let windows = || {
+            vec![
+                window(5, 2, "Example App", true),
+                window(6, 1, "Launcher", true),
+            ]
+        };
+        assert_eq!(picked(&example, Pick::Any, windows(), &[]), None);
+        example.fallback = true;
+        assert_eq!(picked(&example, Pick::Any, windows(), &[]), Some((6, true)));
     }
 
     #[test]
@@ -432,26 +515,6 @@ mod tests {
         assert!(!shows(place(false)));
         assert!(!shows(Ok(None)), "gone");
         assert!(shows(Err(io::Error::other("denied"))), "unknown");
-    }
-
-    #[test]
-    fn the_fallback_takes_a_window_of_the_executable_only() {
-        let mut example = WindowMatch::exact(WindowFacts {
-            title: "Example App",
-            class: "ExampleWindow",
-            executable: "Example.exe",
-        });
-        example.must_match.title = true;
-        let processes = || vec![process(1, "Example.exe"), process(2, "Other.exe")];
-        let windows = || {
-            vec![
-                window(5, 2, "Example App", true),
-                window(6, 1, "Launcher", true),
-            ]
-        };
-        assert_eq!(best_window(&example, processes(), windows()), None);
-        example.fallback = true;
-        assert_eq!(best_window(&example, processes(), windows()), Some(6));
     }
 
     #[test]

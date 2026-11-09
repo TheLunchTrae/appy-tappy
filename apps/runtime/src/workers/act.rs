@@ -26,20 +26,15 @@ use std::time::{Duration, Instant};
 use appytappy_actions::{ActionError, Actions, Backoff, Controls, Watched};
 use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
-use appytappy_engine::RuleIndex;
 use appytappy_sources::screen::Capture;
 use appytappy_sources::system::System;
 
 use crate::click::{self, ClickTargets};
+use crate::model::Owner;
 use crate::trace::{Detail, Record, Trace, What};
-use crate::workers::reader::SessionId;
 
 /// How often a failed volume restore is tried again while no job comes.
 const VOLUME_RETRY: Duration = Duration::from_secs(10);
-
-/// Names a fired automation: its session and its rule's position, so two
-/// sessions' changes are never mixed up.
-pub(crate) type Owner = (SessionId, RuleIndex);
 
 /// What the owner asks the action thread to do.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,21 +66,25 @@ pub(crate) enum Job {
         /// When the frame arrived whose reading released it, for the trace.
         cause: Option<Instant>,
     },
-    /// Record to this trace from now on.
-    Trace(Trace),
 }
 
 impl Job {
     /// The automation the job runs or undoes, and the reading that caused
-    /// it, or `None` for a job that runs nothing.
-    fn traced(&self) -> Option<(Owner, Option<Instant>)> {
+    /// it.
+    pub(crate) const fn traced(&self) -> (Owner, Option<Instant>) {
         match self {
-            Self::Run { owner, cause, .. } | Self::Undo { owner, cause, .. } => {
-                Some((*owner, *cause))
-            },
-            Self::Trace(_) => None,
+            Self::Run { owner, cause, .. } | Self::Undo { owner, cause, .. } => (*owner, *cause),
         }
     }
+}
+
+/// What reaches the action thread.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Control {
+    /// Run or undo an automation's actions.
+    Job(Job),
+    /// Record to this trace from now on.
+    Trace(Trace),
 }
 
 /// What a job did.
@@ -108,7 +107,8 @@ pub(crate) enum ActionReport {
     CanRun(bool),
 }
 
-/// Runs `jobs` until the owner stops sending them, then gives each restore
+/// Runs each job that `jobs` brings, recording to the trace it last
+/// brought, until the owner stops sending them, then gives each restore
 /// still pending a last try. `controls` makes the operating system's
 /// controls on this thread; when it fails, the jobs that come meanwhile are
 /// reported as not run, and it is called again after a wait that grows
@@ -117,7 +117,7 @@ pub(crate) enum ActionReport {
 pub(crate) fn run<C, S, E>(
     controls: impl FnMut() -> io::Result<C>,
     screen: &S,
-    jobs: &Receiver<Job>,
+    jobs: &Receiver<Control>,
     reports: &Sender<E>,
 ) where
     C: Controls,
@@ -153,32 +153,28 @@ pub(crate) fn run<C, S, E>(
             },
         };
         let notes = match job {
-            Some(Job::Trace(next)) => {
+            Some(Control::Trace(next)) => {
                 trace = next;
                 continue;
             },
-            Some(job) => {
-                let traced = job.traced();
+            Some(Control::Job(job)) => {
+                let ((session, rule), cause) = job.traced();
                 let started = trace.wants(What::Started.category()).then(Instant::now);
-                if let Some(((session, rule), cause)) = traced {
-                    trace.record(What::Started, |record| Record {
-                        session: Some(session),
-                        item: Some(rule.0),
-                        cause,
-                        ..record
-                    });
-                }
+                trace.record(What::Started, |record| Record {
+                    session: Some(session),
+                    item: Some(rule.0),
+                    cause,
+                    ..record
+                });
                 let done = worker.job(job, screen, Instant::now());
-                if let Some(((session, rule), cause)) = traced {
-                    trace.record(What::Done, |record| Record {
-                        session: Some(session),
-                        item: Some(rule.0),
-                        took: started.map(|started| record.at.saturating_duration_since(started)),
-                        cause,
-                        detail: Detail::Note(if done.failed { "failed" } else { "ok" }),
-                        ..record
-                    });
-                }
+                trace.record(What::Done, |record| Record {
+                    session: Some(session),
+                    item: Some(rule.0),
+                    took: started.map(|started| record.at.saturating_duration_since(started)),
+                    cause,
+                    detail: Detail::Note(if done.failed { "failed" } else { "ok" }),
+                    ..record
+                });
                 done.notes
             },
             None => worker.retry(Instant::now()),
@@ -295,7 +291,6 @@ where
                 .map(|error| format!("{automation}: undoing failed, so it is tried again: {error}"))
                 .into_iter()
                 .collect(),
-            Job::Trace(_) => Vec::new(),
         };
         let failed = !failures.is_empty();
         notes.extend(failures);
@@ -388,7 +383,10 @@ mod tests {
 
     use appytappy_sources::system::Unsupported;
 
+    use appytappy_engine::RuleIndex;
+
     use super::*;
+    use crate::model::SessionId;
 
     /// One media session that plays until paused, and a system volume when
     /// `volume` holds one.
@@ -563,8 +561,9 @@ mod tests {
     fn jobs_run_in_order_and_failures_name_the_automation_and_action() {
         let (jobs, received) = mpsc::channel();
         let (failures, failed) = mpsc::channel::<ActionReport>();
-        jobs.send(fire(pause_then_mute())).expect("send");
-        jobs.send(release()).expect("send");
+        jobs.send(Control::Job(fire(pause_then_mute())))
+            .expect("send");
+        jobs.send(Control::Job(release())).expect("send");
         drop(jobs);
         let (commands, sent) = mpsc::channel();
         run(
@@ -598,17 +597,17 @@ mod tests {
             .checked_add(Duration::from_millis(5))
             .expect("in range");
         let (jobs, received) = mpsc::channel();
-        jobs.send(Job::Trace(trace)).expect("send");
+        jobs.send(Control::Trace(trace)).expect("send");
         let mut run_job = fire(pause_then_mute());
         if let Job::Run { cause, .. } = &mut run_job {
             *cause = Some(fired_by);
         }
-        jobs.send(run_job).expect("send");
-        jobs.send(Job::Undo {
+        jobs.send(Control::Job(run_job)).expect("send");
+        jobs.send(Control::Job(Job::Undo {
             owner: OWNER,
             automation: AUTOMATION.to_owned(),
             cause: Some(released_by),
-        })
+        }))
         .expect("send");
         drop(jobs);
         let (reports, _reported) = mpsc::channel::<ActionReport>();
@@ -722,7 +721,7 @@ mod tests {
 
     #[test]
     fn the_owner_hears_when_actions_cannot_run_and_when_they_can_again() {
-        let (jobs, received) = mpsc::channel::<Job>();
+        let (jobs, received) = mpsc::channel::<Control>();
         let (reports, reported) = mpsc::channel::<ActionReport>();
         let (commands, _sent) = mpsc::channel();
         let mut player = Some(OnePlayer::new(commands));
@@ -899,8 +898,8 @@ mod tests {
         let (commands, sent) = mpsc::channel();
         let mut player = OnePlayer::new(commands);
         player.refusals = 2;
-        jobs.send(fire(pause())).expect("send");
-        jobs.send(release()).expect("send");
+        jobs.send(Control::Job(fire(pause()))).expect("send");
+        jobs.send(Control::Job(release())).expect("send");
         drop(jobs);
         run(once(player), &Unsupported, &received, &failures);
         assert_eq!(
@@ -1010,8 +1009,8 @@ mod tests {
         let (commands, sent) = mpsc::channel();
         let mut player = OnePlayer::new(commands);
         player.refusals = 1;
-        jobs.send(fire(pause())).expect("send");
-        jobs.send(release()).expect("send");
+        jobs.send(Control::Job(fire(pause()))).expect("send");
+        jobs.send(Control::Job(release())).expect("send");
         let actor =
             std::thread::spawn(move || run(once(player), &Unsupported, &received, &failures));
         let patience = MEDIA_RETRY.saturating_mul(3);

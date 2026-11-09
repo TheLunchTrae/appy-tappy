@@ -436,7 +436,7 @@ public static class Probe {
     Assert-Read
 
     # The same load with the trace recording every category, which costs the
-    # most. Turning it on restarts the readers, which the settle time covers.
+    # most.
     Set-Trace $true
     try { Wait-Log 'the trace records to' 10 } catch { Assert-Trace; throw }
     Measure-Phase 'Active, trace on' $ActiveSample 0 0
@@ -446,11 +446,9 @@ public static class Probe {
     $reads = Measure-Log 'reading its values'
     Set-Trace $false
     Wait-Log 'the trace stopped' 10 ($stops + 1)
-    # Stopping the trace starts the reader over. Its capture starts just after
-    # it logs that it reads, and fails to start on a window that is closing,
-    # so the probe stays open until it has.
-    Wait-Log 'reading its values' 10 ($reads + 1)
+    # Turning the trace on or off starts no reader over.
     Start-Sleep -Seconds 2
+    if ((Measure-Log 'reading its values') -ne $reads) { throw 'turning the trace off started the reader over' }
 
     Stop-Process -Id $probe.Id
     $probe.WaitForExit()

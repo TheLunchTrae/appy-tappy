@@ -141,9 +141,14 @@ export async function stopWatching(watch: number): Promise<void> {
   await invoke('stop_watching', { watch });
 }
 
-/** The running windows `window` takes, the best fit first. */
+/** The running windows `window` takes, the one a new session would read first. */
 export async function matchWindows(window: WindowDef): Promise<ReadonlyArray<WindowFit>> {
   return invoke<ReadonlyArray<WindowFit>>('match_windows', { window });
+}
+
+/** The window a new session would read for `window`, or null while none fits. */
+export async function readWindow(window: WindowDef): Promise<number | null> {
+  return invoke<number | null>('read_window', { window });
 }
 
 /**
