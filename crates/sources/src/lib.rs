@@ -7,6 +7,7 @@
 //!
 //! See `wiki/Architecture.md` for this crate's boundaries.
 
+pub mod automation;
 pub mod build;
 pub mod schedule;
 pub mod screen;
