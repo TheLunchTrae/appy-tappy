@@ -33,6 +33,7 @@ use appytappy_sources::system::{WindowPlace, best_window};
 use serde::Serialize;
 
 use crate::owner::{Host, Message, Reading};
+use crate::stores::SavedApp;
 
 /// The shortest time between two frames an overlay reads: often enough for
 /// readings it shows about four times a second.
@@ -247,7 +248,7 @@ impl<S: CaptureSession> Overlays<S> {
         host: &H,
         messages: &Sender<Message<H>>,
         app: &str,
-        file: impl FnOnce() -> Result<(AppFile, std::path::PathBuf), String>,
+        file: impl FnOnce() -> Result<SavedApp, String>,
     ) -> Result<OverlayView, String> {
         if !self.open.contains_key(app) {
             if let Some((message, wait)) = self.failed.get_mut(app) {
@@ -258,9 +259,8 @@ impl<S: CaptureSession> Overlays<S> {
                 self.failed.remove(app);
             }
             let purpose = self.purpose;
-            let opened = file().and_then(|(file, folder)| {
-                open(&file, purpose, |name| std::fs::read(folder.join(name)))
-            });
+            let opened =
+                file().and_then(|saved| open(&saved.file, purpose, |name| saved.picture(name)));
             match opened {
                 Ok(overlay) => {
                     self.open.insert(app.to_owned(), overlay);

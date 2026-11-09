@@ -1,18 +1,23 @@
-//! What the owner needs from the operating system: its windows, its processes
-//! and a capture of one window, so the tests can stand in for it.
+//! What the owner needs from the operating system and the app around it: the
+//! system's windows and processes, a capture of one window, the runtime, and
+//! the overlays' windows, so the tests can stand in for them.
 
 use std::io;
 use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_sources::HostSystem;
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
 use appytappy_sources::system::{ProcessEntry, System, WindowEntry, WindowPlace};
+use tauri::{AppHandle, Runtime, Wry};
+
+use crate::overlay::{self, OverlayWindow};
 
 /// What the setup app needs from the operating system: its windows and
-/// processes, a capture of one window, and a way to tell the runtime that a
-/// save changed what it reads. It lives as long as the owner, which sends
-/// itself work that names it.
+/// processes, a capture of one window, a way to tell the runtime that a
+/// save changed what it reads, and the overlays' windows. It lives as long
+/// as the owner, which sends itself work that names it.
 pub(crate) trait Host: 'static {
     /// A running capture.
     type Session: CaptureSession;
@@ -67,25 +72,43 @@ pub(crate) trait Host: 'static {
     /// running reads them when it starts, and one that cannot be reached
     /// keeps what it read, so the save stands either way.
     fn reload_runtime(&self);
+
+    /// Opens a window for each overlay in `wanted` that has none, and
+    /// closes the overlay windows nothing wants any more.
+    ///
+    /// # Errors
+    ///
+    /// Returns why each window that could not open or close could not.
+    fn sync_overlay_windows(&self, wanted: &[OverlayWindow]) -> Result<(), String>;
 }
 
-impl<T: System + Capture + 'static> Host for T {
-    type Session = T::Session;
+/// The setup app's host: the operating system, and the running app whose
+/// windows show the overlays.
+#[derive(Debug)]
+pub(crate) struct Desktop<S = HostSystem, R: Runtime = Wry> {
+    /// The operating system.
+    pub(crate) system: S,
+    /// The running app.
+    pub(crate) app: AppHandle<R>,
+}
+
+impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
+    type Session = S::Session;
 
     fn windows(&self) -> io::Result<Vec<WindowEntry>> {
-        System::windows(self)
+        self.system.windows()
     }
 
     fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
-        System::processes(self)
+        self.system.processes()
     }
 
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
-        System::window_place(self, window)
+        self.system.window_place(window)
     }
 
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {
-        System::executable_build(self, process)
+        self.system.executable_build(process)
     }
 
     fn capture(
@@ -95,7 +118,7 @@ impl<T: System + Capture + 'static> Host for T {
         interval: Duration,
         handler: FrameHandler,
     ) -> io::Result<Self::Session> {
-        self.start(window, crop, interval, handler)
+        self.system.start(window, crop, interval, handler)
     }
 
     #[mutants::skip] // Sets a named Windows event, which no test can observe.
@@ -110,6 +133,11 @@ impl<T: System + Capture + 'static> Host for T {
         )]
         let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
     }
+
+    #[mutants::skip] // Opens and closes windows, which needs a running app.
+    fn sync_overlay_windows(&self, wanted: &[OverlayWindow]) -> Result<(), String> {
+        overlay::window::sync(&self.app, wanted)
+    }
 }
 
 #[cfg(test)]
@@ -119,13 +147,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_host_system_lists_and_captures_through_the_platform() {
-        let unsupported = appytappy_sources::system::Unsupported;
-        assert!(Host::windows(&unsupported).is_err());
-        assert!(Host::processes(&unsupported).is_err());
-        assert!(Host::window_place(&unsupported, 7).is_err());
-        assert!(Host::executable_build(&unsupported, ProcessId::new(7)).is_err());
+    fn the_desktop_lists_and_captures_through_the_platform() {
+        let desktop = Desktop {
+            system: appytappy_sources::system::Unsupported,
+            app: tauri::test::mock_app().handle().clone(),
+        };
+        assert!(desktop.windows().is_err());
+        assert!(desktop.processes().is_err());
+        assert!(desktop.window_place(7).is_err());
+        assert!(desktop.executable_build(ProcessId::new(7)).is_err());
         let handler: FrameHandler = Box::new(|_frame| Duration::ZERO);
-        assert!(Host::capture(&unsupported, 7, Crop::Whole, PREVIEW_INTERVAL, handler).is_err());
+        assert!(
+            desktop
+                .capture(7, Crop::Whole, PREVIEW_INTERVAL, handler)
+                .is_err()
+        );
     }
 }

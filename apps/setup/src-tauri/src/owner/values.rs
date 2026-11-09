@@ -2,31 +2,24 @@
 //! and builds, saving and deleting them, each application's anti-cheat
 //! setting, and the build its values were checked against.
 
-use std::fs;
-use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ReferenceDef, ScreenDef, SizeChangesDef, SizeDef,
-    ValueDef, value_id,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, value_id,
 };
 use appytappy_sources::screen::saved;
 
 use crate::applications::{self, AppSpec};
 use crate::automations;
 use crate::check_spec::{self, Pictures};
-use crate::stores::Stores;
+use crate::stores::SavedApp;
 use crate::window_list::{self, WindowChoice};
 
 use super::host::Host;
 use super::messages::{AppSummary, SaveSpec, SavedValue};
-use super::{Changed, Owner};
+use super::{Changed, Edit, Owner, Write};
 
 impl<H: Host> Owner<H> {
-    pub(super) fn stores(&self) -> Result<&Stores, String> {
-        self.stores.as_ref().map_err(Clone::clone)
-    }
-
     /// The saved applications.
     pub(crate) fn apps(&mut self) -> Result<Vec<AppSummary>, String> {
         let stored = self
@@ -78,13 +71,8 @@ impl<H: Host> Owner<H> {
 
     /// Saves a value and answers where it was saved, or what to fix.
     pub(crate) fn save(&mut self, spec: &SaveSpec) -> Result<SavedValue, String> {
-        let saved = self.save_value(spec);
-        self.after(Changed::Values, saved)
-    }
-
-    /// Saves the value `spec` describes, without telling anyone.
-    fn save_value(&mut self, spec: &SaveSpec) -> Result<SavedValue, String> {
-        let stores = self.stores()?;
+        // Without the stores, nothing else the user could fix matters.
+        self.stores()?;
         let name = spec.value_name.trim();
         if name.is_empty() {
             return Err("Name the value first.".to_owned());
@@ -97,52 +85,50 @@ impl<H: Host> Owner<H> {
         let size = self
             .with_session(|session| check_spec::drawn_size(&spec.check, session, spec.screenshot))
             .map_err(|error| error.to_string())?;
-        let app = spec.app.clone();
-        let mut file = stores.app_file(&app)?;
-        let id = value_id(name);
-        if file.values.iter().any(|value| value.id == id) {
-            return Err(format!(
-                "{} already has a value named like \"{name}\". Pick another name.",
-                file.name
-            ));
-        }
-        let saved = self
-            .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
-            .map_err(|error| error.to_string())?;
-        let screen = ScreenDef {
-            window_size: SizeDef {
-                width: size.width,
-                height: size.height,
-            },
-            region: saved.region,
-            check: saved.check,
-            pin: Some(spec.pin),
-            fixes: Vec::new(),
-        };
-        read_back(
-            &screen,
-            &file.references,
-            file.size_changes,
-            &saved.pictures,
-            &stores.apps.folder(&app),
-        )?;
-        let first = file.values.is_empty();
-        file.values.push(ValueDef {
-            id: id.clone(),
-            name: name.to_owned(),
-            screen,
-        });
-        // The first value is checked against the build that runs now. Later
-        // ones leave that to Mark as checked, since one new value says
-        // nothing about the others.
-        if first {
-            file.checked = self.running_build(&file).ok().flatten().map(checked_now);
-        }
-        self.stores()?
-            .apps
-            .save(&app, &file, &saved.pictures)
-            .map_err(|error| error.to_string())?;
-        Ok(SavedValue { app, value: id })
+        self.update_app(&spec.app, Changed::Values, |owner, found| {
+            let id = value_id(name);
+            if found.file.values.iter().any(|value| value.id == id) {
+                return Err(format!(
+                    "{} already has a value named like \"{name}\". Pick another name.",
+                    found.file.name
+                ));
+            }
+            let saved = owner
+                .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
+                .map_err(|error| error.to_string())?;
+            let screen = ScreenDef {
+                window_size: SizeDef {
+                    width: size.width,
+                    height: size.height,
+                },
+                region: saved.region,
+                check: saved.check,
+                pin: Some(spec.pin),
+                fixes: Vec::new(),
+            };
+            read_back(&screen, found, &saved.pictures)?;
+            let file = &mut found.file;
+            let first = file.values.is_empty();
+            file.values.push(ValueDef {
+                id: id.clone(),
+                name: name.to_owned(),
+                screen,
+            });
+            // The first value is checked against the build that runs now.
+            // Later ones leave that to Mark as checked, since one new value
+            // says nothing about the others.
+            if first {
+                file.checked = owner.running_build(file).ok().flatten().map(checked_now);
+            }
+            Ok(Edit::Save(
+                SavedValue {
+                    app: spec.app.clone(),
+                    value: id,
+                },
+                saved.pictures,
+            ))
+        })
+        .map(|saved| saved.answer)
     }
 
     /// The build that the best fit for `file`'s window runs, or `None`
@@ -185,86 +171,56 @@ impl<H: Host> Owner<H> {
     /// Saves the build the application `app` runs now as the one its values
     /// were checked against.
     pub(crate) fn mark_checked(&mut self, app: &str) -> Result<(), String> {
-        let saved = self.save_checked(app);
-        self.after(Changed::Runtime, saved)
-    }
-
-    /// Saves the build `app` runs now, without telling anyone.
-    fn save_checked(&mut self, app: &str) -> Result<(), String> {
-        let mut file = self.stores()?.app_file(app)?;
-        let build = self
-            .running_build(&file)
-            .map_err(|error| {
-                format!(
-                    "AppyTappy Setup cannot tell which build of {} runs: {error}",
-                    file.name
-                )
-            })?
-            .ok_or_else(|| {
-                format!(
-                    "Start {} first, so AppyTappy Setup can tell which build runs.",
-                    file.name
-                )
-            })?;
-        file.checked = Some(checked_now(build));
-        self.stores()?
-            .apps
-            .save(app, &file, &[])
-            .map_err(|error| error.to_string())
+        self.update_app(app, Changed::Runtime, |owner, found| {
+            let file = &mut found.file;
+            let build = owner
+                .running_build(file)
+                .map_err(|error| {
+                    format!(
+                        "AppyTappy Setup cannot tell which build of {} runs: {error}",
+                        file.name
+                    )
+                })?
+                .ok_or_else(|| {
+                    format!(
+                        "Start {} first, so AppyTappy Setup can tell which build runs.",
+                        file.name
+                    )
+                })?;
+            file.checked = Some(checked_now(build));
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.answer)
     }
 
     /// Deletes the value `value` of the application `app`, unless an
     /// automation uses it.
     pub(crate) fn delete(&mut self, app: &str, value: &str) -> Result<(), String> {
-        let deleted = self.delete_value(app, value);
-        let file = self.after(Changed::Values, deleted)?;
-        self.prune(app, &file)
-    }
-
-    /// Deletes the value from the application's file, without telling
-    /// anyone, and answers the file as saved.
-    fn delete_value(&self, app: &str, value: &str) -> Result<AppFile, String> {
-        let stores = self.stores()?;
-        let store = &stores.apps;
-        let mut file = stores.app_file(app)?;
-        if let Some(saved) = file.values.iter().find(|saved| saved.id == value) {
-            automations::check_unused(stores, app, value, &saved.name)?;
-        }
-        file.values.retain(|saved| saved.id != value);
-        // Values made again later are checked against the build they are
-        // made on.
-        if file.values.is_empty() {
-            file.checked = None;
-        }
-        store
-            .save(app, &file, &[])
-            .map_err(|error| error.to_string())?;
-        Ok(file)
-    }
-
-    /// Removes the pictures of the application `app` that `file` no longer
-    /// names. The runtime and the overlays read nothing from them, so a
-    /// removal that fails changes nothing they read.
-    pub(super) fn prune(&self, app: &str, file: &AppFile) -> Result<(), String> {
-        self.stores()?
-            .apps
-            .prune(app, file)
-            .map_err(|error| error.to_string())
+        self.update_app(app, Changed::Values, |owner, found| {
+            let file = &mut found.file;
+            if let Some(saved) = file.values.iter().find(|saved| saved.id == value) {
+                automations::check_unused(owner.stores()?, app, value, &saved.name)?;
+            }
+            file.values.retain(|saved| saved.id != value);
+            // Values made again later are checked against the build they are
+            // made on.
+            if file.values.is_empty() {
+                file.checked = None;
+            }
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.answer)
     }
 
     /// Saves `class` as the anti-cheat class of the application `app`. A
     /// class other than none stops its automations that press keys, which
     /// the Automations page then shows as unable to run.
     pub(crate) fn set_anti_cheat(&mut self, app: &str, class: AntiCheatDef) -> Result<(), String> {
-        let saved = self.stores().and_then(|stores| {
-            let mut file = stores.app_file(app)?;
-            file.anti_cheat = class;
-            stores
-                .apps
-                .save(app, &file, &[])
-                .map_err(|error| error.to_string())
-        });
-        self.after(Changed::Runtime, saved)
+        self.update_app(app, Changed::Runtime, |_owner, found| {
+            found.file.anti_cheat = class;
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.answer)
     }
 
     /// Saves `spec` as a new application, or over `existing`, and answers
@@ -274,23 +230,18 @@ impl<H: Host> Owner<H> {
         existing: Option<&str>,
         spec: AppSpec,
     ) -> Result<String, String> {
-        let saved = self
-            .stores()
-            .and_then(|stores| applications::save(stores, existing, spec));
-        self.after(Changed::Values, saved)
+        let (id, file) = applications::apply(self.stores()?, existing, spec)?;
+        self.write_app(&id, Changed::Values, Write::Save(&file, &Vec::new()))?;
+        Ok(id)
     }
 
-    /// Removes the application `app`, its values and their pictures.
-    pub(crate) fn remove_app(&mut self, app: &str) -> Result<(), String> {
-        self.stores()
-            .and_then(|stores| applications::check_removable(stores, app))?;
-        let removed = self
-            .stores()
-            .and_then(|stores| stores.apps.remove(app).map_err(|error| error.to_string()));
-        // A removal that failed partway may have removed some of the
-        // application's files, so they are read again either way.
-        self.tell(Changed::Values);
-        removed
+    /// Removes the application `app`, its values and their pictures, and
+    /// closes its overlay's window. Answers why an overlay window could not
+    /// open or close, if one could not; the application is removed either
+    /// way.
+    pub(crate) fn remove_app(&mut self, app: &str) -> Result<Option<String>, String> {
+        applications::check_removable(self.stores()?, app)?;
+        self.write_app(app, Changed::Applications, Write::Remove)
     }
 }
 
@@ -303,26 +254,25 @@ fn checked_now(build: BuildDef) -> CheckedDef {
     CheckedDef { build, at }
 }
 
-/// Reads `screen` back as the runtime will, with its application's
-/// `references` and `size_changes`, from `pictures`, about to be saved, and
-/// those already in the application's `folder`, so a value that saves is
-/// one the runtime can read.
+/// Reads `screen` back as the runtime will, with the references and size
+/// changes of `app`'s file, from `pictures`, about to be saved, and those
+/// already in its folder, so a value that saves is one the runtime can read.
 pub(super) fn read_back(
     screen: &ScreenDef,
-    references: &[ReferenceDef],
-    size_changes: SizeChangesDef,
+    app: &SavedApp,
     pictures: &Pictures,
-    folder: &Path,
 ) -> Result<(), String> {
-    saved::build(screen, references, size_changes, |picture| {
-        pictures
-            .iter()
-            .find(|(name, _)| name == picture)
-            .map_or_else(
-                || fs::read(folder.join(picture)),
-                |(_, png)| Ok(png.clone()),
-            )
-    })
+    saved::build(
+        screen,
+        &app.file.references,
+        app.file.size_changes,
+        |picture| {
+            pictures
+                .iter()
+                .find(|(name, _)| name == picture)
+                .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
+        },
+    )
     .map(drop)
     .map_err(|error| format!("AppyTappy could not read this value as saved: {error}."))
 }
@@ -343,8 +293,9 @@ mod tests {
     #[test]
     fn a_value_is_read_back_from_its_new_pictures_and_the_saved_ones() {
         let (stores, root) = scratch_store("read-back");
-        let folder = stores.apps.folder("example");
-        fs::create_dir_all(&folder).expect("makes the folder");
+        let mut harness = harness_with(false, Ok(stores.clone()));
+        add_example_app(&mut harness);
+        let app = stores.app("example").expect("saved");
         let png = Image::new(
             Size {
                 width: 2,
@@ -380,26 +331,14 @@ mod tests {
             pin: None,
             fixes: Vec::new(),
         };
-        fs::write(folder.join("old.png"), &png).expect("writes");
+        std::fs::write(app.folder.join("old.png"), &png).expect("writes");
         let new = vec![("new.png".to_owned(), png)];
         assert_eq!(
-            read_back(
-                &screen(["new.png", "old.png"]),
-                &[],
-                SizeChangesDef::Often,
-                &new,
-                &folder
-            ),
+            read_back(&screen(["new.png", "old.png"]), &app, &new),
             Ok(())
         );
         assert_eq!(
-            read_back(
-                &screen(["new.png", "gone.png"]),
-                &[],
-                SizeChangesDef::Often,
-                &new,
-                &folder
-            ),
+            read_back(&screen(["new.png", "gone.png"]), &app, &new),
             Err(
                 "AppyTappy could not read this value as saved: its picture gone.png cannot be \
                  read."
@@ -407,17 +346,10 @@ mod tests {
             )
         );
         assert!(
-            read_back(
-                &screen(["old.png", "new.png"]),
-                &[],
-                SizeChangesDef::Often,
-                &Vec::new(),
-                &folder
-            )
-            .is_err(),
+            read_back(&screen(["old.png", "new.png"]), &app, &Vec::new()).is_err(),
             "a new picture is not on disk yet"
         );
-        fs::remove_dir_all(root).expect("clean up");
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 
     #[test]
@@ -520,7 +452,7 @@ mod tests {
         .expect("the UI's spelling");
         harness.forget_reloads();
         let id = harness
-            .ask(|owner| owner.save_automation(None, automation))
+            .ask(|owner| owner.update_runtime(|stores| automations::save(stores, None, automation)))
             .expect("saves");
         assert_eq!(id, "pause_music");
         assert_eq!(harness.reloads(), 1, "the runtime reads the automations");
@@ -530,11 +462,13 @@ mod tests {
         );
         assert_eq!(harness.reloads(), 0, "a delete that failed tells no one");
         harness
-            .ask(|owner| owner.set_automation_enabled(&id.clone(), false))
+            .ask(|owner| {
+                owner.update_runtime(|stores| automations::set_enabled(stores, &id, false))
+            })
             .expect("turns off");
         assert_eq!(harness.reloads(), 1);
         let listed = harness
-            .ask(|owner| owner.list_automations())
+            .ask(|owner| owner.stores().and_then(automations::list))
             .expect("lists");
         assert_eq!(listed.len(), 1);
         assert!(!listed[0].automation.enabled);
@@ -547,11 +481,11 @@ mod tests {
             }
         );
         harness
-            .ask(|owner| owner.delete_automation(&id))
+            .ask(|owner| owner.update_runtime(|stores| automations::delete(stores, &id)))
             .expect("removes");
         assert_eq!(harness.reloads(), 1);
         assert_eq!(
-            harness.ask(|owner| owner.list_automations()),
+            harness.ask(|owner| owner.stores().and_then(automations::list)),
             Ok(Vec::new())
         );
 
@@ -566,8 +500,11 @@ mod tests {
             "cooldownMs": 0
         }))
         .expect("the UI's spelling");
-        let save_press =
-            |harness: &mut Harness| harness.ask(|owner| owner.save_automation(None, press.clone()));
+        let save_press = |harness: &mut Harness| {
+            harness.ask(|owner| {
+                owner.update_runtime(|stores| automations::save(stores, None, press.clone()))
+            })
+        };
         assert!(
             save_press(&mut harness)
                 .is_err_and(|error| error.contains("anti-cheat is set to none")),
@@ -584,7 +521,7 @@ mod tests {
         );
         let id = save_press(&mut harness).expect("saves");
         let listed = harness
-            .ask(|owner| owner.list_automations())
+            .ask(|owner| owner.stores().and_then(automations::list))
             .expect("lists");
         assert_eq!(
             listed[0].automation.actions,
@@ -596,7 +533,7 @@ mod tests {
         assert_eq!(listed[0].problem, None);
         set(&mut harness, AntiCheatDef::KernelLevel).expect("sets");
         let listed = harness
-            .ask(|owner| owner.list_automations())
+            .ask(|owner| owner.stores().and_then(automations::list))
             .expect("lists");
         assert!(
             listed[0]
@@ -606,7 +543,7 @@ mod tests {
             "{listed:?}"
         );
         harness
-            .ask(|owner| owner.delete_automation(&id))
+            .ask(|owner| owner.update_runtime(|stores| automations::delete(stores, &id)))
             .expect("removes");
         assert_eq!(
             set(&mut harness, AntiCheatDef::None).map(drop),
@@ -630,10 +567,12 @@ mod tests {
         }))
         .expect("the UI's spelling");
         let id = harness
-            .ask(|owner| owner.save_automation(None, open_and_play))
+            .ask(|owner| {
+                owner.update_runtime(|stores| automations::save(stores, None, open_and_play))
+            })
             .expect("saves");
         let listed = harness
-            .ask(|owner| owner.list_automations())
+            .ask(|owner| owner.stores().and_then(automations::list))
             .expect("lists");
         assert_eq!(
             listed[0].automation.actions,
@@ -647,7 +586,7 @@ mod tests {
             ]
         );
         harness
-            .ask(|owner| owner.delete_automation(&id))
+            .ask(|owner| owner.update_runtime(|stores| automations::delete(stores, &id)))
             .expect("removes");
 
         harness
@@ -858,7 +797,7 @@ mod tests {
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.list_automations()),
+            harness.ask(|owner| owner.stores().and_then(automations::list)),
             Err("no store in this test".to_owned())
         );
         let automation: AutomationDef = serde_json::from_value(serde_json::json!({
@@ -868,15 +807,19 @@ mod tests {
         }))
         .expect("the UI's spelling");
         assert_eq!(
-            harness.ask(|owner| owner.save_automation(None, automation)),
+            harness
+                .ask(|owner| owner
+                    .update_runtime(|stores| automations::save(stores, None, automation))),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.set_automation_enabled("x", true)),
+            harness
+                .ask(|owner| owner
+                    .update_runtime(|stores| automations::set_enabled(stores, "x", true))),
             Err("no store in this test".to_owned())
         );
         assert_eq!(
-            harness.ask(|owner| owner.delete_automation("x")),
+            harness.ask(|owner| owner.update_runtime(|stores| automations::delete(stores, "x"))),
             Err("no store in this test".to_owned())
         );
     }

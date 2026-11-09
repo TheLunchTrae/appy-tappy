@@ -28,13 +28,13 @@ pub(crate) struct AppSpec {
     pub(crate) size_changes: SizeChangesDef,
 }
 
-/// Saves `spec` over the application `existing`, or as a new application
-/// with no values, and returns its ID.
-pub(crate) fn save(
+/// The ID and file `spec` makes of the application `existing`, or of a new
+/// application with no values, for the owner to save.
+pub(crate) fn apply(
     stores: &Stores,
     existing: Option<&str>,
     spec: AppSpec,
-) -> Result<String, String> {
+) -> Result<(String, AppFile), String> {
     let name = spec.name.trim();
     if name.is_empty() {
         return Err("Name the application first.".to_owned());
@@ -117,11 +117,7 @@ pub(crate) fn save(
     }
     file.window = spec.window;
     file.size_changes = spec.size_changes;
-    stores
-        .apps
-        .save(&id, &file, &[])
-        .map_err(|error| error.to_string())?;
-    Ok(id)
+    Ok((id, file))
 }
 
 /// Checks that the application `app` is saved and that no automation
@@ -143,31 +139,30 @@ pub(crate) fn check_removable(stores: &Stores, app: &str) -> Result<(), String> 
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
-    use std::{env, fs, process};
 
     use appytappy_config::app_file::{FallbackDef, MustMatchDef};
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, AutomationsFile, ComparisonDef, MediaCommandDef, TargetDef,
         WhenDef,
     };
-    use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
     use appytappy_config::window_match::WindowFacts;
 
     use super::*;
 
     fn stores(name: &str) -> (Stores, PathBuf) {
-        let folder =
-            env::temp_dir().join(format!("appytappy-applications-{name}-{}", process::id()));
-        if folder.exists() {
-            fs::remove_dir_all(&folder).expect("remove leftovers");
-        }
-        let stores = Stores {
-            apps: AppStore::new(folder.join("apps")),
-            automations: AutomationStore::new(folder.join("automations.json")),
-            settings: SettingsStore::new(folder.join("settings.json")),
-        };
-        (stores, folder)
+        crate::stores::scratch(&format!("applications-{name}"))
+    }
+
+    /// Saves what [`apply`] makes of `spec`, as the owner does.
+    fn save(stores: &Stores, existing: Option<&str>, spec: AppSpec) -> Result<String, String> {
+        let (id, file) = apply(stores, existing, spec)?;
+        stores
+            .apps
+            .save(&id, &file, &[])
+            .map_err(|error| error.to_string())?;
+        Ok(id)
     }
 
     fn spec(name: &str, executable: &str) -> AppSpec {

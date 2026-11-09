@@ -7,13 +7,13 @@ use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{BuildDef, WindowDef};
-use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
 use crate::applications::AppSpec;
+use crate::overlay::OverlayWindow;
 use crate::recording::ocr;
-use crate::stores::Stores;
+use crate::stores::{self, Stores};
 
 use super::host::Host;
 use super::messages::{Message, SaveSpec};
@@ -37,6 +37,11 @@ pub(super) struct FakeHost {
     /// Told each time the owner asks the runtime to read the saved files
     /// again.
     reloads: Sender<()>,
+    /// Told the overlay windows wanted each time the owner opens and closes
+    /// them to match.
+    synced: Sender<Vec<OverlayWindow>>,
+    /// Why opening and closing the overlay windows fails, if it does.
+    pub(super) unsynced: Option<String>,
     /// The time the owner reads, which [`Harness::wait`] moves on.
     pub(super) clock: Instant,
 }
@@ -183,6 +188,11 @@ impl Host for FakeHost {
     fn reload_runtime(&self) {
         self.reloads.send(()).expect("test listens");
     }
+
+    fn sync_overlay_windows(&self, wanted: &[OverlayWindow]) -> Result<(), String> {
+        self.synced.send(wanted.to_vec()).expect("test listens");
+        self.unsynced.clone().map_or(Ok(()), Err)
+    }
 }
 
 pub(super) struct Harness {
@@ -194,21 +204,14 @@ pub(super) struct Harness {
     pub(super) jobs: Receiver<ocr::Job>,
     /// Each time the owner asked the runtime to read the saved files again.
     reloads: Receiver<()>,
+    /// The overlay windows wanted each time the owner opened and closed
+    /// them to match.
+    pub(super) synced: Receiver<Vec<OverlayWindow>>,
 }
 
 /// Fresh, empty stores for one test, all in one folder.
 pub(super) fn scratch_store(name: &str) -> (Stores, std::path::PathBuf) {
-    let folder =
-        std::env::temp_dir().join(format!("appytappy-setup-{name}-{}", std::process::id()));
-    if folder.exists() {
-        std::fs::remove_dir_all(&folder).expect("remove leftovers");
-    }
-    let stores = Stores {
-        apps: AppStore::new(folder.join("apps")),
-        automations: AutomationStore::new(folder.join("automations.json")),
-        settings: SettingsStore::new(folder.join("settings.json")),
-    };
-    (stores, folder)
+    stores::scratch(&format!("setup-{name}"))
 }
 
 pub(super) fn harness(refuse: bool) -> Harness {
@@ -221,6 +224,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
     let (closed_sender, closed) = mpsc::channel();
     let (job_sender, jobs) = mpsc::channel();
     let (reload_sender, reloads) = mpsc::channel();
+    let (synced_sender, synced) = mpsc::channel();
     let host = FakeHost {
         handlers: handler_sender,
         closed: closed_sender,
@@ -230,6 +234,8 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         process: 3,
         build: Some(example_build()),
         reloads: reload_sender,
+        synced: synced_sender,
+        unsynced: None,
         clock: Instant::now(),
     };
     Harness {
@@ -239,6 +245,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         closed,
         jobs,
         reloads,
+        synced,
     }
 }
 

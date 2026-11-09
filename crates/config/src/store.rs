@@ -56,6 +56,13 @@ pub struct StoredApp {
     pub file: Result<AppFile, String>,
 }
 
+/// The file in the application folder `folder`, or why it cannot be read.
+fn read_app(folder: &Path) -> Result<AppFile, String> {
+    fs::read_to_string(folder.join(APP_FILE))
+        .map_err(|error| error.to_string())
+        .and_then(|json| AppFile::parse(&json).map_err(|error| error.to_string()))
+}
+
 /// The folder of application folders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppStore {
@@ -94,13 +101,34 @@ impl AppStore {
             if !entry.file_type().is_ok_and(|kind| kind.is_dir()) || !is_app_id(&id) {
                 continue;
             }
-            let file = fs::read_to_string(entry.path().join(APP_FILE))
-                .map_err(|error| error.to_string())
-                .and_then(|json| AppFile::parse(&json).map_err(|error| error.to_string()));
+            let file = read_app(&entry.path());
             apps.push(StoredApp { id, file });
         }
         apps.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(apps)
+    }
+
+    /// The application folder `id` as [`AppStore::load`] lists it, without
+    /// reading the others, or `None` when it lists no such folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from looking the folder up.
+    pub fn load_one(&self, id: &str) -> io::Result<Option<StoredApp>> {
+        if !is_app_id(id) {
+            return Ok(None);
+        }
+        let folder = self.folder(id);
+        // Not followed, as a listing's entries are not.
+        match fs::symlink_metadata(&folder) {
+            Ok(found) if found.is_dir() => Ok(Some(StoredApp {
+                id: id.to_owned(),
+                file: read_app(&folder),
+            })),
+            Ok(_) => Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// The folder of the application `id`.
@@ -631,9 +659,26 @@ mod tests {
         fs::create_dir_all(store.folder("Not An Id")).expect("create");
         fs::write(store.root.join("loose.txt"), "x").expect("write");
 
+        fs::write(store.root.join("plain"), "x").expect("write");
+
         let apps = store.load().expect("loads");
         let ids: Vec<&str> = apps.iter().map(|app| app.id.as_str()).collect();
         assert_eq!(ids, ["alpha", "broken", "zeta"]);
+        for app in &apps {
+            assert_eq!(
+                store.load_one(&app.id).expect("loads one").as_ref(),
+                Some(app),
+                "one loads as the listing has it"
+            );
+        }
+        for unlisted in ["Not An Id", "plain", "missing"] {
+            assert_eq!(store.load_one(unlisted).expect("looks"), None, "{unlisted}");
+        }
+        // A file where the store's folder belongs is no store, here too.
+        #[cfg(unix)]
+        AppStore::new(root.join("file"))
+            .load_one("alpha")
+            .expect_err("a file is not a store");
         assert_eq!(apps[0].file, Ok(saved));
         assert!(
             apps[1]

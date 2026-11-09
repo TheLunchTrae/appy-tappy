@@ -829,12 +829,12 @@ the capture goes on and each value shows why it is not read there, such as
 that its region is too small, as `NotRead`.
 
 `overlay::window::sync` opens a window for each overlay that is on and closes
-each that is not. It runs when the main window mounts, after each overlay
-change, and after an application is removed, so a removed application's
-overlay or panel closes. It tries every window, and a window that cannot open
-or close does not stop the others. `set_overlay` and `remove_app` then answer
-with a message that names each such window, and the change they saved stays
-saved.
+each that is not. The owner thread runs it through its host: when the main
+window mounts, and from `Owner::write_app` after each overlay change and after
+an application is removed, so a removed application's overlay or panel
+closes. It tries every window, and a window that cannot open or close does not
+stop the others. `set_overlay` and `remove_app` then answer with a message
+that names each such window, and the change they saved stays saved.
 
 ### Saved files and copies
 
@@ -844,22 +844,27 @@ second copy over to the first, which brings its window forward
 
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
-one. Each save reads the file, changes it, and writes it back. After a save
-that works, `Owner::tell` tells who reads what it changed, through
-`Owner::after` for a save:
+one. Each save reads the file, changes it, and writes it back. A save of an
+application's file goes through `Owner::update_app`, which loads the file,
+changes it and hands it to `Owner::write_app`, and a save of the automations
+or the settings goes through `Owner::update_runtime`. After a save that works,
+they tell who reads what it changed, as its `Changed` kind says:
 
 - **The runtime and the overlays:** an application, its values, or the
   references they read with.
-- **The runtime only:** the automations, an application's anti-cheat class,
-  and the build its values were checked against.
-- **The overlays only:** turning an overlay on or off and changing its mode.
+- **The runtime only:** the automations, the settings, an application's
+  anti-cheat class, and the build its values were checked against.
+- **The overlays and their windows:** turning an overlay on or off and
+  changing its mode.
+- **The runtime, the overlays and their windows:** removing an application.
 
 A save that failed before it wrote anything changed nothing, so it tells
 neither, and an overlay that was reading goes on reading. A delete tells them
 once it has written the application's file, even when removing a picture the
 file no longer names fails afterwards, and removing an application tells them
-even when the removal fails partway. Moving a panel writes the application's
-file without telling anyone.
+even when the removal fails partway. Each save of an application's file
+removes the pictures it no longer names, after it tells them. Moving a panel
+writes the application's file without telling anyone.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another

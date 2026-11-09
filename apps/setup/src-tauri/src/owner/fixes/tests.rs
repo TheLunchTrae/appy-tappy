@@ -73,8 +73,9 @@ fn saved_file(harness: &Harness) -> AppFile {
         .owner
         .stores()
         .expect("stores")
-        .app_file("example")
+        .app("example")
         .expect("saved")
+        .file
 }
 
 fn folder(harness: &Harness) -> PathBuf {
