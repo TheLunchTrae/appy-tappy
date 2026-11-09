@@ -937,7 +937,7 @@ mod tests {
         assert_eq!(
             worker.job(fire(steps), &Unsupported, Instant::now()).notes,
             [format!(
-                "{AUTOMATION}: action 1 failed: the application it clicks in is no longer saved"
+                "{AUTOMATION}: action 1 failed: the application target it clicks in was not loaded"
             )],
             "the click is not placed, and the pause still runs"
         );
