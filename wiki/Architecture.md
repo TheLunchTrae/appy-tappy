@@ -196,8 +196,8 @@ Each thread below is a plain `std::thread`, and each channel is a
 - **Reload watch.** Waits on the named event `Local\AppyTappy.Reload`, which
   the setup app sets after each save that changes what the runtime runs, and
   sends `Reload`. The owner reads the settings, then the saved applications
-  and automations, again. A new read interval or trace restarts each reader
-  the new plan keeps, in its session, so automations keep their state and nothing is
+  and automations, again. A new read interval restarts each reader the new
+  plan keeps, in its session, so automations keep their state and nothing is
   undone; settings that cannot be read are logged, and the runtime keeps the
   ones it has. An application starts over, undoing what its automations
   changed first, only when what it runs changed: its window match, its values'
@@ -478,9 +478,9 @@ automation on each. It runs the runtime through five phases:
 3. **Active, trace on.** The same load with the
    [runtime trace](Trace.md) recording every category, which costs the most.
    The script saves the settings and sets the reload event, as the setup app
-   does, and turns the trace off again at the end of the phase. This phase has
-   no targets: it reports what recording costs, as
-   [Overhead](Trace.md#overhead) describes.
+   does, and turns the trace off again at the end of the phase, which fails if
+   that starts the reader over. This phase has no targets: it reports what
+   recording costs, as [Overhead](Trace.md#overhead) describes.
 4. **Steady.** The probe starts again and keeps repainting every 16 ms, but
    only a strip below the values, so the window changes while its values hold
    still. The runtime's reads back off to their slowest, and its capture asks

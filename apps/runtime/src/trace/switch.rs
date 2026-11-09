@@ -16,9 +16,9 @@ use appytappy_config::settings_file::TraceDef;
 use super::Trace;
 use super::writer::{Options, Stopping, TraceReport, Writer};
 use crate::log::Log;
+use crate::model::SessionId;
 use crate::note;
 use crate::plan::AppPlan;
-use crate::workers::reader::SessionId;
 
 /// How many bytes a megabyte of the file size limit is.
 const MEGABYTE: u64 = 1_048_576;

@@ -25,8 +25,8 @@ use appytappy_config::signal::Value;
 use appytappy_platform::LocalTime;
 
 use super::{Categories, Detail, Record, Trace, Tracer, What};
+use crate::model::SessionId;
 use crate::plan::AppPlan;
-use crate::workers::reader::SessionId;
 
 /// How many records the buffer holds. It is allocated once, when the trace
 /// starts, at about 150 bytes a record, so it is the trace's largest cost.
@@ -493,8 +493,8 @@ fn row(record: &Record, started: Instant, names: &BTreeMap<SessionId, Arc<AppPla
         .took
         .map(|took| nanos(took).to_string())
         .unwrap_or_default();
-    // A frame from before the trace started, as a late sample from a reader
-    // the new trace restarted, has no cause in this trace.
+    // A frame from before the trace started, as one whose value a reader
+    // sent just before it got the new trace, has no cause in this trace.
     let cause = record
         .cause
         .and_then(|cause| cause.checked_duration_since(started))
@@ -526,7 +526,10 @@ fn item_name(plan: &AppPlan, what: What, item: usize) -> Option<&str> {
             plan.labels.values.get(item).map(String::as_str)
         },
         What::Fired | What::Held | What::Released | What::Queued | What::Started | What::Done => {
-            plan.labels.automations.get(item).map(String::as_str)
+            plan.runs
+                .rules
+                .get(item)
+                .map(|rule| rule.automation.as_str())
         },
         What::Handled | What::Snapshot | What::Reading | What::Stopped | What::Reloaded => None,
     }
