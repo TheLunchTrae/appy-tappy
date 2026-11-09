@@ -624,16 +624,17 @@ changing.
   app uses, and checks everything again before use, because the files are
   outside its control and a person can edit them by hand. Each `app.json` must
   parse and pass `AppFile::parse`'s checks, which cover the file as a whole,
-  and each automation must pass `Runnable::new` in
-  `appytappy_sources::automation`: `AutomationDef::compile` against the saved
-  applications whose files read, the value it watches through `saved::build`
-  with its pictures, and each click's picture through `ClickSearch`. Saving a
-  value in the setup app calls `saved::build`, and saving, turning on, and
-  listing automations ask `Runnable::new` too, so what saves is what runs.
-  `apps/runtime/src/plan.rs` turns what passes into the plan the runtime runs,
-  in memory, and names each `app.json` that does not read; nothing it builds
-  is written to disk. An automation
-  or a value that fails a check is logged and left out, and the rest run.
+  its window match, and each check's states and bar colors, and each
+  automation must pass `Runnable::new` in `appytappy_sources::automation`:
+  `AutomationDef::compile` against the saved applications whose files read,
+  the value it watches through `saved::build` with its pictures, and each
+  click's picture through `ClickSearch`. Saving a value in the setup app calls
+  `saved::build`, and saving, turning on, and listing automations ask
+  `Runnable::new` too, so what saves is what runs. `apps/runtime/src/plan.rs`
+  turns what passes into the plan the runtime runs, in memory, and names each
+  `app.json` that does not read; nothing it builds is written to disk. An
+  automation or a value that fails a check is logged and left out, and the
+  rest run.
 - **Format.** `app.json`, `automations.json`, and `settings.json` each carry a
   `format` number, and the `FORMAT` constant in `app_file.rs`,
   `automation_file.rs`, and `settings_file.rs` sets the one version this build
@@ -679,10 +680,13 @@ design enforces the block in three places:
    that only their checked constructors make, and neither has `Deserialize` or
    `Default`, so code that skips validation does not compile. The screen
    source has no such split: `saved::build` in `appytappy-sources` takes the
-   raw `ScreenDef` and `ReferenceDef` from `app.json` and checks them as it
-   builds the check it reads with. It is the one owner of the rules for a
-   readable value, such as a state check's states, so one value that breaks
-   them stops only itself.
+   raw `ScreenDef` and `ReferenceDef` from `app.json` and builds the check it
+   reads with. `CheckDef::check` in `config` owns how many states a state
+   check has, that their names differ, and that a bar's two colors differ,
+   so a file that breaks one does not load; `saved::build` and the setup
+   app's check editor report its error. A value that breaks a rule that
+   `saved::build` checks itself, such as a region that fits or a picture of
+   the region's size, stops only itself.
 
 Nothing in AppyTappy opens another application's process. [Build
 detection](#build-detection) reads only the executable file, and process and
