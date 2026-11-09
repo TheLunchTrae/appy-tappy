@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { KEY_NAMES, SHORTCUT_KEYS } from '../src/lib/bindings.ts';
 import { accelerator, actionKeys, shortcutLabel, spellKeys } from '../src/lib/shortcut.ts';
 
 const none = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
@@ -7,8 +8,9 @@ const none = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
 describe('accelerator', () => {
   test('takes function keys alone', () => {
     expect(accelerator({ ...none, code: 'F9' })).toBe('F9');
-    expect(accelerator({ ...none, code: 'F24' })).toBe('F24');
-    expect(accelerator({ ...none, code: 'F25' })).toBeNull();
+    const last = `F${SHORTCUT_KEYS.maxFunctionKey}`;
+    expect(accelerator({ ...none, code: last })).toBe(last);
+    expect(accelerator({ ...none, code: `F${SHORTCUT_KEYS.maxFunctionKey + 1}` })).toBeNull();
   });
 
   test('needs a modifier for typing keys', () => {
@@ -25,8 +27,10 @@ describe('accelerator', () => {
     expect(accelerator({ ...none, code: 'IntlBackslash' })).toBeNull();
   });
 
-  test('takes Print Screen alone', () => {
-    expect(accelerator({ ...none, code: 'PrintScreen' })).toBe('PrintScreen');
+  test('takes the keys that work alone without a modifier', () => {
+    for (const key of SHORTCUT_KEYS.alone) {
+      expect(accelerator({ ...none, code: key })).toBe(key);
+    }
   });
 });
 
@@ -41,7 +45,7 @@ describe('actionKeys', () => {
   test('spells modifiers in order, then the key', () => {
     expect(actionKeys({ ...typed, code: 'KeyM' })).toBe('M');
     expect(actionKeys({ ...typed, code: 'Digit5' })).toBe('5');
-    expect(actionKeys({ ...typed, code: 'F24' })).toBe('F24');
+    expect(actionKeys({ ...typed, code: `F${KEY_NAMES.maxFunctionKey}` })).toBe(`F${KEY_NAMES.maxFunctionKey}`);
     expect(actionKeys({ ctrlKey: true, altKey: true, shiftKey: true, metaKey: true, key: 'm', code: 'KeyM' })).toBe(
       'Ctrl+Alt+Shift+Win+M',
     );
@@ -58,7 +62,7 @@ describe('actionKeys', () => {
 
   test('ignores modifiers alone and keys an action cannot press', () => {
     expect(actionKeys({ ...typed, ctrlKey: true, code: 'ControlLeft' })).toBeNull();
-    expect(actionKeys({ ...typed, code: 'F25' })).toBeNull();
+    expect(actionKeys({ ...typed, code: `F${KEY_NAMES.maxFunctionKey + 1}` })).toBeNull();
     expect(actionKeys({ ...typed, code: 'PrintScreen' })).toBeNull();
     expect(actionKeys({ ...typed, code: 'Numpad1' })).toBeNull();
   });

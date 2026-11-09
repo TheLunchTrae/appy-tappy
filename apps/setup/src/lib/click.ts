@@ -1,7 +1,14 @@
 // A click's target: where it lands in its application's window, as the
 // target screen sets it up and the automation editor shows it.
 
-import type { AntiCheatDef, AppSummary, ClickAtDef, ClickButtonDef, CornerDef } from './bindings.ts';
+import {
+  type AntiCheatDef,
+  type AppSummary,
+  type ClickAtDef,
+  type ClickButtonDef,
+  type CornerDef,
+  LIMITS,
+} from './bindings.ts';
 import type { Point, Rect, Size } from './region.ts';
 
 /** What each button choice is called on screen. */
@@ -17,17 +24,14 @@ export const BUTTONS: readonly ClickButtonDef[] = ['left', 'right', 'double'];
 /** How alike a picture must look, as a new target starts: a little room for a highlighted button. */
 export const DEFAULT_TOLERANCE = 20;
 
-/** The highest tolerance the runtime takes. */
-export const MAX_TOLERANCE = 255;
-
 /** How far around the picture a new search area reaches, in pixels. */
-const SEARCH_MARGIN = 50;
+export const SEARCH_MARGIN = 50;
 
-/** The most pixels a search area may hold, as the runtime allows: 400 by 400. */
-export const MAX_SEARCH_PIXELS = 160_000;
+/** The side of the largest square search area the runtime allows, in pixels. */
+export const SEARCH_SIDE = Math.floor(Math.sqrt(LIMITS.maxSearchPixels));
 
 /** The spot at `point` of a window `size`, measured from the corner nearest it, so it stays put when the window grows away from that corner. */
-export function spotAt(point: Point, size: Size): ClickAtDef {
+export function spotAt(point: Point, size: Size): Extract<ClickAtDef, { kind: 'spot' }> {
   const right = point.x >= size.width / 2;
   const bottom = point.y >= size.height / 2;
   const corner: CornerDef = bottom ? (right ? 'bottomRight' : 'bottomLeft') : right ? 'topRight' : 'topLeft';
@@ -49,11 +53,12 @@ export function placeSpot(at: Extract<ClickAtDef, { kind: 'spot' }>, size: Size)
 }
 
 /**
- * The area a picture `picture` is looked for in: up to 50 pixels around it, inside the window `size`, and narrower
- * where that would hold more than {@link MAX_SEARCH_PIXELS}. Null when the picture alone is too large.
+ * The area a picture `picture` is looked for in: up to {@link SEARCH_MARGIN} pixels around it, inside the window
+ * `size`, and narrower where that would hold more than `LIMITS.maxSearchPixels`. Null when the picture alone is too
+ * large.
  */
 export function searchArea(picture: Rect, size: Size): Rect | null {
-  if (picture.width * picture.height > MAX_SEARCH_PIXELS) {
+  if (picture.width * picture.height > LIMITS.maxSearchPixels) {
     return null;
   }
   for (let margin = SEARCH_MARGIN; margin >= 0; margin -= 1) {
@@ -62,7 +67,7 @@ export function searchArea(picture: Rect, size: Size): Rect | null {
     const right = Math.min(picture.x + picture.width + margin, size.width);
     const bottom = Math.min(picture.y + picture.height + margin, size.height);
     const area = { x: left, y: top, width: right - left, height: bottom - top };
-    if (area.width * area.height <= MAX_SEARCH_PIXELS) {
+    if (area.width * area.height <= LIMITS.maxSearchPixels) {
       return area;
     }
   }

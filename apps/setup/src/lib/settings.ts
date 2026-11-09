@@ -1,6 +1,5 @@
-// The settings commands, and the context that hands the settings to every page.
+// The settings, as the pages read and change them, and the context that hands them to every page.
 
-import { invoke } from '@tauri-apps/api/core';
 import { createContext, use } from 'react';
 
 import {
@@ -8,39 +7,10 @@ import {
   LIMITS,
   type ReadIntervalDef,
   type SettingsFile,
-  type SettingsView,
   TRACE_CATEGORIES,
   type TraceCategory,
   type TraceDef,
 } from './bindings.ts';
-
-export async function loadSettings(): Promise<SettingsView> {
-  return invoke<SettingsView>('settings');
-}
-
-/** Saves every setting; rejects with what to fix. */
-export async function saveSettings(settings: SettingsFile): Promise<void> {
-  await invoke('save_settings', { settings });
-}
-
-/** The folder the runtime writes its trace files to. */
-export async function traceFolder(): Promise<string> {
-  return invoke<string>('trace_folder');
-}
-
-/** Opens the trace folder in File Explorer. */
-export async function openTraceFolder(): Promise<void> {
-  await invoke('open_trace_folder');
-}
-
-/** Whether the runtime starts when the user signs in to Windows. */
-export async function startsWithWindows(): Promise<boolean> {
-  return invoke<boolean>('starts_with_windows');
-}
-
-export async function setStartsWithWindows(on: boolean): Promise<void> {
-  await invoke('set_starts_with_windows', { on });
-}
 
 /** The whole number `text` names, or null when it is not a whole number from `min` to `max`. */
 export function readWhole(text: string, min: number, max: number): number | null {

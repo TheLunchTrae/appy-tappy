@@ -36,6 +36,13 @@ use crate::owner::{Desktop, Message, Owner};
 use crate::recording::ocr;
 use crate::stores::Stores;
 
+/// Tauri's handler for every command in the table.
+macro_rules! handler {
+    ($($(#[doc = $doc:literal])* $module:ident::$name:ident($($arg:ident: $ty:ty),* $(,)?) -> $answer:ty;)*) => {
+        tauri::generate_handler![$($module::$name),*]
+    };
+}
+
 fn main() -> ExitCode {
     // The host system sets the process's DPI awareness, which Windows needs
     // before any window exists, so it comes before the app's window.
@@ -68,62 +75,7 @@ fn main() -> ExitCode {
         .manage(Bridge(sender.clone()))
         .setup(|app| Ok(updates::set_up(app)?))
         .on_window_event(overlay::window::on_event)
-        .invoke_handler(tauri::generate_handler![
-            commands::list_windows,
-            commands::pick_window,
-            commands::preview,
-            commands::stop_capture,
-            commands::take_screenshot,
-            commands::screenshot,
-            commands::select,
-            commands::set_check,
-            commands::read_value,
-            commands::start_recording,
-            commands::stop_recording,
-            commands::discard_recording,
-            commands::recording_state,
-            commands::recorded_reading,
-            commands::review_problems,
-            commands::watch_value,
-            commands::watched_reading,
-            commands::stop_watching,
-            commands::match_windows,
-            commands::read_window,
-            commands::add_click_picture,
-            commands::click_picture,
-            commands::find_click,
-            commands::list_apps,
-            commands::save_app,
-            commands::remove_app,
-            commands::save_value,
-            commands::place_value,
-            commands::save_fix,
-            commands::remove_fix,
-            commands::live_values,
-            commands::stop_live_values,
-            commands::delete_value,
-            commands::save_reference,
-            commands::delete_reference,
-            commands::set_anti_cheat,
-            commands::mark_checked,
-            commands::list_automations,
-            commands::save_automation,
-            commands::set_automation_enabled,
-            commands::delete_automation,
-            commands::sync_overlays,
-            commands::set_overlay,
-            commands::overlay_state,
-            commands::overlay_card,
-            commands::settings,
-            commands::save_settings,
-            commands::starts_with_windows,
-            commands::set_starts_with_windows,
-            commands::trace_folder,
-            commands::open_trace_folder,
-            updates::check_for_update,
-            updates::download_update,
-            updates::install_update,
-        ])
+        .invoke_handler(commands::table::with_commands!(handler))
         .build(tauri::generate_context!());
     let Ok(app) = built else {
         return ExitCode::FAILURE;

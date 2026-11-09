@@ -1,7 +1,12 @@
 // How an application's window match is edited and described.
 
 import type { FallbackDef, WindowChoice, WindowDef, WindowFit } from './bindings.ts';
-import type { LooseField, MatchField } from './api.ts';
+
+/** One of the things an application's window is recognized by. */
+export type MatchField = 'title' | 'class' | 'executable';
+
+/** A field that may be allowed to differ; the executable always has to match. */
+export type LooseField = Exclude<MatchField, 'executable'>;
 
 /** The fields in the order the editor shows them. */
 export const FIELDS: readonly MatchField[] = ['title', 'class', 'executable'];

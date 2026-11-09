@@ -710,8 +710,9 @@ state, and Tauri keeps only that thread's `Sender`, never state behind a
 closure that calls one of the owner's methods, with a `tokio::sync::oneshot`
 reply channel, and awaits the reply, so a slow capture or save never freezes
 the window. A new command is a method on the owner, a command in `commands.rs`
-that calls it, its name in `generate_handler!` in `main.rs`, and its call in
-the UI's `api.ts`, whose types the setup app generates
+that calls it, and its row in the command table, `commands/table.rs`, which
+registers it with Tauri and from which the setup app generates the UI's call
+in `api.ts` and its types
 ([Page types](Setup-app.md#page-types)). The AI-assisted discovery flow
 belongs to [#15](https://github.com/TheLunchTrae/appy-tappy/issues/15).
 

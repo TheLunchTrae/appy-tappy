@@ -1,17 +1,9 @@
 import { useEffect, useState } from 'react';
 
 import { LIMITS, type SettingsFile, TRACE_CATEGORIES, type TraceCategory } from '../lib/bindings.ts';
-import { errorText } from '../lib/api.ts';
+import { errorText, openTraceFolder, traceFolder } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
-import {
-  type TraceLength,
-  openTraceFolder,
-  traceEnd,
-  traceFolder,
-  traceRecords,
-  useSettings,
-  withCategory,
-} from '../lib/settings.ts';
+import { type TraceLength, traceEnd, traceRecords, useSettings, withCategory } from '../lib/settings.ts';
 import { TRACE_HINT } from '../lib/hints.ts';
 import { Hint } from './Hint.tsx';
 import { NumberSetting } from './NumberSetting.tsx';

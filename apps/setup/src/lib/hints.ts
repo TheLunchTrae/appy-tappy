@@ -1,5 +1,8 @@
 // What the ? beside a field explains, for the fields whose name and note leave something out.
 
+import { LIMITS } from './bindings.ts';
+import { shortcutKeysInWords } from './shortcut.ts';
+
 /** The condition: a value and what it has to be. */
 export const WHEN_HINT =
   "Pick a value and what it has to be. The automation runs once each time this becomes true, and only while the value's application is open. Is below and is above leave the number itself out; is at most and is at least count it.";
@@ -37,12 +40,10 @@ export const REGION_HINT =
   "X and Y are the region's top-left corner, counted in pixels from the window's top-left corner. Drawing on a screenshot fills these in; type here to nudge it.";
 
 /** The tolerance's scale for a check's colors. */
-export const TOLERANCE_HINT =
-  "From 0, an exact match, up to 255, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.";
+export const TOLERANCE_HINT = `From 0, an exact match, up to ${LIMITS.maxTolerance}, which matches any color. Raise it if the check misses; lower it if it matches when it shouldn't.`;
 
 /** The tolerance's scale for a reference's characters' color. */
-export const INK_TOLERANCE_HINT =
-  'From 0, only the exact color, up to 255, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.';
+export const INK_TOLERANCE_HINT = `From 0, only the exact color, up to ${LIMITS.maxTolerance}, which counts every pixel. Raise it if parts of characters go missing; lower it if the background counts as characters.`;
 
 /** A bar fill's two colors. */
 export const BAR_COLORS_HINT =
@@ -61,12 +62,10 @@ export const LABEL_HINT =
   'Type exactly what the region shows, such as 87% or 1,250. Each labeled screenshot teaches the reference the characters in it.';
 
 /** The read interval's two waits. */
-export const READING_HINT =
-  'AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is 1 to 10000 ms.';
+export const READING_HINT = `AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs} ms.`;
 
 /** Which shortcuts the screenshot shortcut can be. */
-export const SHORTCUT_HINT =
-  "F1 to F24, Print Screen, and Pause work alone. A letter, a digit, Space, an arrow, Insert, Delete, Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or Win with it, so it keeps working everywhere else. Other keys can't be the shortcut. Change shortcut on the screenshot page changes the same setting.";
+export const SHORTCUT_HINT = `${shortcutKeysInWords()} Change shortcut on the screenshot page changes the same setting.`;
 
 /** What the runtime trace is for. */
 export const TRACE_HINT =

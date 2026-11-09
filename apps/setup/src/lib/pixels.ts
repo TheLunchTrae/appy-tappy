@@ -1,6 +1,8 @@
 // Frames and screenshots as the setup app's Rust side sends them: the width
 // and the height as little-endian 32-bit numbers, then RGBA rows.
 
+import { PICTURES } from './bindings.ts';
+
 /** A picture the UI can draw and sample. */
 export interface Picture {
   readonly width: number;
@@ -15,7 +17,7 @@ export interface Color {
   readonly blue: number;
 }
 
-const HEADER_BYTES = 8;
+const HEADER_BYTES = PICTURES.headerBytes;
 const BYTES_PER_PIXEL = 4;
 
 /** The picture in `buffer`, or null when it holds none, as before the first frame arrives. */

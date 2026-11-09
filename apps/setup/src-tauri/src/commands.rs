@@ -9,6 +9,8 @@
 //! refuses. Pixels go back as raw bytes rather
 //! than JSON, which would be several times larger.
 
+pub(crate) mod table;
+
 use std::sync::mpsc::Sender;
 
 use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, SizeDef, WindowDef};
@@ -326,9 +328,12 @@ pub(crate) async fn mark_checked(app: AppHandle, application: String) -> Result<
 pub(crate) async fn set_anti_cheat(
     app: AppHandle,
     application: String,
-    class: AntiCheatDef,
+    anti_cheat: AntiCheatDef,
 ) -> Result<(), String> {
-    ask(&app, move |owner| owner.set_anti_cheat(&application, class)).await?
+    ask(&app, move |owner| {
+        owner.set_anti_cheat(&application, anti_cheat)
+    })
+    .await?
 }
 
 /// The saved automations, with what stops each one from running.
@@ -493,7 +498,7 @@ pub(crate) async fn review_problems(
 
 /// The saved settings, or the defaults and why the file cannot be read.
 #[tauri::command]
-pub(crate) async fn settings(app: AppHandle) -> Result<SettingsView, String> {
+pub(crate) async fn load_settings(app: AppHandle) -> Result<SettingsView, String> {
     ask(&app, |owner| owner.settings()).await
 }
 

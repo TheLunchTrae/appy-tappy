@@ -11,10 +11,12 @@ import {
   type SelectStep,
   type StateSpec,
 } from './bindings.ts';
-import type { CharactersSpec } from './api.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
+
+/** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
+type CharactersSpec = Extract<CheckSpec, { readonly kind: 'characters' }>;
 
 /** The kinds of check, in the order the capture screen offers them. */
 export const CHECK_KINDS = ['number', 'barFill', 'color', 'state'] as const;

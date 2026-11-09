@@ -10,13 +10,20 @@ import {
   select,
   stopCapture,
 } from '../lib/api.ts';
-import type { AppSummary, ClickAtDef, ClickButtonDef, FoundClick, SelectionSpec } from '../lib/bindings.ts';
+import {
+  type AppSummary,
+  type ClickAtDef,
+  type ClickButtonDef,
+  type FoundClick,
+  LIMITS,
+  type SelectionSpec,
+} from '../lib/bindings.ts';
 import {
   BUTTONS,
   BUTTON_NAMES,
   DEFAULT_TOLERANCE,
-  MAX_SEARCH_PIXELS,
-  MAX_TOLERANCE,
+  SEARCH_MARGIN,
+  SEARCH_SIDE,
   clickApps,
   middle,
   placeSpot,
@@ -367,7 +374,7 @@ function TargetStage({
     const search = searchArea(drawn.region, size);
     if (search === null) {
       throw new Error(
-        `The picture is too big to look for. Draw it smaller: at most ${MAX_SEARCH_PIXELS.toLocaleString()} pixels.`,
+        `The picture is too big to look for. Draw it smaller: at most ${LIMITS.maxSearchPixels.toLocaleString()} pixels.`,
       );
     }
     const { region, selection } = drawn;
@@ -681,15 +688,15 @@ function TargetStage({
                 <label htmlFor="click-tolerance">How alike it must look</label>
                 <Hint topic="How alike it must look" id="hint-click-tolerance">
                   How far each pixel&apos;s color may be from the picture&apos;s, on average, from 0 for exactly alike
-                  to 255. Raise it if the button changes a little, such as when it&apos;s highlighted. Lower it if a
-                  similar button could be clicked instead.
+                  to {LIMITS.maxTolerance}. Raise it if the button changes a little, such as when it&apos;s highlighted.
+                  Lower it if a similar button could be clicked instead.
                 </Hint>
               </span>
               <div className="range">
                 <input
                   type="range"
                   min={0}
-                  max={MAX_TOLERANCE}
+                  max={LIMITS.maxTolerance}
                   value={tolerance}
                   aria-label="How alike it must look"
                   onChange={(event) => {
@@ -702,12 +709,12 @@ function TargetStage({
                   className="input"
                   type="number"
                   min={0}
-                  max={MAX_TOLERANCE}
+                  max={LIMITS.maxTolerance}
                   aria-describedby="hint-click-tolerance"
                   value={tolerance}
                   onChange={(event) => {
                     const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isInteger(value) && value >= 0 && value <= MAX_TOLERANCE) {
+                    if (Number.isInteger(value) && value >= 0 && value <= LIMITS.maxTolerance) {
                       changed();
                       onTolerance(value);
                     }
@@ -719,13 +726,14 @@ function TargetStage({
               <span className="name">
                 <span>Search area</span>
                 <Hint topic="Search area" id="hint-click-search">
-                  Where in the window the picture is looked for: up to 50 pixels around it, and at most 400 by 400. A
-                  small area is quick to search and keeps the click from landing on a look-alike elsewhere.
+                  Where in the window the picture is looked for: up to {SEARCH_MARGIN} pixels around it, and at most{' '}
+                  {SEARCH_SIDE} by {SEARCH_SIDE}. A small area is quick to search and keeps the click from landing on a
+                  look-alike elsewhere.
                 </Hint>
               </span>
               <span className="note">
                 {area === null
-                  ? 'Up to 50 px around the picture.'
+                  ? `Up to ${SEARCH_MARGIN} px around the picture.`
                   : `${area.width} × ${area.height} px around the picture.`}{' '}
                 A click needs the window at the size the picture was taken at.
               </span>

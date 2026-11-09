@@ -1,5 +1,6 @@
 // The capture screen's fields for selecting the thing in a region, and for the checks that read with no reference.
 
+import { LIMITS } from '../lib/bindings.ts';
 import type { Draft } from '../lib/check.ts';
 import { type SelectTool, SELECT_TOOLS, TOOL_NAMES } from '../lib/selection.ts';
 import { BAR_COLORS_HINT } from '../lib/hints.ts';
@@ -7,9 +8,6 @@ import { ColorField, ToleranceField } from './Fields.tsx';
 
 /** Where a picked color goes. */
 export type ColorTarget = 'ink' | 'filled' | 'empty' | 'color';
-
-/** The highest color match, as a color channel's. */
-const MAX_COLOR_MATCH = 255;
 
 /** How each selection tool is used, shown under the tools. */
 const TOOL_HELP: Readonly<Record<SelectTool, string | null>> = {
@@ -35,7 +33,7 @@ export function SelectFields({
 }) {
   const help = TOOL_HELP[tool];
   const set = (value: number): void => {
-    if (Number.isInteger(value) && value >= 0 && value <= MAX_COLOR_MATCH) {
+    if (Number.isInteger(value) && value >= 0 && value <= LIMITS.maxTolerance) {
       onColorMatch(value);
     }
   };
@@ -68,7 +66,7 @@ export function SelectFields({
               id="color-match"
               type="range"
               min={0}
-              max={MAX_COLOR_MATCH}
+              max={LIMITS.maxTolerance}
               value={colorMatch}
               onChange={(event) => {
                 set(Number(event.target.value));
@@ -78,7 +76,7 @@ export function SelectFields({
               className="input"
               type="number"
               min={0}
-              max={MAX_COLOR_MATCH}
+              max={LIMITS.maxTolerance}
               aria-label="Color match"
               value={colorMatch}
               onChange={(event) => {

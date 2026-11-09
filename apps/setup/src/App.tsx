@@ -7,7 +7,7 @@ import {
   DEFAULT_SETTINGS,
   type SettingsFile,
 } from './lib/bindings.ts';
-import { errorText, listApps, listAutomations, syncOverlays } from './lib/api.ts';
+import { errorText, listApps, listAutomations, loadSettings, saveSettings, syncOverlays } from './lib/api.ts';
 import { Question, useQuestion } from './components/Question.tsx';
 import { UpdateNotice } from './components/UpdateNotice.tsx';
 import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
@@ -20,14 +20,7 @@ import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
-import {
-  SettingsContext,
-  type SettingsHandle,
-  type SettingsUpdate,
-  loadSettings,
-  saveSettings,
-  sameSettings,
-} from './lib/settings.ts';
+import { SettingsContext, type SettingsHandle, type SettingsUpdate, sameSettings } from './lib/settings.ts';
 import { type Held, onLeave } from './lib/unsaved.ts';
 
 type Page = 'automations' | 'applications' | 'values' | 'references' | 'settings';

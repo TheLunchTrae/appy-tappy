@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { MAX_SEARCH_PIXELS, middle, placeSpot, searchArea, spotAt, targetSummary } from '../src/lib/click.ts';
+import { LIMITS } from '../src/lib/bindings.ts';
+import { SEARCH_SIDE, middle, placeSpot, searchArea, spotAt, targetSummary } from '../src/lib/click.ts';
 
 const window = { width: 1280, height: 720 };
 
@@ -14,9 +15,6 @@ describe('spots', () => {
       { x: 640, y: 360 },
     ]) {
       const spot = spotAt(point, window);
-      if (spot.kind !== 'spot') {
-        throw new Error('a spot');
-      }
       expect(placeSpot(spot, window)).toEqual(point);
     }
     expect(spotAt({ x: 1270, y: 15 }, window)).toEqual({ kind: 'spot', corner: 'topRight', x: 9, y: 15 });
@@ -25,9 +23,6 @@ describe('spots', () => {
 
   test('follow their corner when the window grows, and land nowhere outside it', () => {
     const spot = spotAt({ x: 1270, y: 700 }, window);
-    if (spot.kind !== 'spot') {
-      throw new Error('a spot');
-    }
     expect(placeSpot(spot, { width: 1920, height: 1080 })).toEqual({ x: 1910, y: 1060 });
     expect(placeSpot(spot, { width: 5, height: 5 })).toBeNull();
   });
@@ -52,9 +47,13 @@ describe('search areas', () => {
   test('narrow to hold at most 160000 pixels, and refuse a picture larger than that', () => {
     const area = searchArea({ x: 200, y: 200, width: 380, height: 380 }, window);
     expect(area).not.toBeNull();
-    expect((area?.width ?? 0) * (area?.height ?? 0)).toBeLessThanOrEqual(MAX_SEARCH_PIXELS);
+    expect((area?.width ?? 0) * (area?.height ?? 0)).toBeLessThanOrEqual(LIMITS.maxSearchPixels);
     expect(area).toEqual({ x: 190, y: 190, width: 400, height: 400 });
     expect(searchArea({ x: 0, y: 0, width: 401, height: 400 }, window)).toBeNull();
+  });
+
+  test('can be a square, as the hint that names its largest side says', () => {
+    expect(SEARCH_SIDE * SEARCH_SIDE).toBe(LIMITS.maxSearchPixels);
   });
 });
 
