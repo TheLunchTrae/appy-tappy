@@ -2,7 +2,7 @@
 //!
 //! Automations live in their own file, apart from the applications' files,
 //! and name a value by its application's ID and the value's ID. Saving one
-//! makes the same check the runtime makes, `AutomationDef::compile`, so it
+//! makes the same check the runtime makes, [`Runnable::new`], so it
 //! never names a value that is not there or compares a value with the wrong
 //! kind of target. A value that later goes away shows as a problem on the
 //! automation that used it, and so does an automation that breaks a rule on
@@ -14,14 +14,14 @@
 use std::fs;
 
 use appytappy_config::action::KeyChord;
+use appytappy_config::app_file::AppFile;
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, AutomationsFile, new_automation_id,
 };
-use appytappy_config::click::{ClickAt, ClickPicture};
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::StoredApp;
-use appytappy_sources::screen::click::{ClickPictureError, ClickSearch};
-use appytappy_sources::screen::saved;
+use appytappy_sources::automation::{Problem, Runnable};
+use appytappy_sources::screen::click::ClickPictureError;
 use serde::Serialize;
 
 use crate::stores::Stores;
@@ -90,34 +90,39 @@ fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
 }
 
 /// What stops `automation` from running with the applications in `apps`,
-/// if anything, as a sentence: the same answer the runtime gets. The runtime
-/// also builds the check of the value it watches and reads each click's
-/// picture, so a value or a picture a hand edit broke shows here too.
+/// if anything, as a sentence: the runtime's own answer, [`Runnable::new`],
+/// which also builds the check of the value it watches and reads each
+/// click's picture, so a value or a picture a hand edit broke shows here
+/// too. An application whose file does not read counts as not saved; the
+/// Applications page says why it does not read.
 fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> Option<String> {
-    let compiled = match automation.compile(apps) {
-        Ok(compiled) => compiled,
-        Err(problem) => return Some(sentence(&problem)),
-    };
-    let folder = stores.apps.folder(compiled.app_id);
-    if let Err(error) = saved::build(
-        &compiled.value.screen,
-        &compiled.app.references,
-        compiled.app.size_changes,
-        |name| fs::read(folder.join(name)),
-    ) {
-        return Some(format!("{} cannot be read: {error}.", compiled.value.name));
-    }
-    automation
-        .actions
+    let readable: Vec<(&str, &AppFile)> = apps
         .iter()
-        .zip(1_usize..)
-        .find_map(|(action, number)| match action {
-            ActionDef::Click { at, .. } => match at.to_at() {
-                Ok(ClickAt::Picture(wanted)) => check_picture(stores, &wanted, number).err(),
-                Ok(ClickAt::Spot(_)) | Err(_) => None,
-            },
-            _ => None,
-        })
+        .filter_map(|app| app.file.as_ref().ok().map(|file| (app.id.as_str(), file)))
+        .collect();
+    let problem = Runnable::new(
+        automation,
+        &readable,
+        |app, name| fs::read(stores.apps.folder(app).join(name)),
+        |name| stores.automations.picture(name),
+    )
+    .err()?;
+    let set_up_again = "Set up its target again.";
+    Some(match problem {
+        Problem::Rule(reason) => sentence(&reason),
+        Problem::UnreadPicture { action, .. }
+        | Problem::Picture {
+            action,
+            error: ClickPictureError::Read(_),
+            ..
+        } => format!("The picture action {action} clicks on is gone. {set_up_again}"),
+        Problem::Picture {
+            action,
+            error: ClickPictureError::Misfit(misfit),
+            ..
+        } => format!("Action {action}'s target cannot be used: {misfit}. {set_up_again}"),
+        Problem::Value { value, error, .. } => format!("{value} cannot be read: {error}."),
+    })
 }
 
 /// Every automation, with what stops each one from running.
@@ -205,26 +210,6 @@ pub(crate) fn save(
         .map_err(|error| error.to_string())?;
     prune_pictures(stores, &file);
     Ok(id)
-}
-
-/// Checks that the picture a click on `wanted`, action `number`, clicks on
-/// is kept and readable, fits the area it is looked for in, and holds the
-/// place it presses, with the runtime's own [`ClickSearch`].
-fn check_picture(stores: &Stores, wanted: &ClickPicture, number: usize) -> Result<(), String> {
-    let gone =
-        || format!("The picture action {number} clicks on is gone. Set up its target again.");
-    let bytes = stores
-        .automations
-        .picture(&wanted.image)
-        .ok()
-        .ok_or_else(gone)?;
-    match ClickSearch::new(wanted, &bytes) {
-        Ok(_) => Ok(()),
-        Err(ClickPictureError::Read(_)) => Err(gone()),
-        Err(ClickPictureError::Misfit(misfit)) => Err(format!(
-            "Action {number}'s target cannot be used: {misfit}. Set up its target again."
-        )),
-    }
 }
 
 /// Removes the click pictures no automation in `file` names, such as those
@@ -518,7 +503,7 @@ mod tests {
         elsewhere.when.app = "other".to_owned();
         assert_eq!(
             save(&stores, None, elsewhere),
-            Err("Its application is no longer saved.".to_owned())
+            Err("Its application is no longer saved or cannot be read.".to_owned())
         );
         assert_eq!(ids(&stores), Vec::<String>::new());
         fs::remove_dir_all(folder).expect("clean up");
@@ -566,7 +551,7 @@ mod tests {
         fs::write(folder.join("apps").join("example").join("app.json"), b"{").expect("breaks");
         assert_eq!(
             list(&stores).expect("lists")[0].problem.as_deref(),
-            Some("Its application's app.json, in the example folder, cannot be read.")
+            Some("Its application is no longer saved or cannot be read.")
         );
         fs::remove_dir_all(folder).expect("clean up");
     }

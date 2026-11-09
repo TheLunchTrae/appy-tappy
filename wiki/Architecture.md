@@ -619,12 +619,15 @@ changing.
   app uses, and checks everything again before use, because the files are
   outside its control and a person can edit them by hand. Each `app.json` must
   parse and pass `AppFile::parse`'s checks, which cover the file as a whole,
-  each automation must pass `AutomationDef::compile` against the saved
-  applications, and each value it watches must pass `saved::build` with its
-  pictures. Saving a value in the setup app calls `saved::build`, and saving an
-  automation calls `compile` and builds the value it watches, so what saves is
-  what runs. `apps/runtime/src/plan.rs` turns what passes into the plan the
-  runtime runs, in memory; nothing it builds is written to disk. An automation
+  and each automation must pass `Runnable::new` in
+  `appytappy_sources::automation`: `AutomationDef::compile` against the saved
+  applications whose files read, the value it watches through `saved::build`
+  with its pictures, and each click's picture through `ClickSearch`. Saving a
+  value in the setup app calls `saved::build`, and saving, turning on, and
+  listing automations ask `Runnable::new` too, so what saves is what runs.
+  `apps/runtime/src/plan.rs` turns what passes into the plan the runtime runs,
+  in memory, and names each `app.json` that does not read; nothing it builds
+  is written to disk. An automation
   or a value that fails a check is logged and left out, and the rest run.
 - **Format.** `app.json`, `automations.json`, and `settings.json` each carry a
   `format` number, and the `FORMAT` constant in `app_file.rs`,
@@ -664,7 +667,8 @@ design enforces the block in three places:
    Reading `automations.json` gives `AutomationDef` and `ActionDef`, which the
    engine and the action worker do not accept; only `AutomationDef::compile`
    and `ActionDef::to_action` in `config` turn them into a `Rule` and its
-   `Action`s, and `compile` reads the rule's actions to find a key press.
+   `Action`s, and `compile` reads the rule's actions to find one that sends
+   input, which `Action::input_sent` names.
    `Rule` has private
    fields, an action's values such as a key chord or a volume level are types
    that only their checked constructors make, and neither has `Deserialize` or

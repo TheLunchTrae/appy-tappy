@@ -547,7 +547,21 @@ impl Action {
     /// application whose anti-cheat class is none.
     #[must_use]
     pub const fn injects_input(&self) -> bool {
-        matches!(self, Self::PressKeys(_) | Self::Click(_))
+        self.input_sent().is_some()
+    }
+
+    /// What the action does that [`Self::injects_input`] counts, as the words
+    /// that follow "it", such as `presses keys`, or `None` for an action
+    /// that sends no input.
+    #[must_use]
+    pub const fn input_sent(&self) -> Option<&'static str> {
+        match self {
+            Self::PressKeys(_) => Some("presses keys"),
+            Self::Click(_) => Some("clicks"),
+            Self::Media { .. } | Self::SetVolume { .. } | Self::Open(_) | Self::PlaySound(_) => {
+                None
+            },
+        }
     }
 }
 
@@ -653,6 +667,7 @@ mod tests {
     fn only_key_presses_and_clicks_inject_input() {
         let keys = Action::PressKeys(KeyChord::parse("F9").expect("valid"));
         assert!(keys.injects_input());
+        assert_eq!(keys.input_sent(), Some("presses keys"));
         assert!(!keys.restorable());
         let spot = Spot::new(Corner::TopLeft, 0, 0).expect("valid");
         let click = Action::Click(
@@ -665,6 +680,7 @@ mod tests {
             .expect("valid"),
         );
         assert!(click.injects_input());
+        assert_eq!(click.input_sent(), Some("clicks"));
         assert!(!click.restorable());
         assert!(
             !Action::Media {
@@ -771,6 +787,7 @@ mod tests {
             Action::PlaySound(SoundFile::parse(r"C:\Ding.wav").expect("valid")),
         ] {
             assert!(!action.injects_input(), "{action:?}");
+            assert_eq!(action.input_sent(), None, "{action:?}");
             assert!(!action.restorable(), "{action:?}");
         }
     }
