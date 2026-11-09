@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod check;
+pub mod click;
 pub mod digits;
 pub mod find;
 pub mod mask;
