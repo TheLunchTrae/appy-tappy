@@ -520,8 +520,14 @@ mod tests {
         let pause = examples::pause_at("Pause", 90.0, std::time::Duration::ZERO);
         let renamed = examples::pause_at("Renamed", 90.0, std::time::Duration::ZERO);
         let lower = examples::pause_at("Pause", 80.0, std::time::Duration::ZERO);
+        assert_ne!(pause.automation, renamed.automation);
         assert_eq!(pause, renamed);
+        assert_eq!(renamed, pause, "both ways");
         assert_ne!(pause, lower);
+        assert_ne!(lower, pause, "both ways");
+        let renamed_lower = examples::pause_at("Renamed", 80.0, std::time::Duration::ZERO);
+        assert_ne!(pause, renamed_lower);
+        assert_ne!(renamed_lower, pause);
     }
 
     #[test]

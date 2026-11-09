@@ -244,9 +244,9 @@ stateDiagram-v2
   until a new size settles, whichever comes first. The capture's frame handler
   runs on another thread and sends `Lost`, `Resizing`, `Failing`, or
   `Recovered` back to this one. A `Trace` from the owner goes on to the frame
-  handler over its own channel, and the capture goes on. Each `CHECK_AGAIN`, `moved_on` checks that the
-  window still shows and still fits as well as any window, because a hidden
-  window sends no frames and no close.
+  handler over its own channel, and the capture goes on. Each `CHECK_AGAIN`,
+  `moved_on` checks that the window still shows and still fits as well as any
+  window, because a hidden window sends no frames and no close.
 - **Settling.** `Resizing` names the size frames show now, and a `Settle`
   (`crates/sources/src/screen/settle.rs`) waits for it to hold for `SETTLE`,
   250 ms, starting again at each other size. The wait runs on this thread's

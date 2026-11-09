@@ -138,14 +138,17 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
 Off, the trace costs one check of an empty handle at each place that could
 record. On, the trace holds its buffer of `BUFFER` records in memory until it
 stops: 152 bytes a slot, about 1.2 MB, all allocated and written when the trace
-starts. Each recorded row costs a clock read and a send into the buffer; the
-formatting and the disk writes happen on the writer thread, at the lowest
-priority. `readings` adds a row and a clock read for every read of every value,
-so it costs the most, and the files grow fastest. A record dropped just before
-the trace stops, or before its thread gets a new trace, is not counted, since
-no later record of that thread carries the count. A trace measures a runtime
-that also records, so compare timings between traces that record the same
-categories.
+starts. The buffer is freed once every thread has let go of it, and a capture's
+frame handler takes a new trace only when a frame arrives, so after the trace
+stops, the handler of a window that sends no frames keeps that buffer until its
+next frame or until its capture ends. Each recorded row costs a clock read and a
+send into the buffer; the formatting and the disk writes happen on the writer
+thread, at the lowest priority. `readings` adds a row and a clock read for every
+read of every value, so it costs the most, and the files grow fastest. A record
+dropped just before the trace stops, or before its thread gets a new trace, is
+not counted, since no later record of that thread carries the count. A trace
+measures a runtime that also records, so compare timings between traces that
+record the same categories.
 
 The [footprint](Architecture.md#footprint) run measures that cost on
 Windows. It runs the runtime under a window that repaints every 16 ms, first
