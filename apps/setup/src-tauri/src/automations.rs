@@ -419,7 +419,11 @@ mod tests {
                     "Health",
                     CheckDef::BarFill {
                         filled: white,
-                        empty: white,
+                        empty: ColorDef {
+                            red: 0,
+                            green: 0,
+                            blue: 0,
+                        },
                     },
                 ),
             ],
