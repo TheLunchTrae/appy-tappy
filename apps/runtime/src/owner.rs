@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use appytappy_actions::Watched;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile, TraceCategory};
@@ -174,6 +175,25 @@ impl Crew {
             reader.set_trace(trace.clone());
         }
         self.trace = trace;
+    }
+
+    /// The job that starts `session`'s reader, and the trace the reader
+    /// starts with: the owner's own, so the reader records from its first
+    /// frame whenever the trace is on.
+    fn reader_job(
+        &self,
+        session: SessionId,
+        plan: Arc<plan::AppPlan>,
+        watched: Watched,
+        interval: ReadInterval,
+    ) -> (reader::Job, Trace) {
+        let job = reader::Job {
+            session,
+            plan,
+            watched,
+            interval,
+        };
+        (job, self.trace.clone())
     }
 }
 
@@ -923,14 +943,9 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
             } => {
                 let name = plan.labels.name.clone();
                 crew.tracing.name(session, &plan);
-                let job = reader::Job {
-                    session,
-                    plan,
-                    watched,
-                    interval,
-                };
+                let (job, trace) = crew.reader_job(session, plan, watched, interval);
                 let system = Arc::clone(&crew.system);
-                match Reader::start(system, job, crew.trace.clone(), crew.events.clone()) {
+                match Reader::start(system, job, trace, crew.events.clone()) {
                     Ok(reader) => {
                         crew.readers.insert(session, reader);
                         crew.trace.record(What::Reading, |record| Record {
@@ -989,7 +1004,6 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
 
 /// Hands `job` to the action thread, and records that its rule `decided`,
 /// fired or released, and that the job was queued.
-#[mutants::skip] // Sends to the action thread; record_rule is tested.
 fn queue(crew: &mut Crew, decided: What, job: act::Job) {
     let (owner, cause) = job.traced();
     record_rule(&mut crew.trace, decided, owner, cause);
@@ -1935,12 +1949,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_new_trace_reaches_every_thread_that_records() {
+    /// A crew whose threads are only channels: it returns what reaches the
+    /// action thread and detection.
+    fn crew() -> (Crew, Receiver<act::Control>, Receiver<Input>) {
         let (events, _events) = mpsc::channel();
         let (jobs, controls) = mpsc::channel();
         let (inputs, received) = mpsc::channel();
-        let mut crew = Crew {
+        let crew = Crew {
             system: Arc::new(HostSystem::default()),
             events,
             jobs,
@@ -1949,6 +1964,16 @@ mod tests {
             tracing: Switch::new(env::temp_dir().join("appytappy-unused-traces")),
             trace: Trace::OFF,
         };
+        (crew, controls, received)
+    }
+
+    #[test]
+    fn a_new_trace_reaches_every_thread_that_records() {
+        let (mut crew, controls, received) = crew();
+        let (first, first_told) = Reader::stand_in();
+        let (second, second_told) = Reader::stand_in();
+        crew.readers.insert(SessionId(0), first);
+        crew.readers.insert(SessionId(1), second);
         let (trace, _entries) = Trace::for_test(1, &[TraceCategory::Rules]);
         crew.set_trace(trace.clone());
         assert_eq!(crew.trace, trace, "the owner's own");
@@ -1959,6 +1984,66 @@ mod tests {
         assert!(
             matches!(received.try_recv(), Ok(Input::Trace(sent)) if sent == trace),
             "detection's"
+        );
+        assert_eq!(
+            first_told.traces(),
+            std::slice::from_ref(&trace),
+            "each reader's"
+        );
+        assert_eq!(second_told.traces(), [trace]);
+    }
+
+    #[test]
+    fn a_reader_starts_with_the_owners_trace() {
+        let (mut crew, _controls, _received) = crew();
+        let (trace, _entries) = Trace::for_test(1, &[TraceCategory::Readings]);
+        crew.trace = trace.clone();
+        let plan = app_plan("Example App", &[]);
+        let watched = Watched {
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        };
+        let interval = ReadInterval::default();
+        let (job, started) =
+            crew.reader_job(SessionId(3), Arc::clone(&plan), watched.clone(), interval);
+        assert_eq!(started, trace);
+        assert_eq!(
+            job,
+            reader::Job {
+                session: SessionId(3),
+                plan,
+                watched,
+                interval,
+            }
+        );
+    }
+
+    #[test]
+    fn a_queued_job_reaches_the_action_thread_between_its_decision_and_queued() {
+        let (mut crew, controls, _received) = crew();
+        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Rules, TraceCategory::Actions]);
+        crew.trace = trace;
+        let cause = Instant::now();
+        let owner = (SessionId(2), appytappy_engine::RuleIndex(4));
+        let job = act::Job::Undo {
+            owner,
+            automation: "Mute".to_owned(),
+            cause: Some(cause),
+        };
+        queue(&mut crew, What::Released, job.clone());
+        assert!(
+            matches!(controls.try_recv(), Ok(act::Control::Job(sent)) if sent == job),
+            "the action thread gets the job"
+        );
+        let sent = crate::trace::sent(&entries);
+        let what: Vec<What> = sent.iter().map(|record| record.what).collect();
+        assert_eq!(what, [What::Released, What::Queued]);
+        assert!(
+            sent.iter()
+                .all(|record| record.session == Some(SessionId(2))
+                    && record.item == Some(4)
+                    && record.cause == Some(cause)),
+            "{sent:?}"
         );
     }
 

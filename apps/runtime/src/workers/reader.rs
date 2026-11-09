@@ -305,6 +305,35 @@ impl Reader {
     }
 }
 
+/// What a stand-in reader was told, for a test.
+#[cfg(test)]
+pub(crate) struct StandIn(Receiver<Control>);
+
+#[cfg(test)]
+impl Reader {
+    /// A reader whose thread reads nothing and ends at once, and the
+    /// stand-in that sees what the reader is told.
+    pub(crate) fn stand_in() -> (Self, StandIn) {
+        let (control, received) = mpsc::channel();
+        let thread = thread::spawn(|| {});
+        (Self { control, thread }, StandIn(received))
+    }
+}
+
+#[cfg(test)]
+impl StandIn {
+    /// The traces the reader was given since the last look.
+    pub(crate) fn traces(&self) -> Vec<Trace> {
+        self.0
+            .try_iter()
+            .filter_map(|control| match control {
+                Control::Trace(trace) => Some(trace),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
 /// Sends `reading`, returning whether the owner still listens.
 fn send<E: From<Reading>>(events: &Sender<E>, reading: Reading) -> bool {
     events.send(E::from(reading)).is_ok()
@@ -2813,6 +2842,7 @@ mod tests {
         drop((first, second, third));
         stopped(reader, desk, &readings);
     }
+
     #[test]
     fn a_new_trace_reaches_the_reader_and_its_capture_without_starting_it_over() {
         let (system, desk) = FakeSystem::new();
