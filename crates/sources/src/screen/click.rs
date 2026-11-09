@@ -56,7 +56,8 @@ impl ClickSearch {
             .fits_picture(size.width, size.height)
             .map_err(ClickPictureError::Misfit)?;
         let area = wanted.search;
-        // `ClickPicture::new` refuses an empty area.
+        // `fits_picture` has already refused an empty area, since no picture
+        // fits one, so this fallback is only defensive.
         let area = Region::new(area.x, area.y, area.width, area.height)
             .ok_or(ClickPictureError::Misfit(InvalidClick::Area))?;
         // A decoded picture's mask has the picture's size.
@@ -191,7 +192,9 @@ mod tests {
 
     #[test]
     fn a_click_lands_on_its_press_where_its_picture_is_found_in_its_area() {
-        let search = ClickSearch::new(&wanted(area(10, 4, 10, 6), (3, 1)), &patch_png()).unwrap();
+        // The patch is 3 across and 2 down in the area, and pressed 3
+        // across and 1 down, so a swapped axis lands elsewhere.
+        let search = ClickSearch::new(&wanted(area(9, 4, 11, 6), (3, 1)), &patch_png()).unwrap();
         assert_eq!(
             search.taken(),
             Size {
@@ -199,7 +202,7 @@ mod tests {
                 height: 10
             }
         );
-        assert_eq!(search.area(), Region::new(10, 4, 10, 6).unwrap());
+        assert_eq!(search.area(), Region::new(9, 4, 11, 6).unwrap());
         let searched = frame().crop(search.area()).unwrap();
         assert_eq!(
             search.locate(&searched),

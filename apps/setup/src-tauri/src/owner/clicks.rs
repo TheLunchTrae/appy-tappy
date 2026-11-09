@@ -264,6 +264,10 @@ mod tests {
         let narrow =
             harness.ask(|owner| owner.find_click(&picture("click-1.png", (4, 2), (2, 0, 1, 2), 0)));
         assert!(narrow.expect_err("too narrow").contains("fit inside"));
+        // A missing picture says so before the window's size is checked.
+        let gone =
+            harness.ask(|owner| owner.find_click(&picture("gone-1.png", (8, 2), (0, 0, 2, 2), 0)));
+        assert!(gone.expect_err("missing").contains("cannot be read"));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
