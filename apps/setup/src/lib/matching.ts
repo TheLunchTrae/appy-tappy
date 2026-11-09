@@ -139,8 +139,8 @@ export function sentence(text: string): string {
 
 /**
  * Whether the application `name` reads the picked window `handle`, as the value picker says it. The runtime reads
- * only the window its match takes first, so a value drawn on any other window would never be read. `titleOf`
- * names an open window.
+ * only the window marked best, so a value drawn on any other window would never be read. `titleOf` names an open
+ * window.
  */
 export function pickedStatus(
   name: string,
@@ -158,18 +158,18 @@ export function pickedStatus(
   if (fits === null) {
     return { text: `Checking whether ${name} finds this window…`, ok: false };
   }
-  if (fits.some((fit) => fit.handle === handle && fit.best)) {
+  const read = fits.find((fit) => fit.best);
+  if (read?.handle === handle) {
     return { text: `${name} reads this window.`, ok: true };
   }
-  const best = fits[0];
   const change = `change how ${name} is found on the Applications page`;
-  if (best === undefined) {
+  if (fits.length === 0) {
     return {
       text: `${name} doesn't find this window, so the value would never be read. Pick another window, or ${change}.`,
       ok: false,
     };
   }
-  const other = titleOf(best.handle);
+  const other = read === undefined ? null : titleOf(read.handle);
   return {
     text: `${name} reads ${other === null ? 'another window' : `“${other}”`} instead, the one that matches it best, so the value would never be read here. Pick that window, or ${change}.`,
     ok: false,

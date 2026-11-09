@@ -172,7 +172,8 @@ Each thread below is a plain `std::thread`, and each channel is a
   window fits better, such as the main window opening after a launcher's,
   and looks again if not. It reads only a window of the process the session
   follows, picked among the windows that fit equally well as
-  [Lifecycle](#lifecycle) describes: one that shows over a minimized one.
+  [Lifecycle](#lifecycle) describes: the one it reads while it shows, then
+  one that shows over a minimized one.
   While no window fits, the window it would read is minimized, or the window
   that fits best is another process's, it looks every `FIND_AGAIN`, until
   the application exits. The constants are in
@@ -284,12 +285,15 @@ starts one for an application that runs without one. When several running
 processes fit the application's executable pattern, such as two copies or a
 helper beside the application, the snapshot also lists the windows and
 checks which show, and the session follows the process that owns the window
-the reader reads. Both pick it the same way (`read_window` in
-`crates/sources/src/system.rs`) among the windows the application's
-[window match](Setup-app.md#window-matching) fits best: one of the session's
-own process while it owns one, and otherwise the first that is not
-minimized, then the first. So the values, the session, and the check that a
-key press goes to the application in front all agree on one process. When
+the reader reads. One function picks that window, `session_window` in
+`crates/sources/src/system.rs`, for detection, the reader, a click, and the
+setup app. Among the windows the application's
+[window match](Setup-app.md#window-matching) fits best, it takes one of the
+session's own process while it owns one, the window the reader reads while
+it shows, then the first that is not minimized, then the first. The reader
+takes only its session's process's windows. So the values, the session, and
+the check that a key press goes to the application in front all agree on one
+process. When
 the session's process owns no such window and another does, such as the
 application opening its window after a helper started first, the session
 ends and starts again on that process. A process that owned such a window
@@ -340,8 +344,9 @@ described in [Saved files](Setup-app.md#saved-files).
 The path is the one the process started from, so an updater that renames the
 running executable and writes the new build in its place makes both programs
 read the new file until the application restarts. When two copies of different
-builds run, the setup app reads the copy whose window fits best and the runtime
-the one its session follows, which can differ.
+builds run, the setup app reads the copy whose window a new session would read
+and the runtime the one its session follows, which differ when the session
+started on the other copy.
 
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
 second copy that finds it logs that and exits at once, and the setup app can

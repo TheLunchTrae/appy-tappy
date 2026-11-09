@@ -3,8 +3,8 @@
 //! A click names the saved application it clicks in. The plan keeps what
 //! placing it needs, [`ClickTargets`]: that application's window match and
 //! the search for each picture a click looks for. When a click runs,
-//! [`place`] finds the application's window the way the reader does, and
-//! turns the click's spot, or where its picture is found in one frame of
+//! [`place`] takes the application's window that [`session_window`] picks,
+//! of any of its processes, and turns the click's spot, or where its picture is found in one frame of
 //! its area, into a place on the screen. A click whose window is missing,
 //! minimized, or another size than its picture was taken at, or whose
 //! picture is not there, is not placed, and the log says why.
@@ -19,7 +19,7 @@ use appytappy_config::click::{Click, ClickAt, ClickPicture, InvalidClick};
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::find::PictureSearch;
 use appytappy_sources::screen::{Capture, Image, Region, Size, grab};
-use appytappy_sources::system::{Bounds, System, best_windows, read_window, shows};
+use appytappy_sources::system::{Bounds, Pick, SessionWindow, System, session_window, shows};
 
 /// How long a picture click waits for the frame it looks in.
 const GRAB_WAIT: Duration = Duration::from_secs(1);
@@ -138,13 +138,17 @@ pub(crate) fn place<S: System + Capture>(
         .ok_or_else(|| "the application it clicks in is no longer saved".to_owned())?;
     let name = &target.name;
     let failed = |error: io::Error| format!("{name}'s window cannot be found: {error}");
-    let best = best_windows(
+    let SessionWindow {
+        entry: window,
+        shown,
+    } = session_window(
         &target.window,
+        Pick::Any,
         screen.processes().map_err(failed)?,
         screen.windows().map_err(failed)?,
-    );
-    let (window, shown) = read_window(&best, None, |handle| shows(screen.window_place(handle)))
-        .ok_or_else(|| format!("{name} has no window open"))?;
+        |handle| shows(screen.window_place(handle)),
+    )
+    .ok_or_else(|| format!("{name} has no window open"))?;
     if !shown {
         return Err(format!("{name}'s window is minimized or hidden"));
     }

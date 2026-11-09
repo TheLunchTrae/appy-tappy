@@ -14,7 +14,7 @@
 //! When several running processes fit an app's executable pattern, such as
 //! a launcher or helper beside the app itself, the session follows the one
 //! that owns the window its reader reads, which both pick with
-//! [`read_window`], and keeps a process whose window went away for
+//! [`session_window`], and keeps a process whose window went away for
 //! [`OWNER_GRACE`]. Detection lists the windows only then.
 //!
 //! Each started app's executable is then identified: which build of it runs,
@@ -30,7 +30,7 @@ use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_platform::WindowEvent;
-use appytappy_sources::system::{ProcessEntry, WindowEntry, best_windows, read_window};
+use appytappy_sources::system::{Pick, ProcessEntry, WindowEntry, session_window};
 
 use crate::trace::{Detail, Record, Trace, What};
 
@@ -243,11 +243,12 @@ impl Lifecycle {
     /// Ends the session of each app whose process is gone, then starts one
     /// for each app that runs without one. When several processes fit an
     /// app, its session follows the one that owns the window its reader
-    /// reads, which [`read_window`] picks: one of the session's own process
-    /// while it owns a window that fits best, so a second copy does not take
-    /// over, and otherwise the first that shows. A process that owned such a
-    /// window keeps the session for [`OWNER_GRACE`] after it owns none, so a
-    /// window it replaces does not hand the session to another copy. A
+    /// reads, which [`session_window`] picks: one of the session's own
+    /// process while it owns a window that fits best, so a second copy does
+    /// not take over, and otherwise the first that shows. A process that
+    /// owned such a window keeps the session for [`OWNER_GRACE`] after it
+    /// owns none ([`Pick::Only`]), so a window it replaces does not hand the
+    /// session to another copy. A
     /// helper started first, which never owned one, gives the session up to
     /// the process that opens the window at once. While no window fits, a
     /// session keeps its process, and a new one follows the process with the
@@ -274,8 +275,6 @@ impl Lifecycle {
             // The name check catches a process ID that Windows reused.
             let current =
                 current.filter(|&process| fitting.iter().any(|entry| entry.id == process));
-            // The processes that own one of the app's best windows.
-            let mut owners = Vec::new();
             let owner = if fitting.len() > 1 {
                 let all = listed.get_or_insert_with(|| {
                     windows
@@ -283,18 +282,24 @@ impl Lifecycle {
                         .and_then(|list| list().ok())
                         .unwrap_or_default()
                 });
+                let pick = match current {
+                    Some(process) if in_grace(&self.owned, app, now) => Pick::Only {
+                        process,
+                        reading: None,
+                    },
+                    Some(process) => Pick::Prefer(process),
+                    None => Pick::Any,
+                };
                 let candidates = fitting.iter().map(|&entry| entry.clone()).collect();
-                let best = best_windows(window, candidates, all.clone());
-                owners = best.iter().map(|entry| entry.process).collect();
-                let owns = current.is_some_and(|process| owners.contains(&process));
-                // The grace starts at the first snapshot where it owns none.
-                if let Some(since) = self.owned.get_mut(app).filter(|_| !owns) {
+                let owner = session_window(window, pick, candidates, all.clone(), &mut shown)
+                    .map(|picked| picked.entry.process);
+                // The grace starts at the first snapshot where the session's
+                // process owns none of the windows it would read. Following
+                // the process that owns one ends it below.
+                if let Some(since) = self.owned.get_mut(app).filter(|_| owner.is_none()) {
                     since.get_or_insert(now);
                 }
-                let kept = current.filter(|_| in_grace(&self.owned, app, now));
-                kept.or_else(|| {
-                    read_window(&best, current, &mut shown).map(|(best, _)| best.process)
-                })
+                owner
             } else {
                 None
             };
@@ -322,7 +327,8 @@ impl Lifecycle {
                     });
                 }
             }
-            if follow.is_some_and(|process| owners.contains(&process)) {
+            // The session follows the process that owns the window it reads.
+            if owner.is_some() {
                 self.owned.insert(app.clone(), None);
             }
         }

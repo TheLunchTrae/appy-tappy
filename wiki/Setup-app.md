@@ -168,9 +168,12 @@ runtime attaches to an application by its process's executable. A window
 qualifies when its executable and every required field match. Fallback
 windows count only when no window qualifies. Windows rank by fewer missed
 fields, then by the title matching. On a tie the runtime keeps a window of
-the process its session already follows, and otherwise takes the first that
-Windows lists, usually the front-most, that is not minimized, so the setup
-app marks every window that ties for the best fit as a best match.
+the process its session already follows, and the window it reads while that
+shows, and otherwise takes the first that Windows lists, usually the
+front-most, that is not minimized
+([Lifecycle](Architecture.md#lifecycle)). The setup app marks as the best
+match the window a new session would read, and watches a value, shows an
+overlay, and finds a click's target in that window.
 The setup app uses the match to show which applications are running, and the
 runtime finds each application's window with the same rules. A value's region
 is drawn at one window size, and the runtime reads it at another by

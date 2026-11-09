@@ -100,6 +100,7 @@ fn main() -> ExitCode {
             commands::watched_reading,
             commands::stop_watching,
             commands::match_windows,
+            commands::read_window,
             commands::add_click_picture,
             commands::click_picture,
             commands::find_click,

@@ -206,7 +206,7 @@ before the next one, and the trace it records to.
 ```mermaid
 stateDiagram-v2
     [*] --> Finding
-    Finding --> Waiting: no window fits, it is minimized or another process's, or windows cannot be listed
+    Finding --> Waiting: no window of the session's process fits best, it is minimized, or windows cannot be listed
     Finding --> Waiting: the capture cannot start
     Waiting --> Finding: FIND_AGAIN passes
     Finding --> Capturing: the capture starts
@@ -216,7 +216,7 @@ stateDiagram-v2
     Capturing --> Capturing: a size where no value reads settles, why each is not read
     Capturing --> Closing: Lost or Failing from the frame handler
     Capturing --> Closing: a size where a value reads settles, Resized
-    Capturing --> Closing: every CHECK_AGAIN, the window is hidden or no longer fits, or a better one fits or is another process's
+    Capturing --> Closing: every CHECK_AGAIN, the window is hidden or session_window picks another
     Closing --> Finding: Resized, or the check, after Unseen
     Closing --> Backoff: Lost or Failing
     Backoff --> Finding: the backoff wait passes
@@ -226,12 +226,12 @@ stateDiagram-v2
     Backoff --> [*]: Stop
 ```
 
-- **Finding.** `find_window` lists the processes and windows, takes the windows
-  that fit best with `best_windows`, and picks one with `read_window` for the
-  session's process (`Job::watched`), as detection does: one of that process's
-  windows when it owns one, and otherwise the first that shows. It captures the
-  window only when it is that process's, and otherwise waits for the session
-  to follow the other process. Before the capture starts, `framed_at` asks
+- **Finding.** `find_window` lists the processes and windows and takes the one
+  `session_window` picks among the session's process's (`Job::watched`), as
+  detection does: the first of its windows that fit best that shows. When the
+  process owns none of the windows that fit best, such as while another
+  process's window fits better, it waits, and detection follows the other
+  process or keeps this one for its grace. Before the capture starts, `framed_at` asks
   `System::frame_size` for the size the window's frames will have, the
   window's bounds without its shadow (`DWMWA_EXTENDED_FRAME_BOUNDS`), and
   places the values there when some value reads there, so a window that is
@@ -245,8 +245,9 @@ stateDiagram-v2
   runs on another thread and sends `Lost`, `Resizing`, `Failing`, or
   `Recovered` back to this one. A `Trace` from the owner goes on to the frame
   handler over its own channel, and the capture goes on. Each `CHECK_AGAIN`, `moved_on` checks that the
-  window still shows and still fits as well as any window, because a hidden
-  window sends no frames and no close.
+  window still shows and that `session_window` still picks it, which it does
+  while the window shows and fits as well as any, because a hidden window
+  sends no frames and no close.
 - **Settling.** `Resizing` names the size frames show now, and a `Settle`
   (`crates/sources/src/screen/settle.rs`) waits for it to hold for `SETTLE`,
   250 ms, starting again at each other size. The wait runs on this thread's

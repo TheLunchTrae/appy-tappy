@@ -124,13 +124,25 @@ describe('the picked window', () => {
     expect(pickedStatus('Example App', 3, null, 'no answer', titles).text).toContain('no answer. Refresh');
   });
 
-  test('allows any window that fits as well as the first', () => {
+  test('is only the window the runtime reads among windows that fit as well', () => {
     const twins: readonly WindowFit[] = [
-      { handle: 3, fallback: false, best: true },
       { handle: 8, fallback: false, best: true },
+      { handle: 3, fallback: false, best: false },
     ];
     expect(pickedStatus('Example App', 8, twins, null, titles).ok).toBe(true);
-    expect(fitLabel(twins, 8)?.text).toBe('best match');
+    const twin = pickedStatus('Example App', 3, twins, null, titles);
+    expect(twin.ok).toBe(false);
+    expect(twin.text).toStartWith('Example App reads another window instead');
+  });
+
+  test('says another window is read when the runtime reads one the list leaves out', () => {
+    const unlisted: readonly WindowFit[] = [
+      { handle: 3, fallback: false, best: false },
+      { handle: 5, fallback: false, best: false },
+    ];
+    const status = pickedStatus('Example App', 3, unlisted, null, titles);
+    expect(status.ok).toBe(false);
+    expect(status.text).toStartWith('Example App reads another window instead');
   });
 
   test('says when the application finds no open window', () => {

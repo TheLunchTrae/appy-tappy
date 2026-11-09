@@ -142,9 +142,14 @@ export async function stopWatching(watch: number): Promise<void> {
   await invoke('stop_watching', { watch });
 }
 
-/** The running windows `window` takes, the best fit first. */
+/** The running windows `window` takes, the one the runtime reads first. */
 export async function matchWindows(window: WindowDef): Promise<readonly WindowFit[]> {
   return invoke<readonly WindowFit[]>('match_windows', { window });
+}
+
+/** The window the runtime reads for `window`, or null while none fits. */
+export async function readWindow(window: WindowDef): Promise<number | null> {
+  return invoke<number | null>('read_window', { window });
 }
 
 /**
