@@ -1,12 +1,12 @@
 //! A click's target: keeping a picture of what it clicks on, showing it, and
-//! finding where the click would land on the picked window's newest frame,
-//! as the runtime does when the click runs.
+//! finding where the click would land on the picked window's newest frame
+//! with the runtime's own [`ClickSearch`].
 
 use appytappy_config::automation_file::ClickAtDef;
 use appytappy_config::click::ClickAt;
-use appytappy_sources::screen::find::PictureSearch;
+use appytappy_sources::screen::click::{ClickPictureError, ClickSearch};
 use appytappy_sources::screen::mask::Mask;
-use appytappy_sources::screen::{Image, Region, Size};
+use appytappy_sources::screen::{Image, Region};
 use serde::Serialize;
 
 use crate::check_spec::{RegionSpec, sentence};
@@ -124,10 +124,20 @@ impl<H: Host> Owner<H> {
                     "The spot lies outside the window. Pick it again on this window.".to_owned()
                 }),
             ClickAt::Picture(wanted) => {
-                let taken = Size {
-                    width: wanted.window_width,
-                    height: wanted.window_height,
+                let name = &wanted.image;
+                let unread = |error: &dyn std::fmt::Display| {
+                    format!("The picture {name} cannot be read: {error}.")
                 };
+                let bytes = self
+                    .stores()?
+                    .automations
+                    .picture(name)
+                    .map_err(|error| unread(&error))?;
+                let search = ClickSearch::new(&wanted, &bytes).map_err(|error| match error {
+                    ClickPictureError::Read(error) => unread(&error),
+                    ClickPictureError::Misfit(misfit) => sentence(&misfit.to_string()),
+                })?;
+                let taken = search.taken();
                 if size != taken {
                     return Err(format!(
                         "The window is {}x{} now, but the picture was taken at {}x{}. A click \
@@ -135,37 +145,21 @@ impl<H: Host> Owner<H> {
                         size.width, size.height, taken.width, taken.height
                     ));
                 }
-                let (picture, mask) = self.click_picture(&wanted.image)?;
-                let size = picture.size();
-                wanted
-                    .fits_picture(size.width, size.height)
-                    .map_err(|misfit| sentence(&misfit.to_string()))?;
-                let area = wanted.search;
-                let searched = Region::new(area.x, area.y, area.width, area.height)
-                    .and_then(|region| frame.crop(region))
+                let searched = frame
+                    .crop(search.area())
                     .ok_or_else(|| "The search area reaches past the window.".to_owned())?;
-                let search = PictureSearch::new(picture, mask.as_ref(), wanted.tolerance)
-                    .map_err(|error| sentence(&error.to_string()))?;
-                let found = search.find(&searched).ok_or_else(|| {
-                    "The picture is not in its search area now, so the click would not happen."
-                        .to_owned()
-                })?;
-                let (press_x, press_y) = wanted.press;
-                let x = area
-                    .x
-                    .checked_add(found.x)
-                    .and_then(|x| x.checked_add(press_x));
-                let y = area
-                    .y
-                    .checked_add(found.y)
-                    .and_then(|y| y.checked_add(press_y));
-                x.zip(y)
-                    .map(|(x, y)| FoundClick {
-                        x,
-                        y,
-                        likeness: Some(found.likeness),
+                search
+                    .locate(&searched)
+                    .map(|landing| FoundClick {
+                        x: landing.x,
+                        y: landing.y,
+                        likeness: Some(landing.likeness),
                     })
-                    .ok_or_else(|| "The place found lies outside the window.".to_owned())
+                    .ok_or_else(|| {
+                        "The picture is not in its search area now, so the click would not \
+                         happen."
+                            .to_owned()
+                    })
             },
         }
     }

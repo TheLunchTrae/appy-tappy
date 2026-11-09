@@ -20,7 +20,8 @@ use appytappy_config::automation_file::{
 use appytappy_config::click::{ClickAt, ClickPicture};
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::StoredApp;
-use appytappy_sources::screen::{Image, saved};
+use appytappy_sources::screen::click::{ClickPictureError, ClickSearch};
+use appytappy_sources::screen::saved;
 use serde::Serialize;
 
 use crate::stores::Stores;
@@ -208,22 +209,22 @@ pub(crate) fn save(
 
 /// Checks that the picture a click on `wanted`, action `number`, clicks on
 /// is kept and readable, fits the area it is looked for in, and holds the
-/// place it presses, as the runtime checks before it clicks.
+/// place it presses, with the runtime's own [`ClickSearch`].
 fn check_picture(stores: &Stores, wanted: &ClickPicture, number: usize) -> Result<(), String> {
-    let size = stores
+    let gone =
+        || format!("The picture action {number} clicks on is gone. Set up its target again.");
+    let bytes = stores
         .automations
         .picture(&wanted.image)
         .ok()
-        .and_then(|bytes| Image::decode_png_masked(&bytes).ok())
-        .map(|(picture, _mask)| picture.size())
-        .ok_or_else(|| {
-            format!("The picture action {number} clicks on is gone. Set up its target again.")
-        })?;
-    wanted
-        .fits_picture(size.width, size.height)
-        .map_err(|misfit| {
-            format!("Action {number}'s target cannot be used: {misfit}. Set up its target again.")
-        })
+        .ok_or_else(gone)?;
+    match ClickSearch::new(wanted, &bytes) {
+        Ok(_) => Ok(()),
+        Err(ClickPictureError::Read(_)) => Err(gone()),
+        Err(ClickPictureError::Misfit(misfit)) => Err(format!(
+            "Action {number}'s target cannot be used: {misfit}. Set up its target again."
+        )),
+    }
 }
 
 /// Removes the click pictures no automation in `file` names, such as those
@@ -343,7 +344,7 @@ mod tests {
     use appytappy_config::click::InvalidClick;
     use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
     use appytappy_config::window_match::WindowFacts;
-    use appytappy_sources::screen::Size;
+    use appytappy_sources::screen::{Image, Size};
 
     use super::*;
 
