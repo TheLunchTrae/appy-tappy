@@ -1225,9 +1225,8 @@ handle: number,
  */
 fallback: boolean,
 /**
- * Whether no other window fits better. The runtime reads one of the
- * best windows, the one Windows lists first, so a value has to be drawn
- * on one of them.
+ * Whether it is the window a new session would read, so a value has
+ * to be drawn on it.
  */
 best: boolean, }>;
 

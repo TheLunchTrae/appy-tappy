@@ -17,7 +17,6 @@ use appytappy_config::signal::SignalName;
 use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Region, Size};
-use appytappy_sources::system::best_window;
 
 use super::host::Host;
 use super::messages::{Live, Message, Seen};
@@ -86,9 +85,11 @@ impl<H: Host> Owner<H> {
             fs::read(folder.join(name))
         })
         .map_err(|error| format!("{} cannot be read: {error}.", saved.name))?;
-        let processes = self.host.processes().map_err(|error| error.to_string())?;
-        let windows = self.host.windows().map_err(|error| error.to_string())?;
-        let window = best_window(&file.window.to_match(), processes, windows)
+        let (processes, windows) = self.desktop()?;
+        let window = self
+            .host
+            .read_window(&file.window.to_match(), processes, windows)
+            .map(|read| read.entry.handle)
             .ok_or_else(|| format!("Open {} to see what {} reads.", file.name, saved.name))?;
         // A value reads where it was first drawn, at the size it was drawn
         // at, until a frame shows the window's size.
@@ -265,8 +266,8 @@ mod tests {
     use crate::check_spec::CheckSpec;
     use crate::owner::messages::Reading;
     use crate::owner::test_support::{
-        FakeHost, Harness, STATE, WINDOW, add_example_app, frame_image, harness_with,
-        scratch_store, spec, with_saved_bar,
+        FakeHost, Harness, STATE, WINDOW, add_example_app, example_build, frame_image,
+        harness_with, scratch_store, spec, with_saved_bar,
     };
 
     use super::*;
@@ -509,6 +510,19 @@ mod tests {
                     .to_owned()
             })
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_editor_takes_the_window_and_build_the_runtime_reads() {
+        let (mut harness, root) = with_saved_bar("watch-twin");
+        // Another copy's window fits as well and is listed first, but it is
+        // minimized, so the runtime reads window 7.
+        harness.owner.host.twin = Some(40);
+        let apps = harness.ask(Owner::apps).expect("lists");
+        assert_eq!(apps[0].windows, [7, 6]);
+        assert_eq!(apps[0].running.as_ref(), Some(&example_build()));
+        let (_watch, _handler) = watch_bar(&mut harness);
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

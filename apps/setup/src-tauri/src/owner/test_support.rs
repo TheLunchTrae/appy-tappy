@@ -30,6 +30,9 @@ pub(super) struct FakeHost {
     pub(super) unlisted: bool,
     /// Makes window 7 minimized.
     pub(super) minimized: bool,
+    /// The process of another copy of the example application, whose
+    /// minimized window 6 fits as well as window 7 and is listed first.
+    pub(super) twin: Option<u32>,
     /// The process that owns window 7, the example application's.
     pub(super) process: u32,
     /// The build that process runs, or `None` when it cannot be read.
@@ -95,50 +98,58 @@ impl Host for FakeHost {
                 bottom: 22,
             },
         };
-        Ok(vec![
-            own,
-            WindowEntry {
-                handle: 7,
-                process: ProcessId::new(self.process),
-                title: "Example App".to_owned(),
-                class: "ExampleWindow".to_owned(),
-                visible: true,
-                bounds: Bounds {
-                    left: 0,
-                    top: 0,
-                    right: 4,
-                    bottom: 2,
-                },
-            },
-        ])
-    }
-
-    fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
-        Ok(vec![
-            ProcessEntry {
-                id: ProcessId::new(self.process),
-                parent: ProcessId::new(0),
-                executable: "Example.exe".to_owned(),
-                threads: 1,
-            },
-            ProcessEntry {
-                id: ProcessId::new(OWN_PROCESS),
-                parent: ProcessId::new(0),
-                executable: "appytappy-setup.exe".to_owned(),
-                threads: 1,
-            },
-        ])
-    }
-
-    fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
-        Ok((window == 7).then_some(WindowPlace {
+        let example = |handle, process| WindowEntry {
+            handle,
+            process: ProcessId::new(process),
+            title: "Example App".to_owned(),
+            class: "ExampleWindow".to_owned(),
+            visible: true,
             bounds: Bounds {
                 left: 0,
                 top: 0,
                 right: 4,
                 bottom: 2,
             },
-            shown: !self.minimized,
+        };
+        let twin = self.twin.map(|process| example(6, process));
+        Ok([Some(own), twin, Some(example(7, self.process))]
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
+    fn processes(&self) -> io::Result<Vec<ProcessEntry>> {
+        let process = |id, executable: &str| ProcessEntry {
+            id: ProcessId::new(id),
+            parent: ProcessId::new(0),
+            executable: executable.to_owned(),
+            threads: 1,
+        };
+        let twin = self.twin.map(|id| process(id, "Example.exe"));
+        Ok([
+            Some(process(self.process, "Example.exe")),
+            twin,
+            Some(process(OWN_PROCESS, "appytappy-setup.exe")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect())
+    }
+
+    fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
+        let shown = match window {
+            7 => !self.minimized,
+            6 if self.twin.is_some() => false,
+            _ => return Ok(None),
+        };
+        Ok(Some(WindowPlace {
+            bounds: Bounds {
+                left: 0,
+                top: 0,
+                right: 4,
+                bottom: 2,
+            },
+            shown,
             front: true,
         }))
     }
@@ -227,6 +238,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         refuse,
         unlisted: false,
         minimized: false,
+        twin: None,
         process: 3,
         build: Some(example_build()),
         reloads: reload_sender,
