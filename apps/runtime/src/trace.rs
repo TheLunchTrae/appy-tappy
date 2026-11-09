@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::Value;
 
-use crate::workers::reader::SessionId;
+use crate::model::SessionId;
 
 /// A set of [`TraceCategory`]s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

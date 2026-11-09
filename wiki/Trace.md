@@ -51,8 +51,8 @@ time_ns,thread,event,app,item,value,took_ns,cause,detail
 - `cause`: when the frame arrived whose reading led to this row, in
   nanoseconds since the trace started. Every row one reading causes has the
   same `cause`, so a filter on it follows one change from the frame to the
-  action it ran. A frame from before the trace started, as from a reader the
-  trace started over, leaves it empty.
+  action it ran. A frame from before the trace started, as one whose value a
+  reader read just before the trace reached it, leaves it empty.
 - `detail`: a word or a count, where the event says.
 
 A field the event leaves out is empty. A field with a comma or a quote is
@@ -103,10 +103,11 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
   it, so names are looked up only there. The owner hands it those plans, and
   tells it to stop, over a second channel with no limit, so the owner never
   waits for the writer, even when its buffer is full. The writer takes them
-  before each record, and a session's plan is sent before its reader starts,
-  so every row of the session is named. After each reload, the owner hands
-  it each running session's newest plan too, so a rename shows in the trace
-  without starting the reader over.
+  before each record, and a session's plan is sent before its reader starts
+  or gets the trace, so every row of the session is named. After each
+  settings read, the owner hands it each running session's newest plan, so
+  a rename shows in the trace without starting the reader over, and a new
+  trace knows the sessions that ran before it started.
 - **Files.** Once a trace starts, and at each new part, the writer deletes the
   oldest trace files past the number to keep. A file it cannot delete, as one
   open in a spreadsheet, stays and is tried again at the next part or
@@ -117,11 +118,13 @@ The code is in `apps/runtime/src/trace.rs` and `apps/runtime/src/trace/`.
   such as another category, the file size limit, or the number of files to
   keep, stop it and start a new one in a new file, because a file's rows
   should all record the same things.
-- **Handing out a new trace.** When the trace changes, the owner gives the new
-  handle to the action thread and to detection over their channels, and the
-  readers start over with it, as a new read interval restarts them. Settings
-  are read before the saved applications and automations, so a reader the new
-  plan starts gets the new trace, and no reader starts twice.
+- **Handing out a new trace.** When the trace changes, `Crew::set_trace`
+  gives the new handle to the action thread, to detection, and to each reader
+  over their channels, and keeps it for the owner and for the readers it
+  starts later. A reader hands it on to its capture's frame handler, which
+  records to it from its next frame. No reader starts over and no value is
+  forgotten, so turning the trace on or off leaves the run it measures as it
+  was.
 - **Stopping.** The owner wakes when the trace's end time comes and stops it.
   A stopped trace's writer writes what its buffer held and ends on its own
   time, so a stop never waits for it. When a file cannot be written, as when

@@ -48,14 +48,12 @@ pub(crate) struct AppPlan {
     pub(crate) runs: Runs,
 }
 
-/// What the log and the tray call an application and its parts. A change to
-/// them alone restarts nothing.
+/// What the log and the tray call an application and its values. A change
+/// to them alone restarts nothing.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Labels {
     /// The application's name, such as `Example App`.
     pub(crate) name: String,
-    /// Each rule's automation's name, in the order of [`Runs::rules`].
-    pub(crate) automations: Vec<String>,
     /// Each value's name, such as `Progress`, in the order of
     /// [`Runs::values`].
     pub(crate) values: Vec<String>,
@@ -64,18 +62,37 @@ pub(crate) struct Labels {
     pub(crate) checked: Option<BuildDef>,
 }
 
-/// What runs for an application. A change to it restarts the application's
-/// automations.
+/// What runs for an application. A change to it, other than to an
+/// automation's name, restarts the application's automations.
 #[derive(Debug, PartialEq)]
 pub(crate) struct Runs {
     /// How to find its window.
     pub(crate) window: WindowMatch,
     /// The values its automations watch.
     pub(crate) values: Vec<ValuePlan>,
-    /// One rule for each automation that can run.
-    pub(crate) rules: Arc<[Rule]>,
+    /// One rule for each automation that can run, with its name.
+    pub(crate) rules: Vec<RulePlan>,
     /// What placing the rules' clicks needs.
     pub(crate) clicks: Arc<ClickTargets>,
+}
+
+/// An automation that can run: its rule, and its name for the log, the
+/// tray, and the trace.
+///
+/// Two are equal when their rules are, whatever their names, since a name
+/// is a label and renaming an automation restarts nothing.
+#[derive(Debug)]
+pub(crate) struct RulePlan {
+    /// The automation's name.
+    pub(crate) automation: String,
+    /// What it watches and does.
+    pub(crate) rule: Rule,
+}
+
+impl PartialEq for RulePlan {
+    fn eq(&self, other: &Self) -> bool {
+        self.rule == other.rule
+    }
 }
 
 /// A value an automation watches.
@@ -137,8 +154,7 @@ struct Draft<'apps> {
     file: &'apps AppFile,
     values: Vec<ValuePlan>,
     value_names: Vec<String>,
-    rules: Vec<Rule>,
-    automations: Vec<String>,
+    rules: Vec<RulePlan>,
     clicks: ClickTargets,
 }
 
@@ -198,7 +214,6 @@ pub(crate) fn compile(
             values: Vec::new(),
             value_names: Vec::new(),
             rules: Vec::new(),
-            automations: Vec::new(),
             clicks: ClickTargets::default(),
         });
         let ready = built.entry((app_id, value.id.as_str())).or_insert_with(|| {
@@ -217,8 +232,10 @@ pub(crate) fn compile(
         // Kept only once the value check is built too, so a rejected
         // automation leaves neither a click target nor a value check behind.
         draft.clicks.merge(clicks);
-        draft.rules.push(rule);
-        draft.automations.push(automation.name.clone());
+        draft.rules.push(RulePlan {
+            automation: automation.name.clone(),
+            rule,
+        });
     }
     let apps = drafts
         .into_iter()
@@ -228,14 +245,13 @@ pub(crate) fn compile(
             let plan = AppPlan {
                 labels: Labels {
                     name: file.name.clone(),
-                    automations: draft.automations,
                     values: draft.value_names,
                     checked: file.checked.as_ref().map(|checked| checked.build.clone()),
                 },
                 runs: Runs {
                     window: file.window.to_match(),
                     values: draft.values,
-                    rules: draft.rules.into(),
+                    rules: draft.rules,
                     clicks: Arc::new(draft.clicks),
                 },
             };
@@ -290,23 +306,9 @@ pub(crate) mod examples {
     }
 
     fn plan_of(name: &str, threshold: f64, cooldown: Duration) -> Arc<AppPlan> {
-        let condition =
-            Condition::compare(signal(), Comparison::AtLeast, number(threshold)).expect("valid");
-        let rule = Rule::new(condition, pause(), cooldown, Restore::OnRelease).expect("valid");
-        let black = Rgb {
-            red: 0,
-            green: 0,
-            blue: 0,
-        };
-        let white = Rgb {
-            red: 255,
-            green: 255,
-            blue: 255,
-        };
         Arc::new(AppPlan {
             labels: Labels {
                 name: name.to_owned(),
-                automations: vec![format!("Pause {name}")],
                 values: vec!["Progress".to_owned()],
                 checked: None,
             },
@@ -321,26 +323,53 @@ pub(crate) mod examples {
                     },
                     fallback: false,
                 },
-                values: vec![ValuePlan {
-                    signal: signal(),
-                    check: SavedValue {
-                        drawn: SavedCheck {
-                            window_size: Size {
-                                width: 800,
-                                height: 600,
-                            },
-                            region: Region::new(0, 0, 10, 2).expect("not empty"),
-                            check: Check::BarFill(BarFill::new(white, black).expect("different")),
-                        },
-                        fixes: Vec::new(),
-                        pin: PinDef::TopLeft,
-                        size_changes: SizeChangesDef::Often,
-                    },
-                }],
-                rules: Arc::from(vec![rule]),
+                values: vec![value(signal())],
+                rules: vec![pause_at(&format!("Pause {name}"), threshold, cooldown)],
                 clicks: Arc::default(),
             },
         })
+    }
+
+    /// The automation `automation`, which pauses media while progress is at
+    /// least `threshold`, at most once every `cooldown`, and undoes it after.
+    pub(crate) fn pause_at(automation: &str, threshold: f64, cooldown: Duration) -> RulePlan {
+        let condition =
+            Condition::compare(signal(), Comparison::AtLeast, number(threshold)).expect("valid");
+        RulePlan {
+            automation: automation.to_owned(),
+            rule: Rule::new(condition, pause(), cooldown, Restore::OnRelease).expect("valid"),
+        }
+    }
+
+    /// The value `signal`, read as the fill of a bar at the top left of an
+    /// 800 by 600 window.
+    pub(crate) fn value(signal: SignalName) -> ValuePlan {
+        let black = Rgb {
+            red: 0,
+            green: 0,
+            blue: 0,
+        };
+        let white = Rgb {
+            red: 255,
+            green: 255,
+            blue: 255,
+        };
+        ValuePlan {
+            signal,
+            check: SavedValue {
+                drawn: SavedCheck {
+                    window_size: Size {
+                        width: 800,
+                        height: 600,
+                    },
+                    region: Region::new(0, 0, 10, 2).expect("not empty"),
+                    check: Check::BarFill(BarFill::new(white, black).expect("different")),
+                },
+                fixes: Vec::new(),
+                pin: PinDef::TopLeft,
+                size_changes: SizeChangesDef::Often,
+            },
+        }
     }
 }
 
@@ -477,6 +506,24 @@ mod tests {
         Err(io::Error::from(io::ErrorKind::NotFound))
     }
 
+    /// The names of `app`'s automations, in the order of its rules.
+    fn automation_names(app: &AppPlan) -> Vec<&str> {
+        app.runs
+            .rules
+            .iter()
+            .map(|rule| rule.automation.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn automations_run_the_same_when_only_their_names_differ() {
+        let pause = examples::pause_at("Pause", 90.0, std::time::Duration::ZERO);
+        let renamed = examples::pause_at("Renamed", 90.0, std::time::Duration::ZERO);
+        let lower = examples::pause_at("Pause", 80.0, std::time::Duration::ZERO);
+        assert_eq!(pause, renamed);
+        assert_ne!(pause, lower);
+    }
+
     #[test]
     fn each_enabled_automation_becomes_a_rule_of_its_application() {
         let apps = [
@@ -503,10 +550,9 @@ mod tests {
         assert_eq!(example.labels.name, "Example App");
         assert_eq!(example.runs.window.executable, Pattern::new("Example*.exe"));
         assert_eq!(
-            example.labels.automations,
+            automation_names(example),
             ["Automation first", "Automation second"]
         );
-        assert_eq!(example.runs.rules.len(), 2);
         let values: Vec<&str> = example.labels.values.iter().map(String::as_str).collect();
         assert_eq!(
             values,
@@ -580,7 +626,7 @@ mod tests {
         );
         let example = plan.apps.get("example").expect("the good automation runs");
         assert_eq!(
-            example.labels.automations,
+            automation_names(example),
             ["Automation good", "Automation good"]
         );
         assert_eq!(example.runs.values.len(), 1);
@@ -691,7 +737,7 @@ mod tests {
         );
         let example = &plan.apps["example"];
         assert_eq!(
-            example.labels.automations,
+            automation_names(example),
             ["Automation spot", "Automation picture"]
         );
         let mut expected = ClickTargets::default();

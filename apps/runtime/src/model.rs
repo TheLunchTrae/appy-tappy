@@ -3,10 +3,11 @@
 //! are enabled, whether their actions can run, and the rule session of
 //! each app whose automations run.
 //!
-//! The model does no I/O. Each change returns the [`Order`]s that carry it
-//! out: start or stop a reader, and run or undo an automation's actions.
-//! An app's automations run while it is attached, automations are enabled,
-//! and the plan has automations for it.
+//! The model does no I/O and holds no channel. Each change returns the
+//! [`Order`]s that carry it out: start or stop a reader, and run or undo an
+//! automation's actions. The owner turns each order into a message for the
+//! thread that carries it out. An app's automations run while it is
+//! attached, automations are enabled, and the plan has automations for it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -14,16 +15,25 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use appytappy_actions::Watched;
-use appytappy_config::anti_cheat::ProcessId;
-use appytappy_config::signal::{SignalName, Value};
-use appytappy_engine::{Effect, Session};
+use appytappy_config::action::Action;
+use appytappy_config::rule::Restore;
+use appytappy_config::signal::Value;
+use appytappy_engine::{Effect, RuleIndex, Session};
 use appytappy_sources::schedule::ReadInterval;
 
+use crate::click::ClickTargets;
 use crate::lifecycle::Change;
-use crate::plan::AppPlan;
-use crate::trace::Trace;
-use crate::workers::act::{Job, Owner};
-use crate::workers::reader::{self, SessionId};
+use crate::plan::{AppPlan, RulePlan};
+
+/// One session of an attached application. A new session starts each time
+/// the runtime starts reading an app, so a reading from a session that ended
+/// is told apart and dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct SessionId(pub(crate) u64);
+
+/// Names a fired automation: its session and its rule's position, so two
+/// sessions' changes are never mixed up.
+pub(crate) type Owner = (SessionId, RuleIndex);
 
 /// The runtime's state, as the log and the tray report it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,44 +61,68 @@ impl fmt::Display for State {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Order {
     /// Start reading an app's values.
-    Read(reader::Job),
+    Read {
+        /// The session the readings belong to.
+        session: SessionId,
+        /// The application's values and window.
+        plan: Arc<AppPlan>,
+        /// The process the session follows, whose window is read.
+        watched: Watched,
+        /// How often to read the values, from the settings.
+        interval: ReadInterval,
+    },
     /// Stop the reader of a session, named by its app's name for the log.
     StopReading(SessionId, String),
-    /// Run or undo an automation's actions.
-    Act(Job),
+    /// Run an automation's actions in order.
+    Run {
+        /// The fired automation.
+        owner: Owner,
+        /// Its name, for the log.
+        automation: String,
+        /// The process its session follows: a key press presses keys only
+        /// while that process's window is in front.
+        watched: Watched,
+        /// Its actions.
+        actions: Box<[Action]>,
+        /// What placing its clicks needs.
+        clicks: Arc<ClickTargets>,
+        /// Whether its changes are undone when it is released.
+        restore: Restore,
+        /// When the frame arrived whose reading fired it, for the trace.
+        cause: Option<Instant>,
+    },
+    /// Undo what an automation changed.
+    Undo {
+        /// The released automation.
+        owner: Owner,
+        /// Its name, for the log.
+        automation: String,
+        /// When the frame arrived whose reading released it, for the trace.
+        cause: Option<Instant>,
+    },
     /// Nothing runs: an automation's cooldown held it back. The trace
     /// records it, with when the frame arrived whose reading it was.
     Held(Owner, Option<Instant>),
 }
 
-/// An attached app's process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Attached {
-    /// The process.
-    process: ProcessId,
-    /// Its executable, such as `Example.exe`.
-    executable: String,
-}
-
 /// An app whose automations run.
 #[derive(Debug)]
 struct Running {
-    id: SessionId,
+    /// The app's ID.
+    app: String,
     plan: Arc<AppPlan>,
     session: Session,
     /// The process the session follows.
     watched: Watched,
     /// How often its reader reads.
     interval: ReadInterval,
-    /// The trace its reader records to.
-    trace: Trace,
 }
 
 /// The owner thread's state.
 #[derive(Debug)]
 pub(crate) struct Model {
     /// The process each attached app follows, by app ID.
-    attached: BTreeMap<String, Attached>,
+    attached: BTreeMap<String, Watched>,
     /// The problem that degrades the runtime.
     problem: Option<String>,
     /// Whether rules may fire. Turning it off from the tray keeps detection
@@ -100,12 +134,10 @@ pub(crate) struct Model {
     actions_can_run: bool,
     /// What each app with automations runs, by app ID.
     plan: BTreeMap<String, Arc<AppPlan>>,
-    /// The apps whose automations run now, by app ID.
-    running: BTreeMap<String, Running>,
+    /// The apps whose automations run now, by session.
+    running: BTreeMap<SessionId, Running>,
     /// How often readers read, from the settings.
     interval: ReadInterval,
-    /// The trace readers record to, from the settings.
-    trace: Trace,
     /// The next session's ID.
     next: u64,
 }
@@ -120,7 +152,6 @@ impl Default for Model {
             plan: BTreeMap::new(),
             running: BTreeMap::new(),
             interval: ReadInterval::DEFAULT,
-            trace: Trace::OFF,
             next: 0,
         }
     }
@@ -153,11 +184,15 @@ impl Model {
         }
     }
 
-    /// The names of the automations that run now, app by app.
+    /// The names of the automations that run now, app by app in the order
+    /// of their IDs.
     pub(crate) fn active_automations(&self) -> Vec<&str> {
-        self.running
-            .values()
-            .flat_map(|running| running.plan.labels.automations.iter().map(String::as_str))
+        let mut running: Vec<&Running> = self.running.values().collect();
+        running.sort_by(|one, other| one.app.cmp(&other.app));
+        running
+            .into_iter()
+            .flat_map(|running| running.plan.runs.rules.iter())
+            .map(|rule| rule.automation.as_str())
             .collect()
     }
 
@@ -173,31 +208,15 @@ impl Model {
 
     /// The newest plan of the application that session `id` runs.
     pub(crate) fn session_plan(&self, id: SessionId) -> Option<&AppPlan> {
-        self.running
-            .values()
-            .find(|running| running.id == id)
-            .map(|running| &*running.plan)
+        self.running.get(&id).map(|running| &*running.plan)
     }
 
     /// Each running session with its application's newest plan, so the trace
     /// names what a reload renamed without starting it over.
     pub(crate) fn sessions(&self) -> impl Iterator<Item = (SessionId, &Arc<AppPlan>)> {
         self.running
-            .values()
-            .map(|running| (running.id, &running.plan))
-    }
-
-    /// Where `signal` is among the values that session `id` reads, for the
-    /// trace.
-    pub(crate) fn value_position(&self, id: SessionId, signal: &SignalName) -> Option<usize> {
-        self.running
-            .values()
-            .find(|running| running.id == id)?
-            .plan
-            .runs
-            .values
             .iter()
-            .position(|value| value.signal == *signal)
+            .map(|(id, running)| (*id, &running.plan))
     }
 
     /// Applies what detection found.
@@ -210,7 +229,7 @@ impl Model {
             } => {
                 self.attached.insert(
                     app.clone(),
-                    Attached {
+                    Watched {
                         process,
                         executable,
                     },
@@ -219,7 +238,8 @@ impl Model {
             },
             Change::Exited { app, .. } => {
                 self.attached.remove(&app);
-                self.stop(&app)
+                self.session_of(&app)
+                    .map_or_else(Vec::new, |id| self.stop(id))
             },
             // Which build an app runs changes nothing the model holds; the
             // owner notes it in the log.
@@ -239,38 +259,33 @@ impl Model {
     /// undoes what the running automations changed.
     pub(crate) fn set_enabled(&mut self, enabled: bool) -> Vec<Order> {
         self.enabled = enabled;
-        let apps: Vec<String> = if enabled {
-            self.attached.keys().cloned().collect()
+        if enabled {
+            let apps: Vec<String> = self.attached.keys().cloned().collect();
+            apps.iter().flat_map(|app| self.start(app)).collect()
         } else {
-            self.running.keys().cloned().collect()
-        };
-        apps.iter()
-            .flat_map(|app| {
-                if enabled {
-                    self.start(app)
-                } else {
-                    self.stop(app)
-                }
-            })
-            .collect()
+            std::mem::take(&mut self.running)
+                .into_iter()
+                .flat_map(|(id, running)| stopped(id, running))
+                .collect()
+        }
     }
 
     /// Switches to a new plan. An app whose part runs differently starts
     /// over with it, undoing what its automations changed. An app that runs
-    /// the same keeps running untouched and only takes the new plan's labels,
-    /// so renaming it or its parts, or marking its values as checked,
-    /// restarts nothing.
+    /// the same keeps running untouched and only takes the new plan, so
+    /// renaming it or its parts, or marking its values as checked, restarts
+    /// nothing.
     pub(crate) fn replan(&mut self, plan: BTreeMap<String, Arc<AppPlan>>) -> Vec<Order> {
         let mut changed = Vec::new();
-        for (app, running) in &mut self.running {
-            match plan.get(app) {
+        for (id, running) in &mut self.running {
+            match plan.get(&running.app) {
                 Some(new) if new.runs == running.plan.runs => {
                     running.plan = Arc::clone(new);
                 },
-                _ => changed.push(app.clone()),
+                _ => changed.push(*id),
             }
         }
-        let mut orders: Vec<Order> = changed.iter().flat_map(|app| self.stop(app)).collect();
+        let mut orders: Vec<Order> = changed.into_iter().flat_map(|id| self.stop(id)).collect();
         self.plan = plan;
         let attached: Vec<String> = self.attached.keys().cloned().collect();
         for app in attached {
@@ -284,64 +299,58 @@ impl Model {
         self.interval
     }
 
-    /// Sets how often readers read and the trace they record to. Readers
-    /// that start from now on use them; [`Model::restart_readers`] moves the
-    /// running ones to them.
-    pub(crate) fn set_reading(&mut self, interval: ReadInterval, trace: Trace) {
+    /// Sets how often readers read. Readers that start from now on read at
+    /// it; [`Model::restart_readers`] moves the running ones to it.
+    pub(crate) const fn set_interval(&mut self, interval: ReadInterval) {
         self.interval = interval;
-        self.trace = trace;
-    }
-
-    /// The trace readers record to.
-    pub(crate) const fn trace(&self) -> &Trace {
-        &self.trace
     }
 
     /// Starts over each running app's reader that reads at another interval
-    /// or records to another trace than the model's, in the same session, so
-    /// its automations keep their state and nothing is undone. Its values are
-    /// forgotten first, as when a reader can no longer see them, because the
-    /// new reader sends each value as it first reads it. A reading the old
-    /// reader sent just before it stopped can still arrive after that, a few
-    /// milliseconds old.
+    /// than the model's, in the same session, so its automations keep their
+    /// state and nothing is undone. Its values are forgotten first, as when
+    /// a reader can no longer see them, because the new reader sends each
+    /// value as it first reads it. A reading the old reader sent just before
+    /// it stopped can still arrive after that, a few milliseconds old.
     pub(crate) fn restart_readers(&mut self) -> Vec<Order> {
         let interval = self.interval;
-        let trace = &self.trace;
         self.running
-            .values_mut()
-            .filter(|running| running.interval != interval || running.trace != *trace)
-            .flat_map(|running| {
+            .iter_mut()
+            .filter(|(_, running)| running.interval != interval)
+            .flat_map(|(id, running)| {
                 running.interval = interval;
-                running.trace = trace.clone();
                 running.session.forget_values();
                 [
-                    Order::StopReading(running.id, running.plan.labels.name.clone()),
-                    Order::Read(reader::Job {
-                        session: running.id,
+                    Order::StopReading(*id, running.plan.labels.name.clone()),
+                    Order::Read {
+                        session: *id,
                         plan: Arc::clone(&running.plan),
-                        process: running.watched.process,
-                        executable: running.watched.executable.clone(),
+                        watched: running.watched.clone(),
                         interval,
-                        trace: trace.clone(),
-                    }),
+                    },
                 ]
             })
             .collect()
     }
 
-    /// Records a value a session's reader read at `at`. A reading from a
-    /// session that ended is dropped.
+    /// Records the value at `position` among the values that session `id`
+    /// reads, as its reader read it at `at`. A reading from a session that
+    /// ended is dropped.
     pub(crate) fn sample(
         &mut self,
         id: SessionId,
-        signal: SignalName,
+        position: usize,
         value: Value,
         at: Instant,
     ) -> Vec<Order> {
-        let Some(running) = self.running.values_mut().find(|running| running.id == id) else {
+        let Some(running) = self.running.get_mut(&id) else {
             return Vec::new();
         };
-        let effects = running.session.sample(signal, value, at);
+        // The session reads the values of its plan, which a reload replaces
+        // only with a plan that reads the same.
+        let Some(read) = running.plan.runs.values.get(position) else {
+            return Vec::new();
+        };
+        let effects = running.session.sample(read.signal.clone(), value, at);
         acts(id, &running.plan, &running.watched, effects, Some(at))
     }
 
@@ -358,10 +367,10 @@ impl Model {
     /// their condition held, and whose cooldown has passed.
     pub(crate) fn recheck(&mut self, at: Instant) -> Vec<Order> {
         self.running
-            .values_mut()
-            .flat_map(|running| {
+            .iter_mut()
+            .flat_map(|(id, running)| {
                 let effects = running.session.recheck(at);
-                acts(running.id, &running.plan, &running.watched, effects, None)
+                acts(*id, &running.plan, &running.watched, effects, None)
             })
             .collect()
     }
@@ -370,67 +379,71 @@ impl Model {
     /// keeps its state, so an automation that ran stays run, and nothing
     /// fires or is undone until the values read next decide its condition.
     pub(crate) fn forget(&mut self, id: SessionId) {
-        if let Some(running) = self.running.values_mut().find(|running| running.id == id) {
+        if let Some(running) = self.running.get_mut(&id) {
             running.session.forget_values();
         }
+    }
+
+    /// The session that runs `app`'s automations, if any.
+    fn session_of(&self, app: &str) -> Option<SessionId> {
+        self.running
+            .iter()
+            .find(|(_, running)| running.app == app)
+            .map(|(id, _)| *id)
     }
 
     /// Starts running `app`'s automations, if it is attached, automations
     /// are enabled, and the plan has automations for it.
     fn start(&mut self, app: &str) -> Vec<Order> {
-        let (Some(attached), Some(plan)) = (self.attached.get(app), self.plan.get(app)) else {
+        let (Some(watched), Some(plan)) = (self.attached.get(app), self.plan.get(app)) else {
             return Vec::new();
         };
-        if !self.enabled || self.running.contains_key(app) {
+        if !self.enabled || self.session_of(app).is_some() {
             return Vec::new();
         }
         let id = SessionId(self.next);
         self.next = self.next.wrapping_add(1);
-        let session = Session::new(Arc::clone(&plan.runs.rules));
-        let orders = vec![Order::Read(reader::Job {
+        let rules = plan
+            .runs
+            .rules
+            .iter()
+            .map(|rule| rule.rule.clone())
+            .collect();
+        let order = Order::Read {
             session: id,
             plan: Arc::clone(plan),
-            process: attached.process,
-            executable: attached.executable.clone(),
+            watched: watched.clone(),
             interval: self.interval,
-            trace: self.trace.clone(),
-        })];
-        let watched = Watched {
-            process: attached.process,
-            executable: attached.executable.clone(),
         };
-        let plan = Arc::clone(plan);
         self.running.insert(
-            app.to_owned(),
+            id,
             Running {
-                id,
-                plan,
-                session,
-                watched,
+                app: app.to_owned(),
+                plan: Arc::clone(plan),
+                session: Session::new(rules),
+                watched: watched.clone(),
                 interval: self.interval,
-                trace: self.trace.clone(),
             },
         );
-        orders
+        vec![order]
     }
 
-    /// Stops running `app`'s automations, undoing what they changed.
-    fn stop(&mut self, app: &str) -> Vec<Order> {
-        let Some(running) = self.running.remove(app) else {
-            return Vec::new();
-        };
-        let effects = running.session.stop();
-        let name = running.plan.labels.name.clone();
-        let mut orders = vec![Order::StopReading(running.id, name)];
-        orders.extend(acts(
-            running.id,
-            &running.plan,
-            &running.watched,
-            effects,
-            None,
-        ));
-        orders
+    /// Stops running session `id`'s automations, undoing what they changed.
+    fn stop(&mut self, id: SessionId) -> Vec<Order> {
+        self.running
+            .remove(&id)
+            .map_or_else(Vec::new, |running| stopped(id, running))
     }
+}
+
+/// The orders that stop `running`, session `id`, and undo what its
+/// automations changed.
+fn stopped(id: SessionId, running: Running) -> Vec<Order> {
+    let effects = running.session.stop();
+    let name = running.plan.labels.name.clone();
+    let mut orders = vec![Order::StopReading(id, name)];
+    orders.extend(acts(id, &running.plan, &running.watched, effects, None));
+    orders
 }
 
 /// The orders for a session's `effects`, caused by the reading of the
@@ -445,29 +458,29 @@ fn acts(
     effects
         .into_iter()
         .filter_map(|effect| {
-            let (Effect::Fire(rule) | Effect::Release(rule) | Effect::Held(rule)) = effect;
-            let owner = (id, rule);
-            let job = match effect {
-                Effect::Fire(_) => {
-                    let fired = plan.runs.rules.get(rule.0)?;
-                    Job::Run {
-                        owner,
-                        automation: plan.labels.automations.get(rule.0)?.clone(),
-                        watched: watched.clone(),
-                        actions: fired.actions().into(),
-                        clicks: Arc::clone(&plan.runs.clicks),
-                        restore: fired.restore(),
-                        cause,
-                    }
-                },
-                Effect::Release(_) => Job::Undo {
+            let (Effect::Fire(index) | Effect::Release(index) | Effect::Held(index)) = effect;
+            let owner = (id, index);
+            // The session started with the rules of this plan, or of one
+            // that a reload swapped in because its rules are the same, so
+            // each index it gives names a rule here.
+            let RulePlan { automation, rule } = plan.runs.rules.get(index.0)?;
+            Some(match effect {
+                Effect::Fire(_) => Order::Run {
                     owner,
-                    automation: plan.labels.automations.get(rule.0)?.clone(),
+                    automation: automation.clone(),
+                    watched: watched.clone(),
+                    actions: rule.actions().into(),
+                    clicks: Arc::clone(&plan.runs.clicks),
+                    restore: rule.restore(),
                     cause,
                 },
-                Effect::Held(_) => return Some(Order::Held(owner, cause)),
-            };
-            Some(Order::Act(job))
+                Effect::Release(_) => Order::Undo {
+                    owner,
+                    automation: automation.clone(),
+                    cause,
+                },
+                Effect::Held(_) => Order::Held(owner, cause),
+            })
         })
         .collect()
 }
@@ -481,10 +494,10 @@ mod tests {
     use appytappy_config::rule::{Comparison, Condition, Restore, Rule};
     use appytappy_engine::RuleIndex;
 
-    use super::*;
-    use appytappy_config::settings_file::TraceCategory;
+    use appytappy_config::signal::SignalName;
 
-    use crate::plan::examples::{number, pause, plan, plan_with_cooldown, signal};
+    use super::*;
+    use crate::plan::examples::{number, pause, plan, plan_with_cooldown, signal, value};
     use crate::plan::{Labels, Runs};
 
     fn plans(apps: &[(&str, &Arc<AppPlan>)]) -> BTreeMap<String, Arc<AppPlan>> {
@@ -513,15 +526,16 @@ mod tests {
         orders
             .iter()
             .map(|order| match order {
-                Order::Read(job) => format!("read {} {}", job.session.0, job.plan.labels.name),
+                Order::Read { session, plan, .. } => {
+                    format!("read {} {}", session.0, plan.labels.name)
+                },
                 Order::StopReading(id, name) => format!("stop {} {name}", id.0),
-                Order::Act(Job::Run {
+                Order::Run {
                     owner, automation, ..
-                }) => format!("run {} {automation}", owner.0.0),
-                Order::Act(Job::Undo {
+                } => format!("run {} {automation}", owner.0.0),
+                Order::Undo {
                     owner, automation, ..
-                }) => format!("undo {} {automation}", owner.0.0),
-                Order::Act(Job::Trace(_)) => "trace".to_owned(),
+                } => format!("undo {} {automation}", owner.0.0),
                 Order::Held((id, rule), _) => format!("held {} {}", id.0, rule.0),
             })
             .collect()
@@ -560,22 +574,30 @@ mod tests {
         assert_eq!(model.replan(plans(&[("a", &a)])), []);
         let read = model.apply(started("a", 7));
         assert_eq!(kinds(&read), ["read 0 A"]);
-        let Some(Order::Read(job)) = read.first() else {
+        let Some(Order::Read { watched, .. }) = read.first() else {
             panic!("a read order");
         };
-        assert_eq!(job.executable, "Example.exe");
+        assert_eq!(
+            *watched,
+            Watched {
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            }
+        );
         assert_eq!(model.active_automations(), ["Pause A"]);
         assert_eq!(model.app_name(SessionId(0)), Some("A"));
         assert_eq!(model.app_name(SessionId(9)), None);
-        let fired = model.sample(SessionId(0), signal(), number(95.0), now);
+        let fired = model.sample(SessionId(0), 0, number(95.0), now);
         assert_eq!(kinds(&fired), ["run 0 Pause A"]);
-        let again = model.sample(SessionId(0), signal(), number(96.0), now);
+        let again = model.sample(SessionId(0), 0, number(96.0), now);
         assert_eq!(again, [], "it fires once until it rearms");
-        let released = model.sample(SessionId(0), signal(), number(10.0), now);
+        let released = model.sample(SessionId(0), 0, number(10.0), now);
         assert_eq!(kinds(&released), ["undo 0 Pause A"]);
-        let other = model.sample(SessionId(5), signal(), number(95.0), now);
+        let other = model.sample(SessionId(5), 0, number(95.0), now);
         assert_eq!(other, [], "a reading of another session is dropped");
-        model.sample(SessionId(0), signal(), number(95.0), now);
+        let nowhere = model.sample(SessionId(0), 1, number(95.0), now);
+        assert_eq!(nowhere, [], "a reading of no value of the plan is dropped");
+        model.sample(SessionId(0), 0, number(95.0), now);
         let ended = model.apply(exited("a", 7));
         assert_eq!(kinds(&ended), ["stop 0 A", "undo 0 Pause A"]);
         assert_eq!(model.active_automations(), Vec::<&str>::new());
@@ -599,32 +621,37 @@ mod tests {
             },
             runs: Runs {
                 window: base.runs.window.clone(),
-                values: Vec::new(),
-                rules: Arc::from(vec![rule]),
+                values: vec![value(signal()), value(flag)],
+                rules: vec![RulePlan {
+                    automation: "Pause A".to_owned(),
+                    rule,
+                }],
                 clicks: Arc::default(),
             },
         });
+        // Where each value is among the values the reader reads.
+        let (progress, flag) = (0, 1);
         let mut model = Model::default();
         let now = Instant::now();
         model.replan(plans(&[("a", &a)]));
         model.apply(started("a", 7));
         assert_eq!(
-            model.sample(SessionId(0), flag.clone(), Value::Flag(false), now),
+            model.sample(SessionId(0), flag, Value::Flag(false), now),
             []
         );
-        let fired = model.sample(SessionId(0), signal(), number(95.0), now);
+        let fired = model.sample(SessionId(0), progress, number(95.0), now);
         assert_eq!(kinds(&fired), ["run 0 Pause A"]);
         model.forget(SessionId(9));
-        let other = model.sample(SessionId(0), signal(), number(10.0), now);
+        let other = model.sample(SessionId(0), progress, number(10.0), now);
         assert_eq!(
             kinds(&other),
             ["undo 0 Pause A"],
             "another session's forget"
         );
-        let again = model.sample(SessionId(0), signal(), number(95.0), now);
+        let again = model.sample(SessionId(0), progress, number(95.0), now);
         assert_eq!(kinds(&again), ["run 0 Pause A"]);
         model.forget(SessionId(0));
-        let low = model.sample(SessionId(0), signal(), number(10.0), now);
+        let low = model.sample(SessionId(0), progress, number(10.0), now);
         assert_eq!(
             low,
             [],
@@ -642,14 +669,14 @@ mod tests {
             Rule::new(condition, pause(), Duration::from_secs(10), Restore::Never).expect("valid");
         let base = plan("A", 90.0);
         let a = Arc::new(AppPlan {
-            labels: Labels {
-                values: Vec::new(),
-                ..base.labels.clone()
-            },
+            labels: base.labels.clone(),
             runs: Runs {
                 window: base.runs.window.clone(),
-                values: Vec::new(),
-                rules: Arc::from(vec![rule]),
+                values: vec![value(signal())],
+                rules: vec![RulePlan {
+                    automation: "Pause A".to_owned(),
+                    rule,
+                }],
                 clicks: Arc::default(),
             },
         });
@@ -663,10 +690,10 @@ mod tests {
         model.apply(started("a", 7));
         model.apply(started("b", 8));
         assert_eq!(model.next_due(), None);
-        model.sample(SessionId(0), signal(), number(95.0), now);
-        model.sample(SessionId(0), signal(), number(10.0), later(1));
+        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), 0, number(10.0), later(1));
         assert_eq!(
-            model.sample(SessionId(0), signal(), number(95.0), later(2)),
+            model.sample(SessionId(0), 0, number(95.0), later(2)),
             [Order::Held((SessionId(0), RuleIndex(0)), Some(later(2)))],
             "held, for the trace"
         );
@@ -689,10 +716,10 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0))]));
         model.apply(started("a", 7));
-        let orders = model.sample(SessionId(0), signal(), number(95.0), now);
+        let orders = model.sample(SessionId(0), 0, number(95.0), now);
         assert_eq!(
             orders,
-            [Order::Act(Job::Run {
+            [Order::Run {
                 owner: (SessionId(0), RuleIndex(0)),
                 automation: "Pause A".to_owned(),
                 watched: Watched {
@@ -703,7 +730,7 @@ mod tests {
                 clicks: Arc::default(),
                 restore: Restore::OnRelease,
                 cause: Some(now),
-            })]
+            }]
         );
     }
 
@@ -717,17 +744,15 @@ mod tests {
         )]));
         model.apply(started("a", 7));
         assert_eq!(
-            kinds(&model.sample(SessionId(0), signal(), number(95.0), now)),
+            kinds(&model.sample(SessionId(0), 0, number(95.0), now)),
             ["run 0 Pause A"]
         );
-        model.sample(SessionId(0), signal(), number(10.0), now);
+        model.sample(SessionId(0), 0, number(10.0), now);
         let later = now + Duration::from_secs(1);
         assert_eq!(
-            model.sample(SessionId(0), signal(), number(95.0), later),
+            model.sample(SessionId(0), 0, number(95.0), later),
             [Order::Held((SessionId(0), RuleIndex(0)), Some(later))]
         );
-        assert_eq!(model.value_position(SessionId(0), &signal()), Some(0));
-        assert_eq!(model.value_position(SessionId(9), &signal()), None);
     }
 
     #[test]
@@ -736,7 +761,7 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0))]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), signal(), number(95.0), now);
+        model.sample(SessionId(0), 0, number(95.0), now);
         assert_eq!(
             kinds(&model.set_enabled(false)),
             ["stop 0 A", "undo 0 Pause A"]
@@ -757,7 +782,7 @@ mod tests {
         model.replan(plans(&[("a", &a), ("b", &plan("B", 90.0))]));
         model.apply(started("a", 7));
         model.apply(started("b", 8));
-        model.sample(SessionId(1), signal(), number(95.0), now);
+        model.sample(SessionId(1), 0, number(95.0), now);
         let b = plan("B", 50.0);
         let orders = model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &b)]));
         assert_eq!(kinds(&orders), ["stop 1 B", "undo 1 Pause B", "read 2 B"]);
@@ -770,6 +795,11 @@ mod tests {
         assert_eq!(model.active_automations(), ["Pause B"]);
         let orders = model.replan(plans(&[("a", &a), ("b", &b)]));
         assert_eq!(kinds(&orders), ["read 3 A"], "a is still attached");
+        assert_eq!(
+            model.active_automations(),
+            ["Pause A", "Pause B"],
+            "listed app by app, whichever started first"
+        );
     }
 
     #[test]
@@ -778,8 +808,8 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), signal(), number(95.0), now);
-        model.set_reading(ReadInterval::DEFAULT, Trace::OFF);
+        model.sample(SessionId(0), 0, number(95.0), now);
+        model.set_interval(ReadInterval::DEFAULT);
         assert_eq!(
             model.restart_readers(),
             [],
@@ -787,26 +817,24 @@ mod tests {
         );
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_reading(slower, Trace::OFF);
+        model.set_interval(slower);
         let orders = model.restart_readers();
         assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"], "b is not running");
-        let Some(Order::Read(job)) = orders.last() else {
+        let Some(Order::Read { interval, .. }) = orders.last() else {
             panic!("a read order");
         };
-        assert_eq!(job.interval, slower);
+        assert_eq!(*interval, slower);
         assert_eq!(
             model.active_automations(),
             ["Pause A"],
             "the automation stays run"
         );
         assert_eq!(model.restart_readers(), [], "a moves to it once");
-        let Some(Order::Read(job)) = model.apply(started("b", 8)).first().cloned() else {
+        let Some(Order::Read { interval, .. }) = model.apply(started("b", 8)).first().cloned()
+        else {
             panic!("b is read");
         };
-        assert_eq!(
-            job.interval, slower,
-            "a new reader reads at the new interval"
-        );
+        assert_eq!(interval, slower, "a new reader reads at the new interval");
     }
 
     #[test]
@@ -818,13 +846,13 @@ mod tests {
             &plan_with_cooldown("A", Duration::from_secs(60)),
         )]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), signal(), number(95.0), now);
-        model.sample(SessionId(0), signal(), number(10.0), now);
-        model.sample(SessionId(0), signal(), number(95.0), now);
+        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), 0, number(10.0), now);
+        model.sample(SessionId(0), 0, number(95.0), now);
         assert!(model.next_due().is_some(), "held back by its cooldown");
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
-        model.set_reading(slower, Trace::OFF);
+        model.set_interval(slower);
         model.restart_readers();
         assert_eq!(model.next_due(), None, "nothing holds on unseen values");
         assert_eq!(model.recheck(now + Duration::from_secs(61)), []);
@@ -840,7 +868,7 @@ mod tests {
             .expect("in order");
         // As the owner does on a reload: the interval, then the plan, then
         // the readers the plan left running.
-        model.set_reading(slower, Trace::OFF);
+        model.set_interval(slower);
         let mut orders = model.replan(plans(&[("a", &plan("A", 80.0)), ("b", &plan("B", 90.0))]));
         orders.extend(model.restart_readers());
         assert_eq!(
@@ -850,34 +878,11 @@ mod tests {
         );
         assert!(
             orders.iter().all(|order| match order {
-                Order::Read(job) => job.interval == slower,
+                Order::Read { interval, .. } => *interval == slower,
                 _ => true,
             }),
             "both read at the new interval"
         );
-    }
-
-    #[test]
-    fn a_new_trace_restarts_each_reader_in_its_session() {
-        let mut model = Model::default();
-        model.replan(plans(&[("a", &plan("A", 90.0))]));
-        model.apply(started("a", 7));
-        let (trace, _entries) = Trace::for_test(1, &[TraceCategory::Readings]);
-        model.set_reading(ReadInterval::DEFAULT, trace.clone());
-        let orders = model.restart_readers();
-        assert_eq!(kinds(&orders), ["stop 0 A", "read 0 A"]);
-        let Some(Order::Read(job)) = orders.last() else {
-            panic!("a read order");
-        };
-        assert_eq!(job.trace, trace);
-        model.set_reading(ReadInterval::DEFAULT, trace);
-        assert_eq!(
-            model.restart_readers(),
-            [],
-            "the same trace changes nothing"
-        );
-        model.set_reading(ReadInterval::DEFAULT, Trace::OFF);
-        assert_eq!(kinds(&model.restart_readers()), ["stop 0 A", "read 0 A"]);
     }
 
     #[test]
@@ -886,12 +891,12 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0))]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), signal(), number(95.0), now);
+        model.sample(SessionId(0), 0, number(95.0), now);
         let mut renamed = plan("A", 90.0);
-        let labels = &mut Arc::get_mut(&mut renamed).expect("unshared").labels;
-        labels.name = "Renamed".to_owned();
-        labels.automations = vec!["Pause renamed".to_owned()];
-        labels.values = vec!["Renamed progress".to_owned()];
+        let parts = Arc::get_mut(&mut renamed).expect("unshared");
+        parts.labels.name = "Renamed".to_owned();
+        parts.labels.values = vec!["Renamed progress".to_owned()];
+        parts.runs.rules[0].automation = "Pause renamed".to_owned();
         assert_eq!(
             model.replan(plans(&[("a", &renamed)])),
             [],
@@ -909,7 +914,7 @@ mod tests {
             "the trace's names too"
         );
         assert_eq!(
-            kinds(&model.sample(SessionId(0), signal(), number(50.0), now)),
+            kinds(&model.sample(SessionId(0), 0, number(50.0), now)),
             ["undo 0 Pause renamed"]
         );
     }

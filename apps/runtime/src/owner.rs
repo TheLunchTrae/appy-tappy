@@ -21,12 +21,12 @@ use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
 use crate::log::Log;
-use crate::model::{Model, Order};
+use crate::model::{Model, Order, Owner, SessionId};
 use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
 use crate::workers::act::ActionReport;
-use crate::workers::reader::{Reader, Reading, SessionId};
+use crate::workers::reader::{self, Reader, Reading};
 use crate::workers::{act, join, spawn};
 use crate::{lifecycle, note, plan, tray};
 
@@ -145,14 +145,36 @@ struct Stores {
 struct Crew {
     system: Arc<HostSystem>,
     events: Sender<Event>,
-    jobs: Sender<act::Job>,
+    /// The action thread's input.
+    jobs: Sender<act::Control>,
     /// Detection's input.
     inputs: Sender<Input>,
     readers: BTreeMap<SessionId, Reader>,
     /// The trace, as the settings turn it on and off.
     tracing: Switch,
-    /// The owner's own handle to the trace.
+    /// The owner's own handle to the trace, which each reader it starts
+    /// records to as well.
     trace: Trace,
+}
+
+impl Crew {
+    /// Has every thread that records record to `trace` from now on: the
+    /// owner, the action thread, detection, and each reader, which keeps its
+    /// capture and what it read.
+    fn set_trace(&mut self, trace: Trace) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the action thread and detection end only after the owner, so neither send fails while it runs"
+        )]
+        let _ = (
+            self.jobs.send(act::Control::Trace(trace.clone())),
+            self.inputs.send(Input::Trace(trace.clone())),
+        );
+        for reader in self.readers.values() {
+            reader.set_trace(trace.clone());
+        }
+        self.trace = trace;
+    }
 }
 
 /// The owner loop: detection, the tray, the reload watch, each reader, and
@@ -254,9 +276,9 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         trace: Trace::OFF,
     };
     // The other threads exist only now, so they get a trace that started
-    // with the first read here; the first readers start with it.
+    // with the first read here.
     if let Some(trace) = first.trace {
-        tell(trace, &mut crew);
+        crew.set_trace(trace);
     }
     carry(first.orders, &mut crew, log);
     loop {
@@ -267,7 +289,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         // Off, the trace reads no clock here.
         let received = crew.trace.wants(TraceCategory::Rules).then(Instant::now);
         let (kind, cause) = (event.kind(), event.cause());
-        receive(&mut crew.trace, &model, &event);
+        receive(&mut crew.trace, &event);
         let step = handle(&mut model, log, &stores.enabled, event);
         reloads.after(&step);
         let read = match step {
@@ -278,14 +300,14 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             Step::Reload => Some(Stale::BOTH),
             Step::TraceFailed(id) => {
                 if let Some(trace) = crew.tracing.failed(id, log) {
-                    retrace(trace, &mut model, &mut crew, log);
+                    crew.set_trace(trace);
                 }
                 None
             },
             Step::Stop => break,
         };
         if let Some(trace) = crew.tracing.expire(Instant::now(), log) {
-            retrace(trace, &mut model, &mut crew, log);
+            crew.set_trace(trace);
         }
         if let Some(read) = read {
             let started = crew
@@ -300,17 +322,12 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 (read, &mut crew.tracing, &crew.events),
             );
             if let Some(trace) = saved.trace {
-                tell(trace, &mut crew);
+                crew.set_trace(trace);
             }
             if let Some(watchlist) = saved.watchlist
                 && crew.inputs.send(Input::Watch(watchlist)).is_err()
             {
                 break;
-            }
-            // A rename starts no reader over, so the trace learns the new
-            // names here.
-            for (id, plan) in model.sessions() {
-                crew.tracing.name(id, plan);
             }
             carry(saved.orders, &mut crew, log);
             crew.trace.record(What::Reloaded, |record| Record {
@@ -705,11 +722,13 @@ struct Saved {
 /// `reports`.
 ///
 /// The settings come first, so the readers that a new plan starts read at
-/// the new interval and with the new trace; then the plan; then the readers
-/// the plan kept running start over with both, so no reader starts twice.
-/// Files that do not read are kept as they were: the model runs the plan
-/// and settings it has, and `reloads` says when to read those files again,
-/// if at all.
+/// the new interval; then the plan; then the readers the plan kept running
+/// start over at the new interval, so no reader starts twice. Files that do
+/// not read are kept as they were: the model runs the plan and settings it
+/// has, and `reloads` says when to read those files again, if at all. Last,
+/// the trace learns each running session's newest plan, since neither a
+/// rename nor a new trace starts a reader over, and a new trace reaches the
+/// threads only after this returns, so it names every row.
 ///
 /// The first settings that read, even on a retry, decide whether
 /// automations start enabled: when they say to remember, as the tray last
@@ -741,8 +760,7 @@ fn read_saved(
                     note(log, &interval_line(interval));
                 }
                 trace = tracing.apply(&settings.trace, (now, unix_ms()), reports, log);
-                let reading = trace.clone().unwrap_or_else(|| model.trace().clone());
-                model.set_reading(interval, reading);
+                model.set_interval(interval);
             },
             Err(error) => {
                 failing.settings = true;
@@ -766,6 +784,9 @@ fn read_saved(
         }
     }
     orders.extend(model.restart_readers());
+    for (id, plan) in model.sessions() {
+        tracing.name(id, plan);
+    }
     reloads.retry = retry;
     reloads.failing = failing;
     Saved {
@@ -795,48 +816,18 @@ fn unix_ms() -> u64 {
         })
 }
 
-/// Gives every thread `trace` after it stopped on its own, the readers by
-/// starting them over.
-#[mutants::skip] // Starts and stops threads; the switch and the model are tested.
-fn retrace(trace: Trace, model: &mut Model, crew: &mut Crew, log: &mut Log) {
-    tell(trace.clone(), crew);
-    let orders = reread(trace, model);
-    carry(orders, crew, log);
-}
-
-/// The orders that start every reader over with `trace`.
-fn reread(trace: Trace, model: &mut Model) -> Vec<Order> {
-    model.set_reading(model.interval(), trace);
-    model.restart_readers()
-}
-
-/// Gives the owner, the action thread, and detection `trace`. The readers
-/// get it from the model when they start over.
-#[mutants::skip] // Sends to threads; checked by the trace's tests.
-fn tell(trace: Trace, crew: &mut Crew) {
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "the action thread and detection end only after the owner, so neither send fails while it runs"
-    )]
-    let _ = (
-        crew.jobs.send(act::Job::Trace(trace.clone())),
-        crew.inputs.send(Input::Trace(trace.clone())),
-    );
-    crew.trace = trace;
-}
-
 /// Records that the owner received a changed value, `event`, now.
-fn receive(trace: &mut Trace, model: &Model, event: &Event) {
+fn receive(trace: &mut Trace, event: &Event) {
     if let Event::Reading(Reading::Sample {
         session,
-        signal,
+        position,
         value,
         at,
     }) = event
     {
         trace.record(What::Received, |record| Record {
             session: Some(*session),
-            item: model.value_position(*session, signal),
+            item: Some(*position),
             value: Some(value.clone()),
             took: Some(record.at.saturating_duration_since(*at)),
             cause: Some(*at),
@@ -902,11 +893,7 @@ fn interval_line(interval: ReadInterval) -> String {
 
 /// The log line that says what the runtime runs.
 fn loaded_line(plan: &plan::Plan) -> String {
-    let automations: usize = plan
-        .apps
-        .values()
-        .map(|app| app.labels.automations.len())
-        .sum();
+    let automations: usize = plan.apps.values().map(|app| app.runs.rules.len()).sum();
     let names: Vec<&str> = plan
         .apps
         .values()
@@ -928,15 +915,26 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
             note(log, &line);
         }
         match order {
-            Order::Read(job) => {
-                let id = job.session;
-                let name = job.plan.labels.name.clone();
-                crew.tracing.name(id, &job.plan);
-                match Reader::start(Arc::clone(&crew.system), job, crew.events.clone()) {
+            Order::Read {
+                session,
+                plan,
+                watched,
+                interval,
+            } => {
+                let name = plan.labels.name.clone();
+                crew.tracing.name(session, &plan);
+                let job = reader::Job {
+                    session,
+                    plan,
+                    watched,
+                    interval,
+                };
+                let system = Arc::clone(&crew.system);
+                match Reader::start(system, job, crew.trace.clone(), crew.events.clone()) {
                     Ok(reader) => {
-                        crew.readers.insert(id, reader);
+                        crew.readers.insert(session, reader);
                         crew.trace.record(What::Reading, |record| Record {
-                            session: Some(id),
+                            session: Some(session),
                             ..record
                         });
                     },
@@ -952,32 +950,60 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     ..record
                 });
             },
-            Order::Act(job) => {
-                let decided = match &job {
-                    act::Job::Run { owner, cause, .. } => Some((What::Fired, *owner, *cause)),
-                    act::Job::Undo { owner, cause, .. } => Some((What::Released, *owner, *cause)),
-                    act::Job::Trace(_) => None,
+            Order::Run {
+                owner,
+                automation,
+                watched,
+                actions,
+                clicks,
+                restore,
+                cause,
+            } => {
+                let job = act::Job::Run {
+                    owner,
+                    automation,
+                    watched,
+                    actions,
+                    clicks,
+                    restore,
+                    cause,
                 };
-                if let Some((what, owner, cause)) = decided {
-                    record_rule(&mut crew.trace, what, owner, cause);
-                }
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "the action thread ends only after the owner drops the jobs, so a send cannot fail while it runs"
-                )]
-                let _ = crew.jobs.send(job);
-                if let Some((_, owner, cause)) = decided {
-                    record_rule(&mut crew.trace, What::Queued, owner, cause);
-                }
+                queue(crew, What::Fired, job);
+            },
+            Order::Undo {
+                owner,
+                automation,
+                cause,
+            } => {
+                let job = act::Job::Undo {
+                    owner,
+                    automation,
+                    cause,
+                };
+                queue(crew, What::Released, job);
             },
             Order::Held(owner, cause) => record_rule(&mut crew.trace, What::Held, owner, cause),
         }
     }
 }
 
+/// Hands `job` to the action thread, and records that its rule `decided`,
+/// fired or released, and that the job was queued.
+#[mutants::skip] // Sends to the action thread; record_rule is tested.
+fn queue(crew: &mut Crew, decided: What, job: act::Job) {
+    let (owner, cause) = job.traced();
+    record_rule(&mut crew.trace, decided, owner, cause);
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the action thread ends only after the owner drops the jobs, so a send cannot fail while it runs"
+    )]
+    let _ = crew.jobs.send(act::Control::Job(job));
+    record_rule(&mut crew.trace, What::Queued, owner, cause);
+}
+
 /// Records `what` happened to the automation `owner` names, for the
 /// reading of the frame that arrived at `cause`.
-fn record_rule(trace: &mut Trace, what: What, (session, rule): act::Owner, cause: Option<Instant>) {
+fn record_rule(trace: &mut Trace, what: What, (session, rule): Owner, cause: Option<Instant>) {
     trace.record(what, |record| Record {
         session: Some(session),
         item: Some(rule.0),
@@ -989,10 +1015,10 @@ fn record_rule(trace: &mut Trace, what: What, (session, rule): act::Owner, cause
 /// The log line for an order, if it gets one.
 fn order_line(order: &Order) -> Option<String> {
     match order {
-        Order::Read(job) => Some(format!("{}: reading its values", job.plan.labels.name)),
-        Order::StopReading(..) | Order::Held(..) | Order::Act(act::Job::Trace(_)) => None,
-        Order::Act(act::Job::Run { automation, .. }) => Some(format!("{automation}: runs")),
-        Order::Act(act::Job::Undo { automation, .. }) => Some(format!("{automation}: undone")),
+        Order::Read { plan, .. } => Some(format!("{}: reading its values", plan.labels.name)),
+        Order::StopReading(..) | Order::Held(..) => None,
+        Order::Run { automation, .. } => Some(format!("{automation}: runs")),
+        Order::Undo { automation, .. } => Some(format!("{automation}: undone")),
     }
 }
 
@@ -1057,10 +1083,10 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
         },
         Event::Reading(Reading::Sample {
             session,
-            signal,
+            position,
             value,
             at,
-        }) => Step::Carry(model.sample(session, signal, value, at)),
+        }) => Step::Carry(model.sample(session, position, value, at)),
         Event::Reading(Reading::Problem { session, problem }) => {
             if let Some(name) = model.app_name(session) {
                 note(log, &format!("{name}: {problem}"));
@@ -1174,7 +1200,6 @@ mod tests {
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
 
     use super::*;
-    use crate::workers::reader;
     use crate::{log, model};
 
     #[cfg(not(windows))]
@@ -1468,12 +1493,12 @@ mod tests {
         );
     }
 
-    /// An app plan named `name` whose automations are only names.
+    /// An app plan named `name` that reads no value, with an automation of
+    /// each name in `automations`.
     fn app_plan(name: &str, automations: &[&str]) -> Arc<plan::AppPlan> {
         Arc::new(plan::AppPlan {
             labels: plan::Labels {
                 name: name.to_owned(),
-                automations: automations.iter().map(|&name| name.to_owned()).collect(),
                 values: Vec::new(),
                 checked: None,
             },
@@ -1489,7 +1514,10 @@ mod tests {
                     fallback: false,
                 },
                 values: Vec::new(),
-                rules: Arc::<[appytappy_config::rule::Rule]>::from(Vec::new()),
+                rules: automations
+                    .iter()
+                    .map(|&name| plan::examples::pause_at(name, 90.0, Duration::ZERO))
+                    .collect(),
                 clicks: Arc::default(),
             },
         })
@@ -1670,7 +1698,7 @@ mod tests {
             process: ProcessId::new(7),
             executable: "Example.exe".to_owned(),
         });
-        assert!(matches!(orders.first(), Some(Order::Read(_))));
+        assert!(matches!(orders.first(), Some(Order::Read { .. })));
         let mut reloads = Reloads::default();
         assert_eq!(
             scratch.reload(&mut model, &mut reloads, Stale::BOTH),
@@ -1740,7 +1768,7 @@ mod tests {
             process: ProcessId::new(7),
             executable: "Example.exe".to_owned(),
         });
-        assert!(matches!(orders.first(), Some(Order::Read(_))));
+        assert!(matches!(orders.first(), Some(Order::Read { .. })));
         (scratch, model)
     }
 
@@ -1826,91 +1854,109 @@ mod tests {
     }
 
     #[test]
-    fn settings_turn_the_trace_on_and_off_and_readers_start_over_with_it() {
+    fn settings_turn_the_trace_on_and_off_while_readers_keep_their_values() {
         let mut scratch = Scratch::new("trace");
         scratch.write("settings.json", r#"{"format":1,"trace":{"on":true}}"#);
         let mut model = Model::default();
         model.replan(BTreeMap::from([(
             "a".to_owned(),
-            app_plan("Example App", &["Mute"]),
+            plan::examples::plan_with_cooldown("Example App", Duration::from_secs(60)),
         )]));
         model.apply(Change::Started {
             app: "a".to_owned(),
             process: ProcessId::new(7),
             executable: "Example.exe".to_owned(),
         });
+        let at = Instant::now();
+        for progress in [95.0, 10.0, 95.0] {
+            model.sample(SessionId(0), 0, plan::examples::number(progress), at);
+        }
+        let held = model.next_due();
+        assert!(held.is_some(), "held back by its cooldown");
         let mut reloads = Reloads::default();
         let on = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
-        let trace = on.trace.expect("the trace starts");
+        let mut trace = on.trace.expect("the trace starts");
         assert_ne!(trace, Trace::OFF);
-        assert_eq!(*model.trace(), trace, "new readers start with it");
-        let restarted: Vec<_> = on
-            .orders
-            .iter()
-            .map(|order| match order {
-                Order::StopReading(id, _) => format!("stop {}", id.0),
-                Order::Read(job) => format!("read {} {}", job.session.0, job.trace == trace),
-                other => format!("{other:?}"),
-            })
-            .collect();
-        assert_eq!(restarted, ["stop 0", "read 0 true"]);
+        assert_eq!(on.orders, [], "no reader starts over");
+        // The session ran before the trace started, and its rows are named.
+        trace.record(What::Reading, |record| Record {
+            session: Some(SessionId(0)),
+            ..record
+        });
         let same = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
         assert!(same.trace.is_none(), "the same settings keep the trace");
-        assert_eq!(same.orders, [], "and restart no reader");
+        assert_eq!(same.orders, []);
         scratch.write("settings.json", r#"{"format":1}"#);
         let off = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
         assert_eq!(off.trace, Some(Trace::OFF));
-        assert_eq!(*model.trace(), Trace::OFF);
-        assert_eq!(off.orders.len(), 2, "the reader starts over without it");
+        assert_eq!(off.orders, [], "the reader keeps reading without it");
+        assert_eq!(model.next_due(), held, "the values read before are kept");
         let written = scratch.log();
         assert!(written.contains("the trace records to "), "{written:?}");
         assert!(written.contains("the trace stopped\n"), "{written:?}");
+        let folder = scratch.folder.join("traces");
+        std::mem::replace(&mut scratch.tracing, Switch::new(folder.clone()))
+            .finish()
+            .expect("the writer stops");
+        let rows: Vec<String> = fs::read_dir(&folder)
+            .expect("the trace's folder")
+            .map(|file| fs::read_to_string(file.expect("a file").path()).expect("read"))
+            .collect();
+        assert!(
+            rows.iter()
+                .any(|rows| rows.contains(",owner,reading,Example App,")),
+            "{rows:?}"
+        );
     }
 
     #[test]
-    fn a_trace_that_ends_on_its_own_starts_the_readers_over_without_it() {
+    fn a_trace_that_ends_on_its_own_stops_and_a_late_failure_changes_nothing() {
         let mut scratch = Scratch::new("trace-ends");
         scratch.write(
             "settings.json",
             r#"{"format":1,"trace":{"on":true,"until":9999999999999}}"#,
         );
         let mut model = Model::default();
-        model.replan(BTreeMap::from([(
-            "a".to_owned(),
-            app_plan("Example App", &["Mute"]),
-        )]));
-        model.apply(Change::Started {
-            app: "a".to_owned(),
-            process: ProcessId::new(7),
-            executable: "Example.exe".to_owned(),
-        });
         let mut reloads = Reloads::default();
         let on = scratch.read(&mut model, &mut reloads, SETTINGS_ONLY);
         assert!(on.trace.is_some_and(|trace| trace != Trace::OFF));
         let until = scratch.tracing.until().expect("an end time");
-        let ended = scratch
-            .tracing
-            .expire(until, &mut scratch.log)
-            .expect("the trace's time is up");
-        assert_eq!(ended, Trace::OFF);
-        let restarted: Vec<_> = reread(ended, &mut model)
-            .iter()
-            .map(|order| match order {
-                Order::StopReading(id, _) => format!("stop {}", id.0),
-                Order::Read(job) => format!("read {} {}", job.session.0, job.trace == Trace::OFF),
-                other => format!("{other:?}"),
-            })
-            .collect();
-        assert_eq!(restarted, ["stop 0", "read 0 true"]);
         assert_eq!(
-            *model.trace(),
-            Trace::OFF,
-            "readers that start later get none"
+            scratch.tracing.expire(until, &mut scratch.log),
+            Some(Trace::OFF),
+            "the trace's time is up"
         );
         assert_eq!(
             scratch.tracing.failed(1, &mut scratch.log),
             None,
             "a late failure report from the trace that ended changes nothing"
+        );
+    }
+
+    #[test]
+    fn a_new_trace_reaches_every_thread_that_records() {
+        let (events, _events) = mpsc::channel();
+        let (jobs, controls) = mpsc::channel();
+        let (inputs, received) = mpsc::channel();
+        let mut crew = Crew {
+            system: Arc::new(HostSystem::default()),
+            events,
+            jobs,
+            inputs,
+            readers: BTreeMap::new(),
+            tracing: Switch::new(env::temp_dir().join("appytappy-unused-traces")),
+            trace: Trace::OFF,
+        };
+        let (trace, _entries) = Trace::for_test(1, &[TraceCategory::Rules]);
+        crew.set_trace(trace.clone());
+        assert_eq!(crew.trace, trace, "the owner's own");
+        assert!(
+            matches!(controls.try_recv(), Ok(act::Control::Trace(sent)) if sent == trace),
+            "the action thread's"
+        );
+        assert!(
+            matches!(received.try_recv(), Ok(Input::Trace(sent)) if sent == trace),
+            "detection's"
         );
     }
 
@@ -1949,7 +1995,7 @@ mod tests {
         let at = Instant::now();
         let sample = Event::from(Reading::Sample {
             session: SessionId(0),
-            signal: plan::examples::signal(),
+            position: 0,
             value: plan::examples::number(95.0),
             at,
         });
@@ -1964,30 +2010,19 @@ mod tests {
 
     #[test]
     fn a_received_value_is_traced_with_its_place_and_its_frame() {
-        let mut model = Model::default();
-        model.replan(BTreeMap::from([(
-            "a".to_owned(),
-            plan::examples::plan("Example App", 90.0),
-        )]));
-        model.apply(Change::Started {
-            app: "a".to_owned(),
-            process: ProcessId::new(7),
-            executable: "Example.exe".to_owned(),
-        });
         let (mut trace, entries) = Trace::for_test(1, &[TraceCategory::Changes]);
         let at = Instant::now();
         let value = plan::examples::number(95.0);
         receive(
             &mut trace,
-            &model,
             &Event::from(Reading::Sample {
                 session: SessionId(0),
-                signal: plan::examples::signal(),
+                position: 2,
                 value: value.clone(),
                 at,
             }),
         );
-        receive(&mut trace, &model, &Event::Due);
+        receive(&mut trace, &Event::Due);
         let sent = crate::trace::sent(&entries);
         let [received] = sent.as_slice() else {
             panic!("one record for the sample: {sent:?}");
@@ -1997,7 +2032,7 @@ mod tests {
             Record {
                 at: received.at,
                 session: Some(SessionId(0)),
-                item: Some(0),
+                item: Some(2),
                 value: Some(value),
                 took: Some(received.at.saturating_duration_since(at)),
                 cause: Some(at),
@@ -2171,35 +2206,33 @@ mod tests {
     fn orders_that_change_something_get_a_log_line() {
         let plan = app_plan("Example App", &[]);
         let owner = (SessionId(1), appytappy_engine::RuleIndex(0));
+        let watched = appytappy_actions::Watched {
+            process: ProcessId::new(1),
+            executable: "Example.exe".to_owned(),
+        };
         let orders = [
-            Order::Read(reader::Job {
+            Order::Read {
                 session: SessionId(1),
                 plan,
-                process: appytappy_config::anti_cheat::ProcessId::new(1),
-                executable: "Example.exe".to_owned(),
+                watched: watched.clone(),
                 interval: ReadInterval::DEFAULT,
-                trace: Trace::OFF,
-            }),
+            },
             Order::StopReading(SessionId(1), "Example App".to_owned()),
-            Order::Act(act::Job::Run {
+            Order::Run {
                 owner,
                 automation: "Mute".to_owned(),
-                watched: appytappy_actions::Watched {
-                    process: appytappy_config::anti_cheat::ProcessId::new(1),
-                    executable: "Example.exe".to_owned(),
-                },
+                watched,
                 actions: Box::new([]),
                 clicks: Arc::default(),
                 restore: appytappy_config::rule::Restore::OnRelease,
                 cause: None,
-            }),
-            Order::Act(act::Job::Undo {
+            },
+            Order::Undo {
                 owner,
                 automation: "Mute".to_owned(),
                 cause: None,
-            }),
+            },
             Order::Held(owner, None),
-            Order::Act(act::Job::Trace(Trace::OFF)),
         ];
         assert_eq!(
             orders.each_ref().map(order_line),
@@ -2208,7 +2241,6 @@ mod tests {
                 None,
                 Some("Mute: runs".to_owned()),
                 Some("Mute: undone".to_owned()),
-                None,
                 None,
             ]
         );
