@@ -69,7 +69,7 @@ apps/
 crates/
   config/        appytappy-config: formats, validation, saved files, paths
   engine/        appytappy-engine: the rule evaluator
-  sources/       appytappy-sources: Windows source primitives
+  sources/       appytappy-sources: Windows source primitives, and whether an automation can run
   actions/       appytappy-actions: Windows actions
   platform/      appytappy-platform: the runtime's Windows host services
 ```
@@ -89,8 +89,11 @@ The table leaves out dev-dependencies, such as `sources` for the actions
 crate's manual media player test. Each crate's owning issue adds its code and
 its dependencies. Where issues #6 and #11 say "the core crate", they mean
 `appytappy-config` for formats, validation, and policy, and `appytappy-engine`
-for rule evaluation. `config` owns what a condition means, so the setup app and the runtime agree on it; `engine` owns
-the state of each game session. `apps/setup/src-tauri`
+for rule evaluation. `config` owns what a condition means, so the setup app and
+the runtime agree on it, and `appytappy_sources::automation` owns the one
+answer to whether an automation can run, `Runnable::new`, which adds the value
+check and the click pictures to the file's rules; `engine` owns the state of
+each game session. `apps/setup/src-tauri`
 is a workspace member like the other programs; the setup app takes `engine`
 once it previews automations.
 

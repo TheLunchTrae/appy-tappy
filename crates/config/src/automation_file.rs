@@ -506,7 +506,10 @@ impl AutomationDef {
         let rule = self.to_rule(signal.clone())?;
         let find = |id: &str| apps.iter().find(|(app, _)| *app == id).copied();
         let Some((app_id, app)) = find(&self.when.app) else {
-            return Err("its application is no longer saved or cannot be read".to_owned());
+            return Err(format!(
+                "its application {} is no longer saved or cannot be read",
+                self.when.app
+            ));
         };
         let Some(value) = app.values.iter().find(|value| value.id == self.when.value) else {
             return Err(format!("{} no longer has the value it watches", app.name));
@@ -530,9 +533,10 @@ impl AutomationDef {
                 continue;
             };
             let Some((target_id, target)) = find(&click.app) else {
-                return Err(
-                    "the application it clicks in is no longer saved or cannot be read".to_owned(),
-                );
+                return Err(format!(
+                    "the application {} it clicks in is no longer saved or cannot be read",
+                    click.app
+                ));
             };
             if !allows_input(AntiCheatClass::from(target.anti_cheat)) {
                 return Err(format!(
@@ -1367,7 +1371,10 @@ mod tests {
         }
         assert_eq!(
             check(&click, AntiCheatDef::None, None),
-            Err("the application it clicks in is no longer saved or cannot be read".to_owned())
+            Err(
+                "the application streaming_app it clicks in is no longer saved or cannot be read"
+                    .to_owned()
+            )
         );
         let mut target = app();
         target.anti_cheat = AntiCheatDef::None;
@@ -1544,7 +1551,7 @@ mod tests {
         elsewhere.when.app = "other".to_owned();
         assert_eq!(
             check(&elsewhere),
-            Err("its application is no longer saved or cannot be read".to_owned())
+            Err("its application other is no longer saved or cannot be read".to_owned())
         );
     }
 

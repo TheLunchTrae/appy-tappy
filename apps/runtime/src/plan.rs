@@ -210,7 +210,6 @@ pub(crate) fn compile(
     }
     let apps = drafts
         .into_iter()
-        .filter(|(_, draft)| !draft.rules.is_empty())
         .map(|(id, draft)| {
             let file = draft.file;
             let plan = AppPlan {
@@ -558,8 +557,10 @@ mod tests {
             plan.problems,
             [
                 "the app.json in the broken folder cannot be read: not JSON",
-                "Automation gone cannot run: its application is no longer saved or cannot be read",
-                "Automation broken cannot run: its application is no longer saved or cannot be read",
+                "Automation gone cannot run: its application removed is no longer saved or cannot \
+                 be read",
+                "Automation broken cannot run: its application broken is no longer saved or \
+                 cannot be read",
                 "Automation missing cannot run: Example App no longer has the value it watches",
                 "Automation kind cannot run: The progress reads a number, so compare it with a number",
                 "Automation picture cannot run: The icon of Example App: its picture icon.png cannot be read",
