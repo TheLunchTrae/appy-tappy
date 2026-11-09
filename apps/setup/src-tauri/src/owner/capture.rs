@@ -217,8 +217,8 @@ impl<H: Host> Owner<H> {
         Ok(())
     }
 
-    /// The running windows that `window` matches, the one the runtime reads
-    /// first.
+    /// The running windows that `window` matches, the one a new session
+    /// would read first.
     pub(crate) fn match_windows(&self, window: &WindowDef) -> Result<Vec<WindowFit>, String> {
         let (processes, windows) = self.desktop()?;
         let read = self
@@ -229,8 +229,8 @@ impl<H: Host> Owner<H> {
         Ok(window_list::matching(&list.windows, window, read))
     }
 
-    /// The window the runtime reads for `window`, or `None` while none
-    /// fits.
+    /// The window a new session would read for `window`, or `None` while
+    /// none fits.
     pub(crate) fn read_window(&self, window: &WindowDef) -> Result<Option<u64>, String> {
         let (processes, windows) = self.desktop()?;
         Ok(self

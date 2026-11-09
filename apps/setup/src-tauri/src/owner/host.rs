@@ -41,8 +41,8 @@ pub(crate) trait Host: 'static {
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
-    /// The window among `processes` and `windows` that the runtime reads for
-    /// `window` when its session starts, the one [`session_window`] picks.
+    /// The window among `processes` and `windows` that a new session would
+    /// read for `window`, the one [`session_window`] picks.
     fn read_window(
         &self,
         window: &WindowMatch,

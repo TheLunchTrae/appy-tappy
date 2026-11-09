@@ -138,7 +138,7 @@ export function sentence(text: string): string {
 }
 
 /**
- * Whether the application `name` reads the picked window `handle`, as the value picker says it. The runtime reads
+ * Whether the application `name` reads the picked window `handle`, as the value picker says it. A new session reads
  * only the window marked best, so a value drawn on any other window would never be read. `titleOf` names an open
  * window.
  */
@@ -171,7 +171,7 @@ export function pickedStatus(
   }
   const other = read === undefined ? null : titleOf(read.handle);
   return {
-    text: `${name} reads ${other === null ? 'another window' : `“${other}”`} instead, the one that matches it best, so the value would never be read here. Pick that window, or ${change}.`,
+    text: `${name} reads ${other === null ? 'another window' : `“${other}”`} instead, the one it would read, so the value would never be read here. Pick that window, or ${change}.`,
     ok: false,
   };
 }

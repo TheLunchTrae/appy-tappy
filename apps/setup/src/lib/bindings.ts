@@ -1225,8 +1225,8 @@ handle: number,
  */
 fallback: boolean,
 /**
- * Whether it is the window the runtime reads, so a value has to be
- * drawn on it.
+ * Whether it is the window a new session would read, so a value has
+ * to be drawn on it.
  */
 best: boolean, }>;
 

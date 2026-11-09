@@ -39,10 +39,8 @@ impl<H: Host> Owner<H> {
         // failed window listing only leaves each one's windows empty.
         let (processes, all) = self.desktop().unwrap_or_default();
         let windows = window_list::list(all.clone(), &processes, self.own_process).windows;
-        // A process that has gone may give its ID to another build.
-        self.builds
-            .retain(|process, _| windows.iter().any(|window| window.process == *process));
-        Ok(stored
+        // Each application with the window a new session would read for it.
+        let apps: Vec<_> = stored
             .into_iter()
             .map(|app| {
                 let (file, error) = match app.file {
@@ -53,6 +51,19 @@ impl<H: Host> Owner<H> {
                     self.host
                         .read_window(&file.window.to_match(), processes.clone(), all.clone())
                 });
+                (app.id, file, error, read)
+            })
+            .collect();
+        // A process that has gone may give its ID to another build.
+        self.builds.retain(|process, _| {
+            apps.iter().any(|(_, _, _, read)| {
+                read.as_ref()
+                    .is_some_and(|read| read.entry.process == *process)
+            })
+        });
+        Ok(apps
+            .into_iter()
+            .map(|(id, file, error, read)| {
                 let matched: Vec<u64> = file
                     .as_ref()
                     .map(|file| {
@@ -74,7 +85,7 @@ impl<H: Host> Owner<H> {
                             .flatten()
                     });
                 AppSummary {
-                    id: app.id,
+                    id,
                     file,
                     error,
                     windows: matched,
@@ -153,8 +164,8 @@ impl<H: Host> Owner<H> {
         Ok(SavedValue { app, value: id })
     }
 
-    /// The build that the window the runtime reads for `file` runs, or
-    /// `None` while no window fits.
+    /// The build that the window a new session would read for `file` runs,
+    /// or `None` while no window fits.
     fn running_build(&mut self, file: &AppFile) -> Result<Option<BuildDef>, String> {
         let (processes, windows) = self.desktop()?;
         let read = self

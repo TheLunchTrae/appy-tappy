@@ -293,10 +293,9 @@ session's own process while it owns one, the window the reader reads while
 it shows, then the first that is not minimized, then the first. The reader
 takes only its session's process's windows. So the values, the session, and
 the check that a key press goes to the application in front all agree on one
-process. When
-the session's process owns no such window and another does, such as the
-application opening its window after a helper started first, the session
-ends and starts again on that process. A process that owned such a window
+process. When the session's process owns no such window and another does,
+such as the application opening its window after a helper started first, the
+session ends and starts again on that process. A process that owned such a window
 keeps the session for `OWNER_GRACE` (`apps/runtime/src/lifecycle.rs`) after
 it owns none, because an application that switches to full screen replaces
 its window, and the snapshot after the old one closed may not list the new

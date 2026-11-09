@@ -152,11 +152,12 @@ in that application's window it lands:
 
 The runtime places a click just before it runs, on the action thread, because
 where it lands depends on where the window is now. It takes the target's
-window that a new session would read, as [Lifecycle](Architecture.md#lifecycle)
-describes, with the application's window match, but never a window taken
-only as the fallback: that may be another of the
-application's windows, where the spot or the picture means something else. A
-window that is not open, is minimized, or is hidden is not clicked. The
+window that a new session would read, as
+[Lifecycle](Architecture.md#lifecycle) describes, with the application's
+window match, but never a window taken only as the fallback: that may be
+another of the application's windows, where the spot or the picture means
+something else. A window that is not open, is minimized, or is hidden is not
+clicked. The
 place is measured in the window's frame as the screen shows it, which the
 desktop window manager reports without the invisible borders that the
 window's own bounds take in, so it matches what a capture of the window

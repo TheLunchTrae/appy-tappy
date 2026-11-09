@@ -112,13 +112,13 @@ pub(crate) struct WindowFit {
     pub(crate) handle: u64,
     /// Whether it is taken only because no window qualifies.
     pub(crate) fallback: bool,
-    /// Whether it is the window the runtime reads, so a value has to be
-    /// drawn on it.
+    /// Whether it is the window a new session would read, so a value has
+    /// to be drawn on it.
     pub(crate) best: bool,
 }
 
-/// The `windows` that `window` takes: `read`, the window the runtime reads,
-/// first, then the rest by fit.
+/// The `windows` that `window` takes: `read`, the window a new session
+/// would read, first, then the rest by fit.
 #[must_use]
 pub(crate) fn matching(
     windows: &[WindowChoice],

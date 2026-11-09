@@ -156,7 +156,8 @@ pub(crate) async fn stop_watching(app: AppHandle, watch: u64) -> Result<(), Stri
     ask(&app, move |owner| owner.stop_watching(watch)).await
 }
 
-/// The running windows `window` takes, the one the runtime reads first.
+/// The running windows `window` takes, the one a new session would read
+/// first.
 #[tauri::command]
 pub(crate) async fn match_windows(
     app: AppHandle,
@@ -165,7 +166,8 @@ pub(crate) async fn match_windows(
     ask(&app, move |owner| owner.match_windows(&window)).await?
 }
 
-/// The window the runtime reads for `window`, or `None` while none fits.
+/// The window a new session would read for `window`, or `None` while none
+/// fits.
 #[tauri::command]
 pub(crate) async fn read_window(app: AppHandle, window: WindowDef) -> Result<Option<u64>, String> {
     ask(&app, move |owner| owner.read_window(&window)).await?

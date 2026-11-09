@@ -404,6 +404,19 @@ mod tests {
     }
 
     #[test]
+    fn an_overlay_reads_the_window_the_runtime_reads() {
+        let (mut harness, root) = with_saved_bar("overlay-twin");
+        // Another copy's window fits as well and is listed first, but it is
+        // minimized, so the runtime reads window 7.
+        harness.owner.host.twin = Some(40);
+        harness
+            .ask(set_overlay(true, OverlayModeDef::Overlay))
+            .expect("saves");
+        let _handler = overlay_capture(&mut harness);
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn removing_an_application_stops_its_overlay_and_leaves_no_window_wanted() {
         let (mut harness, root) = with_saved_bar("overlay-removed");
         harness
