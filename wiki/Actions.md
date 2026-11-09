@@ -164,7 +164,12 @@ at; the runtime then grabs one frame of the area, waits up to a second for
 it, and looks for the picture there (see
 [Screen regions](Screen-regions.md)). It reads the window's frame again after
 the search, and a window that moved since the grab is not clicked. Nothing is
-clicked when the picture is not found, and the log says why.
+clicked when the picture is not found, and the log says why. `ClickSearch` in
+`appytappy-sources` owns reading a click's picture, checking it against the
+click, and turning where it is found into where the click lands. The runtime
+places clicks with it, and the setup app's **Find it now** and its check
+before saving an automation use it too, so the preview lands where the
+runtime clicks.
 
 The search compares the picture's kept pixels with each place it fits in the
 area and takes the closest place within its tolerance: the average distance

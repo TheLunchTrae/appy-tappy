@@ -165,7 +165,11 @@ gives the patterns, the must-match fields, and the fallback. The file stores
 them as `mustMatch`, with a flag for the title and the class, and `fallback`:
 `none` or `executable`. The executable always has to match, because the
 runtime attaches to an application by its process's executable. A window
-qualifies when its executable and every required field match. Fallback
+qualifies when its executable and every required field match.
+`WindowDef::check` refuses an empty executable pattern, one that matches
+nearly every program, such as `*` or `*exe`, and an empty pattern for a field
+that must match. The setup app saves no such match, and the runtime does not
+load a file that has one. Fallback
 windows count only when no window qualifies. Windows rank by fewer missed
 fields, then by the title matching. On a tie the runtime keeps a window of
 the process its session already follows, and otherwise takes the first that
@@ -342,8 +346,9 @@ application or value. One automation that breaks a rule on its own, such as
 after a hand edit, is kept in the file and listed with its problem, and nothing
 runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask
-`AutomationDef::compile` and build the value it watches with `saved::build`, the
-same checks the runtime makes. An automation's ID is the setup app's own key:
+`Runnable::new` in `appytappy-sources`, which runs `AutomationDef::compile`,
+builds the value it watches with `saved::build`, and fits each click's picture,
+the same check the runtime runs. An automation's ID is the setup app's own key:
 the runtime does not read it, so an ID that a hand edit made invalid, or gave to
 more than one automation, stops nothing. When the setup app reads the file, it
 gives a new ID, made from the name, to each automation whose ID is invalid or

@@ -3,7 +3,7 @@
 use std::error::Error;
 use std::fmt;
 
-use appytappy_config::app_file::MAX_STATES;
+use appytappy_config::app_file::{CheckDefError, MAX_STATES};
 use appytappy_sources::screen::Size;
 use appytappy_sources::screen::digits::LearnError;
 
@@ -35,19 +35,13 @@ pub(crate) enum SpecError {
     NoScreenshot,
     /// The region reaches past the edge of the screenshot.
     Outside,
-    /// The bar's filled and empty colors are the same.
-    SameColors,
+    /// The check's settings break a rule of the application's file.
+    Check(CheckDefError),
     /// The selection of the state with this name leaves no pixel of its
     /// region to compare.
     NothingSelected(String),
-    /// A state check has no state.
-    NoStates,
-    /// A state check has more than [`MAX_STATES`] states.
-    TooManyStates,
     /// A state's name breaks the rules, and how, as a sentence.
     StateName(String),
-    /// Two states have the same name.
-    SameStateName(String),
     /// A reference has no saved sample, labeled screenshot, or kept reading
     /// to learn from.
     NoLabels,
@@ -96,23 +90,25 @@ impl fmt::Display for SpecError {
             Self::Outside => formatter.write_str(
                 "The region reaches past the edge of the window. Draw it inside the window.",
             ),
-            Self::SameColors => {
+            Self::Check(CheckDefError::SameColors) => {
                 formatter.write_str("Pick a filled color and an empty color that differ.")
             },
+            Self::Check(CheckDefError::NoStates) => {
+                formatter.write_str("Add a state from a screenshot.")
+            },
+            Self::Check(CheckDefError::TooManyStates) => write!(
+                formatter,
+                "A value can tell apart at most {MAX_STATES} states. Remove one."
+            ),
+            Self::Check(CheckDefError::SameStateName(name)) => write!(
+                formatter,
+                "Two states are named \"{name}\". Give each state its own name."
+            ),
             Self::NothingSelected(name) => write!(
                 formatter,
                 "Nothing in the region is selected for the state {name:?}. Select it again, clear its selection, or stop ignoring the background.",
             ),
-            Self::NoStates => formatter.write_str("Add a state from a screenshot."),
-            Self::TooManyStates => write!(
-                formatter,
-                "A value can tell apart at most {MAX_STATES} states. Remove one."
-            ),
             Self::StateName(problem) => formatter.write_str(problem),
-            Self::SameStateName(name) => write!(
-                formatter,
-                "Two states are named \"{name}\". Give each state its own name."
-            ),
             Self::NoLabels => formatter.write_str(
                 "Type what the region shows on at least one screenshot, or keep a recorded reading.",
             ),

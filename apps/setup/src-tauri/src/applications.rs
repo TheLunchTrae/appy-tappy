@@ -5,9 +5,10 @@
 //! removed. A new application starts with no
 //! values; the Values page adds them to an application saved here.
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, FORMAT, SizeChangesDef, WindowDef};
+use appytappy_config::app_file::{
+    AntiCheatDef, AppFile, FORMAT, SizeChangesDef, WindowDef, WindowDefError,
+};
 use appytappy_config::store::new_app_id;
-use appytappy_config::window_match::Pattern;
 use serde::Deserialize;
 
 use crate::automations;
@@ -39,37 +40,18 @@ pub(crate) fn apply(
     if name.is_empty() {
         return Err("Name the application first.".to_owned());
     }
-    let window = &spec.window;
-    if window.executable.trim().is_empty() {
-        return Err("Fill in the executable.".to_owned());
-    }
-    // A pattern with less than two characters of its own beside any `.exe`,
-    // such as `*` or `*.*`, or one that takes two unrelated programs, such as
-    // `*exe`, matches nearly every program, so the application would always
-    // look running.
-    let executable = window.executable.trim().to_ascii_lowercase();
-    let named = executable
-        .strip_suffix(".exe")
-        .unwrap_or(&executable)
-        .chars()
-        .filter(|each| !matches!(each, '*' | '?' | '.'))
-        .count();
-    let pattern = Pattern::new(&executable);
-    if named < 2 || (pattern.matches("a.exe") && pattern.matches("zq.exe")) {
-        return Err(
-            "Name more of the executable, such as Example.exe. This pattern would take nearly \
-             every program."
-                .to_owned(),
-        );
-    }
-    for (required, pattern, field) in [
-        (window.must_match.title, &window.title, "window title"),
-        (window.must_match.class, &window.class, "window class"),
-    ] {
-        if required && pattern.trim().is_empty() {
-            return Err(format!("Fill in the {field}, or untick its Must match."));
+    spec.window.check().map_err(|error| {
+        match error {
+            WindowDefError::NoExecutable => "Fill in the executable.",
+            WindowDefError::BroadExecutable => {
+                "Name more of the executable, such as Example.exe. This pattern would take \
+                 nearly every program."
+            },
+            WindowDefError::NoTitle => "Fill in the window title, or untick its Must match.",
+            WindowDefError::NoClass => "Fill in the window class, or untick its Must match.",
         }
-    }
+        .to_owned()
+    })?;
     let loaded = stores.apps.load().map_err(|error| error.to_string())?;
     if let Some(other) = loaded.iter().find(|app| {
         Some(app.id.as_str()) != existing
@@ -217,30 +199,25 @@ mod tests {
             save(&stores, None, spec("Other", " ")),
             Err("Fill in the executable.".to_owned())
         );
-        for every in [
-            "*", " *.EXE ", "?*", ".exe", "*.*", "*.e*", "*e", "*exe", "*ex*", "*e*e",
-        ] {
-            assert_eq!(
-                save(&stores, None, spec("Other", every)),
-                Err(
-                    "Name more of the executable, such as Example.exe. This pattern would take \
-                     nearly every program."
-                        .to_owned()
-                ),
-                "{every}"
-            );
-        }
-        // Two characters of its own are enough when the pattern takes only
-        // one of two unrelated programs.
         assert_eq!(
-            save(&stores, None, spec("Short", "zq*")),
-            Ok("zq".to_owned())
+            save(&stores, None, spec("Other", "*.exe")),
+            Err(
+                "Name more of the executable, such as Example.exe. This pattern would take \
+                 nearly every program."
+                    .to_owned()
+            )
         );
         let mut untitled = spec("Other", "Other.exe");
         untitled.window.title = String::new();
         assert_eq!(
             save(&stores, None, untitled.clone()),
             Ok("other".to_owned())
+        );
+        untitled.window.class = String::new();
+        untitled.window.must_match.class = true;
+        assert_eq!(
+            save(&stores, Some("other"), untitled.clone()),
+            Err("Fill in the window class, or untick its Must match.".to_owned())
         );
         untitled.window.must_match.title = true;
         assert_eq!(
