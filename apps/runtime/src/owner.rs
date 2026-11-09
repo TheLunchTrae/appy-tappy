@@ -1891,6 +1891,8 @@ mod tests {
         assert_eq!(off.trace, Some(Trace::OFF));
         assert_eq!(off.orders, [], "the reader keeps reading without it");
         assert_eq!(model.next_due(), held, "the values read before are kept");
+        let sessions: Vec<SessionId> = model.sessions().map(|(id, _)| id).collect();
+        assert_eq!(sessions, [SessionId(0)], "the same session reads on");
         let written = scratch.log();
         assert!(written.contains("the trace records to "), "{written:?}");
         assert!(written.contains("the trace stopped\n"), "{written:?}");

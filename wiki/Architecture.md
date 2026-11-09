@@ -475,9 +475,9 @@ automation on each. It runs the runtime through five phases:
 3. **Active, trace on.** The same load with the
    [runtime trace](Trace.md) recording every category, which costs the most.
    The script saves the settings and sets the reload event, as the setup app
-   does, and turns the trace off again at the end of the phase. This phase has
-   no targets: it reports what recording costs, as
-   [Overhead](Trace.md#overhead) describes.
+   does, and turns the trace off again at the end of the phase, which fails if
+   that starts the reader over. This phase has no targets: it reports what
+   recording costs, as [Overhead](Trace.md#overhead) describes.
 4. **Steady.** The probe starts again and keeps repainting every 16 ms, but
    only a strip below the values, so the window changes while its values hold
    still. The runtime's reads back off to their slowest, and its capture asks
