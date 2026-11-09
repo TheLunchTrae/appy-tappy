@@ -13,6 +13,7 @@
 //! each command calls live in modules below it, and `test_support` holds the
 //! stand-ins the tests share.
 
+mod automations;
 mod capture;
 mod clicks;
 mod fixes;
@@ -66,7 +67,7 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(250);
 pub(crate) struct Owner<H: Host> {
     host: H,
     /// Where the applications', automations' and settings files live, or
-    /// why that is unknown.
+    /// why their folders are unknown.
     stores: Result<Stores, String>,
     /// The setup app's own process, left out of the window list.
     own_process: u32,
@@ -243,15 +244,14 @@ impl<H: Host> Owner<H> {
     }
 
     /// Where the applications', automations' and settings files live, or
-    /// why that is unknown.
+    /// why that is unknown, as the user reads it.
     pub(crate) fn stores(&self) -> Result<&Stores, String> {
-        self.stores.as_ref().map_err(Clone::clone)
+        known(&self.stores)
     }
 
     /// Loads the saved application `app`, lets `change` change its file,
     /// and saves it as [`Owner::write_app`] does. A change that keeps the
-    /// file as it was saves nothing and tells no one, but the pictures the
-    /// file no longer names, which an earlier save left, are still removed.
+    /// file as it was writes nothing and tells no one.
     pub(super) fn update_app<T>(
         &mut self,
         app: &str,
@@ -264,13 +264,10 @@ impl<H: Host> Owner<H> {
                 let windows = self.write_app(app, changed, Write::Save(&saved.file, &pictures))?;
                 Ok(Saved { answer, windows })
             },
-            Edit::Keep(answer) => {
-                self.prune(app, &saved.file)?;
-                Ok(Saved {
-                    answer,
-                    windows: None,
-                })
-            },
+            Edit::Keep(answer) => Ok(Saved {
+                answer,
+                windows: None,
+            }),
         }
     }
 
@@ -283,8 +280,8 @@ impl<H: Host> Owner<H> {
     /// A save that failed changed nothing, so no one is told. A removal that
     /// failed partway may have removed some of the application's files, so
     /// they are read again either way. No one reads a picture the file no
-    /// longer names, so a failure to remove one, which the answer gives,
-    /// changes nothing they read.
+    /// longer names, so a failure to remove one changes nothing they read,
+    /// and the save stands; the application's next save tries again.
     pub(super) fn write_app(
         &mut self,
         app: &str,
@@ -306,7 +303,11 @@ impl<H: Host> Owner<H> {
             .then(|| self.sync_overlay_windows().err())
             .flatten();
         if let Write::Save(file, _) = write {
-            self.prune(app, file)?;
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "no one reads a picture the saved file no longer names, and the next save tries again"
+            )]
+            let _ = self.prune(app, file);
         }
         Ok(windows)
     }
@@ -325,7 +326,7 @@ impl<H: Host> Owner<H> {
 
     /// Removes the pictures of the application `app` that `file` no longer
     /// names.
-    fn prune(&self, app: &str, file: &AppFile) -> Result<(), String> {
+    pub(super) fn prune(&self, app: &str, file: &AppFile) -> Result<(), String> {
         self.stores()?
             .apps
             .prune(app, file)
@@ -363,7 +364,8 @@ impl<H: Host> Owner<H> {
 pub(super) enum Edit<T> {
     /// The file changed: it is saved, with these new pictures.
     Save(T, Pictures),
-    /// The file is as it was, so nothing is saved.
+    /// The file is as it was, so nothing is saved, no one is told and no
+    /// picture is removed.
     Keep(T),
 }
 
@@ -420,6 +422,13 @@ impl Changed {
     const fn windows(self) -> bool {
         matches!(self, Self::Overlay | Self::Applications)
     }
+}
+
+/// `stores`, or why their folders are unknown, as the user reads it.
+fn known(stores: &Result<Stores, String>) -> Result<&Stores, String> {
+    stores
+        .as_ref()
+        .map_err(|reason| format!("AppyTappy cannot find where to keep your values: {reason}."))
 }
 
 /// Runs `owner` until [`Message::Shutdown`] arrives, then stops its capture.
@@ -509,8 +518,7 @@ mod tests {
         // no one.
         assert_eq!(
             harness.ask(|owner| {
-                owner.update_app("example", Changed::Applications, |_owner, found| {
-                    found.file.anti_cheat = AntiCheatDef::None;
+                owner.update_app("example", Changed::Applications, |_owner, _found| {
                     Ok(Edit::Keep(()))
                 })
             }),
@@ -539,6 +547,33 @@ mod tests {
         assert_eq!(harness.reloads(), 0);
         assert!(harness.closed.try_recv().is_err());
         assert!(harness.synced.try_recv().is_err());
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_removal_that_fails_still_tells_who_reads_the_files() {
+        let (mut harness, root) = with_saved_bar("changed-removal");
+        harness
+            .ask(|owner| owner.set_overlay("example", true, OverlayModeDef::Overlay))
+            .expect("saves");
+        harness
+            .ask(|owner| owner.overlay_state("example"))
+            .expect("shows");
+        harness.forget_reloads();
+        harness.synced.try_iter().for_each(drop);
+        // Part of the folder may be gone, so the runtime and the overlays
+        // read again whether or not the removal finished.
+        assert!(
+            harness
+                .ask(|owner| owner.write_app("Not An Id", Changed::Applications, Write::Remove))
+                .is_err()
+        );
+        assert_eq!(harness.reloads(), 1, "the runtime reads again");
+        assert!(harness.closed.try_recv().is_ok(), "the overlay reads again");
+        assert!(
+            harness.synced.try_recv().is_err(),
+            "the windows stay until a removal is done"
+        );
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

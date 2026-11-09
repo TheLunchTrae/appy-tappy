@@ -19,7 +19,7 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 
 use crate::applications::AppSpec;
-use crate::automations::{self, AutomationSummary};
+use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
@@ -326,7 +326,7 @@ pub(crate) async fn set_anti_cheat(
 /// The saved automations, with what stops each one from running.
 #[tauri::command]
 pub(crate) async fn list_automations(app: AppHandle) -> Result<Vec<AutomationSummary>, String> {
-    ask(&app, |owner| owner.stores().and_then(automations::list)).await?
+    ask(&app, |owner| owner.list_automations()).await?
 }
 
 /// Saves `automation` over `existing`, or as a new one; returns its ID.
@@ -337,7 +337,7 @@ pub(crate) async fn save_automation(
     automation: AutomationDef,
 ) -> Result<String, String> {
     ask(&app, move |owner| {
-        owner.update_runtime(|stores| automations::save(stores, existing.as_deref(), automation))
+        owner.save_automation(existing.as_deref(), automation)
     })
     .await?
 }
@@ -350,7 +350,7 @@ pub(crate) async fn set_automation_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     ask(&app, move |owner| {
-        owner.update_runtime(|stores| automations::set_enabled(stores, &id, enabled))
+        owner.set_automation_enabled(&id, enabled)
     })
     .await?
 }
@@ -358,10 +358,7 @@ pub(crate) async fn set_automation_enabled(
 /// Removes an automation.
 #[tauri::command]
 pub(crate) async fn delete_automation(app: AppHandle, id: String) -> Result<(), String> {
-    ask(&app, move |owner| {
-        owner.update_runtime(|stores| automations::delete(stores, &id))
-    })
-    .await?
+    ask(&app, move |owner| owner.delete_automation(&id)).await?
 }
 
 /// Opens a window for each overlay that is on, and closes the rest.

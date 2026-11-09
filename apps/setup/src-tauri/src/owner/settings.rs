@@ -2,6 +2,8 @@
 //! a save worked, whether the runtime starts when the user signs in to
 //! Windows, and the folder its trace files go in.
 
+use std::path::Path;
+
 use appytappy_config::settings_file::SettingsFile;
 
 use crate::settings::{self, SettingsView};
@@ -50,14 +52,24 @@ impl<H: Host> Owner<H> {
 
     /// The folder the runtime writes its trace files to.
     pub(crate) fn trace_folder(&self) -> Result<String, String> {
-        self.stores()
-            .map(|stores| stores.traces.display().to_string())
+        self.traces().map(|traces| traces.display().to_string())
     }
 
     /// Opens the trace folder in File Explorer.
     #[mutants::skip] // Opens a window, checked by hand on Windows.
     pub(crate) fn open_trace_folder(&self) -> Result<(), String> {
-        settings::open_trace_folder(&self.stores()?.traces)
+        settings::open_trace_folder(self.traces()?)
+    }
+
+    /// The folder the runtime writes its trace files to, or why it is
+    /// unknown, as the user reads it.
+    fn traces(&self) -> Result<&Path, String> {
+        self.stores
+            .as_ref()
+            .map(|stores| stores.traces.as_path())
+            .map_err(|reason| {
+                format!("AppyTappy cannot find where the runtime keeps its traces: {reason}.")
+            })
     }
 }
 
@@ -111,8 +123,12 @@ mod tests {
         let mut harness = harness_with(false, Ok(stores));
         assert_eq!(harness.ask(|owner| owner.trace_folder()), Ok(traces));
         assert_eq!(
-            harness_with(false, Err("nowhere".to_owned())).ask(|owner| owner.trace_folder()),
-            Err("nowhere".to_owned())
+            harness_with(false, Err("APPDATA is not set".to_owned()))
+                .ask(|owner| owner.trace_folder()),
+            Err(
+                "AppyTappy cannot find where the runtime keeps its traces: APPDATA is not set."
+                    .to_owned()
+            )
         );
     }
 }
