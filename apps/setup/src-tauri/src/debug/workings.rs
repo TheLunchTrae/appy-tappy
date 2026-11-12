@@ -83,8 +83,11 @@ pub(crate) struct GlyphView {
     pub(crate) character: String,
     /// How many grid cells differ.
     pub(crate) differing: u32,
-    /// The most that may differ for a match.
-    pub(crate) allowed: u32,
+    /// How many grid cells either shape inks.
+    pub(crate) inked: u32,
+    /// Whether the character reads as this glyph: at most a quarter of the
+    /// inked cells differ.
+    pub(crate) matches: bool,
 }
 
 /// A color's red, green, and blue.
@@ -113,6 +116,9 @@ pub(crate) struct StateView {
     pub(crate) channels: u64,
     /// The largest average difference that shows the state.
     pub(crate) tolerance: u8,
+    /// Whether the region is within the tolerance. The read is the closest
+    /// state that is.
+    pub(crate) within: bool,
 }
 
 /// The details of `check` reading `region`, a crop of a frame that arrived
@@ -158,6 +164,7 @@ impl From<Workings> for WorkingsView {
                 states: states
                     .into_iter()
                     .map(|state| StateView {
+                        within: state.within(),
                         name: state.name.as_str().to_owned(),
                         total: state.total,
                         channels: state.channels,
@@ -183,7 +190,8 @@ impl From<GlyphScore> for GlyphView {
         Self {
             character: score.character.to_string(),
             differing: score.differing,
-            allowed: score.allowed,
+            inked: score.inked,
+            matches: score.matches(),
         }
     }
 }

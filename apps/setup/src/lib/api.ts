@@ -22,6 +22,7 @@ import type {
   OverlayModeDef,
   OverlayView,
   Reading,
+  ReadingDetails,
   RecordingView,
   ReferenceSaveSpec,
   RegionSpec,
@@ -87,6 +88,11 @@ export async function readValue(): Promise<Reading | null> {
   return invoke<Reading | null>('read_value');
 }
 
+/** How the check reads the newest frame, for the debug details, or null without a check or a frame. */
+export async function explainReading(): Promise<ReadingDetails | null> {
+  return invoke<ReadingDetails | null>('explain_reading');
+}
+
 /**
  * Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
  * recording, which needs the same region, ink and window size; otherwise starts a new one.
@@ -137,6 +143,14 @@ export async function watchValue(application: string, value: string): Promise<nu
  */
 export async function watchedReading(watch: number, when: WhenDef | null): Promise<Live> {
   return invoke<Live>('watched_reading', { watch, when });
+}
+
+/**
+ * How the watch's value reads now, for the debug details, or null while it does not read. Fails once the
+ * watch was stopped or replaced.
+ */
+export async function explainWatched(watch: number): Promise<ReadingDetails | null> {
+  return invoke<ReadingDetails | null>('explain_watched', { watch });
 }
 
 /** Stops the watch, unless another capture replaced it already. */

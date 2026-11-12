@@ -52,6 +52,15 @@ pub struct StateScore {
     pub tolerance: u8,
 }
 
+impl StateScore {
+    /// Whether the region is within the state's tolerance, as a read
+    /// judges it. A read takes the closest state that is.
+    #[must_use]
+    pub const fn within(&self) -> bool {
+        self.total <= self.channels.saturating_mul(self.tolerance as u64)
+    }
+}
+
 impl Check {
     /// How this check reads `image`: the scores behind [`Check::read`].
     ///
@@ -265,6 +274,15 @@ mod tests {
             ]))
         );
         assert_eq!(check.read(&image), Ok(Value::State(StateName::none())));
+        let Ok(Workings::State(scores)) = check.explain(&draw(&["##"])) else {
+            panic!("state scores");
+        };
+        assert_eq!(
+            scores.iter().map(StateScore::within).collect::<Vec<_>>(),
+            [true, false],
+            "within as the read judges it"
+        );
+        assert_eq!(check.read(&draw(&["##"])), Ok(Value::State(StateName::new("On").expect("a name"))));
         assert!(
             check.explain(&draw(&["###"])).is_err(),
             "another size cannot be compared"

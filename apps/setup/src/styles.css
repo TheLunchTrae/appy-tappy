@@ -2104,3 +2104,78 @@ select {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Debug details under a live reading. */
+.reading-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.debug-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-line strong {
+  color: var(--text);
+}
+
+.glyph-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.glyph-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--glyph);
+  font-variant-numeric: tabular-nums;
+}
+
+.glyph-char {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.glyph-close {
+  color: var(--holds);
+}
+
+.glyph-score.off .glyph-close {
+  color: var(--warn);
+}
+
+.color-scores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.state-scores tr.read td {
+  color: var(--holds);
+}

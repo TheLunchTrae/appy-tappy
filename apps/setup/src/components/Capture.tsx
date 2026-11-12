@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { PinDef, ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
-import { errorText, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
+import { errorText, explainReading, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type Built,
@@ -24,6 +24,7 @@ import {
 import { readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
+import { ReadingDetailsBox } from './ReadingDetails.tsx';
 import { Question, useQuestion } from './Question.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
@@ -880,6 +881,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               )}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
+              <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               <p className="note">
@@ -971,6 +973,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             }
           />
           <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
+          <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
           <div className="actions">

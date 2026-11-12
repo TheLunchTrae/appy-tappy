@@ -238,6 +238,19 @@ pictures: boolean,
 trace: string | null, }>;
 
 /**
+ * A character's closest glyph and the closest of another character.
+ */
+export type CharacterView = DeepReadonly<{
+/**
+ * The closest glyph, if the reference has any.
+ */
+best: GlyphView | null,
+/**
+ * The closest glyph of another character, if the reference has one.
+ */
+runnerUp: GlyphView | null, }>;
+
+/**
  * How a value is read from its region.
  */
 export type CheckDef = DeepReadonly<{ "kind": "number",
@@ -509,6 +522,28 @@ y: number,
 likeness: number | null, }>;
 
 /**
+ * How close a character is to one glyph.
+ */
+export type GlyphView = DeepReadonly<{
+/**
+ * The glyph's character.
+ */
+character: string,
+/**
+ * How many grid cells differ.
+ */
+differing: number,
+/**
+ * How many grid cells either shape inks.
+ */
+inked: number,
+/**
+ * Whether the character reads as this glyph: at most a quarter of the
+ * inked cells differ.
+ */
+matches: boolean, }>;
+
+/**
  * What one screenshot's region shows, typed by the user so a reference
  * learns its characters.
  */
@@ -670,6 +705,44 @@ slowestMs: number, }>;
  * A value the check read, as the UI shows it.
  */
 export type Reading = DeepReadonly<{ "kind": "number", "value": number } | { "kind": "flag", "value": boolean } | { "kind": "state", "value": string }>;
+
+/**
+ * A color's red, green, and blue.
+ */
+export type ReadingColor = DeepReadonly<{
+/**
+ * Red.
+ */
+red: number,
+/**
+ * Green.
+ */
+green: number,
+/**
+ * Blue.
+ */
+blue: number, }>;
+
+/**
+ * A live reading's debug details.
+ */
+export type ReadingDetails = DeepReadonly<{
+/**
+ * How long the check took to read the region, in microseconds.
+ */
+tookUs: number,
+/**
+ * How long ago the frame it read arrived, in milliseconds.
+ */
+frameAgeMs: number,
+/**
+ * The check's scores, or `None` when the region has none.
+ */
+workings: WorkingsView | null,
+/**
+ * Why the region has no scores, such as no ink in it.
+ */
+problem: string | null, }>;
 
 /**
  * What one recorded reading shows, as the user confirmed it in review, so
@@ -1103,6 +1176,32 @@ screenshot: number,
 selection?: SelectionSpec, }>;
 
 /**
+ * How far the region is from one state's picture.
+ */
+export type StateView = DeepReadonly<{
+/**
+ * The state's name.
+ */
+name: string,
+/**
+ * The summed difference of the compared channels.
+ */
+total: number,
+/**
+ * How many channels were compared.
+ */
+channels: number,
+/**
+ * The largest average difference that shows the state.
+ */
+tolerance: number,
+/**
+ * Whether the region is within the tolerance. The read is the closest
+ * state that is.
+ */
+within: boolean, }>;
+
+/**
  * What a value is compared with: a number, yes or no, or a state's name.
  */
 export type TargetDef = DeepReadonly<number | boolean | string>;
@@ -1364,6 +1463,39 @@ windows: Array<WindowChoice>,
  * warning, not a classification.
  */
 antiCheat: Array<string>, }>;
+
+/**
+ * [`Workings`] as the page reads it.
+ */
+export type WorkingsView = DeepReadonly<{ "kind": "number",
+/**
+ * The characters.
+ */
+characters: Array<CharacterView>, } | { "kind": "barFill",
+/**
+ * The pixels nearer the filled color.
+ */
+filled: number,
+/**
+ * The pixels near either color.
+ */
+counted: number, } | { "kind": "color",
+/**
+ * The region's average color.
+ */
+average: ReadingColor,
+/**
+ * The color the check looks for.
+ */
+color: ReadingColor,
+/**
+ * How far each of red, green, and blue may be.
+ */
+tolerance: number, } | { "kind": "state",
+/**
+ * The states, in the check's order.
+ */
+states: Array<StateView>, }>;
 
 /**
  * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the

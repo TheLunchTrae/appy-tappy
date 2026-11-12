@@ -346,7 +346,7 @@ impl DigitReader {
             .map(|glyph| GlyphScore {
                 character: glyph.character,
                 differing: cells(shape, &glyph.shape, |a, b| a ^ b),
-                allowed: cells(shape, &glyph.shape, |a, b| a | b) / 4,
+                inked: cells(shape, &glyph.shape, |a, b| a | b),
             })
             .collect();
         ranked.sort_by_key(|score| score.differing);
@@ -387,16 +387,17 @@ pub struct GlyphScore {
     pub character: char,
     /// How many of the 16 by 16 grid's cells differ from the glyph's.
     pub differing: u32,
-    /// The most cells that may differ for the glyph to match: a quarter of
-    /// the cells either shape inks.
-    pub allowed: u32,
+    /// How many cells either shape inks. The glyph matches when at most a
+    /// quarter of them differ.
+    pub inked: u32,
 }
 
 impl GlyphScore {
-    /// Whether the character is close enough to read as this glyph.
+    /// Whether the character is close enough to read as this glyph, by the
+    /// same rule as [`DigitReader::read`].
     #[must_use]
     pub const fn matches(self) -> bool {
-        self.differing <= self.allowed
+        self.differing.saturating_mul(4) <= self.inked
     }
 }
 
@@ -1030,6 +1031,13 @@ mod tests {
         let mut one_missing = shape;
         one_missing[0] = 0b0111;
         assert_eq!(reader.best_match(&one_missing), Some('7'));
+        // The scores the editor shows follow the same rule.
+        for (shape, matches) in [(one_off, true), (two_off, false), (one_missing, true)] {
+            let best = reader.score(&shape).best.expect("a glyph");
+            assert_eq!(best.matches(), matches);
+        }
+        let best = reader.score(&two_off).best.expect("a glyph");
+        assert_eq!((best.differing, best.inked), (2, 6));
     }
 
     #[test]
