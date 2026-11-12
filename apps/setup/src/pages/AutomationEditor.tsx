@@ -32,6 +32,7 @@ import { clickApps, targetSummary } from '../lib/click.ts';
 import { ACTIONS_HINT, COOLDOWN_HINT, DRAFT_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
+import { DeleteDraft } from '../components/Drafts.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { type Kept, type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
@@ -892,6 +893,9 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
           <button type="button" className="btn" disabled={saving || drafting.saving} onClick={onCancel}>
             Cancel
           </button>
+          {resumed === null ? null : (
+            <DeleteDraft changes={existing !== null} disabled={saving || drafting.saving} onDelete={drafting.discard} />
+          )}
           <span className="with-hint">
             <button
               type="button"

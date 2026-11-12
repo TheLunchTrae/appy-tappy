@@ -661,6 +661,9 @@ stateDiagram-v2
     Saving --> Saving: the tabs are disabled until the save ends
     Flow --> Flow: Add application in the value or reference flow opens the application flow
     Page --> Flow: Finish or Finish draft opens the draft's flow where it left off
+    Flow --> DeletingDraft: Delete draft, confirmed, in a flow that finishes a draft
+    DeletingDraft --> Page: the draft is deleted, the page that lists it opens
+    DeletingDraft --> Flow: the delete fails, the flow shows why
 ```
 
 The unsaved work of a flow, such as its screenshots and recording, lives in the
@@ -675,13 +678,19 @@ recording.
 Each open flow reports how to save its draft to `App.tsx` (`useDraft` in
 `apps/setup/src/lib/drafts.ts`), which the question to leave offers as
 **Save as draft**. Saving a draft counts as a save, so the tabs and the
-question's answers wait for it. A flow that finishes a draft deletes the draft
-once its item is saved; a draft that stays because that delete failed shows on
-its page, where it can be deleted. A value, fix, or reference flow that
-finishes a draft brings the draft's screenshots back only after its window is
-picked, since picking a window clears the session's. **Change window** after
-that starts the capture over without what the draft kept, but a draft saved
-then still replaces the same draft.
+question's answers wait for it, and so does **Change window**. Leaving with a
+draft goes to the asked page only while the flow that saved it is still open.
+A flow that finishes a draft deletes the draft once its item is saved, and its
+**Delete draft** deletes it without saving the item. A draft that stays because
+the delete after a save failed shows on its page, where it can be finished and
+deleted. A saved automation, application, or reference with a draft of changes
+offers **Finish draft** in place of **Edit**, so the saved item and its draft
+never change apart. A value, fix, or reference flow that finishes a draft
+brings the draft's screenshots back only after its window is picked, since
+picking a window clears the session's. **Change window** after that asks
+first, then starts the capture over without what the draft kept; a draft saved
+then still replaces the same draft, and leaving without one keeps it as it
+was.
 
 ### Update notice
 

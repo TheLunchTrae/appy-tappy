@@ -261,10 +261,13 @@ export function ApplicationsPage({
     }
   };
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const removeDraft = async (id: string): Promise<void> => {
     try {
       await onDeleteDraft(id);
       setSetError(null);
+      // The deleted row took the focused button with it.
+      headingRef.current?.focus();
     } catch (error: unknown) {
       setSetError(errorText(error));
     }
@@ -293,7 +296,9 @@ export function ApplicationsPage({
   return (
     <main className="page">
       <div className="page-head">
-        <h1>Applications</h1>
+        <h1 ref={headingRef} tabIndex={-1}>
+          Applications
+        </h1>
         <span className="lead">
           How AppyTappy finds each application&apos;s window, whether automations may press keys into it, and whether
           its live values show on top of it while this app is open.
@@ -418,6 +423,7 @@ export function ApplicationsPage({
                   </td>
                   <td className="row-actions">
                     {removing === app.id || changes === null ? null : (
+                      // Its draft holds the changes, so editing goes on from there rather than from the saved one.
                       <button
                         type="button"
                         className="btn small"
@@ -428,7 +434,7 @@ export function ApplicationsPage({
                         Finish draft<span className="visually-hidden"> of {file.name}</span>
                       </button>
                     )}
-                    {removing === app.id ? null : (
+                    {removing === app.id || changes !== null ? null : (
                       <button
                         type="button"
                         className="btn small"

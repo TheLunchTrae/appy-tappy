@@ -28,7 +28,7 @@ interface RowProps {
   readonly onToggle: () => void;
   readonly onEdit: () => void;
   readonly onDelete: () => void;
-  /** Opens the draft of changes to it, or null when it has none. */
+  /** Opens the draft of changes to it, in Edit's place, or null when it has none. */
   readonly onFinishDraft: (() => void) | null;
 }
 
@@ -134,14 +134,16 @@ function Row({
           </span>
         ) : (
           <span className="confirm">
-            {onFinishDraft === null ? null : (
+            {onFinishDraft === null ? (
+              <button type="button" className="btn small" onClick={onEdit}>
+                Edit<span className="visually-hidden"> {automation.name}</span>
+              </button>
+            ) : (
+              // Its draft holds the changes, so editing goes on from there rather than from the saved one.
               <button type="button" className="btn small" onClick={onFinishDraft}>
                 Finish draft<span className="visually-hidden"> of {automation.name}</span>
               </button>
             )}
-            <button type="button" className="btn small" onClick={onEdit}>
-              Edit<span className="visually-hidden"> {automation.name}</span>
-            </button>
             <button
               ref={deleteRef}
               type="button"
@@ -434,7 +436,7 @@ export function AutomationsPage({
       {body}
       {unreadable.length === 0 ? null : (
         <ul className="draft-list" aria-label="Drafts that cannot be read">
-          {unreadable.map((summary) => (
+          {unreadable.map((summary, index) => (
             <li key={summary.id} className="draft-row">
               <DraftPill />
               <span>
@@ -442,7 +444,7 @@ export function AutomationsPage({
                 <DraftNote missing={[]} problem={summary.problem ?? 'Its file is not valid.'} />
               </span>
               <DraftActions
-                name="that cannot be read"
+                name={unreadable.length === 1 ? 'that cannot be read' : `that cannot be read, number ${index + 1}`}
                 problem={summary.problem ?? 'Its file is not valid.'}
                 onFinish={() => {
                   // A draft that cannot be read cannot be finished.

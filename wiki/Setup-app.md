@@ -386,9 +386,12 @@ format was saved by another version and can only be deleted. A value,
 reference, or fix keeps its labels, but not a recording or the readings kept
 from one, which live with the recording.
 
-A save writes the screenshots first and `draft.json` last, so a save that stops
-halfway leaves a folder the list skips. A draft of changes replaces any other
-draft of the same saved item. Finishing a draft opens its flow; a value, fix,
+A save writes the draft into a folder of its own, `{id}.saving`, and only then
+puts it in place of the old one, so a save that stops partway leaves the old
+draft as it was; the next save removes what it left. A draft of changes to an
+automation, application, or reference replaces any other draft of the same
+saved item. A value can have a fix draft for each window size, so fix drafts
+never replace each other. Finishing a draft opens its flow; a value, fix,
 or reference asks for the window again, and once it is picked, the draft's
 screenshots replace the session's, so each keeps the index the draft's state
 refers to. Saving the item deletes the draft. Saving the automations keeps the

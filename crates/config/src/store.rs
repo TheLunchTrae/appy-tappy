@@ -486,7 +486,7 @@ pub fn new_app_id(executable: &str, taken: &[&str]) -> String {
 ///
 /// Returns the error from writing the temporary file, or from the last
 /// rename, after removing the temporary file.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());

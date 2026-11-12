@@ -90,6 +90,45 @@ describe('what a draft keeps', () => {
   });
 });
 
+describe('the shape a draft keeps', () => {
+  // A draft keeps each flow's state as it is. When one of these lists changes, raise DRAFT_FORMAT, so drafts kept in
+  // the older shape say they were saved by another version instead of opening with fields missing.
+  test('is the one this format names', () => {
+    expect(DRAFT_FORMAT).toBe(1);
+    expect(Object.keys(EMPTY_AUTOMATION).sort()).toEqual([
+      'actions',
+      'cooldown',
+      'enabled',
+      'flag',
+      'is',
+      'name',
+      'number',
+      'source',
+      'state',
+      'undo',
+    ]);
+    const stored = storeSetup({ valueName: '', step: 'how', pinned: null, editing: null, draft: EMPTY_DRAFT });
+    expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'pinned', 'step', 'valueName']);
+    expect(Object.keys(stored.draft).sort()).toEqual([
+      'color',
+      'colorMatch',
+      'drawnOn',
+      'empty',
+      'filled',
+      'ignoreBackground',
+      'ink',
+      'kind',
+      'labels',
+      'reference',
+      'region',
+      'stateNames',
+      'states',
+      'tolerance',
+      'whole',
+    ]);
+  });
+});
+
 describe('why a draft cannot be finished', () => {
   test('another version, a missing application, or a missing fixed value', () => {
     expect(draftProblem(def('automation', { format: 0 }), apps)).toBe(
@@ -100,6 +139,10 @@ describe('why a draft cannot be finished', () => {
       'Its application is no longer saved.',
     );
     expect(draftProblem(def('value', keep('value', {}), null, 'example'), apps)).toBeNull();
+    const unreadable: readonly AppSummary[] = [{ ...apps[0]!, file: null, error: 'Its file is not valid.' }];
+    expect(draftProblem(def('value', keep('value', {}), null, 'example'), unreadable)).toBe(
+      "Its application's file cannot be read.",
+    );
     expect(draftProblem(def('fix', keep('fix', {}), 'gone', 'example'), apps)).toBe(
       'The value it fixes is no longer saved.',
     );

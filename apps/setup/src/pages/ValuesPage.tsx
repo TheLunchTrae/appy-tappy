@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   type AppSummary,
@@ -41,9 +41,9 @@ interface DraftRows {
   readonly onDelete: (id: string) => Promise<void>;
 }
 
-/** The value and fix drafts, the first belonging to `app`, or with null to no saved application. */
+/** The value and fix drafts, the first belonging to `app`, or with null to no application that is still listed. */
 function valueDrafts(drafts: readonly DraftSummary[] | null, apps: readonly AppSummary[], app: string | null) {
-  const saved = (id: string | null): boolean => apps.some((each) => each.id === id && each.file !== null);
+  const saved = (id: string | null): boolean => apps.some((each) => each.id === id);
   return [...draftsOf(drafts, 'value'), ...draftsOf(drafts, 'fix')].filter((resumed) =>
     app === null ? !saved(resumed.def.app) : resumed.def.app === app,
   );
@@ -190,12 +190,15 @@ function AppRows({
   const columns = nowColumn ? 6 : 5;
   if (app.file === null) {
     return (
-      <tr className="group">
-        <td colSpan={columns}>
-          {app.id}
-          <small className="warn">{app.error ?? 'This application could not be read.'}</small>
-        </td>
-      </tr>
+      <>
+        <tr className="group">
+          <td colSpan={columns}>
+            {app.id}
+            <small className="warn">{app.error ?? 'This application could not be read.'}</small>
+          </td>
+        </tr>
+        <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
+      </>
     );
   }
   const { file } = app;
@@ -389,6 +392,7 @@ export function ValuesPage({
     }
   };
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const rows: DraftRows = {
     apps: apps ?? [],
     onFinish,
@@ -396,6 +400,8 @@ export function ValuesPage({
       try {
         await onDeleteDraft(id);
         setActionError(null);
+        // The deleted row took the focused button with it.
+        headingRef.current?.focus();
       } catch (error: unknown) {
         setActionError(errorText(error));
       }
@@ -410,7 +416,9 @@ export function ValuesPage({
   return (
     <main className="page">
       <div className="page-head">
-        <h1>Values</h1>
+        <h1 ref={headingRef} tabIndex={-1}>
+          Values
+        </h1>
         <span className="lead">What AppyTappy reads from each application&apos;s window.</span>
         <div className="end">
           <button type="button" className="btn primary" onClick={onNew}>

@@ -61,8 +61,10 @@ type Flow = (
 
 /** What leaving each kind of flow before it is saved loses, and that a draft can keep it. */
 const LOST: Readonly<Record<Flow['kind'], string>> = {
-  value: 'Leave this value? Save it as a draft to finish later, or leave and lose the screenshots and the region.',
-  reference: 'Leave this reference? Save it as a draft to finish later, or leave and lose the screenshots and labels.',
+  value:
+    'Leave this value? Save it as a draft to finish later, or leave and lose the screenshots and the region. A draft does not keep a recording.',
+  reference:
+    'Leave this reference? Save it as a draft to finish later, or leave and lose the screenshots and labels. A draft does not keep a recording.',
   automation: 'Leave this automation? Save it as a draft to finish later, or leave and lose the changes.',
   application: 'Leave this application? Save it as a draft to finish later, or leave and lose the changes.',
 };
@@ -165,8 +167,13 @@ export function App() {
     } else {
       setAutomationError(errorText(automationsRead.reason));
     }
-    // The drafts that cannot be listed show as none: the saved items are what matters.
-    setDrafts(draftsRead.status === 'fulfilled' ? draftsRead.value : []);
+    // Drafts that cannot be listed this time keep the last list, so their rows do not flicker away; none before
+    // the first list shows as none, since the saved items are what matters.
+    if (draftsRead.status === 'fulfilled') {
+      setDrafts(draftsRead.value);
+    } else {
+      setDrafts((last) => last ?? []);
+    }
   }, []);
   // The overlays that are on open with the app.
   useEffect(() => {
@@ -197,10 +204,15 @@ export function App() {
   // Saves the open flow's draft, then leaves for the page the press asked for.
   const leaveWithDraft = async (target: Page): Promise<void> => {
     const save = draftSaver.current;
+    const opened = openFlow.current;
     if (save === null) {
       return;
     }
     const failed = await save();
+    if (openFlow.current !== opened) {
+      // The flow closed while its draft saved; the lists show the draft at the next read.
+      return;
+    }
     if (failed === null) {
       goTo(target);
       await refresh();
@@ -447,7 +459,7 @@ export function App() {
           {leaving === null || flow === null ? null : (
             <Question
               refs={refs}
-              label="Leave without saving?"
+              label={canDraft ? `Leave this ${flow.kind}?` : 'Leave without saving?'}
               keepLabel="Stay"
               actLabel="Leave"
               busy={held === 'saving'}

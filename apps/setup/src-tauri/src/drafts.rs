@@ -14,11 +14,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appytappy_config::store::write_atomic;
 use serde::{Deserialize, Serialize};
 
 /// The file in a draft's folder that holds the draft.
 const DRAFT_FILE: &str = "draft.json";
+
+/// The end of the name of the folder a draft is written to before it takes
+/// the place of the old one; it is not a draft ID, so the list skips it.
+const SAVING: &str = ".saving";
 
 /// The longest draft ID.
 const MAX_ID_LEN: usize = 32;
@@ -118,9 +121,8 @@ impl DraftStore {
         }
     }
 
-    /// Every draft, oldest first; a folder without a draft file, such as one
-    /// whose first save stopped halfway, is left out. No folder yet holds
-    /// none.
+    /// Every draft, oldest first; a folder without a draft file, or one a
+    /// save is still writing, is left out. No folder yet holds none.
     ///
     /// # Errors
     ///
@@ -159,8 +161,13 @@ impl DraftStore {
 
     /// Saves `draft` over the draft `id`, or as a new one, with `screenshots`,
     /// each a PNG, in the order they were taken; a draft without screenshots
-    /// keeps none. Another draft of the same saved item goes, so the item has
-    /// one. Answers the draft's ID.
+    /// keeps none. Another draft of the same saved automation, application,
+    /// or reference goes, so the item has one; a value can have a fix draft
+    /// for each window size, so fixes are left alone. Answers the draft's ID.
+    ///
+    /// The draft is written to a folder of its own and only then put in the
+    /// place of the old one, so a save that fails partway leaves the old
+    /// draft as it was.
     ///
     /// # Errors
     ///
@@ -181,16 +188,17 @@ impl DraftStore {
             new_id(&taken)
         };
         let folder = self.draft_folder(&id)?;
-        fs::create_dir_all(&folder)?;
+        self.remove_unfinished_saves()?;
+        let staging = self.folder.join(format!("{id}{SAVING}"));
+        fs::create_dir_all(&staging)?;
         for (index, bytes) in screenshots.iter().enumerate() {
-            write_atomic(&folder.join(shot_name(index)), bytes)?;
-        }
-        for index in screenshots.len()..shot_count(&folder) {
-            fs::remove_file(folder.join(shot_name(index)))?;
+            fs::write(staging.join(shot_name(index)), bytes)?;
         }
         let json = serde_json::to_string_pretty(draft).map_err(io::Error::other)?;
-        write_atomic(&folder.join(DRAFT_FILE), json.as_bytes())?;
-        if draft.changes.is_some() {
+        fs::write(staging.join(DRAFT_FILE), json.as_bytes())?;
+        self.delete(&id)?;
+        fs::rename(&staging, &folder)?;
+        if draft.changes.is_some() && draft.kind != DraftKind::Fix {
             for other in existing.iter().filter(|other| {
                 other.id != id
                     && other.draft.as_ref().is_some_and(|other| {
@@ -203,6 +211,26 @@ impl DraftStore {
             }
         }
         Ok(id)
+    }
+
+    /// Removes the folders of saves that stopped before they were put in
+    /// place.
+    fn remove_unfinished_saves(&self) -> io::Result<()> {
+        let entries = match fs::read_dir(&self.folder) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            entries => entries?,
+        };
+        for entry in entries {
+            let entry = entry?;
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.ends_with(SAVING))
+            {
+                fs::remove_dir_all(entry.path())?;
+            }
+        }
+        Ok(())
     }
 
     /// The screenshots of the draft `id`, each a PNG, in the order they were
@@ -373,6 +401,43 @@ mod tests {
             assert!(ids.contains(kept), "{kept}");
         }
         assert_eq!(ids.len(), 5);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_value_keeps_a_fix_draft_for_each_size() {
+        let (store, root) = scratch("fixes");
+        let small = store
+            .save(None, &draft(DraftKind::Fix, Some("health")), &[vec![1]])
+            .expect("saves");
+        let large = store
+            .save(None, &draft(DraftKind::Fix, Some("health")), &[vec![2]])
+            .expect("saves");
+        assert_eq!(store.list().expect("lists").len(), 2);
+        assert_eq!(store.screenshots(&small).expect("reads"), [vec![1]]);
+        assert_eq!(store.screenshots(&large).expect("reads"), [vec![2]]);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_save_that_stopped_leaves_the_old_draft() {
+        let (store, root) = scratch("stopped");
+        let saved = draft(DraftKind::Value, None);
+        let id = store.save(None, &saved, &[vec![1]]).expect("saves");
+        // A save that stopped partway leaves its own folder, never the draft's.
+        let staging = store.folder.join(format!("{id}{SAVING}"));
+        fs::create_dir_all(&staging).expect("folder");
+        fs::write(staging.join(DRAFT_FILE), "{").expect("writes");
+        fs::write(staging.join(shot_name(0)), [9]).expect("writes");
+        let listed = store.list().expect("lists");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].draft.as_ref(), Some(&saved));
+        assert_eq!(store.screenshots(&id).expect("reads"), [vec![1]]);
+
+        // The next save clears it away.
+        store.save(Some(&id), &saved, &[vec![3]]).expect("saves");
+        assert!(!staging.exists());
+        assert_eq!(store.screenshots(&id).expect("reads"), [vec![3]]);
         fs::remove_dir_all(root).expect("clean up");
     }
 

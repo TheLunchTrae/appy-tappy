@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { AppSummary, FallbackDef, SizeChangesDef, WindowChoice, WindowDef, WindowList } from '../lib/bindings.ts';
 import { errorText, listWindows, saveApp } from '../lib/api.ts';
+import { DeleteDraft } from '../components/Drafts.tsx';
 import { Hint } from '../components/Hint.tsx';
 import {
   type AppKept,
@@ -316,6 +317,9 @@ export function ApplicationEditor({ existing, draft: resumed, onCancel, onSaved,
             <button type="button" className="btn" disabled={busy || drafting.saving} onClick={onCancel}>
               Cancel
             </button>
+            {resumed === null ? null : (
+              <DeleteDraft changes={existing !== null} disabled={busy || drafting.saving} onDelete={drafting.discard} />
+            )}
             <span className="with-hint">
               <button
                 type="button"

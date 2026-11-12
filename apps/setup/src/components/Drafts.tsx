@@ -82,6 +82,62 @@ export function DraftActions({ name, problem, onFinish, onDelete }: ActionsProps
   );
 }
 
+interface DeleteProps {
+  /** Whether the draft changes a saved item, which deleting it leaves as it was. */
+  readonly changes: boolean;
+  /** Whether the flow is saving, which holds the button. */
+  readonly disabled: boolean;
+  /** Deletes the draft and closes the flow; the flow shows why when it fails. */
+  readonly onDelete: () => Promise<void>;
+}
+
+/** A flow's Delete draft button, for the draft it finishes, which asks first in its place. */
+export function DeleteDraft({ changes, disabled, onDelete }: DeleteProps) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { control, refs } = useQuestion<HTMLButtonElement>(confirming);
+  if (confirming) {
+    return (
+      <Question
+        refs={refs}
+        label="Delete this draft?"
+        keepLabel="Keep"
+        actLabel="Delete draft"
+        busy={busy}
+        onKeep={() => {
+          setConfirming(false);
+        }}
+        onAct={() => {
+          setBusy(true);
+          background(
+            onDelete().finally(() => {
+              setBusy(false);
+              setConfirming(false);
+            }),
+          );
+        }}
+      >
+        {changes
+          ? 'Delete this draft? Its changes are lost, and the saved one stays as it was.'
+          : 'Delete this draft? What it has set up is lost.'}
+      </Question>
+    );
+  }
+  return (
+    <button
+      ref={control}
+      type="button"
+      className="btn"
+      disabled={disabled}
+      onClick={() => {
+        setConfirming(true);
+      }}
+    >
+      Delete draft
+    </button>
+  );
+}
+
 interface CaptureRowProps {
   readonly resumed: Resumed;
   readonly problem: string | null;

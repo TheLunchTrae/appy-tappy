@@ -48,7 +48,7 @@ const OF_APP: readonly DraftKind[] = ['value', 'fix', 'reference'];
 
 /**
  * Why `def` cannot be finished, or null when it can: it was saved by another version, the application it belongs to
- * is gone, or the value it fixes is.
+ * is gone or cannot be read, or the value it fixes is gone.
  */
 export function draftProblem(def: DraftDef, apps: readonly AppSummary[]): string | null {
   if (!isKept(def.state, def.kind)) {
@@ -57,9 +57,13 @@ export function draftProblem(def: DraftDef, apps: readonly AppSummary[]): string
   if (!OF_APP.includes(def.kind)) {
     return null;
   }
-  const file = apps.find((app) => app.id === def.app)?.file ?? null;
-  if (file === null) {
+  const app = apps.find((each) => each.id === def.app);
+  if (app === undefined) {
     return 'Its application is no longer saved.';
+  }
+  const { file } = app;
+  if (file === null) {
+    return "Its application's file cannot be read.";
   }
   if (def.kind === 'fix' && !file.values.some((value) => value.id === def.changes)) {
     return 'The value it fixes is no longer saved.';
@@ -109,12 +113,14 @@ export type ReportDraft = (save: DraftSaver | null) => void;
 
 /** What {@link useDraft} gives a flow. */
 interface DraftSaving {
-  /** Whether the draft is saving. */
+  /** Whether the draft is saving or being deleted. */
   readonly saving: boolean;
-  /** Why the last save of the draft failed, or null. */
+  /** Why the last save or delete of the draft failed, or null. */
   readonly error: string | null;
   /** Saves the draft and, once that worked, closes the flow. */
   readonly saveAndClose: () => Promise<void>;
+  /** Deletes the draft the flow finishes and, once that worked, closes the flow without saving its item. */
+  readonly discard: () => Promise<void>;
   /** Removes the draft the flow finished, once its item is saved. */
   readonly finished: () => Promise<void>;
 }
@@ -123,7 +129,7 @@ interface DraftSaving {
  * Saving the draft of a flow that finishes `resumed`, or makes a new item when it is null. `make` gives the draft as
  * the flow has it now, and `screenshots` says whether the capture's screenshots go with it. The flow reports its
  * saver to `report` while it shows, so leaving it can save the draft too, and calls `onClosed` after its own button
- * saved one.
+ * saved or deleted the draft; the lists are read again then.
  */
 export function useDraft(
   resumed: Resumed | null,
@@ -165,6 +171,22 @@ export function useDraft(
       if ((await save()) === null) {
         onClosed();
       }
+    },
+    discard: async () => {
+      if (resumed === null) {
+        return;
+      }
+      setSaving(true);
+      try {
+        await deleteDraft(resumed.id);
+        setError(null);
+      } catch (failure: unknown) {
+        setError(errorText(failure));
+        return;
+      } finally {
+        setSaving(false);
+      }
+      onClosed();
     },
     finished: async () => {
       if (resumed === null) {

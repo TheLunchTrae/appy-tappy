@@ -33,6 +33,7 @@ import { clock } from '../lib/review.ts';
 import { type Point, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
 import { PinPicker } from './PinPicker.tsx';
+import { DeleteDraft } from './Drafts.tsx';
 import { Hint } from './Hint.tsx';
 import { FIX_HINT, READ_WITH_HINT, guessPin, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
@@ -239,23 +240,32 @@ export function Capture({ choice, mode, restored, onCancel, onChangeWindow, onSa
   // Readings live with the recording, which a draft cannot keep.
   const losesRecording = recording !== null || draft.recorded.size > 0;
   const draftButton = (
-    <span className="with-hint">
-      <button
-        type="button"
-        className="btn"
-        disabled={holds !== 'unsaved'}
-        aria-describedby="hint-draft"
-        onClick={() => {
-          background(drafting.saveAndClose());
-        }}
-      >
-        Save as draft
-      </button>
-      <Hint topic="Save as draft" id="hint-draft">
-        {DRAFT_HINT}
-        {losesRecording ? ' A draft keeps the screenshots, but not the recording or the readings kept from it.' : ''}
-      </Hint>
-    </span>
+    <>
+      {restored === null ? null : (
+        <DeleteDraft
+          changes={mode.kind === 'fix' || (mode.kind === 'reference' && mode.existing !== null)}
+          disabled={saving || drafting.saving}
+          onDelete={drafting.discard}
+        />
+      )}
+      <span className="with-hint">
+        <button
+          type="button"
+          className="btn"
+          disabled={holds !== 'unsaved'}
+          aria-describedby="hint-draft"
+          onClick={() => {
+            background(drafting.saveAndClose());
+          }}
+        >
+          Save as draft
+        </button>
+        <Hint topic="Save as draft" id="hint-draft">
+          {DRAFT_HINT}
+          {losesRecording ? ' A draft keeps the screenshots, but not the recording or the readings kept from it.' : ''}
+        </Hint>
+      </span>
+    </>
   );
   const draftError =
     drafting.error === null ? null : (
@@ -569,22 +579,25 @@ export function Capture({ choice, mode, restored, onCancel, onChangeWindow, onSa
                   label="Change window?"
                   keepLabel="Keep this window"
                   actLabel="Change window"
-                  busy={saving}
+                  busy={busy}
                   onKeep={() => {
                     setLeavingWindow(false);
                   }}
                   onAct={onChangeWindow}
                 >
-                  Change window? The screenshots, everything set up on them, and any recording are lost.
+                  {holds === 'unsaved'
+                    ? 'Change window? The screenshots, everything set up on them, and any recording are lost.'
+                    : 'Change window? This starts over on the new window. The draft stays as it is unless you save it again.'}
                 </Question>
               ) : (
                 <button
                   ref={leaveQuestion.control}
                   type="button"
                   className="btn"
-                  disabled={saving}
+                  disabled={busy}
                   onClick={() => {
-                    if (holds === 'unsaved') {
+                    // Finishing a draft starts on its screenshots, which the new window leaves behind.
+                    if (holds === 'unsaved' || restored !== null) {
                       setLeavingWindow(true);
                     } else {
                       onChangeWindow();

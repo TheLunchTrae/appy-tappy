@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { AppSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
@@ -39,10 +39,13 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
     }
   };
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const removeDraft = async (id: string): Promise<void> => {
     try {
       await onDeleteDraft(id);
       setDeleteError(null);
+      // The deleted row took the focused button with it.
+      headingRef.current?.focus();
     } catch (error: unknown) {
       setDeleteError(errorText(error));
     }
@@ -86,7 +89,9 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
   return (
     <main className="page">
       <div className="page-head">
-        <h1>References</h1>
+        <h1 ref={headingRef} tabIndex={-1}>
+          References
+        </h1>
         <span className="lead">
           How AppyTappy knows each application&apos;s characters. A number value reads its region with one of these.
         </span>
@@ -183,7 +188,18 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                           </span>
                         ) : (
                           <span className="confirm">
-                            {changes === null ? null : (
+                            {changes === null ? (
+                              <button
+                                type="button"
+                                className="btn small"
+                                onClick={() => {
+                                  onEdit({ app: app.id, reference });
+                                }}
+                              >
+                                Edit<span className="visually-hidden"> {reference.name}</span>
+                              </button>
+                            ) : (
+                              // Its draft holds the changes, so editing goes on from there rather than from the saved one.
                               <button
                                 type="button"
                                 className="btn small"
@@ -194,15 +210,6 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                                 Finish draft<span className="visually-hidden"> of {reference.name}</span>
                               </button>
                             )}
-                            <button
-                              type="button"
-                              className="btn small"
-                              onClick={() => {
-                                onEdit({ app: app.id, reference });
-                              }}
-                            >
-                              Edit<span className="visually-hidden"> {reference.name}</span>
-                            </button>
                             <button
                               type="button"
                               className="btn small"
@@ -227,7 +234,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                 <tr className="group">
                   <td colSpan={4}>
                     Drafts
-                    <small className="warn">Their application is no longer saved.</small>
+                    <small className="warn">Their application is no longer saved, or its file cannot be read.</small>
                   </td>
                 </tr>
                 {draftRows(orphans)}
