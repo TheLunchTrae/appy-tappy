@@ -3,10 +3,12 @@
 # before the Rust tasks. Before the first ui:build, the Rust side's build
 # script puts a stand-in page there, so the Rust tasks still compile.
 
+# No package needs a lifecycle script, so the install runs none. The release
+# workflow's sign job relies on that (wiki/Installer.md#what-guards-the-key).
 [tasks."ui:install"]
 description = "Install the setup UI's locked dependencies"
 dir = "apps/setup"
-run = "bun install --frozen-lockfile"
+run = "bun install --frozen-lockfile --ignore-scripts"
 
 [tasks."ui:lock"]
 description = "Refresh the setup UI's Bun lockfile"
