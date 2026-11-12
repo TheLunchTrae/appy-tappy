@@ -20,12 +20,12 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, WINDOWINFO,
 };
 use windows::core::BOOL;
 
-use crate::screen::Size;
+use crate::screen::{Size, content_on_screen};
 use crate::system::{Bounds, ProcessEntry, Rgb, System, WindowEntry, WindowPlace};
 
 mod build;
@@ -86,6 +86,59 @@ fn utf16_to_string(buffer: &[u16]) -> String {
 
 fn struct_size<T>() -> io::Result<u32> {
     u32::try_from(size_of::<T>()).map_err(io::Error::other)
+}
+
+/// The window handle that `window`, a handle as a number, stands for.
+fn window_handle(window: u64) -> io::Result<HWND> {
+    Ok(HWND(ptr::without_provenance_mut(
+        usize::try_from(window).map_err(io::Error::other)?,
+    )))
+}
+
+/// The bounds of `window`'s frame as the screen shows it, without the
+/// invisible borders around it: what a capture of it takes in.
+fn frame_on_screen(window: HWND) -> io::Result<Bounds> {
+    let mut rect = RECT::default();
+    let size = struct_size::<RECT>()?;
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: `rect` is a live local of the size passed, which the call
+    // writes; it fails without harm when the window is gone.
+    unsafe {
+        DwmGetWindowAttribute(
+            window,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            (&raw mut rect).cast(),
+            size,
+        )
+    }?;
+    Ok(bounds_of(rect))
+}
+
+/// Where `window`'s client area lies on the screen, the part the
+/// application draws in. The system gives it in screen pixels whole, so a
+/// window that the system stretches because it does not follow the
+/// monitor's scale, or that lays itself out right to left, still gets its
+/// whole client area.
+fn client_on_screen(window: HWND) -> io::Result<Bounds> {
+    let mut info = WINDOWINFO {
+        cbSize: struct_size::<WINDOWINFO>()?,
+        ..WINDOWINFO::default()
+    };
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: `info` is a live local whose `cbSize` gives its size, which
+    // the call writes; it fails without harm when the window is gone.
+    unsafe { GetWindowInfo(window, &raw mut info) }?;
+    Ok(bounds_of(info.rcClient))
+}
+
+/// `rect` as bounds.
+const fn bounds_of(rect: RECT) -> Bounds {
+    Bounds {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    }
 }
 
 /// Takes a Toolhelp snapshot of every running process.
@@ -203,9 +256,7 @@ impl System for WindowsSystem {
     }
 
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
-        let handle = HWND(ptr::without_provenance_mut(
-            usize::try_from(window).map_err(io::Error::other)?,
-        ));
+        let handle = window_handle(window)?;
         let mut rect = RECT::default();
         #[expect(unsafe_code, reason = "Win32 calls")]
         // SAFETY: each call only reads the state of the window `handle` names,
@@ -224,80 +275,44 @@ impl System for WindowsSystem {
             return Ok(None);
         }
         Ok(Some(WindowPlace {
-            bounds: Bounds {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-            },
+            bounds: bounds_of(rect),
             shown: visible && !minimized,
             front,
         }))
     }
 
-    fn frame_size(&self, window: u64) -> io::Result<Option<Size>> {
-        let handle = HWND(ptr::without_provenance_mut(
-            usize::try_from(window).map_err(io::Error::other)?,
-        ));
-        let mut rect = RECT::default();
+    fn content_size(&self, window: u64) -> io::Result<Option<Size>> {
+        let handle = window_handle(window)?;
         #[expect(unsafe_code, reason = "Win32 calls")]
-        // SAFETY: IsWindow and IsIconic only read the state of the window
-        // `handle` names; DwmGetWindowAttribute writes at most
-        // `struct_size::<RECT>()` bytes into `rect`, a live local of that size,
-        // and fails without harm when no such window exists.
-        let (exists, minimized, read) = unsafe {
-            (
-                IsWindow(Some(handle)).as_bool(),
-                IsIconic(handle).as_bool(),
-                DwmGetWindowAttribute(
-                    handle,
-                    DWMWA_EXTENDED_FRAME_BOUNDS,
-                    (&raw mut rect).cast(),
-                    struct_size::<RECT>()?,
-                ),
-            )
-        };
+        // SAFETY: both calls only read the state of the window `handle`
+        // names and answer false when no such window exists.
+        let (exists, minimized) =
+            unsafe { (IsWindow(Some(handle)).as_bool(), IsIconic(handle).as_bool()) };
         // A minimized window's bounds are its small placeholder, not the size
         // it will draw at once restored.
         if !exists || minimized {
             return Ok(None);
         }
-        read?;
+        let content = content_on_screen(frame_on_screen(handle)?, client_on_screen(handle).ok());
         let side = |from: i32, to: i32| u32::try_from(to.saturating_sub(from)).unwrap_or_default();
         Ok(Some(Size {
-            width: side(rect.left, rect.right),
-            height: side(rect.top, rect.bottom),
+            width: side(content.left, content.right),
+            height: side(content.top, content.bottom),
         }))
     }
 
-    fn frame_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
+    fn content_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
         let Some(place) = self.window_place(window)? else {
             return Ok(None);
         };
-        let handle = HWND(ptr::without_provenance_mut(
-            usize::try_from(window).map_err(io::Error::other)?,
-        ));
-        let mut rect = RECT::default();
-        let size = struct_size::<RECT>()?;
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `rect` is a live local of the size passed, which the call
-        // writes; it fails without harm when the window is gone.
-        let read = unsafe {
-            DwmGetWindowAttribute(
-                handle,
-                DWMWA_EXTENDED_FRAME_BOUNDS,
-                (&raw mut rect).cast(),
-                size,
-            )
-        };
+        let handle = window_handle(window)?;
         // Without the desktop window manager's bounds, the window's own are
         // the best there is.
-        Ok(Some(read.map_or(place.bounds, |()| Bounds {
-            left: rect.left,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-        })))
+        let frame = frame_on_screen(handle).unwrap_or(place.bounds);
+        Ok(Some(content_on_screen(
+            frame,
+            client_on_screen(handle).ok(),
+        )))
     }
 
     fn executable_build(&self, process: ProcessId) -> io::Result<BuildDef> {

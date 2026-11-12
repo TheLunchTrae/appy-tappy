@@ -490,7 +490,7 @@ impl Error for ImageError {
 /// size and capture a region that fits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutsideWindow {
-    /// The size of the window's whole frame.
+    /// The size of the window's content.
     pub window_size: Size,
 }
 

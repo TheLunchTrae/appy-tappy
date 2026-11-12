@@ -230,7 +230,7 @@ pub(crate) mod tests {
             }))
         }
 
-        fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 

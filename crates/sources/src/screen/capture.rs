@@ -1,6 +1,7 @@
 //! The capture interface: what a capture copies out of each frame, the frame it
-//! lends to its handler, and the [`Capture`] trait that the operating system's
-//! capture implements, with a stand-in for systems that cannot capture.
+//! lends to its handler, where a window's content lies in its frame, and the
+//! [`Capture`] trait that the operating system's capture implements, with a
+//! stand-in for systems that cannot capture.
 
 use std::convert::Infallible;
 use std::io;
@@ -8,27 +9,100 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use super::{Image, Layout, Region, Size};
-use crate::system::Unsupported;
+use crate::system::{Bounds, Unsupported};
 
 /// What a capture copies out of each frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Crop {
-    /// The whole frame, as the setup app's preview and screenshot need.
+    /// The window's whole content, as the setup app's preview and
+    /// screenshot need.
     Whole,
     /// The regions a layout packs, as the values of a window read. The
     /// frame's image is then the packed image.
     Layout(Layout),
 }
 
+/// Where a window's content lies in a capture of its frame.
+///
+/// A capture of a window takes in its frame, at `frame` on the screen, title
+/// bar and borders included, in a picture of `captured` size. The
+/// application draws in its client area, at `client` on the screen, and only
+/// that grows with the window: a title bar keeps its height between a small
+/// window and a large one, and fullscreen has none. So the window's content
+/// is the part of the picture its client area covers, and regions are
+/// measured from it, which places them the same with and without a title
+/// bar. It is `None` when the client area covers none of the picture, and
+/// the whole picture is the content then.
+#[must_use]
+pub fn content(frame: Bounds, client: Bounds, captured: Size) -> Option<Region> {
+    // How far `edge` lies from the frame's `start`, and 0 before it. Two
+    // `i32`s are at most `u32::MAX` apart, so any distance fits.
+    let from = |edge: i32, start: i32| {
+        u32::try_from(i64::from(edge).saturating_sub(i64::from(start))).unwrap_or_default()
+    };
+    let left = from(client.left, frame.left);
+    let top = from(client.top, frame.top);
+    let right = from(client.right, frame.left).min(captured.width);
+    let bottom = from(client.bottom, frame.top).min(captured.height);
+    Region::new(
+        left,
+        top,
+        right.checked_sub(left)?,
+        bottom.checked_sub(top)?,
+    )
+}
+
+/// Where `region`, measured from the corner of a window's `content`, lies in
+/// the frame that [`content`] found it in, or `None` when it reaches past
+/// the content.
+#[must_use]
+pub fn in_frame(region: Region, content: Region) -> Option<Region> {
+    region.fits(content.size()).then_some(())?;
+    let size = region.size();
+    Region::new(
+        region.x().checked_add(content.x())?,
+        region.y().checked_add(content.y())?,
+        size.width,
+        size.height,
+    )
+}
+
+/// Where a window's content lies on the screen.
+///
+/// The window's frame lies at `frame`, and its client area at `client`, or
+/// it is unknown. The content is what [`content`] finds in a capture of the
+/// whole frame, and where it finds none, the whole frame, as for a capture.
+#[must_use]
+pub fn content_on_screen(frame: Bounds, client: Option<Bounds>) -> Bounds {
+    let length = |from: i32, to: i32| u32::try_from(to.saturating_sub(from)).unwrap_or_default();
+    let whole = Size {
+        width: length(frame.left, frame.right),
+        height: length(frame.top, frame.bottom),
+    };
+    client
+        .and_then(|client| content(frame, client, whole))
+        .and_then(|area| {
+            let left = frame.left.checked_add_unsigned(area.x())?;
+            let top = frame.top.checked_add_unsigned(area.y())?;
+            Some(Bounds {
+                left,
+                top,
+                right: left.checked_add_unsigned(area.size().width)?,
+                bottom: top.checked_add_unsigned(area.size().height)?,
+            })
+        })
+        .unwrap_or(frame)
+}
+
 /// One captured frame's pixels, lent to the frame handler. The image is
 /// reused for the next frame, so a handler copies what it keeps.
 #[derive(Debug)]
 pub struct Frame<'buffer> {
-    /// The size of the window's whole frame, which a region's coordinates
-    /// refer to.
+    /// The size of the window's content, which [`content`] finds in the
+    /// frame and a region's coordinates refer to.
     pub window_size: Size,
-    /// The cropped pixels: the whole frame, or the packed image of the
-    /// capture's [`Layout`].
+    /// The cropped pixels: the window's whole content, or the packed image
+    /// of the capture's [`Layout`].
     pub image: &'buffer Image,
     /// When AppyTappy received the frame.
     pub received: Instant,
@@ -175,6 +249,8 @@ impl Capture for Unsupported {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
 
     /// What the fake capture was asked to do.
@@ -302,6 +378,146 @@ mod tests {
             "no capture"
         );
         assert_eq!(asked.try_iter().count(), 0);
+    }
+
+    fn bounds(left: i32, top: i32, right: i32, bottom: i32) -> Bounds {
+        Bounds {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    const fn size(width: u32, height: u32) -> Size {
+        Size { width, height }
+    }
+
+    #[test]
+    fn a_window_s_content_leaves_out_its_title_bar_and_borders() {
+        let frame = bounds(100, 50, 900, 681);
+        let client = bounds(101, 81, 899, 680);
+        assert_eq!(
+            content(frame, client, size(800, 631)),
+            Region::new(1, 31, 798, 599)
+        );
+    }
+
+    #[test]
+    fn a_window_drawn_to_its_edges_is_all_content() {
+        let screen = bounds(-1920, 0, 0, 1080);
+        assert_eq!(
+            content(screen, screen, size(1920, 1080)),
+            Region::new(0, 0, 1920, 1080)
+        );
+        // A client area larger than the frame, as when a maximized window's
+        // reaches past the screen, still gives only the capture.
+        assert_eq!(
+            content(screen, bounds(-1928, -8, 8, 1088), size(1920, 1080)),
+            Region::new(0, 0, 1920, 1080)
+        );
+    }
+
+    #[test]
+    fn a_window_s_content_ends_where_its_capture_does() {
+        // The window grew after the system composed the frame.
+        let frame = bounds(0, 0, 820, 650);
+        let client = bounds(1, 31, 819, 649);
+        assert_eq!(
+            content(frame, client, size(800, 631)),
+            Region::new(1, 31, 799, 600)
+        );
+    }
+
+    #[test]
+    fn a_client_area_outside_the_capture_gives_no_content() {
+        let frame = bounds(0, 0, 800, 600);
+        for client in [
+            bounds(10, 10, 10, 10),
+            bounds(900, 0, 1000, 600),
+            bounds(0, -100, 800, -10),
+        ] {
+            assert_eq!(content(frame, client, size(800, 600)), None, "{client:?}");
+        }
+    }
+
+    #[test]
+    fn a_window_s_content_on_the_screen_is_its_client_area_inside_its_frame() {
+        let frame = bounds(-800, 50, 0, 681);
+        assert_eq!(
+            content_on_screen(frame, Some(bounds(-799, 81, -1, 680))),
+            bounds(-799, 81, -1, 680)
+        );
+        assert_eq!(
+            content_on_screen(frame, Some(bounds(-900, 0, 100, 700))),
+            frame
+        );
+        for client in [None, Some(bounds(10, 10, 20, 20))] {
+            assert_eq!(content_on_screen(frame, client), frame, "{client:?}");
+        }
+    }
+
+    #[test]
+    fn a_region_of_the_content_lies_past_the_title_bar_in_the_frame() {
+        let content = Region::new(1, 31, 798, 599).unwrap();
+        assert_eq!(
+            in_frame(Region::new(0, 0, 10, 4).unwrap(), content),
+            Region::new(1, 31, 10, 4)
+        );
+        assert_eq!(
+            in_frame(Region::new(788, 595, 10, 4).unwrap(), content),
+            Region::new(789, 626, 10, 4)
+        );
+        assert_eq!(
+            in_frame(Region::new(789, 595, 10, 4).unwrap(), content),
+            None
+        );
+    }
+
+    proptest! {
+        /// The capture copies a window's content out of its frame's
+        /// texture, so the content never reaches past the frame.
+        #[test]
+        fn a_window_s_content_lies_inside_its_capture(
+            corner in (-5_000_i32..5_000, -5_000_i32..5_000),
+            width in 1_i32..5_000,
+            height in 1_i32..5_000,
+            // How far each client edge lies right of or below the frame's.
+            shifts in (-50_i32..100, -50_i32..100, -100_i32..50, -100_i32..50),
+            captured in (1_u32..5_100, 1_u32..5_100),
+        ) {
+            let add = |one: i32, other: i32| one.checked_add(other).expect("the ranges are small");
+            let (left, top) = corner;
+            let (right, bottom) = (add(left, width), add(top, height));
+            let frame = bounds(left, top, right, bottom);
+            let client = bounds(
+                add(left, shifts.0),
+                add(top, shifts.1),
+                add(right, shifts.2),
+                add(bottom, shifts.3),
+            );
+            let captured = size(captured.0, captured.1);
+            if let Some(area) = content(frame, client, captured) {
+                prop_assert!(area.fits(captured), "{area:?}");
+            }
+        }
+
+        /// A region that fits the content lies inside it in the frame.
+        #[test]
+        fn a_region_of_the_content_stays_inside_it_in_the_frame(
+            content_at in (0_u32..100, 0_u32..100, 1_u32..500, 1_u32..500),
+            region_at in (0_u32..600, 0_u32..600, 1_u32..600, 1_u32..600),
+        ) {
+            let content = Region::new(content_at.0, content_at.1, content_at.2, content_at.3).unwrap();
+            let region = Region::new(region_at.0, region_at.1, region_at.2, region_at.3).unwrap();
+            let placed = in_frame(region, content);
+            prop_assert_eq!(placed.is_some(), region.fits(content.size()));
+            if let Some(placed) = placed {
+                prop_assert!(placed.x() >= content.x() && placed.right() <= content.right());
+                prop_assert!(placed.y() >= content.y() && placed.bottom() <= content.bottom());
+                prop_assert_eq!(placed.size(), region.size());
+            }
+        }
     }
 
     #[test]

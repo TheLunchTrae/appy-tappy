@@ -48,10 +48,10 @@ pub struct Placed {
 /// It takes the window that [`session_window`] picks, of any of the
 /// application's processes, but never one taken only as the fallback: that
 /// may be another of the application's windows, where the spot or the
-/// picture means something else. The place is measured in the window's
-/// frame as the screen shows it. For a picture, the window must have the
-/// size the picture was taken at; one frame of its area is grabbed and
-/// searched, and a window that moved meanwhile is not clicked.
+/// picture means something else. The place is measured from the window's
+/// content on the screen, as a capture lends it. For a picture, the window
+/// must have the size the picture was taken at; one frame of its area is
+/// grabbed and searched, and a window that moved meanwhile is not clicked.
 ///
 /// # Errors
 ///
@@ -84,7 +84,7 @@ pub fn place<S: System + Capture>(
         return Err(format!("{name}'s window is minimized or hidden"));
     }
     let bounds = screen
-        .frame_bounds(window.handle)
+        .content_bounds(window.handle)
         .map_err(failed)?
         .ok_or_else(|| format!("{name}'s window closed"))?;
     let size = size(bounds).ok_or_else(|| format!("{name}'s window has no size"))?;
@@ -103,17 +103,17 @@ pub fn place<S: System + Capture>(
             if size != taken {
                 return Err(other_size(size));
             }
-            let (frame_size, image) = grab(screen, window.handle, search.area(), GRAB_WAIT)
+            let (grabbed, image) = grab(screen, window.handle, search.area(), GRAB_WAIT)
                 .map_err(|error| format!("{name}'s window cannot be captured: {error}"))?;
-            if frame_size != taken {
-                return Err(other_size(frame_size));
+            if grabbed != taken {
+                return Err(other_size(grabbed));
             }
             let landing = search
                 .locate(&image)
                 .ok_or_else(|| format!("its picture was not found in {name}'s window"))?;
             // The grab and the search take a moment, and a window that
             // moved meanwhile would put the click off by as much.
-            if screen.frame_bounds(window.handle).map_err(failed)? != Some(bounds) {
+            if screen.content_bounds(window.handle).map_err(failed)? != Some(bounds) {
                 return Err(format!(
                     "{name}'s window moved while its picture was looked for"
                 ));
@@ -268,11 +268,11 @@ mod tests {
             }))
         }
 
-        fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
-        fn frame_bounds(&self, _window: u64) -> io::Result<Option<Bounds>> {
+        fn content_bounds(&self, _window: u64) -> io::Result<Option<Bounds>> {
             let next = self.reads.as_ref().and_then(|reads| reads.try_recv().ok());
             Ok(next.or(self.bounds))
         }
@@ -478,7 +478,7 @@ mod tests {
             fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
                 Ok(None)
             }
-            fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+            fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
                 Ok(None)
             }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {

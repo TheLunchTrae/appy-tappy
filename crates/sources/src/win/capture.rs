@@ -8,7 +8,9 @@
 //! calls. Between reads the thread keeps only the newest frame and copies
 //! nothing; when the handler's wait ends, the GPU copies just the values'
 //! regions into a small CPU-readable texture, as the crop's layout packs
-//! them, and the thread copies those rows into a reused buffer.
+//! them, and the thread copies those rows into a reused buffer. A frame takes
+//! in the window's title bar and borders, so each read first finds where the
+//! window's content lies in it, which regions are measured from.
 //!
 //! A capture that can no longer produce frames ends the way a closed window
 //! does: its handler receives a [`io::ErrorKind::NotConnected`] error that
@@ -63,11 +65,11 @@ use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUnini
 use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 use windows::core::{Interface, factory};
 
-use super::WindowsSystem;
+use super::{WindowsSystem, client_on_screen, frame_on_screen};
 use crate::schedule::{ReadClock, frame_interval};
 use crate::screen::{
     Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
-    Region, Size,
+    Region, Size, content, in_frame,
 };
 
 /// The frame pool's buffers: one the thread may hold until its next read,
@@ -503,30 +505,47 @@ impl Capturer {
             .map(|error| ended(&format!("the graphics device was lost: {error}")))
     }
 
-    /// Copies `crop` of `frame` into the buffer and returns the window's
-    /// size, or `None` when the frame had to be dropped for a resize.
+    /// Where the window's content lies in a frame of `captured` size, or
+    /// `None` when its client area cannot be read or covers none of the
+    /// frame, and the whole frame is the content.
+    fn content(&self, captured: Size) -> Option<Region> {
+        let frame = frame_on_screen(self.window).ok()?;
+        let client = client_on_screen(self.window).ok()?;
+        content(frame, client, captured)
+    }
+
+    /// Copies `crop` of `frame`'s content into the buffer and returns the
+    /// content's size, or `None` when the frame had to be dropped for a
+    /// resize.
     fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: &Crop) -> io::Result<Option<Size>> {
-        let content = frame.ContentSize()?;
-        if content != self.pool_size {
+        let surface = frame.ContentSize()?;
+        if surface != self.pool_size {
             self.pool
                 .Recreate(
                     &self.winrt_device,
                     DirectXPixelFormat::B8G8R8A8UIntNormalized,
                     POOL_BUFFERS,
-                    content,
+                    surface,
                 )
                 .map_err(|error| {
                     ended(&format!(
                         "the capture cannot follow the window's new size: {error}"
                     ))
                 })?;
-            self.pool_size = content;
+            self.pool_size = surface;
             return Ok(None);
         }
-        let window_size = Size {
-            width: u32::try_from(content.Width).unwrap_or_default(),
-            height: u32::try_from(content.Height).unwrap_or_default(),
+        let captured = Size {
+            width: u32::try_from(surface.Width).unwrap_or_default(),
+            height: u32::try_from(surface.Height).unwrap_or_default(),
         };
+        let area = self
+            .content(captured)
+            .or_else(|| Region::whole(captured))
+            .ok_or(OutsideWindow {
+                window_size: captured,
+            })?;
+        let window_size = area.size();
         let outside = OutsideWindow { window_size };
         let whole = [Placement {
             from: Region::whole(window_size).ok_or(outside)?,
@@ -544,18 +563,23 @@ impl Capturer {
         let source: ID3D11Texture2D = unsafe { access.GetInterface() }?;
         let staging = self.staging(size)?;
         for placement in placements {
-            let area = D3D11_BOX {
-                left: placement.from.x(),
-                top: placement.from.y(),
+            let from = in_frame(placement.from, area).ok_or(outside)?;
+            let copied = D3D11_BOX {
+                left: from.x(),
+                top: from.y(),
                 front: 0,
-                right: placement.from.right(),
-                bottom: placement.from.bottom(),
+                right: from.right(),
+                bottom: from.bottom(),
                 back: 1,
             };
             #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: both textures are live and BGRA; `area` lies inside the
-            // source, which `fits` checked, and the layout placed it inside
-            // the staging texture, which has the layout's size.
+            // SAFETY: both textures are live and BGRA; `copied` lies inside
+            // the window's content, which `in_frame` checked, and the content
+            // lies inside `captured`, which `content` makes sure of; the
+            // source has the size `captured`, since a frame of another size
+            // than the pool's recreated the pool above instead. The layout
+            // placed the copy inside the staging texture, which has the
+            // layout's size.
             unsafe {
                 self.context.CopySubresourceRegion(
                     &staging,
@@ -565,7 +589,7 @@ impl Capturer {
                     0,
                     &source,
                     0,
-                    Some(&raw const area),
+                    Some(&raw const copied),
                 );
             };
         }
@@ -806,6 +830,7 @@ mod tests {
     use super::*;
     use crate::screen::{Image, Layout, Region};
     use crate::system::System;
+    use crate::win::window_handle;
 
     /// Captures a visible window on the desktop of whoever runs it. It is
     /// ignored because CI runners have no visible windows.
@@ -910,6 +935,33 @@ mod tests {
             })
         });
         assert!(matched, "each packed region matches the whole frame's");
+    }
+
+    /// Captures a visible window with a title bar whole and checks that the
+    /// frame holds its content alone, at the size the system says the
+    /// window's content has. It is ignored because CI runners have no
+    /// visible windows.
+    #[test]
+    #[ignore = "needs a visible window with a title bar on an interactive desktop"]
+    fn a_frame_holds_the_window_s_content_alone() {
+        let system = WindowsSystem::new();
+        let window = system
+            .windows()
+            .unwrap()
+            .into_iter()
+            .find(|window| {
+                let content = system.content_bounds(window.handle).ok().flatten();
+                let frame = frame_on_screen(window_handle(window.handle).unwrap());
+                window.visible
+                    && !window.title.is_empty()
+                    && content.zip(frame.ok()).is_some_and(|(content, frame)| {
+                        content.bottom - content.top >= 64 && content.top > frame.top
+                    })
+            })
+            .expect("a visible window with a title bar");
+        let (size, image) = capture_once(&system, window.handle, Crop::Whole);
+        assert_eq!(Some(size), system.content_size(window.handle).unwrap());
+        assert_eq!(image.size(), size);
     }
 
     #[test]

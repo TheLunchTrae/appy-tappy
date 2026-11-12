@@ -106,25 +106,26 @@ pub trait System {
     /// Returns the operating system's error.
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>>;
 
-    /// The size of `window` as a capture of it frames it now: its bounds
-    /// without the shadow the system draws around it, or `None` once it
-    /// closed or while it is minimized. A capture can then start for the
-    /// size its first frame has.
+    /// The size of `window`'s content as a capture of it lends it now, or
+    /// `None` once it closed or while it is minimized: see
+    /// [`crate::screen::content`]. A capture can then start for the size its
+    /// first frame has.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error.
-    fn frame_size(&self, window: u64) -> io::Result<Option<Size>>;
+    fn content_size(&self, window: u64) -> io::Result<Option<Size>>;
 
-    /// The bounds of `window`'s frame as the screen shows it, which a
-    /// capture's frame covers, or `None` once it closed. On Windows they
-    /// leave out the invisible borders that [`System::window_place`]'s
+    /// The bounds of `window`'s content on the screen, which a capture of it
+    /// lends and a region's coordinates are measured from, or `None` once it
+    /// closed: see [`crate::screen::content_on_screen`]. On Windows they
+    /// leave out the title bar and borders that [`System::window_place`]'s
     /// bounds take in. This default gives those bounds.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error.
-    fn frame_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
+    fn content_bounds(&self, window: u64) -> io::Result<Option<Bounds>> {
         Ok(self.window_place(window)?.map(|place| place.bounds))
     }
 
@@ -170,7 +171,7 @@ impl System for Unsupported {
         unsupported()
     }
 
-    fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+    fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
         unsupported()
     }
 
@@ -539,7 +540,7 @@ mod tests {
                     front: false,
                 }))
             }
-            fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+            fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
                 unsupported()
             }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
@@ -550,7 +551,7 @@ mod tests {
             }
         }
         assert_eq!(
-            OneWindow.frame_bounds(7).unwrap(),
+            OneWindow.content_bounds(7).unwrap(),
             Some(Bounds {
                 left: 1,
                 top: 2,
@@ -558,7 +559,7 @@ mod tests {
                 bottom: 40
             })
         );
-        assert_eq!(OneWindow.frame_bounds(8).unwrap(), None);
+        assert_eq!(OneWindow.content_bounds(8).unwrap(), None);
     }
 
     #[test]
@@ -568,8 +569,8 @@ mod tests {
             system.processes().map(drop),
             system.windows().map(drop),
             system.window_place(7).map(drop),
-            system.frame_size(7).map(drop),
-            system.frame_bounds(7).map(drop),
+            system.content_size(7).map(drop),
+            system.content_bounds(7).map(drop),
             system.executable_build(ProcessId::new(1)).map(drop),
             system.screen_pixel(0, 0).map(drop),
         ]

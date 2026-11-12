@@ -26,6 +26,9 @@ mod image;
 mod layout;
 mod resample;
 
-pub use capture::{Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession, grab};
+pub use capture::{
+    Capture, CaptureSession, Crop, Frame, FrameHandler, NoSession, content, content_on_screen,
+    grab, in_frame,
+};
 pub use image::{FrameBuffer, Image, ImageError, OutsideWindow, Region, Size};
 pub use layout::{Layout, Placement};

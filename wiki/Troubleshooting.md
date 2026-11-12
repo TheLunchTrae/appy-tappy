@@ -84,8 +84,7 @@ The reasons a number has no reading:
   the number now, or the number is another color than the reference's. When
   the log line says **where its region scales to**, the window isn't at a
   size the value was drawn at, and the scaled region can lie beside the
-  number, most often between windowed and fullscreen:
-  [fix the value at this size](Values.md#fix-a-value-at-one-size). Otherwise
+  number: [fix the value at this size](Values.md#fix-a-value-at-one-size). Otherwise
   [edit the reference](References.md#make-a-reference): pick the color on the
   middle of a character, or raise **Tolerance**.
 - **The region holds more than 24 characters.** Something else in the
