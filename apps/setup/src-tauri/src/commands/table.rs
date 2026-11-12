@@ -148,6 +148,16 @@ macro_rules! with_commands {
             commands::open_trace_folder() -> ();
             /// Whether the runtime runs, and the newest trace file read so far, for the Debug page.
             commands::debug_overview() -> DebugOverview;
+            /// The trace files, newest first.
+            commands::trace_files() -> Vec<TraceFile>;
+            /// The metrics of the trace file `file` over `range`. Each call reads on from where the last one on that
+            /// file stopped; `progress` says how much is read, and the page asks again at once while it is less than
+            /// the file.
+            commands::trace_metrics(file: String, range: TraceRange) -> TraceMetrics;
+            /// The rows of the trace file `file` that `filter` picks, read on like {@link traceMetrics}.
+            commands::trace_rows(file: String, filter: RowFilter) -> TraceRows;
+            /// Lets go of the trace file the metrics and rows read.
+            commands::close_trace() -> ();
             /// The end of `log`, whole lines only, or an empty string before anything was logged.
             commands::read_log(log: LogName) -> String;
             /// Opens the logs folder in File Explorer.

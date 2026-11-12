@@ -43,6 +43,7 @@ use appytappy_sources::screen::{CaptureSession, Image};
 use crate::check_spec::{Pictures, RegionCheck};
 use crate::debug::log::SetupLog;
 use crate::debug::trace_file::TraceTail;
+use crate::debug::trace_view::TraceView;
 use crate::overlay::{Overlays, Purpose};
 use crate::recording::{Recording, ocr};
 use crate::stores::{SavedApp, Stores};
@@ -108,6 +109,8 @@ pub(crate) struct Owner<H: Host> {
     /// The newest trace file as the Debug page last read it, so the next
     /// read takes only the rows added since.
     trace_tail: Option<TraceTail>,
+    /// The trace file the Debug page's metrics and rows read, from its start.
+    trace_view: Option<TraceView>,
     /// `setup.log`, open while the settings show debug details.
     setup_log: SetupLog,
 }
@@ -141,6 +144,7 @@ impl<H: Host> Owner<H> {
             update: None,
             builds: BTreeMap::new(),
             trace_tail: None,
+            trace_view: None,
             setup_log: SetupLog::new(match &stores {
                 Ok(stores) => Some(stores.logs.clone()),
                 Err(_unknown) => None,

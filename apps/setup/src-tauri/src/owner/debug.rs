@@ -1,5 +1,5 @@
-//! The Debug page: whether the runtime runs, the newest trace file, both
-//! logs, and the debug bundle.
+//! The Debug page: whether the runtime runs, the newest trace file, the
+//! metrics and rows of a chosen one, both logs, and the debug bundle.
 
 use std::time::Duration;
 
@@ -8,7 +8,8 @@ use appytappy_sources::screen::Size;
 use crate::automations;
 use crate::debug::bundle::{BundleJob, BundleSpec};
 use crate::debug::outline::{self, CaptureOutline};
-use crate::debug::trace_file::{self, TraceTail};
+use crate::debug::trace_file::{self, TraceFile, TraceTail};
+use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows, TraceView};
 use crate::debug::{DebugOverview, LogName, log_tail};
 use crate::settings;
 use crate::stores::Stores;
@@ -53,6 +54,55 @@ impl<H: Host> Owner<H> {
             trace,
             trace_problem,
         })
+    }
+
+    /// The trace files, newest first.
+    pub(crate) fn trace_files(&self) -> Result<Vec<TraceFile>, String> {
+        trace_file::list(&self.debug_stores()?.traces)
+            .map_err(|error| format!("AppyTappy cannot list the trace files: {error}."))
+    }
+
+    /// The metrics of the trace file `file` over `range`, read on from where
+    /// the last call on it stopped.
+    pub(crate) fn trace_metrics(
+        &mut self,
+        file: &str,
+        range: TraceRange,
+    ) -> Result<TraceMetrics, String> {
+        self.trace_view(file).map(|view| view.metrics(range))
+    }
+
+    /// The rows of the trace file `file` that `filter` picks, read on from
+    /// where the last call on it stopped.
+    pub(crate) fn trace_rows(
+        &mut self,
+        file: &str,
+        filter: &RowFilter,
+    ) -> Result<TraceRows, String> {
+        self.trace_view(file).map(|view| view.rows(filter))
+    }
+
+    /// Lets go of the trace file the metrics and rows read, as the Debug
+    /// page closes.
+    pub(crate) fn close_trace(&mut self) {
+        self.trace_view = None;
+    }
+
+    /// The view of the trace file `file`, read on. A view of another file is
+    /// let go, as the page reads one at a time.
+    fn trace_view(&mut self, file: &str) -> Result<&TraceView, String> {
+        if !trace_file::is_trace_name(file) {
+            return Err(format!("{file} is not a trace file."));
+        }
+        let path = self.debug_stores()?.traces.join(file);
+        let view = match self.trace_view.take() {
+            Some(view) if view.path() == path => view,
+            _ => TraceView::new(path),
+        };
+        let view = self.trace_view.insert(view);
+        view.update()
+            .map_err(|error| format!("AppyTappy cannot read {file}: {error}."))?;
+        Ok(view)
     }
 
     /// The newest lines of `log`, or nothing before anything was logged.

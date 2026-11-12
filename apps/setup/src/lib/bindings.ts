@@ -187,6 +187,27 @@ undo: boolean,
 cooldownMs: number, }>;
 
 /**
+ * One automation's numbers.
+ */
+export type AutomationMetrics = DeepReadonly<{ app: string, name: string,
+/**
+ * How many times its actions started.
+ */
+ran: number,
+/**
+ * How many times its cooldown held it back.
+ */
+held: number,
+/**
+ * How many times its actions failed.
+ */
+failed: number,
+/**
+ * From a frame arriving to its actions starting.
+ */
+frameToAction: Spread | null, }>;
+
+/**
  * A saved automation, as the Automations page lists it.
  */
 export type AutomationSummary = DeepReadonly<{
@@ -264,6 +285,29 @@ best: GlyphView | null,
  * The closest glyph of another character, if the reference has one.
  */
 runnerUp: GlyphView | null, }>;
+
+/**
+ * How many times fall in each bar of a chart.
+ */
+export type Chart = DeepReadonly<{
+/**
+ * How long each bar spans; bar `n` counts the times from `n` bars to
+ * `n + 1`.
+ */
+barNs: number,
+/**
+ * How many times each bar counts.
+ */
+counts: number[],
+/**
+ * How many times are longer than the last bar, as a few slow times
+ * would leave the rest too thin to read.
+ */
+over: number,
+/**
+ * How many times in all.
+ */
+samples: number, }>;
 
 /**
  * How a value is read from its region.
@@ -742,6 +786,27 @@ fastestMs: number,
 slowestMs: number, }>;
 
 /**
+ * How far a [`TraceView`] has read its file.
+ */
+export type ReadProgress = DeepReadonly<{
+/**
+ * The file's name.
+ */
+file: string,
+/**
+ * The file's size.
+ */
+bytes: number,
+/**
+ * How much of it is read. Less than `bytes` while it is read.
+ */
+read: number,
+/**
+ * Why its rows cannot be read, such as a trace from another version.
+ */
+problem: string | null, }>;
+
+/**
  * A value the check read, as the UI shows it.
  */
 export type Reading = DeepReadonly<{ "kind": "number", "value": number } | { "kind": "flag", "value": boolean } | { "kind": "state", "value": string }>;
@@ -966,6 +1031,28 @@ export type RegionSpec = DeepReadonly<{ x: number, y: number, width: number, hei
  * A region as the UI describes one.
  */
 export type RegionView = DeepReadonly<{ x: number, y: number, width: number, height: number, }>;
+
+/**
+ * Which rows the rows table shows.
+ */
+export type RowFilter = DeepReadonly<{ range: TraceRange,
+/**
+ * The categories of row to show. A trace's own rows count as
+ * lifecycle rows.
+ */
+categories: Array<TraceCategory>,
+/**
+ * The application, or `None` for every one.
+ */
+app: string | null,
+/**
+ * Only rows that took longer than this, in nanoseconds.
+ */
+tookOverNs: number | null,
+/**
+ * Text a field of the row holds, in any case; empty for any row.
+ */
+search: string, }>;
 
 /**
  * A picture of text in a reference's font and the text it shows.
@@ -1286,6 +1373,91 @@ fileLimitMb: number,
 keepFiles: number, }>;
 
 /**
+ * A trace file, as the Debug page lists it.
+ */
+export type TraceFile = DeepReadonly<{
+/**
+ * Its name.
+ */
+name: string,
+/**
+ * Its size.
+ */
+bytes: number, }>;
+
+/**
+ * The metrics of one trace file over one range.
+ */
+export type TraceMetrics = DeepReadonly<{
+/**
+ * How much of the file is read.
+ */
+progress: ReadProgress,
+/**
+ * The categories the file holds rows of. A number of another category
+ * was not recorded.
+ */
+recorded: Array<TraceCategory>,
+/**
+ * How long the range covers, from its first row to the newest.
+ */
+spanNs: number,
+/**
+ * From a frame arriving to the action it led to starting.
+ */
+frameToAction: Spread | null,
+/**
+ * How those times spread.
+ */
+chart: Chart | null,
+/**
+ * How long the runtime took to handle each event.
+ */
+ruleHandling: Spread | null,
+/**
+ * How long each automation's actions took to run.
+ */
+actionRun: Spread | null,
+/**
+ * How many values were read.
+ */
+reads: number,
+/**
+ * How many values changed.
+ */
+changes: number,
+/**
+ * How many automations' actions started.
+ */
+actions: number,
+/**
+ * How many automations' actions failed.
+ */
+failed: number,
+/**
+ * How many records the trace dropped.
+ */
+dropped: number,
+/**
+ * Each value read, by application and then name.
+ */
+values: Array<ValueMetrics>,
+/**
+ * Each automation that fired or ran, by application and then name.
+ */
+automations: Array<AutomationMetrics>,
+/**
+ * Whether a time comes from only the newest [`SAMPLES`] of its kind,
+ * as the range holds more.
+ */
+sampled: boolean, }>;
+
+/**
+ * Which of a trace's rows the metrics and the rows count.
+ */
+export type TraceRange = DeepReadonly<"lastMinute" | "lastTenMinutes" | "whole">;
+
+/**
  * One row of a trace file, as the page shows it.
  */
 export type TraceRow = DeepReadonly<{
@@ -1301,6 +1473,35 @@ tookNs: number | null,
  * When the frame arrived whose reading led to this row.
  */
 cause: number | null, detail: string, }>;
+
+/**
+ * The rows a [`RowFilter`] picks.
+ */
+export type TraceRows = DeepReadonly<{
+/**
+ * How much of the file is read.
+ */
+progress: ReadProgress,
+/**
+ * The newest rows it picks, at most [`SHOWN`], oldest first.
+ */
+rows: Array<TraceRow>,
+/**
+ * How many rows it picks.
+ */
+matching: number,
+/**
+ * How many rows are held to pick from, the newest [`ROWS`].
+ */
+held: number,
+/**
+ * How many rows were read.
+ */
+total: number,
+/**
+ * The applications the held rows name, in order.
+ */
+apps: Array<string>, }>;
 
 /**
  * What the overview shows of the newest trace file.
@@ -1376,6 +1577,19 @@ name: string,
  * Where on the window the value is read and how.
  */
 screen: ScreenDef, }>;
+
+/**
+ * One value's numbers.
+ */
+export type ValueMetrics = DeepReadonly<{ app: string, name: string, reads: number, changes: number,
+/**
+ * When it last changed, in the whole trace.
+ */
+lastChangeNs: number | null,
+/**
+ * How long its check took.
+ */
+check: Spread | null, }>;
 
 /**
  * One value's line in the overlay.

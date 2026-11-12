@@ -28,6 +28,9 @@ pub(crate) const REPEATED: &[&str] = &[
     "recording_state",
     "screenshot",
     "sync_overlays",
+    "trace_files",
+    "trace_metrics",
+    "trace_rows",
     "watched_reading",
 ];
 
