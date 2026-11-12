@@ -1941,6 +1941,9 @@ export const TRACE_CATEGORIES = [
   "lifecycle"
 ] as const satisfies readonly TraceCategory[];
 
+/** The first line of a trace file, which names its fields. */
+export const TRACE_HEADER = "time_ns,thread,event,app,item,value,took_ns,cause,detail";
+
 /**
  * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it
  * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read

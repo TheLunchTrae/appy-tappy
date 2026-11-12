@@ -39,7 +39,12 @@ The same setting adds debug details to the pages that read a window live.
   it does, such as a field that must match or, with the fallback on, another
   window that qualifies.
 
-## Runtime
+## Tabs
+
+The page has four tabs: **Overview**, **Metrics**, **Trace rows** and
+**Logs**.
+
+## Overview
 
 The top line says whether the background part is running, and whether a
 [runtime trace](Settings.md#runtime-trace) is recording and until when.
@@ -67,11 +72,54 @@ Under the numbers are the trace's newest rows, with times counted from when
 the trace started. The page reads the trace again every few seconds. A trace
 written by another version of AppyTappy shows why it cannot be read instead.
 
+## Metrics
+
+**Metrics** reads a whole trace file, the newest at first, and counts what it
+holds. **Trace file** picks the file; the one the runtime records into now says
+**recording**. The switch beside it picks the rows counted: those in the last
+minute or the last 10 minutes before the trace's newest row, or the whole
+trace. A large file is read in parts, and the page says how much it has read.
+
+- **Frame to action, median** and **95th percentile**, **Running actions,
+  median** and **Rule handling, 95th percentile**, as on the overview.
+- **Reads a second.** How many values were read each second. It needs **Each
+  read** recorded.
+- **Value changes**, **Rows dropped** and **Actions that failed.**
+
+A chart shows how the frame to action times spread, with the median and the
+95th percentile marked. A few times far slower than the rest are counted
+together in a last bar, so the rest stay readable.
+
+Under it, a table lists each value: how often it changed, when it last
+changed, and, with each read recorded, how often it was read and how long its
+check took. Another lists each automation: how often its actions ran, how
+often its cooldown held it back, how often its actions failed, and its frame
+to action times.
+
+Times come from the newest 20,000 of each kind, and the page says so when a
+range holds more.
+
+## Trace rows
+
+**Trace rows** shows the newest 500 rows of the picked trace file that match
+the filters, read again every second. The switch picks the kinds of row,
+named as the trace settings name what they record. **Application** keeps one application's rows,
+**Took over (ms)** keeps rows that took longer than that, and **Search** keeps
+rows that hold the text in any field. The filters reach the newest 100,000
+rows of a trace.
+
+**Frame** is when the frame arrived that led to the row. Picking it marks every
+row from that frame, so a frame's reading, its rules and its actions can be
+read together. Turning off **Follow newest** stops reading new rows, so the
+rows stay still while you read them. **Copy rows as CSV** copies the rows
+shown, as the trace file writes them.
+
 ## Logs
 
 The switch picks the background part's log or AppyTappy Setup's own, and the
-box shows its end, read again every few seconds. **Open logs folder** opens
-the folder that holds both, with the older copy of each.
+box shows its end, read again every few seconds. **Search** keeps the lines
+that hold the text and says how many of the lines they are. **Open logs
+folder** opens the folder that holds both, with the older copy of each.
 
 ## Debug bundle
 

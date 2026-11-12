@@ -930,6 +930,10 @@ fn constants() -> String {
             literal(&trace_categories())
         ),
         format!(
+            "/** The first line of a trace file, which names its fields. */\nexport const TRACE_HEADER = {};\n",
+            literal(&crate::debug::trace_file::HEADER)
+        ),
+        format!(
             "/**\n * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it\n * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read\n * each the same.\n */\nexport const PARSE_CASES = {} as const;\n",
             literal(&parse_cases())
         ),
