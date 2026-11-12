@@ -61,6 +61,10 @@ export const INK_HINT =
 export const LABEL_HINT =
   'Type exactly what the region shows, such as 87% or 1,250. Each labeled screenshot teaches the reference the characters in it.';
 
+/** The characters a reference needs. */
+export const EXPECTED_HINT =
+  'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from what you label or record, never from this list, and a number reads the same way whatever you turn on.';
+
 /** The read interval's two waits. */
 export const READING_HINT = `AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs} ms.`;
 

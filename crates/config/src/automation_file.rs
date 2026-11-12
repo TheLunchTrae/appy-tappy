@@ -840,6 +840,7 @@ mod tests {
                     image: sample_name("percent", 1),
                     text: "12%".to_owned(),
                 }],
+                expects: None,
             }],
         }
     }

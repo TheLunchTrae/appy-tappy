@@ -52,11 +52,17 @@ select **Keep this window** or **Stay** to carry on, as
   characters. Pick one of the application's references, or select
   **New reference from this region** to make one from the region you drew.
   **Edit** changes the picked one, such as to teach it a digit it does not
-  know yet. Turn on **Whole number only** to ignore every digit after the
+  know yet. A reference that has yet to learn characters it needs lists them
+  after **Missing**; it still reads the characters it knows. Turn on
+  **Whole number only** to ignore every digit after the
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.
   To read numbers with a thousands separator, such as `1,234`, teach the
-  reference the `,` too. A `.` is always the decimal point, and a `,` only
+  reference the `,` too. Turning on **Decimal point** and **Comma** under the
+  reference's [**Characters it needs**](References.md#choose-what-it-needs)
+  lists them as missing until it has learned them. That list only says what
+  is left to teach: it does not change how a number reads. A `.` is always
+  the decimal point, and a `,` only
   separates thousands: it counts only between groups of three digits, so
   `12,5` reads as 12. A number written with its point first, such as `.5`,
   reads as 0.5, and a `.` with no digit after it, such as `...`, is not a

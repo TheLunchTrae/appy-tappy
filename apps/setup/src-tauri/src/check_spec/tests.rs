@@ -93,6 +93,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
                 image: sample_name("digits", 1),
                 text: "1".to_owned(),
             }],
+            expects: Some("123".to_owned()),
         },
         pictures: vec![
             screenshot()
@@ -430,6 +431,7 @@ fn characters_being_taught_read_but_are_not_a_value() {
             session(&[], None),
             "digits",
             "Digits",
+            "",
         ),
         Err(SpecError::NotAValue)
     );
@@ -626,9 +628,14 @@ fn the_ui_describes_checks_in_camel_case_json() {
 #[test]
 fn a_new_reference_names_one_picture_per_label() {
     let spec = characters(left(), None, one(0), Vec::new());
-    let (reference, pictures) =
-        to_saved_reference(&spec, session(&[screenshot()], None), "digits", "Digits")
-            .expect("valid characters");
+    let (reference, pictures) = to_saved_reference(
+        &spec,
+        session(&[screenshot()], None),
+        "digits",
+        "Digits",
+        "0123456789%",
+    )
+    .expect("valid characters");
     assert_eq!(
         reference,
         ReferenceDef {
@@ -636,10 +643,12 @@ fn a_new_reference_names_one_picture_per_label() {
             name: "Digits".to_owned(),
             ink: RED.into(),
             tolerance: 0,
+            // The one label teaches the one sample, whatever it expects.
             samples: vec![SampleDef {
                 image: "ref-digits-1.png".to_owned(),
                 text: "1".to_owned(),
             }],
+            expects: Some("0123456789%".to_owned()),
         }
     );
     assert_eq!(pictures.len(), 1);
@@ -676,8 +685,13 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
         session(&[screenshot()], None),
         "digits",
         "Red digits",
+        "",
     )
     .expect("valid characters");
+    assert_eq!(
+        reference.expects, None,
+        "what it expected goes when the user chooses none"
+    );
     let images: Vec<&str> = reference
         .samples
         .iter()
@@ -722,7 +736,7 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
         references: &gapped,
     };
     let (reference, pictures) =
-        to_saved_reference(&spec, session, "digits", "Digits").expect("valid characters");
+        to_saved_reference(&spec, session, "digits", "Digits", "").expect("valid characters");
     let names: Vec<&str> = pictures.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(names, ["ref-digits-3.png"]);
     assert_eq!(reference.samples.len(), 2);
@@ -746,6 +760,7 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
         session(&[screenshot()], Some(&recording)),
         "digits",
         "Digits",
+        "",
     )
     .expect("valid characters");
     let images: Vec<&str> = reference

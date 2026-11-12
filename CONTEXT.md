@@ -23,6 +23,10 @@ parts fit.
   with a saved image.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
+- **Expected characters.** The characters the user says a reference needs to
+  know. They guide teaching in the setup app, which shows the ones still
+  missing; nothing learns or reads with them. The UI calls them
+  **Characters it needs**.
 - **Fix.** A screen region value drawn again at one more window size, which
   it reads there exactly instead of scaled from its first drawing.
 - **Pin.** The side of the window, a corner, an edge's middle, or the center,

@@ -21,10 +21,12 @@ import {
   toReference,
   withKind,
 } from '../lib/check.ts';
-import { readers } from '../lib/reference.ts';
+import { coverage, startingExpected } from '../lib/expected.ts';
+import { knownCharacters, readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { Question, useQuestion } from './Question.tsx';
+import { MissingNote } from './CharacterChips.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
@@ -98,6 +100,8 @@ export type CaptureMode =
 interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
+  /** The characters it needs, each once. */
+  readonly expects: readonly string[];
   /** The value's region when the editor opened from a value, to put back when it closes. */
   readonly valueRegion: Drawn;
 }
@@ -120,7 +124,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const [start] = useState(() => {
     const editing: Editing | null =
       mode.kind === 'reference'
-        ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
+        ? {
+            existing: mode.existing,
+            name: mode.existing?.name ?? '',
+            expects: startingExpected(mode.existing),
+            valueRegion: { region: null, drawnOn: null },
+          }
         : null;
     return {
       screenshots: 0,
@@ -344,7 +353,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   // Opens the reference editor on `existing`, or on a new reference read
   // from the value's region.
   const openEditor = (existing: ReferenceDef | null): void => {
-    setEditing({ existing, name: existing?.name ?? '', valueRegion: { region: draft.region, drawnOn: draft.drawnOn } });
+    setEditing({
+      existing,
+      name: existing?.name ?? '',
+      expects: startingExpected(existing),
+      valueRegion: { region: draft.region, drawnOn: draft.drawnOn },
+    });
     setDraft((current) => toReference(current, existing));
     setPicking(null);
     setSaveError(null);
@@ -372,6 +386,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
         app: appId,
         referenceName: editing.name.trim(),
         check: built.spec,
+        expects: editing.expects.join(''),
       });
       setSaveError(null);
       if (mode.kind === 'reference') {
@@ -398,6 +413,16 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
   const editedName = editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim();
+  // What the reference being edited learns from, and how the characters in it compare with the ones it needs.
+  const taught = {
+    saved: editing?.existing?.samples.map((sample) => sample.text) ?? [],
+    labeled: [...draft.labels.values()].filter((text) => text.trim() !== ''),
+    recorded: [...draft.recorded.values()],
+  };
+  const covered = coverage(
+    editing?.expects ?? [],
+    knownCharacters([...taught.saved, ...taught.labeled, ...taught.recorded]),
+  );
 
   return (
     <main className="capture">
@@ -922,9 +947,11 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             canPick={shownPicture !== null}
             selected={selected}
             label={selected === null ? '' : (draft.labels.get(selected) ?? '')}
-            saved={editing.existing?.samples.map((sample) => sample.text) ?? []}
-            labeled={[...draft.labels.values()].filter((text) => text.trim() !== '')}
-            recorded={[...draft.recorded.values()]}
+            saved={taught.saved}
+            labeled={taught.labeled}
+            recorded={taught.recorded}
+            expected={editing.expects}
+            coverage={covered}
             readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
             onName={(name) => {
               setEditing((current) => (current === null ? null : { ...current, name }));
@@ -939,6 +966,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               if (selected !== null) {
                 setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
               }
+            }}
+            onExpected={(expects) => {
+              setEditing((current) => (current === null ? null : { ...current, expects }));
             }}
             record={
               <RecordPanel
@@ -973,6 +1003,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
           <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
+          {covered.missing.length === 0 ? null : (
+            <>
+              <MissingNote characters={covered.missing} />
+              <p className="note">You can save now and teach the missing characters later.</p>
+            </>
+          )}
           <div className="actions">
             <button
               type="button"

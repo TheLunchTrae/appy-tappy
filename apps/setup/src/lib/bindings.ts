@@ -754,7 +754,17 @@ tolerance: number,
 /**
  * The pictures it learns from.
  */
-samples: Array<SampleDef>, }>;
+samples: Array<SampleDef>,
+/**
+ * The characters the user says it needs to know, each once, such as
+ * `0123456789.%`, or `None` when the user chose none.
+ *
+ * Setup guidance only. The setup app shows which of them the samples
+ * have yet to teach. Nothing that learns or reads looks at it: it adds
+ * no glyph, labels no shape, and leaves how a number is read as it is,
+ * whatever characters it lists.
+ */
+expects?: string, }>;
 
 /**
  * A saved reference of a saved application.
@@ -785,7 +795,13 @@ referenceName: string,
  * The characters it is taught, as a [`CheckSpec::Characters`] that
  * names the reference when it is saved already.
  */
-check: CheckSpec, }>;
+check: CheckSpec,
+/**
+ * The characters the user says it needs to know, each once, or empty
+ * when the user chose none. It is saved as given and replaces what the
+ * saved reference expected.
+ */
+expects: string, }>;
 
 /**
  * A rectangle in pixels from the window's top-left corner.
@@ -1247,13 +1263,14 @@ antiCheat: Array<string>, }>;
 
 /**
  * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the
- * most states, the settings' ranges, the highest tolerance, and the most pixels a click's search area holds, as the
- * saved files take them.
+ * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most
+ * pixels a click's search area holds, as the saved files take them.
  */
 export const LIMITS = {
   "fastestReadMs": 1,
   "maxActionAppBytes": 256,
   "maxCooldownMs": 86400000,
+  "maxExpectedCharacters": 128,
   "maxSearchPixels": 160000,
   "maxStates": 16,
   "maxTargetBytes": 2048,

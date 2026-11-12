@@ -39,7 +39,7 @@ use appytappy_config::action::{
     OpenTarget, SoundFile,
 };
 use appytappy_config::app_file::{
-    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
+    AntiCheatDef, MAX_EXPECTED_CHARACTERS, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
 };
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, CornerDef, MAX_COOLDOWN_MS,
@@ -840,6 +840,7 @@ fn constants() -> String {
         "maxActionAppBytes": MAX_APP_NAME_LEN,
         "maxCooldownMs": MAX_COOLDOWN_MS,
         "maxStates": MAX_STATES,
+        "maxExpectedCharacters": MAX_EXPECTED_CHARACTERS,
         "maxTargetBytes": MAX_TARGET_LEN,
         "maxTraceFileMb": MAX_TRACE_FILE_MB,
         "maxTraceFiles": MAX_TRACE_FILES,
@@ -870,7 +871,7 @@ fn constants() -> String {
     });
     [
         format!(
-            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states, the settings' ranges, the highest tolerance, and the most pixels a click's search area holds, as the\n * saved files take them.\n */\nexport const LIMITS = {} as const;\n",
+            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most\n * pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
             literal(&limits)
         ),
         format!(

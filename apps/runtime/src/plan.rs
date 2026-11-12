@@ -819,6 +819,8 @@ mod tests {
                 image: sample_name("digits", 1),
                 text: "11".to_owned(),
             }],
+            // Setup guidance the plan never reads: it knows only the `1`.
+            expects: Some("0123456789".to_owned()),
         });
         let mut missing = example.clone();
         missing.references.clear();

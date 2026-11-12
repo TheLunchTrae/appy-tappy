@@ -1677,6 +1677,51 @@ select {
   font-size: 22px;
 }
 
+/* Characters a reference has yet to learn: outlined, since it has no shape to show for them. */
+.glyphs.missing .glyph {
+  border: 1px dashed var(--warn);
+  background: none;
+  color: var(--warn);
+}
+
+.missing-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* The characters a reference needs: presets to turn on, in rows that wrap. */
+.needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.need {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.need:has(input:checked) {
+  background: var(--raise);
+}
+
+.need input {
+  accent-color: var(--capture);
+}
+
+.need small {
+  color: var(--muted);
+}
+
 .choices {
   display: flex;
   flex-wrap: wrap;

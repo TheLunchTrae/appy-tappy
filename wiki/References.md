@@ -7,7 +7,9 @@ same font share one reference, and teaching it a new digit teaches all of
 them.
 
 The **References** page lists each application's references, with the
-characters each knows and the values that read with it.
+characters each knows and the values that read with it. A reference that has
+yet to learn characters it needs lists them after **Missing**, and so does
+the list of references you pick from for a Number value.
 
 A reference reads its characters at any size, so a number drawn larger than
 the ones it learned from still reads.
@@ -22,17 +24,64 @@ window, or select **New reference from this region** while you
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
    click the characters on a screenshot. **Tolerance** says how far a pixel's
    color may be from it and still count: drag the slider or type a number.
-3. **Teach it the characters.** Draw a region around text on a screenshot,
+3. **Choose the characters it needs.** Under **Characters it needs**, turn on
+   what the numbers can show. A new reference starts with **Digits** on.
+   [Choose what it needs](#choose-what-it-needs) describes the choices.
+4. **Teach it the characters.** Draw a region around text on a screenshot,
    then type what it shows, such as `87%`. AppyTappy learns the shape of each
    character from what you type. Label screenshots until
-   **Characters it knows** shows every digit the numbers need, or
+   **Characters still missing** says it knows every character it needs, or
    [record the region](#record-readings) to collect them as they show.
-4. **Save.** Select **Save reference**.
+5. **Save.** Select **Save reference**. A reference with characters still
+   missing saves too: the editor names them next to the button, and you can
+   teach them later.
 
 To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;
 new labels and readings add to it. Changing its color or tolerance changes how
 every value that reads with it reads, and the editor names them.
+
+## Choose what it needs
+
+**Characters it needs** is your list of what to teach, so you do not have to
+work out which characters are still to come. Turn on what the numbers this
+reference reads can show:
+
+- **Digits** is `0` to `9`.
+- **Decimal point**, **Comma**, **Percent**, **Minus**, **Plus**, and
+  **Colon** are each one sign. Turn on the ones the application draws.
+- **Uppercase** and **Lowercase** are the English letters `A` to `Z` and `a`
+  to `z`, each case on its own, and **Question mark** and
+  **Exclamation mark** are the punctuation that goes with them. Only
+  [Number](Values.md#checks) values read with a reference, and AppyTappy has
+  no check that reads text. Turn letters on only when a number's region shows
+  them with the number, such as the `Lv` in `Lv.5`.
+- **Other characters** takes anything else: type each character the region
+  shows, such as `/` or `°`. Delete a character there to stop needing it.
+
+A choice that holds only some of its characters, such as **Digits** with `0`
+to `5`, shows as partly on with how many it holds, and its characters show
+in **Other characters**, where you can remove each. Select the choice to turn
+all of it on, and again to turn all of it off.
+
+The editor compares the list with what the reference learned, and keeps up as
+you type labels, keep recorded readings, or correct them:
+
+- **Characters still missing** shows each needed character it has yet to
+  learn, outlined. This is what is left to teach. Once it has them all, it
+  says so.
+- **Characters it knows** shows the needed characters it learned. Characters
+  it learned that are not on the list show below them. They are fine to keep:
+  the list says what you need, not what is allowed.
+
+The list only guides you. AppyTappy learns a character from a label or a kept
+reading, never because it is on the list, and a number reads the same way
+whatever you turn on. [Checks](Values.md#checks) says how a number reads its
+`.` and `,`.
+
+A reference saved without a list shows every character it knows under
+**Characters it knows**, and nothing as missing. **Edit** it and turn on what
+it needs to see what is left to teach.
 
 ## Record readings
 

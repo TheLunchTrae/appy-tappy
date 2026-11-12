@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 
+import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
-import { andList, knownCharacters } from '../lib/reference.ts';
+import { andList } from '../lib/reference.ts';
 import { INK_HINT, INK_TOLERANCE_HINT, LABEL_HINT } from '../lib/hints.ts';
-import { CharacterChips } from './CharacterChips.tsx';
+import { CharacterChips, MissingChips } from './CharacterChips.tsx';
+import { ExpectedCharacters } from './ExpectedCharacters.tsx';
 import { Hint } from './Hint.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
 
@@ -23,6 +25,10 @@ interface Props {
   /** The labeled screenshots' and kept readings' texts. */
   readonly labeled: readonly string[];
   readonly recorded: readonly string[];
+  /** The characters it needs, each once. */
+  readonly expected: readonly string[];
+  /** How the characters in those texts compare with the ones it needs. */
+  readonly coverage: Coverage;
   /** The values that read with the saved reference. */
   readonly readers: readonly string[];
   /** The recording panel. */
@@ -31,6 +37,7 @@ interface Props {
   readonly onPick: () => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onLabel: (text: string) => void;
+  readonly onExpected: (expected: readonly string[]) => void;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -46,10 +53,22 @@ function learnedNote(saved: number, labeled: number, recorded: number): string {
   return parts.length === 0 ? 'Nothing learned yet.' : `Learned from ${andList(parts)}.`;
 }
 
-/** The inspector of a reference: its name and color, and the characters it learns. */
+/** Characters the reference knows: tiles in their own color, or plain text until that color is picked. */
+function Known({ characters, ink }: { readonly characters: readonly string[]; readonly ink: Color | null }) {
+  return ink === null ? (
+    <span className="note">{characters.length === 0 ? 'None yet.' : characters.join(' ')}</span>
+  ) : (
+    <CharacterChips characters={characters} ink={ink} large />
+  );
+}
+
+/** The inspector of a reference: its name and color, the characters it needs, and the ones it learns. */
 export function ReferenceEditor(props: Props) {
-  const { name, appName, ink, tolerance, selected, saved, labeled, recorded, readers } = props;
-  const characters = knownCharacters([...saved, ...labeled, ...recorded]);
+  const { name, appName, ink, tolerance, selected, saved, labeled, recorded, expected, coverage, readers } = props;
+  // Without a choice of what it needs, every character it learned shows as one group.
+  const chosen = expected.length > 0;
+  const known = chosen ? coverage.known : coverage.extra;
+  const extra = chosen ? coverage.extra : [];
   return (
     <>
       <div className="field">
@@ -82,6 +101,7 @@ export function ReferenceEditor(props: Props) {
         value={tolerance}
         onChange={props.onTolerance}
       />
+      <ExpectedCharacters expected={expected} onExpected={props.onExpected} />
       <div className="field">
         <span className="name">
           <label htmlFor="label-text">What the region shows on this screenshot</label>
@@ -104,12 +124,29 @@ export function ReferenceEditor(props: Props) {
           />
         )}
       </div>
+      {chosen ? (
+        <div className="field">
+          <span>Characters still missing</span>
+          {coverage.missing.length === 0 ? (
+            <span className="ok">None. It knows every character it needs.</span>
+          ) : (
+            <>
+              <MissingChips characters={coverage.missing} large />
+              <span className="note">
+                Label a screenshot that shows them, or record the region until it has shown them.
+              </span>
+            </>
+          )}
+        </div>
+      ) : null}
       <div className="field">
         <span>Characters it knows</span>
-        {ink === null ? (
-          <span className="note">{characters.length === 0 ? 'None yet.' : characters.join(' ')}</span>
-        ) : (
-          <CharacterChips characters={characters} ink={ink} large />
+        {known.length === 0 && extra.length > 0 ? null : <Known characters={known} ink={ink} />}
+        {extra.length === 0 ? null : (
+          <>
+            <span className="note">Not among the characters it needs, which is fine:</span>
+            <Known characters={extra} ink={ink} />
+          </>
         )}
         <span className="note">
           {learnedNote(saved.length, labeled.length, recorded.length)} Draw a region around text on any screenshot, then

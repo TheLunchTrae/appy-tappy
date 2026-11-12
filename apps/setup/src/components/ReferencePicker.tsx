@@ -1,7 +1,8 @@
 import type { AppFile } from '../lib/bindings.ts';
+import { referenceCoverage } from '../lib/expected.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
 import { REFERENCE_HINT } from '../lib/hints.ts';
-import { CharacterChips } from './CharacterChips.tsx';
+import { CharacterChips, MissingNote } from './CharacterChips.tsx';
 import { Hint } from './Hint.tsx';
 
 interface Props {
@@ -54,6 +55,7 @@ export function ReferencePicker(props: Props) {
                     <small>{used === 0 ? 'No values yet' : `Used by ${used} ${used === 1 ? 'value' : 'values'}`}</small>
                   </span>
                   <CharacterChips characters={referenceCharacters(reference)} ink={reference.ink} />
+                  <MissingNote characters={referenceCoverage(reference).missing} />
                 </button>
               );
             })}

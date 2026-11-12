@@ -313,6 +313,10 @@ pub(crate) fn to_saved_fix(
 /// `ref-{id}-1.png` onward, the labeled screenshots first and then the
 /// recorded readings.
 ///
+/// `expected` is the characters the user says it needs, saved as given, or
+/// empty when the user chose none. It is guidance for the setup app: no
+/// sample is learned or left out because of it.
+///
 /// # Errors
 ///
 /// Returns the [`SpecError`] that [`build`] would, so only a reference that
@@ -323,6 +327,7 @@ pub(crate) fn to_saved_reference(
     session: Session<'_>,
     id: &str,
     name: &str,
+    expected: &str,
 ) -> Result<(ReferenceDef, Pictures), SpecError> {
     let built = build(spec, session)?;
     let CheckSpec::Characters {
@@ -390,6 +395,7 @@ pub(crate) fn to_saved_reference(
             ink: (*ink).into(),
             tolerance: *tolerance,
             samples,
+            expects: (!expected.is_empty()).then(|| expected.to_owned()),
         },
         pictures,
     ))

@@ -46,6 +46,11 @@ pub const MAX_STATES: usize = 16;
 /// The most fixes a value may have, each a drawing at another window size.
 pub const MAX_FIXES: usize = 8;
 
+/// The most characters a reference may expect: room for the digits, both
+/// cases of the English letters, and every other printable ASCII character,
+/// with some to spare.
+pub const MAX_EXPECTED_CHARACTERS: usize = 128;
+
 /// One application's authoring file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -382,6 +387,16 @@ pub struct ReferenceDef {
     pub tolerance: u8,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
+    /// The characters the user says it needs to know, each once, such as
+    /// `0123456789.%`, or `None` when the user chose none.
+    ///
+    /// Setup guidance only. The setup app shows which of them the samples
+    /// have yet to teach. Nothing that learns or reads looks at it: it adds
+    /// no glyph, labels no shape, and leaves how a number is read as it is,
+    /// whatever characters it lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub expects: Option<String>,
 }
 
 /// A value read from a region of the window's frame.
@@ -853,7 +868,8 @@ impl AppFile {
     /// Checks the rules JSON alone cannot: the format version, a name for
     /// the application and each value and reference, a window match that
     /// passes [`WindowDef::check`], valid and unique IDs, picture file names,
-    /// at least one sample for a reference, and checks that pass
+    /// at least one sample for a reference, expected characters that labels
+    /// can teach, each listed once, and checks that pass
     /// [`CheckDef::check`]. Whether a value's pictures and region can be
     /// read is up to `appytappy-sources`' `saved::build`, so a value that
     /// cannot be read stops only itself.
@@ -905,7 +921,47 @@ fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
     reference
         .samples
         .iter()
-        .try_for_each(|sample| check_image(&sample.image))
+        .try_for_each(|sample| check_image(&sample.image))?;
+    reference.expects.as_deref().map_or(Ok(()), check_expected)
+}
+
+/// Whether a label teaches `character`: every character but whitespace,
+/// which a label may hold anywhere and a reference skips.
+///
+/// A reference learns one shape for each such character of a sample's text,
+/// exactly as typed: `A` and `a` are two characters, and nothing folds case
+/// or combines marks. Its expected characters are counted the same way.
+#[must_use]
+pub fn is_label_character(character: char) -> bool {
+    !character.is_whitespace()
+}
+
+/// Checks a reference's expected characters, answering the problem as a
+/// sentence: at least one and at most [`MAX_EXPECTED_CHARACTERS`], each a
+/// character a label teaches, as [`is_label_character`] says, that is no
+/// control character, and each listed once.
+fn check_expected(expected: &str) -> Result<(), String> {
+    if expected.is_empty() {
+        return Err("its expected characters are empty; leave them out to expect none".to_owned());
+    }
+    let mut seen = BTreeSet::new();
+    for character in expected.chars() {
+        if !is_label_character(character) || character.is_control() {
+            return Err(format!(
+                "its expected characters hold {character:?}, which is whitespace or a control \
+                 character"
+            ));
+        }
+        if !seen.insert(character) {
+            return Err(format!("its expected characters list {character:?} twice"));
+        }
+    }
+    if seen.len() > MAX_EXPECTED_CHARACTERS {
+        return Err(format!(
+            "it expects more than {MAX_EXPECTED_CHARACTERS} characters"
+        ));
+    }
+    Ok(())
 }
 
 /// Checks one value's part of the file's rules, answering the problem as a
@@ -1156,6 +1212,7 @@ mod tests {
                     image: sample_name("percent", 1),
                     text: "87%".to_owned(),
                 }],
+                expects: None,
             }],
         }
     }
@@ -1187,6 +1244,64 @@ mod tests {
         let older = json.replace(",\n  \"references\": []", "");
         assert!(!older.contains("references"));
         assert_eq!(AppFile::parse(&older), Ok(file));
+    }
+
+    #[test]
+    fn a_reference_s_expected_characters_are_left_out_until_chosen_and_round_trip() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(!json.contains("expects"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        file.references[0].expects = Some("0123456789.%Aa".to_owned());
+        let json = file.to_json();
+        assert!(json.contains("\"expects\": \"0123456789.%Aa\""), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn expected_characters_are_ones_a_label_teaches_each_listed_once() {
+        // As many as fit, and one more.
+        let most: String = ('\u{100}'..).take(MAX_EXPECTED_CHARACTERS).collect();
+        assert_eq!(check_expected(&most), Ok(()));
+        assert_eq!(
+            check_expected(&format!("{most}%")),
+            Err("it expects more than 128 characters".to_owned())
+        );
+        assert_eq!(check_expected("-.,%:+?!9aA\u{e9}"), Ok(()));
+        let cases = [
+            (
+                "",
+                "its expected characters are empty; leave them out to expect none",
+            ),
+            (
+                "1 2",
+                "its expected characters hold ' ', which is whitespace or a control character",
+            ),
+            (
+                "12\u{3000}",
+                "its expected characters hold '\\u{3000}', which is whitespace or a control character",
+            ),
+            (
+                "12\u{7}",
+                "its expected characters hold '\\u{7}', which is whitespace or a control character",
+            ),
+            ("0120", "its expected characters list '0' twice"),
+        ];
+        for (expected, problem) in cases {
+            assert_eq!(check_expected(expected), Err(problem.to_owned()));
+        }
+        assert!(is_label_character('1') && is_label_character('\u{7}'));
+        assert!(!is_label_character(' ') && !is_label_character('\n'));
+        // The file names the reference whose expected characters break a rule.
+        let mut file = dash();
+        file.references[0].expects = Some("11".to_owned());
+        assert_eq!(
+            file.check(),
+            Err(AppFileError::Reference(
+                "percent".to_owned(),
+                "its expected characters list '1' twice".to_owned()
+            ))
+        );
     }
 
     #[test]

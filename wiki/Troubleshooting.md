@@ -44,7 +44,9 @@ Check these in order:
 
 [Edit its reference](References.md#make-a-reference) and label more screenshots,
 or record more readings, so that every digit the number can show appears on at
-least one of them, and check the characters' color. Some text the **Number**
+least one of them, and check the characters' color.
+[**Characters still missing**](References.md#choose-what-it-needs) lists what
+is left to teach. Some text the **Number**
 check cannot read; [Checks](Values.md#checks) says what it can't, and what to
 use instead.
 

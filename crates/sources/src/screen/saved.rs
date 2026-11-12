@@ -886,7 +886,29 @@ mod tests {
                 image: sample_name("counter", 1),
                 text: text.to_owned(),
             }],
+            expects: None,
         }
+    }
+
+    #[test]
+    fn what_a_reference_expects_changes_nothing_it_learns_or_reads() {
+        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
+        let number = CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+        };
+        let plain = build(
+            &screen(number.clone()),
+            &[counter("11")],
+            OFTEN,
+            from(&files),
+        )
+        .expect("builds");
+        let mut expecting = counter("11");
+        expecting.expects = Some("0123456789,.%".to_owned());
+        let guided = build(&screen(number), &[expecting], OFTEN, from(&files)).expect("builds");
+        // The same glyphs and the same number rules, whatever it expects.
+        assert_eq!(guided.drawn.check, plain.drawn.check);
     }
 
     #[test]

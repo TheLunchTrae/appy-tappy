@@ -143,6 +143,10 @@ pub(crate) struct ReferenceSaveSpec {
     /// The characters it is taught, as a [`CheckSpec::Characters`] that
     /// names the reference when it is saved already.
     pub(crate) check: CheckSpec,
+    /// The characters the user says it needs to know, each once, or empty
+    /// when the user chose none. It is saved as given and replaces what the
+    /// saved reference expected.
+    pub(crate) expects: String,
 }
 
 /// Where a reference was saved.

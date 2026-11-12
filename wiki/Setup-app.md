@@ -85,6 +85,21 @@ This page covers what the user guide leaves out.
   reference belongs to a saved application. It keeps its ID when renamed, and
   a new one named like a renamed one's old name gets that ID with a number.
   One that a value reads with cannot be deleted.
+- **Expected characters.** A reference may list the characters the user says
+  it needs, as [Choose what it needs](References.md#choose-what-it-needs)
+  describes. The list guides and never decides: `appytappy-sources` builds a
+  reference's reader from its color, tolerance, and samples alone, so the
+  list adds no glyph, labels no shape, and leaves number parsing as it is,
+  and the runtime never looks at it. The page keeps it as one set of
+  characters: `lib/expected.ts` reads each preset's state back from the set,
+  and its `coverage` splits the set and the learned characters into known,
+  missing, and extra, for the editor, the References page, and the reference
+  picker. The learned characters are those of the saved samples, the labeled
+  screenshots, and the kept readings. The save sends the set beside the
+  `characters` check, not in it, and it replaces what the saved reference
+  expected. A character is counted as a label's is: `is_label_character` in
+  `appytappy-config` serves both the learner and the file's rule for the
+  list.
 - **Key recording.** **Record** takes the next keys pressed, Tab included,
   and records a letter as the keyboard layout types it.
 - **Saving an automation** checks that its value is still saved and that the
@@ -251,7 +266,8 @@ the fix's number, such as `status-2-1.png`.
       "name": "Percent font",
       "ink": { "red": 255, "green": 255, "blue": 255 },
       "tolerance": 40,
-      "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }]
+      "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }],
+      "expects": "0123456789.%"
     }
   ]
 }
@@ -312,6 +328,12 @@ file leaves it out. A value's `pin` is one of `topLeft`, `topCenter`,
 when the file leaves it out. Each of its `fixes` has its own window size and
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
+
+A reference's `expects` is the characters the user says it needs to know,
+each once, and is left out when the user chose none. It holds at most 128
+characters, none of them whitespace or a control character, exactly as labels
+spell them: `A` and `a` are two characters. Only the setup app reads it, to
+show which characters a reference has yet to learn.
 
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved

@@ -23,6 +23,7 @@ use std::error::Error;
 use std::fmt;
 use std::ops::Range;
 
+use appytappy_config::app_file::is_label_character;
 use appytappy_config::signal::Number;
 
 use super::Image;
@@ -111,7 +112,9 @@ impl DigitReader {
                 Segmentation::NoInk => LearnError::NoInk,
                 Segmentation::TooMany => LearnError::TooManyCharacters,
             })?;
-        let expected = text.chars().filter(|character| !character.is_whitespace());
+        let expected = text
+            .chars()
+            .filter(|&character| is_label_character(character));
         let found = spans.get(..count).unwrap_or_default();
         if expected.clone().count() != found.len() {
             return Err(LearnError::CountMismatch {
