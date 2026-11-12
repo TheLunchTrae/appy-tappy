@@ -46,7 +46,7 @@ set -eu
 release=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
 if [ -n "${INSTALLER_TAG:-}" ]; then
   if [ "$INSTALLER_TAG" != "v$release" ]; then
-    echo "the tag $INSTALLER_TAG does not name the workspace version; tag v$release instead" >&2
+    echo "INSTALLER_TAG $INSTALLER_TAG does not name the workspace version v$release" >&2
     exit 1
   fi
   version=$release

@@ -9,6 +9,7 @@ name: Release
 # release. Pre-release marks that release as a pre-release, which the updater
 # skips. wiki/Installer.md describes the builds, the update key, and the
 # settings the release relies on.
+run-name: ${{ inputs.publish && 'Release' || 'Test build' }} of ${{ github.ref_name }}
 on:
   workflow_dispatch:
     inputs:
@@ -24,10 +25,11 @@ on:
 permissions:
   contents: read
 
-# Releases wait for each other, so two runs cannot publish one version. Test
-# builds wait only for test builds of the same branch.
+# Releases from main run one at a time, so two runs cannot publish one
+# version. Test builds, and publishing runs off main that prepare stops, queue
+# only behind runs of the same branch.
 concurrency:
-  group: release-${{ inputs.publish && 'publish' || github.ref }}
+  group: release-${{ inputs.publish && github.ref == 'refs/heads/main' && 'publish' || github.ref }}
 
 jobs:
   # Names the release and, for a publishing run, stops before the build when
@@ -45,7 +47,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: Cargo.toml
+          sparse-checkout: /Cargo.toml
           sparse-checkout-cone-mode: false
       # The same reading as the installer:build task, which also fails a
       # release build whose tag does not name this version.
@@ -142,15 +144,15 @@ jobs:
   # Signs the installer for the updater and writes latest.json, which the
   # setup app reads to find a newer release. Only this job gets the update
   # key's private half, so nothing that builds the installer can read it. The
-  # half lives in the update-signing environment, which only main can deploy
-  # to, and this job runs only when publishing. A repository without the
-  # update key skips it, and the release then carries no latest.json.
+  # half lives in the release environment, which only main can deploy to, and
+  # this job runs only when publishing. A repository without the update key
+  # skips it, and the release then carries no latest.json.
   sign:
     name: sign
     needs: [prepare, installer]
     if: inputs.publish && vars.UPDATER_PUBLIC_KEY != ''
     runs-on: ubuntu-26.04
-    environment: update-signing
+    environment: release
     timeout-minutes: 10
     outputs:
       artifact-id: ${{ steps.keep.outputs.artifact-id }}
@@ -205,9 +207,12 @@ jobs:
     # Runs after a skipped sign job too, for a repository without the update
     # key, but not after a failed one or a cancelled run.
     if: >-
-      !cancelled() && inputs.publish &&
+      !cancelled() && inputs.publish && github.ref == 'refs/heads/main' &&
       needs.installer.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped')
     runs-on: ubuntu-26.04
+    # The same environment as the sign job, so only main can publish. This job
+    # reads none of its secrets.
+    environment: release
     timeout-minutes: 10
     permissions:
       contents: write
@@ -230,15 +235,10 @@ jobs:
       - name: Warn about the missing update key
         if: needs.sign.result == 'skipped'
         run: echo "::warning::The repository has no UPDATER_PUBLIC_KEY variable, so this release's setup app does not check for updates and the release has no latest.json."
-      # Records the workflow, commit, and branch that built the installer, so
-      # `gh attestation verify` can check a download against this repository.
-      - name: Attest the installer
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: installer/*-setup.exe
       # The tag comes first, on the commit the installer was built from, so a
-      # ruleset that blocks it stops the run before any release exists. A tag
-      # already on this commit, from a run that failed after tagging, is kept.
+      # ruleset that blocks it stops the run before any attestation or release
+      # exists. A tag already on this commit, from a run that failed after
+      # tagging, is kept.
       - name: Tag the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -258,6 +258,12 @@ jobs:
               *) printf '%s\n' "$out" >&2; exit 1 ;;
             esac
           fi
+      # Records the workflow, commit, and branch that built the installer, so
+      # `gh attestation verify` can check a download against this repository.
+      - name: Attest the installer
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: installer/*-setup.exe
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
