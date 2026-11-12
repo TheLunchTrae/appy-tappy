@@ -669,7 +669,7 @@ mod tests {
     fn a_header_still_being_written_waits() {
         let folder = scratch("tail-header");
         let path = folder.join("trace-a.csv");
-        fs::write(&path, "time_ns,thr").expect("write");
+        fs::write(&path, HEADER.get(..10).expect("a header")).expect("write");
         let mut tail = TraceTail::new(path.clone());
         let early = tail.update().expect("read");
         assert_eq!(early.problem, None, "not another version yet");
