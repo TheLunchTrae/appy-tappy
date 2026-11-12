@@ -84,6 +84,7 @@ stateDiagram-v2
     Running --> Running: Carry orders, Reload, Due, or a read of the saved files again
     Running --> Running: a send to the action thread fails, so it starts again
     Running --> Undoing: Quit, CloseRequested, DetectionEnded, or a send to detection fails
+    Undoing --> Undoing: an undo cannot reach the action thread, so it starts again
     Undoing --> Stopping: the action thread ran the queued undos and ended
     Stopping --> [*]: every thread joined
 ```
@@ -113,11 +114,14 @@ stateDiagram-v2
   only after the owner, or when it panics, so a send that fails means it
   panicked. For the action thread, the owner joins it and logs its panic,
   starts a new one, and sends it the owner's trace and then what the old one
-  could not take. What the old thread changed is not undone, because its
-  journal ended with it. If the new thread cannot start, or ends before it
-  takes the send, the log says so, the send is dropped, and the next send
-  tries again. For detection, the owner sends itself `DetectionEnded` and
-  stops, as when detection ends on its own; the join at the end reports the
+  could not take. The jobs the old thread had not run are dropped, and what
+  it changed is not undone, because its journal ended with it. If the new
+  thread cannot start, or ends before it takes the send, the log says so, the
+  send is dropped, and the next send tries again. This also happens while
+  **Undoing**, when the thread panicked since the last job. Detection sends
+  `DetectionEnded` however it ends, a panic included (`workers::tell_end`),
+  and a send to detection that fails has the owner send itself the same
+  event, so the owner stops either way; the join at the end reports the
   panic.
 - **Undoing.** `model.set_enabled(false)` stops every running application and
   queues the undo of what its automations changed. The owner then drops the
@@ -128,6 +132,12 @@ stateDiagram-v2
   [Tray thread](#tray-thread)). Then the reload watch and the window watch
   stop, and dropping the inputs ends detection. Each reader is stopped, and
   every thread is joined.
+
+**Open problems**
+
+- [#297](https://github.com/TheLunchTrae/appy-tappy/issues/297): after the
+  action thread starts again, what the old thread changed stays changed, and
+  later restores of that target put back the wrong state.
 
 ### Runtime state
 
@@ -328,6 +338,12 @@ stateDiagram-v2
   state changes for it.
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
+
+**Open problems**
+
+- [#298](https://github.com/TheLunchTrae/appy-tappy/issues/298): a reader that
+  panics stops its application's readings without telling the owner, until
+  the session ends.
 
 ### Frame handler
 

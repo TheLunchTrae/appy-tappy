@@ -29,7 +29,7 @@ use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
 use crate::workers::act::ActionReport;
 use crate::workers::reader::{self, Reader, Reading};
-use crate::workers::{act, join, spawn};
+use crate::workers::{act, join, spawn, tell_end};
 use crate::{lifecycle, note, plan, tray};
 
 /// What reaches the owner thread.
@@ -207,10 +207,10 @@ impl Crew {
 
     /// Hands `control` to the action thread. A send fails only when the
     /// thread panicked, so then the log says why, a new action thread starts
-    /// with the owner's trace, and `control` goes to it. What the thread that
-    /// ended changed is no longer undone, because its journal ended with it.
-    /// When no new thread starts, `control` is dropped, and the next one
-    /// tries again.
+    /// with the owner's trace, and `control` goes to it. The jobs the old
+    /// thread had not run are dropped, and what it changed is not undone,
+    /// because its journal ended with it. When no new thread starts,
+    /// `control` is dropped, and the next send tries again.
     fn act(&mut self, control: act::Control, log: &mut Log) {
         let Err(SendError(control)) = self.actor.jobs.send(control) else {
             return;
@@ -222,8 +222,8 @@ impl Crew {
                 note(
                     log,
                     &format!(
-                        "the actions thread ended and cannot start again, so what it was sent \
-                         is dropped: {error}"
+                        "the actions thread ended and cannot start again now, so what it was \
+                         sent is dropped and the next action tries again: {error}"
                     ),
                 );
                 return;
@@ -235,7 +235,10 @@ impl Crew {
         );
         note(
             log,
-            &format!("{why}, so it starts again, and what it changed before is not undone"),
+            &format!(
+                "{why}, so it starts again; the jobs it had not run are dropped, and what it \
+                 changed before is not undone"
+            ),
         );
         let sent = self
             .actor
@@ -251,7 +254,7 @@ impl Crew {
     }
 
     /// Hands `input` to detection. A send fails only when detection ended,
-    /// so the owner then hears that, as when detection says so itself, and
+    /// so the owner then hears that, as detection also tells it itself, and
     /// stops.
     fn detect(&self, input: Input) {
         if self.inputs.send(input).is_ok() {
@@ -334,20 +337,18 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let detect = Arc::clone(&system);
     let changes = sender.clone();
     let detector = spawn("lifecycle", move || {
-        lifecycle::run(
-            lifecycle,
-            &input_events,
-            &changes,
-            || detect.processes(),
-            || detect.windows(),
-            |window| shows(detect.window_place(window)),
-            |process| detect.executable_build(process),
-        );
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "a failed send means the owner already stopped, which is what this tells it"
-        )]
-        let _ = changes.send(Event::DetectionEnded);
+        let detecting = || {
+            lifecycle::run(
+                lifecycle,
+                &input_events,
+                &changes,
+                || detect.processes(),
+                || detect.windows(),
+                |window| shows(detect.window_place(window)),
+                |process| detect.executable_build(process),
+            );
+        };
+        tell_end(detecting, &changes, Event::DetectionEnded);
     });
     let actor = Actor::start(&system, sender.clone());
     let (detector, actor) = match (detector, actor) {
@@ -2114,8 +2115,8 @@ mod tests {
         actor.stop().expect("the new thread runs the job and ends");
         assert!(
             scratch.log().trim_end().ends_with(
-                "the actions thread panicked: broke, so it starts again, and what it \
-                 changed before is not undone"
+                "the actions thread panicked: broke, so it starts again; the jobs it had \
+                 not run are dropped, and what it changed before is not undone"
             ),
             "{:?}",
             scratch.log()
@@ -2136,7 +2137,7 @@ mod tests {
     }
 
     #[test]
-    fn a_send_that_detection_cannot_take_stops_the_owner() {
+    fn a_send_that_detection_cannot_take_tells_the_owner_detection_ended() {
         let (crew, _controls, received, heard) = crew();
         drop(received);
         crew.detect(Input::Trace(Trace::OFF));

@@ -45,6 +45,11 @@ Check these in order:
    becomes true. It runs again only after the condition has stopped being
    true, and after its wait.
 
+If the log says the actions thread panicked, AppyTappy has a bug. It starts
+running actions again with the next one, but a change made before that, such
+as a volume change, isn't put back when its automation stops. Include the log
+line when you report the problem.
+
 ## A number reads in setup but the automation does nothing
 
 What you see while you make a reference isn't all the reference's reading.
@@ -166,7 +171,3 @@ window. Switch it to borderless or windowed fullscreen, or use
   text goes away once actions can run.
 - When putting the volume back fails, for example because your headset was
   unplugged, AppyTappy keeps trying and puts it back once the headset returns.
-- If the log says the actions thread panicked, AppyTappy started it again,
-  and later actions run. A change made before that, such as a volume change,
-  is not put back when its automation stops. The log line is a bug in
-  AppyTappy; its text helps a report.

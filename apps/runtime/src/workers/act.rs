@@ -1182,8 +1182,9 @@ mod tests {
             [
                 ActionReport::CanRun(true),
                 ActionReport::Note(
-                "Pause near the end: undoing failed, so it is tried again: the media session did not take the command".to_owned()
-            )],
+                    "Pause near the end: undoing failed, so it is tried again: the media session did not take the command".to_owned()
+                ),
+            ],
             "the retry worked, so only the first failure is logged"
         );
     }
