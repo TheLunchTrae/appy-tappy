@@ -246,18 +246,20 @@ what it is for.
 
 A refusal carries a `NoBar` reason. The detector does not find a bar drawn as
 separate segments, a striped, textured, or fading fill, a bar with a trail
-between its parts, a bar with a shine in another shade over half or more of one part's
-columns, a bar under a label or an icon that leaves too few lanes free or takes the reader
+between its parts, a bar with a shine in another shade over half or more of
+one part's columns, a bar under a label or an icon that leaves too few lanes
+free or takes the reader
 too far off at some fill, or a bar that fills from its middle. A fill that
 fades so little along the bar that it stays one plain color is proposed, and
 every screenshot must still read with it. Text or marks in one of the bar's
 own two colors cannot be told from the bar on a screenshot where they blend
-into a part, with detected colors or hand-picked ones. A shade over fewer
-than half of a part's columns passes the even parts rule, so such a bar can
-be proposed and then read some points off at other fills, as it does with
-hand-picked colors. The reader reads some
+into a part, with detected colors or hand-picked ones. The reader reads some
 of those bars with hand-picked colors; supporting them here needs a wider
 detector, not another reader.
+
+A shade over fewer than half of a part's columns passes the even parts rule,
+so such a bar can be proposed and then read some points off at other fills,
+as it does with hand-picked colors.
 
 ## Read interval
 
