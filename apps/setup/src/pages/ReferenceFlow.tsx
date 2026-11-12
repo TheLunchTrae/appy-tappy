@@ -1,32 +1,45 @@
 import { useEffect, useState } from 'react';
 
-import type { AppSummary, ReferenceDef } from '../lib/bindings.ts';
+import type { AppSummary } from '../lib/bindings.ts';
 import { stopCapture } from '../lib/api.ts';
 import { Capture, type CaptureMode } from '../components/Capture.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
+import type { Made, SavedRef } from '../lib/flow.ts';
 import { background } from '../lib/repeat.ts';
 import type { Held } from '../lib/unsaved.ts';
 
-/** A saved reference and the application it belongs to. */
-export interface SavedRef {
-  readonly app: string;
-  readonly reference: ReferenceDef;
-}
-
 interface Props {
-  readonly apps: readonly AppSummary[];
   /** The reference to change, or null to make one. */
   readonly existing: SavedRef | null;
+  /** The application a new reference starts with, such as one just added for it, or null to let the user choose. */
+  readonly app: string | null;
+  /** The way to this flow, for its breadcrumb. */
+  readonly trail: readonly string[];
+  /** Whether the flow shows because another flow opened it or ended, so the focus has to land somewhere. */
+  readonly continued: boolean;
   readonly onCancel: () => void;
-  readonly onSaved: () => void;
-  /** Leaves to add an application, for when the one wanted is not saved yet. */
-  readonly onAddApplication: () => void;
+  /** Hears where the reference was saved. */
+  readonly onSaved: (made: Made) => void;
+  /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
+  readonly onAddApplication: (chosen: string | null) => void;
+  /** Leaves to change how `app` is found, and comes back to it. */
+  readonly onEditApplication: (app: AppSummary) => void;
   /** Hears what leaving the flow would lose. */
   readonly onHeld: (held: Held) => void;
 }
 
-/** Making or changing a reference: pick its application's window, then teach it the characters. */
-export function ReferenceFlow({ apps, existing, onCancel, onSaved, onAddApplication, onHeld }: Props) {
+/** Making or changing a reference: choose its application, then capture its window and teach it the characters. */
+export function ReferenceFlow({
+  existing,
+  app,
+  trail,
+  continued,
+  onCancel,
+  onSaved,
+  onAddApplication,
+  onEditApplication,
+  onHeld,
+}: Props) {
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
   const [mode] = useState<CaptureMode>({ kind: 'reference', existing: existing?.reference ?? null });
@@ -40,12 +53,15 @@ export function ReferenceFlow({ apps, existing, onCancel, onSaved, onAddApplicat
   if (picking || choice === null) {
     return (
       <Picker
-        apps={apps}
         heading={existing === null ? 'New reference' : `Edit ${existing.reference.name}`}
+        trail={trail}
+        continued={continued}
         lockedApp={existing?.app ?? null}
-        initial={choice}
+        startApp={choice?.app ?? app}
+        startWindow={choice?.window.handle ?? null}
         onCancel={onCancel}
         onAddApplication={onAddApplication}
+        onEditApplication={onEditApplication}
         onPick={(picked) => {
           setChoice(picked);
           setPicking(false);
@@ -57,6 +73,7 @@ export function ReferenceFlow({ apps, existing, onCancel, onSaved, onAddApplicat
     <Capture
       choice={choice}
       mode={mode}
+      trail={trail}
       onCancel={onCancel}
       onChangeWindow={() => {
         setPicking(true);

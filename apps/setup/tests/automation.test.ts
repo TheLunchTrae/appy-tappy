@@ -18,6 +18,7 @@ import {
   toDraft,
   undoable,
   undoText,
+  unusedKey,
   usedBy,
   valueChoices,
   valueKind,
@@ -296,6 +297,13 @@ describe('buildAutomation', () => {
       [0, 'app', 'Player.exe'],
       [1, 'default', ''],
     ]);
+  });
+
+  test('an added action gets a key no row has, also after rows were removed', () => {
+    expect(unusedKey([])).toBe(0);
+    expect(unusedKey(toDraft(pauseMusic).actions)).toBe(2);
+    expect(unusedKey([newAction(1), newAction(2)])).toBe(3);
+    expect(unusedKey([newAction(4), newAction(0)])).toBe(5);
   });
 });
 
