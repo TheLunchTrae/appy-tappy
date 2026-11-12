@@ -9,7 +9,7 @@ name: Release
 # release. Pre-release marks that release as a pre-release, which the updater
 # skips. wiki/Installer.md describes the builds, the update key, and the
 # settings the release relies on.
-run-name: ${{ inputs.publish && 'Release' || 'Test build' }} of ${{ github.ref_name }}
+run-name: ${{ inputs.publish && (inputs.prerelease && 'Pre-release' || 'Release') || 'Test build' }} of ${{ github.ref_name }}
 on:
   workflow_dispatch:
     inputs:

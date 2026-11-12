@@ -64,7 +64,9 @@ Every build has a version:
 - **A test build** has the workspace version marked as a development version
   of the commit it was built from, such as `0.1.0-dev+27585e8`, with `.dirty`
   after the commit when the tree had uncommitted or untracked changes. A
-  release of the same version counts as newer. Two test builds of one version
+  release of the same version counts as newer, except for a pre-release
+  version, such as `0.2.0-rc.1`, whose test builds count as newer than the
+  pre-release. Two test builds of one version
   are ordered by their commit text, so installing over another one can ask
   whether to downgrade; either answer installs it.
 
@@ -116,8 +118,8 @@ gh attestation verify AppyTappy_0.1.0_x64-setup.exe -R TheLunchTrae/appy-tappy
 
 Only the release job attests, and only in a publishing run on `main` once it
 has tagged the commit. Test builds have no attestation, so a passing check
-means the installer came from a release run. Add `--source-digest` with the commit that the release's tag
-names to check that it came from one release in particular, and
+means the installer came from a release run. Add `--source-digest` with the
+commit that the release's tag names to check that it came from one release in particular, and
 `--signer-workflow TheLunchTrae/appy-tappy/.github/workflows/release.yml` to
 reject an attestation that any other workflow might add later. The attesting
 job alone gets the `id-token` and `attestations` permissions, so the build
@@ -177,8 +179,8 @@ release workflow reads three settings:
 
 Without `UPDATER_PUBLIC_KEY`, the sign job is skipped, the release has no
 `latest.json`, and the release run warns about it. A full release without it
-becomes the latest, so every installed copy, including copies from earlier signed
-releases, finds no `latest.json` and offers nothing until the next signed
+becomes the latest, so every installed copy, including copies from earlier
+signed releases, finds no `latest.json` and offers nothing until the next signed
 release. A copy installed from an unsigned release has no updater at all, so
 its user installs a later release by hand once.
 
