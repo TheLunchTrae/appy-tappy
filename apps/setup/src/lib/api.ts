@@ -13,6 +13,8 @@ import type {
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
+  ClickSent,
+  ClickSpec,
   ColorSpec,
   EditPreview,
   EditSpec,
@@ -157,10 +159,16 @@ export async function readWindow(window: WindowDef): Promise<number | null> {
 
 /**
  * Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
- * when it is given. One that no saved automation names goes the next time automations are saved.
+ * when it is given. One that no saved automation names goes the next time automations are saved, or with
+ * {@link forgetUnsavedClickPictures}.
  */
 export async function addClickPicture(screenshot: number, region: RegionSpec, selection: SelectionSpec | null): Promise<ClickPictureView> {
   return invoke<ClickPictureView>('add_click_picture', { screenshot, region, selection });
+}
+
+/** Removes the click pictures no saved automation names, for when no automation is being made or changed. */
+export async function forgetUnsavedClickPictures(): Promise<void> {
+  await invoke('forget_unsaved_click_pictures');
 }
 
 /** The click picture `image`, at most `maxWidth` wide. */
@@ -171,6 +179,17 @@ export async function clickPicture(image: string, maxWidth: number): Promise<Pic
 /** Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere. */
 export async function findClick(at: ClickAtDef): Promise<FoundClick> {
   return invoke<FoundClick>('find_click', { at });
+}
+
+/**
+ * Sends `click` now, once: one real click in its application's window, placed and sent the way the
+ * background part does both. Call it only when the user asks for the click. It resolves with the window
+ * the click went to once it is sent, which does not say that the application acted on it, and rejects
+ * with why it was not sent. The window is the one the application's window rules find now, which may be
+ * another one than the picked window.
+ */
+export async function clickNow(click: ClickSpec): Promise<ClickSent> {
+  return invoke<ClickSent>('click_now', { click });
 }
 
 export async function listApps(): Promise<ReadonlyArray<AppSummary>> {

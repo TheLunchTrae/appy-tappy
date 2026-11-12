@@ -15,6 +15,15 @@ const CROP_WIDTH = 480;
 /** What a recording records: a region drawn on a screenshot, read with the characters' color and tolerance. */
 type Recordable = Omit<RecordingSettings, 'windowSize'> & { readonly drawnOn: number };
 
+/** Each recorded reading's pixels, by its index, for the recording `id`. */
+interface Crops {
+  readonly id: number;
+  readonly pictures: ReadonlyMap<number, Picture>;
+}
+
+/** No recording's pixels. */
+const NO_CROPS: Crops = { id: -1, pictures: new Map() };
+
 /**
  * The session's recording, kept current while it records or its text is still being read, with each reading's
  * pixels. Leaving the component that uses it stops the recording, since it samples the window until it stops.
@@ -47,10 +56,7 @@ export function useRecording(): {
   // Bumped by each start, stop, or discard, so a poll sent before one is ignored.
   const turn = useRef(0);
   // Each recorded reading's pixels, for the recording they belong to.
-  const [crops, setCrops] = useState<{ readonly id: number; readonly pictures: ReadonlyMap<number, Picture> }>({
-    id: -1,
-    pictures: new Map(),
-  });
+  const [crops, setCrops] = useState<Crops>(NO_CROPS);
 
   useEffect(
     () => () => {
@@ -110,6 +116,10 @@ export function useRecording(): {
     turn.current += 1;
     try {
       await startRecording(settings.region, settings.ink, settings.tolerance, settings.drawnOn, more);
+      if (!more) {
+        // A new recording replaced the old one, whose readings' pixels go with it.
+        setCrops(NO_CROPS);
+      }
       setCommandError(null);
       onStarted();
       setView(await recordingState());
@@ -136,6 +146,7 @@ export function useRecording(): {
     try {
       await discardRecording();
       setView(null);
+      setCrops(NO_CROPS);
       setCommandError(null);
       setPollError(null);
       return true;

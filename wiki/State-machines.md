@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Seven guards drop such stale messages:
+it was about has gone. Eight guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -38,6 +38,9 @@ it was about has gone. Seven guards drop such stale messages:
   owner took it until the draft changes or it is tried again. An answer to a
   read asked under another number, or under none, is dropped (`afterRead`
   in `apps/setup/src/lib/liveCheck.ts`).
+- **Attempt numbers.** The click target screen numbers each **Find it now**
+  and **Click it now**, and drops an answer whose number is not that of the
+  try under way.
 - **The open flow.** A save's answer closes the setup app's flow only while
   the flow that saved is still the one open (`afterFlow` in
   `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
@@ -732,6 +735,16 @@ value is a value flow that no automation opens:
   disabled while a save runs, so this guards a save whose flow was replaced
   some other way.
 
+- **Pictures.** Leaving a value or reference flow unmounts it and stops its
+  capture, which clears its screenshots and recording, and **Change window**
+  stops the capture too, before the picker shows, so nothing holds them
+  while the user picks. A click picture taken for an automation's draft
+  stays while the automation's flow is open or waits under a flow it opened,
+  since the draft that names it waits with it. Once no automation flow is
+  left, on a save, **Cancel**, or **Leave**, the window removes the click
+  pictures that no saved automation names (`holdsAutomation`,
+  [Pictures kept](Setup-app.md#pictures-kept)).
+
 No flow waits for the saved files to be read again before it closes. Each
 save starts that read, and whatever shows next copes with lists that lack
 what was just saved: a picker makes its own look, and the automation editor
@@ -921,6 +934,60 @@ stateDiagram-v2
   in the capture opens a new picker with the same application, and with the
   same window picked when several fit.
 
+### Click target tries
+
+The click target screen (`apps/setup/src/components/ClickTarget.tsx`) tries a
+target with **Find it now** and **Click it now**. `Try` in
+`apps/setup/src/lib/clickTry.ts` names the states, and `tryStep` there is the
+transition.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Finding: Find it now
+    Idle --> Clicking: Click it now
+    Answered --> Finding: Find it now
+    Answered --> Clicking: Click it now
+    Failed --> Finding: Find it now
+    Failed --> Clicking: Click it now
+    Finding --> Answered: where the click would land
+    Finding --> Failed: why it lands nowhere
+    Clicking --> Answered: the click was sent, and to which window
+    Clicking --> Failed: why it was not sent
+    Finding --> Idle: the target changes
+    Answered --> Idle: the target changes
+    Failed --> Idle: the target changes
+```
+
+- **Finding** and **Clicking.** The try starts with the press and keeps its
+  attempt number. A drawn picture is kept first, then the owner thread is
+  asked, and the screen's buttons wait meanwhile. Every way the try can end
+  answers it, a target that is not set up included, so none stays under way.
+  Both commands end by themselves. The owner waits at most a second for a
+  picture's frame. For a click sent to the window it then waits at most half
+  a second for the windows' answers to where the place is on them, and for a
+  click with the cursor about a tenth of a second while the buttons are held.
+- **Clicking locks the target.** A click that is being sent is a real click,
+  so from the press until its answer the button, **How to click**, where it
+  clicks, and the application cannot change. A click that was sent therefore
+  always shows its answer. `tryStep` also keeps **Clicking** through a change
+  that reaches it all the same.
+- **Answered.** **Find it now** answers where the click would land, which the
+  live view marks. **Click it now** answers that the click was sent and names
+  the window. When that is another window than the one the screen shows, the
+  screen offers **Look again**.
+- **Failed.** The screen shows why, such as a picture that is not found or a
+  window that refused the click. The next try or a change of the target
+  leaves the state.
+- **The target changes.** A change of where the click lands goes back to
+  **Idle** from every state but **Clicking**. A change of the button or of
+  **How to click** does too, except that it keeps where **Find it now** said
+  the click would land, since neither moves that place.
+- **A late answer.** The settings stay enabled while **Find it now** looks,
+  which clicks nothing. An answer whose attempt number is not that of the
+  try under way is dropped, so where an earlier target would land never
+  shows for the target as it is set up now.
+
 ### Update notice
 
 The update notice at the end of the tabs (`apps/setup/src/lib/update.ts`,
@@ -988,7 +1055,10 @@ stateDiagram-v2
 ```
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
-  above.
+  above, so no frame, screenshot, or recorded reading outlives the capture.
+  The page stops it when a value or reference flow closes, on **Change
+  window**, and when a click's target screen closes or looks for its window
+  again.
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
@@ -1077,9 +1147,9 @@ stateDiagram-v2
     Stopped --> Recording: Record with other settings starts a new recording
     Recording --> Ended: the window closes
     Stopped --> Ended: the window closes
-    Recording --> None: Discard, a window is picked, or the flow closes
-    Stopped --> None: Discard, a window is picked, or the flow closes
-    Ended --> None: Discard, a window is picked, or the flow closes
+    Recording --> None: Discard, Change window, a window is picked, or the flow closes
+    Stopped --> None: Discard, Change window, a window is picked, or the flow closes
+    Ended --> None: Discard, Change window, a window is picked, or the flow closes
 ```
 
 - Each frame is cropped to the region. A crop of another window size, or one
@@ -1337,19 +1407,30 @@ they tell who reads what it changed, as its `Changed` kind says:
   changing its mode.
 - **The runtime, the overlays and their windows:** removing an application.
 
-A save that failed before it wrote anything changed nothing, so it tells
-neither, and an overlay that was reading goes on reading. A delete tells them
-once it has written the application's file, and removing an application tells
-them even when the removal fails partway. After each save of an application's
-file, the setup app removes the pictures the file no longer names. That
-removal is best effort: one that fails does not fail the save, and the next
-save tries again. Deleting a reference that is already gone saves nothing and
-tells no one, but still removes the pictures an earlier delete left behind.
-An edit that leaves a value as it was saved writes nothing and tells no one.
-Moving a panel writes the application's file without telling anyone.
+A save that failed changed nothing anyone reads, so it tells neither, and an
+overlay that was reading goes on reading. A delete tells them once it has
+written the application's file, and removing an application tells them even
+when the removal fails partway. After each save of an application's file,
+whether it worked or failed, the setup app removes the pictures in its folder
+that the file as saved does not name, of those AppyTappy named. So a save that
+fails after it wrote some pictures takes them back, and pictures that a save
+left when the program ended in the middle of it go with the application's
+next save. That removal is best effort: one that fails does not fail the
+save, and the next save tries again. Deleting a reference that is already
+gone saves nothing and tells no one, but still removes the pictures an
+earlier delete left behind. An edit that leaves a value as it was saved
+writes nothing and tells no one. Moving a panel writes the application's
+file without telling anyone.
+
+A click's picture is written to the `clicks` folder when its target is set
+up, before its automation is saved. Each save of the automations removes the
+click pictures none of them names, and so does the end of the automation's
+flow, so a target set up for an automation that was not saved leaves no file.
+[Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another
 run left and that have not changed for ten minutes, such as one a crash left
-between the write and the rename. A failed delete does not fail the save, and
+between the write and the rename. Those in the `clicks` folder go when the
+click pictures are removed. A failed delete does not fail the save, and
 the next save tries again.

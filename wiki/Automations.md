@@ -190,36 +190,79 @@ most 400 by 400 pixels, and only while the window has the size it had when
 the picture was taken.
 
 **Click** sets the button: **Left**, **Right**, or **Double**, which clicks the
-left button twice. **Find it now** looks for the target on the live window and
-shows where the click would land, without clicking. **Use this target** keeps
-it.
+left button twice. **Use this target** keeps the target.
 
-When the click runs, AppyTappy brings the application's window to the front
-for a moment, moves the cursor there, clicks, and puts the cursor back. With
-**Go back to the window that was in front** on, the window you were using gets
-the focus back. Choosing a right click turns it off, since going back would close the
-menu a right click usually opens.
+### How to click
 
-AppyTappy clicks only when it is safe to:
+**How to click** sets how the click gets to the window:
+
+- **Move the cursor** presses the way a real mouse does. AppyTappy brings the
+  application's window to the front for a moment, moves the cursor there,
+  clicks, and puts the cursor back. It takes the cursor for a moment, and a
+  game in full screen may minimize when another window comes to the front.
+- **Send to the window** sends the click straight to the window. AppyTappy
+  does not move the cursor or bring the window to the front. What the
+  application does with the click is up to it: some ignore a click sent this
+  way, and nothing tells AppyTappy whether it worked. Try it before you rely
+  on it.
+
+With **Move the cursor**, the action has **Go back to the window that was in
+front**. While it is on, the window you were using gets the focus back after
+the click. Choosing a right click turns it off, since going back would close
+the menu a right click usually opens. A click sent to the window moves no
+focus, so it has no such setting.
+
+### Try the target
+
+Under **Try it**, **Find it now** looks for the target on the live window and
+shows where the click would land, without clicking. **Click it now** sends one
+real click to the window, the way the automation would, so you can see whether
+the application takes it. Nothing is clicked until you select **Click it
+now**. Afterwards, AppyTappy says that it sent the click and names the window
+it went to. It cannot tell whether the application did anything, so look at
+the application. If a click sent to the window does nothing, choose **Move
+the cursor**.
+
+**Click it now** clicks the window the automation would click: the one the
+application's window rules find at that moment. When several of the
+application's windows are open, that can be another window than the one the
+screen shows. AppyTappy then says so, and **Look again** shows that window.
+
+**Click it now** follows the same rules as the automation's click. It needs
+anti-cheat set to **None** for the application it clicks in and for the one
+the automation watches, and says so when one is not.
+
+### When a click is skipped
+
+With **Move the cursor**, AppyTappy clicks only when it is safe to:
 
 - only while the watched application or the one it clicks in is the window in
   front;
 - only while you hold no mouse button and no Ctrl, Alt, Shift, or Win, so it
   never turns into a drag or a Ctrl-click;
 - only when the target's window is the one showing at that place, so it never
-  clicks a window that covers it;
-- for a picture, only when the picture is found.
+  clicks a window that covers it.
 
-Otherwise it skips the click and notes why in
-[its log](Troubleshooting.md#appytappys-log).
+With **Send to the window**, none of those matter, because the click reaches
+only its window: it is sent whichever window is in front, and even when
+another window covers the place. It is skipped when the place is on the
+window's title bar, border, or a scroll bar, which a click sent this way
+cannot reach, and while the window takes no clicks, such as while it shows a
+dialog of its own.
+
+Either way, the window must be open and not minimized, and a click on a
+picture happens only when the picture is found. When AppyTappy skips a click,
+it notes why in [its log](Troubleshooting.md#appytappys-log). For each click
+sent to the window, the log says that it was sent.
 
 Clicks work only when both the watched application and the one clicked in
 have anti-cheat set to **None** on the Applications page, because anti-cheat
-can see clicks that AppyTappy makes. A click cannot be undone, so turn undo
-off for an automation that clicks.
+can see clicks that AppyTappy makes, whichever way they are sent. A click
+cannot be undone, so turn undo off for an automation that clicks.
 
-Windows does not let AppyTappy click in a program that runs as administrator,
-and it gives no sign that it dropped the click.
+Windows does not let AppyTappy click in a program that runs as administrator.
+With **Move the cursor**, it gives no sign that it dropped the click. With
+**Send to the window**, the click fails, and the log says so.
 
 ## Undo and running again
 

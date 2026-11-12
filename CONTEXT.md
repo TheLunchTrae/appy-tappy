@@ -21,6 +21,9 @@ parts fit.
 - **Check.** How a screen region binding turns a region's pixels into a value:
   a number read with a reference, a bar's fill, a color match, or a match
   with a saved image.
+- **Click delivery.** How a click action reaches its window: with the
+  cursor, which comes to the window and presses, or as mouse messages sent
+  to the window, which move neither the cursor nor the focus.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
 - **Edit.** A saved value changed as it was first drawn, under the ID it

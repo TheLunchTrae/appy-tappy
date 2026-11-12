@@ -18,7 +18,7 @@ use std::process;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::app_file::{AppFile, is_image_name};
+use crate::app_file::{AppFile, is_image_name, is_own_image_name};
 use crate::automation_file::AutomationsFile;
 use crate::settings_file::SettingsFile;
 
@@ -180,25 +180,18 @@ impl AppStore {
         }
     }
 
-    /// Removes the pictures in the application `id`'s folder that `file` no
-    /// longer names, after a value or reference was removed or changed.
+    /// Removes the pictures in the application `id`'s folder that `file`
+    /// does not name: those of a value, a fix or a reference that was
+    /// removed or replaced, and those a save wrote before it failed or the
+    /// program ended. Only a file named as AppyTappy names a picture goes,
+    /// a reference's sample or a state's picture, so a file the user put in
+    /// the folder stays. A folder that does not exist holds none.
     ///
     /// # Errors
     ///
     /// Returns the error from listing the folder or removing a picture.
     pub fn prune(&self, id: &str, file: &AppFile) -> io::Result<()> {
-        let named = file.images();
-        for entry in fs::read_dir(self.folder(id))? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            if is_image_name(name) && !named.contains(&name) {
-                fs::remove_file(entry.path())?;
-            }
-        }
-        Ok(())
+        remove_unnamed(&self.folder(id), &file.images(), is_own_image_name)
     }
 }
 
@@ -267,11 +260,7 @@ impl AutomationStore {
         let mut highest = 0_u32;
         for entry in fs::read_dir(&folder)? {
             let name = entry?.file_name();
-            let number = name
-                .to_str()
-                .and_then(|name| name.strip_prefix("click-"))
-                .and_then(|name| name.strip_suffix(".png"))
-                .and_then(|number| number.parse::<u32>().ok());
+            let number = name.to_str().and_then(click_number);
             highest = highest.max(number.unwrap_or(0));
         }
         let next = highest
@@ -283,28 +272,19 @@ impl AutomationStore {
     }
 
     /// Removes the click pictures that no automation in `file` names, such
-    /// as one taken for a target the user did not keep. A folder that does
-    /// not exist yet holds none.
+    /// as one taken for a target the user did not keep, and the temporary
+    /// files an earlier run left in their folder. Only a file named as
+    /// [`AutomationStore::add_picture`] names one goes, so a file the user
+    /// put in the folder stays. A folder that does not exist yet holds
+    /// none.
     ///
     /// # Errors
     ///
     /// Returns the error from listing the folder or removing a picture.
     pub fn prune_pictures(&self, file: &AutomationsFile) -> io::Result<()> {
-        let named = file.images();
-        let entries = match fs::read_dir(self.pictures()) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            entries => entries?,
-        };
-        for entry in entries {
-            let entry = entry?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            if is_image_name(name) && !named.contains(&name) {
-                fs::remove_file(entry.path())?;
-            }
-        }
+        let folder = self.pictures();
+        remove_unnamed(&folder, &file.images(), |name| click_number(name).is_some())?;
+        remove_leftovers(&folder);
         Ok(())
     }
 
@@ -424,6 +404,44 @@ impl EnabledStore {
         }
         Ok(())
     }
+}
+
+/// The number in the name [`AutomationStore::add_picture`] gives a click
+/// picture, such as 3 in `click-3.png`, or `None` for any other name.
+fn click_number(name: &str) -> Option<u32> {
+    let digits = name.strip_prefix("click-")?.strip_suffix(".png")?;
+    digits
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| digits.parse().ok())
+        .flatten()
+}
+
+/// Removes the files in `folder` whose names `own` takes and `named` does
+/// not hold. Anything that is not a plain file stays, and so does every
+/// file with another name. A folder that does not exist holds none.
+///
+/// # Errors
+///
+/// Returns the error from listing the folder or from the first removal
+/// that fails, which leaves the rest for the next time.
+fn remove_unnamed(folder: &Path, named: &[&str], own: impl Fn(&str) -> bool) -> io::Result<()> {
+    let entries = match fs::read_dir(folder) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        entries => entries?,
+    };
+    for entry in entries {
+        // An error here fails the listing, as it does in `AppStore::load`.
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if own(name) && !named.contains(&name) && entry.file_type()?.is_file() {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 /// Whether `id` can name an application's folder.
@@ -739,20 +757,9 @@ mod tests {
         fs::remove_dir_all(root).expect("clean up");
     }
 
-    #[test]
-    fn prune_removes_only_pictures_the_file_no_longer_names() {
-        let root = scratch("prune");
-        let store = AppStore::new(root.clone());
-        let pictures = [
-            ("old.png".to_owned(), vec![1]),
-            ("kept.png".to_owned(), vec![2]),
-        ];
-        store
-            .save("app", &file("kept.png"), &pictures)
-            .expect("saves");
-        fs::write(store.folder("app").join("notes.txt"), "mine").expect("write");
-        store.prune("app", &file("kept.png")).expect("prunes");
-        let mut left: Vec<String> = fs::read_dir(store.folder("app"))
+    /// The names of everything in `folder`, sorted.
+    fn names_in(folder: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(folder)
             .expect("lists")
             .map(|entry| {
                 entry
@@ -762,8 +769,51 @@ mod tests {
                     .expect("utf-8")
             })
             .collect();
-        left.sort();
-        assert_eq!(left, ["app.json", "kept.png", "notes.txt"]);
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn prune_removes_only_its_own_pictures_that_the_file_does_not_name() {
+        let root = scratch("prune");
+        let store = AppStore::new(root.clone());
+        store
+            .prune("app", &file("status-1.png"))
+            .expect("no folder holds no pictures");
+        // What a removed value, fix and reference leave behind, or a save
+        // that stopped before it wrote the file.
+        let pictures = [
+            ("status-1.png".to_owned(), vec![1]),
+            ("status-2.png".to_owned(), vec![2]),
+            ("status-1-1.png".to_owned(), vec![3]),
+            ("ref-digits-1.png".to_owned(), vec![4]),
+        ];
+        store
+            .save("app", &file("status-1.png"), &pictures)
+            .expect("saves");
+        let folder = store.folder("app");
+        // The user's own files, and a folder named like a picture.
+        fs::write(folder.join("notes.txt"), "mine").expect("write");
+        fs::write(folder.join("holiday.png"), "mine").expect("write");
+        fs::create_dir(folder.join("status-9.png")).expect("create");
+        store.prune("app", &file("status-1.png")).expect("prunes");
+        assert_eq!(
+            names_in(&folder),
+            [
+                "app.json",
+                "holiday.png",
+                "notes.txt",
+                "status-1.png",
+                "status-9.png"
+            ]
+        );
+        // A picture the file names stays whatever its name, as after a
+        // hand edit.
+        store.prune("app", &file("holiday.png")).expect("prunes");
+        assert_eq!(
+            names_in(&folder),
+            ["app.json", "holiday.png", "notes.txt", "status-9.png"]
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -945,6 +995,26 @@ mod tests {
         assert_eq!(store.add_picture(b"three").expect("adds"), "click-3.png");
         fs::write(store.pictures().join("click-9.png.bak"), b"other").expect("write");
         assert_eq!(store.add_picture(b"four").expect("adds"), "click-4.png");
+        // Only pictures named as `add_picture` names them are pruned: the
+        // user's own files, and a folder named like one, stay.
+        for mine in ["holiday.png", "button-1.png", "click-+8.png", "click-x.png"] {
+            fs::write(store.pictures().join(mine), b"mine").expect("write");
+        }
+        fs::create_dir(store.pictures().join("click-7.png")).expect("create");
+        store.prune_pictures(&file).expect("prunes");
+        assert_eq!(
+            names_in(&store.pictures()),
+            [
+                "button-1.png",
+                "click-+8.png",
+                "click-2.png",
+                "click-7.png",
+                "click-9.png.bak",
+                "click-x.png",
+                "holiday.png",
+                "notes.txt"
+            ]
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -1054,6 +1124,25 @@ mod tests {
             .save(&AutomationsFile::default())
             .expect("saves");
         assert!(!beside.exists());
+
+        // A click picture's write that a crash cut short goes when the
+        // click pictures are pruned.
+        fs::create_dir_all(automations.pictures()).expect("create");
+        let cut_short = automations
+            .pictures()
+            .join(format!("click-1.png.{other}-1700.tmp"));
+        let under_way = automations
+            .pictures()
+            .join(format!("click-2.png.{other}-1700.tmp"));
+        for path in [&cut_short, &under_way] {
+            fs::write(path, b"x").expect("writes");
+        }
+        age(&cut_short);
+        automations
+            .prune_pictures(&AutomationsFile::default())
+            .expect("prunes");
+        assert!(!cut_short.exists(), "another run's old one goes");
+        assert!(under_way.exists(), "a write under way stays");
         fs::remove_dir_all(root).expect("clean up");
     }
 
