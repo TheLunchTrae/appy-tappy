@@ -518,8 +518,9 @@ pub enum Action {
     Open(OpenTarget),
     /// Starts playing a WAV file, without waiting for it to end.
     PlaySound(SoundFile),
-    /// Clicks in a window of another saved application, with the real
-    /// cursor, as if the user clicked there.
+    /// Clicks in a window of another saved application: with the real
+    /// cursor, as if the user clicked there, or as mouse messages posted to
+    /// the window.
     Click(Click),
 }
 
@@ -544,7 +545,9 @@ impl Action {
 
     /// Whether the action sends input as if the user typed or clicked it,
     /// which anti-cheat can see, so the policy allows it only for an
-    /// application whose anti-cheat class is none.
+    /// application whose anti-cheat class is none. A click counts however
+    /// it is delivered: a click posted to a window is still input that
+    /// AppyTappy makes for another program.
     #[must_use]
     pub const fn injects_input(&self) -> bool {
         self.input_sent().is_some()
@@ -568,7 +571,7 @@ impl Action {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::click::{ClickAt, ClickButton, Corner, Spot};
+    use crate::click::{ClickAt, ClickButton, ClickDelivery, Corner, Spot};
 
     #[test]
     fn app_names_are_bounded_and_match_ignoring_case() {
@@ -670,18 +673,23 @@ mod tests {
         assert_eq!(keys.input_sent(), Some("presses keys"));
         assert!(!keys.restorable());
         let spot = Spot::new(Corner::TopLeft, 0, 0).expect("valid");
-        let click = Action::Click(
-            Click::new(
-                "streaming_app",
-                ClickButton::Left,
-                true,
-                ClickAt::Spot(spot),
-            )
-            .expect("valid"),
-        );
-        assert!(click.injects_input());
-        assert_eq!(click.input_sent(), Some("clicks"));
-        assert!(!click.restorable());
+        for delivery in [
+            ClickDelivery::Cursor { return_focus: true },
+            ClickDelivery::Message,
+        ] {
+            let click = Action::Click(
+                Click::new(
+                    "streaming_app",
+                    ClickButton::Left,
+                    delivery,
+                    ClickAt::Spot(spot),
+                )
+                .expect("valid"),
+            );
+            assert!(click.injects_input(), "{delivery:?}");
+            assert_eq!(click.input_sent(), Some("clicks"));
+            assert!(!click.restorable());
+        }
         assert!(
             !Action::Media {
                 target: MediaTarget::Current,

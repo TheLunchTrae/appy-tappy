@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
 import { LIMITS } from '../src/lib/bindings.ts';
-import { SEARCH_SIDE, middle, placeSpot, searchArea, spotAt, targetSummary } from '../src/lib/click.ts';
+import {
+  SEARCH_SIDE,
+  middle,
+  placeSpot,
+  returnsFocus,
+  searchArea,
+  sentText,
+  spotAt,
+  targetSummary,
+} from '../src/lib/click.ts';
 
 const window = { width: 1280, height: 720 };
 
@@ -63,19 +72,44 @@ describe('targets', () => {
   });
 
   test('say what they click in a few words', () => {
-    expect(targetSummary('left', null)).toBe('No target yet. Set up where it clicks.');
-    expect(targetSummary('double', { kind: 'spot', corner: 'bottomRight', x: 40, y: 12 })).toBe(
-      'Double click 40 px from the right, 12 px from the bottom',
+    expect(targetSummary('left', null, 'cursor')).toBe('No target yet. Set up where it clicks.');
+    expect(targetSummary('left', null, 'message')).toBe('No target yet. Set up where it clicks.');
+    const spot = { kind: 'spot', corner: 'bottomRight', x: 40, y: 12 } as const;
+    expect(targetSummary('double', spot, 'cursor')).toBe('Double click 40 px from the right, 12 px from the bottom');
+    expect(targetSummary('double', spot, 'message')).toBe(
+      'Double click, sent to the window, 40 px from the right, 12 px from the bottom',
     );
     expect(
-      targetSummary('right', {
-        kind: 'picture',
-        image: 'click-1.png',
-        windowSize: window,
-        search: { x: 0, y: 0, width: 10, height: 10 },
-        press: { x: 1, y: 1 },
-        tolerance: 20,
-      }),
+      targetSummary(
+        'right',
+        {
+          kind: 'picture',
+          image: 'click-1.png',
+          windowSize: window,
+          search: { x: 0, y: 0, width: 10, height: 10 },
+          press: { x: 1, y: 1 },
+          tolerance: 20,
+        },
+        'cursor',
+      ),
     ).toBe("Right click on this picture, when it's found near where it was");
+  });
+});
+
+describe('how a click is delivered', () => {
+  test('a click keeps where the focus goes until its button changes, and a right click then keeps it', () => {
+    expect(returnsFocus('left', { button: 'left', returnFocus: false })).toBe(false);
+    expect(returnsFocus('right', { button: 'right', returnFocus: true })).toBe(true);
+    expect(returnsFocus('right', { button: 'left', returnFocus: true })).toBe(false);
+    expect(returnsFocus('double', { button: 'right', returnFocus: false })).toBe(true);
+  });
+
+  test('a click that was sent is said to be sent, not to have worked', () => {
+    expect(sentText('cursor', 'Streaming app')).toBe(
+      'AppyTappy clicked in Streaming app. Check that Streaming app did what you wanted.',
+    );
+    const sent = sentText('message', 'Streaming app');
+    expect(sent).toStartWith("AppyTappy sent the click to Streaming app's window.");
+    expect(sent).toContain('Nothing tells it whether Streaming app acted on it');
   });
 });

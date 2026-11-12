@@ -658,7 +658,9 @@ mod tests {
 
     #[test]
     fn clicks_keep_their_targets_and_pictures() {
-        use appytappy_config::automation_file::{ClickAtDef, ClickButtonDef, CornerDef, PointDef};
+        use appytappy_config::automation_file::{
+            ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef, PointDef,
+        };
         use appytappy_config::click::ClickAt;
         use appytappy_sources::screen::click::ClickSearch;
 
@@ -674,6 +676,7 @@ mod tests {
             automation.actions = vec![ActionDef::Click {
                 app: "target".to_owned(),
                 button: ClickButtonDef::Left,
+                delivery: ClickDeliveryDef::Cursor,
                 return_focus: true,
                 at,
             }];

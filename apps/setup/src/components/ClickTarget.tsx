@@ -2,6 +2,7 @@ import { type PointerEvent, type ReactNode, useCallback, useEffect, useRef, useS
 
 import {
   addClickPicture,
+  clickNow,
   clickPicture,
   errorText,
   findClick,
@@ -14,6 +15,7 @@ import {
   type AppSummary,
   type ClickAtDef,
   type ClickButtonDef,
+  type ClickDeliveryDef,
   type FoundClick,
   LIMITS,
   type SelectionSpec,
@@ -22,12 +24,19 @@ import {
   BUTTONS,
   BUTTON_NAMES,
   DEFAULT_TOLERANCE,
+  DELIVERIES,
+  DELIVERY_NAMES,
+  DELIVERY_NOTES,
+  DELIVERY_WORDS,
   SEARCH_MARGIN,
   SEARCH_SIDE,
   clickApps,
+  clickBlocked,
   middle,
   placeSpot,
+  returnsFocus,
   searchArea,
+  sentText,
   spotAt,
 } from '../lib/click.ts';
 import type { Picture } from '../lib/pixels.ts';
@@ -52,6 +61,7 @@ const THUMB_WIDTH = 220;
 interface ClickTargetValue {
   readonly app: string;
   readonly button: ClickButtonDef;
+  readonly delivery: ClickDeliveryDef;
   readonly at: ClickAtDef;
 }
 
@@ -109,6 +119,11 @@ type Found =
   | { readonly kind: 'found'; readonly at: FoundClick }
   | { readonly kind: 'missed'; readonly message: string };
 
+/** What Click it now did: it sent the click, or why it did not. */
+type Clicked =
+  | { readonly kind: 'sent'; readonly message: string }
+  | { readonly kind: 'unsent'; readonly message: string };
+
 function hintText(
   window: Window,
   mode: Mode,
@@ -149,12 +164,18 @@ interface StageProps {
   /** The target's place before this screen opened, kept until a new one is set up. */
   readonly initial: ClickAtDef | null;
   readonly button: ClickButtonDef;
+  readonly delivery: ClickDeliveryDef;
+  /** Whether a click with the cursor gives the focus back after, for Click it now. */
+  readonly returnFocus: boolean;
+  /** The ID of the application whose value the automation watches, or null before it watches one. */
+  readonly watched: string | null;
   readonly tolerance: number;
   /** The application field, disabled while a picture is kept or looked for. */
   readonly appField: (busy: boolean) => ReactNode;
   /** Opens the screen again on the application, to find its window anew. */
   readonly onLookAgain: () => void;
   readonly onButton: (button: ClickButtonDef) => void;
+  readonly onDelivery: (delivery: ClickDeliveryDef) => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onCancel: () => void;
   readonly onUse: (target: ClickTargetValue) => void;
@@ -167,10 +188,14 @@ function TargetStage({
   automation,
   initial,
   button,
+  delivery,
+  returnFocus,
+  watched,
   tolerance,
   appField,
   onLookAgain,
   onButton,
+  onDelivery,
   onTolerance,
   onCancel,
   onUse,
@@ -183,6 +208,7 @@ function TargetStage({
   const [tool, setTool] = useState<SelectTool>('box');
   const [colorMatch, setColorMatch] = useState(DEFAULT_COLOR_MATCH);
   const [found, setFound] = useState<Found | null>(null);
+  const [clicked, setClicked] = useState<Clicked | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The picture kept for a drawn region, so finding and using it keep it once.
@@ -195,6 +221,14 @@ function TargetStage({
       mounted.current = false;
     };
   }, []);
+
+  // What trying the target answered shows below the buttons, which may be past the end of a short window.
+  const answer = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (found !== null || clicked !== null) {
+      answer.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [found, clicked]);
 
   const screenshots = useScreenshots();
   const { shots, full, selected, setSelected, position } = screenshots;
@@ -293,6 +327,7 @@ function TargetStage({
 
   const changed = (): void => {
     setFound(null);
+    setClicked(null);
     setError(null);
   };
 
@@ -430,14 +465,36 @@ function TargetStage({
     });
   };
 
+  // Sends one real click. Only the Click it now button calls it.
+  const clickItNow = (): void => {
+    setClicked(null);
+    run(async (at) => {
+      try {
+        await clickNow({ watched, app, button, delivery, returnFocus, at });
+        setClicked({ kind: 'sent', message: sentText(delivery, appName) });
+      } catch (caught: unknown) {
+        setClicked({ kind: 'unsent', message: errorText(caught) });
+      }
+    });
+  };
+
   const use = (): void => {
     run(async (at) => {
       if (mounted.current) {
-        onUse({ app, button, at });
+        onUse({ app, button, delivery, at });
       }
       await Promise.resolve();
     });
   };
+
+  // Anti-cheat can see a click however it is sent, so a test click needs what the automation's click needs.
+  const named = (id: string) => {
+    const file = apps.find((candidate) => candidate.id === id)?.file ?? null;
+    return file === null ? null : { name: file.name, antiCheat: file.antiCheat };
+  };
+  const clickedIn = named(app);
+  const blocked =
+    clickedIn === null ? null : clickBlocked(watched === null ? clickedIn : (named(watched) ?? clickedIn), clickedIn);
 
   const spotHere = spot?.kind === 'spot' && pictureSize !== null ? placeSpot(spot, pictureSize) : null;
   const ready = mode === 'spot' ? spot !== null : drawn !== null || initial?.kind === 'picture';
@@ -755,6 +812,7 @@ function TargetStage({
                 type="button"
                 aria-pressed={button === option}
                 onClick={() => {
+                  setClicked(null);
                   onButton(option);
                 }}
               >
@@ -763,30 +821,79 @@ function TargetStage({
             ))}
           </div>
         </div>
-        <div role="status">
-          {found === null ? null : found.kind === 'found' ? (
-            <p className="result">
-              {found.at.likeness === null
-                ? `It would click ${found.at.x} px across and ${found.at.y} px down the window.`
-                : `Found it, ${found.at.likeness}% alike. It would click ${found.at.x} px across and ${found.at.y} px down the window.`}
-            </p>
-          ) : (
-            <p className="warn">{found.message}</p>
-          )}
+        <div className="field">
+          <span className="name">
+            <span id="click-delivery">How to click</span>
+            <Hint topic="How to click" id="hint-click-delivery">
+              {DELIVERY_NAMES.cursor} clicks the way you would, so it works everywhere, but the window comes to the
+              front for a moment. {DELIVERY_NAMES.message} leaves the cursor and the window in front alone, which suits
+              a game in full screen, but some applications ignore it.
+            </Hint>
+          </span>
+          <div className="seg" role="group" aria-labelledby="click-delivery" aria-describedby="hint-click-delivery">
+            {DELIVERIES.map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={delivery === option}
+                onClick={() => {
+                  setClicked(null);
+                  onDelivery(option);
+                }}
+              >
+                {DELIVERY_NAMES[option]}
+                <small>{DELIVERY_WORDS[option]}</small>
+              </button>
+            ))}
+          </div>
+          <span className="note">{DELIVERY_NOTES[delivery]}</span>
+        </div>
+        <div className="field">
+          <span className="name">
+            <span id="click-try">Try it</span>
+            <Hint topic="Try it" id="hint-click-try">
+              Find it now shows where the click would land, without clicking. Click it now sends one real click to the
+              window, the way the automation would, so you can see whether the application takes it.
+            </Hint>
+          </span>
+          <div className="click-tries" role="group" aria-labelledby="click-try" aria-describedby="hint-click-try">
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !ready || window.kind !== 'picked'}
+              title="Looks for the target on the live window now, without clicking."
+              onClick={findNow}
+            >
+              Find it now
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !ready || window.kind !== 'picked' || blocked !== null}
+              title="Sends one real click to the window now, the way the automation would."
+              onClick={clickItNow}
+            >
+              Click it now
+            </button>
+          </div>
+          {blocked === null ? null : <span className="note">{blocked}</span>}
+          <div role="status" ref={answer}>
+            {found === null ? null : found.kind === 'found' ? (
+              <p className="result">
+                {found.at.likeness === null
+                  ? `It would click ${found.at.x} px across and ${found.at.y} px down the window.`
+                  : `Found it, ${found.at.likeness}% alike. It would click ${found.at.x} px across and ${found.at.y} px down the window.`}
+              </p>
+            ) : (
+              <p className="warn">{found.message}</p>
+            )}
+            {clicked === null ? null : <p className={clicked.kind === 'sent' ? 'result' : 'warn'}>{clicked.message}</p>}
+          </div>
         </div>
         <span className="warn" role="alert">
           {error ?? ''}
         </span>
         <div className="actions">
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || !ready || window.kind !== 'picked'}
-            title="Looks for the target on the live window now, without clicking."
-            onClick={findNow}
-          >
-            Find it now
-          </button>
           <button type="button" className="btn" disabled={busy} onClick={onCancel}>
             Cancel
           </button>
@@ -803,17 +910,26 @@ interface Props {
   readonly apps: readonly AppSummary[];
   /** The automation's name, for the breadcrumb. */
   readonly automation: string;
+  /** The ID of the application whose value the automation watches, or null before it watches one. */
+  readonly watched: string | null;
   /** The target the click has, or null before it has one. */
-  readonly initial: { readonly app: string; readonly button: ClickButtonDef; readonly at: ClickAtDef | null };
+  readonly initial: {
+    readonly app: string;
+    readonly button: ClickButtonDef;
+    readonly delivery: ClickDeliveryDef;
+    readonly returnFocus: boolean;
+    readonly at: ClickAtDef | null;
+  };
   readonly onCancel: () => void;
   readonly onUse: (target: ClickTargetValue) => void;
 }
 
 /** Setting up where a click lands: on a spot, or on a picture wherever it shows near where it was. */
-export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Props) {
+export function ClickTarget({ apps, automation, watched, initial, onCancel, onUse }: Props) {
   const choices = clickApps(apps);
   const [app, setApp] = useState(() => (initial.app === '' ? (choices[0]?.id ?? '') : initial.app));
   const [button, setButton] = useState<ClickButtonDef>(initial.button);
+  const [delivery, setDelivery] = useState<ClickDeliveryDef>(initial.delivery);
   const [tolerance, setTolerance] = useState(() =>
     initial.at?.kind === 'picture' ? initial.at.tolerance : DEFAULT_TOLERANCE,
   );
@@ -839,8 +955,12 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
       automation={automation}
       initial={initial.app === app ? initial.at : null}
       button={button}
+      delivery={delivery}
+      returnFocus={returnsFocus(button, initial)}
+      watched={watched}
       tolerance={tolerance}
       onButton={setButton}
+      onDelivery={setDelivery}
       onTolerance={setTolerance}
       onCancel={onCancel}
       onUse={onUse}

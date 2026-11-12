@@ -1985,6 +1985,11 @@ select {
   min-width: 0;
 }
 
+.click-tries {
+  display: flex;
+  gap: 8px;
+}
+
 .click-options {
   grid-column: 2 / -1;
   display: flex;

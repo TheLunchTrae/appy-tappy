@@ -42,8 +42,8 @@ use appytappy_config::app_file::{
     AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
 };
 use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, CornerDef, MAX_COOLDOWN_MS,
-    MediaCommandDef, WhenDef,
+    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
+    MAX_COOLDOWN_MS, MediaCommandDef, WhenDef,
 };
 use appytappy_config::click::{MAX_SEARCH_PIXELS, Spot};
 use appytappy_config::settings_file::{
@@ -64,8 +64,8 @@ use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
-    AppSummary, ClickPictureView, FixSpec, FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec,
-    SavedReferenceId, SavedValue,
+    AppSummary, ClickPictureView, ClickSpec, FixSpec, FoundClick, Live, Reading, ReferenceSaveSpec,
+    SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
@@ -464,6 +464,7 @@ fn sample_actions() -> Vec<ActionDef> {
         ActionDef::Click {
             app: "app".to_owned(),
             button: ClickButtonDef::Left,
+            delivery: ClickDeliveryDef::Cursor,
             return_focus: true,
             at: ClickAtDef::Spot {
                 corner: CornerDef::TopLeft,

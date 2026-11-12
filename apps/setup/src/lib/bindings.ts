@@ -48,7 +48,13 @@ app: string,
  */
 button: ClickButtonDef,
 /**
- * Whether the window that was in front gets the focus back after.
+ * How it reaches the window: with the cursor when left out.
+ */
+delivery: ClickDeliveryDef,
+/**
+ * Whether the window that was in front gets the focus back after a
+ * click with the cursor. A click sent as messages moves no focus
+ * and does not read this.
  */
 returnFocus: boolean,
 /**
@@ -349,6 +355,13 @@ tolerance: number, }>;
 export type ClickButtonDef = DeepReadonly<"left" | "right" | "double">;
 
 /**
+ * How a click reaches its window, as the file spells it. A cursor click's
+ * return of the focus is the action's own field, so files that name no
+ * delivery read as before.
+ */
+export type ClickDeliveryDef = DeepReadonly<"cursor" | "message">;
+
+/**
  * A click picture just kept, and the size of the window it was taken on.
  */
 export type ClickPictureView = DeepReadonly<{
@@ -364,6 +377,37 @@ windowWidth: number,
  * The window's height when it was taken.
  */
 windowHeight: number, }>;
+
+/**
+ * A click to send now, as the click target screen sets it up.
+ */
+export type ClickSpec = DeepReadonly<{
+/**
+ * The ID of the saved application whose value the automation watches,
+ * or nothing before the automation watches one.
+ */
+watched: string | null,
+/**
+ * The ID of the saved application it clicks in.
+ */
+app: string,
+/**
+ * Which button, and how many times.
+ */
+button: ClickButtonDef,
+/**
+ * How it reaches the window.
+ */
+delivery: ClickDeliveryDef,
+/**
+ * Whether the window that was in front gets the focus back after a
+ * click with the cursor.
+ */
+returnFocus: boolean,
+/**
+ * Where it clicks.
+ */
+at: ClickAtDef, }>;
 
 /**
  * A color.

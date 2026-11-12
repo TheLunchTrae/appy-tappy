@@ -26,7 +26,7 @@ import {
   valueChoices,
   withSource,
 } from '../lib/automation.ts';
-import { clickApps, targetSummary } from '../lib/click.ts';
+import { clickApps, returnsFocus, targetSummary } from '../lib/click.ts';
 import { ACTIONS_HINT, COOLDOWN_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
@@ -234,7 +234,7 @@ function ClickFields({ action, label, apps, onChange, onTarget }: ClickFieldsPro
           {action.at?.kind === 'picture' ? (
             <ClickPictureThumb image={action.at.image} label={`${label}: the picture it clicks on`} />
           ) : null}
-          <span>{targetSummary(action.button, action.at)}</span>
+          <span>{targetSummary(action.button, action.at, action.delivery)}</span>
         </span>
         <button
           type="button"
@@ -250,23 +250,25 @@ function ClickFields({ action, label, apps, onChange, onTarget }: ClickFieldsPro
           You set it up on a screenshot of the window, so the application must be open.
         </Hint>
       </span>
-      <span className="click-options">
-        <label>
-          <input
-            type="checkbox"
-            aria-describedby={hintFocus}
-            checked={action.returnFocus}
-            onChange={(event) => {
-              onChange({ ...action, returnFocus: event.target.checked });
-            }}
-          />
-          Go back to the window that was in front
-        </label>
-        <Hint topic="Go back to the window that was in front" id={hintFocus}>
-          After the click, the window you were using gets the focus back, so you can carry on. Turn it off when the
-          click opens something you want to use, such as a menu.
-        </Hint>
-      </span>
+      {action.delivery === 'cursor' ? (
+        <span className="click-options">
+          <label>
+            <input
+              type="checkbox"
+              aria-describedby={hintFocus}
+              checked={action.returnFocus}
+              onChange={(event) => {
+                onChange({ ...action, returnFocus: event.target.checked });
+              }}
+            />
+            Go back to the window that was in front
+          </label>
+          <Hint topic="Go back to the window that was in front" id={hintFocus}>
+            After the click, the window you were using gets the focus back, so you can carry on. Turn it off when the
+            click opens something you want to use, such as a menu.
+          </Hint>
+        </span>
+      ) : null}
     </>
   );
 }
@@ -515,7 +517,18 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
     action.kind === 'click' && action.clickApp !== '' ? [action.clickApp] : [],
   );
   const clickWarning = choice === null ? null : clicksBlocked(clickedApps, choice, apps);
-  const clickedNames = [...new Set(clickedApps.map((id) => apps.find((app) => app.id === id)?.file?.name ?? id))];
+  // The applications clicked in with the cursor, and those a click is sent to, since each note says what its way does.
+  const clickedBy = (delivery: ActionDraft['delivery']): readonly string[] => [
+    ...new Set(
+      draft.actions.flatMap((action) =>
+        action.kind === 'click' && action.clickApp !== '' && action.delivery === delivery
+          ? [apps.find((app) => app.id === action.clickApp)?.file?.name ?? action.clickApp]
+          : [],
+      ),
+    ),
+  ];
+  const clickedNames = clickedBy('cursor');
+  const sentNames = clickedBy('message');
 
   const update = (change: Partial<Draft>): void => {
     setDraft((current) => ({ ...current, ...change }));
@@ -547,7 +560,14 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
       <ClickTarget
         apps={apps}
         automation={draft.name.trim() === '' ? (existing?.name ?? 'New automation') : draft.name.trim()}
-        initial={{ app: targeted.clickApp, button: targeted.button, at: targeted.at }}
+        watched={draft.source?.app ?? null}
+        initial={{
+          app: targeted.clickApp,
+          button: targeted.button,
+          delivery: targeted.delivery,
+          returnFocus: targeted.returnFocus,
+          at: targeted.at,
+        }}
         onCancel={() => {
           setTargeting(null);
         }}
@@ -559,9 +579,9 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
                     ...old,
                     clickApp: target.app,
                     button: target.button,
+                    delivery: target.delivery,
                     at: target.at,
-                    // A right click usually opens a menu, which going back to the window in front would close.
-                    returnFocus: target.button === old.button ? old.returnFocus : target.button !== 'right',
+                    returnFocus: returnsFocus(target.button, old),
                   }
                 : old,
             ),
@@ -751,6 +771,13 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
               in front. AppyTappy brings {clickedNames.join(' and ')} to the front for a moment, clicks, puts the cursor
               back, and goes back to the window that was in front if you ask it to. A picture that is not found is not
               clicked.
+            </p>
+          )}
+          {sentNames.length === 0 ? null : (
+            <p className="note">
+              A click sent to the window of {sentNames.join(' or ')} leaves the cursor and the window in front as they
+              are. Some applications ignore a click sent this way, and nothing tells AppyTappy whether it worked, so
+              test it with Click it now where you set up the target. A picture that is not found is not clicked.
             </p>
           )}
           {pressesKeys ? (

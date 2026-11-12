@@ -1,20 +1,24 @@
-//! A click's target: keeping a picture of what it clicks on, showing it, and
+//! A click's target: keeping a picture of what it clicks on, showing it,
 //! finding where the click would land on the picked window's newest frame
-//! with the runtime's own [`ClickSearch`].
+//! with the runtime's own [`ClickSearch`], and sending one click when the
+//! user asks for it.
 
-use appytappy_config::automation_file::ClickAtDef;
-use appytappy_config::click::ClickAt;
+use appytappy_config::anti_cheat::{AntiCheatClass, allows_input};
+use appytappy_config::app_file::AppFile;
+use appytappy_config::automation_file::{ClickAtDef, ClickButtonDef, ClickDeliveryDef};
+use appytappy_config::click::{Click, ClickAt, ClickPicture};
 use appytappy_sources::screen::click::{ClickPictureError, ClickSearch};
 use appytappy_sources::screen::mask::Mask;
+use appytappy_sources::screen::place::Target;
 use appytappy_sources::screen::{Image, Region};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::check_spec::{RegionSpec, sentence};
 use crate::pixels;
 use crate::selection::{self, SelectionSpec};
 
 use super::Owner;
-use super::host::Host;
+use super::host::{ClickNow, Host};
 
 /// A click picture just kept, and the size of the window it was taken on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -43,7 +47,99 @@ pub(crate) struct FoundClick {
     pub(crate) likeness: Option<u8>,
 }
 
+/// A click to send now, as the click target screen sets it up.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ClickSpec {
+    /// The ID of the saved application whose value the automation watches,
+    /// or nothing before the automation watches one.
+    pub(crate) watched: Option<String>,
+    /// The ID of the saved application it clicks in.
+    pub(crate) app: String,
+    /// Which button, and how many times.
+    pub(crate) button: ClickButtonDef,
+    /// How it reaches the window.
+    pub(crate) delivery: ClickDeliveryDef,
+    /// Whether the window that was in front gets the focus back after a
+    /// click with the cursor.
+    pub(crate) return_focus: bool,
+    /// Where it clicks.
+    pub(crate) at: ClickAtDef,
+}
+
+/// Refuses a click while the application `file` describes runs with
+/// anti-cheat, or with none set: a click is input that AppyTappy makes for
+/// another program however it is delivered, which the anti-cheat policy
+/// allows only for the class none.
+fn allows_clicks(file: &AppFile) -> Result<(), String> {
+    if allows_input(AntiCheatClass::from(file.anti_cheat)) {
+        return Ok(());
+    }
+    Err(format!(
+        "AppyTappy cannot click while {name} runs, because anti-cheat can treat a click as \
+         cheating. Set {name}'s anti-cheat to None on the Applications page first.",
+        name = file.name
+    ))
+}
+
 impl<H: Host> Owner<H> {
+    /// Sends the click `click` now, once, because the user asked for it on
+    /// the click target screen. It is placed and sent the way the runtime
+    /// does both, so it lands, or fails, as the automation's click would.
+    ///
+    /// It needs what an automation's click needs to run: the application it
+    /// clicks in, and the watched one when the automation has one, with the
+    /// anti-cheat class none.
+    ///
+    /// `Ok` says the click was sent. Whether its application acted on it,
+    /// nothing reports.
+    pub(crate) fn click_now(&self, click: &ClickSpec) -> Result<(), String> {
+        let invalid = |error: appytappy_config::click::InvalidClick| sentence(&error.to_string());
+        let at = click.at.to_at().map_err(invalid)?;
+        let delivery = click.delivery.to_delivery(click.return_focus);
+        let click_ = Click::new(&click.app, click.button.into(), delivery, at).map_err(invalid)?;
+        let stores = self.stores()?;
+        if let Some(watched) = &click.watched {
+            allows_clicks(&stores.app(watched)?.file)?;
+        }
+        let app = stores.app(&click_.app)?.file;
+        allows_clicks(&app)?;
+        let search;
+        let target = match &click_.at {
+            ClickAt::Spot(spot) => Target::Spot(*spot),
+            ClickAt::Picture(wanted) => {
+                search = self.click_search(wanted)?;
+                Target::Picture(&search)
+            },
+        };
+        self.host
+            .click(ClickNow {
+                app: &app.name,
+                window: &app.window.to_match(),
+                target,
+                button: click_.button,
+                delivery: click_.delivery,
+            })
+            .map_err(|error| sentence(&error))
+    }
+
+    /// The search for the click picture `wanted` names, read from its file.
+    fn click_search(&self, wanted: &ClickPicture) -> Result<ClickSearch, String> {
+        let name = &wanted.image;
+        let unread =
+            |error: &dyn std::fmt::Display| format!("The picture {name} cannot be read: {error}.");
+        let bytes = self
+            .stores()?
+            .automations
+            .picture(name)
+            .map_err(|error| unread(&error))?;
+        ClickSearch::new(wanted, &bytes).map_err(|error| match error {
+            ClickPictureError::Read(error) => unread(&error),
+            ClickPictureError::Misfit(misfit) => sentence(&misfit.to_string()),
+        })
+    }
+
     /// Keeps `region` of screenshot `screenshot` as a new click picture and
     /// answers its name with the window's size. With `selection`, only the
     /// pixels it picks are compared; the rest of the picture is kept
@@ -124,19 +220,7 @@ impl<H: Host> Owner<H> {
                     "The spot lies outside the window. Pick it again on this window.".to_owned()
                 }),
             ClickAt::Picture(wanted) => {
-                let name = &wanted.image;
-                let unread = |error: &dyn std::fmt::Display| {
-                    format!("The picture {name} cannot be read: {error}.")
-                };
-                let bytes = self
-                    .stores()?
-                    .automations
-                    .picture(name)
-                    .map_err(|error| unread(&error))?;
-                let search = ClickSearch::new(&wanted, &bytes).map_err(|error| match error {
-                    ClickPictureError::Read(error) => unread(&error),
-                    ClickPictureError::Misfit(misfit) => sentence(&misfit.to_string()),
-                })?;
+                let search = self.click_search(&wanted)?;
                 let taken = search.taken();
                 if size != taken {
                     return Err(format!(
@@ -178,11 +262,17 @@ impl<H: Host> Owner<H> {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{RegionDef, SizeDef};
+    use appytappy_config::app_file::{AntiCheatDef, RegionDef, SizeChangesDef, SizeDef, WindowDef};
     use appytappy_config::automation_file::{ClickAtDef, CornerDef, PointDef};
+    use appytappy_config::click::{ClickButton, ClickDelivery, Corner, Spot};
+    use appytappy_config::window_match::WindowFacts;
 
     use super::*;
-    use crate::owner::test_support::{FakeHost, frame_image, harness, harness_with, scratch_store};
+    use crate::applications::AppSpec;
+    use crate::owner::test_support::{
+        FakeHost, Harness, SentClick, add_example_app, frame_image, harness, harness_with,
+        scratch_store,
+    };
     use crate::selection::{Combine, SelectStep};
 
     fn region(x: u32, y: u32, width: u32, height: u32) -> RegionSpec {
@@ -370,5 +460,203 @@ mod tests {
         );
         // Nothing was kept, so nothing was written.
         assert!(!root.exists());
+    }
+
+    /// A left click on a spot in the application `app`, for an automation
+    /// that watches `watched`.
+    fn spot_click(watched: Option<&str>, app: &str, delivery: ClickDeliveryDef) -> ClickSpec {
+        ClickSpec {
+            watched: watched.map(str::to_owned),
+            app: app.to_owned(),
+            button: ClickButtonDef::Right,
+            delivery,
+            return_focus: false,
+            at: ClickAtDef::Spot {
+                corner: CornerDef::TopRight,
+                x: 1,
+                y: 0,
+            },
+        }
+    }
+
+    /// Saves `Other App`, with no values, as the application `other`.
+    fn add_other_app(harness: &mut Harness) {
+        let saved = harness.ask(|owner| {
+            owner.save_app(
+                None,
+                AppSpec {
+                    name: "Other App".to_owned(),
+                    window: WindowDef::exact(WindowFacts {
+                        title: "Other App",
+                        class: "OtherWindow",
+                        executable: "Other.exe",
+                    }),
+                    size_changes: SizeChangesDef::Often,
+                },
+            )
+        });
+        assert_eq!(saved, Ok("other".to_owned()));
+    }
+
+    fn sent(harness: &Harness) -> Vec<SentClick> {
+        harness.clicks.try_iter().collect()
+    }
+
+    #[test]
+    fn a_click_is_sent_as_it_is_set_up_once_both_applications_allow_input() {
+        let (stores, root) = scratch_store("click-now");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        add_other_app(&mut harness);
+        let message = spot_click(Some("other"), "example", ClickDeliveryDef::Message);
+        // A new application's anti-cheat is not set, and each of the two
+        // has to allow input, however the click is delivered.
+        for (allowed, blocking) in [
+            (None, "Other App"),
+            (Some("other"), "Example App"),
+            (Some("example"), "Other App"),
+        ] {
+            for app in ["example", "other"] {
+                let class = if Some(app) == allowed {
+                    AntiCheatDef::None
+                } else {
+                    AntiCheatDef::Unknown
+                };
+                harness
+                    .ask(|owner| owner.set_anti_cheat(app, class))
+                    .expect("set");
+            }
+            let refused = harness
+                .ask(|owner| owner.click_now(&message))
+                .expect_err("anti-cheat is not none");
+            assert!(
+                refused.starts_with(&format!("AppyTappy cannot click while {blocking} runs")),
+                "{allowed:?}: {refused}"
+            );
+            assert_eq!(sent(&harness), [], "{allowed:?}");
+        }
+        for app in ["example", "other"] {
+            harness
+                .ask(|owner| owner.set_anti_cheat(app, AntiCheatDef::None))
+                .expect("set");
+        }
+        assert_eq!(harness.ask(|owner| owner.click_now(&message)), Ok(()));
+        let spot = Spot::new(Corner::TopRight, 1, 0).expect("valid");
+        let window = WindowDef::exact(WindowFacts {
+            title: "Example App",
+            class: "ExampleWindow",
+            executable: "Example.exe",
+        })
+        .to_match();
+        assert_eq!(
+            sent(&harness),
+            [SentClick {
+                app: "Example App".to_owned(),
+                window: window.clone(),
+                spot: Some(spot),
+                button: ClickButton::Right,
+                delivery: ClickDelivery::Message,
+            }]
+        );
+        // With no watched application yet, the one clicked in decides, and
+        // a click with the cursor keeps where the focus goes after.
+        let cursor = spot_click(None, "example", ClickDeliveryDef::Cursor);
+        assert_eq!(harness.ask(|owner| owner.click_now(&cursor)), Ok(()));
+        assert_eq!(
+            sent(&harness),
+            [SentClick {
+                app: "Example App".to_owned(),
+                window,
+                spot: Some(spot),
+                button: ClickButton::Right,
+                delivery: ClickDelivery::Cursor {
+                    return_focus: false
+                },
+            }]
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_click_that_cannot_be_sent_says_why() {
+        let (stores, root) = scratch_store("click-now-bad");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        harness
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .expect("set");
+        let click = |app: &str| spot_click(None, app, ClickDeliveryDef::Message);
+        assert_eq!(
+            harness.ask(|owner| owner.click_now(&click("gone"))),
+            Err("That application is no longer saved.".to_owned())
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.click_now(&click("Not An ID"))),
+            Err("A click needs the application it clicks in.".to_owned())
+        );
+        let gone = spot_click(Some("gone"), "example", ClickDeliveryDef::Message);
+        assert_eq!(
+            harness.ask(|owner| owner.click_now(&gone)),
+            Err("That application is no longer saved.".to_owned()),
+            "a watched application that is not saved cannot be checked"
+        );
+        let mut far = click("example");
+        far.at = ClickAtDef::Spot {
+            corner: CornerDef::TopLeft,
+            x: u32::MAX,
+            y: 0,
+        };
+        assert!(
+            harness
+                .ask(|owner| owner.click_now(&far))
+                .expect_err("too far")
+                .contains("16384 pixels")
+        );
+        let mut pictured = click("example");
+        pictured.at = picture("gone-1.png", (4, 2), (0, 0, 2, 2), 0);
+        assert!(
+            harness
+                .ask(|owner| owner.click_now(&pictured))
+                .expect_err("no such picture")
+                .starts_with("The picture gone-1.png cannot be read: ")
+        );
+        assert_eq!(sent(&harness), [], "nothing was sent so far");
+        harness.owner.host.unclicked = Some("example App has no window open".to_owned());
+        assert_eq!(
+            harness.ask(|owner| owner.click_now(&click("example"))),
+            Err("Example App has no window open.".to_owned())
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_click_on_a_picture_is_sent_with_its_search() {
+        let (stores, root) = scratch_store("click-now-picture");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        harness
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .expect("set");
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let kept = harness
+            .ask(|owner| owner.add_click_picture(0, region(2, 0, 2, 2), None))
+            .expect("kept");
+        let mut click = spot_click(None, "example", ClickDeliveryDef::Message);
+        click.at = picture(&kept.image, (4, 2), (1, 0, 3, 2), 0);
+        assert_eq!(harness.ask(|owner| owner.click_now(&click)), Ok(()));
+        let sent = sent(&harness);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].spot, None, "it looks for the picture");
+        // A picture that does not fit its search area is not sent.
+        click.at = picture(&kept.image, (4, 2), (2, 0, 1, 2), 0);
+        assert!(
+            harness
+                .ask(|owner| owner.click_now(&click))
+                .expect_err("too narrow")
+                .contains("fit inside")
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
     }
 }

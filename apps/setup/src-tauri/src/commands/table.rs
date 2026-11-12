@@ -77,6 +77,10 @@ macro_rules! with_commands {
             commands::click_picture(image: String, max_width: u32) -> Pixels;
             /// Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere.
             commands::find_click(at: ClickAtDef) -> FoundClick;
+            /// Sends `click` now, once: one real click in its application's window, placed and sent the way the
+            /// background part does both. Call it only when the user asks for the click. It resolves once the click is
+            /// sent, which does not say that the application acted on it, and rejects with why it was not sent.
+            commands::click_now(click: ClickSpec) -> ();
             commands::list_apps() -> Vec<AppSummary>;
             /// Saves `spec` over the application `existing`, or as a new one; returns its ID.
             commands::save_app(existing: Option<String>, spec: AppSpec) -> String;

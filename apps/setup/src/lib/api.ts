@@ -12,6 +12,7 @@ import type {
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
+  ClickSpec,
   ColorSpec,
   FixSpec,
   FoundClick,
@@ -167,6 +168,15 @@ export async function clickPicture(image: string, maxWidth: number): Promise<Pic
 /** Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere. */
 export async function findClick(at: ClickAtDef): Promise<FoundClick> {
   return invoke<FoundClick>('find_click', { at });
+}
+
+/**
+ * Sends `click` now, once: one real click in its application's window, placed and sent the way the
+ * background part does both. Call it only when the user asks for the click. It resolves once the click is
+ * sent, which does not say that the application acted on it, and rejects with why it was not sent.
+ */
+export async function clickNow(click: ClickSpec): Promise<void> {
+  await invoke('click_now', { click });
 }
 
 export async function listApps(): Promise<ReadonlyArray<AppSummary>> {
