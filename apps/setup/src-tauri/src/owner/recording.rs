@@ -203,14 +203,15 @@ mod tests {
 
     /// A 4 by 2 frame with its left `red` columns red and the rest gray.
     fn red_columns(red: usize) -> Image {
-        let row: Vec<u8> = (0..4)
-            .flat_map(|x| {
-                if x < red {
-                    [0, 0, 255, 0]
-                } else {
-                    [40, 40, 40, 0]
-                }
-            })
+        red_where([0, 1, 2, 3].map(|x| x < red))
+    }
+
+    /// A 4 by 2 frame whose columns are red where `red` says so and gray
+    /// elsewhere.
+    fn red_where(red: [bool; 4]) -> Image {
+        let row: Vec<u8> = red
+            .into_iter()
+            .flat_map(|red| if red { [0, 0, 255, 0] } else { [40, 40, 40, 0] })
             .collect();
         Image::new(
             Size {
@@ -315,6 +316,39 @@ mod tests {
             "a stopped recording keeps no more"
         );
         assert_eq!(harness.jobs.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn a_frame_of_shapes_already_kept_is_counted_and_not_read_as_text() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness.ask(start_recording(255, false)).expect("records");
+        // A stroke one column wide, one two wide, then both in each order.
+        for red in [
+            [true, false, false, false],
+            [true, true, false, false],
+            [true, false, true, true],
+            [true, true, false, true],
+        ] {
+            harness.deliver(&mut handler, Ok(&red_where(red)));
+        }
+        let jobs: Vec<usize> = harness.jobs.try_iter().map(|job| job.index).collect();
+        assert_eq!(jobs, [0, 1], "only a reading with a new shape is read");
+        let view = harness.recording().expect("a recording");
+        let kept: Vec<&[usize]> = view
+            .readings
+            .iter()
+            .map(|reading| reading.shapes.as_slice())
+            .collect();
+        assert_eq!(kept, [&[0][..], &[1]]);
+        let sightings: Vec<(u32, u32)> = view
+            .shapes
+            .iter()
+            .map(|shape| (shape.frames, shape.readings))
+            .collect();
+        assert_eq!(sightings, [(3, 3), (3, 3)]);
     }
 
     #[test]

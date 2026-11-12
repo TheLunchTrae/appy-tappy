@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Ten guards drop such stale messages:
+it was about has gone. Eleven guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -34,6 +34,11 @@ it was about has gone. Ten guards drop such stale messages:
   that was discarded, or replaced by one of either kind, is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Detection keys.** The capture screen keys a bar detection by its region,
+  the screenshot the region was drawn on, and the indexes of the screenshots
+  there are. An answer for any other key than the request under way is dropped. What two
+  colors read is kept under those and the colors, and shows only while they
+  are the same.
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
@@ -1231,20 +1236,27 @@ two never run together, and starting one replaces the other. Both hold a
 still records, and whose `problem` says why it skips frames or why it stopped
 by itself.
 
-A recording of readings keeps each reading a region shows once, for the user
-to review.
+A recording of readings keeps a reading for each shape a region shows, for
+the user to review. Its `Sightings` hold `full`, which says why it takes no
+more once a frame did not fit.
 
 ```mermaid
 stateDiagram-v2
     [*] --> None
     None --> Recording: Record
+    Recording --> Full: a frame shows more shapes or readings than fit
     Recording --> Stopped: Stop
     Recording --> Stopped: the capture fails, with the failure as its problem
+    Full --> Stopped: Stop
+    Full --> Stopped: the capture fails, with the failure as its problem
     Stopped --> Recording: Record more, with the same settings
+    Stopped --> Full: Record more, when it was full
     Stopped --> Recording: Record with other settings starts a new recording
     Recording --> Ended: the window closes
+    Full --> Ended: the window closes
     Stopped --> Ended: the window closes
     Recording --> None: Discard, Change window, a window is picked, or the flow closes
+    Full --> None: Discard, Change window, a window is picked, or the flow closes
     Stopped --> None: Discard, Change window, a window is picked, or the flow closes
     Ended --> None: Discard, Change window, a window is picked, or the flow closes
 ```
@@ -1254,8 +1266,18 @@ stateDiagram-v2
   it goes on recording. A crop with no ink is skipped and clears the problem,
   as does a crop that reads. A capture failure stops the recording, and its
   problem says why.
-- A crop whose characters are new is kept and sent to the text reader. A
-  recording keeps at most 200 readings (`MAX_READINGS`).
+- A crop that shows a shape no kept reading has is kept and sent to the text
+  reader, and so is the first crop to carry cleanly a shape that no kept
+  reading carries so ([Recording](Setup-app.md#recording)). Any other crop
+  is counted and not kept.
+- **Full** is a recording that still records but takes no more. A frame with
+  more new shapes than fit in `MAX_SHAPES`, or with one more different
+  reading than `MAX_READINGS`, is not counted and makes it full
+  (`Sightings::count`). Each frame still sets or clears the problem, but
+  nothing is kept or counted, and its view says why in `full`. A full
+  recording stays full when it stops and when **Record more** goes on with
+  it: **Stop** and review what it found, or **Discard** it to start a new
+  one.
 - **Record more** needs the same region, ink, tolerance, and window size, and
   clears the problem. When any of them differs (`settingsDiffer`), **Use its
   settings** shows and puts all of them back, with the region on a screenshot
@@ -1623,6 +1645,51 @@ stateDiagram-v2
   before it caps the list, so it offers the rest. **Remove found text** drops
   the draft's found labels, and so does opening or closing the reference
   editor, with its other labels (`toReference`, `fromReference`).
+
+### Bar detection
+
+Detecting a bar's colors (`apps/setup/src/lib/detect.ts`, driven by
+`useBarSetup.ts`) is a request to the owner thread and its answer. Its state
+is `Detecting`, and `detectStep` is its `(state, event)` transition, which
+also says which colors go into the draft.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Detecting: Detect the bar
+    Detecting --> Found: colors are proposed, and the draft has none or has these
+    Detecting --> Asking: colors are proposed, and the draft has a color picked by hand
+    Detecting --> Declined: no colors are proposed, or the request fails
+    Asking --> Found: Use detected colors
+    Asking --> Idle: Keep my colors
+    Found --> Detecting: Detect the bar
+    Declined --> Detecting: Detect the bar
+    Detecting --> Idle: the region or the screenshots change
+    Found --> Idle: the region or the screenshots change
+    Asking --> Idle: the region or the screenshots change
+    Declined --> Idle: the region or the screenshots change
+```
+
+- **Found** and **Asking** are one `found` state whose `asking` flag says
+  whether the user has yet to answer. Entering **Found** from **Detecting**
+  puts the colors in a draft that has none, and **Use detected colors** puts
+  them over the ones picked by hand. No other transition changes the draft.
+- **Declined** holds the sentence to show: why no bar is proposed, or the
+  failed command's message. It is left by detecting again or by a change of
+  the region or the screenshots.
+- A detection is keyed by the region, the screenshot it was drawn on, and
+  the indexes of the screenshots there are, so taking, recording, or
+  removing one changes the key. An answer or a failure is taken only in
+  **Detecting** and only for that request's key, so one for a region or
+  screenshots that changed since is dropped, as is one that arrives after
+  the user detected again.
+- The note that says how the colors were found shows while the draft holds
+  the proposal's two colors, either way around, so **Swap colors** keeps it
+  and picking another color by hand hides it.
+
+What the colors measure is not a machine: the newest answer is kept with
+the key it was asked under, and `measuredFor` shows it only under that key.
+A request whose inputs changed before it answered is ignored.
 
 ### Overlays
 

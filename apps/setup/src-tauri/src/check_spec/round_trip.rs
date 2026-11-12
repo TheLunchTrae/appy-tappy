@@ -204,12 +204,12 @@ fn save(
     let tried = match build(spec, session) {
         Ok(tried) => tried,
         Err(error) => {
-            let saved = to_saved_reference(spec, session, "percent", "Percent");
+            let saved = to_saved_reference(spec, session, "percent", "Percent", "");
             prop_assert_eq!(saved.err(), Some(error));
             return Ok(None);
         },
     };
-    let (reference, new) = to_saved_reference(spec, session, "percent", "Percent")
+    let (reference, new) = to_saved_reference(spec, session, "percent", "Percent", "")
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     pictures.extend(new);
     let read_with = runtime_check(&reference, pictures)

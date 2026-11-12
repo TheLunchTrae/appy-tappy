@@ -24,8 +24,11 @@ import {
   withKind,
   withState,
 } from '../lib/check.ts';
+import { discovery } from '../lib/discovery.ts';
 import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/edit.ts';
-import { readers } from '../lib/reference.ts';
+import { TOO_MANY, coverage, startingExpected, tooMany } from '../lib/expected.ts';
+import { knownCharacters, readers } from '../lib/reference.ts';
+import { BarDetect, BarReadings } from './BarFields.tsx';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { FoundMarks, FoundPanel } from './Found.tsx';
@@ -57,6 +60,7 @@ import { background } from '../lib/repeat.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
+import { useBarSetup } from '../lib/useBarSetup.ts';
 import { useFound } from '../lib/useFound.ts';
 import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
@@ -87,7 +91,7 @@ function viewHint(
   }
   if (recording !== null && selected === null) {
     return recording === 'readings'
-      ? 'Recording. Use the application; each different reading is kept.'
+      ? 'Recording. Use the application; a reading is kept for each new shape.'
       : 'Recording. Use the application; a screenshot is kept of each different look.';
   }
   if (selected === null) {
@@ -124,6 +128,8 @@ export type CaptureMode =
 interface Editing {
   readonly existing: ReferenceDef | null;
   readonly name: string;
+  /** The characters it needs, each once. */
+  readonly expects: readonly string[];
   /** The value's region when the editor opened from a value, to put back when it closes. */
   readonly valueRegion: Drawn;
 }
@@ -150,7 +156,12 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const [start, setStart] = useState(() => {
     const editing: Editing | null =
       mode.kind === 'reference'
-        ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
+        ? {
+            existing: mode.existing,
+            name: mode.existing?.name ?? '',
+            expects: startingExpected(mode.existing, null),
+            valueRegion: { region: null, drawnOn: null },
+          }
         : null;
     if (mode.kind === 'edit') {
       return { screenshots: 0, recording: false, editing, ...editStart(mode.value) };
@@ -229,6 +240,12 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   );
   const selection = useStateSelections(draft, setDraft, selected);
   const selecting = draft.kind === 'state' ? tool : 'box';
+  const bar = useBarSetup(
+    draft,
+    setDraft,
+    shots.map((each) => each.index),
+    step === 'how' && editing === null && fixing === null,
+  );
   const review = useReview(recording, draft, setDraft, editingRef);
   // Every text the reference being edited learns from already, which tells a find's letters apart from a misread.
   const savedSamples = editing?.existing?.samples;
@@ -353,6 +370,11 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
       : `Select a screenshot at ${sizeText(edited.screen.windowSize)} to see the matching pixels of its region.`,
   );
   const previewField = <MatchPreviewField preview={preview} region={draft.region} />;
+  // An edited value's region sits on a screenshot of the size it was drawn at, and a bar is looked for on those.
+  const detectBlocked =
+    edited !== null && draft.drawnOn === null
+      ? `Take a screenshot with the window at ${sizeText(edited.screen.windowSize)} to detect the bar: its region was drawn at that size.`
+      : null;
   // Color match is in the inspector while a state's thing is selected with Snap or Click.
   const colorMatched = editing === null && step === 'where' && draft.kind === 'state' && tool !== 'box';
   const selectedPreview = useSelectedPreview(
@@ -487,10 +509,17 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   };
 
   // Opens the reference editor on `existing`, or on a new reference read
-  // from the value's region. The editor records readings, and the owner
-  // records one thing at a time, so a recording of looks goes first.
-  const openEditor = async (existing: ReferenceDef | null): Promise<void> => {
-    setEditing({ existing, name: existing?.name ?? '', valueRegion: { region: draft.region, drawnOn: draft.drawnOn } });
+  // from the value's region, which starts with what `like` expects: the
+  // reference it is learned again for at this size, if any. The editor
+  // records readings, and the owner records one thing at a time, so a
+  // recording of looks goes first.
+  const openEditor = async (existing: ReferenceDef | null, like: ReferenceDef | null): Promise<void> => {
+    setEditing({
+      existing,
+      name: existing?.name ?? '',
+      expects: startingExpected(existing, like),
+      valueRegion: { region: draft.region, drawnOn: draft.drawnOn },
+    });
     setDraft((current) => toReference(current, existing));
     setPicking(null);
     setSaveError(null);
@@ -503,7 +532,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const recordReadings = async (): Promise<void> => {
     const existing = file?.references.find((reference) => reference.id === draft.reference) ?? null;
     const { region, drawnOn } = draft;
-    await openEditor(existing);
+    await openEditor(existing, null);
     if (region === null || drawnOn === null) {
       return;
     }
@@ -541,6 +570,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
         app: appId,
         referenceName: editing.name.trim(),
         check: built.spec,
+        expects: editing.expects.join(''),
       });
       setSaveError(null);
       if (mode.kind === 'reference') {
@@ -612,8 +642,15 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const ready =
     edit.built === null ? named && hasSide && built.ok && draft.drawnOn !== null : saveable(check.preview, edit.lost);
   const canSave = ready && check.state.kind === 'set' && !saving;
+  // A reference that expects more characters than one saves cannot be saved, and the editor says so.
+  const overLimit = editing !== null && tooMany(editing.expects);
   const canSaveRef =
-    editing !== null && editing.name.trim().length > 0 && built.ok && check.state.kind === 'set' && !saving;
+    editing !== null &&
+    editing.name.trim().length > 0 &&
+    built.ok &&
+    check.state.kind === 'set' &&
+    !saving &&
+    !overLimit;
   const whereDone = named && draft.region !== null;
   const fixName = fixing === null ? null : `Fix ${fixing.name}`;
   const flowName = fixName ?? (edited === null ? 'New value' : `Edit ${edited.name}`);
@@ -621,6 +658,27 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
   const editedName = editing === null || editing.name.trim() === '' ? 'New reference' : editing.name.trim();
+  // What the reference being edited learns from, and how the characters in it compare with the ones it needs.
+  const taught = {
+    saved: editing?.existing?.samples.map((sample) => sample.text) ?? [],
+    labeled: [...draft.labels.values()].filter((text) => text.trim() !== ''),
+    recorded: [...draft.recorded.values()],
+    found: draft.found.map((label) => label.text),
+  };
+  const covered = coverage(
+    editing?.expects ?? [],
+    knownCharacters([...taught.saved, ...taught.labeled, ...taught.recorded, ...taught.found]),
+  );
+  // What the recording found, against what the reference needs and knows without it.
+  const needs = editing?.expects ?? [];
+  const found = discovery(
+    needs,
+    knownCharacters([...taught.saved, ...taught.labeled, ...taught.found]),
+    recording?.readings ?? [],
+    review.entries,
+    review.checked,
+    recording?.shapes.length ?? 0,
+  );
 
   return (
     <main className="capture">
@@ -693,7 +751,9 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                 type="button"
                 className="btn primary"
                 disabled={review.keepBlocked !== null}
-                aria-describedby={review.keepBlocked === null ? undefined : 'keep-blocked'}
+                aria-describedby={
+                  review.keepBlocked === null && review.untaught.readings.length === 0 ? undefined : 'keep-blocked'
+                }
                 onClick={review.keep}
               >
                 {review.keeping.length === 1 ? 'Keep 1 reading' : `Keep ${review.keeping.length} readings`}
@@ -764,9 +824,14 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
         {reviewing && recording !== null ? (
           <ReviewSheet
             view={recording}
+            found={found}
+            needs={needs.length > 0}
+            adds={review.adds}
             entries={review.entries}
             problems={review.flagged}
             crops={recorder.crops}
+            clashes={review.clashes}
+            untaught={review.untaught}
             blocked={review.keepBlocked}
             error={recordError}
             onEntry={review.edit}
@@ -1088,7 +1153,9 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                       aria-describedby="read-with-own"
                       checked={draft.reference !== sharedReference}
                       onChange={() => {
-                        background(openEditor(null));
+                        background(
+                          openEditor(null, file?.references.find((saved) => saved.id === sharedReference) ?? null),
+                        );
                       }}
                     />
                     <span>
@@ -1117,10 +1184,10 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                     setDraft((current) => ({ ...current, reference }));
                   }}
                   onEdit={(id) => {
-                    background(openEditor(file?.references.find((reference) => reference.id === id) ?? null));
+                    background(openEditor(file?.references.find((reference) => reference.id === id) ?? null, null));
                   }}
                   onNew={() => {
-                    background(openEditor(null));
+                    background(openEditor(null, null));
                   }}
                   onRecord={() => {
                     background(recordReadings());
@@ -1160,14 +1227,20 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                   fix={fixing !== null}
                 />
               ) : (
-                <ColorFields
-                  draft={draft}
-                  picking={picking}
-                  canPick={shownPicture !== null}
-                  preview={previewField}
-                  onDraft={setDraft}
-                  onPicking={setPicking}
-                />
+                <>
+                  {draft.kind === 'barFill' ? (
+                    <BarDetect bar={bar} picked={draft} position={position} blocked={detectBlocked} />
+                  ) : null}
+                  <ColorFields
+                    draft={draft}
+                    picking={picking}
+                    canPick={shownPicture !== null}
+                    preview={previewField}
+                    onDraft={setDraft}
+                    onPicking={setPicking}
+                  />
+                  {draft.kind === 'barFill' ? <BarReadings bar={bar} position={position} /> : null}
+                </>
               )}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               {lookPanel}
@@ -1228,14 +1301,16 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             canPick={shownPicture !== null}
             selected={selected}
             label={selected === null ? '' : (draft.labels.get(selected) ?? '')}
-            saved={editing.existing?.samples.map((sample) => sample.text) ?? []}
-            labeled={[...draft.labels.values()].filter((text) => text.trim() !== '')}
-            recorded={[...draft.recorded.values()]}
-            found={draft.found.map((label) => label.text)}
+            saved={taught.saved}
+            labeled={taught.labeled}
+            recorded={taught.recorded}
+            found={taught.found}
             onForgetFound={() => {
               setDraft((current) => ({ ...current, found: [] }));
             }}
             finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
+            expected={editing.expects}
+            coverage={covered}
             readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
             onName={(name) => {
               setEditing((current) => (current === null ? null : { ...current, name }));
@@ -1250,6 +1325,9 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               if (selected !== null) {
                 setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
               }
+            }}
+            onExpected={(expects) => {
+              setEditing((current) => (current === null ? null : { ...current, expects }));
             }}
             findPanel={
               selected === null && finder.view === null ? null : (
@@ -1278,6 +1356,8 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             record={
               <RecordPanel
                 view={recording}
+                found={found}
+                needs={needs.length > 0}
                 reviewing={reviewing}
                 kept={draft.recorded.size}
                 keeping={review.keeping.length}
@@ -1313,6 +1393,12 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
           />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
+          {overLimit ? <p className="warn">{TOO_MANY}</p> : null}
+          {canSaveRef && covered.missing.length > 0 ? (
+            <p className="note">
+              It has yet to learn every character it needs. You can save now and teach the rest later.
+            </p>
+          ) : null}
           <div className="actions">
             <button
               type="button"

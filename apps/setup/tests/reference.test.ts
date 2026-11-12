@@ -1,13 +1,19 @@
 import { expect, test } from 'bun:test';
 
 import type { AppFile } from '../src/lib/bindings.ts';
-import { andList, knownCharacters, readers, referenceCharacters } from '../src/lib/reference.ts';
+import { andList, knownCharacters, labelCharacters, readers, referenceCharacters } from '../src/lib/reference.ts';
 
 const white = { red: 255, green: 255, blue: 255 };
 
 test('knownCharacters lists each character once, digits first, without whitespace', () => {
   expect(knownCharacters(['87.5%', ' 12 ', '-3'])).toEqual(['1', '2', '3', '5', '7', '8', '%', '-', '.']);
   expect(knownCharacters([])).toEqual([]);
+  // By code point: a character outside the Basic Multilingual Plane comes after a fullwidth one.
+  expect(knownCharacters(['\u{1d7d9}z\uff11'])).toEqual(['z', '\uff11', '\u{1d7d9}']);
+});
+
+test('labelCharacters keeps every character of a label but white space, in order', () => {
+  expect(labelCharacters(' 8 7\t%\u3000')).toEqual(['8', '7', '%']);
 });
 
 test("referenceCharacters reads a reference's samples", () => {

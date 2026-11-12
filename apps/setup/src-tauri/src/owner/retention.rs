@@ -104,6 +104,7 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
     let digits = ReferenceSaveSpec {
         app: "example".to_owned(),
         reference_name: "Digits".to_owned(),
+        expects: String::new(),
         check: serde_json::from_str(
             r#"{"kind":"characters","region":{"x":0,"y":0,"width":2,"height":2},"screenshot":0,
                 "reference":null,"ink":{"red":255,"green":0,"blue":0},"tolerance":0,

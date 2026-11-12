@@ -26,6 +26,10 @@ parts fit.
   to the window, which move neither the cursor nor the focus.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
+- **Expected characters.** The characters the user says a reference needs to
+  know. They guide teaching in the setup app, which shows the ones still
+  missing; nothing learns or reads with them. The UI calls them
+  **Characters it needs**.
 - **Edit.** A saved value changed as it was first drawn, under the ID it
   has, so the automations that watch it stay linked.
 - **Fix.** A screen region value drawn again at one more window size, which
@@ -50,11 +54,12 @@ parts fit.
 - **Release.** End a fired rule's effect: it re-armed, or the session ended. A
   rule that restores undoes its paired actions then.
 - **Recording.** A setup-app capture of one region over time, while the user
-  uses the application. A recording of readings keeps each different reading
-  a number region shows once, for the user to review and label; kept readings
-  teach a reference like labeled screenshots. A recording of looks keeps a
-  screenshot each time a value's region shows a look that no screenshot shows
-  yet. A capture records one of the two at a time.
+  uses the application. A recording of readings keeps a reading for each
+  different character shape a number region shows, for the user to review
+  and label; kept readings teach a reference like labeled screenshots. A
+  recording of looks keeps a screenshot each time a value's region shows a
+  look that no screenshot shows yet. A capture records one of the two at a
+  time.
 - **Reference.** The characters of one font in one application, learned from
   labeled pictures of its text. A number check reads with one, at any size.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,

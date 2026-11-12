@@ -967,6 +967,21 @@ div.match-answer {
   align-items: center;
 }
 
+.btn.detect,
+.btn.swap {
+  align-self: flex-start;
+}
+
+.bar-readings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-variant-numeric: tabular-nums;
+}
+
 .range input {
   flex: 1;
   accent-color: var(--capture);
@@ -1771,6 +1786,78 @@ div.match-answer {
   border-color: var(--warn);
 }
 
+/* What a reading adds to the kept ones: each new character with how often it showed. */
+.tile .adds ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tile .adds li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The characters a recording found so far, in rows of a name and its characters. */
+.discovered {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.discovered > div {
+  display: grid;
+  grid-template-columns: 9.5em 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.discovered dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.discovered dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+/* What only readings that are left out could teach, with the readings to keep for it. */
+.untaught {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  max-width: 70ch;
+}
+
+.untaught p {
+  color: var(--warn);
+}
+
+.untaught .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. */
+.glyphs.unchecked .glyph {
+  border: 1px dashed var(--muted);
+  background: none;
+}
+
 /* Text found like the first sample, to check before it teaches the reference. */
 .autofill {
   display: flex;
@@ -2085,6 +2172,51 @@ div.match-answer {
   min-width: 36px;
   height: 40px;
   font-size: 22px;
+}
+
+/* Characters a reference has yet to learn: outlined, since it has no shape to show for them. */
+.glyphs.missing .glyph {
+  border: 1px dashed var(--warn);
+  background: none;
+  color: var(--warn);
+}
+
+.missing-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* The characters a reference needs: presets to turn on, in rows that wrap. */
+.needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.need {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.need:has(input:checked) {
+  background: var(--raise);
+}
+
+.need input {
+  accent-color: var(--capture);
+}
+
+.need small {
+  color: var(--muted);
 }
 
 .choices {

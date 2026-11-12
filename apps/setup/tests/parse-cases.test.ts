@@ -3,6 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import { appName, openTarget, soundFile } from '../src/lib/automation.ts';
 import { PARSE_CASES } from '../src/lib/bindings.ts';
 import { placeSpot, spotAt } from '../src/lib/click.ts';
+import { expectedSet, tooMany } from '../src/lib/expected.ts';
+import { labelCharacters } from '../src/lib/reference.ts';
 import { type KeyPress, accelerator, spellKeys } from '../src/lib/shortcut.ts';
 
 // The bindings test writes what the Rust side makes of each sample. The page reads them itself, for instant
@@ -34,6 +36,12 @@ const PAGE_READS = new Map<string, (text: string) => string | null>(
     appName,
     // The recorder records a shortcut the save takes from its key press, and never one the save refuses.
     screenshotShortcut: (text) => (accelerator(pressFor(text)) === text ? text : null),
+    labelCharacters: (text) => labelCharacters(text).join(''),
+    // The save refuses a list longer than a reference saves, and lists the rest once each, in order.
+    expectedCharacters: (text) => {
+      const expected = expectedSet(text);
+      return tooMany(expected) ? null : expected.join('');
+    },
   } satisfies Record<keyof typeof TEXT_CASES, (text: string) => string | null>),
 );
 

@@ -93,6 +93,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
                 image: sample_name("digits", 1),
                 text: "1".to_owned(),
             }],
+            expects: Some("123".to_owned()),
         },
         pictures: vec![
             screenshot()
@@ -438,6 +439,7 @@ fn characters_being_taught_read_but_are_not_a_value() {
             session(&[], None),
             "digits",
             "Digits",
+            "",
         ),
         Err(SpecError::NotAValue)
     );
@@ -636,9 +638,14 @@ fn the_ui_describes_checks_in_camel_case_json() {
 #[test]
 fn a_new_reference_names_one_picture_per_label() {
     let spec = characters(left(), None, one(0), Vec::new());
-    let (reference, pictures) =
-        to_saved_reference(&spec, session(&[screenshot()], None), "digits", "Digits")
-            .expect("valid characters");
+    let (reference, pictures) = to_saved_reference(
+        &spec,
+        session(&[screenshot()], None),
+        "digits",
+        "Digits",
+        "%9 876543210%",
+    )
+    .expect("valid characters");
     assert_eq!(
         reference,
         ReferenceDef {
@@ -646,10 +653,12 @@ fn a_new_reference_names_one_picture_per_label() {
             name: "Digits".to_owned(),
             ink: RED.into(),
             tolerance: 0,
+            // The one label teaches the one sample, whatever it expects.
             samples: vec![SampleDef {
                 image: "ref-digits-1.png".to_owned(),
                 text: "1".to_owned(),
             }],
+            expects: Some("0123456789%".to_owned()),
         }
     );
     assert_eq!(pictures.len(), 1);
@@ -671,6 +680,49 @@ fn a_new_reference_names_one_picture_per_label() {
 }
 
 #[test]
+fn expected_characters_are_saved_once_each_in_order_up_to_the_most() {
+    assert_eq!(
+        expected_characters(" b%1\u{7}a0 1\u{3000}%\u{85}"),
+        Ok(Some("01%ab".to_owned())),
+        "no whitespace, control character or repeat, and the digits first"
+    );
+    assert_eq!(
+        expected_characters("\u{1d7d9}z\u{ff11}\u{feff}"),
+        Ok(Some("z\u{feff}\u{ff11}\u{1d7d9}".to_owned())),
+        "by code point, and only the digits 0 to 9 come first"
+    );
+    assert_eq!(expected_characters(""), Ok(None));
+    assert_eq!(expected_characters(" \t\u{7}"), Ok(None));
+    let most: String = ('\u{100}'..).take(MAX_EXPECTED_CHARACTERS).collect();
+    assert_eq!(expected_characters(&most), Ok(Some(most.clone())));
+    // A repeat or a space does not count toward the most.
+    assert_eq!(
+        expected_characters(&format!("{most} {most}")),
+        Ok(Some(most.clone()))
+    );
+    assert_eq!(
+        expected_characters(&format!("{most}%")),
+        Err(SpecError::TooManyExpected)
+    );
+    assert_eq!(
+        SpecError::TooManyExpected.to_string(),
+        "A reference needs at most 128 characters. Remove some."
+    );
+    // The save refuses the list before it writes anything.
+    let spec = characters(left(), None, one(0), Vec::new());
+    assert_eq!(
+        to_saved_reference(
+            &spec,
+            session(&[screenshot()], None),
+            "digits",
+            "Digits",
+            &format!("{most}%"),
+        ),
+        Err(SpecError::TooManyExpected)
+    );
+}
+
+#[test]
 fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
     let spec = CheckSpec::Characters {
         region: left(),
@@ -686,8 +738,13 @@ fn a_saved_reference_keeps_its_samples_and_numbers_new_ones_after_them() {
         session(&[screenshot()], None),
         "digits",
         "Red digits",
+        "",
     )
     .expect("valid characters");
+    assert_eq!(
+        reference.expects, None,
+        "what it expected goes when the user chooses none"
+    );
     let images: Vec<&str> = reference
         .samples
         .iter()
@@ -732,7 +789,7 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
         references: &gapped,
     };
     let (reference, pictures) =
-        to_saved_reference(&spec, session, "digits", "Digits").expect("valid characters");
+        to_saved_reference(&spec, session, "digits", "Digits", "").expect("valid characters");
     let names: Vec<&str> = pictures.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(names, ["ref-digits-3.png"]);
     assert_eq!(reference.samples.len(), 2);
@@ -756,6 +813,7 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
         session(&[screenshot()], Some(&recording)),
         "digits",
         "Digits",
+        "",
     )
     .expect("valid characters");
     let images: Vec<&str> = reference
