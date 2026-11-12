@@ -4,7 +4,7 @@
 // reads its own state back from the set, so nothing but the set is saved. The set only guides teaching: AppyTappy
 // learns and reads from labels alone, whatever the set holds.
 
-import type { ReferenceDef } from './bindings.ts';
+import { LIMITS, type ReferenceDef } from './bindings.ts';
 import { knownCharacters, referenceCharacters } from './reference.ts';
 
 /** Characters the user turns on or off as one. */
@@ -17,12 +17,21 @@ export interface Preset {
 }
 
 /**
- * The set of the characters in `text`: each once, in the order a reference's characters show, without whitespace or
- * control characters, which no label teaches.
+ * The set of the characters in `text`, as a reference saves them: each character a label teaches that is no control
+ * character, once, the digits first and the rest by code point. A list a person wrote into the file by hand reads
+ * as this set, and the next save writes it so.
  */
 export function expectedSet(text: string): readonly string[] {
   return knownCharacters([text]).filter((character) => !/\p{Cc}/u.test(character));
 }
+
+/** Whether `expected` holds more characters than a reference saves, which the save refuses. */
+export function tooMany(expected: readonly string[]): boolean {
+  return expected.length > LIMITS.maxExpectedCharacters;
+}
+
+/** What to do about a list that {@link tooMany} refuses. */
+export const TOO_MANY = `A reference needs at most ${LIMITS.maxExpectedCharacters} characters. Remove some.`;
 
 function preset(name: string, shown: string, characters: string): Preset {
   return { name, shown, characters: expectedSet(characters) };
@@ -53,10 +62,15 @@ const PRESETS: readonly Preset[] = [...NUMBER_PRESETS, ...LETTER_PRESETS];
 
 /**
  * The set a reference's editor starts with: what the saved reference `existing` expects, which is nothing when it was
- * saved without a choice, or the digits for a new reference, since numbers are what references read.
+ * saved without a choice. A new reference starts with what `like` expects, the reference it is learned again for
+ * at another window size, when that has a list, or else with the digits, since numbers are what references read.
  */
-export function startingExpected(existing: ReferenceDef | null): readonly string[] {
-  return existing === null ? DIGITS.characters : expectedSet(existing.expects ?? '');
+export function startingExpected(existing: ReferenceDef | null, like: ReferenceDef | null): readonly string[] {
+  if (existing !== null) {
+    return expectedSet(existing.expects ?? '');
+  }
+  const shared = expectedSet(like?.expects ?? '');
+  return shared.length > 0 ? shared : DIGITS.characters;
 }
 
 /** How much of a preset a set holds: every character, some of them, or none. */

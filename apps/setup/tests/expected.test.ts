@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import type { ReferenceDef } from '../src/lib/bindings.ts';
+import { LIMITS, type ReferenceDef } from '../src/lib/bindings.ts';
 import {
   coverage,
   expectedSet,
@@ -12,6 +12,7 @@ import {
   presetState,
   referenceCoverage,
   startingExpected,
+  tooMany,
   withOther,
   withPreset,
 } from '../src/lib/expected.ts';
@@ -45,10 +46,27 @@ test('expectedSet keeps each character a label teaches once, digits first', () =
   expect(expectedSet('')).toEqual([]);
 });
 
+test('a list is too long past the most characters a reference saves', () => {
+  const most = Array.from({ length: LIMITS.maxExpectedCharacters }, (_, index) => String.fromCodePoint(0x100 + index));
+  expect(tooMany(most)).toBe(false);
+  expect(tooMany([...most, '%'])).toBe(true);
+});
+
 test('a new reference starts with the digits, and a saved one with what it expects', () => {
-  expect(startingExpected(null)).toEqual(DIGITS);
-  expect(startingExpected(reference(['87%']))).toEqual([]);
-  expect(startingExpected(reference(['87%'], '%10'))).toEqual(['0', '1', '%']);
+  expect(startingExpected(null, null)).toEqual(DIGITS);
+  expect(startingExpected(reference(['87%']), null)).toEqual([]);
+  expect(startingExpected(reference(['87%'], '%10'), null)).toEqual(['0', '1', '%']);
+  // A list a person wrote by hand reads as its characters, each once.
+  expect(startingExpected(reference(['87%'], '11 %'), null)).toEqual(['1', '%']);
+});
+
+test('a reference learned again at another size starts with what the shared one expects', () => {
+  const shared = reference(['87%'], '0123456789.%');
+  expect(startingExpected(null, shared)).toEqual([...DIGITS, '%', '.']);
+  // Without a list to take over, it starts with the digits like any new reference.
+  expect(startingExpected(null, reference(['87%']))).toEqual(DIGITS);
+  // A saved reference keeps its own list.
+  expect(startingExpected(reference(['1'], '1'), shared)).toEqual(['1']);
 });
 
 test('a preset is on with all of its characters, partial with some, and off with none', () => {

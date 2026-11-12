@@ -21,12 +21,11 @@ import {
   toReference,
   withKind,
 } from '../lib/check.ts';
-import { coverage, startingExpected } from '../lib/expected.ts';
+import { TOO_MANY, coverage, startingExpected, tooMany } from '../lib/expected.ts';
 import { knownCharacters, readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { Question, useQuestion } from './Question.tsx';
-import { MissingNote } from './CharacterChips.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
 import type { Choice } from './Picker.tsx';
@@ -127,7 +126,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
         ? {
             existing: mode.existing,
             name: mode.existing?.name ?? '',
-            expects: startingExpected(mode.existing),
+            expects: startingExpected(mode.existing, null),
             valueRegion: { region: null, drawnOn: null },
           }
         : null;
@@ -351,12 +350,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   };
 
   // Opens the reference editor on `existing`, or on a new reference read
-  // from the value's region.
-  const openEditor = (existing: ReferenceDef | null): void => {
+  // from the value's region, which starts with what `like` expects: the
+  // reference it is learned again for at this size, if any.
+  const openEditor = (existing: ReferenceDef | null, like: ReferenceDef | null): void => {
     setEditing({
       existing,
       name: existing?.name ?? '',
-      expects: startingExpected(existing),
+      expects: startingExpected(existing, like),
       valueRegion: { region: draft.region, drawnOn: draft.drawnOn },
     });
     setDraft((current) => toReference(current, existing));
@@ -405,8 +405,15 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
 
   const named = fixing !== null || valueName.trim().length > 0;
   const canSave = named && built.ok && draft.drawnOn !== null && check.state.kind === 'set' && !saving;
+  // A reference that expects more characters than one saves cannot be saved, and the editor says so.
+  const overLimit = editing !== null && tooMany(editing.expects);
   const canSaveRef =
-    editing !== null && editing.name.trim().length > 0 && built.ok && check.state.kind === 'set' && !saving;
+    editing !== null &&
+    editing.name.trim().length > 0 &&
+    built.ok &&
+    check.state.kind === 'set' &&
+    !saving &&
+    !overLimit;
   const whereDone = named && draft.region !== null;
   const fixName = fixing === null ? null : `Fix ${fixing.name}`;
   // The saved reference a fix of a number shares with its first drawing.
@@ -844,7 +851,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                       aria-describedby="read-with-own"
                       checked={draft.reference !== sharedReference}
                       onChange={() => {
-                        openEditor(null);
+                        openEditor(null, file?.references.find((saved) => saved.id === sharedReference) ?? null);
                       }}
                     />
                     <span>
@@ -873,10 +880,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                     setDraft((current) => ({ ...current, reference }));
                   }}
                   onEdit={(id) => {
-                    openEditor(file?.references.find((reference) => reference.id === id) ?? null);
+                    openEditor(file?.references.find((reference) => reference.id === id) ?? null, null);
                   }}
                   onNew={() => {
-                    openEditor(null);
+                    openEditor(null, null);
                   }}
                   onWhole={(whole) => {
                     setDraft((current) => ({ ...current, whole }));
@@ -1003,12 +1010,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
           <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
-          {covered.missing.length === 0 ? null : (
-            <>
-              <MissingNote characters={covered.missing} />
-              <p className="note">You can save now and teach the missing characters later.</p>
-            </>
-          )}
+          {overLimit ? <p className="warn">{TOO_MANY}</p> : null}
+          {canSaveRef && covered.missing.length > 0 ? (
+            <p className="note">
+              It has yet to learn every character it needs. You can save now and teach the rest later.
+            </p>
+          ) : null}
           <div className="actions">
             <button
               type="button"

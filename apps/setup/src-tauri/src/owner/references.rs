@@ -442,15 +442,15 @@ mod tests {
             Ok((Some("0123456789%".to_owned()), 1))
         );
         let saved = Some(("example", "digits"));
-        assert_eq!(save(saved, "01"), Ok((Some("01".to_owned()), 2)));
         assert_eq!(
-            save(saved, "0 1"),
-            Err(
-                "reference \"digits\": its expected characters hold ' ', which is whitespace or a \
-                 control character"
-                    .to_owned()
-            ),
-            "the application's file refuses what no label teaches"
+            save(saved, "% 1 0 1"),
+            Ok((Some("01%".to_owned()), 2)),
+            "listed once each, in order"
+        );
+        let too_many: String = ('\u{100}'..='\u{180}').collect();
+        assert_eq!(
+            save(saved, &too_many),
+            Err("A reference needs at most 128 characters. Remove some.".to_owned()),
         );
         assert_eq!(save(saved, ""), Ok((None, 3)), "none chosen");
         std::fs::remove_dir_all(root).expect("clean up");

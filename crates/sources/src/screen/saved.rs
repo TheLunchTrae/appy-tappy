@@ -904,11 +904,15 @@ mod tests {
             from(&files),
         )
         .expect("builds");
-        let mut expecting = counter("11");
-        expecting.expects = Some("0123456789,.%".to_owned());
-        let guided = build(&screen(number), &[expecting], OFTEN, from(&files)).expect("builds");
-        // The same glyphs and the same number rules, whatever it expects.
-        assert_eq!(guided.drawn.check, plain.drawn.check);
+        // The same glyphs and the same number rules, whatever it expects,
+        // even a list no setup app would save.
+        for expected in ["0123456789,.%", "11 ", "", &"x".repeat(5000)] {
+            let mut expecting = counter("11");
+            expecting.expects = Some(expected.to_owned());
+            let guided =
+                build(&screen(number.clone()), &[expecting], OFTEN, from(&files)).expect("builds");
+            assert_eq!(guided.drawn.check, plain.drawn.check, "{expected:?}");
+        }
     }
 
     #[test]

@@ -1,23 +1,35 @@
 import type { AppFile, ReferenceDef } from './bindings.ts';
 // How references read on the capture screen and the References page.
 
-/** Digits before other characters, then by code point, so the order is the same on every machine. */
+/** The digits `0` to `9` before other characters, then by code point, so the order is the same on every machine. */
 function order(left: string, right: string): number {
   const digits = Number(!/\d/u.test(left)) - Number(!/\d/u.test(right));
   if (digits !== 0) {
     return digits;
   }
-  return left < right ? -1 : Number(left > right);
+  return (left.codePointAt(0) ?? 0) - (right.codePointAt(0) ?? 0);
 }
 
-/** Every character `texts` show, once each, digits first, without whitespace. */
+/**
+ * The characters a label teaches, in order: every code point of `text` but white space, which is how the Rust side
+ * counts them when a reference learns from the label.
+ */
+export function labelCharacters(text: string): readonly string[] {
+  const characters = [];
+  for (const character of text) {
+    if (!/\p{White_Space}/u.test(character)) {
+      characters.push(character);
+    }
+  }
+  return characters;
+}
+
+/** Every character `texts` teach, once each, digits first. */
 export function knownCharacters(texts: Iterable<string>): readonly string[] {
   const found = new Set<string>();
   for (const text of texts) {
-    for (const character of text) {
-      if (character.trim() !== '') {
-        found.add(character);
-      }
+    for (const character of labelCharacters(text)) {
+      found.add(character);
     }
   }
   return [...found].toSorted(order);

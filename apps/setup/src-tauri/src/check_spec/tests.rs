@@ -633,7 +633,7 @@ fn a_new_reference_names_one_picture_per_label() {
         session(&[screenshot()], None),
         "digits",
         "Digits",
-        "0123456789%",
+        "%9 876543210%",
     )
     .expect("valid characters");
     assert_eq!(
@@ -667,6 +667,49 @@ fn a_new_reference_names_one_picture_per_label() {
             .collect()
     };
     assert_eq!(colors(&picture), colors(&cropped));
+}
+
+#[test]
+fn expected_characters_are_saved_once_each_in_order_up_to_the_most() {
+    assert_eq!(
+        expected_characters(" b%1\u{7}a0 1\u{3000}%\u{85}"),
+        Ok(Some("01%ab".to_owned())),
+        "no whitespace, control character or repeat, and the digits first"
+    );
+    assert_eq!(
+        expected_characters("\u{1d7d9}z\u{ff11}\u{feff}"),
+        Ok(Some("z\u{feff}\u{ff11}\u{1d7d9}".to_owned())),
+        "by code point, and only the digits 0 to 9 come first"
+    );
+    assert_eq!(expected_characters(""), Ok(None));
+    assert_eq!(expected_characters(" \t\u{7}"), Ok(None));
+    let most: String = ('\u{100}'..).take(MAX_EXPECTED_CHARACTERS).collect();
+    assert_eq!(expected_characters(&most), Ok(Some(most.clone())));
+    // A repeat or a space does not count toward the most.
+    assert_eq!(
+        expected_characters(&format!("{most} {most}")),
+        Ok(Some(most.clone()))
+    );
+    assert_eq!(
+        expected_characters(&format!("{most}%")),
+        Err(SpecError::TooManyExpected)
+    );
+    assert_eq!(
+        SpecError::TooManyExpected.to_string(),
+        "A reference needs at most 128 characters. Remove some."
+    );
+    // The save refuses the list before it writes anything.
+    let spec = characters(left(), None, one(0), Vec::new());
+    assert_eq!(
+        to_saved_reference(
+            &spec,
+            session(&[screenshot()], None),
+            "digits",
+            "Digits",
+            &format!("{most}%"),
+        ),
+        Err(SpecError::TooManyExpected)
+    );
 }
 
 #[test]

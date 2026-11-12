@@ -8,9 +8,11 @@
 //! way, as [`CheckSpec::Characters`], so the UI can see what it reads before
 //! it is saved.
 
+use std::collections::BTreeSet;
+
 use appytappy_config::app_file::{
     CheckDef, CheckDefError, ColorDef, ReferenceDef, RegionDef, SampleDef, StateDef, check_states,
-    sample_name, state_image_name,
+    is_label_character, sample_name, state_image_name,
 };
 use appytappy_config::signal::StateName;
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
@@ -26,6 +28,11 @@ use crate::selection::{self, SelectionSpec};
 mod error;
 
 pub(crate) use error::{Cut, SpecError, sentence};
+
+/// The most characters a reference is saved as expecting: room for the
+/// digits, both cases of the English letters, and every other printable
+/// ASCII character, with some to spare.
+pub(crate) const MAX_EXPECTED_CHARACTERS: usize = 128;
 
 /// A rectangle of the window, in pixels from its top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -313,15 +320,17 @@ pub(crate) fn to_saved_fix(
 /// `ref-{id}-1.png` onward, the labeled screenshots first and then the
 /// recorded readings.
 ///
-/// `expected` is the characters the user says it needs, saved as given, or
-/// empty when the user chose none. It is guidance for the setup app: no
+/// `expected` is the characters the user says it needs, saved as
+/// [`expected_characters`] lists them. It is guidance for the setup app: no
 /// sample is learned or left out because of it.
 ///
 /// # Errors
 ///
 /// Returns the [`SpecError`] that [`build`] would, so only a reference that
 /// learns every sample is saved; [`SpecError::NotAValue`] for any other
-/// check; or [`SpecError::Picture`] when a picture cannot be encoded.
+/// check; [`SpecError::TooManyExpected`] for more expected characters than
+/// a reference saves; or [`SpecError::Picture`] when a picture cannot be
+/// encoded.
 pub(crate) fn to_saved_reference(
     spec: &CheckSpec,
     session: Session<'_>,
@@ -395,10 +404,37 @@ pub(crate) fn to_saved_reference(
             ink: (*ink).into(),
             tolerance: *tolerance,
             samples,
-            expects: (!expected.is_empty()).then(|| expected.to_owned()),
+            expects: expected_characters(expected)?,
         },
         pictures,
     ))
+}
+
+/// The characters of `expected` as a reference saves them, or `None` when
+/// it has none: each character a label teaches, as [`is_label_character`]
+/// says, that is no control character, once, the digits `0` to `9` first
+/// and the rest by code point.
+///
+/// # Errors
+///
+/// Returns [`SpecError::TooManyExpected`] for more than
+/// [`MAX_EXPECTED_CHARACTERS`] of them.
+pub(crate) fn expected_characters(expected: &str) -> Result<Option<String>, SpecError> {
+    // A digit sorts before every other character, and each group by code
+    // point.
+    let characters: BTreeSet<(bool, char)> = expected
+        .chars()
+        .filter(|&character| is_label_character(character) && !character.is_control())
+        .map(|character| (!character.is_ascii_digit(), character))
+        .collect();
+    if characters.len() > MAX_EXPECTED_CHARACTERS {
+        return Err(SpecError::TooManyExpected);
+    }
+    let list: String = characters
+        .into_iter()
+        .map(|(_, character)| character)
+        .collect();
+    Ok((!list.is_empty()).then_some(list))
 }
 
 /// The window size of screenshot `drawn_on`, the one the region of `spec`
