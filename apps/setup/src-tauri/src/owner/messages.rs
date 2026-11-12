@@ -14,6 +14,7 @@ use tokio::sync::oneshot;
 use crate::check_spec::CheckSpec;
 use crate::overlay::{FrameRead, Purpose};
 use crate::recording::Text;
+use crate::window_list::{WindowFit, WindowList};
 
 use super::{Desktop, Host, Owner};
 
@@ -188,6 +189,30 @@ pub(crate) struct AppSummary {
     /// The build the best fit's executable runs, or `None` while no window
     /// matches or its build cannot be read.
     pub(crate) running: Option<BuildDef>,
+}
+
+/// A saved application with the open windows its match takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppFits {
+    /// The application.
+    pub(crate) app: AppSummary,
+    /// The open windows its match takes, the one a new session would read
+    /// first; none for a broken file.
+    pub(crate) fits: Vec<WindowFit>,
+}
+
+/// The saved applications and the open windows, from one listing of the
+/// desktop, as the picker of a value or reference shows them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppWindows {
+    /// The open windows, which every application's fits are among.
+    pub(crate) open: WindowList,
+    /// Each saved application.
+    pub(crate) apps: Vec<AppFits>,
 }
 
 /// Work for the owner thread, from a command or an overlay window, which it
