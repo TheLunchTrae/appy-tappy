@@ -124,8 +124,13 @@ Both lanes run two mutants at once (`--jobs=2`), since each mutant's build
 waits on its linker most of the time. CI sets `MUTANTS_COPY_TARGET=true`, so
 cargo-mutants copies `target/` into its build directories and the baseline
 reuses the builds already there. A local run leaves it off, so it doesn't copy
-a developer's whole `target/` twice. The gate starts the lane only after the
-other Cargo tasks finish, so the copy never catches a build half written.
+a developer's whole `target/` twice. The copy gives every file a new
+modification time, so Cargo would take a stale workspace build in it, such as
+one from a build cache saved at an older commit, for a current one. With the
+copy on, each lane therefore first runs, in place, the build that cargo-mutants
+runs for each mutant, which is quick when `target/` is already current. The gate
+starts the lane only after the other Cargo tasks finish, so the copy never
+catches a build half written.
 Both lanes also run every workspace package's tests against each mutant
 (`--test-workspace=true`), because a mutant in one crate can be caught by
 another crate's tests. Whether testing only the mutated package catches the

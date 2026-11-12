@@ -972,6 +972,26 @@ mod tests {
     }
 
     #[test]
+    fn a_session_keeps_its_process_until_the_grace_ends() {
+        let since = Instant::now();
+        let owned = BTreeMap::from([("gone".to_owned(), Some(since)), ("owns".to_owned(), None)]);
+        let ends = later(since, OWNER_GRACE);
+        assert!(
+            in_grace(&owned, "gone", since),
+            "the grace starts when the window goes"
+        );
+        assert!(!in_grace(&owned, "gone", ends), "and ends after the grace");
+        assert!(
+            in_grace(&owned, "owns", ends),
+            "a process that owns a window keeps it"
+        );
+        assert!(
+            !in_grace(&owned, "none", since),
+            "a process that owned none has no grace"
+        );
+    }
+
+    #[test]
     fn the_grace_starts_only_while_another_copy_runs() {
         let now = Instant::now();
         let mut lifecycle = Lifecycle::new(example_app(), now);

@@ -108,7 +108,11 @@ run = "cargo package --workspace --allow-dirty --locked --list > /dev/null"
 # cargo-mutants builds in its own copy of the tree and leaves target/ out of
 # it. MUTANTS_COPY_TARGET=true copies target/ too, so the baseline reuses the
 # builds already there; CI sets it, and a local run leaves it off rather than
-# copy a developer's whole target/ twice.
+# copy a developer's whole target/ twice. The copy gives every file a new
+# modification time, so Cargo can take a stale workspace build in it for a
+# current one. With the copy on, both lanes first bring target/ up to date in
+# place with the build cargo-mutants runs for each mutant, which also covers
+# its baseline's.
 # MUTANTS_SHARD=k/n runs only shard k of n (counting from 0), so CI can split
 # the sweep across runners; unset, it runs every mutant. Round-robin sharding
 # spreads each crate's mutants across the shards, so they take similar time.
@@ -129,6 +133,9 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
+  run_mutants_task_child cargo test --no-run --workspace --all-features --locked
+fi
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
 run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked "$@"
@@ -187,6 +194,9 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
+  run_mutants_task_child cargo test --no-run --workspace --all-features --locked
+fi
 # cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
 run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked --in-diff "$diff_file"

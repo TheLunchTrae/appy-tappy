@@ -350,7 +350,7 @@ impl RowReader {
         for range in rows {
             let line = String::from_utf8_lossy(self.partial.get(range).unwrap_or_default());
             let line = line.strip_suffix('\r').unwrap_or(&line);
-            if line == HEADER || self.header != Some(true) {
+            if line == HEADER {
                 continue;
             }
             if let Some(row) = parse_row(line) {
@@ -778,7 +778,6 @@ mod tests {
     #[test]
     fn a_row_that_never_ends_is_given_up_after_a_window() {
         let mut reader = RowReader::new(PathBuf::from("trace-a.csv"));
-        reader.header = Some(true);
         let mut times: Vec<u64> = Vec::new();
         // A cut inside a quoted line break leaves a quote open.
         reader.take(b"lines\",Pause,,40,,ok\n", |row| times.push(row.time_ns));
@@ -866,7 +865,6 @@ mod tests {
     fn a_row_cut_in_two_is_dropped_up_to_its_line_break() {
         let times = |added: &[u8]| {
             let mut reader = RowReader::new(PathBuf::from("trace-a.csv"));
-            reader.header = Some(true);
             reader.mid_row = true;
             let mut times = Vec::new();
             reader.take(added, |row| times.push(row.time_ns));
