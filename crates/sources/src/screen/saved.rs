@@ -676,6 +676,7 @@ mod tests {
             },
             check,
             pin: None,
+            reading_area: false,
             fixes: Vec::new(),
         }
     }
@@ -912,6 +913,33 @@ mod tests {
             let guided =
                 build(&screen(number.clone()), &[expecting], OFTEN, from(&files)).expect("builds");
             assert_eq!(guided.drawn.check, plain.drawn.check, "{expected:?}");
+        }
+    }
+
+    #[test]
+    fn a_reading_area_changes_nothing_a_value_reads() {
+        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
+        let number = CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+        };
+        let bar = CheckDef::BarFill {
+            filled: RED,
+            empty: GRAY,
+        };
+        for check in [number, bar] {
+            let plain = build(
+                &screen(check.clone()),
+                &[counter("11")],
+                OFTEN,
+                from(&files),
+            )
+            .expect("builds");
+            let mut area = screen(check);
+            area.reading_area = true;
+            let guided = build(&area, &[counter("11")], OFTEN, from(&files)).expect("builds");
+            // The same region, check, pin and sizes, whatever the flag says.
+            assert_eq!(guided, plain);
         }
     }
 

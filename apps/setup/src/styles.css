@@ -1952,6 +1952,58 @@ select {
   background: var(--capture);
 }
 
+/* What a region keeps its distance from as the window changes size, over the screenshot. */
+.pin-guides {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pin-guides line {
+  stroke: var(--capture);
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 80%));
+}
+
+.pin-guides .guide {
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.pin-guides .mark {
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.pin-guides .mark.middle {
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+  stroke-linecap: butt;
+}
+
+/* A region drawn as a reading area: larger than what it reads, which may be anywhere inside. */
+.frame.reading-area .marquee {
+  border-style: dashed;
+  background: rgb(242 179 61 / 10%);
+}
+
+.name > .toggle {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* The notice under a side chosen by hand stays in the page while it has nothing to say, and takes no room then. */
+.pin-notice:not(:empty) {
+  margin-top: 5px;
+}
+
+/* What This content may move comes to, as paragraphs spaced like the field's own parts. */
+.moving-says {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 /* A value's reading at the window's size now, or why it has none. */
 .now {
   display: flex;
