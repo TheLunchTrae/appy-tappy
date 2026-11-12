@@ -68,6 +68,13 @@ export const LABEL_HINT =
 /** The characters a reference needs. */
 export const EXPECTED_HINT =
   'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from what you label or record, never from this list, and a number reads the same way whatever you turn on.';
+/** Finding more text like the first sample. */
+export const FIND_LIKE_HINT =
+  "Looks on this screenshot for other text in the characters' color and as tall as the text in the region, and reads each as text. Check what it read; each one you add teaches the reference like a labeled screenshot. Draw the region tightly around the text and type what it shows first, so the size is right.";
+
+/** What the found text's list shows, and what each row's box and field do. */
+export const FOUND_HINT =
+  'Each find is numbered here and outlined on the screenshot, with what the text reader made of it. Clear its box to leave it out, or fix its text. A flagged one needs its text typed, or leaving out, before you can add them.';
 
 /** The read interval's two waits. */
 export const READING_HINT = `AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs} ms.`;

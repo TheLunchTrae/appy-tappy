@@ -1843,6 +1843,136 @@ div.match-answer {
   background: none;
 }
 
+/* Text found like the first sample, to check before it teaches the reference. */
+.autofill {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--base);
+  border: 1px solid color-mix(in srgb, var(--capture) 45%, var(--line));
+}
+
+.autofill h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.autofill h3:focus {
+  outline: none;
+}
+
+.autofill p {
+  margin: 0;
+}
+
+.autofill ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.autofill li {
+  display: grid;
+  grid-template-columns: 18px 20px 92px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.autofill .n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px dashed var(--capture);
+  color: var(--capture);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.autofill .n.flagged {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.autofill .crop {
+  height: 34px;
+}
+
+/* Scaled down whole, since the row's height is not one a canvas can fill. */
+.autofill .crop canvas {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 34px;
+}
+
+.autofill li.off .crop,
+.autofill li.off .input {
+  opacity: 0.45;
+}
+
+.autofill .input.bad {
+  border-color: var(--warn);
+}
+
+.autofill .flag {
+  grid-column: 3 / 5;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.autofill .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Numbered outlines over the found text on the screenshot. */
+.found-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.found-marks .mark {
+  position: absolute;
+  border: 2px dashed var(--capture);
+  border-radius: 3px;
+}
+
+.found-marks .mark.flagged {
+  border-color: var(--warn);
+}
+
+.found-marks .mark.off {
+  opacity: 0.4;
+}
+
+.found-marks .mark span {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  padding: 3px 6px;
+  border-radius: 3px 3px 3px 0;
+  background: var(--capture);
+  color: var(--on-capture);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.found-marks .mark.flagged span {
+  background: var(--warn);
+}
+
 /* A hidden view or strip stays out of the layout, whatever its display. */
 .viewer[hidden],
 .strip[hidden] {
@@ -2016,6 +2146,11 @@ div.match-answer {
   background: var(--glyph);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.glyph.pending {
+  outline: 2px dashed var(--capture);
+  outline-offset: -2px;
 }
 
 .glyphs.large .glyph {

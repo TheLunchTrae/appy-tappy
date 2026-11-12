@@ -1,5 +1,6 @@
-//! The text reader, which guesses what each recorded reading says so the
-//! user only corrects it.
+//! The text reader, which guesses what each recorded reading, and each run
+//! of text a search finds like a reference's sample, says so the user only
+//! corrects it.
 //!
 //! It runs on a thread of its own, because a read takes tens of
 //! milliseconds where the owner thread answers the UI in microseconds. The
@@ -27,16 +28,50 @@ use super::ink::Line;
 /// app's program.
 pub(crate) const MODEL_FILE: &str = "text-recognition.onnx";
 
-/// One reading for the text reader.
+/// What a job's line belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Source {
+    /// A recording, by its number; text for one the user discarded is
+    /// dropped.
+    Recording(u64),
+    /// A search for text like a reference's sample, by its number; text for
+    /// one the user dismissed or replaced is dropped.
+    Search(u64),
+}
+
+/// One line for the text reader.
 #[derive(Debug)]
 pub(crate) struct Job {
-    /// The recording it belongs to; text for a recording the user discarded
-    /// is dropped.
-    pub(crate) recording: u64,
-    /// The reading's index in the recording.
+    /// What it belongs to.
+    pub(crate) source: Source,
+    /// Its index there: a recorded reading's, or a find's.
     pub(crate) index: usize,
     /// Its ink.
     pub(crate) line: Line,
+}
+
+/// The newest recording and search queued so far, whose jobs are the only
+/// ones still worth reading.
+#[derive(Debug, Default, Clone, Copy)]
+struct Newest {
+    recording: u64,
+    search: u64,
+}
+
+impl Newest {
+    fn see(&mut self, source: Source) {
+        match source {
+            Source::Recording(recording) => self.recording = self.recording.max(recording),
+            Source::Search(search) => self.search = self.search.max(search),
+        }
+    }
+
+    const fn is_stale(self, source: Source) -> bool {
+        match source {
+            Source::Recording(recording) => recording < self.recording,
+            Source::Search(search) => search < self.search,
+        }
+    }
 }
 
 /// Where the model file is for the program at `program`: in the `models`
@@ -52,12 +87,13 @@ pub(crate) fn model_path(program: &Path) -> PathBuf {
 /// Reads each job's line as text and sends the owner the result, until the
 /// owner drops its sender. The model at `model` loads on the first job;
 /// when it cannot, every reading says why, and the user types the text.
-/// Jobs of a recording older than the newest one queued are skipped: the
-/// user discarded or replaced it, and the owner would drop their text.
+/// Jobs of a recording or search older than the newest one of its kind
+/// queued are skipped: the user discarded or replaced it, and the owner
+/// would drop their text.
 pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path) {
     let mut engine: Option<Result<OcrEngine, String>> = None;
     let mut queue = VecDeque::new();
-    let mut newest = 0_u64;
+    let mut newest = Newest::default();
     loop {
         queue.extend(jobs.try_iter());
         if queue.is_empty() {
@@ -66,11 +102,13 @@ pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path
                 Err(_closed) => break,
             }
         }
-        newest = queue.iter().map(|job| job.recording).fold(newest, u64::max);
+        for job in &queue {
+            newest.see(job.source);
+        }
         let Some(job) = queue.pop_front() else {
             continue;
         };
-        if job.recording < newest {
+        if newest.is_stale(job.source) {
             continue;
         }
         // A panic while loading the model fails every reading with a reason,
@@ -93,10 +131,17 @@ pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path
                 }),
             Err(why) => Text::Failed(why.clone()),
         };
-        let recognized = Message::Recognized {
-            recording: job.recording,
-            index: job.index,
-            text,
+        let recognized = match job.source {
+            Source::Recording(recording) => Message::Recognized {
+                recording,
+                index: job.index,
+                text,
+            },
+            Source::Search(search) => Message::FoundText {
+                search,
+                index: job.index,
+                text,
+            },
         };
         if messages.send(recognized).is_err() {
             break;
@@ -174,7 +219,7 @@ mod tests {
         let model = std::env::temp_dir().join("appytappy-no-model.onnx");
         for index in 0..2 {
             jobs.send(Job {
-                recording: 4,
+                source: Source::Recording(4),
                 index,
                 line: Line {
                     width: 1,
@@ -208,7 +253,7 @@ mod tests {
         let model = std::env::temp_dir().join("appytappy-no-model.onnx");
         for (recording, index) in [(1, 0), (1, 1), (2, 0), (1, 2)] {
             jobs.send(Job {
-                recording,
+                source: Source::Recording(recording),
                 index,
                 line: Line {
                     width: 1,
@@ -230,5 +275,44 @@ mod tests {
             })
             .collect();
         assert_eq!(answered, [(2, 0)]);
+    }
+
+    #[test]
+    fn a_search_skips_only_older_searches_and_answers_as_a_find() {
+        let (jobs, inbox) = mpsc::channel();
+        let (messages, outbox) = mpsc::channel();
+        let model = std::env::temp_dir().join("appytappy-no-model.onnx");
+        let sources = [
+            Source::Search(1),
+            Source::Recording(5),
+            Source::Search(2),
+            Source::Search(1),
+        ];
+        for (index, source) in sources.into_iter().enumerate() {
+            jobs.send(Job {
+                source,
+                index,
+                line: Line {
+                    width: 1,
+                    height: 1,
+                    pixels: vec![0],
+                },
+            })
+            .expect("reader listens");
+        }
+        drop(jobs);
+        run(&inbox, &messages, &model);
+        let answered: Vec<String> = outbox
+            .try_iter()
+            .map(|message| match message {
+                Message::Recognized {
+                    recording, index, ..
+                } => format!("recording {recording} reading {index}"),
+                Message::FoundText { search, index, .. } => format!("search {search} find {index}"),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        // The newer search does not drop the recording's reading.
+        assert_eq!(answered, ["recording 5 reading 1", "search 2 find 2"]);
     }
 }

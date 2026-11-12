@@ -21,6 +21,7 @@
 //! A digit, a `%`, and a `.` are all shapes the same way: whatever the
 //! check's own sampling makes one character is one shape here.
 
+pub(crate) mod find;
 mod ink;
 mod lifecycle;
 pub(crate) mod looks;

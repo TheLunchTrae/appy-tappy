@@ -148,6 +148,7 @@ fn taught(editing: Option<ReferenceRef>, labeled: &[Shown], tolerance: u8) -> Ch
             .enumerate()
             .map(|(screenshot, shown)| Label {
                 screenshot,
+                region: None,
                 text: shown.text.clone(),
             })
             .collect(),

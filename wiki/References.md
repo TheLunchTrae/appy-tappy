@@ -41,7 +41,8 @@ select **Capture this window**, as the first step of
    [Draw a region](Values.md#draw-the-region) around text on a screenshot,
    then type what it shows, such as `87%`. AppyTappy learns the shape of each
    character from what you type. Label screenshots until
-   **Characters still missing** says it knows every character it needs, or
+   **Characters still missing** says it knows every character it needs,
+   [find more like it](#find-more-like-it) on the same screenshot, or
    [record the region](#record-readings) to collect them as they show.
 5. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
@@ -88,7 +89,7 @@ in **Other characters**, where you can remove each. Select the choice to turn
 all of it on, and again to turn all of it off.
 
 The editor compares the list with what the reference learned, and keeps up as
-you type labels, keep recorded readings, or correct them:
+you type labels, add found text, keep recorded readings, or correct them:
 
 - **Characters still missing** shows each needed character it has yet to
   learn, outlined. This is what is left to teach. Once it has them all, it
@@ -97,14 +98,41 @@ you type labels, keep recorded readings, or correct them:
   it learned that are not on the list show below them. They are fine to keep:
   the list says what you need, not what is allowed.
 
-The list only guides you. AppyTappy learns a character from a label or a kept
-reading, never because it is on the list, and a number reads the same way
+The list only guides you. AppyTappy learns a character from a label, found
+text you add, or a kept reading, never because it is on the list, and a number reads the same way
 whatever you turn on. [Checks](Values.md#checks) says how a number reads its
 `.` and `,`.
 
 A reference saved without a list shows every character it knows under
 **Characters it knows**, and nothing as missing. **Edit** it and turn on what
 it needs to see what is left to teach.
+
+## Find more like it
+
+A screen often shows more numbers in the same font than the one you drew the
+region around, such as a stats panel. After you draw the region and pick the
+**Characters' color**, select **Find more like it** under the text you typed.
+AppyTappy looks on the screenshot for other text in that color and as tall as
+the text in the region, and reads each as text.
+
+1. **Check what it found.** Each find shows numbered on the screenshot and in
+   the list, with the text AppyTappy read. Fix any text it got wrong, and clear
+   the box beside any find that is not in the font, such as a label. When
+   AppyTappy reads a letter while the reference has learned none, such as a `0`
+   read as `O`, the find is flagged until you type its text, and so is text
+   that gives one shape two different characters: fix it or leave it out.
+2. **Add them.** Select the button that says how many you add, such as
+   **Add 3 to the reference**. They teach the reference like labeled
+   screenshots, and **Characters it knows** outlines the characters only the
+   finds would teach until you add them. Until then they still count under
+   **Characters still missing**. **Not these** closes the list without
+   adding any, and **Remove found text** takes the added finds back out.
+
+Draw the region tightly around the text first, since the finds' characters
+must be about as tall as the text in it; a comma or a mark below them does not
+count. Text of another size is skipped, and the list says how much. One search
+lists at most 12 finds; add those, then select **Find more like it** again, and
+it lists the rest, leaving out what you added.
 
 ## What a reference can't learn
 

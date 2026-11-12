@@ -745,7 +745,8 @@ value is a value flow that no automation opens:
   some other way.
 
 - **Pictures.** Leaving a value or reference flow unmounts it and stops its
-  capture, which clears its screenshots and recording, and **Change window**
+  capture, which clears its screenshots, recording, and found text, and
+  **Change window**
   stops the capture too, before the picker shows, so nothing holds them
   while the user picks. A click picture taken for an automation's draft
   stays while the automation's flow is open or waits under a flow it opened,
@@ -1036,7 +1037,8 @@ The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
 capture slot, `session`, shared by the value preview and the automation
 editor's watch. Starting one stops the other. Its other state is `generation`,
 `latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`
-(what the capture records, if anything: readings or looks), and `watched`.
+(what the capture records, if anything: readings or looks), `found` (the
+search of [Found text](#found-text), if any), and `watched`.
 
 ```mermaid
 stateDiagram-v2
@@ -1064,7 +1066,8 @@ stateDiagram-v2
 ```
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
-  above, so no frame, screenshot, or recorded reading outlives the capture.
+  above, so no frame, screenshot, recorded reading, or find outlives the
+  capture.
   The page stops it when a value or reference flow closes, on **Change
   window**, and when a click's target screen closes or looks for its window
   again.
@@ -1596,10 +1599,47 @@ refuses an edit that names a reading area for a Color or a State check.
 ### Text reader
 
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
-loads its model on the first reading it gets, then reads each reading and sends
-the text back with the recording's ID and the reading's index. The owner drops
-text for a recording that is gone. If the thread has stopped, the owner marks
-the reading as failed and asks the user to type it.
+loads its model on the first line it gets, then reads each recorded reading and
+each find of a search, and sends the text back with the recording's or the
+search's ID and the line's index (`ocr::Source`). It skips a queued job of a
+recording or search older than the newest of its kind. The owner drops text
+for a recording or search that is gone. If the thread has stopped, the owner
+marks the reading or find as failed and asks the user to type it.
+
+### Found text
+
+A search for text like a reference's first sample
+(`apps/setup/src-tauri/src/owner/found.rs`) is `None` or a `Found` with its ID,
+the screenshot it searched, and each find's region, pixels, and text.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Found: Find more like it finds ink in the region
+    Found --> Found: Find more like it again replaces it, with a new ID
+    Found --> None: Find more like it fails, such as for a region with no ink
+    Found --> None: Add or Not these
+    Found --> None: Change window, a window is picked, the editor closes, or the flow closes
+```
+
+- Each find starts `Pending` and turns `Read` or `Failed` when the text
+  reader answers for the search's ID. The UI polls only while one is pending.
+  Reads queued for a forgotten search still run; the owner drops their text,
+  and a newer search's jobs make the reader skip the rest.
+- The UI keeps each find's box, its text, and whether the user typed it
+  (`useFound`) until a new search or a dismissal. Answers to a search the user
+  moved on from are ignored by the UI's turn and, for pictures, by the
+  search's ID. A kept find is flagged without asking the owner when it has no
+  text, or when the reader's guess has a letter while the reference has
+  learned none (`foundRows`), and otherwise when the reference cannot learn it after the
+  draft's own labels (`found_problems`). **Add** waits until no kept find is
+  pending or flagged and the owner has answered for the current text.
+- **Add** appends the kept finds to the draft's `found` labels, each with its
+  own region, and forgets the search. A later search of the same screenshot
+  is given the added regions, and the finder leaves out runs that meet them
+  before it caps the list, so it offers the rest. **Remove found text** drops
+  the draft's found labels, and so does opening or closing the reference
+  editor, with its other labels (`toReference`, `fromReference`).
 
 ### Overlays
 
