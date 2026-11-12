@@ -12,8 +12,10 @@ import {
   type Detecting,
   type Measured,
   detectStep,
+  leftOutText,
   measureKey,
   measuredFor,
+  unmarkedText,
 } from './detect.ts';
 import { background } from './repeat.ts';
 
@@ -34,8 +36,12 @@ export interface BarSetup {
   readonly colors: BarColors | null;
   /** What each screenshot reads with `colors`, or null until that is known. */
   readonly readings: readonly BarReading[] | null;
-  /** The pixels `colors` count on the screenshot shown, or null when there are none to show. */
+  /** The pixels `colors` count on the screenshot shown, or null when there are none to mark. */
   readonly marks: BarMarks | null;
+  /** Why the pixels counted on the screenshot shown are not marked, or null. */
+  readonly unmarked: string | null;
+  /** That older screenshots are not among `readings`, or null when all of the window's size are. */
+  readonly leftOut: string | null;
   readonly measureError: string | null;
   /** Whether the user wants the counted pixels marked on the screenshot. */
   readonly marking: boolean;
@@ -129,7 +135,8 @@ export function useBarSetup(
     };
     // `wanted` spells out the key, the colors, and the screenshot shown.
   }, [wanted]);
-  const measured = measuredFor(made, wanted);
+  const measure = measuredFor(made, wanted)?.measure ?? null;
+  const unmarked = measure?.marks === null || measure === null ? null : unmarkedText(measure.marks);
 
   const [marking, setMarking] = useState(true);
   return {
@@ -143,9 +150,11 @@ export function useBarSetup(
       send({ kind: 'keep' });
     },
     colors,
-    readings: measured?.measure?.readings ?? null,
-    marks: marking ? (measured?.measure?.marks ?? null) : null,
-    measureError: measured?.error ?? null,
+    readings: measure?.readings ?? null,
+    marks: marking && unmarked === null ? (measure?.marks ?? null) : null,
+    unmarked,
+    leftOut: measure === null ? null : leftOutText(measure.leftOut),
+    measureError: measuredFor(made, wanted)?.error ?? null,
     marking,
     setMarking,
     swap: () => {

@@ -473,7 +473,11 @@ mod tests {
             harness.ask(measure(0)),
             Ok(serde_json::json!({
                 "readings": [{"screenshot": 0, "fill": 50.0}],
-                "marks": {"filled": [[0, 2], [4, 6]], "empty": [[2, 4], [6, 8]]},
+                "marks": {
+                    "filled": {"count": 4, "spans": [[0, 2], [4, 6]]},
+                    "empty": {"count": 4, "spans": [[2, 4], [6, 8]]},
+                },
+                "leftOut": 0,
             }))
         );
         let gone = "That screenshot is gone. Take a new one and try again.".to_owned();

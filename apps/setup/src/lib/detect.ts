@@ -125,26 +125,57 @@ function listed(numbers: readonly number[]): string {
   return numbers.length === 2 ? `${before} and ${last}` : `${before}, and ${last}`;
 }
 
-/** What one screenshot cannot show, and what to do about it. */
-const ONE_SCREENSHOT =
-  'One screenshot cannot tell a bar from a picture in two colors: compare the readings below with what you see, or take a screenshot at another fill and detect again.';
+/** What one fill cannot show, and what to do about it. */
+const ONE_FILL =
+  'One fill cannot tell a bar from a picture in two colors: compare the readings below with what you see, or take a screenshot at another fill and detect again.';
 
-/**
- * How `proposal`'s colors were found for a region drawn on screenshot `drawnOn`, and how far to trust them.
- * `position` gives a screenshot's number in the strip.
- */
-function basisText(proposal: Proposal, drawnOn: number, position: (index: number) => number): string {
-  const numbers = proposal.screenshots.map(position);
-  switch (proposal.basis) {
-    case 'layout':
-      return numbers.length > 1
-        ? `Found on screenshot ${position(drawnOn)} alone: the region does not change between two colors on screenshots ${listed(numbers)}. ${ONE_SCREENSHOT}`
-        : `Found on screenshot ${position(drawnOn)} alone. ${ONE_SCREENSHOT}`;
-    case 'changes':
-      return `Found from the pixels that change between screenshots ${listed(numbers)}.`;
-    case 'roughChanges':
-      return `Found from the pixels that change between screenshots ${listed(numbers)}. The two colors leave out some of those pixels, as on a bar filled with a gradient, so readings can be a few points off.`;
+/** `count` things in words: `one` of them, or `many(count)`. */
+function counted(count: number, one: string, many: (count: number) => string): string {
+  return count === 1 ? one : many(count);
+}
+
+/** That `count` older screenshots were not looked at, or null when none were. */
+export function leftOutText(count: number): string | null {
+  return count === 0
+    ? null
+    : counted(
+        count,
+        'One older screenshot of this size was not looked at.',
+        (several) => `${several} older screenshots of this size were not looked at.`,
+      );
+}
+
+/** How `proposal`'s colors were found, and how far to trust them. `position` gives a screenshot's number in the strip. */
+function foundText(proposal: Proposal, position: (index: number) => number): string {
+  const found = position(proposal.foundOn);
+  const looked = proposal.shownOn.length + proposal.without.length;
+  const said: (string | null)[] = [];
+  if (proposal.moves) {
+    said.push(
+      `Screenshots ${listed(proposal.shownOn.map(position))} show the bar in these two colors, at different fills.`,
+    );
+  } else if (looked === 1) {
+    said.push(`Found on screenshot ${found} alone. ${ONE_FILL}`);
+  } else {
+    said.push(`Found on screenshot ${found}. No other screenshot shows both colors at another fill. ${ONE_FILL}`);
   }
+  if (proposal.without.length > 0) {
+    const numbers = listed(proposal.without.map(position));
+    said.push(
+      counted(
+        proposal.without.length,
+        `Screenshot ${numbers} shows neither color in the region.`,
+        () => `Screenshots ${numbers} show neither color in the region.`,
+      ),
+    );
+  }
+  if (proposal.rough) {
+    said.push(
+      'On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes.',
+    );
+  }
+  said.push(leftOutText(proposal.leftOut));
+  return said.filter((sentence) => sentence !== null).join(' ');
 }
 
 /** Which color the detection takes as the filled one, and how to turn that around. */
@@ -153,7 +184,7 @@ const FILLED_SIDE_NOTE =
 
 /** What detecting does, shown until it has something to say. */
 const DETECT_NOTE =
-  'Finds the filled and the empty color on the screenshots. Pick them by hand below to correct them, or when it finds none.';
+  'Finds a bar of two plain colors on the screenshots: one color from the left, or from the bottom of a tall region, and the other after it. Pick the colors by hand to correct them, or when it finds none.';
 
 /**
  * What shows under Detect the bar: how the colors were found while the draft's `picked` colors are those, or the
@@ -170,7 +201,7 @@ export function detectingText(detecting: Detecting, picked: PickedColors, positi
       return detecting.message;
     case 'found':
       return detecting.asking || holds(picked, detecting.proposal)
-        ? `${basisText(detecting.proposal, detecting.key.drawnOn, position)} ${FILLED_SIDE_NOTE}`
+        ? `${foundText(detecting.proposal, position)} ${FILLED_SIDE_NOTE}`
         : DETECT_NOTE;
   }
 }
@@ -212,13 +243,23 @@ export function toneCss([red, green, blue]: readonly [number, number, number, nu
 }
 
 /**
+ * Why `marks` are not drawn, or null when they are: a part with too many separate runs of pixels to send carries
+ * only how many pixels it counts, and then neither part is marked.
+ */
+export function unmarkedText(marks: BarMarks): string | null {
+  return marks.filled.spans === null || marks.empty.spans === null
+    ? `Too many separate patches of pixels to mark on the screenshot: ${marks.filled.count} pixels count as filled and ${marks.empty.count} as empty.`
+    : null;
+}
+
+/**
  * The RGBA pixels that mark what a bar's two colors count in a region of `pixels` pixels: a tone over each pixel of
  * `marks`' runs, and clear elsewhere. A run that reaches past the region is cut off at its end.
  */
 export function paintMarks(marks: BarMarks, pixels: number): Uint8ClampedArray<ArrayBuffer> {
   const painted = new Uint8ClampedArray(pixels * 4);
   for (const part of ['filled', 'empty'] as const) {
-    for (const [start, end] of marks[part]) {
+    for (const [start, end] of marks[part].spans ?? []) {
       for (let index = Math.max(0, start); index < Math.min(end, pixels); index += 1) {
         painted.set(MARK_TONES[part], index * 4);
       }

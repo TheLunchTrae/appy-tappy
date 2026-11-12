@@ -89,49 +89,67 @@ cannot share a name, ignoring case, and none can be named `none`.
 
 ## Detect a bar's colors
 
-**Detect the bar** looks for a bar in two plain colors: one color from the
-left of the region and another after it, or from the bottom up in a region
-that is taller than wide. It takes the left color, or the bottom one, as the
-filled color. If the bar fills from the other end, select **Swap colors**.
+**Detect the bar** looks for a bar of two plain colors: one color from the
+left of the region and the other after it, or from the bottom up in a region
+that is taller than wide. Around the two the region may hold a border, a
+rounded end, or a little background, and between them a soft edge at most.
+It takes the left color, or the bottom one, as the filled color. If the bar
+fills from the other end, select **Swap colors**.
 
-What it goes by depends on your screenshots:
+It looks at the screenshot you drew the region on and at the newest other
+screenshots of the same window size, and says so when it left older ones
+out. It takes the colors from the first of them that shows both parts of the
+bar, and proposes them only when they read every screenshot it looked at:
 
-- With **one screenshot** of the window's size, it goes by where the two
-  colors are, and says **Found on screenshot 1 alone**. One screenshot cannot
-  tell a bar from a picture in two colors, so check the readings.
-- With **two or more screenshots** of the same window size that show the bar
-  at different fills, it goes by the pixels that change between them, which
-  only the bar's moving part does, and names the screenshots it compared.
-  When the two colors leave out some of those pixels, as on a bar filled
-  with a gradient, it says that readings can be a few points off.
+- When two screenshots show the bar at different fills, it names them, as in
+  **Screenshots 1 and 2 show the bar in these two colors, at different
+  fills**. A picture in two colors would not do that.
+- Otherwise it says which screenshot it found the colors on. One fill cannot
+  tell a bar from a picture in two colors, so compare the readings with what
+  you see, or take a screenshot at another fill and detect again.
+- A screenshot that shows neither color in the region, such as one of a
+  menu, is named and not compared.
+- When the colors read a screenshot a few points off where the bar ends on
+  it, as a label or a soft edge on the bar causes, it says so.
 
-Under the colors, **These colors read** lists what each screenshot of that
-size reads with them, such as **Screenshot 1: 72**. Compare each number with
+Under the colors, **These colors read** lists what each screenshot it looked
+at reads with them, such as **Screenshot 1: 72**. Compare each number with
 how full the bar looks on that screenshot. While
 **Mark what counts on the screenshot** is on, the screenshot shown has one
 tint over the pixels that count as filled and another over those that count
 as empty. Pixels with no tint, such as a border or a label, are left out. If
-a tint covers something beside the bar, draw the region more closely. The
-list and the tints follow the colors, so they show for colors you pick by
-hand too.
+a tint covers something beside the bar, draw the region more closely. A
+region with too many separate patches of the two colors to mark says so
+instead. The list and the tints follow the colors, so they show for colors
+you pick by hand too.
 
 If you already picked a color by hand, **Detect the bar** asks before it
 replaces it, and the list and the tints show the detected colors meanwhile:
 select **Use detected colors** or **Keep my colors**.
 
-It proposes no colors, and says what to do, when:
+It proposes no colors, and says why and what to do, when:
 
-- No screenshot shows the bar partly filled, so the region is one color.
-  Take a screenshot where the bar is partly filled.
+- No screenshot it looked at shows the bar partly filled, and the region is
+  one color on the screenshot you drew it on. Take a screenshot where the
+  bar is partly filled.
 - The two colors are too close to tell apart.
-- The region does not look like a bar, such as a bar made of separate
-  segments with gaps, a bar that fades from one color to another, or a
-  region drawn loosely over a busy background.
-- The bar's colors also show beside the bar, so the reading would be off.
-- The region is shorter than 12 pixels.
+- The region does not look like a bar of two plain colors. That goes for a
+  bar made of separate segments, a striped or textured fill, a fill that
+  fades along the bar, a label that covers most of the bar's height, and a
+  region drawn loosely over a busy background when no other screenshot
+  shows the bar at another fill.
+- The two colors do not read the region as full as the bar looks: they also
+  show beside the bar, or part of the bar has another shade. Draw the region
+  more closely.
+- The colors found on one screenshot do not read another that shows one of
+  them. The bar changes color as it fills or from one screenshot to the
+  next, or something covers it there, such as a tooltip. Two colors cannot
+  read a bar that changes color, whoever picks them.
+- The region is too short to hold a bar.
 
-Pick the colors by hand then: the check reads any bar whose filled and empty
-parts differ in color, whichever way it fills.
+Where two colors can read the bar, pick them by hand then: the check reads
+any bar whose filled and empty parts each keep one color, whichever way it
+fills.
 
 ## Select the thing in a state
 

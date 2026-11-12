@@ -62,12 +62,19 @@ export function BarReadings({ bar, position }: Props) {
     return null;
   }
   const asking = bar.detecting.kind === 'found' && bar.detecting.asking;
+  const title = <span>{asking ? 'The detected colors read' : 'These colors read'}</span>;
+  if (bar.measureError !== null) {
+    return (
+      <div className="field">
+        {title}
+        <p className="warn">{bar.measureError}</p>
+      </div>
+    );
+  }
   return (
     <div className="field">
-      <span>{asking ? 'The detected colors read' : 'These colors read'}</span>
-      {bar.measureError !== null ? (
-        <p className="warn">{bar.measureError}</p>
-      ) : bar.readings === null ? (
+      {title}
+      {bar.readings === null ? (
         <span className="note">Reading the screenshots…</span>
       ) : (
         <ul className="bar-readings">
@@ -76,7 +83,9 @@ export function BarReadings({ bar, position }: Props) {
           ))}
         </ul>
       )}
-      <span className="note">Compare each with how full the bar looks on that screenshot.</span>
+      <span className="note">
+        Compare each with how full the bar looks on that screenshot.{bar.leftOut === null ? '' : ` ${bar.leftOut}`}
+      </span>
       <label className="toggle">
         <input
           type="checkbox"
@@ -87,11 +96,15 @@ export function BarReadings({ bar, position }: Props) {
         />
         Mark what counts on the screenshot
       </label>
-      <span className="note">
-        <span className="swatch" style={{ background: toneCss(MARK_TONES.filled) }} />
-        counts as filled, <span className="swatch" style={{ background: toneCss(MARK_TONES.empty) }} />
-        as empty. Pixels with no mark, such as a border or a label, are left out.
-      </span>
+      {bar.unmarked === null ? (
+        <span className="note">
+          <span className="swatch" style={{ background: toneCss(MARK_TONES.filled) }} />
+          counts as filled, <span className="swatch" style={{ background: toneCss(MARK_TONES.empty) }} />
+          as empty. Pixels with no mark, such as a border or a label, are left out.
+        </span>
+      ) : (
+        <span className="note">{bar.unmarked}</span>
+      )}
       {asking ? null : (
         <button type="button" className="btn small swap" onClick={bar.swap}>
           Swap colors

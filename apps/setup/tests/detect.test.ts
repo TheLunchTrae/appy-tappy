@@ -6,12 +6,14 @@ import {
   type Detecting,
   detectingText,
   detectStep,
+  leftOutText,
   MARK_TONES,
   measuredFor,
   measureKey,
   paintMarks,
   readingLine,
   toneCss,
+  unmarkedText,
 } from '../src/lib/detect.ts';
 
 const green = { red: 40, green: 210, blue: 60 };
@@ -19,7 +21,17 @@ const gray = { red: 55, green: 55, blue: 70 };
 const red = { red: 255, green: 0, blue: 0 };
 const key: DetectKey = { region: { x: 1, y: 2, width: 30, height: 4 }, drawnOn: 0, shots: 2 };
 type Proposal = Extract<BarDetection, { readonly kind: 'proposed' }>;
-const proposed: Proposal = { kind: 'proposed', filled: green, empty: gray, basis: 'changes', screenshots: [0, 1] };
+const proposed: Proposal = {
+  kind: 'proposed',
+  filled: green,
+  empty: gray,
+  foundOn: 0,
+  shownOn: [0, 1],
+  without: [],
+  moves: true,
+  rough: false,
+  leftOut: 0,
+};
 const nonePicked = { filled: null, empty: null };
 const detecting: Detecting = { kind: 'detecting', key };
 const idle: Detecting = { kind: 'idle' };
@@ -114,51 +126,60 @@ describe('detectStep', () => {
 describe('detectingText', () => {
   const position = (index: number): number => index + 1;
   const note =
-    'Finds the filled and the empty color on the screenshots. Pick them by hand below to correct them, or when it finds none.';
+    'Finds a bar of two plain colors on the screenshots: one color from the left, or from the bottom of a tall region, and the other after it. Pick the colors by hand to correct them, or when it finds none.';
   const side =
     'The left color, or the bottom one of a tall region, counts as filled: swap the colors if the bar fills from the other end.';
   const caveat =
-    'One screenshot cannot tell a bar from a picture in two colors: compare the readings below with what you see, or take a screenshot at another fill and detect again.';
+    'One fill cannot tell a bar from a picture in two colors: compare the readings below with what you see, or take a screenshot at another fill and detect again.';
   const held = { filled: green, empty: gray };
-  const found = (proposal: Proposal, drawnOn = 0): Detecting => ({
-    kind: 'found',
-    key: { ...key, drawnOn },
-    proposal,
-    asking: false,
-  });
+  const found = (proposal: Proposal): Detecting => ({ kind: 'found', key, proposal, asking: false });
+  const still: Proposal = { ...proposed, moves: false };
 
-  test('says what detecting does, that it looks, and why it found none', () => {
+  test('says what detecting looks for, that it looks, and why it found none', () => {
     expect(detectingText(idle, nonePicked, position)).toBe(note);
     expect(detectingText(detecting, nonePicked, position)).toBe('Looking for the bar…');
     expect(detectingText({ kind: 'declined', key, message: 'No bar.' }, nonePicked, position)).toBe('No bar.');
   });
 
-  test('names the screenshots the changes were found between', () => {
+  test('names the screenshots that show the bar at different fills', () => {
     expect(detectingText(found(proposed), held, position)).toBe(
-      `Found from the pixels that change between screenshots 1 and 2. ${side}`,
+      `Screenshots 1 and 2 show the bar in these two colors, at different fills. ${side}`,
     );
-    expect(detectingText(found({ ...proposed, screenshots: [0, 2, 3] }), held, position)).toBe(
-      `Found from the pixels that change between screenshots 1, 3, and 4. ${side}`,
-    );
-  });
-
-  test('says when the colors leave out part of what changes', () => {
-    expect(detectingText(found({ ...proposed, basis: 'roughChanges' }), held, position)).toBe(
-      `Found from the pixels that change between screenshots 1 and 2. The two colors leave out some of those pixels, as on a bar filled with a gradient, so readings can be a few points off. ${side}`,
+    expect(detectingText(found({ ...proposed, shownOn: [0, 2, 3] }), held, position)).toBe(
+      `Screenshots 1, 3, and 4 show the bar in these two colors, at different fills. ${side}`,
     );
   });
 
-  test('says what one screenshot cannot show, and when the others did not help', () => {
-    expect(detectingText(found({ ...proposed, basis: 'layout', screenshots: [1] }, 1), held, position)).toBe(
+  test('says what one fill cannot show, whether or not other screenshots were looked at', () => {
+    expect(detectingText(found({ ...still, foundOn: 1, shownOn: [1] }), held, position)).toBe(
       `Found on screenshot 2 alone. ${caveat} ${side}`,
     );
-    expect(detectingText(found({ ...proposed, basis: 'layout' }, 1), held, position)).toBe(
-      `Found on screenshot 2 alone: the region does not change between two colors on screenshots 1 and 2. ${caveat} ${side}`,
+    // The others show the same fill, a full or an empty bar, or neither color: none shows another fill of both.
+    const others = `Found on screenshot 2. No other screenshot shows both colors at another fill. ${caveat}`;
+    expect(detectingText(found({ ...still, foundOn: 1 }), held, position)).toBe(`${others} ${side}`);
+    expect(detectingText(found({ ...still, foundOn: 1, shownOn: [1], without: [0] }), held, position)).toBe(
+      `${others} Screenshot 1 shows neither color in the region. ${side}`,
+    );
+  });
+
+  test('names the screenshots that show neither color, readings that are off, and screenshots left out', () => {
+    const start = 'Screenshots 1 and 2 show the bar in these two colors, at different fills.';
+    expect(detectingText(found({ ...proposed, without: [2, 4] }), held, position)).toBe(
+      `${start} Screenshots 3 and 5 show neither color in the region. ${side}`,
+    );
+    expect(detectingText(found({ ...proposed, rough: true }), held, position)).toBe(
+      `${start} On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
+    );
+    expect(detectingText(found({ ...proposed, leftOut: 1 }), held, position)).toBe(
+      `${start} One older screenshot of this size was not looked at. ${side}`,
+    );
+    expect(detectingText(found({ ...proposed, leftOut: 3 }), held, position)).toBe(
+      `${start} 3 older screenshots of this size were not looked at. ${side}`,
     );
   });
 
   test('shows how the colors were found only while the draft holds them, or is asked about them', () => {
-    const shown = `Found from the pixels that change between screenshots 1 and 2. ${side}`;
+    const shown = `Screenshots 1 and 2 show the bar in these two colors, at different fills. ${side}`;
     // Swapped colors are still the ones found.
     expect(detectingText(found(proposed), { filled: gray, empty: green }, position)).toBe(shown);
     for (const picked of [
@@ -185,7 +206,7 @@ test('a reading shows its screenshot and its fill to a tenth', () => {
 
 test('a measure shows only for the colors, region, and screenshots it was made for', () => {
   const colors = { filled: green, empty: gray };
-  const made = { key: measureKey(key, colors, 1), measure: { readings: [], marks: null }, error: null };
+  const made = { key: measureKey(key, colors, 1), measure: { readings: [], marks: null, leftOut: 0 }, error: null };
   expect(measuredFor(made, measureKey({ ...key }, { ...colors }, 1))).toBe(made);
   expect(measuredFor(made, measureKey(key, { filled: gray, empty: green }, 1))).toBeNull();
   expect(measuredFor(made, measureKey(key, colors, null))).toBeNull();
@@ -196,9 +217,16 @@ test('a measure shows only for the colors, region, and screenshots it was made f
   expect(measuredFor(null, made.key)).toBeNull();
 });
 
+test('older screenshots that were not looked at are counted in words', () => {
+  expect(leftOutText(0)).toBeNull();
+  expect(leftOutText(1)).toBe('One older screenshot of this size was not looked at.');
+  expect(leftOutText(2)).toBe('2 older screenshots of this size were not looked at.');
+});
+
 test('marks paint a tone over each counted pixel and leave the rest clear', () => {
-  const painted = paintMarks({ filled: [[0, 2]], empty: [[3, 4]] }, 5);
-  expect([...painted]).toEqual([
+  const marks = { filled: { count: 2, spans: [[0, 2]] }, empty: { count: 1, spans: [[3, 4]] } } as const;
+  expect(unmarkedText(marks)).toBeNull();
+  expect([...paintMarks(marks, 5)]).toEqual([
     ...MARK_TONES.filled,
     ...MARK_TONES.filled,
     ...[0, 0, 0, 0],
@@ -206,6 +234,15 @@ test('marks paint a tone over each counted pixel and leave the rest clear', () =
     ...[0, 0, 0, 0],
   ]);
   // A run past the region, as after the region shrank, stops at its end.
-  expect([...paintMarks({ filled: [[1, 9]], empty: [] }, 2)]).toEqual([0, 0, 0, 0, ...MARK_TONES.filled]);
+  const past = { filled: { count: 8, spans: [[1, 9]] }, empty: { count: 0, spans: [] } } as const;
+  expect([...paintMarks(past, 2)]).toEqual([0, 0, 0, 0, ...MARK_TONES.filled]);
   expect(toneCss(MARK_TONES.empty)).toBe('rgb(74 163 255)');
+});
+
+test('a part with too many patches to send is not marked, and the page says so', () => {
+  const said =
+    'Too many separate patches of pixels to mark on the screenshot: 9 pixels count as filled and 4 as empty.';
+  const some = [[0, 1]] as const;
+  expect(unmarkedText({ filled: { count: 9, spans: null }, empty: { count: 4, spans: some } })).toBe(said);
+  expect(unmarkedText({ filled: { count: 9, spans: some }, empty: { count: 4, spans: null } })).toBe(said);
 });

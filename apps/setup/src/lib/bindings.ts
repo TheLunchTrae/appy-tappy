@@ -201,48 +201,67 @@ automation: AutomationDef,
 problem: string | null, }>;
 
 /**
- * What a bar's colors were found from.
- */
-export type BarBasis = DeepReadonly<"layout" | "changes" | "roughChanges">;
-
-/**
  * What looking for a bar in a region found.
  */
-export type BarDetection = DeepReadonly<{ "kind": "proposed", filled: ColorSpec, empty: ColorSpec, basis: BarBasis,
+export type BarDetection = DeepReadonly<{ "kind": "proposed", filled: ColorSpec, empty: ColorSpec,
 /**
- * The screenshots looked at, by index: those with the window size
- * of the one the region was drawn on.
+ * The screenshot whose layout gave the colors.
  */
-screenshots: Array<number>, } | { "kind": "declined", message: string, }>;
+foundOn: number,
+/**
+ * The screenshots that show the bar in these colors, full, empty,
+ * or in between.
+ */
+shownOn: Array<number>,
+/**
+ * The screenshots looked at that show neither color.
+ */
+without: Array<number>,
+/**
+ * Whether two screenshots show both colors at different fills.
+ */
+moves: boolean,
+/**
+ * Whether the colors read a screenshot a few points off where the
+ * bar ends on it.
+ */
+rough: boolean,
+/**
+ * How many older screenshots of the window size were not looked
+ * at.
+ */
+leftOut: number, } | { "kind": "declined", message: string, }>;
 
 /**
- * The pixels of a region two colors count, each as runs of pixels: the
- * index of a run's first pixel and of the pixel after its last, row by row
- * from the top of the region.
+ * The pixels of a region that two colors count.
  */
 export type BarMarks = DeepReadonly<{
 /**
  * The pixels that count as filled.
  */
-filled: Array<[number, number]>,
+filled: Layer,
 /**
  * The pixels that count as empty.
  */
-empty: Array<[number, number]>, }>;
+empty: Layer, }>;
 
 /**
  * What two colors measure on the session's screenshots.
  */
 export type BarMeasure = DeepReadonly<{
 /**
- * What each screenshot reads, in the order they were taken.
+ * What each screenshot looked at reads, in the order they were taken.
  */
 readings: Array<BarReading>,
 /**
  * The pixels counted on the screenshot shown, or `None` when none is
- * shown or it has another window size.
+ * shown or it is not one of those looked at.
  */
-marks: BarMarks | null, }>;
+marks: BarMarks | null,
+/**
+ * How many older screenshots of the window size were not looked at.
+ */
+leftOut: number, }>;
 
 /**
  * What a screenshot's region reads with two colors.
@@ -541,6 +560,21 @@ likeness: number | null, }>;
  * learns its characters.
  */
 export type Label = DeepReadonly<{ screenshot: number, text: string, }>;
+
+/**
+ * The pixels of one part in a region.
+ */
+export type Layer = DeepReadonly<{
+/**
+ * How many pixels count as this part.
+ */
+count: number,
+/**
+ * The runs of them in the region, each as the index of its first pixel
+ * and of the pixel after its last, row by row from the top, as a
+ * selection's are. Missing when there are too many runs to draw.
+ */
+spans: Array<[number, number]> | null, }>;
 
 /**
  * What a watched value reads on the newest frame, for the automation

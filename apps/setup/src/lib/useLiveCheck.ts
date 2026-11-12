@@ -1,10 +1,10 @@
 // The check the capture screen sets up on the live frame, and what it reads.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Reading } from './bindings.ts';
 import { errorText, readValue, setCheck } from './api.ts';
-import type { Built, CheckState } from './check.ts';
+import { type Built, type CheckState, type LiveReading, readingOf } from './check.ts';
 import { useRepeat } from './repeat.ts';
 
 /** How long the check waits after the last change before it is tried. */
@@ -18,11 +18,12 @@ const READING_PAUSE_MS = 120;
  */
 export function useLiveCheck(built: Built): { readonly state: CheckState; readonly reading: Reading | null } {
   const [state, setState] = useState<CheckState>({ kind: 'idle' });
-  const [reading, setReading] = useState<Reading | null>(null);
+  const [read, setRead] = useState<LiveReading | null>(null);
+  // The check the owner reads with: the one whose set-up last went through.
+  const checked = useRef<Built | null>(null);
   useEffect(() => {
     if (!built.ok) {
       setState({ kind: 'idle' });
-      setReading(null);
       return undefined;
     }
     setState({ kind: 'pending' });
@@ -31,6 +32,7 @@ export function useLiveCheck(built: Built): { readonly state: CheckState; readon
       setCheck(built.spec)
         .then(() => {
           if (current) {
+            checked.current = built;
             setState({ kind: 'set' });
           }
         })
@@ -46,13 +48,19 @@ export function useLiveCheck(built: Built): { readonly state: CheckState; readon
     };
   }, [built]);
 
+  // Each reading is kept with the check the owner read it with, so one that arrives after the check changed is
+  // not shown as the new check's.
   const readNow = useCallback(async (): Promise<void> => {
+    const of = checked.current;
+    if (of === null) {
+      return;
+    }
     try {
-      setReading(await readValue());
+      setRead({ of, reading: await readValue() });
     } catch {
-      setReading(null);
+      setRead({ of, reading: null });
     }
   }, []);
   useRepeat(readNow, READING_PAUSE_MS, state.kind === 'set');
-  return { state, reading };
+  return { state, reading: readingOf(read, built) };
 }

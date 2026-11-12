@@ -170,46 +170,59 @@ mask of any region, as after the user adjusts the box by hand.
 `screen::detect` proposes a bar fill check's two colors, so the user does
 not have to click them. It infers only what the bar reader can use. The
 reader counts pixels near two colors wherever they are, with no direction,
-tolerance, or edge, so the detector's whole answer is two colors, and it
-refuses a region that two flat colors do not read well. The constants at the
-top of `screen/detect.rs` hold its thresholds.
+tolerance, or edge, so the detector's whole answer is two colors. It refuses
+a region rather than propose colors the reader would read wrongly. Each
+threshold below is a constant at the top of `screen/detect.rs`, which says
+what it is for.
 
 - **Layout.** The region's long side is its width, or its height when it is
   taller than wide. Each column along it takes the median color of its
-  pixels, which a thin border, a label, and an anti-aliased edge do not
-  move. The columns' colors are gathered into classes of alike colors, and
-  the bar's two colors are the most common class and the most common one far
-  enough apart from it. The columns must then lay out as one color and then
-  the other: each part at least a twentieth of the long side, the two
-  together most of it, and almost none out of place. A column belongs to a
-  part only within a quarter of the distance between the two colors, half as
-  far as the reader allows, so a gradient that runs from one color to the
-  other is not taken for two parts.
-- **Loose regions.** When the whole region shows no bar, the lanes that are
-  one plain color are left out and the rest is tried again, so a bar with
-  plain background or a thick border above and below it is still found.
-- **Changes.** With several screenshots of one window size, the pixels that
-  differ between them are the bar's moving part. Their colors are gathered
-  into classes the same way, the two colors must cover most of them, and one
-  screenshot must show both parts laid out as above, over the lanes that
-  hold a changed pixel. This finds a bar in front of a busy background,
-  which one screenshot cannot. When the changes show no bar, the layout of
-  one screenshot decides.
+  pixels, which a thin border, a thin label, and shading across the bar do
+  not move. The columns' colors are gathered into classes of alike colors
+  (`SAME`), and the bar's two colors are the most common class and the most
+  common one far enough apart from it (`APART`), each on at least a part's
+  worth of columns (`PARTS`, `MIN_PART`).
+- **Two plain parts and nothing between.** A column belongs to a part only
+  while it is as near the part's color as one plain color stays (`SAME`),
+  which is nearer than the reader needs. The columns must then read, from
+  the start: the filled part, at most an edge of columns that belong to
+  neither (`EDGE`), and the empty part. Columns that belong to neither may
+  lie only before and after the two, and take up only so much of the long
+  side (`COVER`): a border, a rounded cap, some background. A column of
+  another color inside a part refuses the region, so a segmented, striped,
+  or fading fill is not proposed.
 - **Which color is filled.** The reader cannot tell, so the color at the
   start of the long side is: the left of a wide region, the bottom of a tall
   one. The setup app's **Swap colors** turns it around.
-- **The reader agrees.** Before colors are proposed, `BarFill::percent` must
-  read the screenshot within a few points of the fill its layout shows.
-  Otherwise something beside the bar has one of the colors, or part of the
-  bar has neither, and the region is refused.
+- **The reader agrees.** `BarFill::percent` must read the screenshot within
+  `AGREE` points of the fill its layout shows. Otherwise something beside
+  the bar has one of the colors, or part of the bar has another shade, and
+  the region is refused. Past `ROUGH`
+  points the proposal says that readings can be a few points off.
+- **Every screenshot.** The colors come from the first screenshot whose
+  layout shows a bar, the one the region was drawn on first. Each other
+  screenshot must then show the same two colors the same way, as a full, an
+  empty, or a partly filled bar that the reader agrees with, or show neither
+  color on a part's worth of columns, as a screenshot of something else
+  does. One that shows a color but not the bar refuses the region and is
+  named: a bar that changes color with its fill or between screenshots
+  cannot be read with two colors. Two screenshots that show both parts at
+  fills a part apart say that the bar moves, which a picture in two colors
+  would not.
+- **Loose regions.** When the whole region shows no bar, two narrower looks
+  follow, each held to the same rules on every screenshot: only the lanes
+  of which a part's worth of pixels differs between screenshots, which finds
+  a bar in front of a busy background once it moved, and then only the lanes
+  that are not one plain color, which finds a bar with plain background or
+  a thick border above and below it.
 
-It refuses, with a `NoBar` reason, a region shorter than 12 pixels, one that
-shows a single color, two colors too close to split, a layout that is not
-one color then another, and colors the reader reads otherwise than the
-layout looks. It does not find a bar drawn as separate segments with wide
-gaps, a bar whose fill fades into its empty color, or a bar that fills from
-its middle. Supporting those needs no change to the reader, only a wider
-detector.
+A refusal carries a `NoBar` reason. The detector does not find a bar drawn
+as separate segments, a striped, textured, or fading fill, a bar with a
+trail between its parts, a bar whose label covers most of its height, or a
+bar that fills from its middle. A fill that fades so little along the bar
+that it stays one plain color is proposed, and every screenshot must still
+read with it. The reader reads some of those bars with hand-picked colors;
+supporting them here needs a wider detector, not another reader.
 
 ## Read interval
 

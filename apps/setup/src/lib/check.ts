@@ -4,6 +4,7 @@ import {
   type CheckDef,
   type CheckSpec,
   LIMITS,
+  type Reading,
   type RecordedLabel,
   type RecordingSettings,
   type ReferenceDef,
@@ -160,6 +161,20 @@ export type CheckState =
   | { readonly kind: 'pending' }
   | { readonly kind: 'set' }
   | { readonly kind: 'error'; readonly message: string };
+
+/** What a check read on the live window, and the check that read it. */
+export interface LiveReading {
+  readonly of: Built;
+  readonly reading: Reading | null;
+}
+
+/**
+ * The reading `read` holds when `built`, the check as it stands, is the very check that read it, and else null: a
+ * reading never outlives its check, so a check being tried shows no reading of the one before it.
+ */
+export function readingOf(read: LiveReading | null, built: Built): Reading | null {
+  return read?.of === built ? read.reading : null;
+}
 
 /** The draft's check, or what the user still has to do. */
 export type Built<Spec = CheckSpec> =

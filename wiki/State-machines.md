@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Five guards drop such stale messages:
+it was about has gone. Six guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -38,6 +38,10 @@ it was about has gone. Five guards drop such stale messages:
   answer for any other key than the request under way is dropped. What two
   colors measure is kept under those, the colors, and the screenshot shown,
   and shows only while they are the same.
+- **Checks.** The capture screen keeps each live reading with the check the
+  owner read it with (`readingOf` in `apps/setup/src/lib/check.ts`), and
+  shows it only while that is the check being tried, so a reading never
+  shows under a check that did not make it.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
