@@ -31,8 +31,8 @@ const MAX_IMAGE_NAME_LEN: usize = 64;
 
 /// The longest ID [`value_id`] makes, in bytes. It leaves room for the
 /// pictures named after the value, such as `{id}-16.png` for a state
-/// check's sixteenth state and `{id}-9-16.png` for it in a fix, within
-/// [`MAX_IMAGE_NAME_LEN`].
+/// check's sixteenth state and `{id}-10-16.png` for it in a fix or in a
+/// drawing whose states were taken again, within [`MAX_IMAGE_NAME_LEN`].
 const MAX_VALUE_ID_LEN: usize = 48;
 
 /// The longest ID [`reference_id`] makes, in bytes. It leaves room for the
@@ -1000,6 +1000,14 @@ pub fn value_id(name: &str) -> String {
     id_from_name(name, "value", MAX_VALUE_ID_LEN)
 }
 
+/// The ID for a new value named `name` that no ID in `taken` uses yet:
+/// [`value_id`] of the name, or that with `_2`, `_3` and so on when a renamed
+/// value still has it.
+#[must_use]
+pub fn new_value_id(name: &str, taken: &[&str]) -> String {
+    free_id(value_id(name), MAX_VALUE_ID_LEN, taken)
+}
+
 /// A reference ID made from a name the user typed, such as `percent_font`
 /// from `Percent font`, the way [`value_id`] makes one, with a `reference`
 /// prefix where it needs one.
@@ -1013,19 +1021,22 @@ pub fn reference_id(name: &str) -> String {
 /// renamed reference still has it.
 #[must_use]
 pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
-    let id = reference_id(name);
+    free_id(reference_id(name), MAX_REFERENCE_ID_LEN, taken)
+}
+
+/// `id`, or `id` with `_2`, `_3` and so on, cut to fit `max_len` bytes,
+/// whichever comes first that no ID in `taken` uses.
+fn free_id(id: String, max_len: usize, taken: &[&str]) -> String {
     if !taken.contains(&id.as_str()) {
         return id;
     }
     let mut base = id;
-    base.truncate(MAX_REFERENCE_ID_LEN.saturating_sub(4));
+    base.truncate(max_len.saturating_sub(4));
     let base = base.trim_end_matches('_');
     // `taken` is finite, so one of its length plus one numbers is free.
     (2_usize..=taken.len().saturating_add(2))
         .map(|number| format!("{base}_{number}"))
-        .find(|candidate| {
-            candidate.len() <= MAX_REFERENCE_ID_LEN && !taken.contains(&candidate.as_str())
-        })
+        .find(|candidate| candidate.len() <= max_len && !taken.contains(&candidate.as_str()))
         .unwrap_or_else(|| base.to_owned())
 }
 
@@ -1040,15 +1051,17 @@ pub fn sample_name(reference: &str, number: usize) -> String {
 /// The file name of the picture of a value's `state`th state, counted from
 /// 1.
 ///
-/// It is `{value}-{state}.png` for its drawing, such as `status-2.png`, and
-/// `{value}-{fix}-{state}.png` for its picture in a fix numbered `fix`, such
-/// as `status-1-2.png`. A value's ID has no hyphen, so neither name is
-/// another value's. No reference's sample can have either: a sample's name
-/// has the reference's ID after `ref-`, which starts with a letter.
+/// It is `{value}-{state}.png` for a new value's drawing, such as
+/// `status-2.png`, and `{value}-{set}-{state}.png` for its picture in the
+/// set numbered `set`, such as `status-1-2.png`: a fix's pictures, or the
+/// drawing's once an edit took its states again. A value's ID has no hyphen,
+/// so neither name is another value's. No reference's sample can have
+/// either: a sample's name has the reference's ID after `ref-`, which starts
+/// with a letter.
 #[must_use]
-pub fn state_image_name(value: &str, fix: Option<usize>, state: usize) -> String {
-    match fix {
-        Some(fix) => format!("{value}-{fix}-{state}.png"),
+pub fn state_image_name(value: &str, set: Option<usize>, state: usize) -> String {
+    match set {
+        Some(set) => format!("{value}-{set}-{state}.png"),
         None => format!("{value}-{state}.png"),
     }
 }
@@ -1737,6 +1750,23 @@ mod tests {
         assert!(SignalName::new(&long).is_ok());
         // The last state's picture named after the longest ID still fits.
         assert!(is_image_name(&format!("{long}-{MAX_STATES}.png")));
+        // A renamed value keeps its ID, so a new value named like its old
+        // name takes that ID with a number, which still fits a fix's
+        // pictures.
+        assert_eq!(new_value_id("Progress", &["other"]), "progress");
+        assert_eq!(
+            new_value_id("Progress", &["progress", "progress_2"]),
+            "progress_3"
+        );
+        let numbered = new_value_id(&"abc".repeat(30), &[long.as_str()]);
+        assert_eq!(numbered.len(), MAX_VALUE_ID_LEN.saturating_sub(2));
+        assert!(numbered.ends_with("_2"));
+        assert!(SignalName::new(&numbered).is_ok());
+        assert!(is_image_name(&state_image_name(
+            &long,
+            Some(MAX_FIXES.saturating_add(2)),
+            MAX_STATES
+        )));
     }
 
     #[test]

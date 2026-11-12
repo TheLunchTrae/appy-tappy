@@ -801,6 +801,83 @@ stateDiagram-v2
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
 
+### Value edit
+
+**Edit** on the Values page opens the capture screen on a saved value
+(`apps/setup/src/components/Capture.tsx`, with the edit's own logic in
+`apps/setup/src/lib/edit.ts` and `useValueEdit.ts`). No type names the
+edit's states: they follow from the draft's region, the screenshot it was
+drawn on (`drawnOn`), and its states, compared with the saved value.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unplaced: Edit, and the window is captured
+    Unplaced --> Placed: a screenshot has the window size the value was drawn at
+    Placed --> Moved: the region is drawn, moved, or typed on a screenshot of that size
+    Moved --> Placed: the region is put back where it was saved
+    Unplaced --> [*]: Save changes, Discard, or the flow is left
+    Placed --> [*]: Save changes, Discard, or the flow is left
+    Moved --> [*]: Save changes, Discard, or the flow is left
+```
+
+- **Unplaced.** The region is where it was saved, on no screenshot, because
+  none has the window size the value was drawn at. The region shows on no
+  screenshot and cannot be drawn or typed, and the editor says which size
+  the value was drawn at and which the screenshot has. The edit is a `kept`
+  drawing, which needs no screenshot, so the name, the pin, the check's kind
+  and its settings still save. A window that never takes that size never
+  leaves this state; the editor points to **Fix at this size** for it.
+- **Placed.** `drawnOn` is the newest screenshot of that size, and the region
+  shows on every screenshot of that size. The edit is still a `kept` drawing
+  while the region equals the saved one.
+- **Moved.** The region differs from the saved one, so the edit is a `drawn`
+  drawing on `drawnOn`.
+
+A saved state check has a second machine beside it, which says where each
+state's picture comes from:
+
+```mermaid
+stateDiagram-v2
+    [*] --> SavedPictures: the saved check is a state check
+    SavedPictures --> NeedsScreenshots: the region moves
+    NeedsScreenshots --> SavedPictures: the region is put back where it was saved
+    SavedPictures --> TakenAgain: Take the states again, or a selection on a screenshot
+    NeedsScreenshots --> TakenAgain: a state is added from a screenshot
+    TakenAgain --> SavedPictures: every taken state is removed, with the region where it was saved
+    TakenAgain --> NeedsScreenshots: every taken state is removed, with the region moved
+```
+
+- **SavedPictures.** The draft has no state of its own and the region is the
+  saved one (`keepsStates`). The edit names the saved pictures in their
+  order, and the names in `stateNames` and the tolerance can change.
+- **NeedsScreenshots.** The saved pictures no longer fit the region, so the
+  edit is not built and **Save changes** waits; the editor says each state
+  needs a new screenshot.
+- **TakenAgain.** Every state comes from a screenshot of the size the value
+  was drawn at, as for a new value, and takes the next saved name.
+
+Each change to the edit is tried on the owner thread after a quarter of a
+second (`try_edit`, through `useLiveCheck`), and again when the live view
+changes size. The owner makes the edited value its `check`, placed where the
+value reads at the newest frame's size, or clears `check` when the value is
+not read at that size, and answers what a save would do. An answer for an
+edit that has changed since is dropped, as a late check's is.
+
+- **The edit cannot be built or read back.** The reading box says why, such
+  as a name another value has or a state's screenshot of another size, and
+  **Save changes** waits. The next change tries again.
+- **An automation refuses it.** The answer names the automations, the editor
+  shows them, and **Save changes** waits until a change no longer breaks
+  them. `edit_value` refuses the same edit, so a file that changed since the
+  answer cannot let one through.
+- **It removes fixes.** The answer lists their window sizes, and **Save
+  changes** waits until the user turns on **Remove its fix**. The agreement
+  holds the sizes agreed to, and counts only while the answer lists exactly
+  those, so an edit that later removes other fixes asks again. `edit_value`
+  refuses an edit that removes fixes without the user's word.
+- **The save fails.** The editor shows why and stays open with the draft, and
+  the saved value is as it was.
+
 ### Text reader
 
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
@@ -863,7 +940,8 @@ second copy over to the first, which brings its window forward
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
 one. Each save reads the file, changes it, and writes it back. A save of an
-application's file goes through `Owner::update_app`, which loads the file,
+application's file, an edit of one of its values included, goes through
+`Owner::update_app`, which loads the file,
 changes it and hands it to `Owner::write_app`, and a save of the automations
 or the settings goes through `Owner::update_runtime`. After a save that works,
 they tell who reads what it changed, as its `Changed` kind says:
@@ -884,6 +962,7 @@ file, the setup app removes the pictures the file no longer names. That
 removal is best effort: one that fails does not fail the save, and the next
 save tries again. Deleting a reference that is already gone saves nothing and
 tells no one, but still removes the pictures an earlier delete left behind.
+An edit that leaves a value as it was saved writes nothing and tells no one.
 Moving a panel writes the application's file without telling anyone.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,

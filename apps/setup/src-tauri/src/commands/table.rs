@@ -85,6 +85,13 @@ macro_rules! with_commands {
             /// null.
             commands::remove_app(application: String) -> Option<String>;
             commands::save_value(spec: SaveSpec) -> SavedValue;
+            /// Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
+            /// now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.
+            commands::try_edit(spec: EditSpec) -> EditPreview;
+            /// Saves a saved value as `spec` edits it, under the ID it has. With `dropFixes`, the fixes the edit
+            /// leaves unusable go with it; without it, such an edit is refused, as is one that would break an
+            /// automation.
+            commands::edit_value(spec: EditSpec, drop_fixes: bool) -> SavedValue;
             /// Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would
             /// not fit.
             commands::place_value(

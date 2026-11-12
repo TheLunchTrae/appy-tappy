@@ -77,6 +77,35 @@ This page covers what the user guide leaves out.
   other states than the value's, and saves it over any fix at the same size
   (`save_fix`, `remove_fix`). A fix of a number names its own reference only
   when it differs from the value's.
+- **Editing a value.** **Edit** opens the capture locked to the value's
+  application, on a first screenshot like a fix's. The draft starts as the
+  saved value (`lib/edit.ts`), with its region on no screenshot. Once a
+  screenshot of the window size the value was drawn at exists, the region
+  sits on the newest one (`useValueEdit`); on a screenshot of any other
+  size the region does not show and cannot be drawn. The page sends an
+  `EditSpec`: the value's ID, its name, its pin, and a drawing. A `kept`
+  drawing keeps the saved region and spells the check as the file does, so
+  it needs no screenshot and the window may have any size; a state check in
+  it names the value's saved pictures in their order, under the names the
+  states have now. A `drawn` drawing is a check on a screenshot, which must
+  have the window size the value was drawn at, and a state check in it
+  takes every state's picture again. The owner builds the value as edited
+  once (`owner/edits.rs`) for both commands. `try_edit` reads it back with
+  `saved::build` and makes it the live check where `SavedValue::at` places
+  it at the newest frame's size, so the editor's reading is the runtime's at
+  the window's size now, and answers an `EditPreview`: why the value is not
+  read at that size, the fixes the edit removes, and the automations that
+  refuse it. The page tries the edit again when the live view changes
+  size. `edit_value` saves the same value over the saved one, under its ID,
+  and leaves the application's `checked` build alone. It refuses an edit
+  when an automation's condition suits the saved value but not the edited
+  one (`TargetDef::suits`), or when the edit removes fixes and the page did
+  not send `dropFixes`. An edit removes a value's fixes when the check's
+  kind changes or a state check's states no longer line up with the fixes'
+  pictures: each state has to keep its picture or its name, in the same
+  place. An edit that changes nothing writes nothing. A value keeps its ID
+  when renamed, and a new value named like a renamed one's old name gets
+  that ID with a number.
 - **References.** A number value names a reference of its own application
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
@@ -91,8 +120,8 @@ This page covers what the user guide leaves out.
   target is the kind the condition compares. A key press action also needs the
   application's anti-cheat class to be `none`
   ([Key presses](Actions.md#key-presses)).
-- **Reload.** Saving or removing an application, saving or deleting a value,
-  a reference or an automation, switching an automation on or off, changing
+- **Reload.** Saving or removing an application, saving, editing or deleting
+  a value, saving or deleting a reference or an automation, switching an automation on or off, changing
   an anti-cheat class, and changing a setting set the reload event, so the
   runtime reads the files again at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](Architecture.md#the-runtime)
@@ -202,7 +231,10 @@ and each state check's pictures, named after its value and the state's
 place, such as `status-1.png`, and transparent where the state's selection
 leaves the background out
 ([Saved pictures](Screen-regions.md#saved-pictures)). A fix's pictures add
-the fix's number, such as `status-2-1.png`.
+a number, such as `status-2-1.png`, and so do the pictures of a drawing
+whose states an edit took again. Each new set takes the smallest number no
+saved picture of the value has, so a save never overwrites a picture the
+saved file still names.
 
 ```json
 {
@@ -343,9 +375,9 @@ later save in that folder removes a temporary file that a crash left between the
 two steps, once it is ten minutes old. A file that cannot be read is listed with
 the reason and left alone; an automations file that cannot be read as a whole,
 such as one with another format version, is not replaced: until it is fixed, the
-setup app saves no automations, removes no application, and deletes no value,
-because it checks that file to see whether an automation still uses the
-application or value. One automation that breaks a rule on its own, such as
+setup app saves no automations, removes no application, and edits or deletes
+no value, because it checks that file to see whether an automation still uses
+the application or value. One automation that breaks a rule on its own, such as
 after a hand edit, is kept in the file and listed with its problem, and nothing
 runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask

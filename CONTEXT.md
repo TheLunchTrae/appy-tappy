@@ -23,6 +23,8 @@ parts fit.
   with a saved image.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
+- **Edit.** A saved value changed as it was first drawn, under the ID it
+  has, so the automations that watch it stay linked.
 - **Fix.** A screen region value drawn again at one more window size, which
   it reads there exactly instead of scaled from its first drawing.
 - **Pin.** The side of the window, a corner, an edge's middle, or the center,

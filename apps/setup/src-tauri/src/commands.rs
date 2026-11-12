@@ -25,8 +25,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
-    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, ClickPictureView, Desktop, EditPreview, EditSpec, FixSpec, FoundClick, Live,
+    Message, Owner, Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -242,6 +242,24 @@ pub(crate) async fn remove_app(
 #[tauri::command]
 pub(crate) async fn save_value(app: AppHandle, spec: SaveSpec) -> Result<SavedValue, String> {
     ask(&app, move |owner| owner.save(&spec)).await?
+}
+
+/// Reads the live frame with a saved value as `spec` edits it, and answers
+/// what saving the edit would do. Nothing is saved.
+#[tauri::command]
+pub(crate) async fn try_edit(app: AppHandle, spec: EditSpec) -> Result<EditPreview, String> {
+    ask(&app, move |owner| owner.try_edit(&spec)).await?
+}
+
+/// Saves a saved value as `spec` edits it, under the ID it has. With
+/// `drop_fixes`, the fixes the edit leaves unusable go with it.
+#[tauri::command]
+pub(crate) async fn edit_value(
+    app: AppHandle,
+    spec: EditSpec,
+    drop_fixes: bool,
+) -> Result<SavedValue, String> {
+    ask(&app, move |owner| owner.edit_value(&spec, drop_fixes)).await?
 }
 
 /// Where the saved value `value` of the application `application` starts

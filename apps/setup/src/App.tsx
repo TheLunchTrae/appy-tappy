@@ -14,7 +14,7 @@ import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
-import { type Fixing, NewValue } from './pages/NewValue.tsx';
+import { type Changing, NewValue } from './pages/NewValue.tsx';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
@@ -39,7 +39,7 @@ const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
 
 /** What the window shows in place of a page: a flow that makes or changes something. */
 type Flow =
-  | { readonly kind: 'value'; readonly fixing: Fixing | null }
+  | { readonly kind: 'value'; readonly changing: Changing | null }
   | { readonly kind: 'automation'; readonly existing: AutomationDef | null }
   | { readonly kind: 'application'; readonly existing: AppSummary | null }
   | { readonly kind: 'reference'; readonly existing: SavedRef | null };
@@ -51,6 +51,14 @@ const LOST: Readonly<Record<Flow['kind'], string>> = {
   automation: 'Leave without saving? The changes to this automation are lost.',
   application: 'Leave without saving? The changes to this application are lost.',
 };
+
+/** What leaving an edit of a saved value before it is saved loses: the value itself stays as it is saved. */
+const EDIT_LOST = 'Leave without saving? The screenshots and the changes to this value are lost.';
+
+/** What leaving `flow` before it is saved loses. */
+function lostText(flow: Flow): string {
+  return flow.kind === 'value' && flow.changing?.how === 'edit' ? EDIT_LOST : LOST[flow.kind];
+}
 
 /** How often the saved files are read again, which also refreshes which applications are running. */
 const REFRESH_MS = 3000;
@@ -188,7 +196,7 @@ export function App() {
       return (
         <NewValue
           apps={apps ?? []}
-          fixing={flow.fixing}
+          changing={flow.changing}
           onCancel={() => {
             open(null);
           }}
@@ -260,10 +268,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'value', fixing: null });
+              open({ kind: 'value', changing: null });
             }}
-            onFix={(fixing) => {
-              open({ kind: 'value', fixing });
+            onChange={(changing) => {
+              open({ kind: 'value', changing });
             }}
           />
         );
@@ -352,7 +360,7 @@ export function App() {
                 goTo(leaving);
               }}
             >
-              {LOST[flow.kind]}
+              {lostText(flow)}
             </Question>
           )}
           <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />
