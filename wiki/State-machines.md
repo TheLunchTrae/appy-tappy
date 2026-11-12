@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Six guards drop such stale messages:
+it was about has gone. Ten guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -29,10 +29,27 @@ it was about has gone. Six guards drop such stale messages:
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
   generation is dropped.
-- **Recording IDs.** Each recording gets a new `id`, so text that the text
-  reader sends back for a discarded recording is dropped.
+- **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
+  from one counter, so text that the text reader sends back for a recording
+  that was discarded, or replaced by one of either kind, is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Pointer IDs.** A region drag keeps the ID of the pointer that started it
+  (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
+  capture of any other pointer is dropped, and so is every event but a press
+  once the drag is over.
+- **Check numbers.** The capture screen gives each check or saved value's
+  edit it tries on the live window a number, which is in force from when the
+  owner took it until the draft changes or it is tried again. An answer to a
+  read asked under another number, or under none, is dropped (`afterRead`
+  in `apps/setup/src/lib/liveCheck.ts`).
+- **Request numbers.** The capture screen numbers each request of its
+  matching pixels preview (`apps/setup/src/lib/matchPreview.ts`). An answer
+  or a failure that carries another number than the request in flight's, such
+  as one sent before the preview was turned off, is dropped.
+- **Attempt numbers.** The click target screen numbers each **Find it now**
+  and **Click it now**, and drops an answer whose number is not that of the
+  try under way.
 - **The open flow.** A save's answer closes the setup app's flow only while
   the flow that saved is still the one open (`afterFlow` in
   `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
@@ -266,10 +283,11 @@ stateDiagram-v2
   and starts again at those regions, once for each settled size. When none
   does, the capture goes on and this thread says why each value is not read
   there (`say_unread`), at once, even when the window draws no more frames.
-  Each value's last problem moves between the two threads over channels:
-  the handler keeps it while frames show the capture's size, hands it to this
-  thread in its first `Resizing` for another size, and takes it back, as this
-  thread said it, on the first frame of its own size again. Nothing moves for
+  The problems said for each value since it was last read move between the
+  two threads over channels: the handler keeps them while frames show the
+  capture's size, hands them to this thread in its first `Resizing` for
+  another size, and takes them back, with what this thread said, on the
+  first frame of its own size again. Nothing moves for
   each frame. A capture started for a new size starts from those problems,
   and one started after a capture ended any other way starts from none. A
   size that settles back at the capture's own size changes nothing. Windows
@@ -298,7 +316,7 @@ stateDiagram-v2
 Its state is `placed` (the window size whose values it reads, and where
 each value reads at it, resolved once), `told` (the other size it last told
 the reader frames show), `last` (each value's last reading), `problems`
-(each value's last problem, handed to the reader while frames show
+(the problems said for each value since it was last read, handed to the reader while frames show
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restarted` (whether the reader started this capture
@@ -342,7 +360,19 @@ stateDiagram-v2
 - A value that does not read at the capture's own size, such as one whose
   scaled region reaches outside the window, says why once and is not
   copied.
-- Each value's problem leaves the window size out and is carried into the
+- A value whose check fails on a frame keeps its last reading and says why.
+  The handler keeps every problem it said for the value since the value was
+  last read, and says each once: a good read forgets them. A number's check
+  fails one way for each stage of its read, such as a character its
+  reference has not learned, whatever the characters are, so a counter that
+  stays unreadable while it counts is said once, with what its first failed
+  read showed, and a region that flickers between two stages is said twice,
+  not once for each frame
+  ([Why a number is not read](Screen-regions.md#why-a-number-is-not-read)).
+  At a size the value was not drawn at, the problem says its region is
+  scaled there and to fix the value at that size if the region is off,
+  which makes it another problem than the same stage at a drawn size.
+- Each value's problems leave the window size out and are carried into the
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.
 
@@ -672,8 +702,8 @@ stateDiagram-v2
 ```
 
 **Open** is one flow on screen with up to two waiting under it. The types
-allow only these stacks, the flow on screen last; a fix of a saved value is a
-value flow that no automation opens:
+allow only these stacks, the flow on screen last; a fix or an edit of a saved
+value is a value flow that no automation opens:
 
 | Stack                            | How it comes about                                                                             |
 | -------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -702,7 +732,8 @@ value flow that no automation opens:
   flow.
 - **Tab.** What leaving loses is what the open flow reports
   (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
-  that waits (`heldInAll`). With nothing unsaved the tab's page opens. With
+  that waits (`heldInAll`). A fix and an edit start from the screenshot the
+  capture takes when they open, so that screenshot is not unsaved work. With nothing unsaved the tab's page opens. With
   unsaved work the question asks first, and `lostText` names what the open
   flow loses and the automation's unsaved changes. **Leave** drops every
   flow, and **Stay** keeps the stack as it is. While a save runs, the tabs
@@ -712,6 +743,16 @@ value flow that no automation opens:
   and `afterFlow` changes nothing when it is not. The tabs and **Cancel** are
   disabled while a save runs, so this guards a save whose flow was replaced
   some other way.
+
+- **Pictures.** Leaving a value or reference flow unmounts it and stops its
+  capture, which clears its screenshots and recording, and **Change window**
+  stops the capture too, before the picker shows, so nothing holds them
+  while the user picks. A click picture taken for an automation's draft
+  stays while the automation's flow is open or waits under a flow it opened,
+  since the draft that names it waits with it. Once no automation flow is
+  left, on a save, **Cancel**, or **Leave**, the window removes the click
+  pictures that no saved automation names (`holdsAutomation`,
+  [Pictures kept](Setup-app.md#pictures-kept)).
 
 No flow waits for the saved files to be read again before it closes. Each
 save starts that read, and whatever shows next copes with lists that lack
@@ -872,8 +913,8 @@ stateDiagram-v2
 - **NoApplications** and **Choosing** show the list of saved applications
   with **Add application** in it. With one saved application there is no
   choice, and the picker resolves that one. A flow that has its application,
-  **Fix at this size** or **Edit** on a reference, shows no list and never
-  reaches them.
+  **Fix at this size**, or **Edit** on a value or a reference, shows no list
+  and never reaches them.
 - **Missing** is a chosen application that the look does not find: the flow's
   own, one handed over by the application flow, or the last choice. The
   picker says so instead of asking for a choice as if none had been made.
@@ -901,6 +942,60 @@ stateDiagram-v2
   it ends, as [Pages and flows](#pages-and-flows) describes. **Change window**
   in the capture opens a new picker with the same application, and with the
   same window picked when several fit.
+
+### Click target tries
+
+The click target screen (`apps/setup/src/components/ClickTarget.tsx`) tries a
+target with **Find it now** and **Click it now**. `Try` in
+`apps/setup/src/lib/clickTry.ts` names the states, and `tryStep` there is the
+transition.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Finding: Find it now
+    Idle --> Clicking: Click it now
+    Answered --> Finding: Find it now
+    Answered --> Clicking: Click it now
+    Failed --> Finding: Find it now
+    Failed --> Clicking: Click it now
+    Finding --> Answered: where the click would land
+    Finding --> Failed: why it lands nowhere
+    Clicking --> Answered: the click was sent, and to which window
+    Clicking --> Failed: why it was not sent
+    Finding --> Idle: the target changes
+    Answered --> Idle: the target changes
+    Failed --> Idle: the target changes
+```
+
+- **Finding** and **Clicking.** The try starts with the press and keeps its
+  attempt number. A drawn picture is kept first, then the owner thread is
+  asked, and the screen's buttons wait meanwhile. Every way the try can end
+  answers it, a target that is not set up included, so none stays under way.
+  Both commands end by themselves. The owner waits at most a second for a
+  picture's frame. For a click sent to the window it then waits at most half
+  a second for the windows' answers to where the place is on them, and for a
+  click with the cursor about a tenth of a second while the buttons are held.
+- **Clicking locks the target.** A click that is being sent is a real click,
+  so from the press until its answer the button, **How to click**, where it
+  clicks, and the application cannot change. A click that was sent therefore
+  always shows its answer. `tryStep` also keeps **Clicking** through a change
+  that reaches it all the same.
+- **Answered.** **Find it now** answers where the click would land, which the
+  live view marks. **Click it now** answers that the click was sent and names
+  the window. When that is another window than the one the screen shows, the
+  screen offers **Look again**.
+- **Failed.** The screen shows why, such as a picture that is not found or a
+  window that refused the click. The next try or a change of the target
+  leaves the state.
+- **The target changes.** A change of where the click lands goes back to
+  **Idle** from every state but **Clicking**. A change of the button or of
+  **How to click** does too, except that it keeps where **Find it now** said
+  the click would land, since neither moves that place.
+- **A late answer.** The settings stay enabled while **Find it now** looks,
+  which clicks nothing. An answer whose attempt number is not that of the
+  try under way is dropped, so where an earlier target would land never
+  shows for the target as it is set up now.
 
 ### Update notice
 
@@ -940,8 +1035,8 @@ state, such as a late check during the download, changes nothing.
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
 capture slot, `session`, shared by the value preview and the automation
 editor's watch. Starting one stops the other. Its other state is `generation`,
-`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`,
-and `watched`.
+`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`
+(what the capture records, if anything: readings or looks), and `watched`.
 
 ```mermaid
 stateDiagram-v2
@@ -969,7 +1064,10 @@ stateDiagram-v2
 ```
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
-  above.
+  above, so no frame, screenshot, or recorded reading outlives the capture.
+  The page stops it when a value or reference flow closes, on **Change
+  window**, and when a click's target screen closes or looks for its window
+  again.
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
@@ -992,14 +1090,147 @@ stateDiagram-v2
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
 
+### Live check
+
+The capture screen tries a trial on the live window (`useLiveCheck` in
+`apps/setup/src/lib/useLiveCheck.ts`): the check being set up, with
+`set_check`, or a saved value's edit, with `try_edit`, as
+[Value edit](#value-edit) describes. Either way the owner reads the window
+with what it took, so the two share this machine and its one guard. Its
+state is `state`, a `CheckState`; `read`, the reading or the problem shown;
+`preview`, what saving an edit would do; `tried`, the number of the newest
+trial; and `inForce`, the number of the trial the owner reads with, or none.
+Below, a check stands for either.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Setting: the draft makes a check
+    Setting --> Set: the owner took the check
+    Setting --> Failed: the owner refused the check
+    Set --> Set: a read answers
+    Setting --> Setting: the check changes
+    Set --> Setting: the check changes
+    Failed --> Setting: the check changes
+    Setting --> Idle: the draft no longer makes a check
+    Set --> Idle: the draft no longer makes a check
+    Failed --> Idle: the draft no longer makes a check
+```
+
+- **Idle.** The draft lacks something, and the box says what. Nothing is
+  shown as read.
+- **Setting** (`pending`). The check waits 250 ms for the draft to hold
+  still, then goes to the owner. Each change of the check, and each time the
+  same edit is tried again, as when the window's size changes,
+  takes the next number, starts the wait again, and leaves no number in
+  force, and the owner's answer for a check the draft has left is ignored.
+  The box says it is trying the check. The last reading is kept, to show
+  until the first read with the new check answers, and a problem is cleared.
+- **Set.** The owner took the check, and its number is in force. The window
+  is read every 120 ms with `read_value`, each read after the last answered.
+  An answer replaces what the box shows: a reading, or why the frame cannot
+  be read.
+- **Failed** (`error`). The owner refused the check, such as a label its
+  reference cannot learn, and the box says why. The owner keeps the check it
+  had, and nothing is read until the check changes.
+- A read notes the number in force when it is asked, and its answer is taken
+  only while that number is still in force. So an answer under an older
+  check is dropped, reading or problem, and so is one asked between a change
+  of the check and the owner taking the new one, which the owner read with
+  the check before (`afterRead`).
+
+### Matching pixels preview
+
+The capture screen's matching pixels preview
+(`apps/setup/src/lib/matchPreview.ts`, run by `useMatchPreview.ts`) tints the
+pixels of the screenshot shown that a color setting takes. Its state is on
+the page only: which settings' switches are on, the request in flight and
+its number, the newest request wanted since, the newest answer, and the
+newest failure. The owner thread keeps nothing for it; each request is one
+`match_pixels` command.
+
+```mermaid
+stateDiagram-v2
+    state "In flight" as InFlight
+    state "In flight, one queued" as Queued
+    [*] --> Off
+    Off --> Blocked: the switch is turned on with nothing to ask
+    Off --> InFlight: the switch is turned on, which sends a request
+    Blocked --> InFlight: what was missing arrives, which sends a request
+    InFlight --> Idle: the request is answered or fails
+    InFlight --> Queued: what to ask changes
+    Queued --> Queued: what to ask changes again, which replaces the queued request
+    Queued --> InFlight: the request in flight is answered or fails, which sends the queued one
+    Queued --> InFlight: what to ask goes back to what the request in flight asks
+    Idle --> InFlight: what to ask changes, which sends a request
+    InFlight --> Blocked: what to ask goes missing
+    Queued --> Blocked: what to ask goes missing
+    Idle --> Blocked: what to ask goes missing
+    Blocked --> Off: the switch is turned off, or its setting leaves the inspector
+    InFlight --> Off: the switch is turned off, or its setting leaves the inspector
+    Queued --> Off: the switch is turned off, or its setting leaves the inspector
+    Idle --> Off: the switch is turned off, or its setting leaves the inspector
+```
+
+- **What to ask** (`plan`) is the screenshot shown, a rectangle of it, and the
+  rule: a reference's characters on the whole screenshot, or a bar's or a
+  color check's colors in the region.
+- **In flight** awaits one request's answer. The transition (`step`) sends a
+  request at once while none is awaited and gives it the next number. One
+  request counts at a time, so the tint follows a dragged slider as fast as
+  the owner answers, and a drag never piles requests up.
+- **In flight, one queued** also remembers the newest request wanted since.
+  A newer one replaces it, so a burst of changes sends the first and the
+  last. The queued request goes out when the one in flight is answered or
+  fails.
+- **Idle** shows the last request's answer, or why it failed, such as a
+  screenshot that is gone or a region that reaches past the window. A failure
+  tints nothing, and the next change to what is asked leaves it.
+- **Blocked** has nothing to ask and says why under the switch: the live view
+  shows instead of a screenshot, a color is not picked, the region is not
+  drawn, or an edited value's region belongs to screenshots of another size
+  than the one shown. Like **Off**, it forgets the request in flight, the queued request,
+  and the answer, so nothing more is sent and an answer still on its way is
+  dropped. Neither waits for that request, so turning the switch on again
+  sends a new one while the forgotten one may still be with the owner: two
+  can be there then, and only the newer one's answer counts. The capture
+  screen clears the preview when it closes.
+- **Off** shows the plain screenshot in the same render that turns the switch
+  off. Each setting has its own switch, which stays as the user left it
+  until the capture screen closes: going back a step and returning, or
+  changing the kind of check and changing it back, shows the tint again
+  without another press. A setting whose fields are not in the inspector
+  shows no tint.
+- An answer counts only under the number of the request in flight
+  (`step`). `previewDriver` gives each answer the number its own request was
+  sent with, so an answer to a request sent before **Off** or **Blocked** is
+  not taken for the answer to a later one.
+- While a request is in flight, the tint of the last answer stays if it is
+  for the same rectangle of the same screenshot (`tinted`), and its counts
+  dim and say that they are updating (`awaited`). An answer for another
+  screenshot or rectangle stops showing at once.
+
+**Show selected pixels**, under **Color match**, has no requests of its own.
+It is a switch that stays as the user left it until the capture screen
+closes, and it tints the selection the capture screen last made on the
+screenshot shown (`selectedPixels`). While the selection for a new color
+match is awaited, the last one for the same steps stays, and its count says
+that it is updating. When that selection cannot be made, nothing is awaited:
+the tint goes, and the line under the switch says so beside the error.
+
 ### Recording
 
-A recording (`apps/setup/src-tauri/src/recording.rs`) keeps a reading for
-each shape a region shows, for the user to review. It is `None` or a
-`Recording` whose `stopped` field says whether it still records, and whose
-`problem` says why it skips frames or why it stopped by itself. Its
-`Sightings` hold `full`, which says why it takes no more once a frame did
-not fit.
+The owner's `recording` field is `None` or one `Recorder`
+(`apps/setup/src-tauri/src/recording.rs`): a recording of readings or
+[a recording of looks](#recording-looks). The type holds one of them, so the
+two never run together, and starting one replaces the other. Both hold a
+`Lifecycle` (`recording/lifecycle.rs`), whose `stopped` field says whether it
+still records, and whose `problem` says why it skips frames or why it stopped
+by itself.
+
+A recording of readings keeps a reading for each shape a region shows, for
+the user to review. Its `Sightings` hold `full`, which says why it takes no
+more once a frame did not fit.
 
 ```mermaid
 stateDiagram-v2
@@ -1016,10 +1247,10 @@ stateDiagram-v2
     Recording --> Ended: the window closes
     Full --> Ended: the window closes
     Stopped --> Ended: the window closes
-    Recording --> None: Discard, a window is picked, or the flow closes
-    Full --> None: Discard, a window is picked, or the flow closes
-    Stopped --> None: Discard, a window is picked, or the flow closes
-    Ended --> None: Discard, a window is picked, or the flow closes
+    Recording --> None: Discard, Change window, a window is picked, or the flow closes
+    Full --> None: Discard, Change window, a window is picked, or the flow closes
+    Stopped --> None: Discard, Change window, a window is picked, or the flow closes
+    Ended --> None: Discard, Change window, a window is picked, or the flow closes
 ```
 
 - Each frame is cropped to the region. A crop of another window size, or one
@@ -1047,6 +1278,9 @@ stateDiagram-v2
   (`Recording::end`). Its problem says to change window, and **Record more**
   and a new **Record** are refused. Its readings stay for review, so a
   reference can still be saved from them.
+- Starting a recording of looks replaces a recording of readings, as a
+  discard would. The UI offers it only in the value flow, which discards the
+  readings when the reference editor closes.
 - A value saves the window size of the screenshot its region was drawn on
   (`drawnOn` in the UI). A number value reads with one of the application's
   references, and saving a reference teaches it from its labeled screenshots
@@ -1054,9 +1288,239 @@ stateDiagram-v2
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
 
+### Region drag
+
+The region surface (`apps/setup/src/components/RegionSurface.tsx`) draws,
+moves, and resizes the region on a screenshot, on the capture screen and on the
+click target screen. Its drag is a pure machine, `step` in
+`apps/setup/src/lib/drag.ts`. The surface turns pointer events into the
+machine's events and carries out the effects it answers with: capture the
+pointer, free it, hand over a region, or hand over the snap tool's rough box.
+Every point is in the screenshot's own pixels, so the zoom and the size of the
+window never reach the machine.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Drawing: press off the region, or with the snap tool
+    Idle --> Moving: press inside the region with the box tool
+    Idle --> Resizing: press on a corner's handle with the box tool
+    Drawing --> Drawing: move, or the screenshot shifts under the pointer
+    Moving --> Moving: move, or the screenshot shifts under the pointer
+    Resizing --> Resizing: move, or the screenshot shifts under the pointer
+    Drawing --> Idle: release, or a move with the button up, hands over the box drawn
+    Moving --> Idle: release, or a move with the button up, hands over the moved region
+    Resizing --> Idle: release, or a move with the button up, hands over the resized region
+    Drawing --> Idle: cancel, lost or failed capture, or the surface changes
+    Moving --> Idle: cancel, lost or failed capture, or the surface changes
+    Resizing --> Idle: cancel, lost or failed capture, or the surface changes
+```
+
+- **Idle.** Only a press of the main button with the box or the snap tool
+  starts a drag, and it captures the pointer. A click that picks a color or
+  selects with the click tool never enters the machine.
+- **Slop.** In every state, nothing changes until the pointer has traveled 3
+  pixels of the view from the press. A click therefore draws, moves, and
+  resizes nothing, so it leaves a region typed to the exact pixel as it is.
+  Past the slop the drag follows the pointer's whole travel, also back to the
+  press.
+- **Drawing.** The box is the part of the screenshot between the press and the
+  pointer. The press can be in the empty space around the screenshot, and a
+  box that holds none of the screenshot is no box. With the box tool the box
+  becomes the region. With the snap tool it is the rough box, and the region
+  stays as it is.
+- **Moving.** The region as it was at the press moves by the pointer's travel
+  and stops at the screenshot's edges.
+- **Resizing.** The pressed corner moves by the pointer's travel from where it
+  was at the press, so a press that is off the corner's tip does not make it
+  jump. The corner across from it stays where it was at the press, also after
+  the dragged corner passes it. A drag that would leave no box keeps the last
+  one.
+- **Shift.** A scroll or a zoom moves the screenshot under a pointer that
+  stays still, and no pointer event tells of it. The surface then says where
+  on the screenshot the pointer is, and the drag follows as for a move.
+- **Release** carries where the pointer was let go, which the last move may
+  not have reached. The drag follows to there, ends, frees the pointer, and
+  hands over what it made: the region, or the rough box. A drag that drew no
+  box, or left the region where it was, hands over nothing.
+- **A move with the main button up** ends the drag the same way, but with the
+  box as it last was. No release event follows a button that comes up while
+  another is held, and where it came up is not known.
+- **Failures.** A drag is interrupted when the browser cancels the pointer,
+  when the surface loses the pointer's capture, or when the surface changes:
+  another screenshot or another size shows, the tool changes, or a click
+  starts to pick a color. Each ends the drag in **Idle** with the pointer
+  freed and hands over nothing. A capture that cannot be taken, because the
+  pointer is gone already, ends the drag the same way with nothing to free:
+  without it no release would reach the surface. Only letting go changes the
+  region, so the region is as it was before the drag, and the next press
+  starts a new one.
+- A press of the pointer that already drags means its release never arrived:
+  the old drag is dropped without handing anything over, and a new one
+  starts. Events of any other pointer change nothing.
+- Dragging on the view selects no text, and the view refuses the browser's own
+  drag of a selection, which would cancel the pointer in the middle of a drag.
+
+The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
+kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
+the live view shows or a screenshot of another size does. It changes only the
+size the screenshot shows at, so a drag goes on through a zoom or a scroll.
+
+### Recording looks
+
+A recording of looks (`apps/setup/src-tauri/src/recording/looks.rs`, started in
+`owner/looks.rs`) keeps a screenshot each time a value's region shows a look
+that no screenshot shows yet. It has no review and nothing to go on with: a
+stopped one only says what it kept and why it stopped, and **Start recording**
+always starts a new one.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Recording: Start recording
+    Recording --> Resting: a frame is compared, whether or not it is kept
+    Resting --> Recording: four times as long as that frame took has passed
+    Recording --> Paused: a frame of another window size
+    Paused --> Recording: a frame of the size the region was drawn at
+    Recording --> Stopped: Stop recording
+    Paused --> Stopped: Stop recording
+    Recording --> Stopped: the capture fails, with the failure as its problem
+    Paused --> Stopped: the capture fails, with the failure as its problem
+    Recording --> Stopped: it kept 16 screenshots, with the limit as its problem
+    Stopped --> Recording: Start recording starts a new recording
+    Recording --> Ended: the window closes
+    Paused --> Ended: the window closes
+    Stopped --> Ended: the window closes
+    Recording --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Paused --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Stopped --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Ended --> None: the reference editor opens, a window is picked, or the flow closes
+```
+
+- **Recording** crops each frame to the region and compares the crop with
+  every look it knows: the region on each screenshot of the same window size
+  that the session held when it started, and on each frame it kept. A crop
+  within the tolerance of one of them changes nothing. Any other is a new look:
+  the whole frame goes to the screenshot store, and the recording's `kept` list
+  gets its index.
+- **Resting** is a recording whose `rests_until` is still to come. After each
+  comparison it is set to four times as long as the frame took from arriving
+  to compared (`REST`), counted from the end of the comparison. A frame that
+  the owner handles before then is not compared: it changes nothing in the
+  recording, and a look it shows is kept when a later frame shows it.
+  Comparing so takes at most a fifth of the owner thread's time, whatever the
+  region's size. The time a frame waited for the owner counts toward what it
+  took, so a recording rests longer after the owner was busy, and the UI
+  shows it as recording all the while. **Resting** leaves by every arrow that
+  leaves **Recording**.
+- **Paused** is a recording whose `problem` says the window has another size
+  than the screenshot the region was drawn on. It keeps nothing, and the next
+  frame of the right size clears the problem and records.
+- **Stopped** keeps its `kept` list and its problem for the UI to show. A
+  capture failure stops it as it stops a recording of readings, and its
+  problem names **Start recording** as the way on, where a recording of
+  readings names **Record more** (`Recorder::after_failure`); frames that come
+  again do not restart it. The limit, `MAX_LOOKS`, stops it when it keeps
+  its 16th screenshot. The user recovers from either with **Start recording**,
+  which starts a new recording with a new ID that knows the looks of every
+  screenshot still held.
+- **Ended** is a stopped recording whose capture slot is **Ended**. Its
+  problem says to change window, and a new recording is refused. The
+  screenshots stay until the capture stops.
+- Leaving a recording, by any arrow to **None**, keeps the screenshots it
+  kept: they belong to the capture slot's `screenshots`, which only a removal
+  or a stop of the capture releases. While it records, rests, or is paused,
+  the owner refuses to remove any screenshot, so the looks it knows and the
+  screenshots that show them stay in step.
+- The reference editor records readings, so opening it discards a recording of
+  looks first (`openEditor` in `Capture.tsx`), and the owner replaces one when
+  a recording of readings starts.
+
+### Value edit
+
+**Edit** on the Values page opens the capture screen on a saved value
+(`apps/setup/src/components/Capture.tsx`, with the edit's own logic in
+`apps/setup/src/lib/edit.ts` and `useValueEdit.ts`). No type names the
+edit's states: they follow from the draft's region, the screenshot it was
+drawn on (`drawnOn`), and its states, compared with the saved value.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unplaced: Edit, and the window is captured
+    Unplaced --> Placed: a screenshot has the window size the value was drawn at
+    Placed --> Moved: the region is drawn, moved, or typed on a screenshot of that size
+    Moved --> Placed: the region is put back where it was saved
+    Unplaced --> [*]: Save changes, Discard, or the flow is left
+    Placed --> [*]: Save changes, Discard, or the flow is left
+    Moved --> [*]: Save changes, Discard, or the flow is left
+```
+
+- **Unplaced.** The region is where it was saved, on no screenshot, because
+  none has the window size the value was drawn at. The region shows on no
+  screenshot and cannot be drawn or typed, and the editor says which size
+  the value was drawn at and which the screenshot has. The edit is a `kept`
+  drawing, which needs no screenshot, so the name, the pin, the check's kind
+  and its settings still save. A window that never takes that size never
+  leaves this state; the editor points to **Fix at this size** for it.
+- **Placed.** `drawnOn` is the newest screenshot of that size, and the region
+  shows on every screenshot of that size. The edit is still a `kept` drawing
+  while the region equals the saved one.
+- **Moved.** The region differs from the saved one, so the edit is a `drawn`
+  drawing on `drawnOn`.
+
+A saved state check has a second machine beside it, which says where each
+state's picture comes from:
+
+```mermaid
+stateDiagram-v2
+    [*] --> SavedPictures: the saved check is a state check
+    SavedPictures --> NeedsScreenshots: the region moves
+    NeedsScreenshots --> SavedPictures: the region is put back where it was saved
+    SavedPictures --> TakenAgain: Take the states again, or a selection on a screenshot
+    NeedsScreenshots --> TakenAgain: a state is added from a screenshot
+    TakenAgain --> SavedPictures: every taken state is removed, with the region where it was saved
+    TakenAgain --> NeedsScreenshots: every taken state is removed, with the region moved
+```
+
+- **SavedPictures.** The draft has no state of its own and the region is the
+  saved one (`keepsStates`). The edit names the saved pictures in their
+  order, and the names in `stateNames` and the tolerance can change.
+- **NeedsScreenshots.** The saved pictures no longer fit the region, so the
+  edit is not built and **Save changes** waits; the editor says each state
+  needs a new screenshot.
+- **TakenAgain.** Every state comes from a screenshot of the size the value
+  was drawn at, as for a new value, and takes the next saved name.
+
+Each change to the edit is tried on the owner thread after a quarter of a
+second (`try_edit`, through `useLiveCheck`). The same edit is tried again
+when the window's size changes, which the page asks the owner for twice a
+second (`window_size`), and after a save the owner refused. The owner makes
+the edited value its `check`, placed where the value reads at the newest
+frame's size, or clears `check` when the value is not read at that size or
+the edit cannot be tried, and answers what a save would do. An answer for an
+edit that has changed since is dropped, as a late check's is.
+
+- **The edit cannot be built or read back.** The reading box says why, such
+  as a name another value has or a state's screenshot of another size, and
+  **Save changes** waits. The next change tries again.
+- **An automation refuses it.** The answer names the automations, the editor
+  shows them, and **Save changes** waits until a change no longer breaks
+  them. `edit_value` refuses the same edit, so a file that changed since the
+  answer cannot let one through.
+- **It removes fixes.** The answer lists their window sizes, and **Save
+  changes** waits until the user turns on **Remove its fix**. The agreement
+  holds the sizes agreed to, and counts only while the answer lists exactly
+  those, so an edit that later removes other fixes asks again. The save
+  carries those sizes, and `edit_value` refuses it unless they are exactly
+  the fixes the edit removes when it runs.
+- **The save fails.** The editor shows why and stays open with the draft, the
+  saved value is as it was, and the edit is tried again, so the answer shows
+  what the saved files say now.
+
 ### Pin choice
 
-A new value's pin is picked in the capture screen's first step
+The pin of a new value, and of a saved value being edited, is picked in the
+capture screen's first step
 (`apps/setup/src/components/Capture.tsx`, shown by `PinPicker.tsx`). The
 choice is one `PinChoice`, automatic or by hand with a pin
 (`apps/setup/src/lib/pin.ts`). It lives on the capture's draft beside the
@@ -1066,7 +1530,8 @@ it came from.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Automatic
+    [*] --> Automatic: a new value, or an edit of a value whose pin is the side its region is nearest
+    [*] --> ByHand: an edit of a value saved with another side
     Automatic --> Automatic: the region is drawn, moved, resized, or typed, and the pin follows it
     Automatic --> ByHand: a side is picked on the grid
     ByHand --> ByHand: another side is picked
@@ -1123,6 +1588,10 @@ A fix has no switch. It starts in **Area** when its value saved a reading
 area and in **Fixed** otherwise, and stays there, since a fix keeps its
 value's kind of check. [Content that moves](Screen-regions.md#content-that-moves)
 says what the saved flag is for.
+
+An edit has the switch. It starts in **Area** when its value saved a reading
+area and in **Fixed** otherwise, and moves as a new value does; the owner
+refuses an edit that names a reading area for a Color or a State check.
 
 ### Text reader
 
@@ -1186,7 +1655,8 @@ second copy over to the first, which brings its window forward
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
 one. Each save reads the file, changes it, and writes it back. A save of an
-application's file goes through `Owner::update_app`, which loads the file,
+application's file, an edit of one of its values included, goes through
+`Owner::update_app`, which loads the file,
 changes it and hands it to `Owner::write_app`, and a save of the automations
 or the settings goes through `Owner::update_runtime`. After a save that works,
 they tell who reads what it changed, as its `Changed` kind says:
@@ -1199,18 +1669,30 @@ they tell who reads what it changed, as its `Changed` kind says:
   changing its mode.
 - **The runtime, the overlays and their windows:** removing an application.
 
-A save that failed before it wrote anything changed nothing, so it tells
-neither, and an overlay that was reading goes on reading. A delete tells them
-once it has written the application's file, and removing an application tells
-them even when the removal fails partway. After each save of an application's
-file, the setup app removes the pictures the file no longer names. That
-removal is best effort: one that fails does not fail the save, and the next
-save tries again. Deleting a reference that is already gone saves nothing and
-tells no one, but still removes the pictures an earlier delete left behind.
-Moving a panel writes the application's file without telling anyone.
+A save that failed changed nothing anyone reads, so it tells neither, and an
+overlay that was reading goes on reading. A delete tells them once it has
+written the application's file, and removing an application tells them even
+when the removal fails partway. After each save of an application's file,
+whether it worked or failed, the setup app removes the pictures in its folder
+that the file as saved does not name, of those AppyTappy named. So a save that
+fails after it wrote some pictures takes them back, and pictures that a save
+left when the program ended in the middle of it go with the application's
+next save. That removal is best effort: one that fails does not fail the
+save, and the next save tries again. Deleting a reference that is already
+gone saves nothing and tells no one, but still removes the pictures an
+earlier delete left behind. An edit that leaves a value as it was saved
+writes nothing and tells no one. Moving a panel writes the application's
+file without telling anyone.
+
+A click's picture is written to the `clicks` folder when its target is set
+up, before its automation is saved. Each save of the automations removes the
+click pictures none of them names, and so does the end of the automation's
+flow, so a target set up for an automation that was not saved leaves no file.
+[Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another
 run left and that have not changed for ten minutes, such as one a crash left
-between the write and the rename. A failed delete does not fail the save, and
+between the write and the rename. Those in the `clicks` folder go when the
+click pictures are removed. A failed delete does not fail the save, and
 the next save tries again.

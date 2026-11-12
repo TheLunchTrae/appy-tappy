@@ -9,8 +9,10 @@ use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
-use crate::check_spec::{self, CheckSpec, RegionCheck};
+use crate::check_spec::{self, CheckSpec, RegionCheck, RegionSpec};
+use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
+use crate::recording::Recorder;
 use crate::selection::{self, SelectionSpec, SelectionView};
 use crate::window_list::{self, WindowFit, WindowList};
 
@@ -36,7 +38,8 @@ fn preview_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Me
     }
 }
 
-/// What `check` reads on `frame`.
+/// What `check` reads on `frame`, or why it cannot be read there, for the
+/// user.
 fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
     let cropped = frame.crop(check.region).ok_or_else(|| {
         "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
@@ -44,7 +47,7 @@ fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
     check
         .check
         .read(&cropped)
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("Not read on the live window now: {error}."))
 }
 
 impl<H: Host> Owner<H> {
@@ -133,6 +136,8 @@ impl<H: Host> Owner<H> {
     /// nothing until frames come again, with the failure as its problem.
     pub(super) fn capture_failed(&mut self, failure: CaptureFailure) {
         if let Some(recording) = &mut self.recording {
+            let next = recording.after_failure();
+            let recording = recording.life_mut();
             let error = check_spec::sentence(&failure.error);
             if failure.ended {
                 recording.end(
@@ -140,10 +145,7 @@ impl<H: Host> Owner<H> {
                     format!("Recording stopped: {error} Change window to pick it again."),
                 );
             } else {
-                recording.fail(
-                    Instant::now(),
-                    format!("Recording stopped: {error} Record more once the window shows again."),
-                );
+                recording.fail(Instant::now(), format!("Recording stopped: {error} {next}"));
             }
         }
         self.failure = Some(failure);
@@ -163,8 +165,22 @@ impl<H: Host> Owner<H> {
             .latest
             .clone()
             .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
-        self.screenshots.push(image);
-        Ok(self.screenshots.len().saturating_sub(1))
+        Ok(self.screenshots.push(image))
+    }
+
+    /// Releases each of the screenshots `indexes` names. The others keep
+    /// their indexes. Refused while a recording of looks records: it knows
+    /// each look it kept, so it would not keep a removed one again.
+    pub(crate) fn remove_screenshots(&mut self, indexes: &[usize]) -> Result<(), String> {
+        if let Some(Recorder::Looks(recording)) = &self.recording
+            && recording.life.is_recording()
+        {
+            return Err("Stop recording to remove a screenshot.".to_owned());
+        }
+        for &index in indexes {
+            self.screenshots.remove(index);
+        }
+        Ok(())
     }
 
     /// What the check reads on the newest frame: `None` until a check is
@@ -208,6 +224,20 @@ impl<H: Host> Owner<H> {
             .ok_or_else(|| check_spec::SpecError::NoScreenshot.to_string())
     }
 
+    /// The pixels of `area` on screenshot `screenshot` that `rule` takes.
+    pub(crate) fn match_pixels(
+        &self,
+        screenshot: usize,
+        area: RegionSpec,
+        rule: MatchRule,
+    ) -> Result<MatchView, String> {
+        self.screenshots
+            .get(screenshot)
+            .ok_or(check_spec::SpecError::NoScreenshot)
+            .and_then(|image| match_preview::find(image, area, rule))
+            .map_err(|error| error.to_string())
+    }
+
     /// Makes `spec` the check the live frame is read with.
     pub(crate) fn set_check(&mut self, spec: &CheckSpec) -> Result<(), String> {
         let check = self
@@ -244,10 +274,12 @@ impl<H: Host> Owner<H> {
 mod tests {
     use appytappy_config::app_file::WindowDef;
     use appytappy_sources::screen::Size;
+    use tokio::sync::oneshot;
 
-    use crate::check_spec::CheckSpec;
+    use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+    use crate::owner::messages::Run;
     use crate::owner::run;
-    use crate::owner::test_support::{FakeHost, Harness, frame_image, harness};
+    use crate::owner::test_support::{FakeHost, Harness, STATE, frame_image, harness};
     use crate::pixels;
     use crate::window_list::WindowFit;
 
@@ -409,6 +441,52 @@ mod tests {
     }
 
     #[test]
+    fn matching_pixels_are_found_on_the_named_screenshot() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let matching = |screenshot, width| {
+            move |owner: &mut Owner<FakeHost>| {
+                owner
+                    .match_pixels(
+                        screenshot,
+                        serde_json::from_value(serde_json::json!(
+                            {"x": 0, "y": 0, "width": width, "height": 2}
+                        ))
+                        .expect("the UI's spelling"),
+                        serde_json::from_value(serde_json::json!({
+                            "kind": "ink",
+                            "ink": {"red": 255, "green": 0, "blue": 0},
+                            "tolerance": 0
+                        }))
+                        .expect("the UI's spelling"),
+                    )
+                    .map(|view| serde_json::to_value(view).expect("plain data"))
+            }
+        };
+        assert_eq!(
+            harness.ask(matching(0, 4)),
+            Ok(serde_json::json!({
+                "kind": "ink",
+                "ink": {"count": 4, "spans": [[0, 2], [4, 6]]}
+            })),
+            "the red half of each row"
+        );
+        assert_eq!(
+            harness.ask(matching(0, 5)),
+            Err(
+                "The region reaches past the edge of the window. Draw it inside the window."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            harness.ask(matching(1, 4)),
+            Err("That screenshot is gone. Take a new one and try again.".to_owned())
+        );
+    }
+
+    #[test]
     fn the_check_reads_the_live_frame() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
@@ -456,6 +534,45 @@ mod tests {
                 .ask(|owner| owner.reading())
                 .expect_err("outside")
                 .contains("past the edge")
+        );
+    }
+
+    #[test]
+    fn a_live_frame_the_check_cannot_read_says_which_stage_failed() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // A reference taught that the screenshot's red half is a 1.
+        let spec: CheckSpec = serde_json::from_str(
+            r#"{"kind":"characters","region":{"x":0,"y":0,"width":4,"height":2},"screenshot":0,
+                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                "labels":[{"screenshot":0,"text":"1"}]}"#,
+        )
+        .expect("valid JSON");
+        harness
+            .ask(|owner| owner.set_check(&spec))
+            .expect("valid check");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(1.0)))
+        );
+        let gray = Image::new(
+            Size {
+                width: 4,
+                height: 2,
+            },
+            [40, 40, 40, 0].repeat(8),
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&gray));
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(
+                "Not read on the live window now: no pixel in the region has the characters' \
+                 color."
+                    .to_owned()
+            )
         );
     }
 
@@ -532,14 +649,47 @@ mod tests {
     }
 
     #[test]
-    fn stopping_closes_the_capture_and_forgets_the_screenshots() {
+    fn stopping_closes_the_capture_and_releases_every_picture_it_held() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(Owner::stop);
+        let left: RegionSpec =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":2,"height":2}"#).expect("valid JSON");
+        let red: ColorSpec =
+            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+        harness
+            .ask(|owner| owner.start_recording(left, red, 0, 0, false))
+            .expect("records");
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness
+            .ask(|owner| owner.set_check(&serde_json::from_str(STATE).expect("valid JSON")))
+            .expect("a valid check");
+        // What the page can ask for of the picked window: the newest frame,
+        // a screenshot, a recorded reading, the recording, and what the
+        // check, which holds a state's picture, reads.
+        let held = |owner: &mut Owner<FakeHost>| {
+            [
+                owner.preview(4).expect("no failure").is_some(),
+                owner.screenshot_pixels(0, 4).is_some(),
+                owner.recorded_pixels(0, 4).is_some(),
+                owner.recording_state().is_some(),
+                owner.reading().expect("reads").is_some(),
+            ]
+        };
+        assert_eq!(harness.ask(held), [true; 5]);
+
+        // The page's `stop_capture`, as it reaches the owner when a flow
+        // closes or the user selects Change window.
+        let (reply, mut answer) = oneshot::channel();
+        let stop = Message::Run(Run::new(reply, Owner::stop));
+        assert!(harness.owner.handle(stop).is_continue());
+        assert_eq!(answer.try_recv(), Ok(()));
         assert_eq!(harness.closed.try_recv(), Ok(7));
-        assert_eq!(harness.ask(|owner| owner.screenshot_pixels(0, 100)), None);
+        assert_eq!(harness.ask(held), [false; 5]);
+        // A frame the stopped capture sends late is not kept either.
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(held), [false; 5]);
         assert_eq!(
             harness.ask(Owner::screenshot),
             Err("No frame has arrived from the window yet.".to_owned())

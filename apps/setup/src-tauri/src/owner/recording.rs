@@ -1,23 +1,31 @@
-//! Recording a region: starting it, and sending each new reading it shows to
-//! the text reader.
+//! Recording a region: what both kinds of recording share, and recording
+//! readings, starting it and sending each new reading it shows to the text
+//! reader. Recording looks is in `looks.rs`.
 
 use std::time::Instant;
 
-use appytappy_sources::screen::{Image, Region};
+use appytappy_sources::screen::{Image, Region, Size};
 
 use crate::check_spec::{self, CheckSpec, ColorSpec, RegionSpec};
 use crate::pixels;
-use crate::recording::{Recording, RecordingView, Text, ocr};
+use crate::recording::{Recorder, Recording, RecordingView, Text, ocr};
 
 use super::Owner;
 use super::host::Host;
 
 impl<H: Host> Owner<H> {
-    /// Records `frame`, which arrived at `received`, and sends a new reading
-    /// it shows to the text reader.
+    /// Records `frame`, which arrived at `received`: sends a new reading it
+    /// shows to the text reader, or keeps it as a screenshot when it shows
+    /// a new look.
     pub(super) fn record(&mut self, frame: &Image, received: Instant) {
-        let Some(recording) = &mut self.recording else {
-            return;
+        let recording = match &mut self.recording {
+            Some(Recorder::Readings(recording)) => recording,
+            Some(Recorder::Looks(recording)) => {
+                let host = &self.host;
+                recording.offer(frame, received, || host.now(), &mut self.screenshots);
+                return;
+            },
+            None => return,
         };
         let Some(new) = recording.offer(frame, received) else {
             return;
@@ -35,18 +43,36 @@ impl<H: Host> Owner<H> {
         }
     }
 
-    /// Records `region` of the picked window, drawn on `screenshot`,
-    /// keeping each reading it shows. With `more`, goes on with the stopped
-    /// recording, which must be of the same region, ink, and window size;
-    /// otherwise starts a new one in place of any recording.
-    pub(crate) fn start_recording(
-        &mut self,
+    /// The recording of readings, if that is what the capture records.
+    pub(super) const fn readings(&self) -> Option<&Recording> {
+        match &self.recording {
+            Some(Recorder::Readings(recording)) => Some(recording),
+            Some(Recorder::Looks(_)) | None => None,
+        }
+    }
+
+    /// The recording of readings, to change it.
+    pub(super) const fn readings_mut(&mut self) -> Option<&mut Recording> {
+        match &mut self.recording {
+            Some(Recorder::Readings(recording)) => Some(recording),
+            Some(Recorder::Looks(_)) | None => None,
+        }
+    }
+
+    /// The next recording's number.
+    pub(super) const fn next_recording_id(&mut self) -> u64 {
+        self.recording_id = self.recording_id.wrapping_add(1);
+        self.recording_id
+    }
+
+    /// The region `region` describes and the size of the window it was
+    /// drawn on, that of `screenshot`, when the picked window can be
+    /// recorded there; otherwise what to do first.
+    pub(super) fn recordable(
+        &self,
         region: RegionSpec,
-        ink: ColorSpec,
-        tolerance: u8,
         screenshot: usize,
-        more: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(Region, Size), String> {
         if self.session.is_none() {
             return Err("Pick a window to record.".to_owned());
         }
@@ -70,14 +96,31 @@ impl<H: Host> Owner<H> {
                     .to_owned(),
             );
         }
-        let window_size = drawn_on.size();
+        Ok((region, drawn_on.size()))
+    }
+
+    /// Records `region` of the picked window, drawn on `screenshot`,
+    /// keeping each reading it shows. With `more`, goes on with the stopped
+    /// recording, which must be of the same region, ink, and window size;
+    /// otherwise starts a new one in place of any recording.
+    pub(crate) fn start_recording(
+        &mut self,
+        region: RegionSpec,
+        ink: ColorSpec,
+        tolerance: u8,
+        screenshot: usize,
+        more: bool,
+    ) -> Result<(), String> {
+        let (region, window_size) = self.recordable(region, screenshot)?;
         let settings = (ink.into(), tolerance);
         let now = Instant::now();
         match &mut self.recording {
-            Some(recording) if more && recording.records(region, settings, window_size) => {
-                recording.resume(now);
+            Some(Recorder::Readings(recording))
+                if more && recording.records(region, settings, window_size) =>
+            {
+                recording.life.resume(now);
             },
-            Some(recording) if more => {
+            Some(Recorder::Readings(recording)) if more => {
                 return Err(format!(
                     "Recording more needs the settings it was recorded with: the same region, \
                      the characters' color, a tolerance of {}, and a screenshot of the same \
@@ -85,7 +128,7 @@ impl<H: Host> Owner<H> {
                     recording.view(now).settings.tolerance
                 ));
             },
-            None if more => {
+            Some(Recorder::Looks(_)) | None if more => {
                 return Err(
                     "That recording is gone, so there is nothing to record more of. Start a new \
                      recording."
@@ -93,42 +136,43 @@ impl<H: Host> Owner<H> {
                 );
             },
             _ => {
-                self.recording_id = self.recording_id.wrapping_add(1);
-                self.recording = Some(Recording::new(
-                    self.recording_id,
+                let id = self.next_recording_id();
+                self.recording = Some(Recorder::Readings(Recording::new(
+                    id,
                     region,
                     settings,
                     window_size,
                     now,
-                ));
+                )));
             },
         }
         Ok(())
     }
 
-    /// Stops the recording, which keeps what it recorded.
+    /// Stops the recording, of readings or of looks, which keeps what it
+    /// recorded.
     pub(crate) fn stop_recording(&mut self) {
         if let Some(recording) = &mut self.recording {
-            recording.stop(Instant::now());
+            recording.life_mut().stop(Instant::now());
         }
     }
 
-    /// Forgets the recording.
+    /// Forgets the recording, of readings or of looks. The screenshots a
+    /// recording of looks kept stay.
     pub(crate) fn discard_recording(&mut self) {
         self.recording = None;
     }
 
-    /// The recording as the interface shows it, or `None` without one.
+    /// The recording of readings as the interface shows it, or `None`
+    /// without one.
     pub(crate) fn recording_state(&self) -> Option<RecordingView> {
-        self.recording
-            .as_ref()
+        self.readings()
             .map(|recording| recording.view(Instant::now()))
     }
 
     /// Recorded reading `index`'s pixels, at most `max_width` wide.
     pub(crate) fn recorded_pixels(&self, index: usize, max_width: u32) -> Option<Vec<u8>> {
-        self.recording
-            .as_ref()
+        self.readings()
             .and_then(|recording| recording.readings().get(index))
             .map(|kept| pixels::rgba(&kept.image, max_width))
     }

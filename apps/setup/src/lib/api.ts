@@ -13,10 +13,17 @@ import type {
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
+  ClickSent,
+  ClickSpec,
   ColorSpec,
+  EditPreview,
+  EditSpec,
   FixSpec,
   FoundClick,
   Live,
+  LookRecordingView,
+  MatchRule,
+  MatchView,
   OverlayModeDef,
   OverlayView,
   Reading,
@@ -30,6 +37,7 @@ import type {
   SelectionView,
   SettingsFile,
   SettingsView,
+  SizeDef,
   UpdateOffer,
   WhenDef,
   WindowDef,
@@ -71,9 +79,25 @@ export async function screenshot(index: number, maxWidth: number): Promise<Pictu
   return decodePicture(await invoke<ArrayBuffer>('screenshot', { index, maxWidth }));
 }
 
+/**
+ * Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. Rejects
+ * while a recording of looks records.
+ */
+export async function removeScreenshots(indexes: ReadonlyArray<number>): Promise<void> {
+  await invoke('remove_screenshots', { indexes });
+}
+
 /** What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected. */
 export async function select(screenshot: number, selection: SelectionSpec): Promise<SelectionView | null> {
   return invoke<SelectionView | null>('select', { screenshot, selection });
+}
+
+/**
+ * The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
+ * to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
+ */
+export async function matchPixels(screenshot: number, area: RegionSpec, rule: MatchRule): Promise<MatchView> {
+  return invoke<MatchView>('match_pixels', { screenshot, area, rule });
 }
 
 export async function setCheck(spec: CheckSpec): Promise<void> {
@@ -93,19 +117,33 @@ export async function startRecording(region: RegionSpec, ink: ColorSpec, toleran
   await invoke('start_recording', { region, ink, tolerance, screenshot, more });
 }
 
-/** Stops the recording, keeping its readings for review. */
+/** Stops the recording, of readings or of looks, keeping what it recorded. */
 export async function stopRecording(): Promise<void> {
   await invoke('stop_recording');
 }
 
-/** Forgets the recording and its readings. */
+/** Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay. */
 export async function discardRecording(): Promise<void> {
   await invoke('discard_recording');
 }
 
-/** The recording and its readings so far, or null without one. */
+/** The recording of readings and its readings so far, or null without one. */
 export async function recordingState(): Promise<RecordingView | null> {
   return invoke<RecordingView | null>('recording_state');
+}
+
+/**
+ * Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
+ * screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
+ * Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
+ */
+export async function startLookRecording(region: RegionSpec, tolerance: number, screenshot: number): Promise<void> {
+  await invoke('start_look_recording', { region, tolerance, screenshot });
+}
+
+/** The recording of looks and the screenshots it kept so far, or null without one. */
+export async function lookRecordingState(): Promise<LookRecordingView | null> {
+  return invoke<LookRecordingView | null>('look_recording_state');
 }
 
 /** A recorded reading at most `maxWidth` wide, or null for an unknown index. */
@@ -154,10 +192,16 @@ export async function readWindow(window: WindowDef): Promise<number | null> {
 
 /**
  * Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
- * when it is given. One that no saved automation names goes the next time automations are saved.
+ * when it is given. One that no saved automation names goes the next time automations are saved, or with
+ * {@link forgetUnsavedClickPictures}.
  */
 export async function addClickPicture(screenshot: number, region: RegionSpec, selection: SelectionSpec | null): Promise<ClickPictureView> {
   return invoke<ClickPictureView>('add_click_picture', { screenshot, region, selection });
+}
+
+/** Removes the click pictures no saved automation names, for when no automation is being made or changed. */
+export async function forgetUnsavedClickPictures(): Promise<void> {
+  await invoke('forget_unsaved_click_pictures');
 }
 
 /** The click picture `image`, at most `maxWidth` wide. */
@@ -168,6 +212,17 @@ export async function clickPicture(image: string, maxWidth: number): Promise<Pic
 /** Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere. */
 export async function findClick(at: ClickAtDef): Promise<FoundClick> {
   return invoke<FoundClick>('find_click', { at });
+}
+
+/**
+ * Sends `click` now, once: one real click in its application's window, placed and sent the way the
+ * background part does both. Call it only when the user asks for the click. It resolves with the window
+ * the click went to once it is sent, which does not say that the application acted on it, and rejects
+ * with why it was not sent. The window is the one the application's window rules find now, which may be
+ * another one than the picked window.
+ */
+export async function clickNow(click: ClickSpec): Promise<ClickSent> {
+  return invoke<ClickSent>('click_now', { click });
 }
 
 export async function listApps(): Promise<ReadonlyArray<AppSummary>> {
@@ -198,6 +253,31 @@ export async function removeApp(application: string): Promise<string | null> {
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
   return invoke<SavedValue>('save_value', { spec });
+}
+
+/**
+ * Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
+ * now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.
+ */
+export async function tryEdit(spec: EditSpec): Promise<EditPreview> {
+  return invoke<EditPreview>('try_edit', { spec });
+}
+
+/**
+ * Saves a saved value as `spec` edits it, under the ID it has. `dropFixes` is the window sizes of the fixes
+ * the user agreed to lose: an edit that leaves other fixes unusable than exactly those is refused, as is
+ * one that would break an automation.
+ */
+export async function editValue(spec: EditSpec, dropFixes: ReadonlyArray<SizeDef>): Promise<SavedValue> {
+  return invoke<SavedValue>('edit_value', { spec, dropFixes });
+}
+
+/**
+ * The size of the picked window on its newest frame, which an edit is tried at, or null before one
+ * arrives.
+ */
+export async function windowSize(): Promise<SizeDef | null> {
+  return invoke<SizeDef | null>('window_size');
 }
 
 /**

@@ -31,6 +31,8 @@ interface Props {
   readonly coverage: Coverage;
   /** The values that read with the saved reference. */
   readonly readers: readonly string[];
+  /** The matching pixels preview of the characters' color. */
+  readonly preview: ReactNode;
   /** The recording panel. */
   readonly record: ReactNode;
   readonly onName: (name: string) => void;
@@ -101,6 +103,7 @@ export function ReferenceEditor(props: Props) {
         value={tolerance}
         onChange={props.onTolerance}
       />
+      {props.preview}
       <ExpectedCharacters expected={expected} onExpected={props.onExpected} />
       <div className="field">
         <span className="name">

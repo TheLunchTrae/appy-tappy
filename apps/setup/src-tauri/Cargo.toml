@@ -16,6 +16,9 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
+# Sends the click the user asks for on the click target screen, the way the
+# runtime clicks.
+appytappy-actions = { version = "=0.1.0", path = "../../../crates/actions" }
 appytappy-config = { version = "=0.1.0", path = "../../../crates/config" }
 # Tells the runtime to read the automations again after each save.
 appytappy-platform = { version = "=0.1.0", path = "../../../crates/platform" }
@@ -60,7 +63,9 @@ tokio = { version = "=1.54.1", features = ["sync"] }
 # without ts-rs.
 appytappy-config = { version = "=0.1.0", path = "../../../crates/config", features = ["ts"] }
 # Generates the frames a recording sees, to check that it keeps every shape
-# they show once and counts each rightly.
+# they show once and counts each rightly, and labeled screenshots for the
+# round trip of a reference from the editor through its saved file to the
+# runtime's reader, a trust boundary.
 proptest = "=1.12.0"
 # A stand-in for the running app, so the host's tests need no window.
 tauri = { version = "=2.12.5", features = ["test"] }

@@ -15,8 +15,10 @@ appytappy-config = { version = "=0.1.0", path = "../config" }
 # in `win.rs` calls: media sessions, Core Audio, COM, `SendInput` for key
 # presses, `ShellExecuteExW` for opening a program, file, or link (its
 # settings structure names a registry key type), `PlaySoundW` for
-# sounds, and attaching to another thread's input to bring a window to the
-# front. `windows-future` is the part of the same bindings that `windows`
+# sounds, attaching to another thread's input to bring a window to the
+# front, and, for a click sent as messages, a screen place in a window's
+# own coordinates and the window's way of counting pixels.
+# `windows-future` is the part of the same bindings that `windows`
 # already uses for requests that finish later; naming it lets the adapter
 # wait for a media request with a timeout.
 [target.'cfg(windows)'.dependencies]
@@ -24,6 +26,7 @@ windows = { version = "=0.62.2", features = [
   "Foundation_Collections",
   "Media_Control",
   "Win32_Foundation",
+  "Win32_Graphics_Gdi",
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",
   "Win32_System_Com",
@@ -31,6 +34,7 @@ windows = { version = "=0.62.2", features = [
   "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_System_Variant",
+  "Win32_UI_HiDpi",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
@@ -38,9 +42,15 @@ windows = { version = "=0.62.2", features = [
 windows-future = "=0.3.2"
 
 # The manual media player test names audio sessions from the same process
-# list the runtime hands the controls.
+# list the runtime hands the controls. The adapter's click tests compare the
+# button flags a message carries with the ones Windows names, and register
+# window classes of their own, which belong to the test program's module.
 [target.'cfg(windows)'.dev-dependencies]
 appytappy-sources = { version = "=0.1.0", path = "../sources" }
+windows = { version = "=0.62.2", features = [
+  "Win32_System_LibraryLoader",
+  "Win32_System_SystemServices",
+] }
 
 [lints]
 workspace = true

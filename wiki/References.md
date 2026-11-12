@@ -27,10 +27,18 @@ select **Capture this window**, as the first step of
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
    click the characters on a screenshot. **Tolerance** says how far a pixel's
    color may be from it and still count: drag the slider or type a number.
+   Turn on **Show matching pixels** to tint every pixel on the screenshot
+   that counts as part of the characters, and watch the tint as you drag
+   **Tolerance**. Raise it until the characters are tinted whole, and lower it
+   if the background around them is tinted too. Under the switch, AppyTappy
+   counts the tinted pixels in the region and on the rest of the screenshot.
+   The tint is only a guide, as
+   [Show matching pixels](Values.md#show-matching-pixels) describes.
 3. **Choose the characters it needs.** Under **Characters it needs**, turn on
    what the numbers can show. A new reference starts with **Digits** on.
    [Choose what it needs](#choose-what-it-needs) describes the choices.
-4. **Teach it the characters.** Draw a region around text on a screenshot,
+4. **Teach it the characters.**
+   [Draw a region](Values.md#draw-the-region) around text on a screenshot,
    then type what it shows, such as `87%`. AppyTappy learns the shape of each
    character from what you type. Label screenshots until
    **Characters still missing** says it knows every character it needs, or
@@ -38,6 +46,15 @@ select **Capture this window**, as the first step of
 5. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
    teach them later.
+
+The box at the bottom of the panel shows what the reference reads on the
+live window, a few times a second. When it can't read the window, it says why
+instead, in the words
+[A number reads in setup but the automation does nothing](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
+explains. That box is the reference's own reading of the region where you
+drew it. The automation reads with the same reference; at a window size the
+value wasn't drawn at, it reads where the region
+[scales to](Values.md#window-size).
 
 To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;
@@ -89,11 +106,38 @@ A reference saved without a list shows every character it knows under
 **Characters it knows**, and nothing as missing. **Edit** it and turn on what
 it needs to see what is left to teach.
 
+## What a reference can't learn
+
+A label has one character for each character the region shows, and AppyTappy
+says so when the two differ:
+
+- **The region shows fewer characters than you typed.** Characters that touch
+  count as one, and a reference can't learn them.
+- **The region shows more characters than you typed.** A character counts once
+  for each of its marks that has blank space on both sides. Some percent
+  signs are three such marks: a ring, a slash, and a ring. Type a character
+  for each mark, such as `87o/o`; the number still reads as 87. Anything else
+  in the characters' color counts too, so draw the region around the number
+  alone.
+
+A reference knows a character as it looked beside the others in the region.
+A sign that reaches above or below the digits, such as the `,` in `1,234`,
+changes how every character beside it looks to AppyTappy. Label readings
+that show the sign until they show every digit, and readings without it
+too.
+
+Small text takes more labels. Where the characters are less than about 16
+pixels tall, label several readings of each character, or
+[record](#record-readings) them.
+
 ## Record readings
 
 Typing what a counter shows on screenshot after screenshot is slow when it
 shows many values. A reference can record its region instead, while you use
-the application, and collect the characters it shows.
+the application, and collect the characters it shows. While you make a
+**Number** value, **Record readings** under **How to read it** opens this
+recording on the value's region. The other checks
+[record screenshots](Values.md#record-screenshots) instead.
 
 A recording keeps a reading when it shows a character shape that no kept
 reading has. A counter that runs from `0%` to `100%` shows 101 readings but
@@ -186,7 +230,9 @@ an edge that blends with the background differently, or a digit beside a `,`
 that reaches below the line, is another shape of the same character. Type the
 same character for each. A sign that the application draws as separate marks
 side by side, with a gap between them, counts as one shape for each mark, and
-a reference cannot learn it as one character.
+a reference cannot learn it as one character:
+[What a reference can't learn](#what-a-reference-cant-learn) says what to
+type for it.
 
 Keep the window the size it was when you took the screenshot you drew the
 region on: at another size, recording pauses and says to resize the window.
@@ -216,6 +262,14 @@ takes hours of a timer that changes many times a second.
 
 If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.
+
+The text in review comes from a separate text reader that only fills in the
+labels for you to check. It doesn't show what the reference reads: the box
+at the bottom of the panel does, on the live window.
+
+To remove a screenshot, select it, then select **Remove screenshot** with its
+number. One the region is drawn on, or that you labeled, stays: draw the
+region on another screenshot or clear its label first.
 
 ## Delete a reference
 

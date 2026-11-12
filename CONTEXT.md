@@ -21,14 +21,23 @@ parts fit.
 - **Check.** How a screen region binding turns a region's pixels into a value:
   a number read with a reference, a bar's fill, a color match, or a match
   with a saved image.
+- **Click delivery.** How a click action reaches its window: with the
+  cursor, which comes to the window and presses, or as mouse messages sent
+  to the window, which move neither the cursor nor the focus.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
 - **Expected characters.** The characters the user says a reference needs to
   know. They guide teaching in the setup app, which shows the ones still
   missing; nothing learns or reads with them. The UI calls them
   **Characters it needs**.
+- **Edit.** A saved value changed as it was first drawn, under the ID it
+  has, so the automations that watch it stay linked.
 - **Fix.** A screen region value drawn again at one more window size, which
   it reads there exactly instead of scaled from its first drawing.
+- **Look.** What the whole of a value's region shows at one moment. Two looks
+  are the same when the region's pixels differ by no more than a tolerance on
+  average, the way a state check compares a region with a state's whole
+  picture. A look takes no account of what a state selects in the region.
 - **Pin.** The side of the window, a corner, an edge's middle, or the center,
   that a region keeps its scaled distance from as the window changes size.
   The UI calls it **Stays at**.
@@ -44,10 +53,13 @@ parts fit.
   holding.
 - **Release.** End a fired rule's effect: it re-armed, or the session ended. A
   rule that restores undoes its paired actions then.
-- **Recording.** A setup-app capture of one number region over time that
-  keeps a reading for each different character shape it shows, for the user
-  to review and label. Kept readings teach a reference like labeled
-  screenshots.
+- **Recording.** A setup-app capture of one region over time, while the user
+  uses the application. A recording of readings keeps a reading for each
+  different character shape a number region shows, for the user to review
+  and label; kept readings teach a reference like labeled screenshots. A
+  recording of looks keeps a screenshot each time a value's region shows a
+  look that no screenshot shows yet. A capture records one of the two at a
+  time.
 - **Reference.** The characters of one font in one application, learned from
   labeled pictures of its text. A number check reads with one, at any size.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,

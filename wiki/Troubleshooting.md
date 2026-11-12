@@ -40,6 +40,66 @@ Check these in order:
    becomes true. It runs again only after the condition has stopped being
    true, and after its wait.
 
+## A number reads in setup but the automation does nothing
+
+What you see while you make a reference isn't all the reference's reading.
+**Characters it knows** lists the characters you labeled, and the text in a
+recording's review comes from a separate text reader that fills in labels.
+Only the box that shows a reading **on the live window** is what the
+reference reads, and the automation reads the same way.
+
+Check these in order:
+
+1. **See what AppyTappy reads while the application runs.** Turn on the
+   application's [overlay](Applications.md#overlay), or look at the Values
+   page. Each value shows its reading, or why it has none. The
+   [log](#appytappys-log) says the same in a line such as
+   `Example App: Progress cannot be read: …`, once for each reason until the
+   value reads again.
+2. **Find the reason below.** They are in the order AppyTappy reads a number,
+   so the first one that applies is the one to fix.
+3. **If the value reads right,** the automation is what to check:
+   [An automation doesn't run](#an-automation-doesnt-run). A condition that a
+   number **is** a target is true only while the value reads exactly that
+   number, and a percentage with decimals can pass 50 between two reads. Use
+   **is at least** or **is at most** instead.
+
+The reasons a number has no reading:
+
+- **It is not read at the window's size now.** The window isn't the size it
+  was when you drew the value, and windowed and fullscreen are different
+  sizes. [Window size](Values.md#window-size) says how to resize the window
+  or fix the value at this size.
+- **No pixel in the region has the characters' color.** The region isn't on
+  the number now, or the number is another color than the reference's. When
+  the log line says **where its region scales to**, the window isn't at a
+  size the value was drawn at, and the scaled region can lie beside the
+  number, most often between windowed and fullscreen:
+  [fix the value at this size](Values.md#fix-a-value-at-one-size). Otherwise
+  [edit the reference](References.md#make-a-reference): pick the color on the
+  middle of a character, or raise **Tolerance**.
+- **The region holds more than 24 characters.** Something else in the
+  characters' color is in the region. Draw the region around the number
+  alone, or lower **Tolerance**.
+- **A character has a shape the reference has not learned.** The message
+  shows what it read, with a `?` for each character it couldn't, such as
+  `8 7 ?`, and the character it learned that the first `?` looks most like.
+  If that is the character the application shows there, the application drew
+  it a little differently this time: label a screenshot that shows this
+  reading, or [record](References.md#record-readings) the region until it
+  reads. If it is another character, the reference hasn't learned the one
+  shown: label a reading with it.
+  [What a reference can't learn](References.md#what-a-reference-cant-learn)
+  lists the characters no label teaches.
+- **The characters hold no number.** The message shows what it read, such as
+  `%`. The region shows no digit now, or the region cuts the digits off.
+
+If the reason isn't one of these, or the number reads on the live window in
+setup at the same window size and not in the overlay, that is a fault in
+AppyTappy. Report it with the log line, the application's folder in
+`%APPDATA%\AppyTappy\apps`, which holds the reference's pictures, and a
+screenshot of the window at the size you play at.
+
 ## A number reads wrong
 
 [Edit its reference](References.md#make-a-reference) and label more screenshots,
@@ -63,6 +123,20 @@ says what to do.
 - AppyTappy presses keys only while the watched application's window is in
   front. The log says when it skipped a press for that reason.
 - Windows drops keys sent to a program that runs as administrator.
+
+## A click does nothing
+
+- Both the watched application and the one clicked in must have anti-cheat
+  set to **None** on the Applications page. See
+  [Anti-cheat](Applications.md#anti-cheat).
+- The log says why AppyTappy skipped a click, such as a window that is
+  minimized, a picture that was not found, or another window in front.
+- With **Send to the window**, the log says each time that the click was sent.
+  If the application still did nothing, it ignores clicks sent this way:
+  change the click to **Move the cursor**. See
+  [How to click](Automations.md#how-to-click).
+- Windows does not let AppyTappy click in a program that runs as
+  administrator.
 
 ## The overlay doesn't show over a game
 

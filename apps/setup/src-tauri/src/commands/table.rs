@@ -29,8 +29,14 @@ macro_rules! with_commands {
             commands::take_screenshot() -> usize;
             /// A screenshot at most `maxWidth` wide, or null for an unknown index.
             commands::screenshot(index: usize, max_width: u32) -> Pixels;
+            /// Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. Rejects
+            /// while a recording of looks records.
+            commands::remove_screenshots(indexes: Vec<usize>) -> ();
             /// What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected.
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;
+            /// The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
+            /// to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
+            commands::match_pixels(screenshot: usize, area: RegionSpec, rule: MatchRule) -> MatchView;
             commands::set_check(spec: CheckSpec) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
@@ -43,12 +49,18 @@ macro_rules! with_commands {
                 screenshot: usize,
                 more: bool
             ) -> ();
-            /// Stops the recording, keeping its readings for review.
+            /// Stops the recording, of readings or of looks, keeping what it recorded.
             commands::stop_recording() -> ();
-            /// Forgets the recording and its readings.
+            /// Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay.
             commands::discard_recording() -> ();
-            /// The recording and its readings so far, or null without one.
+            /// The recording of readings and its readings so far, or null without one.
             commands::recording_state() -> Option<RecordingView>;
+            /// Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
+            /// screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
+            /// Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
+            commands::start_look_recording(region: RegionSpec, tolerance: u8, screenshot: usize) -> ();
+            /// The recording of looks and the screenshots it kept so far, or null without one.
+            commands::look_recording_state() -> Option<LookRecordingView>;
             /// A recorded reading at most `maxWidth` wide, or null for an unknown index.
             commands::recorded_reading(index: usize, max_width: u32) -> Pixels;
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
@@ -67,16 +79,25 @@ macro_rules! with_commands {
             /// The window a new session would read for `window`, or null while none fits.
             commands::read_window(window: WindowDef) -> OptionalU64AsNumber;
             /// Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
-            /// when it is given. One that no saved automation names goes the next time automations are saved.
+            /// when it is given. One that no saved automation names goes the next time automations are saved, or with
+            /// {@link forgetUnsavedClickPictures}.
             commands::add_click_picture(
                 screenshot: usize,
                 region: RegionSpec,
                 selection: Option<SelectionSpec>
             ) -> ClickPictureView;
+            /// Removes the click pictures no saved automation names, for when no automation is being made or changed.
+            commands::forget_unsaved_click_pictures() -> ();
             /// The click picture `image`, at most `maxWidth` wide.
             commands::click_picture(image: String, max_width: u32) -> Pixels;
             /// Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere.
             commands::find_click(at: ClickAtDef) -> FoundClick;
+            /// Sends `click` now, once: one real click in its application's window, placed and sent the way the
+            /// background part does both. Call it only when the user asks for the click. It resolves with the window
+            /// the click went to once it is sent, which does not say that the application acted on it, and rejects
+            /// with why it was not sent. The window is the one the application's window rules find now, which may be
+            /// another one than the picked window.
+            commands::click_now(click: ClickSpec) -> ClickSent;
             commands::list_apps() -> Vec<AppSummary>;
             /// The saved applications and the open windows, with the windows each application's match takes, from
             /// one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
@@ -88,6 +109,16 @@ macro_rules! with_commands {
             /// null.
             commands::remove_app(application: String) -> Option<String>;
             commands::save_value(spec: SaveSpec) -> SavedValue;
+            /// Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
+            /// now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.
+            commands::try_edit(spec: EditSpec) -> EditPreview;
+            /// Saves a saved value as `spec` edits it, under the ID it has. `dropFixes` is the window sizes of the fixes
+            /// the user agreed to lose: an edit that leaves other fixes unusable than exactly those is refused, as is
+            /// one that would break an automation.
+            commands::edit_value(spec: EditSpec, drop_fixes: Vec<SizeDef>) -> SavedValue;
+            /// The size of the picked window on its newest frame, which an edit is tried at, or null before one
+            /// arrives.
+            commands::window_size() -> Option<SizeDef>;
             /// Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would
             /// not fit.
             commands::place_value(
