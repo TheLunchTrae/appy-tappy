@@ -12,6 +12,7 @@ use appytappy_sources::system::{ProcessEntry, WindowEntry};
 use crate::check_spec::{self, CheckSpec, RegionCheck, RegionSpec};
 use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
+use crate::recording::Recorder;
 use crate::selection::{self, SelectionSpec, SelectionView};
 use crate::window_list::{self, WindowFit, WindowList};
 
@@ -135,6 +136,8 @@ impl<H: Host> Owner<H> {
     /// nothing until frames come again, with the failure as its problem.
     pub(super) fn capture_failed(&mut self, failure: CaptureFailure) {
         if let Some(recording) = &mut self.recording {
+            let next = recording.after_failure();
+            let recording = recording.life_mut();
             let error = check_spec::sentence(&failure.error);
             if failure.ended {
                 recording.end(
@@ -142,10 +145,7 @@ impl<H: Host> Owner<H> {
                     format!("Recording stopped: {error} Change window to pick it again."),
                 );
             } else {
-                recording.fail(
-                    Instant::now(),
-                    format!("Recording stopped: {error} Record more once the window shows again."),
-                );
+                recording.fail(Instant::now(), format!("Recording stopped: {error} {next}"));
             }
         }
         self.failure = Some(failure);
@@ -165,8 +165,22 @@ impl<H: Host> Owner<H> {
             .latest
             .clone()
             .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
-        self.screenshots.push(image);
-        Ok(self.screenshots.len().saturating_sub(1))
+        Ok(self.screenshots.push(image))
+    }
+
+    /// Releases each of the screenshots `indexes` names. The others keep
+    /// their indexes. Refused while a recording of looks records: it knows
+    /// each look it kept, so it would not keep a removed one again.
+    pub(crate) fn remove_screenshots(&mut self, indexes: &[usize]) -> Result<(), String> {
+        if let Some(Recorder::Looks(recording)) = &self.recording
+            && recording.life.is_recording()
+        {
+            return Err("Stop recording to remove a screenshot.".to_owned());
+        }
+        for &index in indexes {
+            self.screenshots.remove(index);
+        }
+        Ok(())
     }
 
     /// What the check reads on the newest frame: `None` until a check is

@@ -1,17 +1,24 @@
-//! Recording a region: each reading it shows while the user uses the
-//! application, kept once, for the user to review and label.
+//! Recording a region while the user uses the application. A capture
+//! records one thing at a time, a [`Recorder`]: the readings a number's
+//! region shows, each kept once for the user to review and label
+//! ([`Recording`]), or the looks a value's region shows, each kept as a
+//! screenshot ([`looks`]). Both share when they record and why they stop
+//! ([`Lifecycle`]).
 //!
-//! The preview capture's frames arrive about 30 times a second. Each one is
-//! cropped to the region and its characters sampled the way the number check
-//! samples them, each scaled onto a small grid of cells set where at least
-//! half the pixels are ink. A crop whose characters have the same shapes as
-//! a reading already kept is another sighting of that reading: it would teach
-//! the check nothing new. Any other crop with ink is a new reading, and only
-//! new readings are read as text, so the text reader runs a few times a
-//! recording rather than on every frame. A crop with no ink, such as while a
-//! menu covers the region, is skipped.
+//! The preview capture's frames arrive about 30 times a second. For
+//! readings, each one is cropped to the region and its characters sampled
+//! the way the number check samples them, each scaled onto a small grid of
+//! cells set where at least half the pixels are ink. A crop whose
+//! characters have the same shapes as a reading already kept is another
+//! sighting of that reading: it would teach the check nothing new. Any other
+//! crop with ink is a new reading, and only new readings are read as text,
+//! so the text reader runs a few times a recording rather than on every
+//! frame. A crop with no ink, such as while a menu covers the region, is
+//! skipped.
 
 mod ink;
+mod lifecycle;
+pub(crate) mod looks;
 pub(crate) mod ocr;
 
 use std::time::{Duration, Instant};
@@ -22,6 +29,8 @@ use appytappy_sources::system::Rgb;
 use serde::Serialize;
 
 use self::ink::{Ink, Line};
+pub(crate) use self::lifecycle::Lifecycle;
+use self::looks::LookRecording;
 
 /// The most readings one recording keeps. A counter shows a few hundred
 /// values at most; past this the region is likely not text in the
@@ -66,7 +75,52 @@ pub(crate) struct NewReading {
     pub(crate) line: Line,
 }
 
-/// A recording of one region.
+/// What a capture records, one thing at a time, so a recording of readings
+/// and one of looks never run together.
+#[derive(Debug)]
+pub(crate) enum Recorder {
+    /// The readings a number's region shows, for a reference to learn.
+    Readings(Recording),
+    /// The looks a value's region shows, each kept as a screenshot.
+    Looks(LookRecording),
+}
+
+impl Recorder {
+    /// What the user does to record again once the window shows, after a
+    /// capture failure stopped the recording.
+    pub(crate) const fn after_failure(&self) -> &'static str {
+        match self {
+            Self::Readings(_) => "Record more once the window shows again.",
+            Self::Looks(_) => "Start recording again once the window shows.",
+        }
+    }
+
+    /// When it records and why it stops, which both kinds share.
+    pub(crate) const fn life_mut(&mut self) -> &mut Lifecycle {
+        match self {
+            Self::Readings(recording) => &mut recording.life,
+            Self::Looks(recording) => &mut recording.life,
+        }
+    }
+}
+
+/// The pixels of `region` on `frame`, a whole window's frame, or why the
+/// frame cannot be recorded: the window is not `window_size`, the size it
+/// had when the region was drawn, so the frame shows other pixels there.
+fn cut(frame: &Image, region: Region, window_size: Size) -> Result<Image, String> {
+    let size = frame.size();
+    frame
+        .crop(region)
+        .filter(|_| size == window_size)
+        .ok_or_else(|| {
+            format!(
+                "The region was drawn when the window was {window_size}, and it is {size} now. \
+                 Resize the window to record."
+            )
+        })
+}
+
+/// A recording of the readings one region shows.
 #[derive(Debug)]
 pub(crate) struct Recording {
     /// Its number in the session, so the UI and the text reader tell it
@@ -82,14 +136,10 @@ pub(crate) struct Recording {
     /// The window's size when the region was drawn; a frame of another size
     /// shows other pixels there.
     window_size: Size,
-    /// When it started, moved later by each pause so the time it shows
-    /// counts only recording.
-    started: Instant,
-    /// How long it recorded, once it stopped.
-    stopped: Option<Duration>,
+    /// When it records, and why the latest frame could not be recorded or
+    /// why it stopped by itself.
+    pub(crate) life: Lifecycle,
     readings: Vec<Kept>,
-    /// Why the latest frame could not be recorded, until one can be.
-    problem: Option<String>,
 }
 
 impl Recording {
@@ -109,46 +159,41 @@ impl Recording {
             tolerance,
             reader: DigitReader::new(ink, tolerance),
             window_size,
-            started,
-            stopped: None,
+            life: Lifecycle::new(started),
             readings: Vec::new(),
-            problem: None,
         }
     }
 
     /// Records `frame`, a whole window's frame that arrived at `at`. Answers
     /// the new reading to read as text, if it showed one.
     pub(crate) fn offer(&mut self, frame: &Image, at: Instant) -> Option<NewReading> {
-        if self.stopped.is_some() {
+        if !self.life.is_recording() {
             return None;
         }
-        let size = frame.size();
-        let crop = frame.crop(self.region).filter(|_| size == self.window_size);
-        let Some(crop) = crop else {
-            self.problem = Some(format!(
-                "The region was drawn when the window was {}, and it is {size} now. Resize the \
-                 window to record.",
-                self.window_size
-            ));
-            return None;
+        let crop = match cut(frame, self.region, self.window_size) {
+            Ok(crop) => crop,
+            Err(problem) => {
+                self.life.set_problem(Some(problem));
+                return None;
+            },
         };
         let shapes = match self.reader.shapes(&crop) {
             Ok(shapes) => shapes,
             // A crop with none of the characters' color, such as under a
             // menu, is a moment to skip, not a problem.
             Err(ReadError::NoInk) => {
-                self.problem = None;
+                self.life.set_problem(None);
                 return None;
             },
             Err(error) => {
-                self.problem = Some(format!(
+                self.life.set_problem(Some(format!(
                     "Nothing is recorded while {error}. Draw the region around the value alone, \
                      or lower the tolerance."
-                ));
+                )));
                 return None;
             },
         };
-        self.problem = None;
+        self.life.set_problem(None);
         if let Some(known) = self
             .readings
             .iter_mut()
@@ -165,7 +210,7 @@ impl Recording {
         self.readings.push(Kept {
             image: crop,
             shapes,
-            first: at.saturating_duration_since(self.started),
+            first: self.life.elapsed(at),
             seen: 1,
             text: Text::Pending,
         });
@@ -177,30 +222,6 @@ impl Recording {
         if let Some(kept) = self.readings.get_mut(index) {
             kept.text = text;
         }
-    }
-
-    /// Stops recording at `at`; later frames are ignored.
-    pub(crate) fn stop(&mut self, at: Instant) {
-        if self.stopped.is_none() {
-            self.stopped = Some(at.saturating_duration_since(self.started));
-        }
-    }
-
-    /// Stops recording at `at` because frames stopped coming, with
-    /// `problem` saying why. A stopped recording keeps its problem.
-    pub(crate) fn fail(&mut self, at: Instant, problem: String) {
-        if self.stopped.is_none() {
-            self.stop(at);
-            self.problem = Some(problem);
-        }
-    }
-
-    /// Stops recording at `at` for good, as when the window closed, with
-    /// `problem` saying why even if it had stopped already, since it can
-    /// never go on.
-    pub(crate) fn end(&mut self, at: Instant, problem: String) {
-        self.stop(at);
-        self.problem = Some(problem);
     }
 
     /// Whether it records `region` of a window of `window_size`, with ink
@@ -218,16 +239,6 @@ impl Recording {
             && self.window_size == window_size
     }
 
-    /// Goes on recording at `at` after a stop, keeping its readings. The
-    /// time it shows goes on from where it stopped.
-    pub(crate) fn resume(&mut self, at: Instant) {
-        // Why it last stopped no longer holds; the next frame tells.
-        self.problem = None;
-        if let Some(recorded) = self.stopped.take() {
-            self.started = at.checked_sub(recorded).unwrap_or(at);
-        }
-    }
-
     /// The window's size when the region was drawn.
     pub(crate) const fn window_size(&self) -> Size {
         self.window_size
@@ -242,13 +253,10 @@ impl Recording {
     pub(crate) fn view(&self, now: Instant) -> RecordingView {
         RecordingView {
             id: self.id,
-            recording: self.stopped.is_none(),
-            elapsed_ms: millis(
-                self.stopped
-                    .unwrap_or_else(|| now.saturating_duration_since(self.started)),
-            ),
+            recording: self.life.is_recording(),
+            elapsed_ms: millis(self.life.elapsed(now)),
             full: self.readings.len() >= MAX_READINGS,
-            problem: self.problem.clone(),
+            problem: self.life.problem().map(str::to_owned),
             settings: Settings {
                 region: RegionView {
                     x: self.region.x(),
@@ -572,14 +580,12 @@ mod tests {
         let shown = frame(8, 4, |x, _| x < 2);
         recording.offer(&shown, start + second).expect("new");
         assert_eq!(recording.view(start + 3 * second).elapsed_ms, 3000);
-        recording.stop(start + 4 * second);
-        recording.stop(start + 5 * second);
+        recording.life.stop(start + 4 * second);
         let stopped = recording.view(start + 9 * second);
         assert!(!stopped.recording);
         assert_eq!(stopped.elapsed_ms, 4000);
         assert_eq!(recording.offer(&frame(8, 4, |x, _| x < 3), start), None);
-        recording.resume(start + 10 * second);
-        recording.resume(start + 11 * second);
+        recording.life.resume(start + 10 * second);
         let going = recording.view(start + 12 * second);
         assert!(going.recording);
         assert_eq!(going.elapsed_ms, 6000);

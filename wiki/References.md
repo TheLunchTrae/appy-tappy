@@ -81,7 +81,10 @@ pixels tall, label several readings of each character, or
 
 Typing what a counter shows on screenshot after screenshot is slow when it
 shows many values. A reference can record its region instead, while you use
-the application, and keep each different reading it shows.
+the application, and keep each different reading it shows. While you make a
+**Number** value, **Record readings** under **How to read it** opens this
+recording on the value's region. The other checks
+[record screenshots](Values.md#record-screenshots) instead.
 
 1. **Start recording.** Draw the region and pick the **Characters' color**
    first. Then select **Start recording** under **Record readings**. The
@@ -124,6 +127,10 @@ you to type.
 The text in review comes from a separate text reader that only fills in the
 labels for you to check. It doesn't show what the reference reads: the box
 at the bottom of the panel does, on the live window.
+
+To remove a screenshot, select it, then select **Remove screenshot** with its
+number. One the region is drawn on, or that you labeled, stays: draw the
+region on another screenshot or clear its label first.
 
 ## Delete a reference
 
