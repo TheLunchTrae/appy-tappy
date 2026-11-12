@@ -135,9 +135,34 @@ when another window is picked, or when the flow is left, such as on **Change
 window**; a closed window keeps them for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
 
+### Finding more like it
+
+[Find more like it](References.md#find-more-like-it) searches the screenshot
+the user labels for more text like the region shows (`recording/find.rs`). It
+marks each pixel as ink with the reference's color and tolerance, as
+`DigitReader` does, and measures the sample's height as the band of inked rows
+with the most ink, as the reader segments it. It joins touching ink, corners
+included, into blobs, leaving out blobs over twice the sample's height, such as
+a panel in the same color. Blobs whose rows meet and that start no further than
+the sample's height past each other join into a run of text. A run within 15%
+of the sample's height (`SIZE_PERCENT`) that does not touch the region is a
+find; a shorter or taller run, at least half the sample's height, counts as
+another size, and smaller specks are ignored. Finds go top to bottom, then
+left to right; the first 12 (`MAX_FOUND`) are kept with a margin of a quarter
+of the sample's height, and the rest are counted.
+
+The owner keeps the search (`owner/found.rs`) with each find's pixels and
+sends each to the text reader. A new search replaces it, and dismissing,
+adding, picking another window, or leaving the flow forgets it. The UI lists
+the finds, polls while text is still being read, and asks which kept finds the
+reference cannot learn (`found_problems`), learning them after the draft's own
+labels the way review learns recorded readings. Added finds become labels with
+a `region` of their own on their screenshot, which the reference cuts instead
+of the spec's region, so they save as samples like any labeled screenshot.
+
 ### The text reader
 
-The text reader guesses each new reading's text so review only needs corrections
+The text reader guesses each new reading's text, and each find's, so review only needs corrections
 (`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs), a
 pure-Rust neural text reader, so it reads the same on every system without the
 operating system's OCR. Only its recognition model loads: the region holds one
@@ -145,8 +170,9 @@ line, so there is no text to find first. It runs on a thread of its own, because
 a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
 as black text on white with a margin, whatever the application's colors
-(`recording/ink.rs`). Text for a recording the user discarded or replaced is
-dropped by the recording's number. Only the setup app uses it; the runtime reads
+(`recording/ink.rs`). Text for a recording or a search the user discarded or
+replaced is dropped by its number, and a queued job of an older recording or
+search is skipped without reading it. Only the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
 regions](Screen-regions.md#checks)).
 

@@ -804,10 +804,42 @@ stateDiagram-v2
 ### Text reader
 
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
-loads its model on the first reading it gets, then reads each reading and sends
-the text back with the recording's ID and the reading's index. The owner drops
-text for a recording that is gone. If the thread has stopped, the owner marks
-the reading as failed and asks the user to type it.
+loads its model on the first line it gets, then reads each recorded reading and
+each find of a search, and sends the text back with the recording's or the
+search's ID and the line's index (`ocr::Source`). It skips a queued job of a
+recording or search older than the newest of its kind. The owner drops text
+for a recording or search that is gone. If the thread has stopped, the owner
+marks the reading or find as failed and asks the user to type it.
+
+### Found text
+
+A search for text like a reference's first sample
+(`apps/setup/src-tauri/src/owner/found.rs`) is `None` or a `Found` with its ID,
+the screenshot it searched, and each find's region, pixels, and text.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Found: Find more like it finds ink in the region
+    Found --> Found: Find more like it again replaces it, with a new ID
+    Found --> None: Find more like it fails, such as for a region with no ink
+    Found --> None: Add or Not these
+    Found --> None: a window is picked, the editor closes, or the flow closes
+```
+
+- Each find starts `Pending` and turns `Read` or `Failed` when the text
+  reader answers for the search's ID. The UI polls only while one is pending.
+- The UI keeps each find's Keep box and typed text (`useFound`) until a new
+  search or a dismissal. A kept find is flagged without asking the owner when
+  it has no text, or a letter while the reference has learned none
+  (`foundRows`), and otherwise when the reference cannot learn it after the
+  draft's own labels (`found_problems`). **Add** waits until no kept find is
+  pending or flagged and the owner has answered for the current text.
+- **Add** appends the kept finds to the draft's `found` labels, each with its
+  own region, and forgets the search. A later search of the same screenshot
+  leaves out finds whose region was added already. The draft's found labels
+  are dropped with its other labels when the reference editor opens or closes
+  (`toReference`, `fromReference`).
 
 ### Overlays
 
