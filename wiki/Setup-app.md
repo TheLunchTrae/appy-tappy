@@ -337,6 +337,40 @@ on **Change window**, or when the flow is left; a closed window keeps them
 for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
 
+### Finding more like it
+
+[Find more like it](References.md#find-more-like-it) searches the screenshot
+the user labels for more text like the region shows (`recording/find.rs`). It
+marks each pixel as ink with the reference's color and tolerance, as
+`DigitReader` does, and takes the band of inked rows with the most ink in the
+region, as the reader segments it. It joins touching ink, corners included,
+into blobs, leaving out blobs over twice that band's height, such as a panel in
+the same color. The sample's height is its tallest blob centered in the region,
+and a run's is its tallest blob, so a comma or a mark below the characters
+measures neither. Blobs whose rows meet and that start no further than the
+sample's height past each other join into a run of text; runs are looked up by
+bands of rows and dropped from the lookup once the next blobs start too far
+right of them, so a screenshot full of ink takes well under a second. A run
+within 15% of the sample's height (`SIZE_PERCENT`) that touches neither the
+region nor a find added already is a find; a shorter or taller run, at least
+half the sample's height, counts as another size, and smaller specks are
+ignored. Finds go top to bottom, then left to right; the first 12
+(`MAX_FOUND`) are kept with a margin of a quarter
+of the sample's height, and the rest are counted.
+
+The owner keeps the search (`owner/found.rs`) with each find's pixels and
+sends each to the text reader. A new search replaces it, and dismissing,
+adding, **Change window**, picking another window, or leaving the flow
+forgets it; reads already
+queued for a forgotten search still run, and their text is dropped. Pictures
+of finds are asked for by the search's number, so an answer for a replaced
+search is empty. The UI lists
+the finds, polls while text is still being read, and asks which kept finds the
+reference cannot learn (`found_problems`), learning them after the draft's own
+labels the way review learns recorded readings. Added finds become labels with
+a `region` of their own on their screenshot, which the reference cuts instead
+of the spec's region, so they save as samples like any labeled screenshot.
+
 ### Recording looks
 
 [Recording screenshots](Values.md#record-screenshots) is for the checks that
@@ -399,7 +433,7 @@ a frame is compared; the whole frame is copied only when it is kept.
 
 ### The text reader
 
-The text reader guesses each new reading's text so review only needs corrections
+The text reader guesses each new reading's text, and each find's, so review only needs corrections
 (`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs), a
 pure-Rust neural text reader, so it reads the same on every system without the
 operating system's OCR. Only its recognition model loads: the region holds one
@@ -407,8 +441,9 @@ line, so there is no text to find first. It runs on a thread of its own, because
 a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
 as black text on white with a margin, whatever the application's colors
-(`recording/ink.rs`). Text for a recording the user discarded or replaced is
-dropped by the recording's number. Only the setup app uses it; the runtime reads
+(`recording/ink.rs`). Text for a recording or a search the user discarded or
+replaced is dropped by its number, and a queued job of a recording or search
+that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
 regions](Screen-regions.md#checks)).
 
@@ -459,7 +494,7 @@ the value is read again.
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures it needs: each reference's labeled screenshots, cropped to
-the region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
+the region or to an added find's own region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
 and each state check's pictures, named after its value and the state's
 place, such as `status-1.png`, and transparent where the state's selection
 leaves the background out
@@ -639,7 +674,8 @@ actions until the user sets it
 ## Pictures kept
 
 AppyTappy keeps a picture only where reading or clicking needs one, cut to
-the region the user drew, and never the rest of the window. A window's whole
+the region the user drew or to the box around text it found that the user
+added, and never the rest of the window. A window's whole
 frame exists only in memory while its capture is open. A file holds a region
 alone, which is as much of the window as the user drew. The user guide says
 so in [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
@@ -662,6 +698,8 @@ ends the process.
 | Each look a recording knows        | Owner              | The region, once for each screenshot it knew or kept      |
 | The check being tried              | Owner              | The region, once for each state                           |
 | A new reading, for the text reader | Text reader thread | The region's ink, until it is read                        |
+| Each find of a search              | Owner and page     | Its box; the page's is `CROP_WIDTH` wide at most          |
+| A find, for the text reader        | Text reader thread | The find's ink, until it is read                          |
 
 A capture holds as many screenshots as the user takes, and at most
 `MAX_LOOKS` more for each [recording of looks](#recording-looks). A screenshot
@@ -680,7 +718,7 @@ keeps its value's region of the newest frame.
 
 | File                                 | What it holds                                                                             |
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot, or of a kept recorded reading   |
+| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot or kept reading, or a find's box |
 | `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out  |
 | `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                |
 | `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out |
@@ -691,11 +729,15 @@ hold names, readings, and timings as text, and the
 [MCP server](Development.md#tools)'s `screen_sample` answers the colors of
 single points of the screen, at most `SCREEN_POINTS_LIMIT` a call.
 
-A sample keeps the whole region, not only the box around its characters. A
+A sample of a labeled screenshot or a recorded reading keeps the whole region,
+not only the box around its characters. A
 reference that is edited learns its saved samples again with the color and
 tolerance the editor has then, and another color or a higher tolerance counts
 pixels as ink that a box cut for the saved settings would have dropped. A
 state's picture is the whole region because that is what the check compares.
+An added find's sample is the box the search cut around its text, with a
+margin of a quarter of the text's height, so a color or tolerance that counts
+more pixels as ink sees only those within the margin.
 
 ### Removal
 

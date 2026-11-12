@@ -44,6 +44,9 @@ export function removeBlocked(draft: Draft, value: Drawn | null, index: number, 
   if ((draft.labels.get(index) ?? '').trim() !== '') {
     return 'This screenshot is labeled. Clear what it shows to remove it.';
   }
+  if (draft.found.some((found) => found.screenshot === index)) {
+    return 'Text found on this screenshot is added. Remove found text to remove the screenshot.';
+  }
   return null;
 }
 

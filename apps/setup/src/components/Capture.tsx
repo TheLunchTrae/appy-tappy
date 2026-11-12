@@ -15,6 +15,7 @@ import {
   fromReference,
   KIND_NAMES,
   newestOfSize,
+  findBlocked as findBlockedBy,
   recordBlocked,
   regionScreenshot,
   settingsDiffer,
@@ -27,6 +28,7 @@ import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/
 import { readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
+import { FoundMarks, FoundPanel } from './Found.tsx';
 import { Question, useQuestion } from './Question.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
@@ -55,6 +57,7 @@ import { background } from '../lib/repeat.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
+import { useFound } from '../lib/useFound.ts';
 import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
 import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
@@ -227,6 +230,18 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const selection = useStateSelections(draft, setDraft, selected);
   const selecting = draft.kind === 'state' ? tool : 'box';
   const review = useReview(recording, draft, setDraft, editingRef);
+  // Every text the reference being edited learns from already, which tells a find's letters apart from a misread.
+  const savedSamples = editing?.existing?.samples;
+  const learnedTexts = useMemo(
+    () => [
+      ...(savedSamples ?? []).map((sample) => sample.text),
+      ...[...draft.labels.values()].filter((text) => text.trim() !== ''),
+      ...draft.recorded.values(),
+      ...draft.found.map((label) => label.text),
+    ],
+    [savedSamples, draft.labels, draft.recorded, draft.found],
+  );
+  const finder = useFound(draft, setDraft, editingRef, learnedTexts);
   const { reviewing } = review;
   const recordError = recorder.commandError ?? review.error ?? recorder.pollError;
 
@@ -388,6 +403,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   };
 
   const recordingBlocked = editing === null ? null : recordBlocked(draft);
+  const findBlocked = findBlockedBy(draft, drawnSize, shownPicture);
 
   // Starts a new recording of `from`'s region, or with `more` goes on with the stopped one.
   const record = async (
@@ -511,6 +527,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
     const valueRegion = editing?.valueRegion ?? { region: null, drawnOn: null };
     setEditing(null);
     setPicking(null);
+    finder.dismiss();
     setDraft((current) => fromReference(current, valueRegion));
   };
 
@@ -543,8 +560,13 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   // Why the screenshot shown cannot be removed, or null when it can or the live view shows.
   const valueRegion = editing?.valueRegion ?? null;
   const unremovable =
-    selected === null ? null : removeBlocked(draft, valueRegion, selected, looks.view?.recording === true);
-  const removable = removableRecorded(shots, draft, valueRegion);
+    selected === null
+      ? null
+      : finder.view?.screenshot === selected
+        ? 'Text found on this screenshot is listed. Add it or select Not these to remove the screenshot.'
+        : removeBlocked(draft, valueRegion, selected, looks.view?.recording === true);
+  // The screenshot an open search lists text of stays until the list closes.
+  const removable = removableRecorded(shots, draft, valueRegion).filter((index) => index !== finder.view?.screenshot);
   // A bar's and a color's fix read with the colors of the first drawing, so they need no more screenshots.
   const offersLooks = draft.kind === 'state' || (fixing === null && draft.kind !== 'number');
   const lookPanel =
@@ -815,6 +837,12 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                     selection.addStep({ kind: 'click', x: point.x, y: point.y, combine });
                   }}
                 />
+              )}
+              {native === undefined ||
+              editing === null ||
+              finder.view === null ||
+              selected !== finder.view.screenshot ? null : (
+                <FoundMarks rows={finder.rows} flags={finder.flags} native={native} shown={shown} />
               )}
               {guides === null ? null : <PinGuides shown={shown} {...guides} />}
             </>
@@ -1203,6 +1231,11 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             saved={editing.existing?.samples.map((sample) => sample.text) ?? []}
             labeled={[...draft.labels.values()].filter((text) => text.trim() !== '')}
             recorded={[...draft.recorded.values()]}
+            found={draft.found.map((label) => label.text)}
+            onForgetFound={() => {
+              setDraft((current) => ({ ...current, found: [] }));
+            }}
+            finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
             readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
             onName={(name) => {
               setEditing((current) => (current === null ? null : { ...current, name }));
@@ -1218,6 +1251,29 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                 setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
               }
             }}
+            findPanel={
+              selected === null && finder.view === null ? null : (
+                <FoundPanel
+                  view={finder.view}
+                  rows={finder.rows}
+                  flags={finder.flags}
+                  crops={finder.crops}
+                  findBlocked={findBlocked}
+                  addBlocked={finder.blocked}
+                  error={finder.error}
+                  searching={finder.searching}
+                  onFind={() => {
+                    if (selected !== null) {
+                      setPicking(null);
+                      background(finder.search(selected));
+                    }
+                  }}
+                  onEntry={finder.edit}
+                  onAdd={finder.add}
+                  onDismiss={finder.dismiss}
+                />
+              )
+            }
             preview={previewField}
             record={
               <RecordPanel

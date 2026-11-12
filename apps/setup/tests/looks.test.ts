@@ -69,6 +69,24 @@ describe('removing a screenshot', () => {
     expect(removeBlocked({ ...used, labels: new Map([[2, '  ']]) }, null, 2, false)).toBeNull();
   });
 
+  test('is refused for a screenshot that added found text is on', () => {
+    const found = { ...drawn, found: [{ screenshot: 4, region: REGION, text: '12' }] };
+    expect(removeBlocked(found, null, 4, false)).toBe(
+      'Text found on this screenshot is added. Remove found text to remove the screenshot.',
+    );
+    expect(removeBlocked(found, null, 5, false)).toBeNull();
+    expect(
+      removableRecorded(
+        [
+          { index: 4, recorded: true },
+          { index: 5, recorded: true },
+        ],
+        found,
+        null,
+      ),
+    ).toEqual([5]);
+  });
+
   test("is refused for the value's region while the reference editor is open over it", () => {
     const editor = { ...drawn, drawnOn: 1 };
     const value = { region: REGION, drawnOn: 3 };

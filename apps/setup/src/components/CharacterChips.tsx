@@ -5,18 +5,33 @@ export function CharacterChips({
   characters,
   ink,
   large = false,
+  pending = [],
 }: {
   readonly characters: readonly string[];
   readonly ink: Color;
   readonly large?: boolean;
+  /** Characters of `characters` that only text not added yet would teach, which are outlined. */
+  readonly pending?: readonly string[];
 }) {
   if (characters.length === 0) {
     return <span className="note">No characters yet</span>;
   }
   return (
-    <span className={large ? 'glyphs large' : 'glyphs'} aria-label={`Characters: ${characters.join(' ')}`}>
+    <span
+      className={large ? 'glyphs large' : 'glyphs'}
+      aria-label={
+        pending.length === 0
+          ? `Characters: ${characters.join(' ')}`
+          : `Characters: ${characters.join(' ')}. Only text not added yet teaches ${pending.join(' ')}.`
+      }
+    >
       {characters.map((character) => (
-        <span key={character} className="glyph" style={{ color: hex(ink) }} aria-hidden="true">
+        <span
+          key={character}
+          className={pending.includes(character) ? 'glyph pending' : 'glyph'}
+          style={{ color: hex(ink) }}
+          aria-hidden="true"
+        >
           {character}
         </span>
       ))}

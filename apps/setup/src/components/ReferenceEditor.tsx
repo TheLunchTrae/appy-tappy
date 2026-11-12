@@ -20,11 +20,16 @@ interface Props {
   readonly label: string;
   /** What the saved reference learned from already. */
   readonly saved: readonly string[];
-  /** The labeled screenshots' and kept readings' texts. */
+  /** The labeled screenshots', kept readings' and added found text's texts. */
   readonly labeled: readonly string[];
   readonly recorded: readonly string[];
+  readonly found: readonly string[];
+  /** The texts of found text not added yet, whose new characters are outlined. */
+  readonly finding: readonly string[];
   /** The values that read with the saved reference. */
   readonly readers: readonly string[];
+  /** The panel that finds more text like the first sample. */
+  readonly findPanel: ReactNode;
   /** The matching pixels preview of the characters' color. */
   readonly preview: ReactNode;
   /** The recording panel. */
@@ -33,25 +38,30 @@ interface Props {
   readonly onPick: () => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onLabel: (text: string) => void;
+  /** Takes the added found text back out of the reference. */
+  readonly onForgetFound: () => void;
 }
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-function learnedNote(saved: number, labeled: number, recorded: number): string {
+function learnedNote(saved: number, labeled: number, recorded: number, found: number): string {
   const parts = [
     saved === 0 ? null : plural(saved, 'saved picture', 'saved pictures'),
     labeled === 0 ? null : plural(labeled, 'labeled screenshot', 'labeled screenshots'),
     recorded === 0 ? null : plural(recorded, 'recorded reading', 'recorded readings'),
+    found === 0 ? null : `${found} found like it`,
   ].filter((part) => part !== null);
   return parts.length === 0 ? 'Nothing learned yet.' : `Learned from ${andList(parts)}.`;
 }
 
 /** The inspector of a reference: its name and color, and the characters it learns. */
 export function ReferenceEditor(props: Props) {
-  const { name, appName, ink, tolerance, selected, saved, labeled, recorded, readers } = props;
-  const characters = knownCharacters([...saved, ...labeled, ...recorded]);
+  const { name, appName, ink, tolerance, selected, saved, labeled, recorded, found, finding, readers } = props;
+  const known = knownCharacters([...saved, ...labeled, ...recorded, ...found]);
+  const pending = knownCharacters(finding).filter((character) => !known.includes(character));
+  const characters = knownCharacters([...known, ...pending]);
   return (
     <>
       <div className="field">
@@ -107,17 +117,26 @@ export function ReferenceEditor(props: Props) {
           />
         )}
       </div>
+      {props.findPanel}
       <div className="field">
         <span>Characters it knows</span>
         {ink === null ? (
           <span className="note">{characters.length === 0 ? 'None yet.' : characters.join(' ')}</span>
         ) : (
-          <CharacterChips characters={characters} ink={ink} large />
+          <CharacterChips characters={characters} ink={ink} pending={pending} large />
         )}
         <span className="note">
-          {learnedNote(saved.length, labeled.length, recorded.length)} Draw a region around text on any screenshot, then
-          type what it shows or record it.
+          {learnedNote(saved.length, labeled.length, recorded.length, found.length)}
+          {pending.length === 0 ? '' : ' Outlined characters come from the found text, once you add it.'} Draw a region
+          around text on any screenshot, then type what it shows or record it.
         </span>
+        {found.length === 0 ? null : (
+          <div className="row">
+            <button type="button" className="btn" onClick={props.onForgetFound}>
+              Remove found text
+            </button>
+          </div>
+        )}
       </div>
       {props.record}
       {readers.length === 0 ? null : (
