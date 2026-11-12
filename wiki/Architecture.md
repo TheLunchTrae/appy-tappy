@@ -351,8 +351,13 @@ and the runtime the one its session follows, which differ when the session
 started on the other copy.
 
 A named mutex, `Local\AppyTappy.Runtime`, is the single-instance guard. A
-second copy that finds it logs that and exits at once, and the setup app can
-open it to learn whether the runtime runs.
+second copy that finds it logs that and exits at once. The setup app's Debug
+page learns whether the runtime runs with `InstanceGuard::is_held`, which opens
+the mutex without taking it and closes it at once. A mutex that exists but
+cannot be opened, as when the runtime runs as administrator, counts as held.
+A runtime that starts in the moment the page holds the mutex open finds it
+taken and exits; the page asks every few seconds, so this is rare, and
+starting the runtime again works.
 
 Autostart is the `AppyTappy` value under the user's
 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` key,
@@ -381,6 +386,15 @@ because the log is its only output. Only the copy that
 holds the single-instance guard rotates it; a second copy or an `--autostart`
 command only adds its line. When `%LOCALAPPDATA%` is unknown or the log
 cannot be opened, nothing is logged, and running exits with code 1.
+
+`Log` in `appytappy-platform` writes and rotates both programs' logs. While
+**Show debug details** is on, the setup app writes `setup.log` in the same
+folder, with the same 512 KiB rotation to `setup.old.log`: one line for each
+command the page sends, with how long it took from being sent and why it
+failed, if it did. The commands the page repeats, on a timer or while a control is
+dragged, are left out when they answer in under 50 ms without failing, so the log stays
+readable.
+With the setting off, the setup app writes no log at all.
 
 ### Tray
 

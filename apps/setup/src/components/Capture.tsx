@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
-import { editValue, errorText, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
+import { editValue, errorText, explainReading, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type Built,
@@ -31,6 +31,7 @@ import { knownCharacters, readers } from '../lib/reference.ts';
 import { BarDetect, BarReadings } from './BarFields.tsx';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
+import { ReadingDetailsBox } from './ReadingDetails.tsx';
 import { FoundMarks, FoundPanel } from './Found.tsx';
 import { Question, useQuestion } from './Question.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
@@ -42,6 +43,7 @@ import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
 import { clock } from '../lib/review.ts';
 import type { Point, Size } from '../lib/region.ts';
+import { CaptureOutlineNote, CaptureOutlines, useCaptureOutline } from './CaptureOutlines.tsx';
 import { RegionSurface } from './RegionSurface.tsx';
 import { ZoomView } from './ZoomView.tsx';
 import { PinPicker } from './PinPicker.tsx';
@@ -315,6 +317,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const drawnSize = drawnPicture === undefined ? null : { width: drawnPicture.width, height: drawnPicture.height };
   const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
+  const outline = useCaptureOutline(appId, native, appFile.file);
 
   const pick = (point: Point): void => {
     if (picking === null || shownPicture === null) {
@@ -869,6 +872,9 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               {shownPicture === null ? null : (
                 <MatchOverlay painted={selectedPreview.painted ?? preview.painted} size={shownPicture} />
               )}
+              {native === undefined || outline === null ? null : (
+                <CaptureOutlines outline={outline} size={native} shown={shown} />
+              )}
               {native === undefined ? null : (
                 <RegionSurface
                   size={native}
@@ -969,6 +975,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             {editing === null ? '' : ' A reference learns from each screenshot you label.'}
           </span>
         </div>
+        {outline === null || reviewing ? null : <CaptureOutlineNote outline={outline} />}
       </section>
       {editing === null ? (
         <aside className="inspector" aria-label="Value">
@@ -1257,6 +1264,11 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               {edit.built === null || check.preview === null ? null : (
                 <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
               )}
+              {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
+              <ReadingDetailsBox
+                key={built.ok ? built.spec.kind : 'none'}
+                ask={check.state.kind === 'set' ? explainReading : null}
+              />
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               <p className="note">
@@ -1390,6 +1402,11 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             state={check.state}
             reading={check.reading}
             problem={check.problem}
+          />
+          {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
+          <ReadingDetailsBox
+            key={built.ok ? built.spec.kind : 'none'}
+            ask={check.state.kind === 'set' ? explainReading : null}
           />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}

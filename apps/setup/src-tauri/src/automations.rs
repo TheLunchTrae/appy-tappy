@@ -11,6 +11,7 @@
 //! not read it, so a hand edit that breaks or repeats it stops nothing, and
 //! [`unique_ids`] gives each automation one the page can go by.
 
+use std::collections::BTreeSet;
 use std::fs;
 
 use appytappy_config::action::KeyChord;
@@ -145,6 +146,21 @@ fn problem(automation: &AutomationDef, apps: &[StoredApp], stores: &Stores) -> O
         } => format!("Action {action}'s target cannot be used: {misfit}. {set_up_again}"),
         Problem::Value { value, error, .. } => format!("{value} cannot be read: {error}."),
     })
+}
+
+/// The IDs of the values of the application `app` that the runtime reads:
+/// those its enabled automations watch, of the automations that can run, as
+/// [`problem`] decides with the runtime's own answer.
+pub(crate) fn watched_values(stores: &Stores, app: &str) -> Result<BTreeSet<String>, String> {
+    let file = load(stores)?;
+    let apps = apps(stores)?;
+    Ok(file
+        .automations
+        .iter()
+        .filter(|automation| automation.enabled && automation.when.app == app)
+        .filter(|automation| problem(automation, &apps, stores).is_none())
+        .map(|automation| automation.when.value.clone())
+        .collect())
 }
 
 /// Every automation, with what stops each one from running.
@@ -640,6 +656,34 @@ mod tests {
                 "Its application's app.json, in the example folder, cannot be read: {error}."
             ))
         );
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn only_automations_that_can_run_watch_their_values() {
+        let (stores, folder) = stores("watched");
+        let none = BTreeSet::new();
+        assert_eq!(watched_values(&stores, "example"), Ok(none.clone()));
+        save(&stores, None, draft("Pause music")).expect("saves");
+        let watched = watched_values(&stores, "example").expect("reads");
+        assert_eq!(watched, BTreeSet::from(["icon_visible".to_owned()]));
+        assert_eq!(watched_values(&stores, "other"), Ok(none.clone()));
+        // A value the runtime cannot build stops the automation, so the
+        // runtime reads nothing for it.
+        let app = stores.apps.load().expect("loads")[0]
+            .file
+            .clone()
+            .expect("good");
+        let mut broken = app.clone();
+        for value in &mut broken.values {
+            value.screen.region.width = 0;
+        }
+        stores.apps.save("example", &broken, &[]).expect("saves");
+        assert_eq!(watched_values(&stores, "example"), Ok(none.clone()));
+        stores.apps.save("example", &app, &[]).expect("saves");
+        assert_eq!(watched_values(&stores, "example"), Ok(watched));
+        set_enabled(&stores, "pause_music", false).expect("turns off");
+        assert_eq!(watched_values(&stores, "example"), Ok(none));
         fs::remove_dir_all(folder).expect("clean up");
     }
 

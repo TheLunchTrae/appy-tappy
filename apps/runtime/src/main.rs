@@ -12,7 +12,6 @@ mod autostart;
 mod cli;
 mod click;
 mod lifecycle;
-mod log;
 mod model;
 mod owner;
 mod plan;
@@ -25,11 +24,10 @@ use std::io;
 use std::process::ExitCode;
 
 use appytappy_config::paths::Locations;
-use appytappy_platform::{InstanceGuard, LocalTime};
+use appytappy_platform::{InstanceGuard, LOG_LIMIT, LocalTime, Log};
 
 use crate::autostart::{autostart, autostart_line};
 use crate::cli::Command;
-use crate::log::Log;
 use crate::owner::watch;
 
 /// The exit code for a command line the runtime does not understand.
@@ -41,7 +39,7 @@ fn main() -> ExitCode {
     // this copy holds the single-instance guard.
     let mut log = Locations::from_env()
         .map_err(io::Error::other)
-        .and_then(|locations| Log::open(&locations.logs(), u64::MAX));
+        .and_then(|locations| Log::open(&locations.logs(), "runtime", u64::MAX));
     let command = match cli::parse(env::args_os().skip(1)) {
         Ok(command) => command,
         Err(error) => {
@@ -86,7 +84,7 @@ fn run(log: &mut Log) -> io::Result<()> {
             return Err(error);
         },
     };
-    log.rotate_at(log::LIMIT);
+    log.rotate_at(LOG_LIMIT);
     note(log, "runtime started");
     let result = Locations::from_env()
         .map_err(io::Error::other)
@@ -118,7 +116,7 @@ mod tests {
     #[test]
     fn off_windows_the_runtime_refuses_to_run() {
         let folder = env::temp_dir().join(format!("appytappy-run-{}", process::id()));
-        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let mut log = Log::open(&folder, "runtime", LOG_LIMIT).expect("open");
         let ran = run(&mut log);
         let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
         fs::remove_dir_all(&folder).expect("clean up");

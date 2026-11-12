@@ -1,6 +1,6 @@
 //! Where the setup app keeps what the user saves: the applications' folders,
 //! the automations' file and the settings file, and where the runtime writes
-//! its traces.
+//! its logs and traces.
 
 use std::fs;
 use std::io;
@@ -21,6 +21,12 @@ pub(crate) struct Stores {
     pub(crate) settings: SettingsStore,
     /// The folder the runtime writes its trace files to.
     pub(crate) traces: PathBuf,
+    /// The folder of the runtime's log, where the setup app writes its own
+    /// while it shows debug details.
+    pub(crate) logs: PathBuf,
+    /// Every file's place, for the debug bundle, which copies the files as
+    /// they are on disk.
+    pub(crate) locations: Locations,
 }
 
 impl From<Locations> for Stores {
@@ -30,6 +36,8 @@ impl From<Locations> for Stores {
             automations: AutomationStore::new(locations.automations()),
             settings: SettingsStore::new(locations.settings()),
             traces: locations.traces(),
+            logs: locations.logs(),
+            locations,
         }
     }
 }

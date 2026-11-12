@@ -95,6 +95,15 @@ function sameTrace(one: TraceDef, other: TraceDef): boolean {
   );
 }
 
+/** `until` as the user reads it: the time, with the day when it is not today. */
+export function endText(until: number): string {
+  const end = new Date(until);
+  const today = new Date().toDateString() === end.toDateString();
+  return today
+    ? end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : end.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 /** Whether two settings are the same, so saving one over the other changes nothing. */
 export function sameSettings(one: SettingsFile, other: SettingsFile): boolean {
   return (
@@ -103,7 +112,8 @@ export function sameSettings(one: SettingsFile, other: SettingsFile): boolean {
     one.readInterval.slowestMs === other.readInterval.slowestMs &&
     one.screenshotShortcut === other.screenshotShortcut &&
     sameTrace(one.trace, other.trace) &&
-    one.rememberEnabled === other.rememberEnabled
+    one.rememberEnabled === other.rememberEnabled &&
+    one.showDebug === other.showDebug
   );
 }
 

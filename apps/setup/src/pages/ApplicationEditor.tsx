@@ -24,7 +24,7 @@ import { background } from '../lib/repeat.ts';
 import { SIZE_CHANGES, SIZE_CHANGES_HINT, SIZE_CHANGE_TEXT } from '../lib/sizes.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { Trail } from '../components/Trail.tsx';
-import { WindowsPanel, useWindowFits } from '../components/WindowsPanel.tsx';
+import { WindowsPanel, useWindowFits, useWindowScores } from '../components/WindowsPanel.tsx';
 
 interface Props {
   /** The application to change, or null to add one. */
@@ -57,6 +57,7 @@ export function ApplicationEditor({ existing, trail, onCancel, onSaved, onHeld }
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { fits, error: fitError } = useWindowFits(window, listed);
+  const scores = useWindowScores(window, listed);
   useReportHeld(
     onHeld,
     held(
@@ -138,6 +139,7 @@ export function ApplicationEditor({ existing, trail, onCancel, onSaved, onHeld }
           selected={selected}
           fits={fits}
           onChoose={choose}
+          scores={scores === null || window === null ? null : { windows: scores, rules: window }}
         />
         <aside className="side" aria-label="Application">
           <h2>Application</h2>

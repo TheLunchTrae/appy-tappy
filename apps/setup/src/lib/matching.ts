@@ -1,6 +1,6 @@
 // How an application's window match is edited and described.
 
-import type { FallbackDef, WindowChoice, WindowDef, WindowFit } from './bindings.ts';
+import type { FallbackDef, WindowChoice, WindowDef, WindowFit, WindowScore } from './bindings.ts';
 
 /** One of the things an application's window is recognized by. */
 export type MatchField = 'title' | 'class' | 'executable';
@@ -117,6 +117,31 @@ export function fitLabel(
     };
   }
   return fit.fallback ? { text: 'fallback', className: 'fit fallback' } : { text: 'matches', className: 'note' };
+}
+
+/** The parts of a window match that say why it leaves a window out. */
+export type MatchRules = Pick<WindowDef, 'mustMatch' | 'fallback'>;
+
+/**
+ * Why the match leaves out a window that `score` describes. A window of the executable that matches every field
+ * ticked is always taken, so one left out either has another executable or differs in a field ticked. With a fallback,
+ * such a window would be taken as the fallback, but a window that qualifies takes its place.
+ */
+function leftOut(score: WindowScore, rules: MatchRules): string {
+  if (!score.executable) {
+    return 'its executable differs';
+  }
+  const field = rules.mustMatch.title && !score.title ? 'title' : 'class';
+  return rules.fallback === 'none'
+    ? `its ${field} must match`
+    : `its ${field} must match, and a window that does is open, so the fallback is not used`;
+}
+
+/** For the debug details: which of a window's fields match, and why the match leaves it out if it does. */
+export function scoreText(score: WindowScore, rules: MatchRules): string {
+  const word = (matches: boolean): string => (matches ? 'matches' : 'differs');
+  const parts = `Title ${word(score.title)}, class ${word(score.class)}, executable ${word(score.executable)}.`;
+  return score.fit === null ? `${parts} Not taken: ${leftOut(score, rules)}.` : parts;
 }
 
 /** How many open windows qualify, and which one AppyTappy would use. */
