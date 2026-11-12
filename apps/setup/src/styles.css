@@ -467,6 +467,30 @@ select {
   font-weight: 600;
 }
 
+/* A flow that knows its application has only that application's window to find. */
+.picker.alone {
+  grid-template-columns: minmax(0, 480px);
+}
+
+/* The windows that fit an application equally well, listed in the side panel only as tall as they are. */
+.side .window-list {
+  flex: none;
+}
+
+.side > .btn {
+  align-self: flex-start;
+}
+
+.window-list button:disabled {
+  cursor: default;
+}
+
+/* Adding an application is a choice among the saved applications, marked as the one that makes something. */
+.window-list button.add .title::before {
+  content: '+ ';
+  color: var(--capture);
+}
+
 .actions {
   margin-top: auto;
   display: flex;
@@ -901,6 +925,29 @@ select {
 
 .value-select {
   border-color: var(--capture);
+}
+
+/* What the condition watches: the application, and the flows that add an application or make a value for it. */
+.watch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-row .input {
+  flex: 0 1 280px;
+  min-width: 0;
+}
+
+/* The next step toward a value to watch, said where the step is taken. */
+.guide {
+  max-width: 68ch;
+}
+
+/* The guide stays in the page while it has nothing to say, without the card's gap around it. */
+.guide:empty {
+  margin-bottom: -10px;
 }
 
 .live-reading {
