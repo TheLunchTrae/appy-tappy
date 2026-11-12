@@ -38,8 +38,9 @@ import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
 import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
 import { clock } from '../lib/review.ts';
-import { type Point, type Size, fit } from '../lib/region.ts';
+import type { Point, Size } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
+import { ZoomView } from './ZoomView.tsx';
 import { PinPicker } from './PinPicker.tsx';
 import { PinGuides } from './PinGuides.tsx';
 import { MovingContentField } from './MovingContentField.tsx';
@@ -53,7 +54,6 @@ import { StatesField } from './StatesField.tsx';
 import { EditIntro, EditOutcome, SavedStates } from './ValueEdit.tsx';
 import { CHECK_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
-import { useSize } from '../lib/size.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
@@ -216,9 +216,6 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const [leavingWindow, setLeavingWindow] = useState(false);
   const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
 
-  const view = useRef<HTMLDivElement>(null);
-  const space = useSize(view);
-
   // The saved reference the editor adds to, or null for a new one or while no editor is open.
   const existingId = editing?.existing?.id ?? null;
   const editingRef = useMemo(
@@ -301,13 +298,6 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const drawnSize = drawnPicture === undefined ? null : { width: drawnPicture.width, height: drawnPicture.height };
   const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
-  const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
-  const frameStyle = {
-    left: (space.width - shown.width) / 2,
-    top: (space.height - shown.height) / 2,
-    width: shown.width,
-    height: shown.height,
-  };
 
   const pick = (point: Point): void => {
     if (picking === null || shownPicture === null) {
@@ -770,6 +760,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
         {shortcut.error === null ? null : <p className="warn">{shortcut.error}</p>}
         {shortcut.saveError === null ? null : <p className="warn">{shortcut.saveError}</p>}
         {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
+        {selection.error === null ? null : <p className="warn">{selection.error}</p>}
         {reviewing && recording !== null ? (
           <ReviewSheet
             view={recording}
@@ -783,74 +774,80 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
           />
         ) : null}
         {/* Hidden rather than removed during review, so the view keeps its measured size. */}
-        <div className="view" ref={view} hidden={reviewing}>
-          <div className={area ? 'frame reading-area' : 'frame'} style={frameStyle}>
-            {reviewing ? null : selected === null ? (
-              <LiveCanvas
-                maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
-                onFrame={onFrame}
-                onError={onLiveError}
-              />
-            ) : shownPicture === null ? null : (
-              <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
-            )}
-            {shownPicture === null ? null : (
-              <MatchOverlay painted={selectedPreview.painted ?? preview.painted} size={shownPicture} />
-            )}
-            {native === undefined ? null : (
-              <RegionSurface
-                size={native}
-                shown={shown}
-                region={otherSize === null ? draft.region : null}
-                recording={recordingNow !== null && selected === null}
-                label={editing !== null ? editedName : regionLabel(valueName, moving)}
-                editable={shownPicture !== null && (otherSize === null || picking !== null)}
-                picking={picking !== null}
-                tool={selecting}
-                ignored={selection.ignored}
-                onRegion={(region) => {
-                  setDraft((current) => ({
-                    ...current,
-                    region,
-                    drawnOn: selected,
-                    // The reference editor draws for its own characters, which leaves the value's side alone.
-                    pin:
-                      editing === null
-                        ? pinChoiceAfterRegion(current.pin, current.region, region, native)
-                        : current.pin,
-                  }));
-                }}
-                onPick={pick}
-                onSnap={(rough, combine) => {
-                  selection.addStep({ kind: 'snap', region: rough, combine });
-                }}
-                onSelectAt={(point, combine) => {
-                  selection.addStep({ kind: 'click', x: point.x, y: point.y, combine });
-                }}
-              />
-            )}
-            {native === undefined ||
-            editing === null ||
-            finder.view === null ||
-            selected !== finder.view.screenshot ? null : (
-              <FoundMarks rows={finder.rows} flags={finder.flags} native={native} shown={shown} />
-            )}
-            {guides === null ? null : <PinGuides shown={shown} {...guides} />}
-          </div>
-          <p className="hint">
-            {viewHint(
-              recordingNow === null ? null : recordingNow === recording ? 'readings' : 'looks',
-              selected,
-              shots.length,
-              picking !== null,
-              liveError,
-              shortcut.label,
-              selecting,
-              area,
-              otherSize !== null,
-            )}
-          </p>
-        </div>
+        <ZoomView
+          picture={layoutSize}
+          zoomable={shownPicture !== null}
+          hidden={reviewing}
+          hint={viewHint(
+            recordingNow === null ? null : recordingNow === recording ? 'readings' : 'looks',
+            selected,
+            shots.length,
+            picking !== null,
+            liveError,
+            shortcut.label,
+            selecting,
+            area,
+            otherSize !== null,
+          )}
+        >
+          {({ space, shown }) => (
+            <>
+              {reviewing ? null : selected === null ? (
+                <LiveCanvas
+                  maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
+                  onFrame={onFrame}
+                  onError={onLiveError}
+                />
+              ) : shownPicture === null ? null : (
+                <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
+              )}
+              {shownPicture === null ? null : (
+                <MatchOverlay painted={selectedPreview.painted ?? preview.painted} size={shownPicture} />
+              )}
+              {native === undefined ? null : (
+                <RegionSurface
+                  size={native}
+                  shown={shown}
+                  screenshot={selected}
+                  region={otherSize === null ? draft.region : null}
+                  recording={recordingNow !== null && selected === null}
+                  area={area}
+                  label={editing !== null ? editedName : regionLabel(valueName, moving)}
+                  editable={shownPicture !== null && (otherSize === null || picking !== null)}
+                  picking={picking !== null}
+                  tool={selecting}
+                  ignored={selection.ignored}
+                  onRegion={(region) => {
+                    setDraft((current) => ({
+                      ...current,
+                      region,
+                      drawnOn: selected,
+                      // The reference editor draws for its own characters, which leaves the value's side alone.
+                      pin:
+                        editing === null
+                          ? pinChoiceAfterRegion(current.pin, current.region, region, native)
+                          : current.pin,
+                    }));
+                  }}
+                  onPick={pick}
+                  onSnap={(rough, combine) => {
+                    selection.addStep({ kind: 'snap', region: rough, combine });
+                  }}
+                  onSelectAt={(point, combine) => {
+                    selection.addStep({ kind: 'click', x: point.x, y: point.y, combine });
+                  }}
+                />
+              )}
+              {native === undefined ||
+              editing === null ||
+              finder.view === null ||
+              selected !== finder.view.screenshot ? null : (
+                <FoundMarks rows={finder.rows} flags={finder.flags} native={native} shown={shown} />
+              )}
+              {guides === null ? null : <PinGuides shown={shown} {...guides} />}
+            </>
+          )}
+        </ZoomView>
         <div className="strip" hidden={reviewing}>
           <button
             type="button"
@@ -1021,7 +1018,6 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                   }}
                 />
               ) : null}
-              {selection.error === null ? null : <p className="warn">{selection.error}</p>}
               <RegionFields
                 region={draft.region}
                 locked={edited !== null && draft.drawnOn === null}

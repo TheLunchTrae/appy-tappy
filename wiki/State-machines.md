@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Nine guards drop such stale messages:
+it was about has gone. Ten guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -34,6 +34,10 @@ it was about has gone. Nine guards drop such stale messages:
   that was discarded, or replaced by one of either kind, is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Pointer IDs.** A region drag keeps the ID of the pointer that started it
+  (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
+  capture of any other pointer is dropped, and so is every event but a press
+  once the drag is over.
 - **Check numbers.** The capture screen gives each check or saved value's
   edit it tries on the live window a number, which is in force from when the
   owner took it until the draft changes or it is tried again. An answer to a
@@ -1269,6 +1273,84 @@ stateDiagram-v2
   and the recording. A save or a try whose labeled screenshots, recording, or
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
+
+### Region drag
+
+The region surface (`apps/setup/src/components/RegionSurface.tsx`) draws,
+moves, and resizes the region on a screenshot, on the capture screen and on the
+click target screen. Its drag is a pure machine, `step` in
+`apps/setup/src/lib/drag.ts`. The surface turns pointer events into the
+machine's events and carries out the effects it answers with: capture the
+pointer, free it, hand over a region, or hand over the snap tool's rough box.
+Every point is in the screenshot's own pixels, so the zoom and the size of the
+window never reach the machine.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Drawing: press off the region, or with the snap tool
+    Idle --> Moving: press inside the region with the box tool
+    Idle --> Resizing: press on a corner's handle with the box tool
+    Drawing --> Drawing: move, or the screenshot shifts under the pointer
+    Moving --> Moving: move, or the screenshot shifts under the pointer
+    Resizing --> Resizing: move, or the screenshot shifts under the pointer
+    Drawing --> Idle: release, or a move with the button up, hands over the box drawn
+    Moving --> Idle: release, or a move with the button up, hands over the moved region
+    Resizing --> Idle: release, or a move with the button up, hands over the resized region
+    Drawing --> Idle: cancel, lost or failed capture, or the surface changes
+    Moving --> Idle: cancel, lost or failed capture, or the surface changes
+    Resizing --> Idle: cancel, lost or failed capture, or the surface changes
+```
+
+- **Idle.** Only a press of the main button with the box or the snap tool
+  starts a drag, and it captures the pointer. A click that picks a color or
+  selects with the click tool never enters the machine.
+- **Slop.** In every state, nothing changes until the pointer has traveled 3
+  pixels of the view from the press. A click therefore draws, moves, and
+  resizes nothing, so it leaves a region typed to the exact pixel as it is.
+  Past the slop the drag follows the pointer's whole travel, also back to the
+  press.
+- **Drawing.** The box is the part of the screenshot between the press and the
+  pointer. The press can be in the empty space around the screenshot, and a
+  box that holds none of the screenshot is no box. With the box tool the box
+  becomes the region. With the snap tool it is the rough box, and the region
+  stays as it is.
+- **Moving.** The region as it was at the press moves by the pointer's travel
+  and stops at the screenshot's edges.
+- **Resizing.** The pressed corner moves by the pointer's travel from where it
+  was at the press, so a press that is off the corner's tip does not make it
+  jump. The corner across from it stays where it was at the press, also after
+  the dragged corner passes it. A drag that would leave no box keeps the last
+  one.
+- **Shift.** A scroll or a zoom moves the screenshot under a pointer that
+  stays still, and no pointer event tells of it. The surface then says where
+  on the screenshot the pointer is, and the drag follows as for a move.
+- **Release** carries where the pointer was let go, which the last move may
+  not have reached. The drag follows to there, ends, frees the pointer, and
+  hands over what it made: the region, or the rough box. A drag that drew no
+  box, or left the region where it was, hands over nothing.
+- **A move with the main button up** ends the drag the same way, but with the
+  box as it last was. No release event follows a button that comes up while
+  another is held, and where it came up is not known.
+- **Failures.** A drag is interrupted when the browser cancels the pointer,
+  when the surface loses the pointer's capture, or when the surface changes:
+  another screenshot or another size shows, the tool changes, or a click
+  starts to pick a color. Each ends the drag in **Idle** with the pointer
+  freed and hands over nothing. A capture that cannot be taken, because the
+  pointer is gone already, ends the drag the same way with nothing to free:
+  without it no release would reach the surface. Only letting go changes the
+  region, so the region is as it was before the drag, and the next press
+  starts a new one.
+- A press of the pointer that already drags means its release never arrived:
+  the old drag is dropped without handing anything over, and a new one
+  starts. Events of any other pointer change nothing.
+- Dragging on the view selects no text, and the view refuses the browser's own
+  drag of a selection, which would cancel the pointer in the middle of a drag.
+
+The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
+kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
+the live view shows or a screenshot of another size does. It changes only the
+size the screenshot shows at, so a drag goes on through a zoom or a scroll.
 
 ### Recording looks
 

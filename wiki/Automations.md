@@ -179,6 +179,9 @@ then choose **Where to click**:
   middle. With **Snap** or **Click**, only what they select is compared, so
   the background around a round button does not count.
 
+The screenshot zooms, and the picture's box is drawn, moved, and resized, as
+[Draw the region](Values.md#draw-the-region) describes.
+
 If the window closes while you set up the target, open it again and select
 **Look again**. Looking again clears the screenshots taken so far.
 
