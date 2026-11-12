@@ -35,8 +35,8 @@ it was about has gone. Five guards drop such stale messages:
   `Overlays::next`, and a reading from an older capture is dropped.
 - **Request numbers.** The capture screen numbers each request of its
   matching pixels preview (`apps/setup/src/lib/matchPreview.ts`). An answer
-  or a failure that carries another number than the newest request's, or
-  that arrives once the preview is off, is dropped.
+  or a failure that carries another number than the request in flight's, such
+  as one sent before the preview was turned off, is dropped.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -764,55 +764,76 @@ stateDiagram-v2
 ### Matching pixels preview
 
 The capture screen's matching pixels preview
-(`apps/setup/src/lib/matchPreview.ts`, driven by `useMatchPreview.ts`) tints
-the pixels of the screenshot shown that a color setting takes. Its state is
-on the page only: which setting the user turned it on for, the number of the
-request whose answer is awaited, the newest answer, and the newest failure.
-The owner thread keeps nothing for it; each request is one `match_pixels`
-command.
+(`apps/setup/src/lib/matchPreview.ts`, run by `useMatchPreview.ts`) tints the
+pixels of the screenshot shown that a color setting takes. Its state is on
+the page only: which settings' switches are on, the request in flight and
+its number, the newest request wanted since, the newest answer, and the
+newest failure. The owner thread keeps nothing for it; each request is one
+`match_pixels` command.
 
 ```mermaid
 stateDiagram-v2
+    state "In flight" as InFlight
+    state "In flight, one queued" as Queued
     [*] --> Off
     Off --> Blocked: the switch is turned on with nothing to ask
-    Off --> Waiting: the switch is turned on
-    Blocked --> Waiting: what was missing arrives
-    Waiting --> Shown: the newest request is answered
-    Waiting --> Failed: the newest request fails
-    Waiting --> Waiting: what to ask changes, which numbers a new request
-    Shown --> Waiting: what to ask changes
-    Failed --> Waiting: what to ask changes
-    Waiting --> Blocked: what to ask goes missing
-    Shown --> Blocked: what to ask goes missing
-    Failed --> Blocked: what to ask goes missing
+    Off --> InFlight: the switch is turned on, which sends a request
+    Blocked --> InFlight: what was missing arrives, which sends a request
+    InFlight --> Idle: the request is answered or fails
+    InFlight --> Queued: what to ask changes
+    Queued --> Queued: what to ask changes again, which replaces the queued request
+    Queued --> InFlight: the request in flight is answered or fails, which sends the queued one
+    Queued --> InFlight: what to ask goes back to what the request in flight asks
+    Idle --> InFlight: what to ask changes, which sends a request
+    InFlight --> Blocked: what to ask goes missing
+    Queued --> Blocked: what to ask goes missing
+    Idle --> Blocked: what to ask goes missing
     Blocked --> Off: the switch is turned off, or its setting leaves the inspector
-    Waiting --> Off: the switch is turned off, or its setting leaves the inspector
-    Shown --> Off: the switch is turned off, or its setting leaves the inspector
-    Failed --> Off: the switch is turned off, or its setting leaves the inspector
+    InFlight --> Off: the switch is turned off, or its setting leaves the inspector
+    Queued --> Off: the switch is turned off, or its setting leaves the inspector
+    Idle --> Off: the switch is turned off, or its setting leaves the inspector
 ```
 
 - **What to ask** (`plan`) is the screenshot shown, a rectangle of it, and the
   rule: a reference's characters on the whole screenshot, or a bar's or a
-  color check's colors in the region. A change to any of them makes a new
-  request with the next number, sent once nothing has changed for 80 ms, so a
-  dragged slider asks when it rests.
+  color check's colors in the region.
+- **In flight** has one request with the owner. The transition (`step`) sends
+  a request at once while none is in flight and gives it the next number. At
+  most one request is in flight, so the tint follows a dragged slider as fast
+  as the owner answers, and requests never pile up.
+- **In flight, one queued** also remembers the newest request wanted since.
+  A newer one replaces it, so a burst of changes sends the first and the
+  last. The queued request goes out when the one in flight is answered or
+  fails.
+- **Idle** shows the last request's answer, or why it failed, such as a
+  screenshot that is gone or a region that reaches past the window. A failure
+  tints nothing, and the next change to what is asked leaves it.
 - **Blocked** has nothing to ask and says why under the switch: the live view
   shows instead of a screenshot, a color is not picked, or the region is not
-  drawn. It awaits no answer, so an answer still on its way is dropped.
-- **Waiting** keeps the tint of the last answer while it is for the same
-  rectangle of the same screenshot (`tinted`), so the tint does not flicker
-  under the slider. An answer for another screenshot or rectangle stops
-  showing at once.
-- **Failed** shows why under the switch, such as a screenshot that is gone or
-  a region that reaches past the window, and tints nothing. The next change
-  to what is asked leaves it.
+  drawn. Like **Off**, it forgets the request in flight, the queued request,
+  and the answer, so nothing more is sent and an answer still on its way is
+  dropped.
 - **Off** shows the plain screenshot in the same render that turns the switch
-  off, and forgets the answer. The switch is on for one setting at a time, so
-  another setting's preview starts off, and a setting whose fields are not in
-  the inspector shows no tint.
-- Only the newest request counts (`step`): an answer or a failure that
-  carries an older number, or that arrives in **Off** or **Blocked**, changes
-  nothing.
+  off. Each setting has its own switch, which stays as the user left it
+  until the capture screen closes: going back a step and returning, or
+  changing the kind of check and changing it back, shows the tint again
+  without another press. A setting whose fields are not in the inspector
+  shows no tint.
+- An answer counts only under the number of the request in flight
+  (`step`). `previewDriver` gives each answer the number its own request was
+  sent with, so an answer to a request sent before **Off** or **Blocked** is
+  not taken for the answer to a later one.
+- While a request is in flight, the tint of the last answer stays if it is
+  for the same rectangle of the same screenshot (`tinted`), and its counts
+  dim and say that they are updating (`awaited`). An answer for another
+  screenshot or rectangle stops showing at once.
+
+**Show selected pixels**, under **Color match**, has no requests of its own.
+It is a switch that stays as the user left it until the capture screen
+closes, and it tints the selection the capture screen last made on the
+screenshot shown (`selectedPixels`). While the selection for a new color
+match is awaited, the last one for the same steps stays, and its count says
+that it is updating.
 
 ### Recording
 

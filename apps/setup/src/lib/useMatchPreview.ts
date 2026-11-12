@@ -1,22 +1,26 @@
 // The matching pixels preview's switch, and the requests it makes while it is on.
 
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { errorText, matchPixels } from './api.ts';
+import type { Draft } from './check.ts';
 import {
   type Answered,
   NO_PREVIEW,
+  type Painted,
   type Plan,
   type PreviewDraft,
   type PreviewTarget,
+  type SelectedPixels,
+  awaited,
+  paintedOf,
   plan,
-  step,
+  previewDriver,
+  selectedPixels,
   tinted,
 } from './matchPreview.ts';
 import type { Size } from './region.ts';
-
-/** How long a request waits after the last change before it is made, so a dragged slider asks once. */
-const ASK_DELAY_MS = 80;
+import type { Selection } from './selection.ts';
 
 /** The preview as the capture screen shows it. */
 export interface MatchPreview {
@@ -26,15 +30,19 @@ export interface MatchPreview {
   readonly setOn: (on: boolean) => void;
   /** What it asks while it is on, or why it has nothing to show. */
   readonly plan: Plan | null;
-  /** The answer to tint over the screenshot shown, or null. */
+  /** The answer the counts are of, or null. */
   readonly tint: Answered | null;
+  /** That answer as the overlay tints it over the screenshot shown. */
+  readonly painted: Painted | null;
+  /** Whether the answer for the settings now is still awaited, so the tint and its counts are for earlier ones. */
+  readonly updating: boolean;
   readonly error: string | null;
 }
 
 /**
  * Asks which pixels `target`'s colors in `draft` take on the screenshot shown, `selected`, while the user has the
- * preview on. It is the capture screen's own state: it changes neither the draft nor the screenshot. Turning it on
- * is for one target, so another target's preview starts off.
+ * preview on. It is the capture screen's own state: it changes neither the draft nor the screenshot. Each target has
+ * its own switch, which stays as the user left it for as long as the capture screen is open.
  */
 export function useMatchPreview(
   target: PreviewTarget | null,
@@ -42,10 +50,16 @@ export function useMatchPreview(
   selected: number | null,
   size: Size | null,
 ): MatchPreview {
-  const [wanted, setWanted] = useState<PreviewTarget | null>(null);
-  const [preview, dispatch] = useReducer(step, NO_PREVIEW);
-  const asked = useRef(0);
-  const on = target !== null && wanted === target;
+  const [wanted, setWanted] = useState<ReadonlySet<PreviewTarget>>(new Set());
+  const [preview, setPreview] = useState(NO_PREVIEW);
+  const [want] = useState(() =>
+    previewDriver(
+      async (request) => matchPixels(request.screenshot, request.area, request.rule),
+      setPreview,
+      errorText,
+    ),
+  );
+  const on = target !== null && wanted.has(target);
   const { ink, tolerance, filled, empty, color, region } = draft;
   const width = size?.width ?? null;
   const height = size?.height ?? null;
@@ -63,34 +77,67 @@ export function useMatchPreview(
   );
   const request = planned?.kind === 'ask' ? planned.request : null;
   useEffect(() => {
-    if (request === null) {
-      dispatch({ kind: 'cleared' });
-      return undefined;
-    }
-    asked.current += 1;
-    const id = asked.current;
-    dispatch({ kind: 'asked', id });
-    const timer = setTimeout(() => {
-      matchPixels(request.screenshot, request.area, request.rule)
-        .then((view) => {
-          dispatch({ kind: 'answered', id, request, view });
-        })
-        .catch((error: unknown) => {
-          dispatch({ kind: 'failed', id, message: errorText(error) });
-        });
-    }, ASK_DELAY_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [request]);
+    want(request);
+  }, [want, request]);
+  const tint = tinted(preview, request);
+  const painted = useMemo(() => (tint === null ? null : paintedOf(tint)), [tint]);
   return {
     target,
     on,
     setOn: (next) => {
-      setWanted(next ? target : null);
+      if (target !== null) {
+        setWanted((current) => {
+          const targets = new Set(current);
+          if (next) {
+            targets.add(target);
+          } else {
+            targets.delete(target);
+          }
+          return targets;
+        });
+      }
     },
     plan: planned,
-    tint: tinted(preview, request),
+    tint,
+    painted,
+    updating: awaited(preview, request),
     error: request === null ? null : preview.error,
+  };
+}
+
+/** The selected pixels preview as the capture screen shows it, under **Color match**. */
+export interface SelectedPreview {
+  /** Whether the screenshot also shades what a selection leaves out. */
+  readonly shaded: boolean;
+  readonly on: boolean;
+  readonly setOn: (on: boolean) => void;
+  readonly selected: SelectedPixels;
+  /** The selection's own pixels to tint over the screenshot shown, or null. */
+  readonly painted: Painted | null;
+}
+
+/**
+ * What **Show selected pixels** shows of the selection `draft` has on the screenshot shown, `selected`, from the
+ * `selections` the capture screen made already. `offered` is whether **Color match** is in the inspector; no tint
+ * shows without it. The switch stays as the user left it for as long as the capture screen is open.
+ */
+export function useSelectedPreview(
+  offered: boolean,
+  draft: Pick<Draft, 'states' | 'colorMatch' | 'ignoreBackground'>,
+  selections: ReadonlyMap<number, Selection>,
+  selected: number | null,
+): SelectedPreview {
+  const [on, setOn] = useState(false);
+  const { states, colorMatch, ignoreBackground } = draft;
+  const pixels = useMemo(
+    () => selectedPixels(states, selections, selected, colorMatch),
+    [states, selections, selected, colorMatch],
+  );
+  return {
+    shaded: ignoreBackground,
+    on,
+    setOn,
+    selected: pixels,
+    painted: offered && on ? pixels.painted : null,
   };
 }

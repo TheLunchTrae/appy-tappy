@@ -604,10 +604,20 @@ select {
   image-rendering: pixelated;
 }
 
-.match-found {
+.match-found,
+div.match-answer {
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+
+/* What shows is for earlier settings until the answer for these arrives. */
+.match-found.updating .match-answer {
+  opacity: 0.55;
+}
+
+.match-status {
+  min-height: 1lh;
 }
 
 .match-key {

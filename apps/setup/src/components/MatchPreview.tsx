@@ -4,17 +4,18 @@ import { type ReactNode, useEffect, useMemo, useRef } from 'react';
 
 import {
   type Answered,
+  type Painted,
+  SELECTED_TINT,
   type Tint,
   barLegend,
   inkLines,
-  layersOf,
   nearLine,
   paint,
   tintsFor,
 } from '../lib/matchPreview.ts';
 import { hex } from '../lib/pixels.ts';
 import type { Rect, Size } from '../lib/region.ts';
-import type { MatchPreview } from '../lib/useMatchPreview.ts';
+import type { MatchPreview, SelectedPreview } from '../lib/useMatchPreview.ts';
 
 /** What each target's switch is called, and what its tint means. */
 const SWITCHES = {
@@ -107,6 +108,25 @@ function Found({ tint, region }: { readonly tint: Answered; readonly region: Rec
   }
 }
 
+/**
+ * What a switch found, in a live region that stays mounted while its content changes, so a screen reader hears each
+ * change. While the answer for the settings now is awaited, what it shows is for earlier ones: it says so, and
+ * dims.
+ */
+function Results({ updating, children }: { readonly updating: boolean; readonly children: ReactNode }) {
+  return (
+    <div className={updating ? 'match-found updating' : 'match-found'} aria-live="polite" aria-busy={updating}>
+      {children === null ? null : (
+        <>
+          {children}
+          {/* Always there, so the fields below do not jump as the slider is dragged. */}
+          <p className="note match-status">{updating ? 'Updating…' : ''}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** The preview's switch, and under it what the tint shows or why there is none. */
 export function MatchPreviewField({
   preview,
@@ -116,7 +136,7 @@ export function MatchPreviewField({
   /** The draft's region, which a reference's count is for. */
   readonly region: Rect | null;
 }) {
-  const { target, on, plan, tint, error } = preview;
+  const { target, on, plan, tint, updating, error } = preview;
   if (target === null) {
     return null;
   }
@@ -140,44 +160,76 @@ export function MatchPreviewField({
       <span id="match-preview-help" className="note">
         {help}
       </span>
-      {plan === null ? null : plan.kind === 'blocked' ? (
-        <p className="note" role="status">
-          {plan.why}
-        </p>
-      ) : error !== null ? (
-        <p className="warn">{error}</p>
-      ) : tint === null ? (
-        <p className="note">Looking for matching pixels…</p>
-      ) : (
-        <div className="match-found" aria-live="polite">
-          <Found tint={tint} region={region} />
-        </div>
-      )}
+      <Results updating={updating && tint !== null}>
+        {plan === null ? null : plan.kind === 'blocked' ? (
+          <p className="note">{plan.why}</p>
+        ) : error !== null ? (
+          <p className="warn">{error}</p>
+        ) : tint === null ? (
+          <p className="note">Looking for matching pixels…</p>
+        ) : (
+          <div className="match-answer">
+            <Found tint={tint} region={region} />
+          </div>
+        )}
+      </Results>
     </div>
   );
 }
 
 /**
- * The tint, drawn at the screenshot's own pixels inside the frame that holds the screenshot, so it stays on its
- * pixels at any size the frame shows at. It takes no pointer events.
+ * Under **Color match**: a switch that tints the pixels the selection takes on the screenshot shown. The selection
+ * is remade once the slider rests, so the tint is the last selection's until then.
+ */
+export function SelectedPixelsField({ preview }: { readonly preview: SelectedPreview }) {
+  const { shaded, on, selected } = preview;
+  return (
+    <div className="field">
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          role="switch"
+          className="switch"
+          aria-checked={on}
+          aria-describedby="selected-pixels-help"
+          checked={on}
+          onChange={(event) => {
+            preview.setOn(event.target.checked);
+          }}
+        />
+        Show selected pixels
+      </label>
+      <span id="selected-pixels-help" className="note">
+        Tints the pixels the selection takes on the screenshot shown. It follows Color match once the slider rests.
+        {shaded ? ' While Ignore the background is on, the pixels the selection leaves out are shaded as well.' : ''}
+      </span>
+      <Results updating={on && selected.updating && selected.painted !== null}>
+        {on ? (
+          <p className="note match-answer">
+            {selected.painted === null ? null : <Key tint={SELECTED_TINT} />}
+            {selected.line}
+          </p>
+        ) : null}
+      </Results>
+    </div>
+  );
+}
+
+/**
+ * A tint, drawn at the screenshot's own pixels inside the frame that holds the screenshot, so it stays on its pixels
+ * at any size the frame shows at. It takes no pointer events.
  */
 export function MatchOverlay({
-  tint,
+  painted,
   size,
 }: {
-  readonly tint: Answered | null;
+  readonly painted: Painted | null;
   /** The screenshot's size in its own pixels. */
   readonly size: Size;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const area = tint?.request.area ?? null;
-  const pixels = useMemo(
-    () =>
-      tint === null
-        ? null
-        : paint(layersOf(tint.view), tintsFor(tint.request.rule), tint.request.area.width, tint.request.area.height),
-    [tint],
-  );
+  const area = painted?.area ?? null;
+  const pixels = useMemo(() => (painted === null ? null : paint(painted)), [painted]);
   useEffect(() => {
     const context = canvas.current?.getContext('2d');
     if (context === null || context === undefined || pixels === null || area === null) {

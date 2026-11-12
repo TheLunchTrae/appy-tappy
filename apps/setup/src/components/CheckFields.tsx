@@ -24,12 +24,15 @@ export function SelectFields({
   tool,
   colorMatch,
   canSelect,
+  preview,
   onTool,
   onColorMatch,
 }: {
   readonly tool: SelectTool;
   readonly colorMatch: number;
   readonly canSelect: boolean;
+  /** How to see what the color match selects, under its slider, on a screen that remakes selections as it moves. */
+  readonly preview?: ReactNode;
   readonly onTool: (tool: SelectTool) => void;
   readonly onColorMatch: (value: number) => void;
 }) {
@@ -92,6 +95,7 @@ export function SelectFields({
           </span>
         </div>
       )}
+      {tool === 'box' ? null : preview}
     </>
   );
 }

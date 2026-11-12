@@ -35,7 +35,7 @@ import { type Point, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
 import { PinPicker } from './PinPicker.tsx';
 import { Hint } from './Hint.tsx';
-import { MatchOverlay, MatchPreviewField } from './MatchPreview.tsx';
+import { MatchOverlay, MatchPreviewField, SelectedPixelsField } from './MatchPreview.tsx';
 import { FIX_HINT, READ_WITH_HINT, guessPin, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
@@ -45,7 +45,7 @@ import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useLiveCheck } from '../lib/useLiveCheck.ts';
-import { useMatchPreview } from '../lib/useMatchPreview.ts';
+import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
@@ -246,6 +246,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     shownPicture,
   );
   const previewField = <MatchPreviewField preview={preview} region={draft.region} />;
+  // Color match is in the inspector while a state's thing is selected with Snap or Click.
+  const colorMatched = editing === null && step === 'where' && draft.kind === 'state' && tool !== 'box';
+  const selectedPreview = useSelectedPreview(colorMatched, draft, selection.selections, selected);
   const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
   const frameStyle = {
     left: (space.width - shown.width) / 2,
@@ -572,7 +575,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             ) : shownPicture === null ? null : (
               <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
             )}
-            {shownPicture === null ? null : <MatchOverlay tint={preview.tint} size={shownPicture} />}
+            {shownPicture === null ? null : (
+              <MatchOverlay painted={selectedPreview.painted ?? preview.painted} size={shownPicture} />
+            )}
             {native === undefined ? null : (
               <RegionSurface
                 size={native}
@@ -750,6 +755,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   tool={tool}
                   colorMatch={draft.colorMatch}
                   canSelect={shownPicture !== null}
+                  preview={<SelectedPixelsField preview={selectedPreview} />}
                   onTool={(next) => {
                     setTool(next);
                     setPicking(null);

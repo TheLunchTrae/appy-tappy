@@ -19,10 +19,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::check_spec::{ColorSpec, RegionSpec, SpecError};
 
-/// The most runs a layer carries, enough for a 3840 by 2160 screenshot full
-/// of text. A picture dithered at the tolerance's edge can hold millions,
-/// tens of megabytes for the UI to read, so a layer with more carries only
-/// its count.
+/// The most runs a layer carries. Runs go to the UI as JSON, and a picture
+/// dithered at a tolerance's edge has a run for every other pixel, so the cap
+/// bounds what one answer costs to send and to read. A layer with more
+/// carries only its count, and the UI says that it tints none of them.
 const MAX_RUNS: usize = 500_000;
 
 /// What makes a pixel match, as the UI describes it.
@@ -114,7 +114,9 @@ pub(crate) fn find(
 ) -> Result<MatchView, SpecError> {
     let area =
         Region::new(area.x, area.y, area.width, area.height).ok_or(SpecError::EmptyRegion)?;
-    let pixels = pixels_in(image, area).ok_or(SpecError::Outside)?;
+    // The one place that decides whether the rectangle lies on the picture.
+    let cropped = image.crop(area).ok_or(SpecError::Outside)?;
+    let pixels = cropped.pixels().iter().copied();
     Ok(match rule {
         MatchRule::Ink { ink, tolerance } => {
             let reader = DigitReader::new(ink.into(), tolerance);
@@ -140,7 +142,6 @@ pub(crate) fn find(
                 layers(pixels.map(|[blue, green, red, _]| {
                     check.near(Rgb { red, green, blue }).then_some(0)
                 }));
-            let cropped = image.crop(area).ok_or(SpecError::Outside)?;
             let average = average(&cropped);
             MatchView::Color {
                 near,
@@ -150,27 +151,6 @@ pub(crate) fn find(
             }
         },
     })
-}
-
-/// The pixels of `area` on `image`, row by row from the top, or `None` when
-/// `area` reaches past the image.
-fn pixels_in(image: &Image, area: Region) -> Option<impl Iterator<Item = [u8; 4]>> {
-    if !area.fits(image.size()) {
-        return None;
-    }
-    let row = usize::try_from(image.size().width).ok()?;
-    let left = usize::try_from(area.x()).ok()?;
-    let right = usize::try_from(area.right()).ok()?;
-    let top = usize::try_from(area.y()).ok()?;
-    let height = usize::try_from(area.size().height).ok()?;
-    Some(
-        image
-            .pixels()
-            .chunks_exact(row)
-            .skip(top)
-            .take(height)
-            .flat_map(move |row| row.get(left..right).unwrap_or_default().iter().copied()),
-    )
 }
 
 /// The `N` layers of a rectangle whose pixels, row by row from the top, are

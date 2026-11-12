@@ -68,16 +68,23 @@ This page covers what the user guide leaves out.
   A color check's answer carries that average, its distance from the color,
   and what the check reads on the rectangle. The answer holds each kind of
   pixel as a count and as runs in the rectangle, spelled as a selection's
-  are. A kind with more than 500,000 runs carries only its count, and the
-  page says that it tints none of them. The page draws the runs
+  are. The runs cross to the page as JSON, so the answer caps them: a kind
+  with more than 500,000 runs carries only its count, and the page says that
+  it tints none of them. The page draws the runs
   (`lib/matchPreview.ts`) on a canvas of the rectangle's own pixels inside
   the frame that holds the screenshot, placed in fractions of the frame, so
   the tint stays on its pixels at any size the frame shows at, and under the
   surface that takes the pointer. The page asks for a reference's characters
   on the whole screenshot and counts those in the region itself, so moving
-  the region asks nothing. A whole 3840 by 2160 screenshot takes the owner
-  about 25 ms. [State machines](State-machines.md#matching-pixels-preview)
-  maps its requests and answers.
+  the region asks nothing. It keeps at most one request with the owner and
+  sends the newest settings when that one is answered, so the tint follows a
+  dragged slider as fast as the owner answers.
+  [State machines](State-machines.md#matching-pixels-preview) maps its
+  requests and answers. **Show selected pixels** asks the owner nothing of
+  its own: it draws the runs the `select` answer for the screenshot shown
+  already carries, on the same canvas. That selection is remade once
+  **Color match** rests (`SELECT_DELAY_MS`), so until then the tint is the
+  last selection's and its count says that it is updating.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to

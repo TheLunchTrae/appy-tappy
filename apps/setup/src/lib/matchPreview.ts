@@ -1,10 +1,11 @@
 // The matching pixels preview: which pixels of the screenshot shown a color setting takes, as the setup app's own
 // readers decide, tinted over the screenshot while the user picks the color and moves its tolerance.
 
-import type { Layer, MatchRule, MatchView } from './bindings.ts';
+import type { Layer, MatchRule, MatchView, SelectStep } from './bindings.ts';
 import type { Draft } from './check.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
+import type { Selection } from './selection.ts';
 
 /** The color settings that decide pixel by pixel: a reference's characters, a bar's two colors, a color check's. */
 export type PreviewTarget = MatchRule['kind'];
@@ -75,10 +76,23 @@ export interface Answered {
   readonly view: MatchView;
 }
 
-/** The preview's requests and answers. */
+/** A request to send, and the number its answer must carry. */
+interface Sent {
+  readonly id: number;
+  readonly request: PreviewRequest;
+}
+
+/**
+ * The preview's requests and answers. It is idle while `flight` is null, in flight while a request is out, and in
+ * flight with one queued while `queued` also holds the newest request wanted since.
+ */
 export interface Preview {
-  /** The number of the request whose answer is awaited, or null while none is. */
-  readonly awaiting: number | null;
+  /** The number of the last request sent, so each request gets its own. */
+  readonly sent: number;
+  /** The request whose answer is awaited, or null while none is. */
+  readonly flight: Sent | null;
+  /** The newest request wanted since the one in flight went out, which goes out when that one is answered. */
+  readonly queued: PreviewRequest | null;
   /** The newest answer, kept while the next one is awaited. */
   readonly shown: Answered | null;
   /** Why the newest request failed. */
@@ -86,33 +100,102 @@ export interface Preview {
 }
 
 /** The preview before anything is asked, and once it is turned off. */
-export const NO_PREVIEW: Preview = { awaiting: null, shown: null, error: null };
+export const NO_PREVIEW: Preview = { sent: 0, flight: null, queued: null, shown: null, error: null };
 
 export type PreviewEvent =
-  /** Request `id` was made. */
-  | { readonly kind: 'asked'; readonly id: number }
-  | { readonly kind: 'answered'; readonly id: number; readonly request: PreviewRequest; readonly view: MatchView }
+  /** The settings ask for `request` now. */
+  | { readonly kind: 'wanted'; readonly request: PreviewRequest }
+  | { readonly kind: 'answered'; readonly id: number; readonly view: MatchView }
   | { readonly kind: 'failed'; readonly id: number; readonly message: string }
   /** The preview was turned off, or has nothing to ask. */
   | { readonly kind: 'cleared' };
 
+/** The preview after an event, and the request to send now, if any. */
+export interface Stepped {
+  readonly preview: Preview;
+  readonly send: Sent | null;
+}
+
+function sameRequest(a: PreviewRequest, b: PreviewRequest): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** `preview` with `request` sent under the next number. */
+function sending(preview: Preview, request: PreviewRequest): Stepped {
+  const send = { id: preview.sent + 1, request };
+  return { preview: { ...preview, sent: send.id, flight: send, queued: null, error: null }, send };
+}
+
+/** `preview` once the request in flight is settled: the queued request goes out, or the preview is idle. */
+function settled(preview: Preview): Stepped {
+  return preview.queued === null
+    ? { preview: { ...preview, flight: null }, send: null }
+    : sending(preview, preview.queued);
+}
+
 /**
- * The preview after `event`. Only the newest request's answer or failure counts: one that carries another number,
- * or that arrives once the preview is cleared, changes nothing.
+ * The preview after `event`, and the request to send. At most one request is in flight. A request wanted meanwhile
+ * waits, and a newer one takes its place, so a burst of changes sends the first and the last. Only the answer or
+ * failure of the request in flight counts: one that carries another number, such as one sent before the preview was
+ * cleared, changes nothing and sends nothing.
  */
-export function step(preview: Preview, event: PreviewEvent): Preview {
+export function step(preview: Preview, event: PreviewEvent): Stepped {
   switch (event.kind) {
-    case 'asked':
-      return { ...preview, awaiting: event.id, error: null };
+    case 'wanted':
+      if (preview.flight === null) {
+        return sending(preview, event.request);
+      }
+      // The request in flight already asks this, so nothing needs to follow it.
+      return {
+        preview: { ...preview, queued: sameRequest(preview.flight.request, event.request) ? null : event.request },
+        send: null,
+      };
     case 'answered':
-      return event.id === preview.awaiting
-        ? { awaiting: null, shown: { request: event.request, view: event.view }, error: null }
-        : preview;
+      if (event.id !== preview.flight?.id) {
+        return { preview, send: null };
+      }
+      return settled({ ...preview, shown: { request: preview.flight.request, view: event.view }, error: null });
     case 'failed':
-      return event.id === preview.awaiting ? { awaiting: null, shown: null, error: event.message } : preview;
+      if (event.id !== preview.flight?.id) {
+        return { preview, send: null };
+      }
+      return settled({ ...preview, shown: null, error: event.message });
     case 'cleared':
-      return NO_PREVIEW;
+      return { preview: { ...NO_PREVIEW, sent: preview.sent }, send: null };
   }
+}
+
+/**
+ * Runs a preview: sends each request {@link step} orders with `ask`, and steps with its answer or failure under the
+ * number the request was sent with. `show` hears the preview after each step. The function it returns takes the
+ * request the settings want now, or null to clear the preview.
+ */
+export function previewDriver(
+  ask: (request: PreviewRequest) => Promise<MatchView>,
+  show: (preview: Preview) => void,
+  describe: (error: unknown) => string,
+): (request: PreviewRequest | null) => void {
+  let preview = NO_PREVIEW;
+  const apply = (event: PreviewEvent): void => {
+    const stepped = step(preview, event);
+    ({ preview } = stepped);
+    show(preview);
+    const { send } = stepped;
+    if (send === null) {
+      return;
+    }
+    ask(send.request).then(
+      (view) => {
+        apply({ kind: 'answered', id: send.id, view });
+      },
+      (error: unknown) => {
+        apply({ kind: 'failed', id: send.id, message: describe(error) });
+      },
+    );
+  };
+  return (request) => {
+    apply(request === null ? { kind: 'cleared' } : { kind: 'wanted', request });
+  };
 }
 
 /**
@@ -130,6 +213,18 @@ export function tinted(preview: Preview, request: PreviewRequest | null): Answer
     shown.request.rule.kind === request.rule.kind &&
     sameRect(shown.request.area, request.area);
   return same ? shown : null;
+}
+
+/**
+ * Whether the answer for `request` is still awaited, so what shows is for earlier settings: nothing answers it yet,
+ * and it has not failed.
+ */
+export function awaited(preview: Preview, request: PreviewRequest | null): boolean {
+  if (request === null) {
+    return false;
+  }
+  const { flight, shown, error } = preview;
+  return flight !== null || (error === null && (shown === null || !sameRequest(shown.request, request)));
 }
 
 /** The layers of `view`, in the order {@link tintsFor} gives their tints. */
@@ -152,6 +247,8 @@ export interface Tint {
 }
 
 const MAGENTA: Color = { red: 255, green: 0, blue: 255 };
+/** The tint of a selection's own pixels, which have no one color to stand out against. */
+export const SELECTED_TINT: Tint = { color: MAGENTA, striped: false };
 const GREEN: Color = { red: 0, green: 255, blue: 0 };
 
 function apart(a: Color, b: Color): number {
@@ -195,17 +292,29 @@ function packed(color: Color, alpha: number): number {
   return new Uint32Array(new Uint8Array([color.red, color.green, color.blue, alpha]).buffer)[0] ?? 0;
 }
 
+/** The runs of one kind of pixel, or null when there are too many to draw. */
+type Runs = Pick<Layer, 'spans'>;
+
+/** What to tint over the screenshot: the runs of each layer within `area`, and each layer's tint. */
+export interface Painted {
+  /** In the screenshot's pixels. */
+  readonly area: Rect;
+  readonly layers: readonly Runs[];
+  readonly tints: readonly Tint[];
+}
+
+/** An answer as the overlay tints it. */
+export function paintedOf(answered: Answered): Painted {
+  return { area: answered.request.area, layers: layersOf(answered.view), tints: tintsFor(answered.request.rule) };
+}
+
 /**
- * The RGBA pixels that tint `layers` over a `width`-wide rectangle, each with its entry in `tints`: clear where no
+ * The RGBA pixels that tint `painted`'s layers over its rectangle, each with its entry in `tints`: clear where no
  * layer has a pixel. A layer with too many runs to draw is left clear.
  */
-export function paint(
-  layers: readonly Layer[],
-  tints: readonly Tint[],
-  width: number,
-  height: number,
-): Uint8ClampedArray<ArrayBuffer> {
-  const pixels = new Uint32Array(width * height);
+export function paint({ area, layers, tints }: Painted): Uint8ClampedArray<ArrayBuffer> {
+  const { width } = area;
+  const pixels = new Uint32Array(width * area.height);
   layers.forEach((layer, index) => {
     const tint = tints[index];
     if (tint === undefined || layer.spans === null) {
@@ -370,4 +479,57 @@ export function nearLine(layer: Layer, asked: Rect): string {
   }
   const counted = `${ofRegion(layer.count, total)} ${layer.count === 1 ? 'is' : 'are'} within the tolerance on ${layer.count === 1 ? 'its' : 'their'} own.`;
   return layer.spans === null ? `${TOO_MANY} ${counted}` : counted;
+}
+
+/** The selection a state's steps make on its screenshot, as much of it as the capture screen has. */
+interface Selecting {
+  readonly screenshot: number;
+  readonly steps: readonly SelectStep[];
+}
+
+/** What **Show selected pixels** shows of the selection on the screenshot shown. */
+export interface SelectedPixels {
+  /** What is selected, in words, or why nothing shows. */
+  readonly line: string;
+  /** The selection's own pixels to tint, or null. */
+  readonly painted: Painted | null;
+  /** Whether the selection for the color match now is still awaited, so what shows is for an earlier one. */
+  readonly updating: boolean;
+}
+
+/**
+ * What to show of the selection `states` has on the screenshot shown, `selected`, at `colorMatch`. `selections`
+ * holds the selection last made on each screenshot. One made for the same steps at an earlier color match stays
+ * until the new one is made, so the tint does not flicker under the slider.
+ */
+export function selectedPixels(
+  states: readonly Selecting[],
+  selections: ReadonlyMap<number, Selection>,
+  selected: number | null,
+  colorMatch: number,
+): SelectedPixels {
+  const nothing = (line: string, updating = false): SelectedPixels => ({ line, painted: null, updating });
+  if (selected === null) {
+    return nothing('Selected pixels show on a screenshot. Select the one the thing was selected on.');
+  }
+  const state = states.find((each) => each.screenshot === selected);
+  if (state === undefined || state.steps.length === 0) {
+    return nothing('Nothing is selected on this screenshot yet. Select the thing on it with Snap or Click.');
+  }
+  const made = selections.get(selected);
+  if (made === undefined || made.steps !== state.steps) {
+    return nothing('Selecting…', true);
+  }
+  const updating = made.colorMatch !== colorMatch;
+  const { view } = made;
+  if (view === null) {
+    return nothing('Nothing is selected at this color match. Change it, or select the thing again.', updating);
+  }
+  const count = view.spans.reduce((sum, [start, end]) => sum + end - start, 0);
+  const box = area(view.region);
+  return {
+    line: `${count.toLocaleString('en-US')} of the ${pixelsText(box)} in the box around the selection (${share(count, box)}) are selected.`,
+    painted: { area: view.region, layers: [view], tints: [SELECTED_TINT] },
+    updating,
+  };
 }
