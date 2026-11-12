@@ -144,14 +144,12 @@ It proposes no colors, and says why and what to do, when:
   leaves too few strips of the bar free from end to end. Around a label or
   an icon, draw the region over a strip of the bar above or below it. Over
   a busy background, draw the region closer to the bar.
-- Something lies over part of the bar, such as a large label, an icon at
-  one end, or a shine in another shade. The colors read the screenshot
-  right, but would read other fills wrong, because the bar's countable
-  pixels are not spread evenly along it. Draw the region over a strip of
-  the bar that is clear from end to end, or pick the colors by hand.
-- The two colors do not read the region as full as the bar looks: they also
-  show beside the bar, or part of the bar has another shade. Draw the region
-  more closely.
+- Something lies over part of the bar, such as a large label or an icon at
+  one end, or one part of the bar has a shine in another shade. The colors
+  read the screenshot right, but would read other fills wrong, because the
+  pixels that count are not spread evenly along the bar, or are fewer in one
+  part than in the other. Draw the region over a strip of the bar that is
+  clear from end to end, or pick the colors by hand.
 - The colors found on one screenshot do not read another that shows one of
   them. The bar changes color as it fills or from one screenshot to the
   next, or a label, an icon, or something else such as a tooltip covers most
@@ -163,6 +161,10 @@ It proposes no colors, and says why and what to do, when:
 Where two colors can read the bar, pick them by hand then: the check reads
 any bar whose filled and empty parts each keep one color, whichever way it
 fills.
+
+Text or marks drawn over the bar in one of its own two colors cannot be told
+from the bar on a screenshot where they blend into it, whoever picks the
+colors. So check the list of readings at more than one fill.
 
 ## Select the thing in a state
 

@@ -123,10 +123,11 @@ pub enum NoBar {
         /// The screenshot.
         image: usize,
     },
-    /// The two colors read a screenshot as its layout looks, but the
-    /// pixels they count are not spread evenly along the bar, as under
-    /// something that lies over part of it: at another fill the reader
-    /// would be further off than it may be.
+    /// The two colors read a screenshot as its layout looks, but at another
+    /// fill the reader would be further off than it may be: the pixels
+    /// they count are not spread evenly along the bar, as under something
+    /// that lies over part of it, or they are fewer in one part than in
+    /// the other, as under a shine that moves with the fill.
     Uneven {
         /// The screenshot.
         image: usize,
@@ -444,18 +445,17 @@ fn laid_out(columns: &[Rgb], bar: BarFill) -> Option<(Shown, Range<usize>)> {
     Some((shown, start..start.saturating_add(inner.len())))
 }
 
-/// Whether the pixels of `image` that the reader counts with `bar` are
-/// spread evenly along `extent`, the columns the bar takes up.
+/// Whether the pixels the reader counts, `counted` of them in each column,
+/// are spread evenly along `extent`, the columns the bar takes up.
 ///
 /// The reader divides the pixels of the filled color by those of either
 /// color. So were the fill to end at a column, it would read the share of
 /// the countable pixels that lie before that column, while the fill would
 /// be that column's place along the bar. Where something lies over part of
-/// the bar, such as a label, an icon, or a shine of another color, those
-/// two come apart, though the reader agrees with the layout at the fill the
+/// the bar and stays there, such as a label or an icon, those two come
+/// apart, though the reader agrees with the layout at the fill the
 /// screenshot shows. They may differ by [`AGREE`] at no column.
-fn spread_evenly(image: &Image, bar: BarFill, extent: &Range<usize>) -> bool {
-    let counted = Strip::new(image).counted(bar);
+fn spread_evenly(counted: &[usize], extent: &Range<usize>) -> bool {
     let total: usize = counted.iter().sum();
     let mut before: usize = counted.iter().take(extent.start).sum();
     let mut along = counted.iter().skip(extent.start);
@@ -464,6 +464,42 @@ fn spread_evenly(image: &Image, bar: BarFill, extent: &Range<usize>) -> bool {
         let means = place as f64 * 100.0 / extent.len() as f64;
         before = before.saturating_add(along.next().copied().unwrap_or_default());
         (reads - means).abs() <= AGREE
+    })
+}
+
+/// Whether the reader counts a column of the filled part and a column of
+/// the empty part alike enough, where `counted` says how many pixels it
+/// counts in each column and the bar's `filled` and then `empty` columns
+/// lie at the two ends of `extent`.
+///
+/// What lowers the count in one part only and moves with the fill, such as
+/// a shine in another shade along the whole filled part, leaves the counted
+/// pixels spread evenly while the bar is nearly full or nearly empty. But
+/// with `f` pixels counted in a filled column and `e` in an empty one, a
+/// bar filled to a share `p` of its length reads
+/// `p * f / (p * f + (1 - p) * e)`, which may differ from `p` by [`AGREE`]
+/// at no fill. A column's count is taken where the
+/// most are counted in its part, which is where nothing else lies over it:
+/// a label, an icon, or a rounded end lowers the count in some columns
+/// only, and [`spread_evenly`] holds that against the colors.
+fn parts_count_alike(
+    counted: &[usize],
+    extent: &Range<usize>,
+    filled: usize,
+    empty: usize,
+) -> bool {
+    let most = |columns: Range<usize>| {
+        let counts = counted.get(columns).unwrap_or_default();
+        counts.iter().copied().max().unwrap_or_default() as f64
+    };
+    let in_filled = most(extent.start..extent.start.saturating_add(filled));
+    let in_empty = most(extent.end.saturating_sub(empty)..extent.end);
+    (0..=extent.len()).all(|place| {
+        let share = place as f64 / extent.len() as f64;
+        let as_filled = share * in_filled;
+        let as_empty = (1.0 - share) * in_empty;
+        let reads = as_filled / (as_filled + as_empty);
+        ((reads - share) * 100.0).abs() <= AGREE
     })
 }
 
@@ -477,7 +513,7 @@ enum Verdict {
     Absent,
     /// It shows the bar and the reader agrees, but the reader would not at
     /// other fills: the pixels it counts are not spread evenly along the
-    /// bar.
+    /// bar, or not alike in its two parts.
     Uneven,
     /// It shows one of the colors on a part's worth of columns, but not
     /// the bar in both, or the reader reads it otherwise than it looks.
@@ -500,8 +536,14 @@ fn verdict(image: &Image, columns: &[Rgb], bar: BarFill) -> Verdict {
         .percent(image)
         .map_or(f64::INFINITY, |reads| (reads.raw() - shown.fill()).abs());
     if off > AGREE {
-        Verdict::Differs
-    } else if spread_evenly(image, bar, &extent) {
+        return Verdict::Differs;
+    }
+    let counted = Strip::new(image).counted(bar);
+    let alike = match shown {
+        Shown::Both { filled, empty } => parts_count_alike(&counted, &extent, filled, empty),
+        Shown::Filled | Shown::Empty => true,
+    };
+    if alike && spread_evenly(&counted, &extent) {
         Verdict::Shows { shown, off }
     } else {
         Verdict::Uneven
@@ -1858,6 +1900,112 @@ mod tests {
         };
         assert!(!shades(32));
         assert!(shades(33));
+    }
+
+    /// A bar 200 by 20 with its first `filled` columns filled, and a band
+    /// of another shade over `lanes` lanes in the middle of one part: the
+    /// filled part, or else the empty one.
+    fn banded(filled: u32, lanes: u32, on_the_fill: bool) -> Image {
+        let shine = Rgb {
+            red: 120,
+            green: 240,
+            blue: 130,
+        };
+        let top = 10_u32.saturating_sub(lanes.checked_div(2).unwrap());
+        picture(200, 20, move |x, y| {
+            let band = y >= top && y < top.saturating_add(lanes);
+            match (x < filled, band) {
+                (true, true) if on_the_fill => shine,
+                (false, true) if !on_the_fill => WHITE,
+                (true, _) => GREEN,
+                (false, _) => GRAY,
+            }
+        })
+    }
+
+    #[test]
+    fn a_shine_that_moves_with_the_fill_is_refused() {
+        let uneven = Err(NoBar::Uneven { image: 0 });
+        // The reader agrees near either end of the bar, and would be 9
+        // points off at a little over half.
+        assert_eq!(detect_bar(&banded(180, 6, true), &[]), uneven);
+        // Over 4 lanes of 20 it would be 6 off, at any fill it is seen at.
+        assert_eq!(detect_bar(&banded(40, 4, true), &[]), uneven);
+        assert_eq!(detect_bar(&banded(180, 4, true), &[]), uneven);
+        assert_eq!(
+            detect_bar(&banded(180, 4, true), &[banded(150, 4, true)]),
+            uneven
+        );
+        // Over 3 lanes it would be 4 off, which the reader may be.
+        let rough = BarProposal {
+            rough: true,
+            ..alone(GREEN, GRAY)
+        };
+        assert_eq!(detect_bar(&banded(40, 3, true), &[]), Ok(rough.clone()));
+        assert_eq!(
+            detect_bar(&banded(180, 3, true), &[]),
+            Ok(alone(GREEN, GRAY))
+        );
+        // The same of a band over the empty part only, as on a track with
+        // a groove.
+        assert_eq!(detect_bar(&banded(20, 4, false), &[]), uneven);
+        assert_eq!(detect_bar(&banded(160, 4, false), &[]), uneven);
+        assert_eq!(
+            detect_bar(&banded(20, 3, false), &[]),
+            Ok(alone(GREEN, GRAY))
+        );
+        assert_eq!(detect_bar(&banded(160, 3, false), &[]), Ok(rough));
+    }
+
+    #[test]
+    fn a_shine_across_both_parts_counts_the_same_in_each() {
+        let glossy = |filled: u32| {
+            picture(200, 20, move |x, y| {
+                let plain = if x < filled { GREEN } else { GRAY };
+                match y {
+                    8..12 => mix(plain, WHITE, 400),
+                    _ => plain,
+                }
+            })
+        };
+        for filled in [40, 100, 180] {
+            assert_eq!(detect_bar(&glossy(filled), &[]), Ok(alone(GREEN, GRAY)));
+        }
+    }
+
+    #[test]
+    fn the_parts_count_alike_while_no_fill_would_read_too_far_off() {
+        // A bar of 100 columns, 40 of them filled, between two columns of
+        // something else, with so many pixels counted in each filled column
+        // and in each empty one.
+        let alike = |in_filled: usize, in_empty: usize| {
+            let mut counted = vec![0];
+            counted.extend(iter::repeat_n(in_filled, 40));
+            counted.extend(iter::repeat_n(in_empty, 60));
+            counted.push(0);
+            parts_count_alike(&counted, &(1..101), 40, 60)
+        };
+        assert!(alike(20, 20));
+        // The worst fill is a little over or under half: 4.1 points off
+        // at 17 to 20, and 5.6 at 16 to 20. Whichever part counts fewer,
+        // the worst is the same, at the fill as far from half the other
+        // way.
+        assert!(alike(17, 20));
+        assert!(!alike(16, 20));
+        assert!(alike(20, 17));
+        assert!(!alike(20, 16));
+        // A column counts what the most of its part do: one column where
+        // nothing else lies over the bar is enough.
+        let mut counted = vec![16; 40];
+        counted.extend(iter::repeat_n(20, 60));
+        assert!(!parts_count_alike(&counted, &(0..100), 40, 60));
+        counted[39] = 20;
+        assert!(parts_count_alike(&counted, &(0..100), 40, 60));
+        let mut counted = vec![20; 40];
+        counted.extend(iter::repeat_n(16, 60));
+        assert!(!parts_count_alike(&counted, &(0..100), 40, 60));
+        counted[40] = 20;
+        assert!(parts_count_alike(&counted, &(0..100), 40, 60));
     }
 
     #[test]

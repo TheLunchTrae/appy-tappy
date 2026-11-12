@@ -221,27 +221,38 @@ what it is for.
   then hold over those lanes on every screenshot, with the reader still
   reading the whole region. A fill that is striped, segmented, or fading in
   every lane leaves no such lane and stays refused. One that is so in only
-  some lanes leaves the others, and is held to the even spread below. The
+  some lanes leaves the others, and is held to the two rules below. The
   proposal says that it went by part of the region.
 - **Even spread.** The reader divides the pixels of the filled color by
-  those of either color, so what lies over part of the bar and has neither
-  color shifts the reading by an amount that depends on the fill: a label,
-  an icon, a shine in another shade. A screenshot shows that at one fill
-  only, where the reader may well agree. So on every screenshot that shows
-  the bar, the pixels the reader counts have to be spread evenly along the
-  bar: were the fill to end at any column, the share of the counted pixels
-  before that column may differ from the column's place along the bar by
-  no more than `AGREE`. A region that fails is refused, whichever way the
-  colors were found.
+  those of either color. So what lies over part of the bar, stays there, and
+  has neither color shifts the reading by an amount that depends on the
+  fill: a label, an icon, a fade in some lanes. A screenshot shows that at
+  one fill only, where the reader may well agree. So on every screenshot
+  that shows the bar, the pixels the reader counts have to be spread evenly
+  along the bar: were the fill to end at any column, the share of the
+  counted pixels before that column may differ from the column's place along
+  the bar by no more than `AGREE`.
+- **Even parts.** What lowers the count in one part only and moves with the
+  fill, such as a shine in another shade along the whole filled part, leaves
+  the counted pixels spread evenly while the bar is nearly full or nearly
+  empty. So on every screenshot that shows both parts, the detector takes
+  what the reader counts in a column of each part, where the most are
+  counted, which is where nothing else lies over the bar. From those two
+  counts it works out what every fill would read, and none may differ from
+  the fill by more than `AGREE`. A shine across both parts lowers both
+  counts alike and passes.
 
 A refusal carries a `NoBar` reason. The detector does not find a bar drawn as
 separate segments, a striped, textured, or fading fill, a bar with a trail
-between its parts, a bar under a label or an icon that leaves too few lanes
-free or takes the reader too far off at some fill, or a bar that fills from
-its middle. A fill that fades so little along the bar that it stays one plain
-color is proposed, and every screenshot must still read with it. The reader
-reads some of those bars with hand-picked colors; supporting them here needs a
-wider detector, not another reader.
+between its parts, a bar with a shine in another shade on one part only, a bar
+under a label or an icon that leaves too few lanes free or takes the reader
+too far off at some fill, or a bar that fills from its middle. A fill that
+fades so little along the bar that it stays one plain color is proposed, and
+every screenshot must still read with it. Text or marks in one of the bar's
+own two colors cannot be told from the bar on a screenshot where they blend
+into a part, with detected colors or hand-picked ones. The reader reads some
+of those bars with hand-picked colors; supporting them here needs a wider
+detector, not another reader.
 
 ## Read interval
 
