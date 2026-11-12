@@ -128,17 +128,8 @@ impl DraftStore {
     ///
     /// Returns the error from listing the folder.
     pub(crate) fn list(&self) -> io::Result<Vec<DraftSummary>> {
-        let entries = match fs::read_dir(&self.folder) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            entries => entries?,
-        };
         let mut drafts = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            let Ok(id) = entry.file_name().into_string() else {
-                continue;
-            };
-            let folder = entry.path();
+        for (id, folder) in self.entries()? {
             if !is_draft_id(&id) || !folder.join(DRAFT_FILE).is_file() {
                 continue;
             }
@@ -216,21 +207,29 @@ impl DraftStore {
     /// Removes the folders of saves that stopped before they were put in
     /// place.
     fn remove_unfinished_saves(&self) -> io::Result<()> {
-        let entries = match fs::read_dir(&self.folder) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            entries => entries?,
-        };
-        for entry in entries {
-            let entry = entry?;
-            if entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.ends_with(SAVING))
-            {
-                fs::remove_dir_all(entry.path())?;
+        for (name, folder) in self.entries()? {
+            if name.ends_with(SAVING) {
+                fs::remove_dir_all(folder)?;
             }
         }
         Ok(())
+    }
+
+    /// What the drafts folder holds, by name, leaving out names that are not
+    /// text. No folder yet holds nothing.
+    fn entries(&self) -> io::Result<Vec<(String, PathBuf)>> {
+        let entries = match fs::read_dir(&self.folder) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            entries => entries?,
+        };
+        let mut named = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if let Ok(name) = entry.file_name().into_string() {
+                named.push((name, entry.path()));
+            }
+        }
+        Ok(named)
     }
 
     /// The screenshots of the draft `id`, each a PNG, in the order they were
@@ -467,6 +466,28 @@ mod tests {
             "{broken:?}"
         );
         assert_eq!(store.pictures().expect("lists"), Vec::<String>::new());
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_read_or_removed_says_why() {
+        let (store, root) = scratch("unreadable");
+        let id = store
+            .save(None, &draft(DraftKind::Value, None), &[])
+            .expect("saves");
+        // A file where a draft's folder should be cannot be removed as one.
+        fs::remove_dir_all(store.draft_folder(&id).expect("an ID")).expect("removes");
+        fs::write(store.draft_folder(&id).expect("an ID"), b"not a folder").expect("writes");
+        assert!(store.delete(&id).is_err());
+        // A file where the drafts folder should be cannot be listed.
+        fs::remove_dir_all(&store.folder).expect("removes");
+        fs::write(&store.folder, b"not a folder").expect("writes");
+        assert!(store.list().is_err());
+        assert!(
+            store
+                .save(None, &draft(DraftKind::Value, None), &[])
+                .is_err()
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
