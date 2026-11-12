@@ -54,8 +54,8 @@ Check these in order:
    application's [overlay](Applications.md#overlay), or look at the Values
    page. Each value shows its reading, or why it has none. The
    [log](#appytappys-log) says the same in a line such as
-   `Example App: Progress cannot be read: …`, once each time the reason
-   changes.
+   `Example App: Progress cannot be read: …`, once for each reason until the
+   value reads again.
 2. **Find the reason below.** They are in the order AppyTappy reads a number,
    so the first one that applies is the one to fix.
 3. **If the value reads right,** the automation is what to check:

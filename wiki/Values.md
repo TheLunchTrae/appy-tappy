@@ -179,9 +179,9 @@ While you resize the window, AppyTappy waits until the window keeps one size
 for a quarter of a second before it reads at that size. While the window is
 being resized, is closed or is at a size where no value reads, AppyTappy
 reads nothing. Automations neither run nor undo their changes until it can
-read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once
-which values it doesn't read at the window's size and why, and says it again
-only when the reason changes.
+read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says
+which values it doesn't read at the window's size and why, each reason once
+until the value reads again.
 
 ## When an application updates
 

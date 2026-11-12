@@ -198,8 +198,8 @@ condition still holds, so it neither runs again nor undoes what it changed
 while the window is out of sight.
 A value that does not read at the window's size is not read. Once the
 window has settled at that size, the runtime logs why and that the window
-should be resized or the value fixed at that size, once until the reason
-changes.
+should be resized or the value fixed at that size, each reason once until
+the value is read again.
 
 ## Saved files
 

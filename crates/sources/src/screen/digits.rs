@@ -158,11 +158,21 @@ impl DigitReader {
             })?;
         let expected = text.chars().filter(|character| !character.is_whitespace());
         let found = spans.get(..count).unwrap_or_default();
-        if expected.clone().count() != found.len() {
-            return Err(LearnError::CountMismatch {
-                found: found.len(),
-                expected: expected.count(),
-            });
+        let (found_count, expected_count) = (found.len(), expected.clone().count());
+        match found_count.cmp(&expected_count) {
+            Ordering::Equal => {},
+            Ordering::Less => {
+                return Err(LearnError::FewerCharacters {
+                    found: found_count,
+                    expected: expected_count,
+                });
+            },
+            Ordering::Greater => {
+                return Err(LearnError::MoreCharacters {
+                    found: found_count,
+                    expected: expected_count,
+                });
+            },
         }
         let mut learned = self.glyphs.clone();
         for (character, span) in expected.zip(found) {
@@ -220,7 +230,8 @@ impl DigitReader {
         let mut read = ReadText::default();
         // The first character that matched no glyph, and the glyph closest
         // to it. The read then fails, whatever `number` holds; the
-        // characters after it are still matched, for the error.
+        // characters after it are still matched, for the error, up to
+        // where a number among them ends.
         let mut unknown = None;
         for (position, span) in spans.iter().take(count).enumerate() {
             let closest = self.closest(&self.shape(image, line, *span));
@@ -231,7 +242,7 @@ impl DigitReader {
                 },
                 // Text after a finished number, such as the "HP" in "37% HP",
                 // needs no glyphs.
-                None if number.ended && unknown.is_none() => break,
+                None if number.ended => break,
                 None => {
                     read.push(ReadText::UNKNOWN);
                     if unknown.is_none() {
@@ -647,8 +658,18 @@ pub enum LearnError {
     NoInk,
     /// The image held more than 24 characters.
     TooManyCharacters,
-    /// The image held a different number of characters than the text.
-    CountMismatch {
+    /// The image held fewer characters than the text, as when characters
+    /// share a column of ink.
+    FewerCharacters {
+        /// Characters in the image.
+        found: usize,
+        /// Characters in the text, without whitespace.
+        expected: usize,
+    },
+    /// The image held more characters than the text, as when a character
+    /// is drawn as marks with a gap between them, or something else in the
+    /// region has the characters' color.
+    MoreCharacters {
         /// Characters in the image.
         found: usize,
         /// Characters in the text, without whitespace.
@@ -670,23 +691,17 @@ impl fmt::Display for LearnError {
         match self {
             Self::NoInk => formatter.write_str(NO_INK),
             Self::TooManyCharacters => formatter.write_str(TOO_MANY),
-            Self::CountMismatch { found, expected } => {
-                // Too few come from characters that share a column of ink;
-                // too many from one drawn as marks with a gap between them,
-                // or from something else in the characters' color.
-                let why = match found.cmp(expected) {
-                    Ordering::Less => "characters that touch count as one",
-                    Ordering::Equal | Ordering::Greater => {
-                        "a character drawn as separate marks side by side, as some percent \
-                         signs are, counts once for each mark, and so does anything else in \
-                         the characters' color"
-                    },
-                };
-                write!(
-                    formatter,
-                    "the region shows {found} characters but the text has {expected}; {why}"
-                )
-            },
+            Self::FewerCharacters { found, expected } => write!(
+                formatter,
+                "the region shows {found} characters but the text has {expected}; characters \
+                 that touch count as one"
+            ),
+            Self::MoreCharacters { found, expected } => write!(
+                formatter,
+                "the region shows {found} characters but the text has {expected}; a character \
+                 drawn as separate marks side by side, as some percent signs are, counts once \
+                 for each mark, and so does anything else in the characters' color"
+            ),
             Self::Conflict { learned, new } => write!(
                 formatter,
                 "a character shaped like {learned:?} was given as {new:?}"
@@ -806,7 +821,7 @@ mod tests {
                 "the region holds more than 24 characters",
             ),
             (
-                LearnError::CountMismatch {
+                LearnError::FewerCharacters {
                     found: 2,
                     expected: 3,
                 },
@@ -814,7 +829,7 @@ mod tests {
                  as one",
             ),
             (
-                LearnError::CountMismatch {
+                LearnError::MoreCharacters {
                     found: 5,
                     expected: 3,
                 },
@@ -1088,9 +1103,16 @@ mod tests {
         let mut reader = DigitReader::new(WHITE, 0);
         assert_eq!(
             reader.learn(&digits, "1"),
-            Err(LearnError::CountMismatch {
+            Err(LearnError::MoreCharacters {
                 found: 2,
                 expected: 1
+            })
+        );
+        assert_eq!(
+            reader.learn(&digits, "123"),
+            Err(LearnError::FewerCharacters {
+                found: 2,
+                expected: 3
             })
         );
         assert_eq!(
@@ -1154,6 +1176,17 @@ mod tests {
         // "1%" and then a character never learned.
         let labeled = draw(&["#.###.#.#", "#.#.#.###", "#.###.#.#"]);
         assert_eq!(reader.read(&labeled, false), Ok(Number::new(1.0).unwrap()));
+        // After an unlearned character the read fails, and its error lists
+        // the characters the same way: up to where a number ends.
+        let led = draw(&["#.#.#.###.#.#", "###.#.#.#.###", "#.#.#.###.#.#"]);
+        assert_eq!(
+            reader.read(&led, false),
+            Err(ReadError::UnknownCharacter {
+                position: 0,
+                closest: Some('%'),
+                read: read_text("?1%"),
+            })
+        );
     }
 
     #[test]
@@ -1532,7 +1565,7 @@ mod tests {
         let mut reader = DigitReader::new(WHITE, 40);
         assert_eq!(
             reader.learn(&apart("87%"), "87%"),
-            Err(LearnError::CountMismatch {
+            Err(LearnError::MoreCharacters {
                 found: 5,
                 expected: 3
             })

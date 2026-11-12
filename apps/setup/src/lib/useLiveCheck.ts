@@ -1,6 +1,6 @@
 // The check the capture screen sets up on the live frame, and what it reads.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Reading } from './bindings.ts';
 import { errorText, readValue, setCheck } from './api.ts';
@@ -29,7 +29,10 @@ export function useLiveCheck(built: Built): LiveCheck {
   const [state, setState] = useState<CheckState>({ kind: 'idle' });
   const [reading, setReading] = useState<Reading | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // Counts the checks tried, so a read asked under an older check is dropped when it answers.
+  const tried = useRef(0);
   useEffect(() => {
+    tried.current += 1;
     setProblem(null);
     if (!built.ok) {
       setState({ kind: 'idle' });
@@ -58,12 +61,20 @@ export function useLiveCheck(built: Built): LiveCheck {
   }, [built]);
 
   const readNow = useCallback(async (): Promise<void> => {
+    const asked = tried.current;
+    // A function, because the check after the await must see a check tried meanwhile.
+    const isCurrent = (): boolean => tried.current === asked;
     try {
-      setReading(await readValue());
-      setProblem(null);
+      const read = await readValue();
+      if (isCurrent()) {
+        setReading(read);
+        setProblem(null);
+      }
     } catch (error: unknown) {
-      setReading(null);
-      setProblem(errorText(error));
+      if (isCurrent()) {
+        setReading(null);
+        setProblem(errorText(error));
+      }
     }
   }, []);
   useRepeat(readNow, READING_PAUSE_MS, state.kind === 'set');

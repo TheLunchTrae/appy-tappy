@@ -65,9 +65,10 @@ the same answer on every system, and allocate nothing per read.
 An application that scales its interface, or centers a number whose width
 changes, draws the same character at another fraction of a pixel each time,
 so its edge pixels differ from the ones the reference learned. Counting the
-grid cells that differ cannot tell that from another character: in the
-tests' font at 20 pixels tall, a 0 moved by a fraction of a pixel differs
-from itself in more cells than a 6 differs from an 8.
+grid cells that differ cannot tell that from another character: an edge that
+moves by a fraction of a pixel changes many cells without moving any of
+them far, while a different character has cells far from any of the
+other's.
 
 So a match looks at where the cells differ. A cell that one shape sets is
 apart when the other sets neither that cell nor one beside it, left, right,
@@ -103,9 +104,10 @@ runtime's log:
 - **No number.** Every character matched, and they hold no digits, such as
   `%` alone. The message shows them.
 
-The runtime logs a value's failure once until it reads again or fails at
-another stage (`ReadError::stage`), so a counter that stays unreadable while
-it counts is one line, with what its first failed read showed.
+The runtime logs each stage a value fails at (`ReadError::stage`) once
+until the value reads again, so a counter that stays unreadable while it
+counts is one line, with what its first failed read showed, and a region
+that flickers between two stages is two.
 [Troubleshooting](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
 says what the user does about each.
 
