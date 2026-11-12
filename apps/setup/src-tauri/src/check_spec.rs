@@ -21,6 +21,7 @@ use appytappy_sources::system::Rgb;
 use serde::{Deserialize, Serialize};
 
 use crate::recording::Recording;
+use crate::screenshots::Shots;
 use crate::selection::{self, SelectionSpec};
 
 mod error;
@@ -211,7 +212,7 @@ pub(crate) struct SavedCheck {
 /// checks the UI describes name.
 #[derive(Clone, Copy)]
 pub(crate) struct Session<'a> {
-    pub(crate) screenshots: &'a [Image],
+    pub(crate) screenshots: &'a dyn Shots,
     pub(crate) recording: Option<&'a Recording>,
     pub(crate) references: References<'a>,
 }
@@ -538,7 +539,7 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
 /// Returns a [`SpecError`] when a name breaks the rules or a picture cannot
 /// be cut.
 fn state_pictures(
-    screenshots: &[Image],
+    screenshots: &dyn Shots,
     region: Region,
     states: &[StateSpec],
     tolerance: u8,
@@ -561,7 +562,7 @@ fn state_pictures(
 /// and with a selection the mask of the pixels of `region` it selects on
 /// that screenshot.
 fn picture_of(
-    screenshots: &[Image],
+    screenshots: &dyn Shots,
     region: Region,
     state: &StateSpec,
 ) -> Result<(Image, Option<Mask>), SpecError> {
@@ -691,7 +692,7 @@ fn region_def(region: Region) -> RegionDef {
 }
 
 /// The `region` of screenshot `screenshot`.
-fn cut(screenshots: &[Image], region: Region, screenshot: usize) -> Result<Image, SpecError> {
+fn cut(screenshots: &dyn Shots, region: Region, screenshot: usize) -> Result<Image, SpecError> {
     screenshots
         .get(screenshot)
         .ok_or(SpecError::NoScreenshot)?

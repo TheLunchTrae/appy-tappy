@@ -507,6 +507,33 @@ message: string, } | { "kind": "lost",
 message: string, }>;
 
 /**
+ * A recording of looks as the UI shows it.
+ */
+export type LookRecordingView = DeepReadonly<{
+/**
+ * Its number in the session.
+ */
+id: number,
+/**
+ * Whether it still records.
+ */
+recording: boolean,
+/**
+ * How long it has recorded, or recorded in all once stopped.
+ */
+elapsedMs: number,
+/**
+ * Why the latest frame could not be recorded, or why it stopped by
+ * itself.
+ */
+problem: string | null,
+/**
+ * The indexes of the screenshots it kept, in the order their looks
+ * first showed.
+ */
+kept: Array<number>, }>;
+
+/**
  * [`MediaCommand`] as the file spells it.
  */
 export type MediaCommandDef = DeepReadonly<"play" | "pause" | "next" | "previous">;

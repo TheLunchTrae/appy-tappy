@@ -133,6 +133,7 @@ impl<H: Host> Owner<H> {
     /// nothing until frames come again, with the failure as its problem.
     pub(super) fn capture_failed(&mut self, failure: CaptureFailure) {
         if let Some(recording) = &mut self.recording {
+            let recording = recording.life_mut();
             let error = check_spec::sentence(&failure.error);
             if failure.ended {
                 recording.end(
@@ -163,8 +164,15 @@ impl<H: Host> Owner<H> {
             .latest
             .clone()
             .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
-        self.screenshots.push(image);
-        Ok(self.screenshots.len().saturating_sub(1))
+        Ok(self.screenshots.push(image))
+    }
+
+    /// Releases each of the screenshots `indexes` names. The others keep
+    /// their indexes.
+    pub(crate) fn remove_screenshots(&mut self, indexes: &[usize]) {
+        for &index in indexes {
+            self.screenshots.remove(index);
+        }
     }
 
     /// What the check reads on the newest frame: `None` until a check is

@@ -29,6 +29,8 @@ macro_rules! with_commands {
             commands::take_screenshot() -> usize;
             /// A screenshot at most `maxWidth` wide, or null for an unknown index.
             commands::screenshot(index: usize, max_width: u32) -> Pixels;
+            /// Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes.
+            commands::remove_screenshots(indexes: Vec<usize>) -> ();
             /// What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected.
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;
             commands::set_check(spec: CheckSpec) -> ();
@@ -43,12 +45,18 @@ macro_rules! with_commands {
                 screenshot: usize,
                 more: bool
             ) -> ();
-            /// Stops the recording, keeping its readings for review.
+            /// Stops the recording, of readings or of looks, keeping what it recorded.
             commands::stop_recording() -> ();
-            /// Forgets the recording and its readings.
+            /// Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay.
             commands::discard_recording() -> ();
-            /// The recording and its readings so far, or null without one.
+            /// The recording of readings and its readings so far, or null without one.
             commands::recording_state() -> Option<RecordingView>;
+            /// Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
+            /// screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
+            /// Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
+            commands::start_look_recording(region: RegionSpec, tolerance: u8, screenshot: usize) -> ();
+            /// The recording of looks and the screenshots it kept so far, or null without one.
+            commands::look_recording_state() -> Option<LookRecordingView>;
             /// A recorded reading at most `maxWidth` wide, or null for an unknown index.
             commands::recorded_reading(index: usize, max_width: u32) -> Pixels;
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it

@@ -669,6 +669,28 @@ select {
   max-height: 100%;
 }
 
+/* The strip scrolls once a recording fills it, so its note keeps a width it can be read at. */
+.strip .note {
+  min-width: 240px;
+}
+
+.strip .btn {
+  flex: none;
+}
+
+/* A screenshot's number and time, after a dot when a recording kept it. */
+.thumb .when {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.thumb .when .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--live);
+}
+
 .thumb[aria-pressed='true'] .shot {
   border-color: var(--capture);
 }

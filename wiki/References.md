@@ -38,7 +38,10 @@ every value that reads with it reads, and the editor names them.
 
 Typing what a counter shows on screenshot after screenshot is slow when it
 shows many values. A reference can record its region instead, while you use
-the application, and keep each different reading it shows.
+the application, and keep each different reading it shows. While you make a
+**Number** value, **Record readings** under **How to read it** opens this
+recording on the value's region. The other checks
+[record screenshots](Values.md#record-screenshots) instead.
 
 1. **Start recording.** Draw the region and pick the **Characters' color**
    first. Then select **Start recording** under **Record readings**. The
@@ -77,6 +80,10 @@ reference. One recording keeps at most 200 readings.
 
 If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.
+
+To remove a screenshot, select it, then select **Remove screenshot** with its
+number. One the region is drawn on, or that you labeled, stays: draw the
+region on another screenshot or clear its label first.
 
 ## Delete a reference
 

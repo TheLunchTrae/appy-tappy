@@ -17,6 +17,7 @@ mod overlay;
 mod owner;
 mod pixels;
 mod recording;
+mod screenshots;
 mod selection;
 mod settings;
 mod stores;

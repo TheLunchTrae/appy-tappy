@@ -69,6 +69,7 @@ use crate::owner::{
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
+use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::updates::UpdateOffer;

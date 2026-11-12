@@ -29,8 +29,9 @@ it was about has gone. Four guards drop such stale messages:
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
   generation is dropped.
-- **Recording IDs.** Each recording gets a new `id`, so text that the text
-  reader sends back for a discarded recording is dropped.
+- **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
+  from one counter, so text that the text reader sends back for a recording
+  that was discarded, or replaced by one of either kind, is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
 
@@ -705,8 +706,8 @@ state, such as a late check during the download, changes nothing.
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
 capture slot, `session`, shared by the value preview and the automation
 editor's watch. Starting one stops the other. Its other state is `generation`,
-`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`,
-and `watched`.
+`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`
+(what the capture records, if anything: readings or looks), and `watched`.
 
 ```mermaid
 stateDiagram-v2
@@ -759,10 +760,16 @@ stateDiagram-v2
 
 ### Recording
 
-A recording (`apps/setup/src-tauri/src/recording.rs`) keeps each reading a
-region shows once, for the user to review. It is `None` or a `Recording` whose
-`stopped` field says whether it still records, and whose `problem` says why
-it skips frames or why it stopped by itself.
+The owner's `recording` field is `None` or one `Recorder`
+(`apps/setup/src-tauri/src/recording.rs`): a recording of readings or
+[a recording of looks](#recording-looks). The type holds one of them, so the
+two never run together, and starting one replaces the other. Both hold a
+`Lifecycle` (`recording/lifecycle.rs`), whose `stopped` field says whether it
+still records, and whose `problem` says why it skips frames or why it stopped
+by itself.
+
+A recording of readings keeps each reading a region shows once, for the user
+to review.
 
 ```mermaid
 stateDiagram-v2
@@ -794,12 +801,69 @@ stateDiagram-v2
   (`Recording::end`). Its problem says to change window, and **Record more**
   and a new **Record** are refused. Its readings stay for review, so a
   reference can still be saved from them.
+- Starting a recording of looks replaces a recording of readings, as a
+  discard would. The UI offers it only in the value flow, which discards the
+  readings when the reference editor closes.
 - A value saves the window size of the screenshot its region was drawn on
   (`drawnOn` in the UI). A number value reads with one of the application's
   references, and saving a reference teaches it from its labeled screenshots
   and the recording. A save or a try whose labeled screenshots, recording, or
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
+
+### Recording looks
+
+A recording of looks (`apps/setup/src-tauri/src/recording/looks.rs`, started in
+`owner/looks.rs`) keeps a screenshot each time a value's region shows a look
+that no screenshot shows yet. It has no review and nothing to go on with: a
+stopped one only says what it kept and why it stopped, and **Start recording**
+always starts a new one.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Recording: Start recording
+    Recording --> Paused: a frame of another window size
+    Paused --> Recording: a frame of the size the region was drawn at
+    Recording --> Stopped: Stop recording
+    Paused --> Stopped: Stop recording
+    Recording --> Stopped: the capture fails, with the failure as its problem
+    Paused --> Stopped: the capture fails, with the failure as its problem
+    Recording --> Stopped: it kept 16 screenshots, with the limit as its problem
+    Stopped --> Recording: Start recording starts a new recording
+    Recording --> Ended: the window closes
+    Paused --> Ended: the window closes
+    Stopped --> Ended: the window closes
+    Recording --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Paused --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Stopped --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Ended --> None: the reference editor opens, a window is picked, or the flow closes
+```
+
+- **Recording** crops each frame to the region and compares the crop with
+  every look it knows: the region on each screenshot of the same window size
+  that the session held when it started, and on each frame it kept. A crop
+  within the tolerance of one of them changes nothing. Any other is a new look:
+  the whole frame goes to the screenshot store, and the recording's `kept` list
+  gets its index.
+- **Paused** is a recording whose `problem` says the window has another size
+  than the screenshot the region was drawn on. It keeps nothing, and the next
+  frame of the right size clears the problem and records.
+- **Stopped** keeps its `kept` list and its problem for the UI to show. A
+  capture failure stops it as it stops a recording of readings; frames that
+  come again do not restart it. The limit, `MAX_LOOKS`, stops it when it keeps
+  its 16th screenshot. The user recovers from either with **Start recording**,
+  which starts a new recording with a new ID that knows the looks of every
+  screenshot still held.
+- **Ended** is a stopped recording whose capture slot is **Ended**. Its
+  problem says to change window, and a new recording is refused. The
+  screenshots stay until the capture stops.
+- Leaving a recording, by any arrow to **None**, keeps the screenshots it
+  kept: they belong to the capture slot's `screenshots`, which only a removal
+  or a stop of the capture releases.
+- The reference editor records readings, so opening it discards a recording of
+  looks first (`openEditor` in `Capture.tsx`), and the owner replaces one when
+  a recording of readings starts.
 
 ### Text reader
 

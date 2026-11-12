@@ -15,6 +15,8 @@ interface Props {
   readonly onSelect: (reference: string) => void;
   readonly onEdit: (reference: string) => void;
   readonly onNew: () => void;
+  /** Opens the picked reference, or a new one, to record the region's readings. */
+  readonly onRecord: () => void;
   readonly onWhole: (whole: boolean) => void;
 }
 
@@ -80,7 +82,20 @@ export function ReferencePicker(props: Props) {
           >
             New reference from this region
           </button>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!hasRegion}
+            title={hasRegion ? undefined : 'Draw the region first'}
+            onClick={props.onRecord}
+          >
+            Record readings
+          </button>
         </div>
+        <span className="note">
+          Record readings watches the region while you use {appName} and keeps each different reading, to teach{' '}
+          {chosen === null ? 'a new reference' : chosen.name} its characters.
+        </span>
       </div>
       <div className="field">
         <label className="toggle">

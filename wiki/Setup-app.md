@@ -23,8 +23,17 @@ This page covers what the user guide leaves out.
 - **Application editor.** A new application's match starts from the picked
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
-- **Screenshots.** The owner thread keeps the session's screenshots until
-  another window is picked or the user leaves the new value. The draft keeps
+- **Screenshots.** The owner thread keeps the session's screenshots, taken or
+  [recorded](#recording-looks), in memory until the user removes them, another
+  window is picked, or the user leaves the new value; none is written to disk.
+  Each is named by the index it got when it was kept (`screenshots.rs`).
+  Removing one releases its pixels and leaves its index empty, so the indexes
+  the draft holds stay right, and the strip numbers a screenshot by its index
+  so its number never changes. The UI refuses to remove a screenshot the draft
+  uses: the one its region is drawn on, one a state is taken from, a labeled
+  one, and the value's own while the reference editor is open over it
+  (`lib/looks.ts`). A check that names a removed screenshot is refused like
+  one that names a screenshot of another session. The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
   a labeled screenshot, a recording, or a compared screenshot of another
@@ -100,9 +109,22 @@ This page covers what the user guide leaves out.
 
 ## Recording
 
-[Recording readings](References.md#record-readings) samples the frames
-the reference editor's preview capture already takes, about 30 a second, in
-the owner thread (`recording.rs`). Each frame is cut to the region and reduced
+A capture records one thing at a time (`Recorder` in `recording.rs`): the
+readings a number's region shows, for a reference to learn, or
+[the looks a value's region shows](#recording-looks), each kept as a
+screenshot. Both sample the frames the preview capture already takes, about 30
+a second, in the owner thread, and share when they record and why they stop
+(`recording/lifecycle.rs`): a frame of another size than the screenshot the
+region was drawn on is skipped, a capture failure stops the recording with the
+failure as its problem, and a closed window ends it. Starting one kind
+replaces a recording of the other. Recordings of both kinds are numbered from
+one counter.
+
+[Recording readings](References.md#record-readings) runs in the reference
+editor. A number value's **Record readings** opens that editor on the value's
+region, for the reference picked or a new one. A saved reference has its
+characters' color, so its recording starts at once; for a new one the editor
+opens on the screenshot the region is drawn on, with the color next to pick. Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
 into characters, and scales each to the grid the check compares. A crop whose
 shapes equal a kept reading's is another sighting of that reading, because it
@@ -134,6 +156,46 @@ the newest screenshot of that size. Kept readings are lost only on a discard,
 when another window is picked, or when the flow is left, such as on **Change
 window**; a closed window keeps them for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
+
+### Recording looks
+
+[Recording screenshots](Values.md#record-screenshots) is for the checks that
+are set up on screenshots: a state, a bar fill, and a color
+(`recording/looks.rs`, `owner/looks.rs`). Each frame is cut to the region and
+compared with every look the recording knows. Two looks are the same when the
+average difference of their red, green, and blue is at most the tolerance,
+which is how a state check compares a region with a state's whole picture
+(`same_look`, tested against `ImageMatch`). A frame that shows a look it does
+not know is kept whole in the screenshot store, like a screenshot the user
+takes, so every tool that works on a screenshot works on it. Only the crop is
+compared for each frame; the whole frame is copied only when it is kept.
+
+- **Sensitivity.** The UI sends the tolerance (`lookTolerance`). For a state
+  check it is the check's own **Tolerance**, so a recording keeps the looks
+  that check can tell apart, and the user adjusts both with one control. A
+  bar's and a color's own tolerance compare colors, not looks, so they record
+  with 16, the tolerance a state check starts with.
+- **What it knows.** A recording starts knowing the region on every screenshot
+  of the same window size that the session holds, taken or recorded. So the
+  look of the screenshot the region was drawn on is not kept again, and
+  recording again keeps only what is new. A screenshot removed since is not
+  known, so its look is kept again if it shows.
+- **Bounds.** A recording keeps at most 16 screenshots (`MAX_LOOKS`, the most
+  states a check holds), then stops with the limit as its problem. A screenshot
+  is a whole window at four bytes a pixel, about 8 MB at 1920 by 1080, so one
+  recording holds at most about 130 MB there. Each new recording may keep 16
+  more, and the screenshots the user takes have no limit; removing a
+  screenshot releases it at once, and the capture's end releases all of them.
+- **Cost.** A frame costs one pass over the region for each look known, until
+  one matches. A region that never settles reaches the limit and stops. The
+  owner thread does this work, so a region that covers most of a large window
+  and shows many looks makes its answers to the UI slower while it records.
+- **Review.** There is no review sheet: the UI lists each kept screenshot in
+  the strip as the recording reports it (`useLookRecording`), marked as
+  recorded, and the user keeps or removes them there. Stopping shows the first
+  one kept. A stopped recording only says what it kept and why it stopped;
+  discarding it, or starting readings in the reference editor, leaves its
+  screenshots in the strip.
 
 ### The text reader
 
