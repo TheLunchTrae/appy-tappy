@@ -42,8 +42,9 @@ publish = false
 # Dependencies that more than one package uses, so each version is written
 # once; a package names one with `name.workspace = true` and adds its own
 # features. Versions are ranges, not exact pins: Cargo.lock pins what builds,
-# and `rust:lock` moves it within the range without a manifest edit. The
-# workspace's own crates follow the workspace version above.
+# and `cargo update -p <crate>` moves it within the range without a manifest
+# edit. The workspace's own crates carry the workspace version above, which a
+# minor release bumps here too.
 [workspace.dependencies]
 appytappy-actions = { version = "0.1.0", path = "crates/actions" }
 appytappy-config = { version = "0.1.0", path = "crates/config" }
