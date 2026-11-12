@@ -18,10 +18,11 @@ On the Automations page, select **New automation**. To change one, select
 **Edit**.
 
 1. **Name** it, such as `Pause music near the end`.
-2. **When.** Choose the application, pick one of its values, then how it
-   compares. If the application or the value isn't saved yet, make it from
-   here, as [What to watch](#what-to-watch) describes. Until there is a value
-   to watch, the editor says which step comes next.
+2. **When.** Choose the application and pick one of its values. If the
+   application or the value isn't saved yet, make it from here, as
+   [What to watch](#what-to-watch) describes. Until there is a value to
+   watch, the editor says which step comes next. Then choose how the value
+   compares:
    - A value that reads a number: **is at least**, **is above**,
      **is at most**, **is below**, **is**, or **is not** a number you type.
    - A value that reads yes or no: **is** or **is not**, then **Yes** or

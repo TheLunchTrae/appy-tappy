@@ -713,11 +713,6 @@ what was just saved: a picker makes its own look, and the automation editor
 waits for it, as the next section describes. A save that fails leaves its
 flow open with the reason, and changes nothing that waits.
 
-The unsaved work of a value or reference flow, such as its screenshots and
-recording, lives in the flow's components and in the owner thread. Leaving
-that flow, for its opener or for a page, unmounts it and stops its capture,
-which clears its screenshots and recording.
-
 ### What an automation watches
 
 The **When** card of the automation editor
