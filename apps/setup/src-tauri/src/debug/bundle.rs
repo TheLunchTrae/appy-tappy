@@ -268,6 +268,8 @@ mod tests {
             .expect("missing is fine");
         assert!(bundle.file_if_there("b", &scratch).is_err());
         // A path under a file cannot be opened, and is not simply missing.
+        // Windows reports such a path as missing, so this holds elsewhere.
+        #[cfg(unix)]
         assert!(bundle.file_if_there("e", &file.join("inside")).is_err());
         bundle
             .folder("c", &missing, |_name| true)
