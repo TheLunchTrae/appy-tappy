@@ -83,7 +83,7 @@ impl<H: Host> Owner<H> {
     }
 
     /// Lets go of the trace file the metrics and rows read, as the Debug
-    /// page closes.
+    /// page leaves its trace tabs.
     pub(crate) fn close_trace(&mut self) {
         self.trace_view = None;
     }
@@ -305,6 +305,73 @@ mod tests {
             Some(("trace-2026-11-12-110000.csv".to_owned(), 0)),
             "a newer trace is read from its start"
         );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_picked_trace_is_read_on_one_file_at_a_time_and_let_go() {
+        let (stores, root) = scratch_store("owner-debug-view");
+        let traces = stores.traces.clone();
+        fs::create_dir_all(&traces).expect("folder");
+        let mut harness = harness_with(false, Ok(stores));
+        // Larger than one update reads, so each call reads on from the last.
+        let row = "1000,reader,read,Example,health,3,1000,,\n";
+        let older = "trace-2026-11-12-100000.csv";
+        fs::write(
+            traces.join(older),
+            format!("{HEADER}\n{}", row.repeat(12 * 1024 * 1024 / row.len())),
+        )
+        .expect("write");
+        fs::File::options()
+            .write(true)
+            .open(traces.join(older))
+            .expect("open")
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .expect("age it");
+        let newer = "trace-2026-11-12-110000.csv";
+        fs::write(traces.join(newer), format!("{HEADER}\n{row}{row}")).expect("write");
+
+        let files = harness.ask(|owner| owner.trace_files()).expect("listed");
+        let names: Vec<&str> = files.iter().map(|file| file.name.as_str()).collect();
+        assert_eq!(names, [newer, older], "newest first");
+        assert_eq!(
+            harness.ask(|owner| owner.trace_metrics("../trace-a.csv", TraceRange::Whole)),
+            Err("../trace-a.csv is not a trace file.".to_owned())
+        );
+
+        let read = |harness: &mut crate::owner::test_support::Harness, file: &str| {
+            harness
+                .ask(|owner| owner.trace_metrics(file, TraceRange::Whole))
+                .expect("metrics")
+                .progress
+                .read
+        };
+        let first = read(&mut harness, older);
+        assert!(read(&mut harness, older) > first, "the same file reads on");
+        assert_eq!(
+            harness
+                .ask(|owner| {
+                    owner.trace_rows(
+                        newer,
+                        &RowFilter {
+                            range: TraceRange::Whole,
+                            categories: vec![
+                                appytappy_config::settings_file::TraceCategory::Readings,
+                            ],
+                            app: None,
+                            took_over_ns: None,
+                            search: String::new(),
+                        },
+                    )
+                })
+                .expect("rows")
+                .matching,
+            2
+        );
+        assert_eq!(read(&mut harness, older), first, "another file let it go");
+        assert!(read(&mut harness, older) > first);
+        harness.ask(Owner::close_trace);
+        assert_eq!(read(&mut harness, older), first, "closing let it go");
         fs::remove_dir_all(root).expect("clean up");
     }
 

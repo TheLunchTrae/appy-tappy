@@ -199,18 +199,15 @@ pub(crate) enum Behind {
 
 /// What a read of a trace file came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Read {
-    /// The file is shorter than what was read, so another file took its
-    /// place. Nothing was read; start again with a new reader.
-    Shrank,
-    /// The rows were read.
-    Rows {
-        /// The file's size.
-        bytes: u64,
-        /// Whether more is written than was read, for a reader that catches
-        /// up.
-        behind: bool,
-    },
+pub(crate) struct Read {
+    /// The file's size.
+    pub(crate) bytes: u64,
+    /// Whether a whole window was read, so more can be waiting.
+    pub(crate) full: bool,
+    /// Whether the file was shorter than what was read before, so another
+    /// file took its place and was read from its start. The rows read before
+    /// are from the old file.
+    pub(crate) restarted: bool,
 }
 
 /// A trace file's rows, read a window at a time from where the last read
@@ -285,20 +282,27 @@ impl RowReader {
     pub(crate) fn read(&mut self, behind: Behind, row: impl FnMut(TraceRow)) -> io::Result<Read> {
         let mut file = File::open(&self.path)?;
         let bytes = file.metadata()?.len();
-        if bytes < self.read {
-            return Ok(Read::Shrank);
+        let restarted = bytes < self.read;
+        if restarted {
+            *self = Self::new(mem::take(&mut self.path));
         }
+        let waiting = Read {
+            bytes,
+            full: false,
+            restarted,
+        };
         if self.header.is_none() {
             match first_line(&mut file)? {
                 Some(line) => self.header = Some(line == HEADER),
                 // The header is not all written yet.
-                None => {
-                    return Ok(Read::Rows {
-                        bytes,
-                        behind: false,
-                    });
-                },
+                None => return Ok(waiting),
             }
+        }
+        if self.header == Some(false) {
+            // No row of another version's trace can be read, so its rows are
+            // passed over rather than read.
+            self.read = bytes;
+            return Ok(waiting);
         }
         let skip_to = bytes.saturating_sub(WINDOW);
         if behind == Behind::Skip && skip_to > self.read {
@@ -311,14 +315,13 @@ impl RowReader {
         }
         file.seek(SeekFrom::Start(self.read))?;
         let mut added = Vec::new();
-        let count = (&mut file).take(WINDOW).read_to_end(&mut added)?;
-        self.read = self
-            .read
-            .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+        let count =
+            u64::try_from((&mut file).take(WINDOW).read_to_end(&mut added)?).unwrap_or(u64::MAX);
+        self.read = self.read.saturating_add(count);
         self.take(&added, row);
-        Ok(Read::Rows {
-            bytes,
-            behind: self.read < bytes,
+        Ok(Read {
+            full: count == WINDOW,
+            ..waiting
         })
     }
 
@@ -405,19 +408,15 @@ impl TraceTail {
     ///
     /// Returns the error from reading the file.
     pub(crate) fn update(&mut self) -> io::Result<TraceSummary> {
-        let counts = &mut self.counts;
-        let mut read = self.reader.read(Behind::Skip, |row| counts.count(row))?;
-        if read == Read::Shrank {
-            // The file was replaced by a shorter one: read it again.
-            *self = Self::new(self.reader.path().to_path_buf());
-            let counts = &mut self.counts;
-            read = self.reader.read(Behind::Skip, |row| counts.count(row))?;
+        let mut rows = Vec::new();
+        let read = self.reader.read(Behind::Skip, |row| rows.push(row))?;
+        if read.restarted {
+            self.counts = TailCounts::default();
         }
-        let bytes = match read {
-            Read::Rows { bytes, .. } => bytes,
-            Read::Shrank => 0,
-        };
-        Ok(self.summary(bytes))
+        for row in rows {
+            self.counts.count(row);
+        }
+        Ok(self.summary(read.bytes))
     }
 
     /// What the rows read so far come to, for a file of `bytes`.

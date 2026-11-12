@@ -300,7 +300,7 @@ barNs: number,
  */
 counts: number[],
 /**
- * How many times are longer than the last bar, as a few slow times
+ * How many times come after the last bar, as a few far slower times
  * would leave the rest too thin to read.
  */
 over: number,
@@ -804,7 +804,12 @@ read: number,
 /**
  * Why its rows cannot be read, such as a trace from another version.
  */
-problem: string | null, }>;
+problem: string | null,
+/**
+ * Whether some rows could not be read, as when a quoted field went
+ * wrong, so the numbers leave them out.
+ */
+skipped: boolean, }>;
 
 /**
  * A value the check read, as the UI shows it.
@@ -1050,7 +1055,8 @@ app: string | null,
  */
 tookOverNs: number | null,
 /**
- * Text a field of the row holds, in any case; empty for any row.
+ * Text the row's thread, event, application, item, value or detail
+ * holds, in any case; empty for any row.
  */
 search: string, }>;
 
@@ -1386,7 +1392,9 @@ name: string,
 bytes: number, }>;
 
 /**
- * The metrics of one trace file over one range.
+ * The metrics of one trace file over one range. Counts go by whole
+ * seconds, so a range's counts can take in up to a second before it, while
+ * its times and rows start where it does.
  */
 export type TraceMetrics = DeepReadonly<{
 /**
@@ -1399,7 +1407,8 @@ progress: ReadProgress,
  */
 recorded: Array<TraceCategory>,
 /**
- * How long the range covers, from its first row to the newest.
+ * How long the range covers up to the newest row: from where it starts,
+ * or from the first row when that is later.
  */
 spanNs: number,
 /**
@@ -1943,6 +1952,9 @@ export const TRACE_CATEGORIES = [
 
 /** The first line of a trace file, which names its fields. */
 export const TRACE_HEADER = "time_ns,thread,event,app,item,value,took_ns,cause,detail";
+
+/** How many of the newest times of each kind the Debug page's metrics keep. */
+export const TRACE_SAMPLES = 20000;
 
 /**
  * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it

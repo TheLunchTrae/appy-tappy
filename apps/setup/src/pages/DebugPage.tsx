@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { DebugOverview, LogName, TraceRange, TraceSummary } from '../lib/bindings.ts';
 import { debugOverview, errorText, openLogsFolder, readLog } from '../lib/api.ts';
@@ -239,7 +239,10 @@ function Logs() {
   );
 }
 
-/** The trace file and range picker over the metrics or the rows of the picked file. */
+/**
+ * The trace file and range picker over the metrics or the rows of the picked file. It stays while either tab shows,
+ * so both read the same file the same way.
+ */
 function TraceTab({ tab }: { readonly tab: 'metrics' | 'rows' }) {
   const { trace } = useSettings().settings;
   const now = useNowUntil(trace.on ? trace.until : null);
@@ -294,6 +297,27 @@ export function DebugPage() {
     }
   }, []);
   useRepeat(refresh, REFRESH_MS, tab === 'overview');
+  // The arrow keys, Home and End move between the tabs, as a list of tabs does elsewhere.
+  const moveTab = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    const at = TABS.findIndex((each) => each.tab === tab);
+    const to =
+      event.key === 'ArrowRight'
+        ? (at + 1) % TABS.length
+        : event.key === 'ArrowLeft'
+          ? (at + TABS.length - 1) % TABS.length
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? TABS.length - 1
+              : null;
+    const next = to === null ? undefined : TABS[to];
+    if (next === undefined) {
+      return;
+    }
+    event.preventDefault();
+    setTab(next.tab);
+    document.getElementById(`debug-tab-${next.tab}`)?.focus();
+  };
   const openFolder = async (): Promise<void> => {
     try {
       await openLogsFolder();
@@ -337,7 +361,9 @@ export function DebugPage() {
             id={`debug-tab-${each.tab}`}
             aria-selected={tab === each.tab}
             aria-controls="debug-panel"
+            tabIndex={tab === each.tab ? 0 : -1}
             className="tab"
+            onKeyDown={moveTab}
             onClick={() => {
               setTab(each.tab);
             }}
@@ -361,8 +387,8 @@ export function DebugPage() {
         ) : tab === 'logs' ? (
           <Logs />
         ) : (
-          // Keyed, so each tab reads its own way from the start.
-          <TraceTab key={tab} tab={tab} />
+          // Not keyed: moving between the metrics and the rows keeps the picked file, its range and what was read.
+          <TraceTab tab={tab} />
         )}
       </div>
       {exporting ? (

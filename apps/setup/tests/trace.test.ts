@@ -32,7 +32,7 @@ describe('recordedCount', () => {
 });
 
 describe('progress', () => {
-  const progress = { file: 'trace-a.csv', bytes: 2 * 1024 * 1024, read: 1024 * 1024, problem: null };
+  const progress = { file: 'trace-a.csv', bytes: 2 * 1024 * 1024, read: 1024 * 1024, problem: null, skipped: false };
   test('says how much is read until all of it is', () => {
     expect(progressText(progress)).toBe('Reading trace-a.csv: 1.0 MB of 2.0 MB');
     expect(isBehind(progress)).toBe(true);
@@ -103,5 +103,6 @@ describe('tookOverNs', () => {
     expect(tookOverNs('')).toBeNull();
     expect(tookOverNs('soon')).toBeNull();
     expect(tookOverNs('-1')).toBeNull();
+    expect(tookOverNs('1e30')).toBe(Number.MAX_SAFE_INTEGER);
   });
 });

@@ -76,9 +76,12 @@ written by another version of AppyTappy shows why it cannot be read instead.
 
 **Metrics** reads a whole trace file, the newest at first, and counts what it
 holds. **Trace file** picks the file; the one the runtime records into now says
-**recording**. The switch beside it picks the rows counted: those in the last
+**recording**. The buttons beside it pick the rows counted: those in the last
 minute or the last 10 minutes before the trace's newest row, or the whole
-trace. A large file is read in parts, and the page says how much it has read.
+trace. Counts go by whole seconds, so a range's counts can take in up to a
+second before it. **Metrics** and **Trace rows** share the file and the range,
+so moving between them keeps both. A large file is read in parts, and the page
+says how much it has read, and when some rows could not be read.
 
 - **Frame to action, median** and **95th percentile**, **Running actions,
   median** and **Rule handling, 95th percentile**, as on the overview.
@@ -87,8 +90,9 @@ trace. A large file is read in parts, and the page says how much it has read.
 - **Value changes**, **Rows dropped** and **Actions that failed.**
 
 A chart shows how the frame to action times spread, with the median and the
-95th percentile marked. A few times far slower than the rest are counted
-together in a last bar, so the rest stay readable.
+95th percentile marked. When a few times are far slower than the rest, the
+bars stop just past twice the 95th percentile and the times after them are
+counted together in a last bar, so the rest stay readable.
 
 Under it, a table lists each value: how often it changed, when it last
 changed, and, with each read recorded, how often it was read and how long its
@@ -102,11 +106,11 @@ range holds more.
 ## Trace rows
 
 **Trace rows** shows the newest 500 rows of the picked trace file that match
-the filters, read again every second. The switch picks the kinds of row,
-named as the trace settings name what they record. **Application** keeps one application's rows,
-**Took over (ms)** keeps rows that took longer than that, and **Search** keeps
-rows that hold the text in any field. The filters reach the newest 100,000
-rows of a trace.
+the filters, read again every second. The kind buttons pick the kinds of row,
+named as the trace settings name what they record. **Application** keeps one
+application's rows, **Took over (ms)** keeps rows that took longer than that,
+and **Search** keeps rows whose thread, event, application, item, value or
+detail holds the text. The filters reach the newest 100,000 rows of a trace.
 
 **Frame** is when the frame arrived that led to the row. Picking it marks every
 row from that frame, so a frame's reading, its rules and its actions can be

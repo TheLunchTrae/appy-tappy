@@ -391,9 +391,11 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   the whole file and by the second for its last 10 minutes, the newest 20,000
   times of each kind with when each happened, and the newest 100,000 rows,
   each name held once and compacted as old names pile up, so a long trace
-  holds a fixed amount. A range is measured back from the newest row. The
-  view starts over when the file shrinks, and `close_trace` lets it go as the
-  page closes.
+  holds about the same amount, more only for each value and automation it
+  names. A range is measured back from the newest row. The view starts over
+  when the file shrinks, and `close_trace` lets it go as the page leaves its
+  **Metrics** and **Trace rows** tabs. Each read the page starts makes the
+  ones before it stale, so an older answer never replaces a newer one.
 - `read_log` returns the last 64 KB of `runtime.log` or `setup.log`, as whole
   lines.
 - `debug_bundle` hands the owner's file locations to a blocking task, which

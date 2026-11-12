@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type {
-  Chart,
-  ReadProgress,
-  RowFilter,
-  Spread,
-  TraceCategory,
-  TraceFile,
-  TraceMetrics,
-  TraceRange,
-  TraceRows,
+import {
+  type Chart,
+  type ReadProgress,
+  type RowFilter,
+  type Spread,
+  type TraceCategory,
+  type TraceFile,
+  type TraceMetrics,
+  type TraceRange,
+  TRACE_SAMPLES,
+  type TraceRows,
 } from '../lib/bindings.ts';
 import { closeTrace, errorText, traceFiles, traceMetrics, traceRows } from '../lib/api.ts';
 import { durationText, elapsedText, sizeText } from '../lib/debug.ts';
-import { background, useRepeat } from '../lib/repeat.ts';
+import { background, useNewest, useOnChange, useRepeat } from '../lib/repeat.ts';
 import {
   CATEGORIES,
   RANGES,
@@ -34,13 +35,19 @@ const REFRESH_MS = 1000;
 /** How many reads in a row one refresh makes at most while the file is still being read. */
 const CATCH_UP = 8;
 
-/** Reads `read` again at once while it says more of the file is left, so a large file is read in one go. */
-async function readAll<T extends { readonly progress: ReadProgress }>(read: () => Promise<T>): Promise<T> {
+/**
+ * Reads `read` again at once while it says more of the file is left, so a large file is read in one go. Stops, and
+ * gives `null`, once `current` says a newer read started or the page left.
+ */
+async function readAll<T extends { readonly progress: ReadProgress }>(
+  read: () => Promise<T>,
+  current: () => boolean,
+): Promise<T | null> {
   let answer = await read();
-  for (let round = 1; round < CATCH_UP && isBehind(answer.progress); round += 1) {
+  for (let round = 1; round < CATCH_UP && current() && isBehind(answer.progress); round += 1) {
     answer = await read();
   }
-  return answer;
+  return current() ? answer : null;
 }
 
 /** The trace files, read again every few seconds while `active`, and the one picked, the newest at first. */
@@ -62,7 +69,7 @@ export function useTraceFiles(active: boolean): {
     }
   }, []);
   useRepeat(list, 3 * REFRESH_MS, active);
-  // The page lets go of the file it read as it closes, so a trace it showed is not held open.
+  // The page lets go of the file it read as it leaves its trace tabs, so a trace it showed is not held.
   useEffect(
     () => () => {
       background(closeTrace());
@@ -149,19 +156,34 @@ function FrameChart({ chart, spread }: { readonly chart: Chart; readonly spread:
       <figcaption className="note">
         Frame to action, {chart.samples.toLocaleString('en-US')} times. Each bar is {durationText(chart.barNs)} wide.
       </figcaption>
-      <div className="chart-bars">
+      <div
+        className="chart-bars"
+        role="img"
+        aria-label={`Median ${durationText(spread.medianNs)}, 95th percentile ${durationText(spread.p95Ns)}${
+          chart.over === 0 ? '' : `, ${chart.over.toLocaleString('en-US')} times past the last bar`
+        }.`}
+      >
         {bars.map((bar) => (
           <div
             key={bar.fromNs}
+            aria-hidden="true"
             className={bar.toNs === Infinity ? 'chart-bar over' : 'chart-bar'}
             style={{ height: `${Math.max(bar.count === 0 ? 0 : 2, bar.height * 100)}%` }}
             title={`${barText(bar)}: ${bar.count.toLocaleString('en-US')}`}
           />
         ))}
-        <span className="chart-mark" style={{ left: `${chartPlace(chart, spread.medianNs) * 100}%` }}>
-          median
+        <span
+          className="chart-mark"
+          aria-hidden="true"
+          style={{ left: `${chartPlace(chart, spread.medianNs) * 100}%` }}
+        >
+          Median
         </span>
-        <span className="chart-mark p95" style={{ left: `${chartPlace(chart, spread.p95Ns) * 100}%` }}>
+        <span
+          className="chart-mark p95"
+          aria-hidden="true"
+          style={{ left: `${chartPlace(chart, spread.p95Ns) * 100}%` }}
+        >
           95th
         </span>
       </div>
@@ -194,8 +216,9 @@ function MetricsView({ metrics }: { readonly metrics: TraceMetrics }) {
         <Tile value={recordedCount(metrics.failed, 'actions', recorded)} label="Actions that failed" />
       </div>
       <p className="note">
-        These cover {elapsedText(metrics.spanNs)} of the trace. A dash is a number this trace did not record.
-        {metrics.sampled ? ' Times come from the newest 20,000 of each kind.' : ''}
+        These cover {elapsedText(metrics.spanNs)} of the trace. A dash means the trace has no rows of that kind, as when
+        it does not record them.
+        {metrics.sampled ? ` Times come from the newest ${TRACE_SAMPLES.toLocaleString('en-US')} of each kind.` : ''}
       </p>
       {metrics.chart === null || metrics.frameToAction === null ? null : (
         <FrameChart chart={metrics.chart} spread={metrics.frameToAction} />
@@ -290,10 +313,14 @@ function Progress({ progress }: { readonly progress: ReadProgress }) {
     );
   }
   const reading = progressText(progress);
-  return reading === null ? null : (
-    <p className="note" role="status">
-      {reading}
-    </p>
+  // Not announced: it changes every second while a large file is read.
+  return (
+    <>
+      {reading === null ? null : <p className="note">{reading}</p>}
+      {progress.skipped ? (
+        <p className="warn">Some rows of this trace could not be read, so these numbers leave them out.</p>
+      ) : null}
+    </>
   );
 }
 
@@ -301,14 +328,23 @@ function Progress({ progress }: { readonly progress: ReadProgress }) {
 export function TraceMetricsTab({ file, range }: { readonly file: string; readonly range: TraceRange }) {
   const [metrics, setMetrics] = useState<TraceMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const begin = useNewest();
   const read = useCallback(async (): Promise<void> => {
+    const current = begin();
     try {
-      setMetrics(await readAll(() => traceMetrics(file, range)));
-      setError(null);
+      const answer = await readAll(() => traceMetrics(file, range), current);
+      if (answer !== null) {
+        setMetrics(answer);
+        setError(null);
+      }
     } catch (failure: unknown) {
-      setError(errorText(failure));
+      if (current()) {
+        setError(errorText(failure));
+      }
     }
-  }, [file, range]);
+  }, [begin, file, range]);
+  // Another file or range reads at once.
+  useOnChange(read);
   useRepeat(read, REFRESH_MS, true);
   return (
     <>
@@ -349,18 +385,23 @@ export function TraceRowsTab({ file, range }: { readonly file: string; readonly 
     () => ({ range, categories: [...categories], app, tookOverNs: tookOverNs(took), search }),
     [range, categories, app, took, search],
   );
+  const begin = useNewest();
   const read = useCallback(async (): Promise<void> => {
+    const current = begin();
     try {
-      setRows(await readAll(() => traceRows(file, filter)));
-      setError(null);
+      const answer = await readAll(() => traceRows(file, filter), current);
+      if (answer !== null) {
+        setRows(answer);
+        setError(null);
+      }
     } catch (failure: unknown) {
-      setError(errorText(failure));
+      if (current()) {
+        setError(errorText(failure));
+      }
     }
-  }, [file, filter]);
-  // A changed filter reads at once, even while the rows do not follow the newest.
-  useEffect(() => {
-    background(read());
-  }, [read]);
+  }, [begin, file, filter]);
+  // A changed file or filter reads at once, even while the rows do not follow the newest.
+  useOnChange(read);
   useRepeat(read, REFRESH_MS, follow);
   const copy = async (): Promise<void> => {
     if (rows === null) {
@@ -405,11 +446,14 @@ export function TraceRowsTab({ file, range }: { readonly file: string; readonly 
             }}
           >
             <option value="">Every application</option>
-            {(rows?.apps ?? []).map((each) => (
-              <option key={each} value={each}>
-                {each}
-              </option>
-            ))}
+            {/* One picked before is kept though the rows no longer name it, so the select still shows why none match. */}
+            {[...(rows?.apps ?? []), ...(app === null || rows?.apps.includes(app) === true ? [] : [app])].map(
+              (each) => (
+                <option key={each} value={each}>
+                  {each}
+                </option>
+              ),
+            )}
           </select>
         </label>
         <label className="field narrow">

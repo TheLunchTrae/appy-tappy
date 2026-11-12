@@ -934,6 +934,10 @@ fn constants() -> String {
             literal(&crate::debug::trace_file::HEADER)
         ),
         format!(
+            "/** How many of the newest times of each kind the Debug page's metrics keep. */\nexport const TRACE_SAMPLES = {};\n",
+            crate::debug::trace_view::SAMPLES
+        ),
+        format!(
             "/**\n * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it\n * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read\n * each the same.\n */\nexport const PARSE_CASES = {} as const;\n",
             literal(&parse_cases())
         ),

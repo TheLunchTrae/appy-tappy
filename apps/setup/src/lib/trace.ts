@@ -19,7 +19,7 @@ export const RANGES: readonly { readonly range: TraceRange; readonly name: strin
 
 /** The kinds of row, named as the trace settings name what they record. */
 export const CATEGORIES: readonly { readonly category: TraceCategory; readonly name: string }[] = [
-  { category: 'readings', name: 'Reads' },
+  { category: 'readings', name: 'Each read' },
   { category: 'changes', name: 'Value changes' },
   { category: 'rules', name: 'Rules' },
   { category: 'actions', name: 'Actions' },
@@ -138,8 +138,13 @@ export function logLines(
   return { shown: found.map((line) => `${line}\n`).join(''), count: found.length, total: lines.length };
 }
 
-/** A number of milliseconds the user typed, as nanoseconds, or `null` for nothing or not a number. */
+/**
+ * A number of milliseconds the user typed, as nanoseconds, or `null` for nothing or not a number. A number too large
+ * to send exactly is held at the largest that is, which no row takes longer than.
+ */
 export function tookOverNs(typed: string): number | null {
   const ms = Number(typed.trim());
-  return typed.trim() === '' || !Number.isFinite(ms) || ms < 0 ? null : Math.round(ms * 1e6);
+  return typed.trim() === '' || !Number.isFinite(ms) || ms < 0
+    ? null
+    : Math.min(Math.round(ms * 1e6), Number.MAX_SAFE_INTEGER);
 }

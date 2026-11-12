@@ -5,18 +5,20 @@
 //! table, with each name held once, and counts and times for the metrics.
 //! Counts are kept for the whole file and by the second for its last
 //! [`RECENT_S`] seconds, and times as the newest [`SAMPLES`] of each kind,
-//! so a long trace holds a fixed amount and each range reads only those.
+//! so a long trace holds about the same amount, more only for each value and
+//! automation it names, and each range reads only those.
 //! Each row's time is its time since the trace started, as the file has it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::io;
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use appytappy_config::settings_file::TraceCategory;
 use serde::{Deserialize, Serialize};
 
-use crate::debug::trace_file::{Behind, Read, RowReader, Spread, TraceRow};
+use crate::debug::trace_file::{Behind, RowReader, Spread, TraceRow};
 
 /// How many of the newest rows the rows table can filter.
 pub(crate) const ROWS: usize = 100_000;
@@ -65,7 +67,9 @@ impl TraceRange {
     }
 }
 
-/// The metrics of one trace file over one range.
+/// The metrics of one trace file over one range. Counts go by whole
+/// seconds, so a range's counts can take in up to a second before it, while
+/// its times and rows start where it does.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -75,7 +79,8 @@ pub(crate) struct TraceMetrics {
     /// The categories the file holds rows of. A number of another category
     /// was not recorded.
     pub(crate) recorded: Vec<TraceCategory>,
-    /// How long the range covers, from its first row to the newest.
+    /// How long the range covers up to the newest row: from where it starts,
+    /// or from the first row when that is later.
     #[cfg_attr(test, ts(type = "number"))]
     pub(crate) span_ns: u64,
     /// From a frame arriving to the action it led to starting.
@@ -125,6 +130,9 @@ pub(crate) struct ReadProgress {
     pub(crate) read: u64,
     /// Why its rows cannot be read, such as a trace from another version.
     pub(crate) problem: Option<String>,
+    /// Whether some rows could not be read, as when a quoted field went
+    /// wrong, so the numbers leave them out.
+    pub(crate) skipped: bool,
 }
 
 /// One value's numbers.
@@ -177,7 +185,7 @@ pub(crate) struct Chart {
     /// How many times each bar counts.
     #[cfg_attr(test, ts(type = "number[]"))]
     pub(crate) counts: Vec<u64>,
-    /// How many times are longer than the last bar, as a few slow times
+    /// How many times come after the last bar, as a few far slower times
     /// would leave the rest too thin to read.
     #[cfg_attr(test, ts(type = "number"))]
     pub(crate) over: u64,
@@ -200,7 +208,8 @@ pub(crate) struct RowFilter {
     /// Only rows that took longer than this, in nanoseconds.
     #[cfg_attr(test, ts(type = "number | null"))]
     pub(crate) took_over_ns: Option<u64>,
-    /// Text a field of the row holds, in any case; empty for any row.
+    /// Text the row's thread, event, application, item, value or detail
+    /// holds, in any case; empty for any row.
     pub(crate) search: String,
 }
 
@@ -250,6 +259,14 @@ impl Names {
         self.names.push(Arc::clone(&name));
         self.places.insert(name, place);
         place
+    }
+
+    /// `text`, held once.
+    fn name(&mut self, text: &str) -> Name {
+        let place = self.place(text);
+        self.names
+            .get(place as usize)
+            .map_or_else(|| Arc::from(text), Arc::clone)
     }
 
     /// The text at `place`. Every place a row holds came from
@@ -407,8 +424,13 @@ pub(crate) struct TraceView {
 impl TraceView {
     /// A view of `path` that has read nothing yet.
     pub(crate) fn new(path: PathBuf) -> Self {
+        Self::reading(RowReader::new(path))
+    }
+
+    /// A view that holds nothing, reading on with `reader`.
+    fn reading(reader: RowReader) -> Self {
         Self {
-            reader: RowReader::new(path),
+            reader,
             bytes: 0,
             names: Names::default(),
             compact_at: ROWS.saturating_mul(2),
@@ -446,20 +468,26 @@ impl TraceView {
         for _ in 0..WINDOWS {
             let mut rows = Vec::new();
             let read = self.reader.read(Behind::CatchUp, |row| rows.push(row))?;
-            let Read::Rows { bytes, behind } = read else {
-                *self = Self::new(self.reader.path().to_path_buf());
-                continue;
-            };
-            self.bytes = bytes;
+            if read.restarted {
+                self.restart();
+            }
+            self.bytes = read.bytes;
             for row in rows {
                 self.add(&row);
             }
-            if !behind {
+            if !read.full {
                 break;
             }
         }
         self.trim();
         Ok(())
+    }
+
+    /// Lets go of everything read, keeping the reader, which started its
+    /// file again.
+    fn restart(&mut self) {
+        let reader = mem::replace(&mut self.reader, RowReader::new(PathBuf::new()));
+        *self = Self::reading(reader);
     }
 
     /// Adds `row` to the counts, the times and the held rows.
@@ -470,12 +498,14 @@ impl TraceView {
         self.first_ns = Some(self.first_ns.map_or(time, |first| first.min(time)));
         self.newest_ns = self.newest_ns.max(time);
         self.recorded.insert(category);
-        let key = || -> Key { (Arc::from(row.app.as_str()), Arc::from(row.item.as_str())) };
+        // Names the rows hold already, so a value or automation seen before
+        // costs no new text.
+        let key: Key = (self.names.name(&row.app), self.names.name(&row.item));
         let from_frame = row.cause.map(|cause| time.saturating_sub(cause));
         match row.event.as_str() {
             "read" => {
                 self.reads.add(time, 1);
-                let value = self.values.entry(key()).or_default();
+                let value = self.values.entry(key).or_default();
                 value.reads.add(time, 1);
                 if let Some(took) = row.took_ns {
                     value.checks.add(time, took);
@@ -483,7 +513,7 @@ impl TraceView {
             },
             "changed" => {
                 self.changes.add(time, 1);
-                let value = self.values.entry(key()).or_default();
+                let value = self.values.entry(key).or_default();
                 value.changes.add(time, 1);
                 value.last_change_ns =
                     Some(value.last_change_ns.map_or(time, |last| last.max(time)));
@@ -493,10 +523,10 @@ impl TraceView {
                     self.rule_handling.add(time, took);
                 }
             },
-            "held" => self.automations.entry(key()).or_default().held.add(time, 1),
+            "held" => self.automations.entry(key).or_default().held.add(time, 1),
             "started" => {
                 self.actions.add(time, 1);
-                let automation = self.automations.entry(key()).or_default();
+                let automation = self.automations.entry(key).or_default();
                 automation.ran.add(time, 1);
                 if let Some(sample) = from_frame {
                     automation.frame_to_action.add(time, sample);
@@ -509,11 +539,7 @@ impl TraceView {
                 }
                 if row.detail == "failed" {
                     self.failed.add(time, 1);
-                    self.automations
-                        .entry(key())
-                        .or_default()
-                        .failed
-                        .add(time, 1);
+                    self.automations.entry(key).or_default().failed.add(time, 1);
                 }
             },
             "dropped" => self.dropped.add(time, row.value.parse().unwrap_or(0)),
@@ -595,6 +621,7 @@ impl TraceView {
             bytes: self.bytes,
             read: self.reader.position(),
             problem: self.reader.problem(),
+            skipped: self.reader.skipped(),
         }
     }
 
@@ -751,8 +778,10 @@ fn category(event: &str) -> TraceCategory {
 }
 
 /// How `times`, sorted, spread over about [`BARS`] bars of a round width.
-/// A few times far beyond the rest, more than 4 times the 95th percentile,
-/// are counted apart, so the bars stop at twice the 95th percentile.
+/// When the longest is more than 4 times the 95th percentile, a few far
+/// slower times would leave the rest too thin to read, so the bars stop
+/// just past twice the 95th percentile and the times after the last bar are
+/// counted apart.
 fn chart(times: &[u64], spread: Option<Spread>) -> Option<Chart> {
     let (spread, longest) = (spread?, *times.last()?);
     let top = if longest > spread.p95_ns.saturating_mul(4) {
@@ -769,8 +798,8 @@ fn chart(times: &[u64], spread: Option<Spread>) -> Option<Chart> {
             .checked_div(bar)
             .and_then(|at| usize::try_from(at).ok());
         match at.and_then(|at| counts.get_mut(at)) {
-            Some(count) if *time <= top => *count = count.saturating_add(1),
-            _ => over = over.saturating_add(1),
+            Some(count) => *count = count.saturating_add(1),
+            None => over = over.saturating_add(1),
         }
     }
     Some(Chart {
@@ -995,6 +1024,8 @@ mod tests {
             &[
                 read(0, "health", 1),
                 started(1_000, "heal", 990),
+                // Just where the last minute starts.
+                "70000000000,main,snapshot,,,,,,".to_owned(),
                 read(100_000, "health", 1),
                 started(100_000, "heal", 99_995),
                 read(130_000, "mana", 1),
@@ -1018,7 +1049,7 @@ mod tests {
         assert_eq!((whole.reads, whole.actions), (3, 2));
         assert_eq!(whole.span_ns, 130_000 * MS);
         assert_eq!(view.metrics(TraceRange::LastTenMinutes).reads, 3);
-        assert_eq!(view.rows(&every_row(TraceRange::LastMinute)).matching, 3);
+        assert_eq!(view.rows(&every_row(TraceRange::LastMinute)).matching, 4);
     }
 
     #[test]
@@ -1034,7 +1065,7 @@ mod tests {
         let path = trace(
             "rows",
             &[
-                read(1, "health", 1),
+                read(1, "health", 5),
                 read(2, "Mana", 9),
                 "3,reader,read,Other App,ammo,1,1000000,,".to_owned(),
                 started(4, "heal", 1),
@@ -1062,6 +1093,7 @@ mod tests {
             ..every_row(TraceRange::Whole)
         };
         assert_eq!(view.rows(&unknown).matching, 0);
+        // A row that took just as long as the limit is not over it.
         let slow = RowFilter {
             took_over_ns: Some(5 * MS),
             ..every_row(TraceRange::Whole)
@@ -1115,7 +1147,8 @@ mod tests {
 
     #[test]
     fn a_large_trace_is_read_a_few_windows_at_a_time() {
-        let row = format!("{}\n", read(1, "health", 1));
+        // Two values, each read more often than the times kept of a kind.
+        let row = format!("{}\n{}\n", read(1, "health", 1), read(1, "mana", 1));
         let count = usize::try_from(WINDOW * 5 / 2).expect("fits") / row.len() + 1;
         let path = trace("large", &[]);
         let mut file = OpenOptions::new().append(true).open(&path).expect("open");
@@ -1129,7 +1162,13 @@ mod tests {
         view.update().expect("read");
         let caught_up = view.metrics(TraceRange::Whole);
         assert_eq!(caught_up.progress.read, caught_up.progress.bytes);
-        assert_eq!(caught_up.reads, count as u64);
+        assert_eq!(caught_up.reads, 2 * count as u64);
+        assert!(
+            caught_up
+                .values
+                .iter()
+                .all(|value| value.reads > SAMPLES as u64)
+        );
         assert!(caught_up.sampled);
         assert_eq!(view.rows(&every_row(TraceRange::Whole)).held, ROWS as u64);
     }
@@ -1217,8 +1256,9 @@ mod tests {
         assert_eq!(view.rows.len(), ROWS);
         // Each row names its own value, so without compacting there would be
         // a name for every row read.
-        assert!(view.names.len() < count, "{}", view.names.len());
-        assert!(view.names.len() <= view.compact_at);
+        let held = view.names.names.len();
+        assert!(held < count, "{held}");
+        assert!(held <= view.compact_at, "{held}");
         let newest = view.rows(&RowFilter {
             search: format!("value {}", count - 1),
             ..every_row(TraceRange::Whole)
@@ -1241,6 +1281,51 @@ mod tests {
         assert_eq!((drawn.over, drawn.samples), (1, 101));
         assert_eq!(drawn.counts.iter().sum::<u64>(), 100);
         assert_eq!(chart(&[], None), None);
+    }
+
+    #[test]
+    fn a_chart_keeps_a_longest_time_just_4_times_the_95th_percentile() {
+        let mut times = vec![10 * MS; 99];
+        times.push(40 * MS);
+        let spread = Spread::of_sorted(&times);
+        assert_eq!(spread.map(|spread| spread.p95_ns), Some(10 * MS));
+        let drawn = chart(&times, spread).expect("a chart");
+        assert_eq!(
+            (drawn.bar_ns, drawn.counts.len(), drawn.over),
+            (2 * MS, 21, 0)
+        );
+        assert_eq!(drawn.counts.last(), Some(&1));
+    }
+
+    #[test]
+    fn counts_by_the_second_are_kept_only_as_long_as_a_range_reads_them() {
+        let late = (RECENT_S + 100) * 1_000;
+        let view = view(trace(
+            "trim",
+            &[
+                read(0, "health", 1),
+                started(0, "heal", 0),
+                read(late, "health", 1),
+                started(late, "heal", late),
+            ],
+        ));
+        assert_eq!(view.reads.seconds.len(), 1);
+        assert_eq!(view.actions.seconds.len(), 1);
+        assert!(
+            view.values
+                .values()
+                .all(|value| value.reads.seconds.len() == 1)
+        );
+        assert!(
+            view.automations
+                .values()
+                .all(|automation| automation.ran.seconds.len() == 1)
+        );
+        assert_eq!(
+            view.metrics(TraceRange::Whole).reads,
+            2,
+            "the whole count stays"
+        );
     }
 
     #[test]
