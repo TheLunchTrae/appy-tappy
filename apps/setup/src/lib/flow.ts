@@ -107,6 +107,16 @@ function waitingUnder(flow: Flow): readonly Opener[] {
 }
 
 /**
+ * Whether an automation is being made or changed: its flow is the one open, or waits under a flow it opened. Until
+ * then its draft, on screen or waiting, can name click pictures that no saved automation names yet.
+ */
+export function holdsAutomation(flow: Flow | null): boolean {
+  return (
+    flow !== null && (flow.kind === 'automation' || waitingUnder(flow).some((under) => under.kind === 'automation'))
+  );
+}
+
+/**
  * The automation flow as it waits under a flow it opens: with the `draft` it shows again, and nothing handed to
  * it yet.
  */

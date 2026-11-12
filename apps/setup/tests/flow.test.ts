@@ -12,6 +12,7 @@ import {
   afterFlow,
   applicationFor,
   heldInAll,
+  holdsAutomation,
   lostText,
   savedNote,
   trail,
@@ -270,4 +271,21 @@ test('a capture says where its value shows once saved: back in the automation th
   expect(savedNote(trail(valueFor(waits, 'example')), 'Example App')).toBe(
     'Saving returns to the automation with this value picked. The value also shows on the Values page, under Example App.',
   );
+});
+
+describe('an automation being made', () => {
+  test('lasts while its flow is open or waits under the flows it opened', () => {
+    const forAutomation = valueFor(waits, 'example');
+    expect(holdsAutomation(automation)).toBe(true);
+    expect(holdsAutomation(forAutomation)).toBe(true);
+    expect(holdsAutomation(applicationFor(waits, null, null))).toBe(true);
+    expect(holdsAutomation(applicationFor(forAutomation, 'example', null))).toBe(true);
+  });
+
+  test('is over once no automation flow is left', () => {
+    expect(holdsAutomation(null)).toBe(false);
+    expect(holdsAutomation(value)).toBe(false);
+    expect(holdsAutomation(reference)).toBe(false);
+    expect(holdsAutomation(applicationFor(value, null, null))).toBe(false);
+  });
 });

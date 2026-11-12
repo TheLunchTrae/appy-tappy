@@ -50,7 +50,9 @@ back to the automation with the value picked.
 5. **Save.** Select **Save value**. **Back** returns to the first step.
 
 AppyTappy keeps the screenshots until you select **Change window** or leave
-the new value. Before either drops work you have not saved, it asks first:
+the new value, and saves only the part inside the box you drew, as
+[What AppyTappy keeps](Getting-started.md#what-appytappy-keeps) describes.
+Before either drops work you have not saved, it asks first:
 select **Keep this window** or **Stay** to carry on, as
 [Leave before you save](Getting-started.md#leave-before-you-save) describes.
 **Change window** returns to the first step with the same application chosen.
