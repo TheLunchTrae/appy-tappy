@@ -1,14 +1,18 @@
 //! What the owner needs from the operating system and the app around it: the
-//! system's windows and processes, a capture of one window, the runtime, and
-//! the overlays' windows, so the tests can stand in for them.
+//! system's windows and processes, a capture of one window, a click sent on
+//! request, the runtime, and the overlays' windows, so the tests can stand in
+//! for them.
 
 use std::io;
 use std::time::{Duration, Instant};
 
+use appytappy_actions::{HostInput, PlacedClick, Watched};
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_config::click::{ClickButton, ClickDelivery};
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::HostSystem;
+use appytappy_sources::screen::place::{Target, place};
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
 use appytappy_sources::system::{
     Pick, ProcessEntry, SessionWindow, System, WindowEntry, WindowPlace, session_window, shows,
@@ -17,10 +21,39 @@ use tauri::{AppHandle, Runtime, Wry};
 
 use crate::overlay::{self, OverlayWindow};
 
+/// What the setup app calls itself where the runtime names the watched
+/// application, such as in why a click did not click.
+const SETUP_APP: &str = "AppyTappy Setup";
+
+/// A click to place on the screen and send now.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ClickNow<'click> {
+    /// The name of the application it clicks in, for messages.
+    pub(crate) app: &'click str,
+    /// How to find that application's window.
+    pub(crate) window: &'click WindowMatch,
+    /// What it looks for in the window.
+    pub(crate) target: Target<'click>,
+    /// Which button, and how many times.
+    pub(crate) button: ClickButton,
+    /// How it reaches the window.
+    pub(crate) delivery: ClickDelivery,
+}
+
+/// The window a click sent on request went to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClickedWindow {
+    /// The window's handle.
+    pub(crate) handle: u64,
+    /// Its title.
+    pub(crate) title: String,
+}
+
 /// What the setup app needs from the operating system: its windows and
-/// processes, a capture of one window, a way to tell the runtime that a
-/// save changed what it reads, and the overlays' windows. It lives as long
-/// as the owner, which sends itself work that names it.
+/// processes, a capture of one window, a click sent on request, a way to
+/// tell the runtime that a save changed what it reads, and the overlays'
+/// windows. It lives as long as the owner, which sends itself work that
+/// names it.
 pub(crate) trait Host: 'static {
     /// A running capture.
     type Session: CaptureSession;
@@ -80,6 +113,18 @@ pub(crate) trait Host: 'static {
         handler: FrameHandler,
     ) -> io::Result<Self::Session>;
 
+    /// Places `click` on the screen and sends it, both the way the runtime
+    /// does. The setup app stands where the runtime has the watched
+    /// application: a click with the cursor clicks only while the setup
+    /// app's window or the window it clicks in is in front, and gives the
+    /// focus back to the one that was. Answers the window it went to, which
+    /// is the one the application's window rules find now.
+    ///
+    /// # Errors
+    ///
+    /// Returns why the click was not placed or not sent, as a clause.
+    fn click(&self, click: ClickNow<'_>) -> Result<ClickedWindow, String>;
+
     /// The time now. The tests set it, to settle a window size without
     /// waiting.
     fn now(&self) -> Instant;
@@ -137,6 +182,28 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
         self.system.start(window, crop, interval, handler)
     }
 
+    fn click(&self, click: ClickNow<'_>) -> Result<ClickedWindow, String> {
+        let found = place(&self.system, click.app, click.window, click.target)?;
+        let placed = PlacedClick {
+            window: found.window,
+            process: found.process,
+            app: click.app.to_owned(),
+            at: found.at,
+            button: click.button,
+            delivery: click.delivery,
+        };
+        let asking = Watched {
+            process: ProcessId::new(std::process::id()),
+            executable: SETUP_APP.to_owned(),
+        };
+        appytappy_actions::click(&mut HostInput::default(), &placed, &asking)
+            .map_err(|error| error.to_string())?;
+        Ok(ClickedWindow {
+            handle: found.window,
+            title: found.title,
+        })
+    }
+
     #[mutants::skip] // Sets a named Windows event, which no test can observe.
     fn now(&self) -> Instant {
         Instant::now()
@@ -177,6 +244,28 @@ mod tests {
             desktop
                 .capture(7, Crop::Whole, PREVIEW_INTERVAL, handler)
                 .is_err()
+        );
+        let window = WindowMatch::exact(appytappy_config::window_match::WindowFacts {
+            title: "Example App",
+            class: "ExampleWindow",
+            executable: "Example.exe",
+        });
+        let spot =
+            appytappy_config::click::Spot::new(appytappy_config::click::Corner::TopLeft, 1, 1)
+                .expect("valid");
+        let click = ClickNow {
+            app: "Example App",
+            window: &window,
+            target: Target::Spot(spot),
+            button: ClickButton::Left,
+            delivery: ClickDelivery::Message,
+        };
+        assert!(
+            desktop
+                .click(click)
+                .expect_err("no windows here")
+                .starts_with("Example App's window cannot be found: "),
+            "a click is placed before it is sent"
         );
     }
 }

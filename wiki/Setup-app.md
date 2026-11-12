@@ -222,6 +222,21 @@ This page covers what the user guide leaves out.
   target is the kind the condition compares. A key press action also needs the
   application's anti-cheat class to be `none`
   ([Key presses](Actions.md#key-presses)).
+- **Click it now.** The click target screen sends a click only from that
+  button's press: `click_now` in the owner checks the anti-cheat classes,
+  reads the click's picture from its file, and has the host place and send it
+  as the runtime does ([Trying a click](Actions.md#trying-a-click)). The
+  owner thread waits for it, up to a second for a picture's frame and half a
+  second more for the answers of the windows a click sent to the window asks,
+  so other commands wait meanwhile. It answers the window the click went to, and the
+  screen says when that is not the window it picked. While anti-cheat blocks
+  the click, the button stays in the tab order with `aria-disabled`, is
+  described by the note that says why, and sends nothing. The click's return
+  of the focus follows the same
+  rule as **Use this target**: what the action had while its button is the
+  same, and otherwise on unless it is a right click (`returnsFocus` in
+  `lib/click.ts`). [Click target tries](State-machines.md#click-target-tries)
+  maps the screen's states.
 - **Reload.** Saving or removing an application, saving, editing or deleting
   a value, saving or deleting a reference or an automation, switching an automation on or off, changing
   an anti-cheat class, and changing a setting set the reload event, so the

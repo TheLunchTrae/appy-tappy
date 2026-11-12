@@ -27,7 +27,9 @@ use crate::action::{
 };
 use crate::anti_cheat::{AntiCheatClass, allows_input};
 use crate::app_file::{AppFile, RegionDef, SizeDef, ValueDef, ValueKind, id_from_name};
-use crate::click::{Area, Click, ClickAt, ClickButton, ClickPicture, Corner, InvalidClick, Spot};
+use crate::click::{
+    Area, Click, ClickAt, ClickButton, ClickDelivery, ClickPicture, Corner, InvalidClick, Spot,
+};
 use crate::rule::{Comparison, Condition, Restore, Rule, RuleError};
 use crate::signal::{Number, SignalName, StateName, Value};
 
@@ -302,7 +304,12 @@ pub enum ActionDef {
         app: String,
         /// Which button, and how many times.
         button: ClickButtonDef,
-        /// Whether the window that was in front gets the focus back after.
+        /// How it reaches the window: with the cursor when left out.
+        #[serde(default)]
+        delivery: ClickDeliveryDef,
+        /// Whether the window that was in front gets the focus back after a
+        /// click with the cursor. A click sent as messages moves no focus
+        /// and does not read this.
         #[serde(default = "yes")]
         return_focus: bool,
         /// Where it clicks.
@@ -334,6 +341,31 @@ impl From<ClickButtonDef> for ClickButton {
             ClickButtonDef::Left => Self::Left,
             ClickButtonDef::Right => Self::Right,
             ClickButtonDef::Double => Self::Double,
+        }
+    }
+}
+
+/// How a click reaches its window, as the file spells it: with the cursor
+/// when the file names none. A cursor click's return of the focus is the
+/// action's own field.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum ClickDeliveryDef {
+    /// [`ClickDelivery::Cursor`].
+    #[default]
+    Cursor,
+    /// [`ClickDelivery::Message`].
+    Message,
+}
+
+impl ClickDeliveryDef {
+    /// The delivery this names. Only a cursor click keeps `return_focus`.
+    #[must_use]
+    pub const fn to_delivery(self, return_focus: bool) -> ClickDelivery {
+        match self {
+            Self::Cursor => ClickDelivery::Cursor { return_focus },
+            Self::Message => ClickDelivery::Message,
         }
     }
 }
@@ -491,11 +523,15 @@ impl ActionDef {
             Self::Click {
                 app,
                 button,
+                delivery,
                 return_focus,
                 at,
             } => Action::Click(
                 at.to_at()
-                    .and_then(|at| Click::new(app, (*button).into(), *return_focus, at))
+                    .and_then(|at| {
+                        let delivery = delivery.to_delivery(*return_focus);
+                        Click::new(app, (*button).into(), delivery, at)
+                    })
                     .map_err(|invalid| invalid.to_string())?,
             ),
         })
@@ -1206,6 +1242,7 @@ mod tests {
         ActionDef::Click {
             app: app.to_owned(),
             button: ClickButtonDef::Left,
+            delivery: ClickDeliveryDef::Cursor,
             return_focus: true,
             at: ClickAtDef::Spot {
                 corner: CornerDef::TopRight,
@@ -1217,13 +1254,13 @@ mod tests {
 
     #[test]
     fn clicks_are_saved_as_written_and_read_as_actions() {
-        let spot = r#"{"kind":"click","app":"streaming_app","button":"left","returnFocus":true,"at":{"kind":"spot","corner":"topRight","x":120,"y":40}}"#;
-        let picture = r#"{"kind":"click","app":"streaming_app","button":"double","returnFocus":false,"at":{"kind":"picture","image":"click-1.png","windowSize":{"width":1920,"height":1080},"search":{"x":1500,"y":60,"width":180,"height":120},"press":{"x":40,"y":20},"tolerance":20}}"#;
+        let spot = r#"{"kind":"click","app":"streaming_app","button":"left","delivery":"cursor","returnFocus":true,"at":{"kind":"spot","corner":"topRight","x":120,"y":40}}"#;
+        let picture = r#"{"kind":"click","app":"streaming_app","button":"double","delivery":"cursor","returnFocus":false,"at":{"kind":"picture","image":"click-1.png","windowSize":{"width":1920,"height":1080},"search":{"x":1500,"y":60,"width":180,"height":120},"press":{"x":40,"y":20},"tolerance":20}}"#;
         let spot_action = Action::Click(
             Click::new(
                 "streaming_app",
                 ClickButton::Left,
-                true,
+                ClickDelivery::Cursor { return_focus: true },
                 ClickAt::Spot(Spot::new(Corner::TopRight, 120, 40).expect("valid")),
             )
             .expect("valid"),
@@ -1232,7 +1269,9 @@ mod tests {
             Click::new(
                 "streaming_app",
                 ClickButton::Double,
-                false,
+                ClickDelivery::Cursor {
+                    return_focus: false,
+                },
                 ClickAt::Picture(
                     ClickPicture::new(
                         "click-1.png",
@@ -1272,6 +1311,7 @@ mod tests {
             ActionDef::Click {
                 app: "a".to_owned(),
                 button: ClickButtonDef::Right,
+                delivery: ClickDeliveryDef::Cursor,
                 return_focus: true,
                 at: ClickAtDef::Spot {
                     corner: CornerDef::BottomLeft,
@@ -1279,7 +1319,7 @@ mod tests {
                     y: 2
                 },
             },
-            "the focus goes back unless the file says otherwise"
+            "it clicks with the cursor and the focus goes back unless the file says otherwise"
         );
         for (corner, read) in [
             ("topLeft", Corner::TopLeft),
@@ -1297,6 +1337,27 @@ mod tests {
                 ClickAt::Spot(Spot::new(read, 1, 2).expect("valid"))
             );
         }
+    }
+
+    #[test]
+    fn a_click_sent_as_messages_keeps_no_return_of_the_focus() {
+        for return_focus in ["", r#""returnFocus":false,"#, r#""returnFocus":true,"#] {
+            let def: ActionDef = serde_json::from_str(&format!(
+                r#"{{"kind":"click","app":"a","button":"left","delivery":"message",{return_focus}"at":{{"kind":"spot","corner":"topLeft","x":1,"y":2}}}}"#
+            ))
+            .expect("valid");
+            let Ok(Action::Click(click)) = def.to_action() else {
+                panic!("a click");
+            };
+            assert_eq!(click.delivery, ClickDelivery::Message, "{return_focus}");
+        }
+        assert!(
+            serde_json::from_str::<ActionDef>(
+                r#"{"kind":"click","app":"a","button":"left","delivery":"posted","at":{"kind":"spot","corner":"topLeft","x":1,"y":2}}"#
+            )
+            .is_err(),
+            "a delivery the file does not know is refused"
+        );
     }
 
     #[test]
@@ -1331,25 +1392,65 @@ mod tests {
         );
     }
 
+    /// Whether `click` can run for a watched application of the class
+    /// `watched` that clicks in `Streaming App` of the class `target`, or
+    /// with that application not saved.
+    fn check_classes(
+        click: &AutomationDef,
+        watched: AntiCheatDef,
+        target: Option<AntiCheatDef>,
+    ) -> Result<(), String> {
+        let mut app = app();
+        app.anti_cheat = watched;
+        let mut other = app.clone();
+        other.name = "Streaming App".to_owned();
+        other.anti_cheat = target.unwrap_or(AntiCheatDef::None);
+        let both = [("example", &app), ("streaming_app", &other)];
+        let apps = if target.is_some() {
+            &both[..]
+        } else {
+            &both[..1]
+        };
+        click.compile(apps).map(drop)
+    }
+
+    #[test]
+    fn a_click_sent_as_messages_needs_both_applications_without_anti_cheat_too() {
+        let mut click = pause_music();
+        let mut action = click_on("streaming_app");
+        if let ActionDef::Click { delivery, .. } = &mut action {
+            *delivery = ClickDeliveryDef::Message;
+        }
+        click.actions = vec![action];
+        click.undo = false;
+        assert_eq!(
+            check_classes(&click, AntiCheatDef::None, Some(AntiCheatDef::None)),
+            Ok(())
+        );
+        for class in [
+            AntiCheatDef::Unknown,
+            AntiCheatDef::UserMode,
+            AntiCheatDef::KernelLevel,
+        ] {
+            assert!(
+                check_classes(&click, class, Some(AntiCheatDef::None))
+                    .is_err_and(|problem| problem.starts_with("it clicks, which anti-cheat")),
+                "watched {class:?}"
+            );
+            assert!(
+                check_classes(&click, AntiCheatDef::None, Some(class))
+                    .is_err_and(|problem| problem.starts_with("it clicks in Streaming App")),
+                "clicked in {class:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_click_needs_both_applications_without_anti_cheat() {
         let mut click = pause_music();
         click.actions = vec![click_on("streaming_app")];
         click.undo = false;
-        let check = |click: &AutomationDef, watched: AntiCheatDef, target: Option<AntiCheatDef>| {
-            let mut app = app();
-            app.anti_cheat = watched;
-            let mut other = app.clone();
-            other.name = "Streaming App".to_owned();
-            other.anti_cheat = target.unwrap_or(AntiCheatDef::None);
-            let both = [("example", &app), ("streaming_app", &other)];
-            let apps = if target.is_some() {
-                &both[..]
-            } else {
-                &both[..1]
-            };
-            click.compile(apps).map(drop)
-        };
+        let check = check_classes;
         assert_eq!(
             check(&click, AntiCheatDef::None, Some(AntiCheatDef::None)),
             Ok(())
