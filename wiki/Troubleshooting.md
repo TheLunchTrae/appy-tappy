@@ -45,6 +45,11 @@ Check these in order:
    becomes true. It runs again only after the condition has stopped being
    true, and after its wait.
 
+If the log says the actions thread panicked, AppyTappy has a bug. It starts
+running actions again with the next one, but a change made before that, such
+as a volume change, isn't put back when its automation stops. Include the log
+line when you report the problem.
+
 ## A number reads in setup but the automation does nothing
 
 What you see while you make a reference isn't all the reference's reading.

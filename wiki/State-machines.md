@@ -82,7 +82,9 @@ stateDiagram-v2
     Starting --> Running: threads started, first plan carried out
     Starting --> [*]: the window events hook, detection, or the action thread cannot start
     Running --> Running: Carry orders, Reload, Due, or a read of the saved files again
-    Running --> Undoing: Quit, CloseRequested, DetectionEnded
+    Running --> Running: a send to the action thread fails, so it starts again
+    Running --> Undoing: Quit, CloseRequested, DetectionEnded, or a send to detection fails
+    Undoing --> Undoing: an undo cannot reach the action thread, so it starts again
     Undoing --> Stopping: the action thread ran the queued undos and ended
     Stopping --> [*]: every thread joined
 ```
@@ -107,6 +109,20 @@ stateDiagram-v2
   and, once the retry is due, reads the saved files again. With neither, it
   waits with no limit. After each step the tray gets a fresh menu if it
   changed.
+- **A worker that ended.** Every send to the action thread and to detection
+  goes through `Crew::act` and `Crew::detect`. Each of those threads ends
+  only after the owner, or when it panics, so a send that fails means it
+  panicked. For the action thread, the owner joins it and logs its panic,
+  starts a new one, and sends it the owner's trace and then what the old one
+  could not take. The jobs the old thread had not run are dropped, and what
+  it changed is not undone, because its journal ended with it. If the new
+  thread cannot start, or ends before it takes the send, the log says so, the
+  send is dropped, and the next send tries again. This also happens while
+  **Undoing**, when the thread panicked since the last job. Detection sends
+  `DetectionEnded` however it ends, a panic included (`workers::tell_end`),
+  and a send to detection that fails has the owner send itself the same
+  event, so the owner stops either way; the join at the end reports the
+  panic.
 - **Undoing.** `model.set_enabled(false)` stops every running application and
   queues the undo of what its automations changed. The owner then drops the
   job sender and joins the action thread, which runs the queued undos before
@@ -116,6 +132,12 @@ stateDiagram-v2
   [Tray thread](#tray-thread)). Then the reload watch and the window watch
   stop, and dropping the inputs ends detection. Each reader is stopped, and
   every thread is joined.
+
+#### Open problems
+
+- [#297](https://github.com/TheLunchTrae/appy-tappy/issues/297): after the
+  action thread starts again, what the old thread changed stays changed, and
+  later restores of that target put back the wrong state.
 
 ### Runtime state
 
@@ -317,6 +339,12 @@ stateDiagram-v2
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
 
+#### Open problems
+
+- [#298](https://github.com/TheLunchTrae/appy-tappy/issues/298): a reader that
+  panics stops its application's readings without telling the owner, until
+  the session ends.
+
 ### Frame handler
 
 `FrameReader::handle` runs once per frame and decides what each frame means.
@@ -499,11 +527,12 @@ stateDiagram-v2
   has nothing to undo. When the wait ends, or the first job after it comes,
   the worker makes the controls again. The wait starts at 1 second and doubles
   after each failure, up to a minute. The log says when actions can run again.
-- **Telling the owner.** `act::run` sends `ActionReport::CanRun(false)` when the
-  worker reaches **Missing** and `CanRun(true)` when it leaves it, and only
-  then; the owner takes it that actions can run until it hears otherwise. The
-  owner keeps the last report in the model's `actions_can_run`, and the tray
-  shows it.
+- **Telling the owner.** `act::run` sends `ActionReport::CanRun` once when it
+  starts, then `CanRun(false)` when the worker reaches **Missing** and
+  `CanRun(true)` when it leaves it. A thread that the owner starts again
+  after a panic thereby replaces what the old one said. The owner takes it
+  that actions can run until the first report, keeps the last report in the
+  model's `actions_can_run`, and the tray shows it.
 - **Ready.** After each job, the worker tries the pending restores that are
   due. While any restore is pending, it waits for the next job only until the
   next one is due, or 10 seconds (`VOLUME_RETRY`) for a volume restore.

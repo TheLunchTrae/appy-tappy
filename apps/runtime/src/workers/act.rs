@@ -104,9 +104,10 @@ struct Done {
 pub(crate) enum ActionReport {
     /// A line for the log, such as an action that could not run.
     Note(String),
-    /// Whether actions can run. The owner takes it that they can until it
-    /// hears otherwise, so this comes only when that changes: `false` when
-    /// the controls cannot be made, and `true` once they are.
+    /// Whether actions can run: `false` when the controls cannot be made,
+    /// and `true` once they are. It comes once when the thread starts, so a
+    /// thread started again replaces what the one before it said, and after
+    /// that only when it changes.
     CanRun(bool),
 }
 
@@ -115,8 +116,9 @@ pub(crate) enum ActionReport {
 /// still pending a last try. `controls` makes the operating system's
 /// controls on this thread; when it fails, the jobs that come meanwhile are
 /// reported as not run, and it is called again after a wait that grows
-/// with each failure. Clicks find their windows on `screen`. Each note, and
-/// each change in whether actions can run, goes to `reports`.
+/// with each failure. Clicks find their windows on `screen`. Each note,
+/// whether actions can run once it starts, and each change in that go to
+/// `reports`.
 pub(crate) fn run<C, S, E>(
     controls: impl FnMut() -> io::Result<C>,
     screen: &S,
@@ -127,15 +129,15 @@ pub(crate) fn run<C, S, E>(
     S: System + Capture,
     E: From<ActionReport>,
 {
-    let mut told = true;
+    let mut told = None;
     let mut report = |notes: Vec<String>, can_run: bool| {
         let noted = notes
             .into_iter()
             .all(|note| reports.send(E::from(ActionReport::Note(note))).is_ok());
-        if !noted || can_run == told {
+        if !noted || told == Some(can_run) {
             return noted;
         }
-        told = can_run;
+        told = Some(can_run);
         reports.send(E::from(ActionReport::CanRun(can_run))).is_ok()
     };
     let (mut worker, notes) = Worker::start(controls, Instant::now());
@@ -689,10 +691,13 @@ mod tests {
         );
         assert_eq!(
             failed.try_iter().collect::<Vec<_>>(),
-            [ActionReport::Note(
-                "Pause near the end: action 2 failed: the volume target has no audio session"
-                    .to_owned()
-            )]
+            [
+                ActionReport::CanRun(true),
+                ActionReport::Note(
+                    "Pause near the end: action 2 failed: the volume target has no audio session"
+                        .to_owned()
+                )
+            ]
         );
     }
 
@@ -1020,6 +1025,7 @@ mod tests {
         assert_eq!(
             failed.try_iter().collect::<Vec<_>>(),
             [
+                ActionReport::CanRun(true),
                 ActionReport::Note(
                     "Pause near the end: undoing failed, so it is tried again: the media session did not take the command".to_owned()
                 ),
@@ -1173,9 +1179,12 @@ mod tests {
         actor.join().expect("the thread ends when the jobs stop");
         assert_eq!(
             failed.try_iter().collect::<Vec<_>>(),
-            [ActionReport::Note(
-                "Pause near the end: undoing failed, so it is tried again: the media session did not take the command".to_owned()
-            )],
+            [
+                ActionReport::CanRun(true),
+                ActionReport::Note(
+                    "Pause near the end: undoing failed, so it is tried again: the media session did not take the command".to_owned()
+                ),
+            ],
             "the retry worked, so only the first failure is logged"
         );
     }
