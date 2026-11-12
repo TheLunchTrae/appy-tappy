@@ -45,6 +45,7 @@ import { EditIntro, EditOutcome, SavedStates } from './ValueEdit.tsx';
 import { CHECK_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
+import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
@@ -118,14 +119,17 @@ type Step = 'where' | 'how';
 interface Props {
   readonly choice: Choice;
   readonly mode: CaptureMode;
+  /** The way to the capture's flow, for its breadcrumb: its page, then each flow that waits under it. */
+  readonly trail: readonly string[];
   readonly onCancel: () => void;
   readonly onChangeWindow: () => void;
-  readonly onSaved: () => void;
+  /** Hears what the flow saved: where a value is, or the application of a reference. */
+  readonly onSaved: (made: Made) => void;
   /** Hears what leaving the capture would lose. */
   readonly onHeld: (held: Held) => void;
 }
 
-export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHeld }: Props) {
+export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved, onHeld }: Props) {
   // What the capture shows before the user does anything, which leaving it loses nothing of. A fix and an edit
   // open on a screenshot the capture takes itself, and start from there.
   const [start, setStart] = useState(() => {
@@ -303,7 +307,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       : null;
 
   // What Save sends, or null while something is missing.
-  const sends = (): (() => Promise<unknown>) | null => {
+  const sends = (): (() => Promise<Made>) | null => {
     const changes = edit.built;
     if (changes !== null) {
       return changes.ok ? async () => editValue(changes.spec, dropFixes) : null;
@@ -325,8 +329,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     }
     setSaving(true);
     try {
-      await send();
-      onSaved();
+      onSaved(await send());
     } catch (error: unknown) {
       setSaveError(errorText(error));
       edit.refused();
@@ -428,7 +431,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       });
       setSaveError(null);
       if (mode.kind === 'reference') {
-        onSaved();
+        onSaved({ app: saved.app, value: null });
         return;
       }
       await appFile.reload();
@@ -459,7 +462,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       <section className="stage" aria-label="Capture">
         <div className="bar">
           <span className="crumb">
-            {mode.kind === 'reference' ? 'References' : 'Values'}
+            {trail.join(' / ')}
             {mode.kind !== 'reference' && editing !== null ? ` / ${flowName}` : ''} /{' '}
             {reviewing ? (
               <>
@@ -972,7 +975,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   ? `The fix shows on the Values page, beside ${fixing.name}.`
                   : edited !== null
                     ? `The changes to ${edited.name} show on the Values page, and its automations keep using it.`
-                    : `Saved values show on the Values page, under ${choice.name}.`}
+                    : savedNote(trail, choice.name)}
               </p>
               <div className="actions">
                 <button

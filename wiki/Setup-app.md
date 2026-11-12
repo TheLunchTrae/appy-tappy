@@ -14,12 +14,44 @@ This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
 
-- **Picker.** A value's picker only chooses a saved application; the
-  Applications page adds, edits, and removes them. Picking a window a saved
-  application finds chooses that application. Capture stays off until the
-  open windows are matched, and then only allows a window that fits the
-  application's match as well as any other, since the runtime reads one of
-  those.
+- **Picker.** The picker of a value or reference chooses a saved application
+  and then resolves that application's window with its own match
+  (`lib/picker.ts`); [Picker](State-machines.md#picker) lists its states. One
+  look (`lib/useAppWindows.ts`) is one `list_app_windows` command: the owner
+  reads the saved applications and lists the desktop once, and answers the
+  applications, the open windows, and the windows each application's match
+  takes, so the three agree. The picker shows the applications from that
+  answer, not from the pages' list, so **Refresh** reads them again and a
+  failed read shows with its reason. `window_list::matching` marks the window
+  a new session would read as `best`, and every offered window that fits as
+  well as it as `tied`. `tied` covers only offered windows: one the list
+  filters out, untitled, without a size, or of a desktop class, ties with
+  none even where the runtime could read it, and when the runtime reads such
+  a window no offered window is tied. Capture allows only a tied window,
+  since the runtime reads one of those: the only one without asking, or the
+  one the user picks among several. A window the match takes with a worse fit
+  is never offered. The chosen application's ID travels with the captured
+  window as the `Choice`, and every save names it, so nothing reads the owner
+  back from the window. **Add application** and **Change how it's found**
+  open the application flow for the picker's flow, as
+  [Pages and flows](State-machines.md#pages-and-flows) describes.
+- **One flow from an automation.** The automation editor is where a first
+  automation starts: its condition chooses the application, then one of that
+  application's values (`lib/watch.ts`), and says which step is missing while
+  there is no value to compare. **Add application** and **New value** open
+  those flows for the automation, which waits under them with its draft
+  (`lib/flow.ts`). `save_value` answers the saved value's application and ID,
+  which the editor picks once the pages' lists show it, so nothing is looked
+  up by name. Until then the draft has no value and cannot be saved. The
+  pages' lists are read every three seconds and after each save; the reads
+  are numbered, so an answer that arrives after a newer one is dropped
+  (`lib/reads.ts`), and the editor can tell what is still on its way from
+  what a newer read shows to be gone. When a flow shows because another
+  ended, the focus lands on the control the next step is taken with
+  (`lib/landing.ts`). [Pages and flows](State-machines.md#pages-and-flows)
+  and
+  [What an automation watches](State-machines.md#what-an-automation-watches)
+  list the transitions.
 - **Application editor.** A new application's match starts from the picked
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
@@ -49,6 +81,13 @@ This page covers what the user guide leaves out.
   the tabs, **Change window**, the questions' answers, and **Discard** or
   **Cancel** wait. A save closes its flow only while that flow is still open,
   so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
+  A flow opened for another unmounts that one, so what a waiting flow would
+  lose has to travel in its `Flow` value. Only the automation editor opens a
+  flow while it holds work, so it hands over its draft, and the window counts
+  that draft with what the open flow reports (`heldInAll`). A tab then asks
+  even when the open flow holds nothing, and the question names both losses
+  (`lostText`). **Cancel** in a flow opened for another shows that one again
+  and drops only its own work.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner

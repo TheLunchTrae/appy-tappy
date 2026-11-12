@@ -10,6 +10,7 @@ use appytappy_config::app_file::{
     value_id,
 };
 use appytappy_sources::screen::saved;
+use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::applications::{self, AppSpec};
 use crate::automations;
@@ -18,21 +19,40 @@ use crate::stores::SavedApp;
 use crate::window_list;
 
 use super::host::Host;
-use super::messages::{AppSummary, SaveSpec, SavedValue};
+use super::messages::{AppFits, AppSummary, AppWindows, SaveSpec, SavedValue};
 use super::{Changed, Edit, Owner, Write};
 
 impl<H: Host> Owner<H> {
     /// The saved applications.
     pub(crate) fn apps(&mut self) -> Result<Vec<AppSummary>, String> {
+        // The saved files read fine without the running windows, so a
+        // failed window listing only leaves each one's windows empty.
+        let (processes, windows) = self.desktop().unwrap_or_default();
+        let found = self.app_windows_among(&processes, windows)?;
+        Ok(found.apps.into_iter().map(|each| each.app).collect())
+    }
+
+    /// The saved applications and the open windows, with the windows each
+    /// application's match takes, all from one listing of the desktop, so
+    /// a window that opens or closes meanwhile cannot make them disagree.
+    pub(crate) fn app_windows(&mut self) -> Result<AppWindows, String> {
+        let (processes, windows) = self.desktop()?;
+        self.app_windows_among(&processes, windows)
+    }
+
+    /// The saved applications, with what each one's match takes among
+    /// `processes` and `all`, and the windows of `all` to offer.
+    fn app_windows_among(
+        &mut self,
+        processes: &[ProcessEntry],
+        all: Vec<WindowEntry>,
+    ) -> Result<AppWindows, String> {
         let stored = self
             .stores()?
             .apps
             .load()
             .map_err(|error| error.to_string())?;
-        // The saved files read fine without the running windows, so a
-        // failed window listing only leaves each one's windows empty.
-        let (processes, all) = self.desktop().unwrap_or_default();
-        let windows = window_list::list(all.clone(), &processes, self.own_process).windows;
+        let open = window_list::list(all.clone(), processes, self.own_process);
         // Each application with the window a new session would read for it.
         let apps: Vec<_> = stored
             .into_iter()
@@ -43,7 +63,7 @@ impl<H: Host> Owner<H> {
                 };
                 let read = file.as_ref().and_then(|file| {
                     self.host
-                        .read_window(&file.window.to_match(), processes.clone(), all.clone())
+                        .read_window(&file.window.to_match(), processes.to_vec(), all.clone())
                 });
                 (app.id, file, error, read)
             })
@@ -55,17 +75,14 @@ impl<H: Host> Owner<H> {
                     .is_some_and(|read| read.entry.process == *process)
             })
         });
-        Ok(apps
+        let apps = apps
             .into_iter()
             .map(|(id, file, error, read)| {
-                let matched: Vec<u64> = file
+                let fits = file
                     .as_ref()
                     .map(|file| {
                         let handle = read.as_ref().map(|read| read.entry.handle);
-                        window_list::matching(&windows, &file.window, handle)
-                            .into_iter()
-                            .map(|fit| fit.handle)
-                            .collect()
+                        window_list::matching(&open.windows, &file.window, handle)
                     })
                     .unwrap_or_default();
                 // Only an application with values shows its build, and one
@@ -78,15 +95,19 @@ impl<H: Host> Owner<H> {
                             .ok()
                             .flatten()
                     });
-                AppSummary {
-                    id,
-                    file,
-                    error,
-                    windows: matched,
-                    running,
+                AppFits {
+                    app: AppSummary {
+                        id,
+                        file,
+                        error,
+                        windows: fits.iter().map(|fit| fit.handle).collect(),
+                        running,
+                    },
+                    fits,
                 }
             })
-            .collect())
+            .collect();
+        Ok(AppWindows { open, apps })
     }
 
     /// Saves a value and answers where it was saved, or what to fix.
@@ -311,6 +332,8 @@ mod tests {
     use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
     use appytappy_sources::screen::{Image, Size};
 
+    use crate::window_list::WindowFit;
+
     use crate::owner::test_support::{
         BAR, FakeHost, Harness, NO_STORE, STATE, add_example_app, example_build, frame_image,
         harness, harness_with, scratch_store, spec, with_saved_bar,
@@ -377,6 +400,55 @@ mod tests {
             read_back(&screen(["old.png", "new.png"]), &app, &Vec::new()).is_err(),
             "a new picture is not on disk yet"
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_applications_and_the_open_windows_come_from_one_listing() {
+        let (stores, root) = scratch_store("app-windows");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let fit = |handle, best| WindowFit {
+            handle,
+            fallback: false,
+            best,
+            tied: true,
+        };
+        let handles = |found: &AppWindows| -> Vec<u64> {
+            found.open.windows.iter().map(|each| each.handle).collect()
+        };
+
+        let found = harness.ask(Owner::app_windows).expect("lists");
+        assert_eq!(
+            handles(&found),
+            [7],
+            "the setup app's own window is left out"
+        );
+        assert_eq!(found.apps.len(), 1);
+        let example = &found.apps[0];
+        assert_eq!(example.app.id, "example");
+        assert_eq!(example.app.windows, [7]);
+        assert_eq!(example.fits, [fit(7, true)]);
+        assert_eq!(
+            example.app.file.as_ref().map(|file| file.name.as_str()),
+            Some("Example App")
+        );
+
+        // Another copy's window fits as well, and both are offered.
+        harness.owner.host.twin = Some(40);
+        let found = harness.ask(Owner::app_windows).expect("lists");
+        assert_eq!(handles(&found), [6, 7]);
+        assert_eq!(found.apps[0].fits, [fit(7, true), fit(6, false)]);
+        assert_eq!(found.apps[0].app.windows, [7, 6]);
+
+        // Without the windows there is nothing to capture, so the look
+        // fails where the list of applications alone would not.
+        harness.owner.host.unlisted = true;
+        assert_eq!(
+            harness.ask(Owner::app_windows),
+            Err("no windows here".to_owned())
+        );
+        assert!(harness.ask(Owner::apps).is_ok());
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

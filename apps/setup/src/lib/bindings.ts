@@ -108,6 +108,20 @@ overlay?: OverlayDef,
 checked?: CheckedDef, }>;
 
 /**
+ * A saved application with the open windows its match takes.
+ */
+export type AppFits = DeepReadonly<{
+/**
+ * The application.
+ */
+app: AppSummary,
+/**
+ * The open windows its match takes, the one a new session would read
+ * first; none for a broken file.
+ */
+fits: Array<WindowFit>, }>;
+
+/**
  * An application's name, how to find its window, and how often that window
  * changes size, as the editor sends them.
  */
@@ -151,6 +165,20 @@ windows: Array<number>,
  * matches or its build cannot be read.
  */
 running: BuildDef | null, }>;
+
+/**
+ * The saved applications and the open windows, from one listing of the
+ * desktop, as the picker of a value or reference shows them.
+ */
+export type AppWindows = DeepReadonly<{
+/**
+ * The open windows, which every application's fits are among.
+ */
+open: WindowList,
+/**
+ * Each saved application.
+ */
+apps: Array<AppFits>, }>;
 
 /**
  * One automation: a condition on a value, the actions to run in order when
@@ -1291,10 +1319,15 @@ handle: number,
  */
 fallback: boolean,
 /**
- * Whether it is the window a new session would read, so a value has
- * to be drawn on it.
+ * Whether it is the window a new session would read now.
  */
-best: boolean, }>;
+best: boolean,
+/**
+ * Whether it fits as well as the window a new session would read. A
+ * session reads one of these, so a value can be drawn on any of them.
+ * Only offered windows count: one the list leaves out ties with none.
+ */
+tied: boolean, }>;
 
 /**
  * The windows to offer, with the anti-cheat products running now.

@@ -23,13 +23,17 @@ import {
 import { background } from '../lib/repeat.ts';
 import { SIZE_CHANGES, SIZE_CHANGES_HINT, SIZE_CHANGE_TEXT } from '../lib/sizes.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
+import { Trail } from '../components/Trail.tsx';
 import { WindowsPanel, useWindowFits } from '../components/WindowsPanel.tsx';
 
 interface Props {
   /** The application to change, or null to add one. */
   readonly existing: AppSummary | null;
+  /** The way to this editor, for its breadcrumb. */
+  readonly trail: readonly string[];
   readonly onCancel: () => void;
-  readonly onSaved: () => void;
+  /** Hears the saved application's ID. */
+  readonly onSaved: (id: string) => void;
   /** Hears what leaving the editor would lose. */
   readonly onHeld: (held: Held) => void;
 }
@@ -41,7 +45,7 @@ function choiceLabel(option: SizeChangesDef): string {
 }
 
 /** Adding an application, or changing one's name, how its window is found and how often that window changes size. */
-export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props) {
+export function ApplicationEditor({ existing, trail, onCancel, onSaved, onHeld }: Props) {
   const saved = existing?.file ?? null;
   const [list, setList] = useState<WindowList | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -100,8 +104,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
     }
     setBusy(true);
     try {
-      await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges });
-      onSaved();
+      onSaved(await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges }));
     } catch (error: unknown) {
       setSaveError(errorText(error));
     } finally {
@@ -109,10 +112,12 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
     }
   };
 
+  const heading = saved === null ? 'New application' : `Edit ${saved.name}`;
   return (
     <main className="page">
+      <Trail trail={trail} here={heading} />
       <div className="page-head">
-        <h1>{saved === null ? 'New application' : `Edit ${saved.name}`}</h1>
+        <h1>{heading}</h1>
         <span className="lead">Pick its window, then choose what has to match to find it again.</span>
         <div className="end">
           <button

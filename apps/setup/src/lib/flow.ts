@@ -1,0 +1,268 @@
+// The flows the window shows in place of a page: how one opens another, waits under it, and shows again when it ends.
+
+import type { AppSummary, AutomationDef, ReferenceDef, ValueDef } from './bindings.ts';
+import { type Draft, startingDraft } from './automation.ts';
+import { type Held, held } from './unsaved.ts';
+
+/** A saved value to change, and its application's ID. */
+export interface Changing {
+  readonly app: string;
+  readonly value: ValueDef;
+  /** Whether it is drawn again at the window's size now, as a fix, or edited as it was first drawn. */
+  readonly how: 'fix' | 'edit';
+}
+
+/** A saved reference and the application it belongs to. */
+export interface SavedRef {
+  readonly app: string;
+  readonly reference: ReferenceDef;
+}
+
+/** Making or changing an automation. It opens the value flow and the application flow for its condition. */
+export interface AutomationFlow {
+  readonly kind: 'automation';
+  /** The saved automation to change, or null for a new one. */
+  readonly existing: AutomationDef | null;
+  /** The draft as the editor left it to open another flow, or null to start from `existing`. */
+  readonly draft: Draft | null;
+  /** The application the condition starts with: the one chosen before another flow opened, or the one that flow saved. */
+  readonly app: string | null;
+  /** What a flow the editor opened just saved for `app`, or null when none did. */
+  readonly handed: Handed | null;
+}
+
+/** What a flow saved for the automation that opened it, as the automation's editor takes it. */
+export interface Handed {
+  /** The value of the application that the value flow saved, which the condition picks, or null for an application. */
+  readonly value: string | null;
+  /**
+   * The number of the newest read of the saved lists that started before the save was heard. Any later read
+   * started after the save, so its answer has what was saved, or shows that it is gone.
+   */
+  readonly after: number;
+}
+
+/**
+ * Making a value, fixing a saved one at another window size, or editing a saved one. It opens the application flow
+ * from its picker. Only a new value is made for an automation: a fix and an edit open from the Values page alone.
+ */
+export type ValueFlow =
+  | {
+      readonly kind: 'value';
+      readonly changing: null;
+      /** The application the picker starts with, or null to let the user choose. */
+      readonly app: string | null;
+      readonly opener: AutomationFlow | null;
+    }
+  | {
+      readonly kind: 'value';
+      readonly changing: Changing;
+      /** The application the picker showed chosen when it opened the application flow, which is the value's own. */
+      readonly app: string | null;
+      readonly opener: null;
+    };
+
+/** Making or changing a reference. It opens the application flow from its picker. */
+export interface RefFlow {
+  readonly kind: 'reference';
+  readonly existing: SavedRef | null;
+  /** The application the picker starts with, or null to let the user choose. */
+  readonly app: string | null;
+}
+
+/** A flow that opens another flow and waits under it. */
+export type Opener = AutomationFlow | ValueFlow | RefFlow;
+
+/** Adding or changing an application. */
+export interface ApplicationFlow {
+  readonly kind: 'application';
+  readonly existing: AppSummary | null;
+  readonly opener: Opener | null;
+}
+
+/**
+ * What the window shows in place of a page: a flow that makes or changes something. A flow opened for another keeps
+ * that one as its `opener`, which waits under it and shows again when it ends. At most three are stacked: an
+ * automation, a value for it, and an application for that value.
+ */
+export type Flow = AutomationFlow | ValueFlow | RefFlow | ApplicationFlow;
+
+/**
+ * What a flow that saved made for the flow that opened it: the application it belongs to, and the value when it
+ * saved one.
+ */
+export interface Made {
+  readonly app: string;
+  readonly value: string | null;
+}
+
+function openerOf(flow: Flow): Opener | null {
+  return 'opener' in flow ? flow.opener : null;
+}
+
+/** The flows that wait under `flow`, the one opened first at the start. */
+function waitingUnder(flow: Flow): readonly Opener[] {
+  const opener = openerOf(flow);
+  return opener === null ? [] : [...waitingUnder(opener), opener];
+}
+
+/**
+ * The automation flow as it waits under a flow it opens: with the `draft` it shows again, and nothing handed to
+ * it yet.
+ */
+export function waiting(flow: AutomationFlow, draft: Draft): AutomationFlow {
+  return { ...flow, draft, handed: null };
+}
+
+/**
+ * The value flow opened for the automation flow `opener`, starting with `app`, the application its condition has
+ * chosen. The opener keeps that application, so it shows again as the user left it.
+ */
+export function valueFor(opener: AutomationFlow, app: string): ValueFlow {
+  return { kind: 'value', changing: null, app, opener: { ...opener, app } };
+}
+
+/**
+ * The application flow opened for `opener`, to add an application or to change `existing`. The opener keeps
+ * `chosen`, the application it shows chosen, so it shows again as the user left it.
+ */
+export function applicationFor(opener: Opener, chosen: string | null, existing: AppSummary | null): ApplicationFlow {
+  return { kind: 'application', existing, opener: { ...opener, app: chosen } };
+}
+
+/**
+ * How a flow ended: it saved, or the user canceled it. A save has what it made for a flow that opened it, or
+ * null when it made nothing a flow starts with, and the number of the newest read of the saved lists that
+ * started before the save was heard.
+ */
+export type Ended =
+  | { readonly kind: 'saved'; readonly made: Made | null; readonly read: number }
+  | { readonly kind: 'canceled' };
+
+/**
+ * What the window shows once a flow ended: nothing else than it shows now, the flow that opened it, the page that
+ * lists what it saved, or the page under it.
+ */
+export type After =
+  | { readonly kind: 'nothing' }
+  | { readonly kind: 'flow'; readonly flow: Opener }
+  | { readonly kind: 'listed' }
+  | { readonly kind: 'page' };
+
+/**
+ * What follows `flow`. `open` says the flow is still the one the window shows: a save that finishes after the user
+ * left it for another changes nothing. A flow that waits under it shows again: with the saved application chosen,
+ * and for an automation what was handed to it, or as it was left when the flow was canceled.
+ */
+export function afterFlow(flow: Flow, ended: Ended, open: boolean): After {
+  if (!open) {
+    return { kind: 'nothing' };
+  }
+  const opener = openerOf(flow);
+  if (opener === null) {
+    return { kind: ended.kind === 'saved' ? 'listed' : 'page' };
+  }
+  if (ended.kind === 'canceled' || ended.made === null) {
+    return { kind: 'flow', flow: opener };
+  }
+  const { app, value } = ended.made;
+  return {
+    kind: 'flow',
+    flow: opener.kind === 'automation' ? { ...opener, app, handed: { value, after: ended.read } } : { ...opener, app },
+  };
+}
+
+/** The page each kind of flow opens from. */
+const PAGE_NAMES: Readonly<Record<Flow['kind'], string>> = {
+  automation: 'Automations',
+  value: 'Values',
+  reference: 'References',
+  application: 'Applications',
+};
+
+/** A value flow as a breadcrumb names it: a new value, or the fix or the edit of a saved one. */
+function changeName(changing: Changing | null): string {
+  if (changing === null) {
+    return 'New value';
+  }
+  return `${changing.how === 'fix' ? 'Fix' : 'Edit'} ${changing.value.name}`;
+}
+
+/** A waiting flow as a breadcrumb names it. */
+function crumbName(flow: Opener): string {
+  switch (flow.kind) {
+    case 'automation':
+      return flow.existing?.name ?? 'New automation';
+    case 'value':
+      return changeName(flow.changing);
+    case 'reference':
+      return flow.existing?.reference.name ?? 'New reference';
+  }
+}
+
+/**
+ * The way to `flow`, for its breadcrumb: the page the first flow opened from, then each flow that waits under
+ * `flow`, such as Automations, New automation for a value made for a new automation.
+ */
+export function trail(flow: Flow): readonly string[] {
+  const under = waitingUnder(flow);
+  return [PAGE_NAMES[(under[0] ?? flow).kind], ...under.map(crumbName)];
+}
+
+/**
+ * Where a new value of the application named `app` shows once it is saved, as its capture says before the save:
+ * `way` is the way to the value's flow, which is longer than its page when an automation waits for the value.
+ */
+export function savedNote(way: readonly string[], app: string): string {
+  const listed = `on the Values page, under ${app}`;
+  return way.length > 1
+    ? `Saving returns to the automation with this value picked. The value also shows ${listed}.`
+    : `Saved values show ${listed}.`;
+}
+
+/**
+ * Whether the waiting flow `opener` holds work that leaving would lose. Only an automation's draft can: the value
+ * and reference flows open another flow from their picker, before a capture holds anything.
+ */
+function holdsWork(opener: Opener): boolean {
+  return (
+    opener.kind === 'automation' &&
+    opener.draft !== null &&
+    held(false, startingDraft(opener.existing), opener.draft) === 'unsaved'
+  );
+}
+
+/**
+ * What leaving `flow` would lose, counting the flows that wait under it; `reported` is what the open flow says it
+ * holds. A save under way comes first.
+ */
+export function heldInAll(flow: Flow | null, reported: Held): Held {
+  if (flow === null || reported !== 'nothing') {
+    return reported;
+  }
+  return waitingUnder(flow).some(holdsWork) ? 'unsaved' : 'nothing';
+}
+
+/** What leaving each kind of flow before it is saved loses. */
+const LOST: Readonly<Record<Flow['kind'], string>> = {
+  value: 'The screenshots, the region and any recording are lost.',
+  reference: 'The screenshots, the labels and any recording are lost.',
+  automation: 'The changes to this automation are lost.',
+  application: 'The changes to this application are lost.',
+};
+
+/** What leaving an edit of a saved value before it is saved loses: the value itself stays as it is saved. */
+const EDIT_LOST = 'The screenshots and the changes to this value are lost.';
+
+/**
+ * What the question before leaving `flow` says: what the open flow loses when it `reported` work, and the changes
+ * to an automation that waits under it.
+ */
+export function lostText(flow: Flow, reported: Held): string {
+  const lost = flow.kind === 'value' && flow.changing?.how === 'edit' ? EDIT_LOST : LOST[flow.kind];
+  const here = reported === 'nothing' ? null : lost;
+  const under = waitingUnder(flow).some(holdsWork)
+    ? `The unsaved changes to the automation are lost${here === null ? '' : ' too'}.`
+    : null;
+  return ['Leave without saving?', here, under].filter((part) => part !== null).join(' ');
+}
