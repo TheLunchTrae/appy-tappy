@@ -1,6 +1,6 @@
 /** What the Debug page shows, in the words and units the user reads. */
 
-/** A time in nanoseconds, as `0.05 ms`, `9.4 ms`, `120 ms` or `2.4 s`. */
+/** A time in nanoseconds, as `0.05 ms`, `9.4 ms`, `2400 ms` or `12.3 s`. */
 export function durationText(ns: number): string {
   const ms = ns / 1e6;
   if (ms >= 10_000) {
@@ -81,7 +81,13 @@ export async function pickZipFile(name: string): Promise<ZipSaver | null> {
   }
   return async (zip) => {
     const writable = await file.createWritable();
-    await writable.write(zip);
+    try {
+      await writable.write(zip);
+    } catch (error: unknown) {
+      // Leaves the picked file as it was rather than half written.
+      await writable.abort();
+      throw error;
+    }
     await writable.close();
   };
 }

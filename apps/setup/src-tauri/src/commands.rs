@@ -660,12 +660,25 @@ pub(crate) async fn open_logs_folder(app: AppHandle) -> Result<(), String> {
     try_ask(&app, "open_logs_folder", |owner| owner.open_logs_folder()).await
 }
 
-/// The debug bundle, as the bytes of a zip file.
+/// The debug bundle, as the bytes of a zip file. The owner thread names the
+/// files, a blocking task packs them, and `setup.log` then records the whole
+/// time and any failure on the owner thread.
 #[tauri::command]
 pub(crate) async fn debug_bundle(app: AppHandle, contents: BundleSpec) -> Result<Response, String> {
-    try_ask(&app, "debug_bundle", move |owner| {
-        owner.debug_bundle(contents)
+    let sent = Instant::now();
+    let made = match run(&app, move |owner| owner.debug_bundle(contents)).await? {
+        Ok(job) => tauri::async_runtime::spawn_blocking(move || job.make())
+            .await
+            .unwrap_or_else(|error| {
+                Err(format!("AppyTappy cannot make the debug bundle: {error}."))
+            }),
+        Err(problem) => Err(problem),
+    };
+    let took = sent.elapsed();
+    let failure = made.as_ref().err().cloned();
+    run(&app, move |owner| {
+        owner.record_command("debug_bundle", took, failure.as_ref());
     })
-    .await
-    .map(Response::new)
+    .await?;
+    made.map(Response::new)
 }

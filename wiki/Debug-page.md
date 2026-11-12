@@ -7,9 +7,10 @@ show it, turn on **Show debug details** under **Debug** on the
 **Settings**. Turning the setting off hides the tab again.
 
 While debug details are on, AppyTappy Setup also writes its own log,
-`setup.log`, beside the background part's `runtime.log`. It names each thing
-you did in AppyTappy Setup, how long it took, and why it failed, if it did, so
-a slow or failing page can be told apart from a slow or failing runtime.
+`setup.log`, beside the background part's `runtime.log`. It names each request
+the page made to the rest of AppyTappy Setup, how long it took, and why it
+failed, if it did, so a slow or failing page can be told apart from a slow or
+failing runtime.
 
 ## Runtime
 
@@ -24,15 +25,15 @@ actions and changes:
   actions started sooner than the median, and 1 in 20 took longer than the
   95th percentile.
 - **Rule handling, median** and **95th percentile.** How long the background
-  part took to handle each change it read.
-- **Running actions, median.** How long the background part took to run an
-  automation's actions once its rules matched.
+  part took to handle each event, such as a changed value or a reload.
+- **Running actions, median** and **95th percentile.** How long the background
+  part took to run an automation's actions once its rules matched.
 - **Rows dropped.** Rows the trace left out because it could not write them as
   fast as they came. Any number above 0 means it records more than it keeps up
   with; record less, such as without **Each read**.
 
 A dash means the trace did not record what that number needs. Frame to action
-needs **Changes** and **Actions** recorded, rule handling needs **Rules**, and
+needs **Value changes** and **Actions** recorded, rule handling needs **Rules**, and
 running actions needs **Actions**. When the trace file is too large to read
 whole, the numbers cover its newest rows, and the page says so.
 Under the numbers are the trace's newest rows, with times counted from when

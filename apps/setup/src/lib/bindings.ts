@@ -1086,9 +1086,8 @@ trace: TraceDef,
  */
 rememberEnabled: boolean,
 /**
- * Whether the setup app shows its debug details: the Debug page, and
- * the working behind each reading. On, it also writes `setup.log`. The
- * runtime ignores it.
+ * Whether the setup app shows its debug details, such as the Debug
+ * page. On, it also writes `setup.log`. The runtime ignores it.
  */
 showDebug: boolean, }>;
 

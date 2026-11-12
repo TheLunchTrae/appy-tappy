@@ -40,7 +40,7 @@ pub(crate) const BUFFER: usize = 8_192;
 const FLUSH_EVERY: Duration = Duration::from_secs(1);
 
 /// The header row of every trace file.
-pub(crate) const HEADER: &str = "time_ns,thread,event,app,item,value,took_ns,cause,detail";
+pub(crate) const HEADER: &str = appytappy_config::settings_file::TRACE_HEADER;
 
 /// What reaches the writer thread through the buffer.
 #[derive(Debug)]
