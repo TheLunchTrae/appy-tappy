@@ -391,8 +391,8 @@ cannot be opened, nothing is logged, and running exits with code 1.
 **Show debug details** is on, the setup app writes `setup.log` in the same
 folder, with the same 512 KiB rotation to `setup.old.log`: one line for each
 command the page sends, with how long it took from being sent and why it
-failed, if it did. The commands the page repeats every second or so are left
-out when they answer in under 50 ms without failing, so the log stays
+failed, if it did. The commands the page repeats, on a timer or while a control is
+dragged, are left out when they answer in under 50 ms without failing, so the log stays
 readable.
 With the setting off, the setup app writes no log at all.
 
