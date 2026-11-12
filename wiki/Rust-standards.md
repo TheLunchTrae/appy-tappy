@@ -98,7 +98,7 @@ or build dependencies.
 
 ## Mutation testing
 
-`rust:mutants` is the full sweep. `rust:mutants:diff` mutates code changed
+`rust:mutants` mutates the whole workspace. `rust:mutants:diff` mutates code changed
 since the merge base with `MUTANTS_BASE_REF`, which defaults to `origin/main`,
 then local `main`, so it needs full Git history. Untracked files fail the
 lane; stage them with `git add -N`. A diff that selects no mutants passes.
@@ -110,27 +110,25 @@ lane; stage them with `git add -N`. A diff that selects no mutants passes.
 pull request diffs against its base branch and a push to main against the
 previous tip, which with squash merges is exactly the merged pull request.
 
-`.github/workflows/mutants.yml` runs the full sweep nightly on main, split into
-shards: `MUTANTS_SHARD=k/n` makes `rust:mutants` run shard `k` of `n`, counted
-from zero, and the workflow sets the shard count. A mutant that survives only
-once two merged changes meet shows up in the next nightly sweep.
+No workflow runs the full lane. A mutant that survives only once two merged
+changes meet is not caught until a later change touches its code.
 
 The diff lane mutates only changed source lines, so a pull request that only
 removes or weakens tests, or changes only mutation configuration, selects no
-mutants. Run the mutation sweep workflow manually on its branch to check the
-whole workspace before merging it.
+mutants. Run `rust:mutants` on its branch to check the whole workspace before
+merging it.
 
 Both lanes run two mutants at once (`--jobs=2`), since each mutant's build
-waits on its linker most of the time. CI sets `MUTANTS_COPY_TARGET=true`, so
-cargo-mutants copies `target/` into its build directories and the baseline
-reuses the builds already there. A local run leaves it off, so it doesn't copy
-a developer's whole `target/` twice. The copy gives every file a new
-modification time, so Cargo would take a stale workspace build in it, such as
-one from a build cache saved at an older commit, for a current one. With the
-copy on, each lane therefore first runs, in place, the build that cargo-mutants
-runs for each mutant, which is quick when `target/` is already current. The gate
-starts the lane only after the other Cargo tasks finish, so the copy never
-catches a build half written.
+waits on its linker most of the time. CI sets `MUTANTS_COPY_TARGET=true` for
+the diff lane, so cargo-mutants copies `target/` into its build directories
+and the baseline reuses the builds already there. A local run leaves it off,
+so it doesn't copy a developer's whole `target/` twice. The copy gives every
+file a new modification time, so Cargo would take a stale workspace build in
+it, such as one from a build cache saved at an older commit, for a current
+one. With the copy on, the diff lane therefore first runs, in place, the build
+that cargo-mutants runs for each mutant, which is quick when `target/` is
+already current. The gate starts the lane only after the other Cargo tasks
+finish, so the copy never catches a build half written.
 Both lanes also run every workspace package's tests against each mutant
 (`--test-workspace=true`), because a mutant in one crate can be caught by
 another crate's tests. Whether testing only the mutated package catches the
