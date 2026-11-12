@@ -1,10 +1,10 @@
-//! The different shapes a recording has seen, and how often it saw each.
+//! The different shapes a recording has seen, how often it saw each, and
+//! which frames are worth keeping for them.
 //!
 //! A reference learns one glyph for each different shape, so a shape is
-//! what a recording collects: a reading is worth keeping only when it shows
-//! a shape no kept reading has. Two shapes are the same only when every
-//! cell of their grids is, which is how learning tells glyphs apart. Two
-//! grids one cell apart may be one character with a blended edge or two
+//! what a recording collects. Two shapes are the same only when every cell
+//! of their grids is, which is how learning tells glyphs apart. Two grids
+//! one cell apart may be one character with a blended edge or two
 //! characters, and nothing here can tell which, so both stay and review
 //! shows each. The same character is another shape when its line is
 //! another height, as beside a `,` that reaches below the digits, and the
@@ -12,6 +12,16 @@
 //!
 //! How often a shape showed is counted without keeping a frame: each shape
 //! holds two counts, and each different reading costs one fingerprint.
+//!
+//! A reading is kept for a shape no kept reading shows. That alone would
+//! leave a shape with one kept reading whatever stood beside it, and a
+//! reading can be learned only when its text names every shape in it. A
+//! frame caught while the digit beside a `7` was half drawn holds a shape
+//! no character names, so the `7` could not be taught from it. So a kept
+//! reading carries a shape cleanly when every other shape in it has shown
+//! in another reading too, which a half-drawn digit seldom does, and a
+//! shape with no clean carrier gets one more kept reading: the first frame
+//! that would be one.
 
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -19,12 +29,12 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use appytappy_sources::screen::digits::{MAX_GLYPHS, Shape};
 use serde::Serialize;
 
-/// The most different shapes one recording looks for: as many glyphs as a
-/// reference learns, so a recording that found more could not teach them
-/// all. Each kept reading shows at least one shape no reading before it
-/// has, so this also bounds the kept readings, which cost the most: a kept
-/// reading holds its crop at four bytes a pixel, so a region 300 pixels
-/// wide and 60 tall costs 72 KB a reading and 18 MB at the bound.
+/// The most different shapes one recording holds: as many glyphs as a
+/// reference learns, so a recording that showed more could not teach them
+/// all. It also bounds the kept readings at two for each shape: a reading
+/// is kept either for a shape no kept reading shows or to carry cleanly a
+/// shape that none carries so, and a shape stays cleanly carried once it
+/// is.
 pub(super) const MAX_SHAPES: usize = MAX_GLYPHS;
 
 /// The most different readings one recording counts. A fingerprint costs
@@ -36,9 +46,11 @@ const MAX_READINGS: usize = 1 << 20;
 /// Why a recording keeps and counts no more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Full {
-    /// It found [`MAX_SHAPES`] different shapes.
+    /// A frame showed more shapes than fit beside the ones it holds, of
+    /// [`MAX_SHAPES`] in all.
     Shapes,
-    /// It counted [`MAX_READINGS`] different readings.
+    /// A frame showed another reading than the [`MAX_READINGS`] it
+    /// counted.
     Readings,
 }
 
@@ -59,6 +71,8 @@ pub(super) struct Sightings {
     /// one fingerprint would count as one, which 64 bits make unlikely
     /// enough to ignore for a count the user reads as evidence.
     readings: BTreeSet<u64>,
+    /// Why it takes no more, once a frame did not fit.
+    full: Option<Full>,
 }
 
 impl Sightings {
@@ -66,33 +80,61 @@ impl Sightings {
         Self {
             shapes: Vec::new(),
             readings: BTreeSet::new(),
+            full: None,
         }
     }
 
     /// Why it takes no more, once it is full.
-    pub(super) fn full(&self) -> Option<Full> {
-        if self.shapes.len() >= MAX_SHAPES {
-            Some(Full::Shapes)
-        } else if self.readings.len() >= MAX_READINGS {
-            Some(Full::Readings)
-        } else {
-            None
+    pub(super) const fn full(&self) -> Option<Full> {
+        self.full
+    }
+
+    /// Counts one frame that showed `reading`, its characters left to
+    /// right. Answers each character's shape as an index into the shapes
+    /// seen, so two readings show the same shapes exactly when their
+    /// answers are equal.
+    ///
+    /// Answers `None`, and counts nothing, for a frame that does not fit:
+    /// one with more new shapes than [`MAX_SHAPES`] leaves room for, or
+    /// with another reading than the [`MAX_READINGS`] counted. That frame
+    /// makes it full, and it counts no frame after it.
+    pub(super) fn count(&mut self, reading: &[Shape]) -> Option<Vec<usize>> {
+        if self.full.is_some() {
+            return None;
         }
-    }
-
-    /// Whether `reading`, a frame's characters left to right, shows a shape
-    /// no counted reading has.
-    pub(super) fn shows_new(&self, reading: &[Shape]) -> bool {
-        reading.iter().any(|shape| self.index_of(shape).is_none())
-    }
-
-    /// Counts one frame that showed `reading`. Answers each of its
-    /// characters' shapes, left to right, as an index into the shapes seen,
-    /// so two readings show the same shapes exactly when their answers are
-    /// equal.
-    pub(super) fn count(&mut self, reading: &[Shape]) -> Vec<usize> {
-        let characters: Vec<usize> = reading.iter().map(|shape| self.index(shape)).collect();
-        let first = self.readings.insert(fingerprint(&characters));
+        // Each character's index once the new shapes have joined, in the
+        // order they show.
+        let mut new: Vec<&Shape> = Vec::new();
+        let characters: Vec<usize> = reading
+            .iter()
+            .map(|shape| {
+                self.index_of(shape).unwrap_or_else(|| {
+                    let place = new
+                        .iter()
+                        .position(|known| *known == shape)
+                        .unwrap_or_else(|| {
+                            new.push(shape);
+                            new.len().saturating_sub(1)
+                        });
+                    self.shapes.len().saturating_add(place)
+                })
+            })
+            .collect();
+        if self.shapes.len().saturating_add(new.len()) > MAX_SHAPES {
+            self.full = Some(Full::Shapes);
+            return None;
+        }
+        let fingerprint = fingerprint(&characters);
+        if !self.readings.contains(&fingerprint) && self.readings.len() >= MAX_READINGS {
+            self.full = Some(Full::Readings);
+            return None;
+        }
+        self.shapes.extend(new.into_iter().map(|shape| Sighted {
+            shape: *shape,
+            frames: 0,
+            readings: 0,
+        }));
+        let first = self.readings.insert(fingerprint);
         // A reading that shows a shape twice, as `11` does, is one frame
         // and one reading of it.
         let shown: BTreeSet<usize> = characters.iter().copied().collect();
@@ -102,7 +144,37 @@ impl Sightings {
                 sighted.readings = sighted.readings.saturating_add(u32::from(first));
             }
         }
-        characters
+        Some(characters)
+    }
+
+    /// Whether a frame that showed `reading`, counted already, is worth
+    /// keeping beside the `kept` readings: it shows a shape none of them
+    /// shows, or it carries cleanly a shape none of them carries so.
+    pub(super) fn worth_keeping<'kept>(
+        &self,
+        reading: &[usize],
+        kept: impl Iterator<Item = &'kept [usize]> + Clone,
+    ) -> bool {
+        reading.iter().any(|&shape| {
+            let mut carriers = kept.clone().filter(|carrier| carrier.contains(&shape));
+            let carried = carriers.clone().next().is_some();
+            !carried
+                || (self.carries_cleanly(reading, shape)
+                    && !carriers.any(|carrier| self.carries_cleanly(carrier, shape)))
+        })
+    }
+
+    /// Whether `reading` carries `shape` cleanly: every other shape in it
+    /// has shown in another reading too, so a text is likely to name them
+    /// all. It stays so once it is, since the counts only grow.
+    fn carries_cleanly(&self, reading: &[usize], shape: usize) -> bool {
+        reading.iter().all(|&other| {
+            other == shape
+                || self
+                    .shapes
+                    .get(other)
+                    .is_some_and(|sighted| sighted.readings >= 2)
+        })
     }
 
     /// Each shape as the UI shows it, in the order they first showed.
@@ -120,18 +192,6 @@ impl Sightings {
         self.shapes
             .iter()
             .position(|sighted| sighted.shape == *shape)
-    }
-
-    /// The index of `shape`, which joins the shapes seen if it is new.
-    fn index(&mut self, shape: &Shape) -> usize {
-        self.index_of(shape).unwrap_or_else(|| {
-            self.shapes.push(Sighted {
-                shape: *shape,
-                frames: 0,
-                readings: 0,
-            });
-            self.shapes.len().saturating_sub(1)
-        })
     }
 }
 
@@ -175,35 +235,37 @@ mod tests {
             .collect()
     }
 
+    /// Counts a frame that fits.
+    fn count(sightings: &mut Sightings, reading: &[Shape]) -> Vec<usize> {
+        sightings.count(reading).expect("the frame fits")
+    }
+
     #[test]
     fn a_shape_counts_its_frames_and_its_different_readings() {
         let mut sightings = Sightings::new();
         let (one, two, three) = (shape(1), shape(2), shape(3));
-        assert!(sightings.shows_new(&[one, two]));
-        assert_eq!(sightings.count(&[one, two]), [0, 1]);
-        assert!(!sightings.shows_new(&[two, one]));
-        assert!(
-            sightings.shows_new(&[two, three]),
-            "one new shape is enough"
-        );
+        assert_eq!(count(&mut sightings, &[one, two]), [0, 1]);
         // The same reading again is another frame of each shape, not
         // another reading.
-        assert_eq!(sightings.count(&[one, two]), [0, 1]);
+        assert_eq!(count(&mut sightings, &[one, two]), [0, 1]);
         assert_eq!(counts(&sightings), [(2, 1), (2, 1)]);
         // The same shapes in another order are another reading.
-        assert_eq!(sightings.count(&[two, one]), [1, 0]);
+        assert_eq!(count(&mut sightings, &[two, one]), [1, 0]);
         assert_eq!(counts(&sightings), [(3, 2), (3, 2)]);
         // A reading that showed before is known among all of them, not
         // only as the latest.
-        assert_eq!(sightings.count(&[one, two]), [0, 1]);
-        assert_eq!(sightings.count(&[three]), [2]);
-        assert_eq!(counts(&sightings), [(4, 2), (4, 2), (1, 1)]);
+        assert_eq!(count(&mut sightings, &[one, two]), [0, 1]);
+        assert_eq!(count(&mut sightings, &[three, two, three]), [2, 1, 2]);
+        assert_eq!(counts(&sightings), [(4, 2), (5, 3), (1, 1)]);
     }
 
     #[test]
     fn a_shape_a_reading_shows_twice_counts_once_a_frame() {
         let mut sightings = Sightings::new();
-        assert_eq!(sightings.count(&[shape(1), shape(2), shape(1)]), [0, 1, 0]);
+        assert_eq!(
+            count(&mut sightings, &[shape(1), shape(2), shape(1)]),
+            [0, 1, 0]
+        );
         assert_eq!(counts(&sightings), [(1, 1), (1, 1)]);
     }
 
@@ -212,31 +274,112 @@ mod tests {
         let mut sightings = Sightings::new();
         let mut blended = shape(0b0110);
         blended[15] = 1;
-        assert_eq!(sightings.count(&[shape(0b0110)]), [0]);
-        assert!(sightings.shows_new(&[blended]));
-        assert_eq!(sightings.count(&[blended]), [1]);
+        assert_eq!(count(&mut sightings, &[shape(0b0110)]), [0]);
+        assert_eq!(count(&mut sightings, &[blended]), [1]);
     }
 
     #[test]
-    fn it_is_full_at_as_many_shapes_as_a_reference_learns() {
+    fn a_frame_is_worth_keeping_for_a_shape_no_kept_reading_shows() {
         let mut sightings = Sightings::new();
-        for cell in 1..u32::try_from(MAX_SHAPES).expect("fits") {
-            sightings.count(&[shape(cell)]);
-        }
-        assert_eq!(sightings.full(), None);
-        sightings.count(&[shape(0)]);
-        assert_eq!(sightings.full(), Some(Full::Shapes));
+        let (seven, eight) = (shape(7), shape(8));
+        let first = count(&mut sightings, &[seven]);
+        assert!(sightings.worth_keeping(&first, std::iter::empty()));
+        let kept = [first.as_slice()];
+        assert!(!sightings.worth_keeping(&first, kept.into_iter()));
+        let both = count(&mut sightings, &[seven, eight]);
+        assert!(
+            sightings.worth_keeping(&both, kept.into_iter()),
+            "one shape no kept reading shows is enough"
+        );
     }
 
     #[test]
-    fn it_is_full_at_the_most_readings_it_counts() {
+    fn a_shape_kept_beside_one_seen_nowhere_else_gets_a_clean_carrier() {
+        let mut sightings = Sightings::new();
+        let (one, seven, half_drawn) = (shape(1), shape(7), shape(99));
+        // The first frame with a 7 caught the digit beside it half drawn.
+        let caught = count(&mut sightings, &[seven, half_drawn]);
+        let alone = count(&mut sightings, &[one]);
+        let kept = [caught.as_slice(), alone.as_slice()];
+        // The same frame again is the reading already kept.
+        assert_eq!(count(&mut sightings, &[seven, half_drawn]), caught);
+        assert!(!sightings.worth_keeping(&caught, kept.into_iter()));
+        // A 17 holds only shapes it has, and its 1 showed elsewhere, so it
+        // carries the 7 as the caught frame does not.
+        let clean = count(&mut sightings, &[one, seven]);
+        assert!(sightings.worth_keeping(&clean, kept.into_iter()));
+        let kept = [caught.as_slice(), alone.as_slice(), clean.as_slice()];
+        // With a clean carrier, the 7 needs no more.
+        let again = count(&mut sightings, &[seven, one]);
+        assert!(!sightings.worth_keeping(&again, kept.into_iter()));
+    }
+
+    #[test]
+    fn a_kept_reading_carries_cleanly_once_its_other_shapes_show_elsewhere() {
+        let mut sightings = Sightings::new();
+        let (eight, seven, nine) = (shape(8), shape(7), shape(9));
+        let first = count(&mut sightings, &[eight, seven]);
+        let kept = [first.as_slice()];
+        // The 7 shows in another reading, so the first one carries the 8
+        // cleanly, and a later reading with the 8 is not kept for it.
+        let second = count(&mut sightings, &[seven, nine]);
+        assert!(sightings.worth_keeping(&second, kept.into_iter()));
+        let kept = [first.as_slice(), second.as_slice()];
+        let third = count(&mut sightings, &[eight, nine]);
+        assert!(!sightings.worth_keeping(&third, kept.into_iter()));
+    }
+
+    #[test]
+    fn a_frame_with_more_new_shapes_than_fit_makes_it_full_and_is_not_counted() {
+        let mut sightings = Sightings::new();
+        let most = u32::try_from(MAX_SHAPES).expect("fits");
+        for cell in 2..most {
+            count(&mut sightings, &[shape(cell)]);
+        }
+        // Two new shapes where one fits.
+        let before = counts(&sightings);
+        assert_eq!(before.len(), MAX_SHAPES.checked_sub(2).expect("not zero"));
+        count(&mut sightings, &[shape(0)]);
+        assert_eq!(sightings.full(), None);
+        assert_eq!(sightings.count(&[shape(most), shape(1)]), None);
+        assert_eq!(sightings.full(), Some(Full::Shapes));
+        assert_eq!(sightings.view().len(), MAX_SHAPES.saturating_sub(1));
+        // Full, it counts no frame, not even one of shapes it has.
+        assert_eq!(sightings.count(&[shape(2)]), None);
+        assert_eq!(counts(&sightings).first(), Some(&(1, 1)));
+    }
+
+    #[test]
+    fn it_holds_as_many_shapes_as_a_reference_learns() {
+        let mut sightings = Sightings::new();
+        let most = u32::try_from(MAX_SHAPES).expect("fits");
+        for cell in 2..most {
+            count(&mut sightings, &[shape(cell)]);
+        }
+        // The same new shape twice in a frame is one shape, so two fit.
+        count(&mut sightings, &[shape(0), shape(1), shape(0)]);
+        assert_eq!(sightings.view().len(), MAX_SHAPES);
+        assert_eq!(sightings.full(), None);
+        count(&mut sightings, &[shape(5), shape(1)]);
+        assert_eq!(sightings.count(&[shape(most)]), None);
+        assert_eq!(sightings.full(), Some(Full::Shapes));
+        assert_eq!(sightings.view().len(), MAX_SHAPES);
+    }
+
+    #[test]
+    fn another_reading_than_the_most_it_counts_makes_it_full() {
         let mut sightings = Sightings::new();
         // The fingerprints of every reading but one.
         sightings
             .readings
             .extend((1_u64..).take(MAX_READINGS.checked_sub(1).expect("not zero")));
+        count(&mut sightings, &[shape(1)]);
         assert_eq!(sightings.full(), None);
-        sightings.count(&[shape(1)]);
+        // A reading it counted still counts at the bound.
+        count(&mut sightings, &[shape(1)]);
+        assert_eq!(sightings.full(), None);
+        assert_eq!(sightings.count(&[shape(2)]), None);
         assert_eq!(sightings.full(), Some(Full::Readings));
+        assert_eq!(counts(&sightings), [(2, 1)], "the frame added no shape");
     }
 }

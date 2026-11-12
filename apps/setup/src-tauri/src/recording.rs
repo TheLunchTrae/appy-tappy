@@ -5,12 +5,13 @@
 //! cropped to the region and its characters sampled the way the number check
 //! samples them, each scaled onto a small grid of cells set where at least
 //! half the pixels are ink. A crop that shows a shape no kept reading has
-//! is kept, since a reference learns one glyph for each different shape. A
-//! crop whose shapes all showed before would teach the check nothing new,
-//! so it only counts toward how often each of them showed. Only kept
-//! readings are read as text, so the text reader runs a few times a
-//! recording rather than on every frame. A crop with no ink, such as while a
-//! menu covers the region, is skipped.
+//! is kept, since a reference learns one glyph for each different shape,
+//! and so is one more for a shape whose kept readings all hold a shape seen
+//! nowhere else, which no text may be able to name. Any other crop would
+//! teach the check nothing new, so it only counts toward how often each of
+//! its shapes showed. Only kept readings are read as text, so the text
+//! reader runs a few times a recording rather than on every frame. A crop
+//! with no ink, such as while a menu covers the region, is skipped.
 //!
 //! A digit, a `%`, and a `.` are all shapes the same way: whatever the
 //! check's own sampling makes one character is one shape here.
@@ -89,7 +90,8 @@ pub(crate) struct Recording {
     started: Instant,
     /// How long it recorded, once it stopped.
     stopped: Option<Duration>,
-    /// The readings it kept: each showed a shape none before it had.
+    /// The readings it kept, each for a shape none before it showed or
+    /// carried cleanly.
     readings: Vec<Kept>,
     /// Every different shape a frame showed, and how often.
     sightings: Sightings,
@@ -123,9 +125,10 @@ impl Recording {
     }
 
     /// Records `frame`, a whole window's frame that arrived at `at`. Answers
-    /// the reading to read as text, if the frame showed a shape no kept
-    /// reading has. Of several frames with the same new shape, the first is
-    /// kept. A full recording keeps and counts no more.
+    /// the reading to read as text, if the frame is worth keeping: it shows
+    /// a shape no kept reading has, or carries cleanly one that none
+    /// carries so. Of several such frames for a shape, the first is kept. A
+    /// full recording keeps and counts no more.
     pub(crate) fn offer(&mut self, frame: &Image, at: Instant) -> Option<NewReading> {
         if self.stopped.is_some() {
             return None;
@@ -157,22 +160,15 @@ impl Recording {
             },
         };
         self.problem = None;
-        if self.sightings.full().is_some() {
-            return None;
-        }
-        let shapes = shapes.characters();
-        let line = if self.sightings.shows_new(shapes) {
-            Some(Ink::of(&crop, &self.reader).line()?)
-        } else {
-            None
-        };
-        let shapes = self.sightings.count(shapes);
-        let Some(line) = line else {
+        let shapes = self.sightings.count(shapes.characters())?;
+        let kept = self.readings.iter().map(|kept| kept.shapes.as_slice());
+        if !self.sightings.worth_keeping(&shapes, kept) {
             if let Some(kept) = self.readings.iter_mut().find(|kept| kept.shapes == shapes) {
                 kept.seen = kept.seen.saturating_add(1);
             }
             return None;
-        };
+        }
+        let line = Ink::of(&crop, &self.reader).line()?;
         let index = self.readings.len();
         self.readings.push(Kept {
             image: crop,
@@ -261,11 +257,12 @@ impl Recording {
             ),
             full: self.sightings.full().map(|full| match full {
                 Full::Shapes => format!(
-                    "This recording is full: it found {MAX_SHAPES} different shapes, as many as \
-                     a reference learns. Stop and review them. If the region shows more than \
-                     the value, draw it around the value alone and record again."
+                    "This recording is full: the region showed more than {MAX_SHAPES} different \
+                     shapes, more than a reference learns. Stop and review what it found. If the \
+                     region shows more than the value, draw it around the value alone and \
+                     record again."
                 ),
-                Full::Readings => "This recording is full: it counted more than a million \
+                Full::Readings => "This recording is full: the region showed more than a million \
                                    different readings, the most one recording counts. Stop and \
                                    review what it found."
                     .to_owned(),
@@ -540,6 +537,36 @@ mod tests {
         assert_eq!(recording.readings()[1].seen, 2);
     }
 
+    /// The `0` while its right stroke is still being drawn.
+    fn half_drawn(x: u32, y: u32) -> bool {
+        zero(x, y) && x < 6
+    }
+
+    #[test]
+    fn a_shape_first_kept_beside_a_half_drawn_one_is_kept_again_on_recording_more() {
+        let start = Instant::now();
+        let mut recording = recording_of(48, 32, start);
+        let kept = |recording: &mut Recording, characters: &[fn(u32, u32) -> bool]| {
+            recording
+                .offer(&showing(characters), start)
+                .map(|new| new.index)
+        };
+        // The first frame with an 8 caught the digit beside it half drawn,
+        // which no text can name, so the 8 cannot be learned from it.
+        assert_eq!(kept(&mut recording, &[eight, half_drawn]), Some(0));
+        assert_eq!(kept(&mut recording, &[one]), Some(1));
+        assert_eq!(kept(&mut recording, &[eight, half_drawn]), None);
+        recording.stop(start);
+        recording.resume(start);
+        // Recording more, a clean 18 holds only shapes it has seen, and is
+        // kept for the 8.
+        assert_eq!(kept(&mut recording, &[one, eight]), Some(2));
+        assert_eq!(recording.view(start).readings[2].shapes, [2, 0]);
+        // The 8 needs no third reading.
+        assert_eq!(kept(&mut recording, &[eight, one]), None);
+        assert_eq!(kept(&mut recording, &[eight]), None);
+    }
+
     #[test]
     fn a_sign_drawn_in_marks_apart_is_a_shape_for_each_mark() {
         let start = Instant::now();
@@ -584,44 +611,57 @@ mod tests {
 
     proptest! {
         #[test]
-        fn every_shape_shown_is_kept_once_and_counted(
+        fn every_shape_shown_is_kept_counted_and_carried_cleanly_where_a_frame_could(
             frames in prop::collection::vec(prop::collection::vec(0..MARKS.len(), 0..5), 0..24),
         ) {
             let start = Instant::now();
             let mut recording = recording_of(20, 6, start);
             let reader = DigitReader::new(RED, 0);
-            // Every reading shown, as the check samples it, and every
-            // different shape in the order it first showed.
+            // How many different readings among `shown` show `shape`.
+            let readings_of = |shown: &[Vec<Shape>], shape: &Shape| {
+                let with = shown.iter().filter(|reading| reading.contains(shape));
+                with.collect::<BTreeSet<_>>().len()
+            };
+            // Whether `reading` carries `shape` cleanly: its other shapes
+            // each show in another of the readings `shown` too.
+            let carries = |shown: &[Vec<Shape>], reading: &[Shape], shape: &Shape| {
+                reading.contains(shape)
+                    && reading
+                        .iter()
+                        .all(|other| other == shape || readings_of(shown, other) >= 2)
+            };
+            // Every reading shown, as the check samples it, every different
+            // shape in the order it first showed, and the shapes that some
+            // frame carried cleanly when it showed.
             let mut shown: Vec<Vec<Shape>> = Vec::new();
             let mut distinct: Vec<Shape> = Vec::new();
+            let mut carried: Vec<Shape> = Vec::new();
             for marks in &frames {
                 let frame = marked(marks);
                 let Ok(shapes) = reader.shapes(&frame) else {
                     prop_assert_eq!(recording.offer(&frame, start), None, "no ink to keep");
                     continue;
                 };
-                let new = shapes.characters().iter().any(|shape| !distinct.contains(shape));
-                for shape in shapes.characters() {
+                let shapes = shapes.characters();
+                let new = shapes.iter().any(|shape| !distinct.contains(shape));
+                for shape in shapes {
                     if !distinct.contains(shape) {
                         distinct.push(*shape);
                     }
                 }
-                prop_assert_eq!(recording.offer(&frame, start).is_some(), new);
-                shown.push(shapes.characters().to_vec());
-            }
-            // Each kept reading's picture, which is what review learns
-            // from, shows a shape no kept reading before it shows, and
-            // together they show every shape.
-            let mut kept: Vec<Shape> = Vec::new();
-            for reading in recording.readings() {
-                let shapes = reader.shapes(&reading.image).expect("kept for its ink");
-                let before = kept.len();
-                for shape in shapes.characters() {
-                    if !kept.contains(shape) {
-                        kept.push(*shape);
+                let kept = recording.offer(&frame, start).is_some();
+                prop_assert!(kept || !new, "a frame with a new shape is kept");
+                shown.push(shapes.to_vec());
+                for shape in shapes {
+                    if carries(&shown, shapes, shape) && !carried.contains(shape) {
+                        carried.push(*shape);
                     }
                 }
-                prop_assert!(kept.len() > before, "a kept reading adds a shape");
+            }
+            // Each kept reading's picture is what review learns from.
+            let mut kept: Vec<Vec<Shape>> = Vec::new();
+            for reading in recording.readings() {
+                let shapes = reader.shapes(&reading.image).expect("kept for its ink");
                 let indexes: Vec<Option<usize>> = shapes
                     .characters()
                     .iter()
@@ -629,15 +669,31 @@ mod tests {
                     .collect();
                 let named: Vec<Option<usize>> = reading.shapes.iter().copied().map(Some).collect();
                 prop_assert_eq!(named, indexes);
+                kept.push(shapes.characters().to_vec());
             }
-            prop_assert_eq!(&kept, &distinct);
+            // Together the kept readings show every shape, no reading is
+            // kept twice, and there are at most two for each shape.
+            for shape in &distinct {
+                prop_assert!(kept.iter().any(|reading| reading.contains(shape)));
+            }
+            prop_assert_eq!(kept.iter().collect::<BTreeSet<_>>().len(), kept.len());
+            prop_assert!(kept.len() <= distinct.len().saturating_mul(2));
+            // A shape that some frame carried cleanly has a kept reading
+            // that does, so a shape seen nowhere else beside its first kept
+            // reading does not keep it from being taught.
+            for shape in &carried {
+                prop_assert!(
+                    kept.iter().any(|reading| carries(&shown, reading, shape)),
+                    "no kept reading carries {shape:?} cleanly among {kept:?}"
+                );
+            }
             // Each shape's counts are the frames and the different readings
             // that showed it.
             let counted: Vec<(usize, usize)> = distinct
                 .iter()
                 .map(|shape| {
-                    let with = shown.iter().filter(|reading| reading.contains(shape));
-                    (with.clone().count(), with.collect::<BTreeSet<_>>().len())
+                    let frames = shown.iter().filter(|reading| reading.contains(shape));
+                    (frames.count(), readings_of(&shown, shape))
                 })
                 .collect();
             let sighted: Vec<(usize, usize)> = sightings(&recording, start)
@@ -770,25 +826,34 @@ mod tests {
         };
         for width in 2..18 {
             for row in 0..16 {
-                assert_eq!(recording.view(start).full, None);
                 assert!(recording.offer(&notched(width, row), start).is_some());
             }
         }
         assert_eq!(recording.readings().len(), MAX_SHAPES);
+        assert_eq!(recording.view(start).full, None, "as many as fit");
+        assert_eq!(recording.offer(&notched(2, 0), start), None);
+        assert_eq!(recording.readings()[0].seen, 2);
+        // One shape more does not fit.
+        assert_eq!(recording.offer(&notched(18, 0), start), None);
         assert_eq!(
             recording.view(start).full.as_deref(),
             Some(
-                "This recording is full: it found 256 different shapes, as many as a reference \
-                 learns. Stop and review them. If the region shows more than the value, draw it \
-                 around the value alone and record again."
+                "This recording is full: the region showed more than 256 different shapes, more \
+                 than a reference learns. Stop and review what it found. If the region shows \
+                 more than the value, draw it around the value alone and record again."
             )
         );
-        assert_eq!(recording.offer(&notched(18, 0), start), None);
+        assert_eq!(recording.offer(&notched(2, 0), start), None);
+        // Stopped and recorded more, it is as full as it was.
+        recording.stop(start);
+        assert!(recording.view(start).full.is_some());
+        recording.resume(start);
+        assert!(recording.view(start).full.is_some());
         assert_eq!(recording.offer(&notched(2, 0), start), None);
         assert_eq!(recording.readings().len(), MAX_SHAPES);
-        assert_eq!(recording.readings()[0].seen, 1);
+        assert_eq!(recording.readings()[0].seen, 2);
         assert_eq!(sightings(&recording, start).len(), MAX_SHAPES);
-        assert_eq!(sightings(&recording, start)[0], (1, 1));
+        assert_eq!(sightings(&recording, start)[0], (2, 1));
     }
 
     #[test]
