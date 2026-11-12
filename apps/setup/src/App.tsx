@@ -30,13 +30,15 @@ import { NewValue } from './pages/NewValue.tsx';
 import {
   type Ended,
   type Flow,
+  type KeepEvent,
+  type Keeping,
   type Made,
   type Opener,
   afterFlow,
   applicationFor,
-  draftUnder,
   heldInAll,
   holdsAutomation,
+  keepStep,
   leaveQuestion,
   resumedFlow,
   trail,
@@ -51,7 +53,7 @@ import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
 import { SettingsContext, type SettingsHandle, type SettingsUpdate, sameSettings } from './lib/settings.ts';
 import { type Held, onLeave } from './lib/unsaved.ts';
-import type { DraftSaver, Resumed } from './lib/drafts.ts';
+import { type DraftSaver, type Resumed, draftsOf } from './lib/drafts.ts';
 
 type Page = 'automations' | 'applications' | 'values' | 'references' | 'settings' | 'debug';
 
@@ -107,7 +109,8 @@ export function App() {
   const draftSaver = useRef<DraftSaver | null>(null);
   const [canDraft, setCanDraft] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
-  // Whether leaving is saving the drafts, which the question's answers wait for.
+  // Whether leaving is saving the drafts, which the question's answers and everything in the open flow wait for.
+  const keep = useRef<Keeping<Page>>({ kind: 'idle' });
   const [keeping, setKeeping] = useState(false);
   const reportDraft = useCallback((save: DraftSaver | null): void => {
     draftSaver.current = save;
@@ -242,41 +245,50 @@ export function App() {
     setPage(target);
   };
   const question = flow === null ? null : leaveQuestion(flow, reported, canDraft);
-  // Saves a draft of each flow that holds work, then leaves for the page the press asked for: the open flow's own
-  // draft first, then that of an automation that waits under it. The open flow remembers its draft, so a second
-  // try after the automation's failed saves over it.
-  const leaveWithDrafts = async (target: Page): Promise<void> => {
-    const opened = openFlow.current;
-    if (opened === null) {
-      return;
-    }
-    const save = reported === 'unsaved' ? draftSaver.current : null;
-    const under = draftUnder(opened, apps ?? []);
-    setKeeping(true);
-    try {
-      const failed = save === null ? null : await save();
-      if (failed !== null) {
-        setLeaveError(`The draft could not be saved. ${failed}`);
-        return;
-      }
-      if (under !== null) {
-        try {
-          await saveDraft(under.id, under.def, false);
-        } catch (error: unknown) {
-          setLeaveError(
-            `The automation's draft could not be saved. ${errorText(error)}${save === null ? '' : ' The draft of what shows here is saved.'}`,
+  // Leaving with Save as draft saves a draft of each flow that holds work, one after the other (`keepStep`). The
+  // state lives in a ref beside the flag the window renders from, since the saves' answers arrive in callbacks of
+  // an earlier render.
+  const send = (event: KeepEvent<Page>): void => {
+    const { state, effects } = keepStep(keep.current, event, openFlow.current, apps ?? []);
+    keep.current = state;
+    setKeeping(state.kind !== 'idle');
+    for (const effect of effects) {
+      switch (effect.kind) {
+        case 'saveHere': {
+          const save =
+            draftSaver.current ?? (async () => Promise.resolve({ failed: 'It cannot be saved as a draft.' }));
+          background(
+            save().then((result) => {
+              send({ kind: 'here', flow: effect.flow, result });
+            }),
           );
-          return;
+          break;
         }
+        case 'saveUnder':
+          saveDraft(effect.id, effect.def, false).then(
+            () => {
+              send({ kind: 'under', flow: effect.flow, failed: null });
+            },
+            (error: unknown) => {
+              send({ kind: 'under', flow: effect.flow, failed: errorText(error) });
+            },
+          );
+          break;
+        case 'adopt':
+          // The answers that follow are for this flow, so it is the open one at once.
+          openFlow.current = effect.flow;
+          setFlow(effect.flow);
+          break;
+        case 'fail':
+          setLeaveError(effect.text);
+          background(refresh());
+          break;
+        case 'leave':
+          goTo(effect.target);
+          background(refresh());
+          break;
       }
-    } finally {
-      setKeeping(false);
     }
-    // A flow that closed while its draft saved shows nothing new; the lists show the draft at the next read.
-    if (openFlow.current === opened) {
-      goTo(target);
-    }
-    await refresh();
   };
   // Opens the flow that finishes `resumed`, on the saved item it changes when that is still there.
   const finish = (resumed: Resumed): void => {
@@ -328,15 +340,20 @@ export function App() {
       background(refresh());
     }
   };
+  // The saved applications that have a draft of changes, which the picker opens in place of the saved one.
+  const draftedApps = new Set(
+    draftsOf(drafts, 'application').flatMap(({ def }) => (def.changes === null ? [] : [def.changes])),
+  );
   // What lets the flow `opener` open the application flow from its picker, and show again when that ends as its
   // picker stood.
   const pickerFor = (opener: Opener) => ({
     onAddApplication: (chosen: string | null): void => {
-      open(applicationFor(opener, chosen, null), 'flow');
+      open(applicationFor(opener, chosen, null, drafts), 'flow');
     },
     onEditApplication: (existing: AppSummary): void => {
-      open(applicationFor(opener, existing.id, existing), 'flow');
+      open(applicationFor(opener, existing.id, existing, drafts), 'flow');
     },
+    draftedApps,
   });
   const path = flow === null ? [] : trail(flow);
 
@@ -425,7 +442,7 @@ export function App() {
             end(flow, 'drafted');
           }}
           onAddApplication={(draft, app) => {
-            open(applicationFor(waiting(flow, draft), app, null), 'flow');
+            open(applicationFor(waiting(flow, draft), app, null, drafts), 'flow');
           }}
           onNewValue={(draft, app) => {
             open(valueFor(waiting(flow, draft), app), 'flow');
@@ -557,7 +574,7 @@ export function App() {
                   ? {
                       label: 'Save as draft',
                       onPress: () => {
-                        background(leaveWithDrafts(leaving));
+                        send({ kind: 'asked', target: leaving, here: reported === 'unsaved' && canDraft });
                       },
                     }
                   : undefined
@@ -575,7 +592,10 @@ export function App() {
           )}
           <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />
         </nav>
-        {content}
+        {/* While leaving saves the drafts, nothing in the open flow can end or save it. */}
+        <div className="flow-hold" inert={keeping}>
+          {content}
+        </div>
       </div>
     </SettingsContext>
   );

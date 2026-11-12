@@ -31,6 +31,8 @@ interface Props {
   readonly onAddApplication: (chosen: string | null) => void;
   /** Leaves to change how `app` is found, and comes back to it. */
   readonly onEditApplication: (app: AppSummary) => void;
+  /** The saved applications that have a draft of changes. */
+  readonly draftedApps: ReadonlySet<string>;
   /** Hears what leaving the flow would lose. */
   readonly onHeld: (held: Held) => void;
   /** Hears how to save the flow's draft. */
@@ -56,12 +58,15 @@ export function NewValue({
   onDrafted,
   onAddApplication,
   onEditApplication,
+  draftedApps,
   onHeld,
   onDraft,
 }: Props) {
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
   const [restored, setRestored] = useState<Restored | null>(null);
+  // Whether a window was picked before: only the first pick brings a draft's screenshots back.
+  const [pickedBefore, setPickedBefore] = useState(false);
   const [mode] = useState<CaptureMode>(changing === null ? VALUE : { kind: changing.how, value: changing.value });
   // Leaving the flow stops the window's capture, which would otherwise keep
   // copying frames nobody looks at, and its screenshots and recording go with it.
@@ -83,14 +88,13 @@ export function NewValue({
         onCancel={onCancel}
         onAddApplication={onAddApplication}
         onEditApplication={onEditApplication}
+        draftedApps={draftedApps}
         onPick={async (picked) => {
           // Picking the window forgets the session's screenshots, so a draft's come back after it, the first time.
           if (draft !== null) {
-            setRestored({
-              resumed: draft,
-              screenshots: restored === null ? await restoreDraftScreenshots(draft.id) : null,
-            });
+            setRestored({ screenshots: pickedBefore ? null : await restoreDraftScreenshots(draft.id) });
           }
+          setPickedBefore(true);
           setChoice(picked);
           setPicking(false);
         }}
@@ -101,6 +105,7 @@ export function NewValue({
     <Capture
       choice={choice}
       mode={mode}
+      resumed={draft}
       restored={restored}
       trail={trail}
       onCancel={onCancel}

@@ -57,7 +57,8 @@ select {
 /* Shell */
 .shell {
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr);
+  /* The nav grows when a question in it takes more lines than the tabs. */
+  grid-template-rows: minmax(48px, auto) minmax(0, 1fr);
   height: 100%;
 }
 
@@ -100,6 +101,16 @@ select {
 .nav .confirm-none,
 .update {
   margin-left: auto;
+}
+
+/* A long question wraps beside its answers and keeps clear of the nav's edges. */
+.nav .confirm-none {
+  padding: 6px 0;
+  min-width: 0;
+}
+
+.nav .confirm-none > .confirm {
+  flex-shrink: 0;
 }
 
 /* The update notice keeps to one line at the nav's end. */
@@ -491,6 +502,11 @@ select {
 .window-list button.add .title::before {
   content: '+ ';
   color: var(--capture);
+}
+
+/* The open flow, which is inert while leaving saves the drafts. It takes no box of its own. */
+.flow-hold {
+  display: contents;
 }
 
 .actions {

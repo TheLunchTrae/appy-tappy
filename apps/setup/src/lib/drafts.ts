@@ -1,7 +1,7 @@
 // Drafts: what a flow keeps of an item the user saved before it was finished, apart from the saved files, so it never
 // runs until it is finished.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { AppSummary, DraftDef, DraftKind, DraftSummary } from './bindings.ts';
 import { deleteDraft, errorText, saveDraft } from './api.ts';
@@ -90,7 +90,10 @@ export function draftOfSaved(
   changes: string,
   app: string | null = null,
 ): Resumed | null {
-  return draftsOf(drafts, kind).find((resumed) => resumed.def.changes === changes && resumed.def.app === app) ?? null;
+  // A save that could not remove an older draft of the same item leaves both; the newest is the one saved last.
+  return (
+    draftsOf(drafts, kind).findLast((resumed) => resumed.def.changes === changes && resumed.def.app === app) ?? null
+  );
 }
 
 /** The drafts of `kind` that change no saved item that is still there, which the lists show as their own rows. */
@@ -102,11 +105,31 @@ export function newDrafts(
   return draftsOf(drafts, kind).filter((resumed) => resumed.def.changes === null || !saved(resumed.def.changes));
 }
 
-/**
- * Saves a flow's draft for App, which asks for it when the user leaves the flow: answers why the save failed, or
- * null once it worked.
- */
-export type DraftSaver = () => Promise<string | null>;
+/** How many of `drafts` go with the application `app` when it is removed: those of its values, fixes and references, and its own draft of changes. */
+export function draftsWith(drafts: readonly DraftSummary[] | null, app: string): number {
+  return (drafts ?? []).filter(
+    ({ draft }) => draft !== null && (draft.app === app || (draft.kind === 'application' && draft.changes === app)),
+  ).length;
+}
+
+/** What removing an application takes with it: how many `values` and how many `drafts`. */
+export function removalLoses(values: number, drafts: number): string {
+  const parts = [
+    values === 0 ? null : values === 1 ? 'value' : `${String(values)} values`,
+    drafts === 0 ? null : drafts === 1 ? 'draft' : `${String(drafts)} drafts`,
+  ].filter((part) => part !== null);
+  if (parts.length === 0) {
+    return 'This cannot be undone.';
+  }
+  const one = parts.length === 1 && (values === 1 || drafts === 1);
+  return `Its ${parts.join(' and ')} ${one ? 'goes' : 'go'} with it, and this cannot be undone.`;
+}
+
+/** How a draft save ended: the draft as it is saved, with its ID, or why the save failed. */
+export type Saved = Resumed | { readonly failed: string };
+
+/** Saves a flow's draft for App, which asks for it when the user leaves the flow. */
+export type DraftSaver = () => Promise<Saved>;
 
 /** Hears the flow's way to save its draft, or null once the flow goes. */
 export type ReportDraft = (save: DraftSaver | null) => void;
@@ -131,7 +154,7 @@ interface DraftSaving {
  * says whether the capture's screenshots go with it. The flow reports its saver to `report` while it shows, so
  * leaving it can save the draft too, and calls `onClosed` after its own button saved or deleted the draft; the lists
  * are read again then. A flow that stays open after its draft was saved, because leaving stopped at another save,
- * saves over that draft the next time and removes it once its item is saved.
+ * is given that draft as `resumed`, so it saves over it the next time and removes it once its item is saved.
  */
 export function useDraft(
   resumed: Resumed | null,
@@ -142,21 +165,20 @@ export function useDraft(
 ): DraftSaving {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The ID of the flow's draft: the one it finishes, or the one its first save made.
-  const id = useRef(resumed?.id ?? null);
   const save: DraftSaver = async () => {
     if (make === null) {
-      return 'It cannot be saved as a draft.';
+      return { failed: 'It cannot be saved as a draft.' };
     }
     setSaving(true);
     try {
-      id.current = await saveDraft(id.current, make(), screenshots);
+      const def = make();
+      const id = await saveDraft(resumed?.id ?? null, def, screenshots);
       setError(null);
-      return null;
+      return { id, def };
     } catch (failure: unknown) {
-      const text = errorText(failure);
-      setError(text);
-      return text;
+      const failed = errorText(failure);
+      setError(failed);
+      return { failed };
     } finally {
       setSaving(false);
     }
@@ -176,7 +198,7 @@ export function useDraft(
     saving,
     error,
     saveAndClose: async () => {
-      if ((await save()) === null) {
+      if (!('failed' in (await save()))) {
         onClosed();
       }
     },
@@ -197,11 +219,11 @@ export function useDraft(
       onClosed();
     },
     finished: async () => {
-      if (id.current === null) {
+      if (resumed === null) {
         return;
       }
       try {
-        await deleteDraft(id.current);
+        await deleteDraft(resumed.id);
       } catch {
         // The item is saved; a draft that stays shows on its page, where it can be deleted.
       }

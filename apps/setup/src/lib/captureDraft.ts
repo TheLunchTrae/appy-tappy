@@ -1,8 +1,9 @@
 // What a draft of a value, a fix, or a reference keeps of the capture screen, and what it still needs.
 
-import type { DraftDef, ReferenceDef } from './bindings.ts';
-import type { Built, Draft, Drawn } from './check.ts';
-import { type Kept, isKept } from './drafts.ts';
+import type { AppSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
+import { type Built, type Draft, type Drawn, fixDraft } from './check.ts';
+import { type Kept, draftProblem, isKept } from './drafts.ts';
+import { sameContent } from './unsaved.ts';
 
 /** The reference being made or changed, and its name as typed. */
 export interface Editing {
@@ -82,4 +83,44 @@ export function labeledCharacters(setup: CaptureSetup): string {
     }
   }
   return [...seen].join(' ');
+}
+
+/**
+ * `editing`, the reference editor a draft kept open, on the reference as `references` have it saved now: what the
+ * draft copied may have been taught more, or deleted, since. A reference that is gone is made as a new one.
+ */
+export function refreshedEditing(editing: Editing | null, references: readonly ReferenceDef[]): Editing | null {
+  const id = editing?.existing?.id;
+  return editing === null || id === undefined
+    ? editing
+    : { ...editing, existing: references.find((reference) => reference.id === id) ?? null };
+}
+
+/**
+ * Whether the fix draft `def` no longer fits `value`: a fix reads its value the way that was first drawn, and the
+ * value's check, colors, or states were changed since the draft copied them.
+ */
+export function fixOutdated(def: DraftDef, value: ValueDef): boolean {
+  const kept = keptSetup(def)?.draft;
+  if (def.kind !== 'fix' || kept === undefined) {
+    return false;
+  }
+  const now = fixDraft(value.screen.check);
+  const taken = (draft: Draft): unknown => [draft.kind, draft.filled, draft.empty, draft.color, draft.stateNames];
+  return !sameContent(taken(now), taken(kept));
+}
+
+/**
+ * Why the value, fix, or reference draft `def` cannot be finished, or null when it can: what {@link draftProblem}
+ * finds, or a fix whose value was changed since.
+ */
+export function captureProblem(def: DraftDef, apps: readonly AppSummary[]): string | null {
+  const problem = draftProblem(def, apps);
+  if (problem !== null || def.kind !== 'fix') {
+    return problem;
+  }
+  const value = apps.find((app) => app.id === def.app)?.file?.values.find((each) => each.id === def.changes);
+  return value !== undefined && fixOutdated(def, value)
+    ? 'The value it fixes was changed since, so this fix no longer fits it.'
+    : null;
 }

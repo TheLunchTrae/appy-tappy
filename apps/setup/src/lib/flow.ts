@@ -1,9 +1,17 @@
 // The flows the window shows in place of a page: how one opens another, waits under it, and shows again when it ends,
 // and how a flow is saved as a draft and opened again from one.
 
-import type { AppSummary, AutomationDef, AutomationSummary, DraftDef, ReferenceDef, ValueDef } from './bindings.ts';
+import type {
+  AppSummary,
+  AutomationDef,
+  AutomationSummary,
+  DraftDef,
+  DraftSummary,
+  ReferenceDef,
+  ValueDef,
+} from './bindings.ts';
 import { type Draft, draftPictures, startingDraft, unfinished, valueChoices } from './automation.ts';
-import { type Kept, type Resumed, isKept, keep } from './drafts.ts';
+import { type Kept, type Resumed, type Saved, draftOfSaved, isKept, keep } from './drafts.ts';
 import { type Held, held } from './unsaved.ts';
 
 /** A saved value to change, and its application's ID. */
@@ -159,10 +167,22 @@ export function valueFor(opener: AutomationFlow, app: string): ValueFlow {
 
 /**
  * The application flow opened for `opener`, to add an application or to change `existing`. The opener keeps
- * `chosen`, the application it shows chosen, so it shows again as the user left it.
+ * `chosen`, the application it shows chosen, so it shows again as the user left it. When `existing` has a draft of
+ * changes among `drafts`, the flow finishes that draft, as **Finish draft** on the Applications page does, so the
+ * saved application and its draft never change apart.
  */
-export function applicationFor(opener: Opener, chosen: string | null, existing: AppSummary | null): ApplicationFlow {
-  return { kind: 'application', existing, opener: { ...opener, app: chosen }, resumed: null };
+export function applicationFor(
+  opener: Opener,
+  chosen: string | null,
+  existing: AppSummary | null,
+  drafts: readonly DraftSummary[] | null,
+): ApplicationFlow {
+  return {
+    kind: 'application',
+    existing,
+    opener: { ...opener, app: chosen },
+    resumed: existing === null ? null : draftOfSaved(drafts, 'application', existing.id),
+  };
 }
 
 /**
@@ -434,4 +454,93 @@ export function leaveQuestion(flow: Flow, reported: Held, savable: boolean): Lea
     text: ['Leave without saving?', here, under, offer, refused].filter((part) => part !== null).join(' '),
     drafts: kept.length > 0,
   };
+}
+
+/**
+ * Leaving a stack of flows with **Save as draft**: nothing under way, the open flow's own draft saving, or the draft
+ * of the automation that waits under it saving. `flow` is the open flow the saves are for, and `here` says the open
+ * flow's own draft was saved on the way.
+ */
+export type Keeping<Page> =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'here'; readonly flow: Flow; readonly target: Page }
+  | { readonly kind: 'under'; readonly flow: Flow; readonly target: Page; readonly here: boolean };
+
+/** What happens while leaving with drafts: the answer is pressed, or one of the two saves answers for `flow`. */
+export type KeepEvent<Page> =
+  | { readonly kind: 'asked'; readonly target: Page; readonly here: boolean }
+  | { readonly kind: 'here'; readonly flow: Flow; readonly result: Saved }
+  | { readonly kind: 'under'; readonly flow: Flow; readonly failed: string | null };
+
+/**
+ * What a step asks of the window: save the open flow's draft, save the waiting automation's, show `flow` in place of
+ * the open one because it now knows the draft it saved, show why a save failed, or leave for the page.
+ */
+type KeepEffect<Page> =
+  | { readonly kind: 'saveHere'; readonly flow: Flow }
+  | { readonly kind: 'saveUnder'; readonly flow: Flow; readonly id: string | null; readonly def: DraftDef }
+  | { readonly kind: 'adopt'; readonly flow: Flow }
+  | { readonly kind: 'fail'; readonly text: string }
+  | { readonly kind: 'leave'; readonly target: Page };
+
+/** A step's outcome: the state that follows and what to do. */
+export interface KeepOutcome<Page> {
+  readonly state: Keeping<Page>;
+  readonly effects: readonly KeepEffect<Page>[];
+}
+
+/**
+ * One step of leaving with **Save as draft**. `open` is the flow the window shows now, and `apps` the saved
+ * applications. The open flow's draft is saved first, when `here` says it holds work that a draft keeps, and then
+ * the draft of the automation that waits under it. The open flow comes to know the draft it saved (`resumed`), so
+ * when the automation's save fails and the user tries again, or saves the flow's item after all, the same draft is
+ * saved over or finished. An answer for a flow that is no longer the open one, or that no save is waiting for, is
+ * dropped.
+ */
+export function keepStep<Page>(
+  state: Keeping<Page>,
+  event: KeepEvent<Page>,
+  open: Flow | null,
+  apps: readonly AppSummary[],
+): KeepOutcome<Page> {
+  const idle: Keeping<Page> = { kind: 'idle' };
+  const under = (flow: Flow, target: Page, here: boolean, first: readonly KeepEffect<Page>[]): KeepOutcome<Page> => {
+    const waits = draftUnder(flow, apps);
+    return waits === null
+      ? { state: idle, effects: [{ kind: 'leave', target }] }
+      : {
+          state: { kind: 'under', flow, target, here },
+          effects: [...first, { kind: 'saveUnder', flow, id: waits.id, def: waits.def }],
+        };
+  };
+  if (event.kind === 'asked') {
+    if (state.kind !== 'idle' || open === null) {
+      return { state, effects: [] };
+    }
+    return event.here
+      ? { state: { kind: 'here', flow: open, target: event.target }, effects: [{ kind: 'saveHere', flow: open }] }
+      : under(open, event.target, false, []);
+  }
+  if (state.kind !== event.kind || state.flow !== event.flow) {
+    return { state, effects: [] };
+  }
+  if (open !== state.flow) {
+    // The flow the saves were for is gone, so there is nothing to leave and no one to tell.
+    return { state: idle, effects: [] };
+  }
+  if (event.kind === 'here') {
+    if ('failed' in event.result) {
+      return { state: idle, effects: [{ kind: 'fail', text: `The draft could not be saved. ${event.result.failed}` }] };
+    }
+    const knows: Flow = { ...state.flow, resumed: event.result };
+    return under(knows, state.target, true, [{ kind: 'adopt', flow: knows }]);
+  }
+  if (event.failed !== null) {
+    const here = state.kind === 'under' && state.here ? ' The draft of what shows here is saved.' : '';
+    return {
+      state: idle,
+      effects: [{ kind: 'fail', text: `The automation's draft could not be saved. ${event.failed}${here}` }],
+    };
+  }
+  return { state: idle, effects: [{ kind: 'leave', target: state.target }] };
 }

@@ -1005,6 +1005,24 @@ mod tests {
             stores.automations.picture(&drafted).is_ok(),
             "the draft keeps it"
         );
+        // While a draft cannot be read, nothing says which pictures it
+        // names, so every picture stays, through a save too.
+        let file = folder
+            .join("AppyTappy")
+            .join("drafts")
+            .join(&id)
+            .join("draft.json");
+        let text = fs::read_to_string(&file).expect("the draft's file");
+        fs::write(&file, "{").expect("breaks the draft");
+        let spare = stores.automations.add_picture(&png(7)).expect("adds");
+        assert!(forget_unsaved_pictures(&stores).is_err());
+        save(&stores, None, clicking(&stores, "Meanwhile", &kept)).expect("saves");
+        assert!(stores.automations.picture(&drafted).is_ok());
+        assert!(stores.automations.picture(&spare).is_ok());
+        fs::write(&file, text).expect("mends the draft");
+        assert_eq!(forget_unsaved_pictures(&stores), Ok(()));
+        assert!(stores.automations.picture(&spare).is_err(), "pruned again");
+        assert!(stores.automations.picture(&drafted).is_ok());
         // Once the draft is deleted, nothing names its picture.
         stores.drafts.delete(&id).expect("deletes the draft");
         assert_eq!(forget_unsaved_pictures(&stores), Ok(()));

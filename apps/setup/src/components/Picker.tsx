@@ -40,6 +40,8 @@ interface Props {
   readonly onAddApplication: (chosen: string | null) => void;
   /** Leaves to change how `app` is found, and comes back to it. */
   readonly onEditApplication: (app: AppSummary) => void;
+  /** The saved applications that have a draft of changes, which changing how one is found finishes. */
+  readonly draftedApps: ReadonlySet<string>;
 }
 
 /** Chooses the application a value or reference belongs to, then the window that application reads. */
@@ -54,6 +56,7 @@ export function Picker({
   onPick,
   onAddApplication,
   onEditApplication,
+  draftedApps,
 }: Props) {
   const [chosen, setChosen] = useState(lockedApp ?? startApp);
   const [picked, setPicked] = useState(startWindow);
@@ -202,17 +205,31 @@ export function Picker({
             </ul>
           ) : null}
           {'app' in step && offersMatchEdit(step) ? (
-            <button
-              type="button"
-              className="btn"
-              data-landing="match"
-              disabled={busy}
-              onClick={() => {
-                onEditApplication(step.app.summary);
-              }}
-            >
-              Change how it&apos;s found
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn"
+                data-landing="match"
+                disabled={busy}
+                onClick={() => {
+                  onEditApplication(step.app.summary);
+                }}
+              >
+                {draftedApps.has(step.app.id) ? (
+                  <>
+                    Finish draft<span className="visually-hidden"> of {step.app.name}</span>
+                  </>
+                ) : (
+                  <>Change how it&apos;s found</>
+                )}
+              </button>
+              {draftedApps.has(step.app.id) ? (
+                // Changing it here apart from its draft would leave the two to overwrite each other.
+                <p className="note">
+                  {step.app.name} has a draft of changes. To change how it&apos;s found, finish that draft.
+                </p>
+              ) : null}
+            </>
           ) : null}
           {typeof start === 'object' ? (
             <p className="warn" role="alert">

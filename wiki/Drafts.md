@@ -61,7 +61,9 @@ or delete it ([What AppyTappy keeps](Getting-started.md#what-appytappy-keeps)).
 Drafts show on the page that lists what they make, with a **Draft** mark and
 what each still needs. An automation or application draft shows under the
 saved ones. A value, fix, or reference draft shows under its application. A
-value can have a fix draft for each window size.
+value can have several fix drafts. AppyTappy doesn't match them to window
+sizes: **Fix at this size** always starts a new fix, and you finish a fix
+draft from its own row.
 
 - **Finish** opens it where you left off. A value, fix, or reference draft
   first asks for its application's window again, then brings back its
@@ -76,9 +78,19 @@ A saved item that has a draft of changes shows **Draft changes**, and
 **Finish draft** in place of **Edit**, so you carry on from the draft. To edit
 it as saved instead, finish the draft and select **Delete draft**; the saved
 item stays as it was. For the same reason, a new value can pick a reference
-that has a draft of changes but can't edit it there.
+that has a draft of changes but can't edit it there, and when you choose an
+application for a value or a reference, **Finish draft** takes the place of
+**Change how it's found** for an application that has a draft of changes.
 
-A draft whose application was removed or can't be read, or whose value no
-longer exists, says so and can only be deleted. So can a draft saved by
-another version of AppyTappy Setup. A draft whose file can't be read at all
-shows under the automations on the **Automations** page.
+Removing an application deletes its drafts with it: those of its values,
+fixes, and references, and its own draft of changes. Deleting a value deletes
+its fix drafts. The question before either says so.
+
+A draft whose application can't be read says so and can only be deleted. So
+can a fix draft whose value was changed since, such as to another check, and
+a draft saved by another version of AppyTappy Setup. A draft whose file can't
+be read at all shows under the automations on the **Automations** page, and
+can only be deleted too. Until you delete it, AppyTappy keeps every picture
+that clicks look for, because it can't tell which of them that draft uses. If
+a draft's screenshot can't be read when you finish it, AppyTappy says so where
+you chose the window: select **Cancel**, then delete the draft on its page.

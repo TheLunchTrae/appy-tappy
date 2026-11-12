@@ -7,6 +7,7 @@ import {
   type ApplicationFlow,
   type AutomationFlow,
   type Ended,
+  type Keeping,
   type Made,
   type RefFlow,
   type ValueFlow,
@@ -16,6 +17,7 @@ import {
   draftUnder,
   heldInAll,
   holdsAutomation,
+  keepStep,
   keptAutomation,
   leaveQuestion,
   resumedFlow,
@@ -97,11 +99,14 @@ describe('a flow opens another', () => {
   });
 
   test('the flow an application is opened for keeps the application it showed chosen', () => {
-    expect(applicationFor(value, 'player', null)).toEqual({ ...application, opener: { ...value, app: 'player' } });
-    expect(applicationFor(waits, 'player', null).opener).toEqual({ ...waits, app: 'player' });
+    expect(applicationFor(value, 'player', null, null)).toEqual({
+      ...application,
+      opener: { ...value, app: 'player' },
+    });
+    expect(applicationFor(waits, 'player', null, null).opener).toEqual({ ...waits, app: 'player' });
     // Nothing chosen stays nothing chosen, whatever the flow started with.
-    expect(applicationFor({ ...value, app: 'example' }, null, null).opener).toEqual(value);
-    expect(applicationFor(value, 'example', example)).toEqual({
+    expect(applicationFor({ ...value, app: 'example' }, null, null, null).opener).toEqual(value);
+    expect(applicationFor(value, 'example', example, null)).toEqual({
       kind: 'application',
       existing: example,
       opener: { ...value, app: 'example' },
@@ -112,15 +117,15 @@ describe('a flow opens another', () => {
 
 describe('a flow opened for another ends', () => {
   test('a saved application is what the flow that opened it starts with', () => {
-    expect(afterFlow(applicationFor(value, 'example', null), savedPlayer, true)).toEqual({
+    expect(afterFlow(applicationFor(value, 'example', null, null), savedPlayer, true)).toEqual({
       kind: 'flow',
       flow: { ...value, app: 'player' },
     });
-    expect(afterFlow(applicationFor(reference, null, null), savedPlayer, true)).toEqual({
+    expect(afterFlow(applicationFor(reference, null, null, null), savedPlayer, true)).toEqual({
       kind: 'flow',
       flow: { ...reference, app: 'player' },
     });
-    expect(afterFlow(applicationFor(waits, 'example', null), savedPlayer, true)).toEqual({
+    expect(afterFlow(applicationFor(waits, 'example', null, null), savedPlayer, true)).toEqual({
       kind: 'flow',
       flow: { ...waits, app: 'player', handed: { value: null, after: 4 } },
     });
@@ -144,7 +149,7 @@ describe('a flow opened for another ends', () => {
 
   test('an application saved for a value keeps the automation that value is for', () => {
     const forValue = valueFor(waits, 'example');
-    expect(afterFlow(applicationFor(forValue, 'example', null), savedPlayer, true)).toEqual({
+    expect(afterFlow(applicationFor(forValue, 'example', null, null), savedPlayer, true)).toEqual({
       kind: 'flow',
       flow: { ...forValue, app: 'player' },
     });
@@ -155,10 +160,13 @@ describe('a flow opened for another ends', () => {
       kind: 'flow',
       flow: { ...waits, app: 'example' },
     });
-    expect(afterFlow(applicationFor(waits, null, null), canceled, true)).toEqual({ kind: 'flow', flow: waits });
+    expect(afterFlow(applicationFor(waits, null, null, null), canceled, true)).toEqual({ kind: 'flow', flow: waits });
     // So does a save that made nothing for it.
-    expect(afterFlow(applicationFor(waits, null, null), saved(null), true)).toEqual({ kind: 'flow', flow: waits });
-    expect(afterFlow(applicationFor(value, 'player', null), canceled, true)).toEqual({
+    expect(afterFlow(applicationFor(waits, null, null, null), saved(null), true)).toEqual({
+      kind: 'flow',
+      flow: waits,
+    });
+    expect(afterFlow(applicationFor(value, 'player', null, null), canceled, true)).toEqual({
       kind: 'flow',
       flow: { ...value, app: 'player' },
     });
@@ -168,7 +176,7 @@ describe('a flow opened for another ends', () => {
     expect(afterFlow(valueFor(waits, 'example'), saved({ app: 'example', value: 'progress' }), false)).toEqual({
       kind: 'nothing',
     });
-    expect(afterFlow(applicationFor(value, null, null), savedPlayer, false)).toEqual({ kind: 'nothing' });
+    expect(afterFlow(applicationFor(value, null, null, null), savedPlayer, false)).toEqual({ kind: 'nothing' });
     expect(afterFlow(application, savedPlayer, false)).toEqual({ kind: 'nothing' });
     expect(afterFlow(automation, saved(null), false)).toEqual({ kind: 'nothing' });
   });
@@ -196,7 +204,7 @@ describe('a flow opened for another is saved as a draft', () => {
       kind: 'flow',
       flow: { ...waits, app: 'example' },
     });
-    expect(afterFlow(applicationFor(value, 'player', null), drafted, true)).toEqual({
+    expect(afterFlow(applicationFor(value, 'player', null, null), drafted, true)).toEqual({
       kind: 'flow',
       flow: { ...value, app: 'player' },
     });
@@ -214,8 +222,8 @@ describe('the breadcrumb', () => {
   test('names each flow that waits, the first one opened first', () => {
     const forValue = valueFor(waits, 'example');
     expect(trail(forValue)).toEqual(['Automations', 'New automation']);
-    expect(trail(applicationFor(forValue, null, null))).toEqual(['Automations', 'New automation', 'New value']);
-    expect(trail(applicationFor(reference, null, null))).toEqual(['References', 'New reference']);
+    expect(trail(applicationFor(forValue, null, null, null))).toEqual(['Automations', 'New automation', 'New value']);
+    expect(trail(applicationFor(reference, null, null, null))).toEqual(['References', 'New reference']);
   });
 
   test('names a waiting flow by what it changes', () => {
@@ -228,12 +236,12 @@ describe('the breadcrumb', () => {
       opener: null,
       resumed: null,
     };
-    expect(trail(applicationFor(fixing, 'example', example))).toEqual(['Values', 'Fix Progress']);
+    expect(trail(applicationFor(fixing, 'example', example, null))).toEqual(['Values', 'Fix Progress']);
     const edited: ValueFlow = { ...fixing, changing: { app: 'example', value: progress, how: 'edit' } };
-    expect(trail(applicationFor(edited, 'example', example))).toEqual(['Values', 'Edit Progress']);
+    expect(trail(applicationFor(edited, 'example', example, null))).toEqual(['Values', 'Edit Progress']);
     const percent = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
     const changing = { ...reference, existing: { app: 'example', reference: percent } };
-    expect(trail(applicationFor(changing, 'example', example))).toEqual(['References', 'Percent']);
+    expect(trail(applicationFor(changing, 'example', example, null))).toEqual(['References', 'Percent']);
   });
 });
 
@@ -249,8 +257,8 @@ describe('leaving a stack of flows', () => {
 
   test('loses the changed draft of an automation that waits, at any depth', () => {
     expect(heldInAll(forChanged, 'nothing')).toBe('unsaved');
-    expect(heldInAll(applicationFor(forChanged, 'example', null), 'nothing')).toBe('unsaved');
-    expect(heldInAll(applicationFor(waits, null, null), 'nothing')).toBe('unsaved');
+    expect(heldInAll(applicationFor(forChanged, 'example', null, null), 'nothing')).toBe('unsaved');
+    expect(heldInAll(applicationFor(waits, null, null, null), 'nothing')).toBe('unsaved');
   });
 
   test('loses nothing of an automation that waits as it started', () => {
@@ -316,7 +324,7 @@ describe('leaving a stack of flows', () => {
       text: 'Leave without saving? The screenshots, the region and any recording are lost. The unsaved changes to the automation are lost too. Save as draft keeps both, each as its own draft, without a recording.',
       drafts: true,
     });
-    expect(leaveQuestion(applicationFor(forChanged, 'example', null), 'unsaved', true).text).toBe(
+    expect(leaveQuestion(applicationFor(forChanged, 'example', null, null), 'unsaved', true).text).toBe(
       'Leave without saving? The changes to this application are lost. The unsaved changes to the automation are lost too. Save as draft keeps both, each as its own draft.',
     );
   });
@@ -419,14 +427,14 @@ describe('an automation saved as a draft', () => {
       id: null,
       def: automationDraft(automation, { draft: typed, app: 'example' }, []),
     });
-    expect(draftUnder(applicationFor(forValue, 'example', null), [])?.def.name).toBe('Pause music');
+    expect(draftUnder(applicationFor(forValue, 'example', null, null), [])?.def.name).toBe('Pause music');
     const resumed = stored(automationDraft(automation, setup, []), 'd7');
     const finishing = waiting({ ...automation, resumed }, { ...full, cooldown: '9' });
     expect(draftUnder(valueFor(finishing, 'example'), [])?.id).toBe('d7');
     // Nothing waits with work: the automation is as it started, or no automation waits.
     expect(draftUnder(valueFor(waiting({ ...automation, resumed }, full), 'example'), [])).toBeNull();
     expect(draftUnder(valueFor(waiting(automation, EMPTY_DRAFT), 'example'), [])).toBeNull();
-    expect(draftUnder(applicationFor(value, null, null), [])).toBeNull();
+    expect(draftUnder(applicationFor(value, null, null, null), [])).toBeNull();
     expect(draftUnder(automation, [])).toBeNull();
   });
 });
@@ -514,14 +522,167 @@ describe('an automation being made', () => {
     const forAutomation = valueFor(waits, 'example');
     expect(holdsAutomation(automation)).toBe(true);
     expect(holdsAutomation(forAutomation)).toBe(true);
-    expect(holdsAutomation(applicationFor(waits, null, null))).toBe(true);
-    expect(holdsAutomation(applicationFor(forAutomation, 'example', null))).toBe(true);
+    expect(holdsAutomation(applicationFor(waits, null, null, null))).toBe(true);
+    expect(holdsAutomation(applicationFor(forAutomation, 'example', null, null))).toBe(true);
   });
 
   test('is over once no automation flow is left', () => {
     expect(holdsAutomation(null)).toBe(false);
     expect(holdsAutomation(value)).toBe(false);
     expect(holdsAutomation(reference)).toBe(false);
-    expect(holdsAutomation(applicationFor(value, null, null))).toBe(false);
+    expect(holdsAutomation(applicationFor(value, null, null, null))).toBe(false);
+  });
+});
+
+describe('changing how an application is found, from a picker', () => {
+  const draftOf = (id: string, kind: DraftDef['kind'], changes: string | null) => ({
+    id,
+    draft: { kind, app: null, changes, name: 'Draft', missing: [], pictures: [], state: keep(kind, {}) },
+    problem: null,
+    screenshots: 0,
+  });
+  const drafts = [
+    draftOf('d1', 'application', 'example'),
+    draftOf('d2', 'application', 'player'),
+    draftOf('d3', 'automation', 'example'),
+    draftOf('d4', 'application', null),
+  ];
+
+  test('finishes the draft of changes the application has, so the two never change apart', () => {
+    const flow = applicationFor(value, 'example', example, drafts);
+    expect(flow.resumed?.id).toBe('d1');
+    expect(flow).toMatchObject({ kind: 'application', existing: example, opener: { ...value, app: 'example' } });
+    // The newest, when a save could not remove an older draft of the same application.
+    expect(
+      applicationFor(value, 'example', example, [...drafts, draftOf('d9', 'application', 'example')]).resumed?.id,
+    ).toBe('d9');
+  });
+
+  test('opens the saved application when it has no draft, and a new one finishes none', () => {
+    expect(applicationFor(value, 'example', example, [drafts[1]!, drafts[2]!, drafts[3]!]).resumed).toBeNull();
+    expect(applicationFor(value, 'example', example, null).resumed).toBeNull();
+    expect(applicationFor(value, 'example', null, drafts).resumed).toBeNull();
+  });
+});
+
+describe('leaving a stack of flows with Save as draft', () => {
+  const forValue = valueFor(waits, 'example');
+  const idle: Keeping<string> = { kind: 'idle' };
+  const valueDraft: Resumed = {
+    id: 'v1',
+    def: { kind: 'value', app: 'example', changes: null, name: 'Hull', missing: [], pictures: [], state: null },
+  };
+  const automationDef = automationDraft(automation, { draft: typed, app: 'example' }, []);
+  /** The open flow once it knows the draft it saved. */
+  const knows = { ...forValue, resumed: valueDraft };
+
+  test('saves the open flow first, then the automation that waits, then leaves', () => {
+    const asked = keepStep(idle, { kind: 'asked', target: 'values', here: true }, forValue, []);
+    expect(asked).toEqual({
+      state: { kind: 'here', flow: forValue, target: 'values' },
+      effects: [{ kind: 'saveHere', flow: forValue }],
+    });
+    const here = keepStep(asked.state, { kind: 'here', flow: forValue, result: valueDraft }, forValue, []);
+    expect(here).toEqual({
+      state: { kind: 'under', flow: knows, target: 'values', here: true },
+      effects: [
+        { kind: 'adopt', flow: knows },
+        { kind: 'saveUnder', flow: knows, id: null, def: automationDef },
+      ],
+    });
+    // The answers that follow are for the flow that knows its draft, which is the open one from here on.
+    const adopted = here.state.kind === 'under' ? here.state.flow : forValue;
+    expect(keepStep(here.state, { kind: 'under', flow: adopted, failed: null }, adopted, [])).toEqual({
+      state: idle,
+      effects: [{ kind: 'leave', target: 'values' }],
+    });
+  });
+
+  test('saves only what holds work', () => {
+    // The open flow holds nothing a draft keeps: only the automation is saved.
+    expect(keepStep(idle, { kind: 'asked', target: 'values', here: false }, forValue, [])).toEqual({
+      state: { kind: 'under', flow: forValue, target: 'values', here: false },
+      effects: [{ kind: 'saveUnder', flow: forValue, id: null, def: automationDef }],
+    });
+    // No automation waits with work: the open flow's draft is the only one, and leaving follows it.
+    const alone = keepStep(idle, { kind: 'asked', target: 'values', here: true }, value, []);
+    expect(keepStep(alone.state, { kind: 'here', flow: value, result: valueDraft }, value, [])).toEqual({
+      state: idle,
+      effects: [{ kind: 'leave', target: 'values' }],
+    });
+    // An automation that finishes a draft is saved over that draft.
+    const resumed: Resumed = { id: 'a7', def: automationDef };
+    const finishing = valueFor(waiting({ ...automation, resumed }, { ...typed, cooldown: '9' }), 'example');
+    const [effect] = keepStep(idle, { kind: 'asked', target: 'values', here: false }, finishing, []).effects;
+    expect(effect).toMatchObject({ kind: 'saveUnder', id: 'a7' });
+  });
+
+  test('a first save that fails keeps the stack and says why', () => {
+    const asked = keepStep(idle, { kind: 'asked', target: 'values', here: true }, forValue, []);
+    expect(
+      keepStep(asked.state, { kind: 'here', flow: forValue, result: { failed: 'The disk is full.' } }, forValue, []),
+    ).toEqual({ state: idle, effects: [{ kind: 'fail', text: 'The draft could not be saved. The disk is full.' }] });
+  });
+
+  test('a second save that fails says the first is saved, and a retry saves over it', () => {
+    const under: Keeping<string> = { kind: 'under', flow: knows, target: 'values', here: true };
+    expect(keepStep(under, { kind: 'under', flow: knows, failed: 'The disk is full.' }, knows, [])).toEqual({
+      state: idle,
+      effects: [
+        {
+          kind: 'fail',
+          text: "The automation's draft could not be saved. The disk is full. The draft of what shows here is saved.",
+        },
+      ],
+    });
+    // The open flow is the one that knows its draft now, so its saver names that draft's ID.
+    const again = keepStep(idle, { kind: 'asked', target: 'values', here: true }, knows, []);
+    expect(again.effects).toEqual([{ kind: 'saveHere', flow: knows }]);
+    const [retry] = again.effects;
+    expect(retry?.kind === 'saveHere' ? retry.flow.resumed?.id : null).toBe('v1');
+    // Without a draft of the open flow on the way, the failure names only the automation's.
+    const only: Keeping<string> = { ...under, here: false };
+    expect(keepStep(only, { kind: 'under', flow: knows, failed: 'No.' }, knows, []).effects).toEqual([
+      { kind: 'fail', text: "The automation's draft could not be saved. No." },
+    ]);
+  });
+
+  test('an answer for a flow that is no longer the open one is dropped', () => {
+    const here: Keeping<string> = { kind: 'here', flow: forValue, target: 'values' };
+    const under: Keeping<string> = { kind: 'under', flow: knows, target: 'values', here: true };
+    // The flow closed while its draft saved: nothing is left, and nothing more is saved.
+    expect(keepStep(here, { kind: 'here', flow: forValue, result: valueDraft }, waits, [])).toEqual({
+      state: idle,
+      effects: [],
+    });
+    expect(keepStep(under, { kind: 'under', flow: knows, failed: null }, null, [])).toEqual({
+      state: idle,
+      effects: [],
+    });
+    // An answer for another flow than the one the saves are for, or of the other save, changes nothing.
+    expect(keepStep(under, { kind: 'under', flow: forValue, failed: null }, knows, [])).toEqual({
+      state: under,
+      effects: [],
+    });
+    expect(keepStep(under, { kind: 'here', flow: knows, result: valueDraft }, knows, [])).toEqual({
+      state: under,
+      effects: [],
+    });
+    expect(keepStep(idle, { kind: 'under', flow: knows, failed: null }, knows, [])).toEqual({
+      state: idle,
+      effects: [],
+    });
+  });
+
+  test('a second press while the saves run, or with no flow open, does nothing', () => {
+    const here: Keeping<string> = { kind: 'here', flow: forValue, target: 'values' };
+    expect(keepStep(here, { kind: 'asked', target: 'settings', here: true }, forValue, [])).toEqual({
+      state: here,
+      effects: [],
+    });
+    expect(keepStep(idle, { kind: 'asked', target: 'settings', here: true }, null, [])).toEqual({
+      state: idle,
+      effects: [],
+    });
   });
 });

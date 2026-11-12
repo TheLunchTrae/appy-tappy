@@ -58,9 +58,11 @@ it was about has gone. Eleven guards drop such stale messages:
 - **The open flow.** A save's answer closes the setup app's flow only while
   the flow that saved is still the one open (`afterFlow` in
   `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
-  on leaves the next flow alone.
-- **List reads.** The setup app numbers each read of the saved applications
-  and automations as it starts. An answer older than the newest one taken is
+  on leaves the next flow alone. The draft saves of leaving with
+  **Save as draft** carry the flow they are for in the same way, and
+  `keepStep` drops an answer for any other flow than the open one.
+- **List reads.** The setup app numbers each read of the saved applications,
+  automations, and drafts as it starts. An answer older than the newest one taken is
   dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
   started before a save and answers late never puts older lists back.
 
@@ -713,9 +715,13 @@ stateDiagram-v2
     Open --> Asking: a tab is pressed and the open flow or a waiting one holds unsaved work
     Asking --> Page: Leave drops every flow
     Asking --> Open: Stay
-    Asking --> KeepingDrafts: Save as draft, for each flow that holds work
-    KeepingDrafts --> Page: every draft is saved, the asked page opens
-    KeepingDrafts --> Asking: a draft save fails, the question shows why
+    Asking --> KeepingHere: Save as draft, and the open flow holds work a draft keeps
+    Asking --> KeepingUnder: Save as draft, and only an automation that waits holds work
+    KeepingHere --> KeepingUnder: the open flow's draft is saved, and an automation waits with work
+    KeepingHere --> Page: the open flow's draft is saved and nothing waits with work, the asked page opens
+    KeepingHere --> Asking: the save fails, the question shows why
+    KeepingUnder --> Page: the automation's draft is saved, the asked page opens
+    KeepingUnder --> Asking: the save fails, the question shows why
 ```
 
 **Open** is one flow on screen with up to two waiting under it. The types
@@ -782,10 +788,25 @@ draft opens from its page with none waiting:
   draft keeps is called lost for good. The automation's draft is finished
   later from the Automations page, without the value or application flow it
   had opened, and the value's from the Values page, where saving it no longer
-  returns to the automation. A draft save that fails keeps the stack and the
-  question, which shows why. The open flow remembers the draft it saved, so
-  when the automation's save fails after it, a second try saves over that
-  draft, and saving the flow's item later deletes it.
+  returns to the automation. `keepStep` is the transition: it takes the
+  state (`Keeping`: idle, the open flow's draft saving, or the waiting
+  automation's saving) and the press or a save's answer, and gives the state
+  that follows with what `App.tsx` does next: send a save, show a failure, or
+  leave. A draft save that fails returns to the question, which shows why,
+  with the stack as it was. When the open flow's draft is saved, the flow
+  comes to know it (`resumed`), so when the automation's save fails after it,
+  a second try saves over that draft, and saving the flow's item later
+  deletes it. The automation's draft is the last save, and its success
+  leaves, so no automation flow shows again without knowing a draft that was
+  written for it. While either save runs, the tabs and the question's answers
+  wait and the open flow is inert, so nothing in it can end or save it. An
+  answer for a flow that is no longer the open one, or for a save that is not
+  the one under way, is dropped.
+- **An application opened from a picker.** **Change how it's found** opens
+  the application flow for the picker's flow (`applicationFor`). When the
+  application has a draft of changes, the flow finishes that draft, and the
+  button says **Finish draft**, as the Applications page does, so there is one
+  way to change an application that has a draft.
 - **Finishing a draft.** **Finish** or **Finish draft** opens the flow
   `resumedFlow` makes from the draft, on the saved item it changes when that
   is still saved. A flow that finishes a draft deletes the draft once its

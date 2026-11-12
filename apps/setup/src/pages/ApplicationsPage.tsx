@@ -8,7 +8,15 @@ import { ANTI_CHEAT_NAMES } from '../lib/describe.ts';
 import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { type AppKept, matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
-import { type Resumed, draftOfSaved, draftProblem, isKept, newDrafts } from '../lib/drafts.ts';
+import {
+  type Resumed,
+  draftOfSaved,
+  draftProblem,
+  draftsWith,
+  isKept,
+  newDrafts,
+  removalLoses,
+} from '../lib/drafts.ts';
 import { DraftActions, DraftNote, DraftPill } from '../components/Drafts.tsx';
 
 /**
@@ -142,15 +150,6 @@ function RemoveCell({ name, loses, confirming, onConfirm, onRemove, busy }: Remo
   );
 }
 
-/** What removing an application takes with it. */
-function loses(app: AppSummary): string {
-  const values = app.file?.values.length ?? 0;
-  if (values === 0) {
-    return 'This cannot be undone.';
-  }
-  return `Its ${values === 1 ? 'value goes' : `${values} values go`} with it, and this cannot be undone.`;
-}
-
 interface Props {
   readonly apps: readonly AppSummary[] | null;
   readonly loadError: string | null;
@@ -281,7 +280,7 @@ export function ApplicationsPage({
   const removeCell = (app: AppSummary, name: string) => (
     <RemoveCell
       name={name}
-      loses={loses(app)}
+      loses={removalLoses(app.file?.values.length ?? 0, draftsWith(drafts, app.id))}
       confirming={removing === app.id}
       busy={busy}
       onConfirm={(now) => {

@@ -58,7 +58,12 @@ impl<H: Host> Owner<H> {
             .into_iter()
             .map(|(index, bytes)| Ok((index, Image::decode_png(&bytes)?)))
             .collect::<Result<Vec<_>, ImageError>>()
-            .map_err(|error| format!("A screenshot of the draft cannot be read: {error}."))?;
+            .map_err(|error| {
+                format!(
+                    "A screenshot of the draft cannot be read: {error}. Cancel, then delete the \
+                     draft on its page to start again."
+                )
+            })?;
         let indexes = screenshots.iter().map(|(index, _)| *index).collect();
         self.screenshots = Screenshots::restored(screenshots);
         Ok(indexes)

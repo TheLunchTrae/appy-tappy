@@ -30,7 +30,8 @@ import {
 } from '../lib/sizes.ts';
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
 import type { Changing } from '../lib/flow.ts';
-import { type Resumed, draftProblem, draftsOf } from '../lib/drafts.ts';
+import { type Resumed, draftsOf } from '../lib/drafts.ts';
+import { captureProblem } from '../lib/captureDraft.ts';
 import { KIND_NAMES } from '../lib/check.ts';
 import { CaptureDraftRow } from '../components/Drafts.tsx';
 
@@ -63,7 +64,7 @@ function ValueDraftRows({
     <CaptureDraftRow
       key={resumed.id}
       resumed={resumed}
-      problem={draftProblem(resumed.def, rows.apps)}
+      problem={captureProblem(resumed.def, rows.apps)}
       cells={(setup) => (
         <>
           <td className="note">{setup === null ? '' : KIND_NAMES[setup.draft.kind]}</td>
@@ -282,6 +283,9 @@ function AppRows({
             <td className="end">
               {confirming === key ? (
                 <span className="confirm">
+                  {drafts.some((each) => each.def.kind === 'fix' && each.def.changes === value.id) ? (
+                    <small className="note">Its fix drafts go with it.</small>
+                  ) : null}
                   <button
                     type="button"
                     className="btn small"

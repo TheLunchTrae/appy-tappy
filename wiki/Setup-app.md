@@ -882,8 +882,17 @@ until the old one is back, and removes the rest. Deleting a draft first
 removes what a stopped save of it left, so tidying never brings a deleted
 draft back. A draft of changes to an
 automation, application, or reference replaces any other draft of the same
-saved item. A value can have a fix draft for each window size, so fix drafts
-never replace each other. Finishing a draft opens its flow; a value, fix,
+saved item, and a save that cannot remove the older one still worked: the
+page takes the newest. Fix drafts never replace each other and are not keyed
+by window size, so a value can have several, each finished from its own row.
+A fix draft copies how its value is read (`fixDraft`); once the value's
+check, colors, or states are edited, the draft no longer fits it, and its row
+says so and offers only **Delete** (`fixOutdated` in `lib/captureDraft.ts`).
+A value draft that kept the reference editor open takes that reference again
+from the application's file when it is finished (`refreshedEditing`).
+Removing an application deletes the drafts that belong to it, and deleting a
+value its fix drafts (`DraftStore::delete_where`), since nothing could finish
+them; that is best effort, and one that stays says it can only be deleted. Finishing a draft opens its flow; a value, fix,
 or reference asks for the window again, and once it is picked, the draft's
 screenshots replace the session's, each under the index the draft's state
 refers to. Saving the item deletes the draft.
@@ -1008,8 +1017,13 @@ more pixels as ink sees only those within the margin.
 - Nothing is removed when AppyTappy Setup starts. An application whose file
   cannot be read keeps every picture, and so do the click pictures while the
   automations file or the drafts folder cannot be read, since nothing says
-  which they name. A draft whose file cannot be read names no click picture;
-  it keeps its own screenshots until it is deleted.
+  which they name. A draft whose file cannot be read counts the same way:
+  nothing says which click pictures it names, so `DraftStore::pictures`
+  answers an error and no click picture is removed until that draft reads
+  again or the user deletes it, which its row says. It keeps its own
+  screenshots until it is deleted.
+- The uninstaller's **Delete the application data** removes the drafts folder
+  with the saved files and the logs ([Installer](Installer.md)).
 
 ## Debug page
 

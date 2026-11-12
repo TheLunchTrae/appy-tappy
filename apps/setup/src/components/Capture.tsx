@@ -73,6 +73,7 @@ import {
   type Editing,
   type Step,
   captureMissing,
+  refreshedEditing,
   restoreSetup,
   storeSetup,
 } from '../lib/captureDraft.ts';
@@ -159,16 +160,18 @@ function draftName(mode: Exclude<CaptureMode, { readonly kind: 'edit' }>, setup:
   }
 }
 
-/** A draft the capture finishes: the draft, and which of its screenshots are this session's again, by index. */
+/** What came back from the draft the capture finishes when its window was picked. */
 export interface Restored {
-  readonly resumed: Resumed;
-  /** Null once the window changed, which starts the capture again without what the draft kept. */
+  /**
+   * Which of the draft's screenshots are this session's again, by index, or null once the window changed, which
+   * starts the capture again without what the draft kept.
+   */
   readonly screenshots: readonly number[] | null;
 }
 
-/** What the capture starts with: what `restored` kept, or else what `mode` makes. */
-function startSetup(mode: CaptureMode, restored: Restored | null): CaptureSetup {
-  const kept = restored?.screenshots === null ? null : (restored?.resumed.def.state ?? null);
+/** What the capture starts with: what the draft `resumed` kept, when `restored` brought it back, or what `mode` makes. */
+function startSetup(mode: CaptureMode, resumed: Resumed | null, restored: Restored | null): CaptureSetup {
+  const kept = (restored?.screenshots ?? null) === null ? null : (resumed?.def.state ?? null);
   if (kept !== null && mode.kind !== 'edit' && isKept<CaptureKept>(kept, mode.kind)) {
     const setup = restoreSetup(kept.state);
     // A reference's draft changes the reference as it is saved now.
@@ -206,7 +209,9 @@ function startSetup(mode: CaptureMode, restored: Restored | null): CaptureSetup 
 interface Props {
   readonly choice: Choice;
   readonly mode: CaptureMode;
-  /** The draft the capture finishes, or null. */
+  /** The draft the flow finishes, or null. */
+  readonly resumed: Resumed | null;
+  /** What came back from that draft with the window, or null when nothing did. */
   readonly restored: Restored | null;
   /** The way to the capture's flow, for its breadcrumb: its page, then each flow that waits under it. */
   readonly trail: readonly string[];
@@ -225,6 +230,7 @@ interface Props {
 export function Capture({
   choice,
   mode,
+  resumed,
   restored,
   trail,
   onCancel,
@@ -236,7 +242,7 @@ export function Capture({
 }: Props) {
   // What the capture opens with: what its draft kept, or else what its mode makes.
   const [opening] = useState(() => {
-    const setup = startSetup(mode, restored);
+    const setup = startSetup(mode, resumed, restored);
     const recorded = new Set(setup.recordedShots);
     return {
       setup,
@@ -260,6 +266,18 @@ export function Capture({
   const { file } = appFile;
   const [step, setStep] = useState<Step>(opening.setup.step);
   const [editing, setEditing] = useState<Editing | null>(start.editing);
+  // A draft that kept the reference editor open copied the reference as it was saved then. Once the application's
+  // file is read, the editor goes on from the reference as it is saved now, which is also what leaving loses
+  // nothing of.
+  const savedNow = useRef((restored?.screenshots ?? null) === null);
+  useEffect(() => {
+    if (file === null || savedNow.current) {
+      return;
+    }
+    savedNow.current = true;
+    setEditing((current) => refreshedEditing(current, file.references));
+    setStart((began) => ({ ...began, editing: refreshedEditing(began.editing, file.references) }));
+  }, [file]);
   const [picking, setPicking] = useState<ColorTarget | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   const [valueName, setValueName] = useState(start.valueName);
@@ -339,7 +357,7 @@ export function Capture({
   const missing = captureMissing(setup, built, fixing !== null);
   // An edit changes a saved value in place and is never a draft.
   const drafting = useDraft(
-    restored?.resumed ?? null,
+    resumed,
     mode.kind === 'edit'
       ? null
       : () => ({
@@ -370,7 +388,7 @@ export function Capture({
   const draftButton =
     mode.kind === 'edit' ? null : (
       <>
-        {restored === null ? null : (
+        {resumed === null ? null : (
           <DeleteDraft
             changes={mode.kind === 'fix' || (mode.kind === 'reference' && mode.existing !== null)}
             disabled={busy}
@@ -951,7 +969,7 @@ export function Capture({
                   disabled={busy}
                   onClick={() => {
                     // Finishing a draft starts on its screenshots, which the new window leaves behind.
-                    if (holds === 'unsaved' || restored !== null) {
+                    if (holds === 'unsaved' || resumed !== null) {
                       setLeavingWindow(true);
                     } else {
                       onChangeWindow();

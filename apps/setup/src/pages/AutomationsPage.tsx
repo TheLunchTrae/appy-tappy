@@ -437,7 +437,10 @@ export function AutomationsPage({
               <DraftPill />
               <span>
                 <span className="strong">A draft that cannot be read</span>
-                <DraftNote missing={[]} problem={summary.problem ?? 'Its file is not valid.'} />
+                <DraftNote
+                  missing={[]}
+                  problem={`${summary.problem ?? 'Its file is not valid.'} It can only be deleted. Until then, AppyTappy keeps every picture that clicks look for, since this draft may use some.`}
+                />
               </span>
               <DraftActions
                 name={unreadable.length === 1 ? 'that cannot be read' : `that cannot be read, number ${index + 1}`}

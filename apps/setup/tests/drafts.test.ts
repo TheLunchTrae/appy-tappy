@@ -5,20 +5,25 @@ import { EMPTY_DRAFT as EMPTY_AUTOMATION, newAction, unfinished, valueChoices } 
 import {
   type CaptureSetup,
   captureMissing,
+  captureProblem,
+  fixOutdated,
+  refreshedEditing,
   keptSetup,
   labeledCharacters,
   restoreSetup,
   storeSetup,
 } from '../src/lib/captureDraft.ts';
-import { type Draft, EMPTY_DRAFT } from '../src/lib/check.ts';
+import { type Draft, EMPTY_DRAFT, fixDraft } from '../src/lib/check.ts';
 import {
   DRAFT_FORMAT,
   draftOfSaved,
   draftProblem,
   draftsOf,
+  draftsWith,
   isKept,
   keep,
   newDrafts,
+  removalLoses,
   unfinishedText,
 } from '../src/lib/drafts.ts';
 import { unfinishedApp } from '../src/lib/matching.ts';
@@ -330,5 +335,76 @@ describe('what an unfinished item still needs', () => {
       },
     };
     expect(labeledCharacters(setup)).toBe('1 2 3');
+  });
+});
+
+describe('a draft and what it belongs to', () => {
+  const progress = apps[0]!.file!.values[0]!;
+  const fixOf = (draft: Draft): DraftDef =>
+    def('fix', JSON.parse(JSON.stringify(keep('fix', storeSetup({ ...EMPTY_SETUP, draft })))), 'progress', 'example');
+
+  test('a fix whose value was changed since no longer fits it, and can only be deleted', () => {
+    const fits = fixOf(fixDraft(progress.screen.check));
+    expect(fixOutdated(fits, progress)).toBe(false);
+    expect(captureProblem(fits, apps)).toBeNull();
+    // The reference a fix reads with is its own choice, so another one still fits.
+    expect(fixOutdated(fixOf({ ...fixDraft(progress.screen.check), reference: 'other' }), progress)).toBe(false);
+    const bar = {
+      kind: 'barFill' as const,
+      filled: { red: 1, green: 2, blue: 3 },
+      empty: { red: 4, green: 5, blue: 6 },
+    };
+    const asBar = fixOf(fixDraft(bar));
+    expect(fixOutdated(asBar, progress)).toBe(true);
+    expect(captureProblem(asBar, apps)).toBe('The value it fixes was changed since, so this fix no longer fits it.');
+    // The same kind with another color is another way to read it too.
+    const recolored = {
+      ...progress,
+      screen: { ...progress.screen, check: { ...bar, filled: { red: 9, green: 9, blue: 9 } } },
+    };
+    expect(fixOutdated(asBar, recolored)).toBe(true);
+    expect(fixOutdated(asBar, { ...progress, screen: { ...progress.screen, check: bar } })).toBe(false);
+    // A missing value comes first, and a value draft has nothing to be outdated against.
+    expect(captureProblem({ ...asBar, changes: 'gone' }, apps)).toBe('The value it fixes is no longer saved.');
+    expect(fixOutdated({ ...asBar, kind: 'value' }, progress)).toBe(false);
+  });
+
+  test('a reference editor a draft kept open goes on from the reference as it is saved now', () => {
+    const saved = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
+    const taught = { ...saved, tolerance: 12 };
+    const editing = { existing: saved, name: 'Percent', expects: ['1'], valueRegion: { region: null, drawnOn: null } };
+    expect(refreshedEditing(editing, [taught])).toEqual({ ...editing, existing: taught });
+    // A reference deleted since is made as a new one, and a new one stays new.
+    expect(refreshedEditing(editing, [])).toEqual({ ...editing, existing: null });
+    const fresh = { ...editing, existing: null };
+    expect(refreshedEditing(fresh, [taught])).toBe(fresh);
+    expect(refreshedEditing(null, [taught])).toBeNull();
+  });
+
+  test('the newest draft of a saved item is the one finished', () => {
+    const both = [
+      summary('a', def('application', keep('application', {}), 'example')),
+      summary('b', def('application', keep('application', {}), 'example')),
+    ];
+    expect(draftOfSaved(both, 'application', 'example')?.id).toBe('b');
+  });
+
+  test('removing an application says what goes with it', () => {
+    const drafts = [
+      summary('a', def('value', keep('value', {}), null, 'example')),
+      summary('b', def('fix', keep('fix', {}), 'progress', 'example')),
+      summary('c', def('application', keep('application', {}), 'example')),
+      summary('d', def('application', keep('application', {}), 'other')),
+      summary('e', def('automation', keep('automation', {}), 'example')),
+      summary('f', null),
+    ];
+    expect(draftsWith(drafts, 'example')).toBe(3);
+    expect(draftsWith(null, 'example')).toBe(0);
+    expect(removalLoses(0, 0)).toBe('This cannot be undone.');
+    expect(removalLoses(1, 0)).toBe('Its value goes with it, and this cannot be undone.');
+    expect(removalLoses(0, 1)).toBe('Its draft goes with it, and this cannot be undone.');
+    expect(removalLoses(2, 0)).toBe('Its 2 values go with it, and this cannot be undone.');
+    expect(removalLoses(1, 1)).toBe('Its value and draft go with it, and this cannot be undone.');
+    expect(removalLoses(2, 3)).toBe('Its 2 values and 3 drafts go with it, and this cannot be undone.');
   });
 });

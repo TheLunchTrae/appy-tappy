@@ -219,7 +219,14 @@ impl DraftStore {
                             && other.changes == draft.changes
                     })
             }) {
-                self.delete(&other.id)?;
+                // The new draft is in place, so the save worked. An older
+                // draft of the same item that stays is listed before it, and
+                // the page takes the newest.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the draft is saved; an older one that stays shows on its page"
+                )]
+                let _ = self.delete(&other.id);
             }
         }
         Ok(id)
@@ -349,18 +356,39 @@ impl DraftStore {
     }
 
     /// The click pictures the drafts name, which saving the automations
-    /// keeps. A draft that cannot be read names none.
+    /// keeps.
     ///
     /// # Errors
     ///
-    /// Returns the error from listing the folder.
+    /// Returns the error from listing the folder, or an error while a draft
+    /// cannot be read: nothing says which pictures that one names, so the
+    /// caller must keep them all until it reads again or is deleted.
     pub(crate) fn pictures(&self) -> io::Result<Vec<String>> {
-        Ok(self
-            .list()?
-            .into_iter()
-            .filter_map(|summary| summary.draft)
-            .flat_map(|draft| draft.pictures)
-            .collect())
+        let mut named = Vec::new();
+        for summary in self.list()? {
+            let draft = summary.draft.ok_or_else(|| {
+                io::Error::other(format!("the draft {} cannot be read", summary.id))
+            })?;
+            named.extend(draft.pictures);
+        }
+        Ok(named)
+    }
+
+    /// Deletes each draft that `gone` takes, such as those of an application
+    /// that was removed, which nothing can finish. A draft that cannot be
+    /// read is left, since nothing says what it is of.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from listing the folder or from the first delete
+    /// that fails.
+    pub(crate) fn delete_where(&self, gone: impl Fn(&DraftDef) -> bool) -> io::Result<()> {
+        for summary in self.list()? {
+            if summary.draft.as_ref().is_some_and(&gone) {
+                self.delete(&summary.id)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -520,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn a_value_keeps_a_fix_draft_for_each_size() {
+    fn a_value_keeps_each_of_its_fix_drafts() {
         let (store, root) = scratch("fixes");
         let small = store
             .save(
@@ -658,7 +686,69 @@ mod tests {
                 .is_some_and(|problem| problem.starts_with("Its file is not valid")),
             "{broken:?}"
         );
+        // Nothing says which pictures a draft that cannot be read names.
+        let named = store
+            .save(None, &draft(DraftKind::Automation, None), &[])
+            .expect("saves");
+        assert!(store.pictures().is_err());
+        store.delete(&id).expect("deletes the broken one");
+        assert_eq!(store.pictures().expect("lists"), ["click-1.png"]);
+        store.delete(&named).expect("deletes");
         assert_eq!(store.pictures().expect("lists"), Vec::<String>::new());
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn drafts_of_something_gone_are_deleted_and_the_rest_stay() {
+        let (store, root) = scratch("gone");
+        let value = store
+            .save(None, &draft(DraftKind::Value, None), &[(0, vec![1])])
+            .expect("saves");
+        store
+            .save(None, &draft(DraftKind::Fix, Some("health")), &[])
+            .expect("saves");
+        let broken = store
+            .save(None, &draft(DraftKind::Fix, Some("health")), &[])
+            .expect("saves");
+        fs::write(
+            store.draft_folder(&broken).expect("an ID").join(DRAFT_FILE),
+            "{",
+        )
+        .expect("breaks it");
+        store
+            .delete_where(|draft| draft.kind == DraftKind::Fix)
+            .expect("deletes");
+        let left: Vec<String> = store
+            .list()
+            .expect("lists")
+            .into_iter()
+            .map(|summary| summary.id)
+            .collect();
+        assert_eq!(
+            left,
+            [value.clone(), broken],
+            "one that cannot be read stays"
+        );
+        // A draft that cannot be removed says so.
+        fs::write(store.folder.join(format!("{value}.1{SAVING}")), b"stray").expect("writes");
+        assert!(store.delete_where(|_draft| true).is_err());
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_save_works_though_an_older_draft_of_the_item_cannot_be_removed() {
+        let (store, root) = scratch("stuck");
+        let changes = draft(DraftKind::Automation, Some("pause"));
+        let older = store.save(None, &changes, &[]).expect("saves");
+        // A file with a save's ending and the draft's name cannot be
+        // removed as a folder, so deleting the older draft fails.
+        fs::write(store.folder.join(format!("{older}.1{SAVING}")), b"stray").expect("writes");
+        assert!(store.delete(&older).is_err());
+        let newer = store
+            .save(None, &changes, &[])
+            .expect("the new one is saved");
+        assert_ne!(newer, older);
+        assert!(store.draft_folder(&newer).expect("an ID").is_dir());
         fs::remove_dir_all(root).expect("clean up");
     }
 
