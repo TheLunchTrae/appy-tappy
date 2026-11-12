@@ -1,4 +1,5 @@
 import type { RecordedLabel, RecordedReading, RecordedShape } from './bindings.ts';
+import { labelCharacters } from './reference.ts';
 // Reviewing a recording: which readings the user keeps, what each shows, and what each adds.
 //
 // A recording keeps a reading for a shape no reading before it showed, and a reference learns one character for
@@ -32,11 +33,6 @@ export function sighted(shape: RecordedShape): string {
     return 'seen once';
   }
   return `seen ${shape.frames} times in ${shape.readings === 1 ? '1 reading' : `${shape.readings} readings`}`;
-}
-
-/** The characters a text teaches, as learning counts them: each one but whitespace. */
-function labelCharacters(text: string): readonly string[] {
-  return Array.from(text).filter((character) => character.trim() !== '');
 }
 
 /**

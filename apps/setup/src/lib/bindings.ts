@@ -781,13 +781,15 @@ tolerance: number,
  */
 samples: Array<SampleDef>,
 /**
- * The characters the user says it needs to know, each once, such as
+ * The characters the user says it needs to know, such as
  * `0123456789.%`, or `None` when the user chose none.
  *
  * Setup guidance only. The setup app shows which of them the samples
- * have yet to teach. Nothing that learns or reads looks at it: it adds
- * no glyph, labels no shape, and leaves how a number is read as it is,
- * whatever characters it lists.
+ * have yet to teach, and writes them each once, in order, when it saves
+ * the reference. Nothing that learns or reads looks at it, and no rule
+ * of the file covers it: it adds no glyph, labels no shape, leaves how
+ * a number is read as it is, and never stops a file from loading,
+ * whatever text it holds.
  */
 expects?: string, }>;
 
@@ -822,9 +824,10 @@ referenceName: string,
  */
 check: CheckSpec,
 /**
- * The characters the user says it needs to know, each once, or empty
- * when the user chose none. It is saved as given and replaces what the
- * saved reference expected.
+ * The characters the user says it needs to know, or empty when the
+ * user chose none. The save lists each once, in order, refuses more
+ * than a reference saves, and replaces what the saved reference
+ * expected.
  */
 expects: string, }>;
 
@@ -1448,9 +1451,9 @@ export const TRACE_CATEGORIES = [
 ] as const satisfies readonly TraceCategory[];
 
 /**
- * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it
- * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read
- * each the same.
+ * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts, app names, labels and expected
+ * characters: the text it keeps, or null when it refuses one; and where sample spots land in sample windows. The
+ * page's own checks must read each the same.
  */
 export const PARSE_CASES = {
   "appName": [
@@ -1489,6 +1492,68 @@ export const PARSE_CASES = {
     {
       "read": "\u00e9\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "text": "\u00e9\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "expectedCharacters": [
+    {
+      "read": "578%.",
+      "text": "87.5%"
+    },
+    {
+      "read": "123",
+      "text": " 1 2\t3\n"
+    },
+    {
+      "read": "01%",
+      "text": "%10 0%"
+    },
+    {
+      "read": "Aa",
+      "text": "Aa"
+    },
+    {
+      "read": "",
+      "text": ""
+    },
+    {
+      "read": "",
+      "text": "   "
+    },
+    {
+      "read": "12",
+      "text": "1\u00852"
+    },
+    {
+      "read": "12\ufeff",
+      "text": "\ufeff12"
+    },
+    {
+      "read": "123",
+      "text": "1\u30002\u00a03"
+    },
+    {
+      "read": "x\u200b",
+      "text": "\u2028x\u2029\u200b"
+    },
+    {
+      "read": "e\u0301",
+      "text": "e\u0301"
+    },
+    {
+      "read": "9z\uff11\ud835\udfd9\ud83d\ude00",
+      "text": "\ud835\udfd9z\uff119\ud83d\ude00"
+    },
+    {
+      "read": "12",
+      "text": "1\u00072\u009f"
+    },
+    {
+      "read": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f",
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f"
+    },
+    {
+      "read": null,
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f\u0180"
     }
   ],
   "keys": [
@@ -1639,6 +1704,68 @@ export const PARSE_CASES = {
     {
       "read": null,
       "text": "Control+M"
+    }
+  ],
+  "labelCharacters": [
+    {
+      "read": "87.5%",
+      "text": "87.5%"
+    },
+    {
+      "read": "123",
+      "text": " 1 2\t3\n"
+    },
+    {
+      "read": "%100%",
+      "text": "%10 0%"
+    },
+    {
+      "read": "Aa",
+      "text": "Aa"
+    },
+    {
+      "read": "",
+      "text": ""
+    },
+    {
+      "read": "",
+      "text": "   "
+    },
+    {
+      "read": "12",
+      "text": "1\u00852"
+    },
+    {
+      "read": "\ufeff12",
+      "text": "\ufeff12"
+    },
+    {
+      "read": "123",
+      "text": "1\u30002\u00a03"
+    },
+    {
+      "read": "x\u200b",
+      "text": "\u2028x\u2029\u200b"
+    },
+    {
+      "read": "e\u0301",
+      "text": "e\u0301"
+    },
+    {
+      "read": "\ud835\udfd9z\uff119\ud83d\ude00",
+      "text": "\ud835\udfd9z\uff119\ud83d\ude00"
+    },
+    {
+      "read": "1\u00072\u009f",
+      "text": "1\u00072\u009f"
+    },
+    {
+      "read": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f",
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f"
+    },
+    {
+      "read": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f\u0180",
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f\u0180"
     }
   ],
   "openTarget": [

@@ -33,7 +33,7 @@ window, or select **New reference from this region** while you
    **Characters still missing** says it knows every character it needs, or
    [record the region](#record-readings) to collect them as they show.
 5. **Save.** Select **Save reference**. A reference with characters still
-   missing saves too: the editor names them next to the button, and you can
+   missing saves too: the editor says so next to the button, and you can
    teach them later.
 
 To teach a saved reference more, select **Edit** next to it on the References
@@ -58,6 +58,9 @@ reference reads can show:
   them with the number, such as the `Lv` in `Lv.5`.
 - **Other characters** takes anything else: type each character the region
   shows, such as `/` or `°`. Delete a character there to stop needing it.
+  Spaces do not count. A list with more characters than a reference can
+  need turns **Save reference** off until you remove some, and the editor
+  says so.
 
 A choice that holds only some of its characters, such as **Digits** with `0`
 to `5`, shows as partly on with how many it holds, and its characters show

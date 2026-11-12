@@ -1,13 +1,14 @@
 import { useState } from 'react';
 
-import { LIMITS } from '../lib/bindings.ts';
 import {
   LETTER_PRESETS,
   NUMBER_PRESETS,
   type Preset,
+  TOO_MANY,
   otherCharacters,
   presetCount,
   presetState,
+  tooMany,
   withOther,
   withPreset,
 } from '../lib/expected.ts';
@@ -102,9 +103,9 @@ export function ExpectedCharacters({ expected, onExpected }: Props) {
           setTyping(null);
         }}
       />
-      {expected.length > LIMITS.maxExpectedCharacters ? (
+      {tooMany(expected) ? (
         <span className="warn" role="alert">
-          A reference needs at most {LIMITS.maxExpectedCharacters} characters. Remove some before you save.
+          {TOO_MANY}
         </span>
       ) : null}
     </div>

@@ -87,19 +87,28 @@ This page covers what the user guide leaves out.
   One that a value reads with cannot be deleted.
 - **Expected characters.** A reference may list the characters the user says
   it needs, as [Choose what it needs](References.md#choose-what-it-needs)
-  describes. The list guides and never decides: `appytappy-sources` builds a
+  describes. The list guides and never decides. `appytappy-sources` builds a
   reference's reader from its color, tolerance, and samples alone, so the
-  list adds no glyph, labels no shape, and leaves number parsing as it is,
-  and the runtime never looks at it. The page keeps it as one set of
-  characters: `lib/expected.ts` reads each preset's state back from the set,
+  list adds no glyph, labels no shape, and leaves number parsing as it is.
+  No rule of the file covers it either: the runtime and the setup app load
+  an application whatever its list holds. The save is the one place that
+  shapes it. `expected_characters` in `check_spec.rs` writes each character a
+  label teaches that is no control character, once, the digits `0` to `9`
+  first and the rest by code point, and refuses more than
+  `MAX_EXPECTED_CHARACTERS`, which the page reads as
+  `LIMITS.maxExpectedCharacters` to say so before the save. The page keeps
+  the list as one set of characters. `lib/expected.ts` reads a saved list as
+  that same set, so one written by hand shows as its characters and the next
+  save writes it in order; it reads each preset's state back from the set;
   and its `coverage` splits the set and the learned characters into known,
   missing, and extra, for the editor, the References page, and the reference
   picker. The learned characters are those of the saved samples, the labeled
   screenshots, and the kept readings. The save sends the set beside the
   `characters` check, not in it, and it replaces what the saved reference
   expected. A character is counted as a label's is: `is_label_character` in
-  `appytappy-config` serves both the learner and the file's rule for the
-  list.
+  `appytappy-config` serves the learner and the save, and the samples in
+  `PARSE_CASES` hold the page's reading of labels and lists to the Rust
+  side's.
 - **Key recording.** **Record** takes the next keys pressed, Tab included,
   and records a letter as the keyboard layout types it.
 - **Saving an automation** checks that its value is still saved and that the
@@ -330,10 +339,11 @@ region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 
 A reference's `expects` is the characters the user says it needs to know,
-each once, and is left out when the user chose none. It holds at most 128
-characters, none of them whitespace or a control character, exactly as labels
-spell them: `A` and `a` are two characters. Only the setup app reads it, to
-show which characters a reference has yet to learn.
+and is left out when the user chose none. Only the setup app reads it, to
+show which characters a reference has yet to learn, so no rule covers it and
+a file loads whatever it holds. The setup app writes each character once,
+exactly as labels spell them, so `A` and `a` are two characters: the digits
+first, then the rest by code point.
 
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
