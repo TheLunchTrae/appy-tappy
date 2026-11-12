@@ -102,6 +102,8 @@ mod tests {
         fs::write(&path, &two).expect("write");
         assert_eq!(log_tail(&path).expect("both"), two);
         // A path under a file cannot be opened, and is not simply missing.
+        // Windows reports such a path as missing, so this holds elsewhere.
+        #[cfg(unix)]
         assert!(log_tail(&path.join("inside")).is_err());
         let long = format!("{}\nlast\n", "x".repeat(70 * 1024));
         fs::write(&path, long).expect("write");
