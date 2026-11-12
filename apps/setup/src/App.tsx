@@ -25,6 +25,7 @@ import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
+import { DebugPage } from './pages/DebugPage.tsx';
 import { NewValue } from './pages/NewValue.tsx';
 import {
   type Ended,
@@ -52,11 +53,12 @@ import { SettingsContext, type SettingsHandle, type SettingsUpdate, sameSettings
 import { type Held, onLeave } from './lib/unsaved.ts';
 import type { DraftSaver, Resumed } from './lib/drafts.ts';
 
-type Page = 'automations' | 'applications' | 'values' | 'references' | 'settings';
+type Page = 'automations' | 'applications' | 'values' | 'references' | 'settings' | 'debug';
 
 /**
  * The pages, Automations first since running them is what the app is for, then in the order something new is set
- * up: the application, then the values read from it. Settings come last.
+ * up: the application, then the values read from it. Settings come last, and Debug after them while debug details
+ * are on.
  */
 const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
   { id: 'automations', name: 'Automations' },
@@ -64,6 +66,7 @@ const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
   { id: 'values', name: 'Values' },
   { id: 'references', name: 'References' },
   { id: 'settings', name: 'Settings' },
+  { id: 'debug', name: 'Debug' },
 ];
 
 /** The page that lists what each kind of flow saves. */
@@ -222,6 +225,7 @@ export function App() {
     applications: apps === null ? null : apps.length,
     references: apps === null ? null : apps.reduce((total, app) => total + (app.file?.references.length ?? 0), 0),
     settings: null,
+    debug: null,
   };
 
   const open = (next: Flow | null, after: 'page' | 'flow' = 'page'): void => {
@@ -511,6 +515,10 @@ export function App() {
         );
       case 'settings':
         return <SettingsPage problem={settingsProblem} />;
+      case 'debug':
+        // Turning debug details off on the Settings page hides the tab, so this shows only after a change made
+        // elsewhere, such as in the file.
+        return settings.showDebug ? <DebugPage /> : <SettingsPage problem={settingsProblem} />;
     }
   })();
 
@@ -518,7 +526,7 @@ export function App() {
     <SettingsContext value={settingsHandle}>
       <div className="shell">
         <nav className="nav" aria-label="Pages">
-          {PAGES.map(({ id, name }) => {
+          {PAGES.filter(({ id }) => id !== 'debug' || settings.showDebug).map(({ id, name }) => {
             const count = counts[id];
             return (
               <button

@@ -9,9 +9,9 @@
 //! argument and answer types, and the test the argument names. The doc
 //! comments are the page's; they become the page functions' docs.
 //!
-//! An argument or answer is its Rust type, except for three the page reads
+//! An argument or answer is its Rust type, except for four the page reads
 //! differently from their ts-rs type: `Pixels`, the raw bytes of a picture
-//! that the page decodes, `U64AsNumber`, a `u64` the page takes as a number
+//! that the page decodes, `Bytes`, the raw bytes of a file, `U64AsNumber`, a `u64` the page takes as a number
 //! because it stays far below 2^53, and `OptionalU64AsNumber`, one that can
 //! be missing.
 
@@ -46,6 +46,8 @@ macro_rules! with_commands {
             commands::set_check(spec: CheckSpec) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
+            /// How the check reads the newest frame, for the debug details, or null without a check or a frame.
+            commands::explain_reading() -> Option<ReadingDetails>;
             /// Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
             /// recording, which needs the same region, ink and window size; otherwise starts a new one.
             commands::start_recording(
@@ -72,6 +74,9 @@ macro_rules! with_commands {
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
             /// can.
             commands::review_problems(spec: CheckSpec) -> Vec<Option<String>>;
+            /// What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
+            /// where each of its saved values reads there.
+            commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
             /// Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
             /// at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
             /// earlier search.
@@ -90,10 +95,15 @@ macro_rules! with_commands {
             /// What the watch's value reads now, and whether `when` holds for it. Fails once the watch was stopped or
             /// replaced.
             commands::watched_reading(watch: U64AsNumber, when: Option<WhenDef>) -> Live;
+            /// How the watch's value reads now, for the debug details, or null while it does not read. Fails once the
+            /// watch was stopped or replaced.
+            commands::explain_watched(watch: U64AsNumber) -> Option<ReadingDetails>;
             /// Stops the watch, unless another capture replaced it already.
             commands::stop_watching(watch: U64AsNumber) -> ();
             /// The running windows `window` takes, the one a new session would read first.
             commands::match_windows(window: WindowDef) -> Vec<WindowFit>;
+            /// How each open window compares with `window`: which fields match, and how the match takes it.
+            commands::window_scores(window: WindowDef) -> Vec<WindowScore>;
             /// The window a new session would read for `window`, or null while none fits.
             commands::read_window(window: WindowDef) -> OptionalU64AsNumber;
             /// Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
@@ -198,6 +208,25 @@ macro_rules! with_commands {
             commands::trace_folder() -> String;
             /// Opens the trace folder in File Explorer.
             commands::open_trace_folder() -> ();
+            /// Whether the runtime runs, and the newest trace file read so far, for the Debug page.
+            commands::debug_overview() -> DebugOverview;
+            /// The trace files, newest first.
+            commands::trace_files() -> Vec<TraceFile>;
+            /// The metrics of the trace file `file` over `range`. Each call reads on from where the last one on that
+            /// file stopped; `progress` says how much is read, and the page asks again at once while it is less than
+            /// the file.
+            commands::trace_metrics(file: String, range: TraceRange) -> TraceMetrics;
+            /// The rows of the trace file `file` that `filter` picks, read on like {@link traceMetrics}.
+            commands::trace_rows(file: String, filter: RowFilter) -> TraceRows;
+            /// Lets go of the trace file the metrics and rows read.
+            commands::close_trace() -> ();
+            /// The end of `log`, whole lines only, or an empty string before anything was logged.
+            commands::read_log(log: LogName) -> String;
+            /// Opens the logs folder in File Explorer.
+            commands::open_logs_folder() -> ();
+            /// The debug bundle, as the bytes of a zip file, with the pictures and the newest trace if `contents`
+            /// asks for them.
+            commands::debug_bundle(contents: BundleSpec) -> Bytes;
             /// The newer release on GitHub, or null when this one is the newest or this build does not update itself.
             updates::check_for_update() -> Option<UpdateOffer>;
             /// Downloads the newest release and checks its signature; AppyTappy Setup keeps it until

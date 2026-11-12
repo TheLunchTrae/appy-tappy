@@ -53,6 +53,10 @@ pub struct SettingsFile {
     /// Whether the runtime starts with automations enabled or disabled as
     /// the tray last left them. Off, it starts with them enabled.
     pub remember_enabled: bool,
+    /// Whether the setup app shows its debug details: the Debug page, the
+    /// working behind each live reading, the capture outlines and the window
+    /// match scores. On, it also writes `setup.log`. The runtime ignores it.
+    pub show_debug: bool,
 }
 
 impl Default for SettingsFile {
@@ -63,9 +67,14 @@ impl Default for SettingsFile {
             screenshot_shortcut: "F9".to_owned(),
             trace: TraceDef::default(),
             remember_enabled: false,
+            show_debug: false,
         }
     }
 }
+
+/// The first line of every trace file the runtime writes, which the setup
+/// app's Debug page checks before it reads a trace.
+pub const TRACE_HEADER: &str = "time_ns,thread,event,app,item,value,took_ns,cause,detail";
 
 /// The runtime trace: whether the runtime records what it reads and does to
 /// a file, what it records, and how much disk the files may take.
@@ -364,6 +373,20 @@ mod tests {
             remember,
             Ok(SettingsFile {
                 remember_enabled: true,
+                ..SettingsFile::default()
+            })
+        );
+    }
+
+    #[test]
+    fn debug_details_are_hidden_unless_the_file_shows_them() {
+        assert!(!SettingsFile::default().show_debug);
+        let json = SettingsFile::default().to_json();
+        assert!(json.contains("\"showDebug\": false"), "{json}");
+        assert_eq!(
+            SettingsFile::parse(r#"{"format": 1, "showDebug": true}"#),
+            Ok(SettingsFile {
+                show_debug: true,
                 ..SettingsFile::default()
             })
         );

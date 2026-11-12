@@ -8,6 +8,8 @@
   --muted: #9aa3b2;
   --capture: #f2b33d;
   --on-capture: #22190a;
+  --outline: #6cb6ff;
+  --on-outline: #0b1a2a;
   --holds: #5bc48a;
   --warn: #e8845b;
   --live: #e05555;
@@ -2649,4 +2651,355 @@ tr.draft-row > td:not(.end):not(.row-actions) {
   align-items: center;
   gap: 12px;
   padding: 8px 0;
+}
+
+/* Debug page */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.table.mono td {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table caption {
+  text-align: left;
+  padding-bottom: 6px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* A switch beside a heading is as wide as its words, so its buttons need their own room. */
+.card-head .seg button {
+  padding: 5px 12px;
+}
+
+.logbox {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+  color: var(--muted);
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.dialog {
+  /* The reset at the top zeroes every margin, and a modal dialog centers itself with an automatic one. */
+  margin: auto;
+  max-width: 520px;
+  color: inherit;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 45%);
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.check-row input {
+  margin-top: 3px;
+  accent-color: var(--capture);
+}
+
+.check-row .what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Debug details under a live reading. */
+.reading-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.debug-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-line strong {
+  color: var(--text);
+}
+
+.glyph-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.glyph-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--glyph);
+  font-variant-numeric: tabular-nums;
+}
+
+.glyph-char {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.glyph-close {
+  color: var(--holds);
+}
+
+.glyph-score.off .glyph-close {
+  color: var(--warn);
+}
+
+.color-scores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.state-scores tr.read td {
+  color: var(--holds);
+}
+
+.capture-outlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.copy-outline {
+  position: absolute;
+  outline: 2px dashed var(--outline);
+  outline-offset: 2px;
+}
+
+.value-outline {
+  position: absolute;
+  border: 1px solid var(--outline);
+}
+
+.value-outline.unwatched {
+  border-style: dotted;
+  opacity: 0.55;
+}
+
+.outline-tag {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  white-space: nowrap;
+  background: var(--outline);
+  color: var(--on-outline);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px 3px 0 0;
+}
+
+.outline-unread {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.window-list .window-score {
+  grid-column: 1 / -1;
+}
+
+/* Debug page tabs, metrics and trace rows */
+.page-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.page-tabs .tab {
+  padding: 8px 14px;
+}
+
+.page-tabs .tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--capture);
+  font-weight: 600;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.logbox.tall {
+  max-height: 560px;
+}
+
+.card-head .end {
+  margin-left: auto;
+}
+
+.trace-picker,
+.row-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.chart {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chart-bars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+  padding-top: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chart-bar {
+  flex: 1;
+  background: var(--outline);
+  border-radius: 2px 2px 0 0;
+}
+
+.chart-bar.over {
+  background: var(--warn);
+}
+
+.chart-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--holds);
+  color: var(--holds);
+  font-size: 11px;
+  padding-left: 3px;
+}
+
+.chart-mark.p95 {
+  border-left-color: var(--capture);
+  color: var(--capture);
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+}
+
+.trace-rows tr.same-frame td {
+  background: var(--raise);
+}
+
+.frame-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--outline);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.frame-link[aria-pressed='true'] {
+  color: var(--capture);
+}
+
+.row-filters .field.narrow .input {
+  width: 110px;
+}
+
+.trace-picker + * {
+  margin-top: 4px;
+}
+
+.trace-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Each kind of row is as wide as its name. */
+.seg.kinds {
+  grid-auto-columns: auto;
+}
+
+.seg.kinds button {
+  padding: 5px 10px;
 }

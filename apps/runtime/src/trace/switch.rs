@@ -12,10 +12,10 @@ use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use appytappy_config::settings_file::TraceDef;
+use appytappy_platform::Log;
 
 use super::Trace;
 use super::writer::{Options, Stopping, TraceReport, Writer};
-use crate::log::Log;
 use crate::model::SessionId;
 use crate::note;
 use crate::plan::AppPlan;
@@ -253,8 +253,9 @@ mod tests {
 
     use appytappy_config::settings_file::TraceCategory;
 
+    use appytappy_platform::LOG_LIMIT;
+
     use super::*;
-    use crate::log;
     use crate::trace::{Record, What, within};
 
     struct Scratch {
@@ -267,7 +268,7 @@ mod tests {
             let folder = env::temp_dir().join(format!("appytappy-switch-{name}-{}", process::id()));
             drop(fs::remove_dir_all(&folder));
             fs::create_dir_all(&folder).expect("make the folder");
-            let log = Log::open(&folder.join("logs"), log::LIMIT).expect("open the log");
+            let log = Log::open(&folder.join("logs"), "runtime", LOG_LIMIT).expect("open the log");
             Self { folder, log }
         }
 

@@ -64,6 +64,12 @@ use crate::check_spec::bar::{BarDetection, BarMeasure};
 use crate::check_spec::{
     CheckSpec, ColorSpec, Label, MAX_EXPECTED_CHARACTERS, RegionSpec, expected_characters,
 };
+use crate::debug::bundle::BundleSpec;
+use crate::debug::outline::CaptureOutline;
+use crate::debug::trace_file::TraceFile;
+use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
+use crate::debug::workings::ReadingDetails;
+use crate::debug::{DebugOverview, LogName};
 use crate::drafts::{DraftDef, DraftSummary};
 use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
@@ -79,7 +85,7 @@ use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::updates::UpdateOffer;
-use crate::window_list::{WindowFit, WindowList};
+use crate::window_list::{WindowFit, WindowList, WindowScore};
 use crate::{commands, updates};
 
 /// The command to write the files again.
@@ -122,6 +128,17 @@ impl Wire for Pixels {
     type Rust = Response;
     fn ts(_cfg: &Config) -> String {
         "ArrayBuffer".to_owned()
+    }
+    fn visit(_found: &mut Declarations<'_>) {}
+}
+
+/// A file, which a command answers as its raw bytes rather than JSON.
+struct Bytes;
+
+impl Wire for Bytes {
+    type Rust = Response;
+    fn ts(_cfg: &Config) -> String {
+        "Blob".to_owned()
     }
     fn visit(_found: &mut Declarations<'_>) {}
 }
@@ -251,6 +268,13 @@ fn parameters(module: &str, name: &str) -> Vec<String> {
         "the command {name} takes the app's handle first"
     );
     let names: Vec<String> = names.collect();
+    let body = rest.split_once("\n}\n").map_or(rest, |(body, _after)| body);
+    for call in body.split("ask(&app, ").skip(1) {
+        assert!(
+            call.starts_with(&format!("\"{name}\"")),
+            "the command {name} should name itself where it asks the owner, as setup.log records it"
+        );
+    }
     assert!(
         names.iter().all(|name| !name.starts_with('_')),
         "Tauri drops the leading underscore of {name}'s argument key, which the page's key keeps; rename the parameter"
@@ -291,7 +315,7 @@ fn doc_comment(lines: &[&str]) -> String {
 
 /// `api.ts`: a function for each command, which sends its arguments under
 /// the keys Tauri reads and types its answer. A picture comes back decoded,
-/// and an answer of nothing as `void`.
+/// a file as its bytes, and an answer of nothing as `void`.
 fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
     let mut imported = BTreeSet::new();
     let mut functions = Vec::new();
@@ -328,6 +352,10 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
             "ArrayBuffer" => (
                 "Picture | null".to_owned(),
                 format!("return decodePicture(await invoke<ArrayBuffer>({call}));"),
+            ),
+            "Blob" => (
+                "Blob".to_owned(),
+                format!("return new Blob([await invoke<ArrayBuffer>({call})]);"),
             ),
             answer => (
                 answer.to_owned(),
@@ -951,6 +979,14 @@ fn constants() -> String {
             literal(&trace_categories())
         ),
         format!(
+            "/** The first line of a trace file, which names its fields. */\nexport const TRACE_HEADER = {};\n",
+            literal(&crate::debug::trace_file::HEADER)
+        ),
+        format!(
+            "/** How many of the newest times of each kind the Debug page's metrics keep. */\nexport const TRACE_SAMPLES = {};\n",
+            crate::debug::trace_view::SAMPLES
+        ),
+        format!(
             "/**\n * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts, app names, labels and expected\n * characters: the text it keeps, or null when it refuses one; and where sample spots land in sample windows. The\n * page's own checks must read each the same.\n */\nexport const PARSE_CASES = {} as const;\n",
             literal(&parse_cases())
         ),
@@ -1039,6 +1075,17 @@ fn the_command_table_names_each_argument_as_its_command_does() {
             "the table's arguments of {} differ from its parameters",
             command.name
         );
+    }
+}
+
+#[test]
+fn the_log_leaves_out_only_commands_the_table_has() {
+    let names: BTreeSet<&str> = commands(&Config::new())
+        .iter()
+        .map(|command| command.name)
+        .collect();
+    for repeated in crate::debug::log::REPEATED {
+        assert!(names.contains(repeated), "{repeated} is not a command");
     }
 }
 

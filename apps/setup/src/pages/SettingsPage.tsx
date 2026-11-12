@@ -136,6 +136,54 @@ function RememberEnabled() {
   );
 }
 
+/** Whether the setup app shows its debug details: the Debug page, and `setup.log`. */
+function ShowDebug() {
+  const { settings, change } = useSettings();
+  const [error, setError] = useState<string | null>(null);
+  const turn = (on: boolean): void => {
+    change((current) => ({ ...current, showDebug: on })).then(
+      (problem) => {
+        setError(problem);
+      },
+      (failure: unknown) => {
+        setError(errorText(failure));
+      },
+    );
+  };
+  return (
+    <div className="set-row">
+      <div className="what">
+        <span className="set-name">
+          <span id="show-debug">Show debug details</span>
+          <Hint topic="Show debug details" id="show-debug-hint">
+            While on, AppyTappy Setup also writes its own log, setup.log, beside the runtime&apos;s log.
+          </Hint>
+        </span>
+        <span className="note" id="show-debug-note">
+          Adds a Debug page with the runtime&apos;s state, the newest trace, both logs and a debug bundle to share, and
+          shows the working behind live readings, capture outlines and window match scores.
+        </span>
+        {error === null ? null : (
+          <span className="warn" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        className="switch"
+        aria-labelledby="show-debug"
+        aria-describedby="show-debug-note show-debug-hint"
+        aria-checked={settings.showDebug}
+        onClick={() => {
+          turn(!settings.showDebug);
+        }}
+      />
+    </div>
+  );
+}
+
 /** The screenshot shortcut, and a button that records a new one from the next key press. */
 function ScreenshotShortcut() {
   const { label, choosing, saveError, toggle, cancel, onKeyDown } = useShortcutChoice();
@@ -234,6 +282,10 @@ export function SettingsPage({ problem }: Props) {
             label="Slowest read"
             note="How long AppyTappy waits at most while a value holds still. Longer uses less CPU."
           />
+        </section>
+        <section className="card" aria-labelledby="settings-debug">
+          <h2 id="settings-debug">Debug</h2>
+          <ShowDebug />
         </section>
         <RuntimeTrace />
       </div>

@@ -157,6 +157,47 @@ pub(crate) fn matching(
     fits
 }
 
+/// How one open window compares with an application's window match, for
+/// the debug details: which fields match, and whether the match takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowScore {
+    /// The window's handle.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub(crate) handle: u64,
+    /// Whether its title matches the title's pattern.
+    pub(crate) title: bool,
+    /// Whether its class matches the class's pattern.
+    pub(crate) class: bool,
+    /// Whether its executable matches the executable's pattern.
+    pub(crate) executable: bool,
+    /// How the match takes it, or `None` when it does not.
+    pub(crate) fit: Option<WindowFit>,
+}
+
+/// How each of `windows` compares with `window`, in the order given, with
+/// `read` as the window a new session would read.
+#[must_use]
+pub(crate) fn scores(
+    windows: &[WindowChoice],
+    window: &WindowDef,
+    read: Option<u64>,
+) -> Vec<WindowScore> {
+    let matcher = window.to_match();
+    let fits = matching(windows, window, read);
+    windows
+        .iter()
+        .map(|choice| WindowScore {
+            handle: choice.handle,
+            title: matcher.title.matches(&choice.title),
+            class: matcher.class.matches(&choice.class),
+            executable: matcher.executable.matches(&choice.executable),
+            fit: fits.iter().find(|fit| fit.handle == choice.handle).copied(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::FallbackDef;
@@ -315,5 +356,50 @@ mod tests {
             ..exact
         };
         assert_eq!(matching(&offered, &nothing, None), []);
+    }
+
+    #[test]
+    fn scores_say_which_fields_match_each_window() {
+        let processes = [process(1, "Example.exe"), process(2, "Player.exe")];
+        let mut settings = window(5, 1, "Settings");
+        settings.class = "Dialog".to_owned();
+        let windows = vec![
+            window(4, 2, "Media Player"),
+            settings,
+            window(3, 1, "Example App"),
+        ];
+        let offered = list(windows, &processes, 0).windows;
+        let mut must_title = WindowDef::exact(WindowFacts {
+            title: "Example App",
+            class: "AppWindow",
+            executable: "example.exe",
+        });
+        must_title.must_match.title = true;
+        let parts = |score: &WindowScore| {
+            (
+                score.handle,
+                score.title,
+                score.class,
+                score.executable,
+                score.fit,
+            )
+        };
+        let read = WindowFit {
+            handle: 3,
+            fallback: false,
+            best: true,
+            tied: true,
+        };
+        assert_eq!(
+            scores(&offered, &must_title, Some(3))
+                .iter()
+                .map(parts)
+                .collect::<Vec<_>>(),
+            [
+                (3, true, true, true, Some(read)),
+                (4, false, true, false, None),
+                (5, false, false, true, None),
+            ]
+        );
     }
 }

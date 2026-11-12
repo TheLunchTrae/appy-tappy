@@ -116,7 +116,10 @@ While it watches a window, the background part looks only at the boxes of
 your values and keeps nothing it sees. Its
 [log](Troubleshooting.md#appytappys-log) and the
 [runtime trace](Settings.md#runtime-trace) hold text, such as a value's name
-and what it read, and never a picture.
+and what it read, and never a picture. A
+[debug bundle](Debug-page.md#debug-bundle) holds copies of the pictures above,
+a draft's screenshots among them, only when you include them, in a file you
+save yourself.
 
 ## Update
 

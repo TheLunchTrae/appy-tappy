@@ -19,6 +19,8 @@ fills up. New to it? Start with [Getting started](Getting-started.md).
 - [Drafts](Drafts.md): keep something unfinished and finish it later.
 - [Settings](Settings.md): starting with Windows, the screenshot shortcut, and
   how often values are read.
+- [Debug page](Debug-page.md): what AppyTappy is doing, its logs, and a debug
+  bundle to share when something goes wrong.
 - [The tray icon](The-tray-icon.md): turn automations off and on, and see
   which ones run.
 - [Troubleshooting](Troubleshooting.md)

@@ -955,9 +955,14 @@ and keeps them in `clicks` with the others.
 
 A number, bar fill, or color value saves no picture of its own. Nothing else
 AppyTappy writes holds pixels: the runtime's log and its [trace](Trace.md)
-hold names, readings, and timings as text, and the
+hold names, readings, and timings as text, `setup.log` holds each command's
+name, time, and failure as text, never its arguments or its answer, and the
 [MCP server](Development.md#tools)'s `screen_sample` answers the colors of
-single points of the screen, at most `SCREEN_POINTS_LIMIT` a call.
+single points of the screen, at most `SCREEN_POINTS_LIMIT` a call. A
+[debug bundle](#debug-page) copies the picture files above into the zip file
+the user saves, a draft's screenshots among them, and only when the user
+includes them. Each draft's `draft.json` goes in either way, as each
+application's `app.json` does.
 
 A sample of a labeled screenshot or a recorded reading keeps the whole region,
 not only the box around its characters. A
@@ -1005,6 +1010,82 @@ more pixels as ink sees only those within the margin.
   automations file or the drafts folder cannot be read, since nothing says
   which they name. A draft whose file cannot be read names no click picture;
   it keeps its own screenshots until it is deleted.
+
+## Debug page
+
+The [Debug page](Debug-page.md) shows only while `showDebug` in
+`settings.json` is true; the runtime ignores that setting. Its commands live in
+`owner/debug.rs` and its file readers in `src-tauri/src/debug/`:
+
+- `debug_overview` asks `InstanceGuard::is_held` whether the runtime runs, and
+  summarizes the newest `trace-*.csv` in the trace folder. `TraceTail` keeps
+  its place in that file, so each poll reads only the rows added since the last
+  one, and starts over when a newer file appears or the file shrinks. A header
+  other than the one this build writes is reported as a trace from another
+  version, not parsed; the header is `TRACE_HEADER` in `appytappy-config`,
+  which the runtime writes too. Frame to action is each `started` row's time
+  minus its `cause`, rule handling is each `handled` row's `took_ns`, running
+  actions is each `done` row's `took_ns`, and each is summarized as a median
+  and 95th percentile of the newest 10,000, so a long trace keeps a fixed
+  amount in memory. A poll reads at most 4 MiB, from near the end when more
+  was added, and a row that no line break ends within that much is given up
+  at the next line break. The summary covers the newest file only, so a trace
+  that has moved to its next file starts its numbers again.
+- `trace_files` lists the `trace-*.csv` files, newest first, by when each was
+  last written. `trace_metrics` and `trace_rows` read the picked file through a
+  `TraceView` in `debug/trace_view.rs`, which reads it from its first row, at
+  most two 4 MiB windows a call, and keeps its place between calls. The page
+  asks again at once while it has more to read. The view keeps each count for
+  the whole file and by the second for its last 10 minutes, the newest 20,000
+  times of each kind with when each happened, and the newest 100,000 rows,
+  each name held once and let go with the last row that uses it, so a long trace
+  holds about the same amount, more only for each value and automation it
+  names. A range is measured back from the newest row. The view starts over
+  when the file shrinks, and `close_trace` lets it go as the page leaves its
+  **Metrics** and **Trace rows** tabs. Each read the page starts makes the
+  ones before it stale, so an older answer never replaces a newer one.
+- `read_log` returns the last 64 KB of `runtime.log` or `setup.log`, as whole
+  lines.
+- `debug_bundle` hands the owner's file locations to a blocking task, which
+  builds the zip in memory away from the owner thread, so the page's other
+  commands do not wait for a large trace to be packed. The page saves the
+  returned bytes with the WebView's save picker. Pictures are stored,
+  everything else is deflated, with the `zip` crate and its pure-Rust deflate
+  backend. `setup.log` records the whole time, packing included.
+
+The same setting adds debug details to the editors. The page asks for them
+only while `showDebug` is true, so with it off they cost nothing:
+
+- `explain_reading` and `explain_watched` score the region of the newest frame
+  that the value editor's check or the automation editor's watch read, with
+  `Check::explain` from `appytappy-sources`. A read decides with the same
+  scores: a number's read takes the closest glyph by `GlyphScore`, and a
+  state's by the `Difference` that `StateScore::within` also checks. The state
+  marked as read comes from a read of the same region, so the scores and the
+  state marked as read always agree; the runtime never asks for them. The live
+  reading above them is its own read, so it can come from a frame before or
+  after. The page asks every 500 ms, less often than the reading, as scoring a
+  number checks each character against every glyph.
+- `capture_outline` builds the saved application's capture as the runtime
+  would at the screenshot's window size, in `debug/outline.rs`: the values
+  that its enabled automations watch, of those `Runnable::new` says can run,
+  as `automations::watched_values` gives them, each placed with
+  `SavedValue::at`, then `Layout::new` for the rectangles copied. It answers
+  every saved value, with where it reads or why it does not, and the page
+  draws them over the screenshot. The page asks again when the window size or
+  the saved file changes.
+- `window_scores` compares each window that the picker lists with the match
+  being edited, field by field, with the same `Pattern::matches` the match
+  uses, and gives the `WindowFit` that `match_windows` gives the windows it
+  takes. With scores, the window list takes each window's label from its
+  score, so the label and the score come from the same read of the windows.
+
+Every command passes its own name to `ask` or `try_ask`, which a test in
+`bindings.rs` checks against the command table. `debug_bundle` passes its name
+to `record_command` once the bundle is packed instead. The work then records how long
+the command took from being sent, and why it failed, in `SetupLog`, which the
+owner thread holds and opens only while `showDebug` is true. Loading or saving
+the settings opens or closes it.
 
 ## Page types
 

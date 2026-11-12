@@ -1,18 +1,19 @@
-//! The runtime's log: one file that rotates to one old file, so it never
-//! takes more than twice its limit on disk.
+//! A program's log: one file that rotates to one old file, so it never takes
+//! more than twice its limit on disk. The runtime writes `runtime.log`, and
+//! the setup app writes `setup.log` while it shows debug details.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use appytappy_platform::LocalTime;
+use crate::LocalTime;
 
-/// The size at which the log rotates.
-pub(crate) const LIMIT: u64 = 524_288;
+/// The size at which a log rotates.
+pub const LOG_LIMIT: u64 = 524_288;
 
 /// An open log file.
 #[derive(Debug)]
-pub(crate) struct Log {
+pub struct Log {
     path: PathBuf,
     old: PathBuf,
     file: File,
@@ -28,16 +29,20 @@ fn open_append(path: &Path) -> io::Result<File> {
 }
 
 impl Log {
-    /// Opens `runtime.log` in `folder`, creating both if needed. A line that
+    /// Opens `{name}.log` in `folder`, creating both if needed. A line that
     /// would take the file past `limit` bytes first moves it to
-    /// `runtime.old.log`, replacing the old one.
-    pub(crate) fn open(folder: &Path, limit: u64) -> io::Result<Self> {
+    /// `{name}.old.log`, replacing the old one.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from creating the folder or opening the file.
+    pub fn open(folder: &Path, name: &str, limit: u64) -> io::Result<Self> {
         fs::create_dir_all(folder)?;
-        let path = folder.join("runtime.log");
+        let path = folder.join(format!("{name}.log"));
         let file = open_append(&path)?;
         let size = file.metadata()?.len();
         Ok(Self {
-            old: folder.join("runtime.old.log"),
+            old: folder.join(format!("{name}.old.log")),
             path,
             file,
             size,
@@ -50,12 +55,16 @@ impl Log {
     /// Makes the log rotate at `limit` bytes from now on. Only the copy that
     /// holds the single-instance guard rotates, so another copy that only
     /// notes why it exits never moves the file under it.
-    pub(crate) const fn rotate_at(&mut self, limit: u64) {
+    pub const fn rotate_at(&mut self, limit: u64) {
         self.limit = limit;
     }
 
     /// Appends `message` as one line, after `time` when there is one.
-    pub(crate) fn write(&mut self, time: Option<LocalTime>, message: &str) -> io::Result<()> {
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from writing the line.
+    pub fn write(&mut self, time: Option<LocalTime>, message: &str) -> io::Result<()> {
         let line = match time {
             Some(time) => format!("{time} {message}\n"),
             None => format!("{message}\n"),
@@ -144,11 +153,11 @@ mod tests {
             minute: 5,
             second: 9,
         };
-        Log::open(&folder.0, LIMIT)
+        Log::open(&folder.0, "runtime", LOG_LIMIT)
             .expect("open")
             .write(Some(time), "started")
             .expect("write");
-        Log::open(&folder.0, LIMIT)
+        Log::open(&folder.0, "runtime", LOG_LIMIT)
             .expect("reopen")
             .write(None, "stopped")
             .expect("write");
@@ -161,7 +170,7 @@ mod tests {
     #[test]
     fn a_line_past_the_limit_rotates_the_file() {
         let folder = Folder::new("rotate");
-        let mut log = Log::open(&folder.0, 10).expect("open");
+        let mut log = Log::open(&folder.0, "runtime", 10).expect("open");
         log.write(None, "first").expect("write");
         log.write(None, "fou").expect("write");
         assert_eq!(
@@ -178,7 +187,7 @@ mod tests {
     #[test]
     fn a_log_that_cannot_move_keeps_every_line() {
         let folder = Folder::new("stuck");
-        let mut log = Log::open(&folder.0, 10).expect("open");
+        let mut log = Log::open(&folder.0, "runtime", 10).expect("open");
         log.write(None, "first").expect("write");
         // A folder that is not empty in the old file's place stops the move.
         let blocker = folder.0.join("runtime.old.log");
@@ -205,7 +214,7 @@ mod tests {
     #[test]
     fn a_new_file_that_cannot_open_keeps_the_moved_one_until_it_can() {
         let folder = Folder::new("reopen-fails");
-        let mut log = Log::open(&folder.0, 10).expect("open");
+        let mut log = Log::open(&folder.0, "runtime", 10).expect("open");
         log.write(None, "first").expect("write");
         log.fail_open = true;
         log.write(None, "second")
@@ -229,7 +238,7 @@ mod tests {
     #[test]
     fn a_log_deleted_while_open_starts_a_new_file() {
         let folder = Folder::new("deleted");
-        let mut log = Log::open(&folder.0, 10).expect("open");
+        let mut log = Log::open(&folder.0, "runtime", 10).expect("open");
         log.write(None, "first").expect("write");
         fs::remove_file(folder.0.join("runtime.log")).expect("delete the log");
         log.write(None, "second").expect("write");
@@ -240,7 +249,7 @@ mod tests {
     #[test]
     fn a_log_rotates_only_once_given_a_limit() {
         let folder = Folder::new("unlimited");
-        let mut log = Log::open(&folder.0, u64::MAX).expect("open");
+        let mut log = Log::open(&folder.0, "runtime", u64::MAX).expect("open");
         log.write(None, "first").expect("write");
         log.write(None, "second").expect("write");
         log.rotate_at(10);
@@ -252,11 +261,11 @@ mod tests {
     #[test]
     fn a_reopened_log_counts_what_the_file_already_holds() {
         let folder = Folder::new("reopen");
-        Log::open(&folder.0, 10)
+        Log::open(&folder.0, "runtime", 10)
             .expect("open")
             .write(None, "first")
             .expect("write");
-        Log::open(&folder.0, 10)
+        Log::open(&folder.0, "runtime", 10)
             .expect("reopen")
             .write(None, "second")
             .expect("write");

@@ -16,6 +16,7 @@
 mod automations;
 mod capture;
 mod clicks;
+mod debug;
 mod drafts;
 mod edits;
 mod fixes;
@@ -39,13 +40,16 @@ use std::collections::BTreeMap;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::check_spec::{Pictures, RegionCheck};
+use crate::debug::log::SetupLog;
+use crate::debug::trace_file::TraceTail;
+use crate::debug::trace_view::TraceView;
 use crate::overlay::{Overlays, Purpose};
 use crate::recording::{Recorder, ocr};
 use crate::screenshots::Screenshots;
@@ -85,6 +89,8 @@ pub(crate) struct Owner<H: Host> {
     generation: u64,
     session: Option<H::Session>,
     latest: Option<Image>,
+    /// When `latest` arrived.
+    latest_at: Option<Instant>,
     /// Why the picked window's capture failed, until a good frame arrives.
     failure: Option<CaptureFailure>,
     screenshots: Screenshots,
@@ -115,11 +121,18 @@ pub(crate) struct Owner<H: Host> {
     /// The build each running process runs, read once per process, since
     /// the application list asks again every few seconds.
     builds: BTreeMap<ProcessId, BuildDef>,
+    /// The newest trace file as the Debug page last read it, so the next
+    /// read takes only the rows added since.
+    trace_tail: Option<TraceTail>,
+    /// The trace file the Debug page's metrics and rows read, from its start.
+    trace_view: Option<TraceView>,
+    /// `setup.log`, open while the settings show debug details.
+    setup_log: SetupLog,
 }
 
 impl<H: Host> Owner<H> {
     /// An owner with no window picked.
-    pub(crate) const fn new(
+    pub(crate) fn new(
         host: H,
         stores: Result<Stores, String>,
         own_process: u32,
@@ -128,12 +141,12 @@ impl<H: Host> Owner<H> {
     ) -> Self {
         Self {
             host,
-            stores,
             own_process,
             messages,
             generation: 0,
             session: None,
             latest: None,
+            latest_at: None,
             failure: None,
             screenshots: Screenshots::new(),
             check: None,
@@ -147,6 +160,13 @@ impl<H: Host> Owner<H> {
             live: Overlays::new(Purpose::ValuesPage),
             update: None,
             builds: BTreeMap::new(),
+            trace_tail: None,
+            trace_view: None,
+            setup_log: SetupLog::new(match &stores {
+                Ok(stores) => Some(stores.logs.clone()),
+                Err(_unknown) => None,
+            }),
+            stores,
         }
     }
 

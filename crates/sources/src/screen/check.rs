@@ -138,6 +138,16 @@ impl BarFill {
     ///
     /// Returns [`CheckError::NoBar`] when no pixel is near either color.
     pub fn percent(self, image: &Image) -> Result<Number, CheckError> {
+        let (filled, counted) = self.count(image);
+        if counted == 0 {
+            return Err(CheckError::NoBar);
+        }
+        Number::new(filled as f64 * 100.0 / counted as f64).ok_or(CheckError::NoBar)
+    }
+
+    /// How many of `image`'s pixels count as filled, and how many count at
+    /// all.
+    pub(super) fn count(self, image: &Image) -> (u64, u64) {
         let mut filled = 0_u64;
         let mut counted = 0_u64;
         for &pixel in image.pixels() {
@@ -146,10 +156,7 @@ impl BarFill {
             filled = filled.wrapping_add(u64::from(class == BarPixel::Filled));
             counted = counted.wrapping_add(u64::from(class != BarPixel::Neither));
         }
-        if counted == 0 {
-            return Err(CheckError::NoBar);
-        }
-        Number::new(filled as f64 * 100.0 / counted as f64).ok_or(CheckError::NoBar)
+        (filled, counted)
     }
 }
 
@@ -245,7 +252,7 @@ pub fn average(image: &Image) -> Rgb {
 pub struct ImageMatch {
     picture: Image,
     spans: Box<[Range<usize>]>,
-    tolerance: u8,
+    pub(super) tolerance: u8,
 }
 
 impl ImageMatch {
@@ -328,7 +335,7 @@ impl ImageMatch {
     /// # Errors
     ///
     /// Returns [`CheckError::SizeMismatch`] when the sizes differ.
-    fn difference(&self, image: &Image) -> Result<Difference, CheckError> {
+    pub(super) fn difference(&self, image: &Image) -> Result<Difference, CheckError> {
         if image.size() != self.picture.size() {
             return Err(CheckError::SizeMismatch {
                 expected: self.picture.size(),
@@ -358,14 +365,14 @@ impl ImageMatch {
 /// How far a region is from a picture: the summed difference of the
 /// compared red, green, and blue channels, and how many there were.
 #[derive(Debug, Clone, Copy)]
-struct Difference {
-    total: u64,
-    channels: u64,
+pub(super) struct Difference {
+    pub(super) total: u64,
+    pub(super) channels: u64,
 }
 
 impl Difference {
     /// Whether the average difference per channel is at most `tolerance`.
-    fn within(self, tolerance: u8) -> bool {
+    pub(super) fn within(self, tolerance: u8) -> bool {
         self.total <= self.channels.saturating_mul(u64::from(tolerance))
     }
 
@@ -386,7 +393,7 @@ impl Difference {
 /// them. A tie goes to the earlier state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateMatch {
-    states: Box<[(StateName, ImageMatch)]>,
+    pub(super) states: Box<[(StateName, ImageMatch)]>,
     none: StateName,
 }
 

@@ -70,6 +70,10 @@ impl InstanceGuard {
     pub(crate) fn acquire(_name: &str) -> io::Result<Option<Self>> {
         unsupported()
     }
+
+    pub(crate) fn is_held(_name: &str) -> io::Result<bool> {
+        unsupported()
+    }
 }
 
 /// A reload watch, which cannot be constructed here.
@@ -141,6 +145,7 @@ mod tests {
             WindowWatch::start(events).map(drop),
             Tray::start(tray_events, menu).map(drop),
             InstanceGuard::acquire(InstanceGuard::RUNTIME).map(drop),
+            InstanceGuard::is_held(InstanceGuard::RUNTIME).map(drop),
             ReloadWatch::start(crate::RELOAD, reloads).map(drop),
             crate::request_reload(crate::RELOAD).map(drop),
             crate::enable_autostart("test", OsStr::new("runtime.exe")),
@@ -149,7 +154,7 @@ mod tests {
             crate::lower_thread_priority(),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 9]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 10]);
         assert_eq!(LocalTime::now(), None);
     }
 }

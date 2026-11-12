@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { WindowDef, WindowFit } from '../src/lib/bindings.ts';
+import type { WindowDef, WindowFit, WindowScore } from '../src/lib/bindings.ts';
 import {
   exactWindow,
   fallbackUseful,
@@ -9,6 +9,7 @@ import {
   matchSummary,
   sentence,
   required,
+  scoreText,
   withMustMatch,
 } from '../src/lib/matching.ts';
 
@@ -102,5 +103,40 @@ describe('sentence', () => {
   test('ends text in a full stop once', () => {
     expect(sentence('no answer ')).toBe('no answer.');
     expect(sentence('Done!')).toBe('Done!');
+  });
+});
+
+describe('a window score', () => {
+  const loose = { mustMatch: { title: false, class: false }, fallback: 'none' } as const;
+  const score = (parts: Partial<WindowScore>): WindowScore => ({
+    handle: 1,
+    title: true,
+    class: true,
+    executable: true,
+    fit: null,
+    ...parts,
+  });
+
+  test('names each field that matches or differs', () => {
+    expect(scoreText(score({ class: false, fit: { handle: 1, fallback: false, best: true, tied: true } }), loose)).toBe(
+      'Title matches, class differs, executable matches.',
+    );
+  });
+
+  test('says why the match leaves a window out', () => {
+    const titled = { mustMatch: { title: true, class: false }, fallback: 'none' } as const;
+    expect(scoreText(score({ executable: false, title: false }), titled)).toEndWith(
+      'Not taken: its executable differs.',
+    );
+    expect(scoreText(score({ title: false }), titled)).toEndWith('Not taken: its title must match.');
+    expect(scoreText(score({ class: false }), { mustMatch: { title: true, class: true }, fallback: 'none' })).toEndWith(
+      'Not taken: its class must match.',
+    );
+  });
+
+  test('says when a window that qualifies takes the place of the fallback', () => {
+    expect(
+      scoreText(score({ title: false }), { mustMatch: { title: true, class: false }, fallback: 'executable' }),
+    ).toEndWith('Not taken: its title must match, and a window that does is open, so the fallback is not used.');
   });
 });

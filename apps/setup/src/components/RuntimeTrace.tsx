@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { LIMITS, type SettingsFile, TRACE_CATEGORIES, type TraceCategory } from '../lib/bindings.ts';
 import { errorText, openTraceFolder, traceFolder } from '../lib/api.ts';
 import { background } from '../lib/repeat.ts';
-import { type TraceLength, traceEnd, traceRecords, useSettings, withCategory } from '../lib/settings.ts';
+import { type TraceLength, endText, traceEnd, traceRecords, useSettings, withCategory } from '../lib/settings.ts';
 import { TRACE_HINT } from '../lib/hints.ts';
 import { Hint } from './Hint.tsx';
 import { NumberSetting } from './NumberSetting.tsx';
@@ -64,17 +64,8 @@ function firstLength(on: boolean, until: number | null): TraceLength {
   return kept === null || (on && kept === 'off') ? 60 : kept;
 }
 
-/** `until` as the user reads it: the time, with the day when it is not today. */
-function endText(until: number): string {
-  const end = new Date(until);
-  const today = new Date().toDateString() === end.toDateString();
-  return today
-    ? end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    : end.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-}
-
 /** The time now, which moves on when a trace's end time passes, so the page shows the trace stopped. */
-function useNowUntil(until: number | null): number {
+export function useNowUntil(until: number | null): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (until === null || until <= now) {

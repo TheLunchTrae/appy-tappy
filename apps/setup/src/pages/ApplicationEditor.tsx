@@ -30,7 +30,7 @@ import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { DRAFT_HINT } from '../lib/hints.ts';
 import { Trail } from '../components/Trail.tsx';
-import { WindowsPanel, useWindowFits } from '../components/WindowsPanel.tsx';
+import { WindowsPanel, useWindowFits, useWindowScores } from '../components/WindowsPanel.tsx';
 
 /** The setup as `resumed` keeps it, or else as `saved` has it, or a new application's. */
 function startAppSetup(saved: AppSummary['file'], resumed: Resumed | null): AppSetup {
@@ -87,6 +87,7 @@ export function ApplicationEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { fits, error: fitError } = useWindowFits(window, listed);
+  const scores = useWindowScores(window, listed);
   const setup: AppSetup = { name, window, sizeChanges };
   const missing = unfinishedApp(setup);
   const drafting = useDraft(
@@ -181,6 +182,7 @@ export function ApplicationEditor({
           selected={selected}
           fits={fits}
           onChoose={choose}
+          scores={scores === null || window === null ? null : { windows: scores, rules: window }}
         />
         <aside className="side" aria-label="Application">
           <h2>Application</h2>

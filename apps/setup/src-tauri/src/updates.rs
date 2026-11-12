@@ -166,7 +166,10 @@ pub(crate) async fn download_update(app: AppHandle) -> Result<UpdateOffer, Strin
         manifest: update.raw_json,
         installer,
     };
-    ask(&app, move |owner| owner.keep_update(downloaded)).await?;
+    ask(&app, "download_update", move |owner| {
+        owner.keep_update(downloaded);
+    })
+    .await?;
     Ok(UpdateOffer { version })
 }
 
@@ -177,7 +180,7 @@ pub(crate) async fn download_update(app: AppHandle) -> Result<UpdateOffer, Strin
 #[tauri::command]
 #[mutants::skip]
 pub(crate) async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
-    let downloaded = ask(&app, Owner::take_update)
+    let downloaded = ask(&app, "install_update", Owner::take_update)
         .await?
         .ok_or_else(|| "AppyTappy Setup has no update downloaded. Update again.".to_owned())?;
     agreed(&downloaded.version, &version)?;

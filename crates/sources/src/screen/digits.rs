@@ -419,24 +419,102 @@ impl DigitReader {
     /// or `None` before the reader learned any.
     fn closest(&self, shape: &Shape) -> Option<Closest> {
         let around = grown(shape);
-        let (glyph, distance) = self
+        let score = self
             .glyphs
             .iter()
-            .map(|glyph| {
-                let apart = cells(shape, &glyph.grown, |a, b| a & !b).saturating_add(cells(
-                    &glyph.shape,
-                    &around,
-                    |a, b| a & !b,
-                ));
-                let differing = cells(shape, &glyph.shape, |a, b| a ^ b);
-                (glyph, Distance { apart, differing })
-            })
-            .min_by_key(|(_, distance)| *distance)?;
-        let set = cells(shape, &glyph.shape, |a, b| a | b);
+            .map(|glyph| GlyphScore::of(shape, &around, glyph))
+            .min_by_key(|score| score.distance())?;
         Some(Closest {
-            character: glyph.character,
-            matches: distance.apart.saturating_mul(CELLS_PER_APART) <= set,
+            character: score.character,
+            matches: score.matches(),
         })
+    }
+
+    /// How each character in `image` scores against the learned glyphs:
+    /// its closest glyph and the closest of another character, left to
+    /// right. A read decides with the same scores.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`DigitReader::shapes`].
+    pub fn explain(&self, image: &Image) -> Result<Vec<CharacterScore>, ReadError> {
+        let Shapes(shapes) = self.shapes(image)?;
+        Ok(shapes.iter().map(|shape| self.score(shape)).collect())
+    }
+
+    /// The closest glyph to `shape`, and the closest of another character.
+    /// Of equals, the glyph learned first, as in [`DigitReader::read`].
+    fn score(&self, shape: &Shape) -> CharacterScore {
+        let around = grown(shape);
+        let mut ranked: Vec<GlyphScore> = self
+            .glyphs
+            .iter()
+            .map(|glyph| GlyphScore::of(shape, &around, glyph))
+            .collect();
+        ranked.sort_by_key(|score| score.distance());
+        let best = ranked.first().copied();
+        let runner_up = ranked
+            .iter()
+            .find(|score| best.is_some_and(|best| best.character != score.character))
+            .copied();
+        CharacterScore { best, runner_up }
+    }
+}
+
+/// How one character in a region scores, from [`DigitReader::explain`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharacterScore {
+    /// The closest learned glyph, or `None` when the reader knows none.
+    pub best: Option<GlyphScore>,
+    /// The closest glyph of another character, or `None` when the reader
+    /// knows no other character.
+    pub runner_up: Option<GlyphScore>,
+}
+
+/// How close a character is to one learned glyph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GlyphScore {
+    /// The glyph's character.
+    pub character: char,
+    /// How many cells one of the two sets where the other sets neither that
+    /// cell nor one beside it: a part the other lacks, not a moved edge.
+    pub apart: u32,
+    /// How many cells only one of the two sets. Of glyphs with as many
+    /// cells apart, the one with the fewest of these is closest.
+    pub differing: u32,
+    /// How many cells either of the two sets. The glyph matches when at
+    /// most 1 in 32 of them are apart.
+    pub set: u32,
+}
+
+impl GlyphScore {
+    /// How close `shape` is to `glyph`. `around` is `shape` grown.
+    fn of(shape: &Shape, around: &Shape, glyph: &Glyph) -> Self {
+        Self {
+            character: glyph.character,
+            apart: cells(shape, &glyph.grown, |a, b| a & !b).saturating_add(cells(
+                &glyph.shape,
+                around,
+                |a, b| a & !b,
+            )),
+            differing: cells(shape, &glyph.shape, |a, b| a ^ b),
+            set: cells(shape, &glyph.shape, |a, b| a | b),
+        }
+    }
+
+    /// What orders glyphs from the closest.
+    const fn distance(self) -> Distance {
+        Distance {
+            apart: self.apart,
+            differing: self.differing,
+        }
+    }
+
+    /// Whether the character is close enough to read as this glyph, by the
+    /// same rule as [`DigitReader::read`].
+    #[must_use]
+    pub const fn matches(self) -> bool {
+        self.apart.saturating_mul(CELLS_PER_APART) <= self.set
     }
 }
 
@@ -1493,6 +1571,72 @@ mod tests {
                 .closest(&shape_of(&wide))
                 .map(|closest| closest.character),
             Some('1')
+        );
+    }
+
+    #[test]
+    fn the_scores_shown_are_the_ones_a_read_decides_with() {
+        let mut far = BLOCK.to_vec();
+        far.extend(["........", "#.#.#..."]);
+        let far = shape_of(&far);
+        let reader = reader_of(&[('1', shape_of(&["#"; 8])), ('7', shape_of(&BLOCK))]);
+        let score = reader.score(&far);
+        // The three cells two rows below the block are apart from it: more
+        // than 1 in 32 of the 67 either sets.
+        let best = GlyphScore {
+            character: '7',
+            apart: 3,
+            differing: 3,
+            set: 67,
+        };
+        assert_eq!(score.best, Some(best));
+        assert!(!best.matches());
+        assert_eq!(
+            reader.closest(&far),
+            Some(Closest {
+                character: '7',
+                matches: false
+            })
+        );
+        // The runner-up is the closest glyph of another character.
+        assert_eq!(
+            score.runner_up,
+            Some(GlyphScore {
+                character: '1',
+                apart: 51,
+                differing: 59,
+                set: 67,
+            })
+        );
+        // Fewer cells apart is closer than fewer cells differing, as a read
+        // has it.
+        let mut one_far = BLOCK.to_vec();
+        one_far.extend(["........", "#......."]);
+        let mut shifted = vec!["#########"; 8];
+        shifted.extend(["........", "#........"]);
+        let reader = reader_of(&[('1', shape_of(&BLOCK)), ('2', shape_of(&shifted))]);
+        let score = reader.score(&shape_of(&one_far));
+        assert_eq!(
+            score
+                .best
+                .map(|best| (best.character, best.apart, best.differing, best.matches())),
+            Some(('2', 0, 8, true))
+        );
+        assert_eq!(
+            score.runner_up.map(|next| (
+                next.character,
+                next.apart,
+                next.differing,
+                next.matches()
+            )),
+            Some(('1', 1, 1, true))
+        );
+        assert_eq!(
+            reader_of(&[]).score(&far),
+            CharacterScore {
+                best: None,
+                runner_up: None
+            }
         );
     }
 
