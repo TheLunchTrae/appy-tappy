@@ -104,7 +104,7 @@ impl<H: Host> Owner<H> {
             }
             let (reference, pictures) = owner
                 .with_session(|session| {
-                    check_spec::to_saved_reference(&spec.check, session, &id, name)
+                    check_spec::to_saved_reference(&spec.check, session, &id, name, &spec.expects)
                 })
                 .map_err(|error| error.to_string())?;
             match file.references.iter_mut().find(|saved| saved.id == id) {
@@ -188,6 +188,7 @@ mod tests {
         ReferenceSaveSpec {
             app: app.to_owned(),
             reference_name: name.to_owned(),
+            expects: String::new(),
             check: serde_json::from_str(&format!(
                 r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},"screenshot":0,
                     "reference":{editing},"ink":{{"red":255,"green":0,"blue":0}},
@@ -413,6 +414,45 @@ mod tests {
             ["small"],
             "only the deleted reference is gone"
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_reference_is_saved_with_the_characters_it_expects_until_they_change() {
+        let (stores, root) = scratch_store("references-expected");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let mut save = |editing, expects: &str| {
+            let spec = ReferenceSaveSpec {
+                expects: expects.to_owned(),
+                ..reference("example", "Digits", editing)
+            };
+            harness.ask(move |owner| owner.save_reference(&spec))?;
+            let apps = harness.ask(Owner::apps)?;
+            let file = apps[0].file.as_ref().ok_or("a good file")?;
+            let saved = file.reference("digits").ok_or("saved")?;
+            Ok::<_, String>((saved.expects.clone(), saved.samples.len()))
+        };
+        // It learns the one sample it is taught, whatever it expects.
+        assert_eq!(
+            save(None, "0123456789%"),
+            Ok((Some("0123456789%".to_owned()), 1))
+        );
+        let saved = Some(("example", "digits"));
+        assert_eq!(
+            save(saved, "% 1 0 1"),
+            Ok((Some("01%".to_owned()), 2)),
+            "listed once each, in order"
+        );
+        let too_many: String = ('\u{100}'..='\u{180}').collect();
+        assert_eq!(
+            save(saved, &too_many),
+            Err("A reference needs at most 128 characters. Remove some.".to_owned()),
+        );
+        assert_eq!(save(saved, ""), Ok((None, 3)), "none chosen");
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

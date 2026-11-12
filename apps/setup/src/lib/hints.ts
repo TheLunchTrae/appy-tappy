@@ -65,6 +65,9 @@ export const INK_HINT =
 export const LABEL_HINT =
   'Type exactly what the region shows, such as 87% or 1,250. Each labeled screenshot teaches the reference the characters in it.';
 
+/** The characters a reference needs. */
+export const EXPECTED_HINT =
+  'Your list of what to teach. AppyTappy shows which of these characters the reference has yet to learn. It only guides you: a character is learned from what you label or record, never from this list, and a number reads the same way whatever you turn on.';
 /** Finding more text like the first sample. */
 export const FIND_LIKE_HINT =
   "Looks on this screenshot for other text in the characters' color and as tall as the text in the region, and reads each as text. Check what it read; each one you add teaches the reference like a labeled screenshot. Draw the region tightly around the text and type what it shows first, so the size is right.";

@@ -888,6 +888,32 @@ mod tests {
                 image: sample_name("counter", 1),
                 text: text.to_owned(),
             }],
+            expects: None,
+        }
+    }
+
+    #[test]
+    fn what_a_reference_expects_changes_nothing_it_learns_or_reads() {
+        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
+        let number = CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+        };
+        let plain = build(
+            &screen(number.clone()),
+            &[counter("11")],
+            OFTEN,
+            from(&files),
+        )
+        .expect("builds");
+        // The same glyphs and the same number rules, whatever it expects,
+        // even a list no setup app would save.
+        for expected in ["0123456789,.%", "11 ", "", &"x".repeat(5000)] {
+            let mut expecting = counter("11");
+            expecting.expects = Some(expected.to_owned());
+            let guided =
+                build(&screen(number.clone()), &[expecting], OFTEN, from(&files)).expect("builds");
+            assert_eq!(guided.drawn.check, plain.drawn.check, "{expected:?}");
         }
     }
 
@@ -940,6 +966,7 @@ mod tests {
             },
             tolerance: 40,
             samples,
+            expects: None,
         };
         let value = ScreenDef {
             window_size: SizeDef {

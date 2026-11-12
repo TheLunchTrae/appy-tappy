@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 
+import type { Coverage } from '../lib/expected.ts';
 import type { Color } from '../lib/pixels.ts';
 import { andList, knownCharacters } from '../lib/reference.ts';
 import { INK_HINT, INK_TOLERANCE_HINT, LABEL_HINT } from '../lib/hints.ts';
-import { CharacterChips } from './CharacterChips.tsx';
+import { CharacterChips, MissingChips } from './CharacterChips.tsx';
+import { ExpectedCharacters } from './ExpectedCharacters.tsx';
 import { Hint } from './Hint.tsx';
 import { ColorField, ToleranceField } from './Fields.tsx';
 
@@ -23,6 +25,10 @@ interface Props {
   /** The labeled screenshots', kept readings' and added found text's texts. */
   readonly labeled: readonly string[];
   readonly recorded: readonly string[];
+  /** The characters it needs, each once. */
+  readonly expected: readonly string[];
+  /** How the characters in those texts compare with the ones it needs. */
+  readonly coverage: Coverage;
   readonly found: readonly string[];
   /** The texts of found text not added yet, whose new characters are outlined. */
   readonly finding: readonly string[];
@@ -38,6 +44,7 @@ interface Props {
   readonly onPick: () => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onLabel: (text: string) => void;
+  readonly onExpected: (expected: readonly string[]) => void;
   /** Takes the added found text back out of the reference. */
   readonly onForgetFound: () => void;
 }
@@ -56,12 +63,44 @@ function learnedNote(saved: number, labeled: number, recorded: number, found: nu
   return parts.length === 0 ? 'Nothing learned yet.' : `Learned from ${andList(parts)}.`;
 }
 
-/** The inspector of a reference: its name and color, and the characters it learns. */
+/** Characters the reference knows: tiles in their own color, or plain text until that color is picked. */
+function Known({
+  characters,
+  pending,
+  ink,
+}: {
+  readonly characters: readonly string[];
+  /** The ones that found text would teach once it is added, which show outlined. */
+  readonly pending: readonly string[];
+  readonly ink: Color | null;
+}) {
+  return ink === null ? (
+    <span className="note">{characters.length === 0 ? 'None yet.' : characters.join(' ')}</span>
+  ) : (
+    <CharacterChips
+      characters={characters}
+      ink={ink}
+      pending={pending.filter((character) => characters.includes(character))}
+      large
+    />
+  );
+}
+
+/** The inspector of a reference: its name and color, the characters it needs, and the ones it learns. */
 export function ReferenceEditor(props: Props) {
-  const { name, appName, ink, tolerance, selected, saved, labeled, recorded, found, finding, readers } = props;
-  const known = knownCharacters([...saved, ...labeled, ...recorded, ...found]);
-  const pending = knownCharacters(finding).filter((character) => !known.includes(character));
-  const characters = knownCharacters([...known, ...pending]);
+  const { name, appName, ink, tolerance, selected, saved, labeled, recorded, found, finding } = props;
+  const { expected, coverage, readers } = props;
+  // Without a choice of what it needs, every character it learned shows as one group.
+  const chosen = expected.length > 0;
+  // Characters of found text not added yet show outlined beside the ones it knows.
+  const pending = knownCharacters(finding).filter(
+    (character) => !coverage.known.includes(character) && !coverage.extra.includes(character),
+  );
+  const needed = (character: string): boolean => !chosen || expected.includes(character);
+  const known = knownCharacters([...(chosen ? coverage.known : coverage.extra), ...pending.filter(needed)]);
+  const extra = chosen
+    ? knownCharacters([...coverage.extra, ...pending.filter((character) => !needed(character))])
+    : [];
   return (
     <>
       <div className="field">
@@ -95,6 +134,7 @@ export function ReferenceEditor(props: Props) {
         onChange={props.onTolerance}
       />
       {props.preview}
+      <ExpectedCharacters expected={expected} onExpected={props.onExpected} />
       <div className="field">
         <span className="name">
           <label htmlFor="label-text">What the region shows on this screenshot</label>
@@ -118,12 +158,30 @@ export function ReferenceEditor(props: Props) {
         )}
       </div>
       {props.findPanel}
+      {chosen ? (
+        <div className="field">
+          <span>Characters still missing</span>
+          {coverage.missing.length === 0 ? (
+            <span className="ok">None. It knows every character it needs.</span>
+          ) : (
+            <>
+              <MissingChips characters={coverage.missing} large />
+              <span className="note">
+                Label a screenshot that shows them, find more text like it, or record the region until it has shown
+                them.
+              </span>
+            </>
+          )}
+        </div>
+      ) : null}
       <div className="field">
         <span>Characters it knows</span>
-        {ink === null ? (
-          <span className="note">{characters.length === 0 ? 'None yet.' : characters.join(' ')}</span>
-        ) : (
-          <CharacterChips characters={characters} ink={ink} pending={pending} large />
+        {known.length === 0 && extra.length > 0 ? null : <Known characters={known} pending={pending} ink={ink} />}
+        {extra.length === 0 ? null : (
+          <>
+            <span className="note">Not among the characters it needs, which is fine:</span>
+            <Known characters={extra} pending={pending} ink={ink} />
+          </>
         )}
         <span className="note">
           {learnedNote(saved.length, labeled.length, recorded.length, found.length)}

@@ -682,6 +682,7 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
         let reference = ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
+            expects: String::new(),
             check: serde_json::from_str(&format!(
                 r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},
                     "screenshot":0,"reference":null,"ink":{{"red":255,"green":0,"blue":0}},
