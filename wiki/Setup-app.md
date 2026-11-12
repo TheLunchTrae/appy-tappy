@@ -268,12 +268,7 @@ Each names its value by application ID and value ID:
       "id": "pause_music_near_the_end",
       "name": "Pause music near the end",
       "enabled": true,
-      "when": {
-        "app": "example",
-        "value": "progress",
-        "is": "atLeast",
-        "target": 90.0
-      },
+      "when": { "app": "example", "value": "progress", "is": "atLeast", "target": 90.0 },
       "actions": [
         { "kind": "media", "command": "pause", "app": "Player.exe" },
         { "kind": "volume", "percent": 20, "app": null },
@@ -406,18 +401,18 @@ only while `showDebug` is true, so with it off they cost nothing:
   scores: a number's read takes the closest glyph by `GlyphScore`, and a
   state's by the `Difference` that `StateScore::within` also checks. The state
   marked as read comes from a read of the same region, so the scores and the
-  reading always agree; the runtime never asks for them. The page asks every
-  500 ms, less often than the reading, as scoring a number checks each
-  character against every glyph.
+  state marked as read always agree; the runtime never asks for them. The live
+  reading above them is its own read, so it can come from a frame before or
+  after. The page asks every 500 ms, less often than the reading, as scoring a
+  number checks each character against every glyph.
 - `capture_outline` builds the saved application's capture as the runtime
   would at the screenshot's window size, in `debug/outline.rs`: the values
   that its enabled automations watch, of those `Runnable::new` says can run,
   as `automations::watched_values` gives them, each placed with
-  `SavedValue::at`, then
-  `Layout::new` for the rectangles copied. It answers every saved value, with
-  where it reads or why it does not, and the page draws them over the
-  screenshot. The page asks again when the window size or the saved file
-  changes.
+  `SavedValue::at`, then `Layout::new` for the rectangles copied. It answers
+  every saved value, with where it reads or why it does not, and the page
+  draws them over the screenshot. The page asks again when the window size or
+  the saved file changes.
 - `window_scores` compares each window that the picker lists with the match
   being edited, field by field, with the same `Pattern::matches` the match
   uses, and gives the `WindowFit` that `match_windows` gives the windows it
