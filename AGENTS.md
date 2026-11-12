@@ -30,7 +30,7 @@ Linux and is the required gate. `windows` runs `rust:lint`, `rust:doc`, and
 `rust:test:members` on Windows, and also `rust:bench` on pushes to main and
 manual runs. `footprint` runs `rust:footprint` on Windows.
 `.github/workflows/mutants.yml` runs the full mutation sweep nightly on main,
-split across eight `mutants` shards, and on demand for any branch.
+split across sixteen `mutants` shards, and on demand for any branch.
 `quality`, `windows`, and `footprint` restore a Rust build cache that only
 pushes to main save, once for each set of manifests, `Cargo.lock` and
 toolchain. The mutation sweep reads the `quality` job's cache and saves none.

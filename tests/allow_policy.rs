@@ -3066,8 +3066,13 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         );
     }
     for (lane, task) in [("full", full), ("diff", diff)] {
+        // The copied target/ holds only current workspace builds: the copy
+        // resets modification times, so Cargo cannot see a stale one.
         let steps = [
             format!("acquire_mutants_task_lock {lane}"),
+            "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then".to_owned(),
+            "run_mutants_task_child cargo test --no-run --workspace --all-features --locked"
+                .to_owned(),
             "rm -rf mutants.out".to_owned(),
             "run_mutants_task_child cargo mutants ".to_owned(),
             format!("sh scripts/verify-mutants.sh {lane} mutants.out"),
@@ -3081,7 +3086,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
             .collect();
         assert!(
             positions.is_sorted(),
-            "the {lane} mutation task must clear the previous report under its lock, then run and verify cargo-mutants"
+            "the {lane} mutation task must, under its lock, bring a copied target/ up to date, clear the previous report, then run and verify cargo-mutants"
         );
     }
     let no_report = diff.find("if [ ! -d mutants.out ]; then").expect(
