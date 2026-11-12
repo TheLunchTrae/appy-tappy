@@ -1862,9 +1862,8 @@ mod tests {
         assert!(written.contains("the trace records to "), "{written:?}");
         assert!(written.contains("the trace stopped\n"), "{written:?}");
         let folder = scratch.folder.join("traces");
-        std::mem::replace(&mut scratch.tracing, Switch::new(folder.clone()))
-            .finish()
-            .expect("the writer stops");
+        let tracing = std::mem::replace(&mut scratch.tracing, Switch::new(folder.clone()));
+        crate::trace::within(move || tracing.finish()).expect("the writer stops");
         let rows: Vec<String> = fs::read_dir(&folder)
             .expect("the trace's folder")
             .map(|file| fs::read_to_string(file.expect("a file").path()).expect("read"))
