@@ -145,11 +145,12 @@ It proposes no colors, and says why and what to do, when:
   an icon, draw the region over a strip of the bar above or below it. Over
   a busy background, draw the region closer to the bar.
 - Something lies over part of the bar, such as a large label or an icon at
-  one end, or one part of the bar has a shine in another shade. The colors
-  read the screenshot right, but would read other fills wrong, because the
-  pixels that count are not spread evenly along the bar, or are fewer in one
-  part than in the other. Draw the region over a strip of the bar that is
-  clear from end to end, or pick the colors by hand.
+  one end, or one part of the bar has a shine in another shade over half its
+  length or more. The colors read the screenshot right, but would read other
+  fills wrong, because the pixels that count are not spread evenly along the
+  bar, or are fewer in one part than in the other. Draw the region over a
+  strip of the bar that is clear from end to end, or pick the colors by
+  hand.
 - The colors found on one screenshot do not read another that shows one of
   them. The bar changes color as it fills or from one screenshot to the
   next, or a label, an icon, or something else such as a tooltip covers most

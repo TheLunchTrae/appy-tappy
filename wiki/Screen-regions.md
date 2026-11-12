@@ -233,14 +233,16 @@ what it is for.
   counted pixels before that column may differ from the column's place along
   the bar by no more than `AGREE`.
 - **Even parts.** What lowers the count in one part only and moves with the
-  fill, such as a shine in another shade along the whole filled part, leaves
-  the counted pixels spread evenly while the bar is nearly full or nearly
-  empty. So on every screenshot that shows both parts, the detector takes
-  what the reader counts in a column of each part, where the most are
-  counted, which is where nothing else lies over the bar. From those two
-  counts it works out what every fill would read, and none may differ from
-  the fill by more than `AGREE`. A shine across both parts lowers both
-  counts alike and passes.
+  fill, such as a shine in another shade along the filled part, leaves the
+  counted pixels spread evenly while the bar is nearly full or nearly empty.
+  So on every screenshot that shows both parts, the detector takes what the
+  reader counts in a column of each part: the median over the part's
+  columns, the lower of the middle two. A shine over half a part's columns
+  or more lowers it, whichever columns it leaves free, while a label, an
+  icon, or a rounded end over fewer columns does not, and is held to the
+  even spread. From those two counts the detector works out what every fill
+  would read, and none may differ from the fill by more than `AGREE`. A
+  shine across both parts lowers both counts alike and passes.
 
 A refusal carries a `NoBar` reason. The detector does not find a bar drawn as
 separate segments, a striped, textured, or fading fill, a bar with a trail

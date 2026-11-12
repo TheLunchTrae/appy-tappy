@@ -478,22 +478,26 @@ fn spread_evenly(counted: &[usize], extent: &Range<usize>) -> bool {
 /// with `f` pixels counted in a filled column and `e` in an empty one, a
 /// bar filled to a share `p` of its length reads
 /// `p * f / (p * f + (1 - p) * e)`, which may differ from `p` by [`AGREE`]
-/// at no fill. A column's count is taken where the
-/// most are counted in its part, which is where nothing else lies over it:
-/// a label, an icon, or a rounded end lowers the count in some columns
-/// only, and [`spread_evenly`] holds that against the colors.
+/// at no fill. A column's count is the median over its part's columns, the
+/// lower of the middle two, so a shine counts when it lies over half the
+/// part's columns or more, whatever columns it leaves free. A label, an
+/// icon, or a rounded end mostly lowers the count in fewer columns than
+/// that, and [`spread_evenly`] holds it against the colors.
 fn parts_count_alike(
     counted: &[usize],
     extent: &Range<usize>,
     filled: usize,
     empty: usize,
 ) -> bool {
-    let most = |columns: Range<usize>| {
-        let counts = counted.get(columns).unwrap_or_default();
-        counts.iter().copied().max().unwrap_or_default() as f64
+    let middle = |columns: Range<usize>| {
+        let mut counts = counted.get(columns).unwrap_or_default().to_vec();
+        counts.sort_unstable();
+        let lower_middle = counts.len().saturating_sub(1).checked_div(2);
+        let count = lower_middle.and_then(|index| counts.get(index));
+        count.copied().unwrap_or_default() as f64
     };
-    let in_filled = most(extent.start..extent.start.saturating_add(filled));
-    let in_empty = most(extent.end.saturating_sub(empty)..extent.end);
+    let in_filled = middle(extent.start..extent.start.saturating_add(filled));
+    let in_empty = middle(extent.end.saturating_sub(empty)..extent.end);
     (0..=extent.len()).all(|place| {
         let share = place as f64 / extent.len() as f64;
         let as_filled = share * in_filled;
@@ -1957,6 +1961,63 @@ mod tests {
         assert_eq!(detect_bar(&banded(160, 3, false), &[]), Ok(rough));
     }
 
+    /// A bar 200 by 20 with its first `filled` columns filled, where
+    /// `shines(x)` says whether column `x` has a band of another shade over
+    /// its middle six lanes.
+    fn shining_where(filled: u32, shines: impl Fn(u32) -> bool) -> Image {
+        let (shine, groove) = (
+            Rgb {
+                red: 120,
+                green: 240,
+                blue: 130,
+            },
+            Rgb {
+                red: 120,
+                green: 120,
+                blue: 135,
+            },
+        );
+        picture(200, 20, move |x, y| {
+            match (x < filled, (7..13).contains(&y) && shines(x)) {
+                (true, true) => shine,
+                (false, true) => groove,
+                (true, false) => GREEN,
+                (false, false) => GRAY,
+            }
+        })
+    }
+
+    #[test]
+    fn a_shine_that_leaves_some_columns_of_its_part_free_is_refused_all_the_same() {
+        let uneven = Err(NoBar::Uneven { image: 0 });
+        // Set in from both ends of the fill, as a glossy fill is drawn.
+        for inset in [1, 6] {
+            for filled in [40_u32, 180, 190] {
+                let inside = move |x: u32| x >= inset && x.saturating_add(inset) < filled;
+                assert_eq!(
+                    detect_bar(&shining_where(filled, inside), &[]),
+                    uneven,
+                    "{inset} columns in, {filled} filled"
+                );
+            }
+        }
+        // With one column left out.
+        assert_eq!(
+            detect_bar(&shining_where(180, |x| x < 180 && x != 20), &[]),
+            uneven
+        );
+        // On every other column of the fill.
+        assert_eq!(
+            detect_bar(&shining_where(180, |x| x < 180 && x.is_multiple_of(2)), &[]),
+            uneven
+        );
+        // On the empty part, set in from the fill's edge and the bar's end.
+        for filled in [20_u32, 180] {
+            let inside = move |x: u32| x > filled.saturating_add(3) && x < 196;
+            assert_eq!(detect_bar(&shining_where(filled, inside), &[]), uneven);
+        }
+    }
+
     #[test]
     fn a_shine_across_both_parts_counts_the_same_in_each() {
         let glossy = |filled: u32| {
@@ -1994,18 +2055,32 @@ mod tests {
         assert!(!alike(16, 20));
         assert!(alike(20, 17));
         assert!(!alike(20, 16));
-        // A column counts what the most of its part do: one column where
-        // nothing else lies over the bar is enough.
-        let mut counted = vec![16; 40];
-        counted.extend(iter::repeat_n(20, 60));
-        assert!(!parts_count_alike(&counted, &(0..100), 40, 60));
-        counted[39] = 20;
-        assert!(parts_count_alike(&counted, &(0..100), 40, 60));
-        let mut counted = vec![20; 40];
-        counted.extend(iter::repeat_n(16, 60));
-        assert!(!parts_count_alike(&counted, &(0..100), 40, 60));
-        counted[40] = 20;
-        assert!(parts_count_alike(&counted, &(0..100), 40, 60));
+        // A column counts what the middle one of its part does, the lower
+        // of the middle two: a part half of whose columns count fewer
+        // counts fewer, and one column less than half does not.
+        let parts = |lowered: usize, in_filled: bool| {
+            // The lowered columns lie next to the edge between the parts.
+            let mut counted = vec![20; 100];
+            let columns = if in_filled {
+                40_usize.saturating_sub(lowered)..40
+            } else {
+                40..40_usize.saturating_add(lowered)
+            };
+            counted[columns].fill(16);
+            parts_count_alike(&counted, &(0..100), 40, 60)
+        };
+        assert!(!parts(20, true));
+        assert!(parts(19, true));
+        assert!(!parts(30, false));
+        assert!(parts(29, false));
+        // An odd number of columns has one middle.
+        let odd = |lowered: usize| {
+            let mut counted = vec![20; 100];
+            counted[..lowered].fill(16);
+            parts_count_alike(&counted, &(0..100), 41, 59)
+        };
+        assert!(!odd(21));
+        assert!(odd(20));
     }
 
     #[test]
