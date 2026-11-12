@@ -2995,7 +2995,7 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
     ] {
         assert!(
             gate.contains(contract),
-            "the mutation gate must default to the full sweep and reject unknown lanes; missing {contract}"
+            "the mutation gate must default to the full lane and reject unknown lanes; missing {contract}"
         );
     }
 
@@ -3070,21 +3070,33 @@ fn mutation_tasks_preserve_workspace_and_base_resolution_contracts() {
         full_positions.is_sorted(),
         "the full mutation task must, under its lock, clear the previous report, then run and verify cargo-mutants"
     );
+    let Some(full_run) = full
+        .lines()
+        .find(|line| line.starts_with("run_mutants_task_child cargo mutants "))
+    else {
+        panic!("the full mutation task should run cargo-mutants");
+    };
+    for flag in ["--workspace", "--all-features", "--cargo-arg=--locked"] {
+        assert!(
+            full_run.split_whitespace().any(|word| word == flag),
+            "the full mutation task's cargo-mutants run must keep {flag}"
+        );
+    }
     // The copied target/ holds only current workspace builds: the copy
     // resets modification times, so Cargo cannot tell a stale build from
     // a current one.
     let steps = [
-        "acquire_mutants_task_lock diff".to_owned(),
-        "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then".to_owned(),
-        "run_mutants_task_child cargo test --no-run --workspace --all-features --locked".to_owned(),
-        "rm -rf mutants.out".to_owned(),
-        "run_mutants_task_child cargo mutants ".to_owned(),
-        "sh scripts/verify-mutants.sh diff mutants.out".to_owned(),
+        "acquire_mutants_task_lock diff",
+        "if [ \"${MUTANTS_COPY_TARGET:-false}\" = true ]; then",
+        "run_mutants_task_child cargo test --no-run --workspace --all-features --locked",
+        "rm -rf mutants.out",
+        "run_mutants_task_child cargo mutants ",
+        "sh scripts/verify-mutants.sh diff mutants.out",
     ];
     let positions: Vec<usize> = steps
         .iter()
         .map(|step| {
-            diff.find(step.as_str())
+            diff.find(step)
                 .unwrap_or_else(|| panic!("the diff mutation task is missing {step}"))
         })
         .collect();

@@ -228,9 +228,9 @@ source changes; add `rust:doc` for public API changes.
 `rust:standards` formats code. Refresh `Cargo.lock` through `rust:lock` after
 dependency changes and commit it.
 
-`rust:mutants` mutates the whole workspace. `rust:mutants:diff` mutates only changed
-code; its base defaults to `origin/main`, then local `main`, and can be set with
-`MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
+`rust:mutants` mutates the whole workspace. `rust:mutants:diff` mutates only
+changed code; its base defaults to `origin/main`, then local `main`, and can be
+set with `MUTANTS_BASE_REF`. Include new files in the Git diff before running it.
 `rust:standards:check` runs the lane that `MUTANTS_LANE` names, `full` by
 default; [mutation testing](wiki/Rust-standards.md#mutation-testing)
 says which lane CI runs. Before handoff, run `mise run rust:standards:check`;
