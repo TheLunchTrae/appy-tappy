@@ -6,7 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, value_id,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, new_value_id,
+    value_id,
 };
 use appytappy_sources::screen::saved;
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
@@ -126,13 +127,14 @@ impl<H: Host> Owner<H> {
             .with_session(|session| check_spec::drawn_size(&spec.check, session, spec.screenshot))
             .map_err(|error| error.to_string())?;
         self.update_app(&spec.app, Changed::Values, |owner, found| {
-            let id = value_id(name);
-            if found.file.values.iter().any(|value| value.id == id) {
-                return Err(format!(
-                    "{} already has a value named like \"{name}\". Pick another name.",
-                    found.file.name
-                ));
-            }
+            named_apart(&found.file, None, name)?;
+            let taken: Vec<&str> = found
+                .file
+                .values
+                .iter()
+                .map(|value| value.id.as_str())
+                .collect();
+            let id = new_value_id(name, &taken);
             let saved = owner
                 .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
                 .map_err(|error| error.to_string())?;
@@ -144,6 +146,7 @@ impl<H: Host> Owner<H> {
                 region: saved.region,
                 check: saved.check,
                 pin: Some(spec.pin),
+                reading_area: spec.reading_area,
                 fixes: Vec::new(),
             };
             read_back(&screen, found, &saved.pictures)?;
@@ -284,6 +287,24 @@ fn checked_now(build: BuildDef) -> CheckedDef {
     CheckedDef { build, at }
 }
 
+/// Fails when a value of `file` other than `own` has a name like `name`.
+/// Names that make the same ID, such as "Progress" and "progress ", are one
+/// name, whatever ID the value named so has: a renamed value keeps its ID.
+pub(super) fn named_apart(file: &AppFile, own: Option<&str>, name: &str) -> Result<(), String> {
+    let same = value_id(name);
+    if file
+        .values
+        .iter()
+        .any(|value| Some(value.id.as_str()) != own && value_id(&value.name) == same)
+    {
+        return Err(format!(
+            "{} already has a value named like \"{name}\". Pick another name.",
+            file.name
+        ));
+    }
+    Ok(())
+}
+
 /// Reads `screen` back as the runtime will, with the references and size
 /// changes of `app`'s file, from `pictures`, about to be saved, and those
 /// already in its folder, so a value that saves is one the runtime can read.
@@ -291,7 +312,7 @@ pub(super) fn read_back(
     screen: &ScreenDef,
     app: &SavedApp,
     pictures: &Pictures,
-) -> Result<(), String> {
+) -> Result<saved::SavedValue, String> {
     saved::build(
         screen,
         &app.file.references,
@@ -303,7 +324,6 @@ pub(super) fn read_back(
                 .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
         },
     )
-    .map(drop)
     .map_err(|error| format!("AppyTappy could not read this value as saved: {error}."))
 }
 
@@ -361,16 +381,17 @@ mod tests {
                 tolerance: 0,
             },
             pin: None,
+            reading_area: false,
             fixes: Vec::new(),
         };
         std::fs::write(app.folder.join("old.png"), &png).expect("writes");
         let new = vec![("new.png".to_owned(), png)];
         assert_eq!(
-            read_back(&screen(["new.png", "old.png"]), &app, &new),
+            read_back(&screen(["new.png", "old.png"]), &app, &new).map(drop),
             Ok(())
         );
         assert_eq!(
-            read_back(&screen(["new.png", "gone.png"]), &app, &new),
+            read_back(&screen(["new.png", "gone.png"]), &app, &new).map(drop),
             Err(
                 "AppyTappy could not read this value as saved: its picture gone.png cannot be \
                  read."
@@ -474,6 +495,17 @@ mod tests {
             ),
             "a value is saved at one window size"
         );
+        // Only a check that reads anywhere in its region has a reading area.
+        let mut area = spec("example", "Icon visible", STATE);
+        area.reading_area = true;
+        assert_eq!(
+            harness.ask(save(area)),
+            Err(
+                "value \"icon_visible\": its region is a reading area, which only a number or \
+                 bar fill check can read"
+                    .to_owned()
+            )
+        );
         let saved = harness
             .ask(save(spec("example", "Icon visible", STATE)))
             .expect("saves a new app");
@@ -484,9 +516,9 @@ mod tests {
                 value: "icon_visible".to_owned()
             }
         );
-        harness
-            .ask(save(spec("example", "Progress bar", BAR)))
-            .expect("adds to the app");
+        let mut bar = spec("example", "Progress bar", BAR);
+        bar.reading_area = true;
+        harness.ask(save(bar)).expect("adds to the app");
         assert_eq!(
             harness.ask(save(spec("example", "Progress BAR", BAR))),
             Err(
@@ -508,6 +540,12 @@ mod tests {
         assert_eq!(file.name, "Example App");
         let ids: Vec<&str> = file.values.iter().map(|value| value.id.as_str()).collect();
         assert_eq!(ids, ["icon_visible", "progress_bar"]);
+        let areas: Vec<bool> = file
+            .values
+            .iter()
+            .map(|value| value.screen.reading_area)
+            .collect();
+        assert_eq!(areas, [false, true], "a value keeps what its save said");
         assert_eq!(
             file.values[0].screen.window_size,
             SizeDef {

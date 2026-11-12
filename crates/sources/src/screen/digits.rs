@@ -912,6 +912,59 @@ mod tests {
         );
     }
 
+    /// `rows` with `left` and `right` blank columns beside them and `above`
+    /// and `below` blank rows.
+    fn padded(rows: &[&str], left: usize, right: usize, above: usize, below: usize) -> Vec<String> {
+        let wide: Vec<String> = rows
+            .iter()
+            .map(|row| [".".repeat(left).as_str(), row, ".".repeat(right).as_str()].concat())
+            .collect();
+        let blank = ".".repeat(wide[0].len());
+        let mut all = vec![blank.clone(); above];
+        all.extend(wide);
+        all.extend(vec![blank; below]);
+        all
+    }
+
+    #[test]
+    fn a_number_reads_wherever_it_sits_in_a_larger_region() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&TWELVE), "12").unwrap();
+        for (left, right, above, below) in [(0, 9, 0, 6), (4, 5, 3, 3), (9, 0, 6, 0)] {
+            let region = padded(&TWELVE, left, right, above, below);
+            let rows: Vec<&str> = region.iter().map(String::as_str).collect();
+            assert_eq!(
+                reader.read(&draw(&rows), false),
+                Ok(Number::new(12.0).unwrap()),
+                "{left} columns to its left and {above} rows above it"
+            );
+        }
+    }
+
+    #[test]
+    fn ink_beside_a_number_in_a_larger_region_is_read_with_it() {
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&TWELVE), "12").unwrap();
+        // A "1" three columns to the left of "12", on its rows.
+        let digit: Vec<String> = TWELVE.iter().map(|row| format!("#...{row}")).collect();
+        let rows: Vec<&str> = digit.iter().map(String::as_str).collect();
+        assert_eq!(
+            reader.read(&draw(&rows), false),
+            Ok(Number::new(112.0).unwrap())
+        );
+        // A shape the reader never learned there fails the read.
+        let shape: Vec<String> = ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"]
+            .iter()
+            .zip(TWELVE)
+            .map(|(shape, row)| format!("{shape}...{row}"))
+            .collect();
+        let rows: Vec<&str> = shape.iter().map(String::as_str).collect();
+        assert_eq!(
+            reader.read(&draw(&rows), false),
+            Err(ReadError::UnknownCharacter { position: 0 })
+        );
+    }
+
     #[test]
     fn shapes_tell_characters_apart_but_not_their_size() {
         let reader = DigitReader::new(WHITE, 0);

@@ -198,6 +198,38 @@ pub enum TargetDef {
     State(String),
 }
 
+impl TargetDef {
+    /// Checks that a condition can compare `value` with this target: a
+    /// number with a number, yes or no with yes or no, and a state with one
+    /// of the value's states or `none`.
+    ///
+    /// # Errors
+    ///
+    /// Returns why it cannot, as a sentence the setup app can show.
+    pub fn suits(&self, value: &ValueDef) -> Result<(), String> {
+        let check = &value.screen.check;
+        match (check.reads(), self) {
+            (ValueKind::Number, Self::Number(_)) | (ValueKind::Flag, Self::Flag(_)) => Ok(()),
+            (ValueKind::State, Self::State(name)) if check.reads_state(name) => Ok(()),
+            (ValueKind::State, Self::State(name)) => {
+                Err(format!("{} has no state named {name:?}", value.name))
+            },
+            (ValueKind::Number, Self::Flag(_) | Self::State(_)) => Err(format!(
+                "{} reads a number, so compare it with a number",
+                value.name
+            )),
+            (ValueKind::Flag, Self::Number(_) | Self::State(_)) => Err(format!(
+                "{} reads yes or no, so compare it with yes or no",
+                value.name
+            )),
+            (ValueKind::State, Self::Number(_) | Self::Flag(_)) => Err(format!(
+                "{} reads a state, so compare it with one of its states",
+                value.name
+            )),
+        }
+    }
+}
+
 /// [`MediaCommand`] as the file spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -547,32 +579,7 @@ impl AutomationDef {
             }
             targets.push((target_id, target));
         }
-        let check = &value.screen.check;
-        match (check.reads(), &self.when.target) {
-            (ValueKind::Number, TargetDef::Number(_)) | (ValueKind::Flag, TargetDef::Flag(_)) => {},
-            (ValueKind::State, TargetDef::State(name)) if check.reads_state(name) => {},
-            (ValueKind::State, TargetDef::State(name)) => {
-                return Err(format!("{} has no state named {name:?}", value.name));
-            },
-            (ValueKind::Number, TargetDef::Flag(_) | TargetDef::State(_)) => {
-                return Err(format!(
-                    "{} reads a number, so compare it with a number",
-                    value.name
-                ));
-            },
-            (ValueKind::Flag, TargetDef::Number(_) | TargetDef::State(_)) => {
-                return Err(format!(
-                    "{} reads yes or no, so compare it with yes or no",
-                    value.name
-                ));
-            },
-            (ValueKind::State, TargetDef::Number(_) | TargetDef::Flag(_)) => {
-                return Err(format!(
-                    "{} reads a state, so compare it with one of its states",
-                    value.name
-                ));
-            },
-        }
+        self.when.target.suits(value)?;
         Ok(Compiled {
             rule,
             signal,
@@ -763,6 +770,7 @@ mod tests {
                 },
                 check,
                 pin: None,
+                reading_area: false,
                 fixes: Vec::new(),
             },
         }

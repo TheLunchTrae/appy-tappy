@@ -41,7 +41,8 @@ export interface MatchPreview {
 
 /**
  * Asks which pixels `target`'s colors in `draft` take on the screenshot shown, `selected`, while the user has the
- * preview on. It is the capture screen's own state: it changes neither the draft nor the screenshot. Each target has
+ * preview on. `unplaced` is why the region does not lie on that screenshot, when it does not, which the preview then
+ * says instead of asking. It is the capture screen's own state: it changes neither the draft nor the screenshot. Each target has
  * its own switch, which stays as the user left it for as long as the capture screen is open.
  */
 export function useMatchPreview(
@@ -49,6 +50,7 @@ export function useMatchPreview(
   draft: PreviewDraft,
   selected: number | null,
   size: Size | null,
+  unplaced: string | null,
 ): MatchPreview {
   const [wanted, setWanted] = useState<ReadonlySet<PreviewTarget>>(new Set());
   const [preview, setPreview] = useState(NO_PREVIEW);
@@ -64,16 +66,18 @@ export function useMatchPreview(
   const width = size?.width ?? null;
   const height = size?.height ?? null;
   const planned = useMemo(
-    () =>
-      on
-        ? plan(
-            target,
-            { ink, tolerance, filled, empty, color, region },
-            selected,
-            width === null || height === null ? null : { width, height },
-          )
-        : null,
-    [on, target, ink, tolerance, filled, empty, color, region, selected, width, height],
+    (): Plan | null =>
+      !on
+        ? null
+        : unplaced !== null
+          ? { kind: 'blocked', why: unplaced }
+          : plan(
+              target,
+              { ink, tolerance, filled, empty, color, region },
+              selected,
+              width === null || height === null ? null : { width, height },
+            ),
+    [on, target, unplaced, ink, tolerance, filled, empty, color, region, selected, width, height],
   );
   const request = planned?.kind === 'ask' ? planned.request : null;
   useEffect(() => {
