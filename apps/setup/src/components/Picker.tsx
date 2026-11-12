@@ -1,18 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import type { AppSummary, WindowChoice } from '../lib/bindings.ts';
 import { errorText, pickWindow } from '../lib/api.ts';
-import {
-  captureWindow,
-  isRunning,
-  offersMatchEdit,
-  pickerApps,
-  pickerStep,
-  startingApp,
-  stepStatus,
-} from '../lib/picker.ts';
+import { captureWindow, isRunning, known, offersMatchEdit, pickerStep, stepStatus } from '../lib/picker.ts';
 import { background } from '../lib/repeat.ts';
-import { useOpenWindows } from '../lib/useOpenWindows.ts';
+import { useAppWindows } from '../lib/useAppWindows.ts';
 
 /** The window to capture and the application its values belong to. */
 export interface Choice {
@@ -27,26 +19,24 @@ export interface Choice {
 type Start = 'idle' | 'starting' | { readonly error: string };
 
 interface Props {
-  readonly apps: readonly AppSummary[];
   /** The page's heading, such as New value. */
   readonly heading: string;
   /** The saved application the flow belongs to already, such as a reference's own, or null to let the user choose. */
   readonly lockedApp: string | null;
-  /** The application chosen at first: the last choice's, or one just added for this flow. */
+  /** The application chosen at first: the last choice's, or one handed over to this flow. */
   readonly startApp: string | null;
   /** The window of the last choice, picked again when several fit. */
   readonly startWindow: number | null;
   readonly onCancel: () => void;
   readonly onPick: (choice: Choice) => void;
-  /** Leaves to add an application, and comes back with it chosen. */
-  readonly onAddApplication: () => void;
-  /** Leaves to change how the application with this ID is found, and comes back to it. */
-  readonly onEditApplication: (app: string) => void;
+  /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
+  readonly onAddApplication: (chosen: string | null) => void;
+  /** Leaves to change how `app` is found, and comes back to it. */
+  readonly onEditApplication: (app: AppSummary) => void;
 }
 
 /** Chooses the application a value or reference belongs to, then the window that application reads. */
 export function Picker({
-  apps,
   heading,
   lockedApp,
   startApp,
@@ -56,13 +46,13 @@ export function Picker({
   onAddApplication,
   onEditApplication,
 }: Props) {
-  const saved = useMemo(() => pickerApps(apps), [apps]);
-  const [chosen, setChosen] = useState(() => startingApp(saved, lockedApp, startApp));
+  const [chosen, setChosen] = useState(lockedApp ?? startApp);
   const [picked, setPicked] = useState(startWindow);
   const [start, setStart] = useState<Start>('idle');
-  const { look, antiCheat, refresh } = useOpenWindows(saved);
+  const { look, refresh } = useAppWindows();
 
-  const step = pickerStep({ saved, locked: lockedApp !== null, chosen, look, picked });
+  const found = known(look);
+  const step = pickerStep({ locked: lockedApp !== null, chosen, look, picked });
   const status = stepStatus(step);
   const target = captureWindow(step);
   const busy = start === 'starting';
@@ -106,27 +96,27 @@ export function Picker({
               refresh();
             }}
           >
-            Refresh windows
+            Refresh
           </button>
         </div>
       </div>
-      {antiCheat.length > 0 ? (
+      {found !== null && found.antiCheat.length > 0 ? (
         <p className="warn">
-          Anti-cheat running now: {antiCheat.join(', ')}. Reading the screen is fine, but set the application&apos;s
-          anti-cheat before giving it key press actions.
+          Anti-cheat running now: {found.antiCheat.join(', ')}. Reading the screen is fine, but set the
+          application&apos;s anti-cheat before giving it key press actions.
         </p>
       ) : null}
       <div className={lockedApp === null ? 'picker' : 'picker alone'}>
         {lockedApp === null ? (
           <section className="windows" aria-label="Applications">
             <ul className="window-list">
-              {saved.map((app) => {
-                const running = isRunning(look, app.id);
+              {(found?.apps ?? []).map((app) => {
+                const running = isRunning(look, app);
                 return (
                   <li key={app.id}>
                     <button
                       type="button"
-                      aria-pressed={chosen === app.id}
+                      aria-pressed={'app' in step && step.app.id === app.id}
                       disabled={busy}
                       onClick={() => {
                         choose(app.id);
@@ -138,13 +128,20 @@ export function Picker({
                       ) : (
                         <small className={running ? 'ok' : undefined}>{running ? 'Running' : 'Not running'}</small>
                       )}
-                      <small>{app.window.executable}</small>
+                      <small>{app.executable}</small>
                     </button>
                   </li>
                 );
               })}
               <li>
-                <button type="button" className="add" disabled={busy} onClick={onAddApplication}>
+                <button
+                  type="button"
+                  className="add"
+                  disabled={busy}
+                  onClick={() => {
+                    onAddApplication('app' in step ? step.app.id : null);
+                  }}
+                >
                   <span className="title">Add application</span>
                   <small />
                   <small>For a program that is not in this list yet. You come back here with it chosen.</small>
@@ -160,7 +157,7 @@ export function Picker({
           </p>
           {step.kind === 'one' ? (
             <p className="note">
-              {step.window.width} × {step.window.height} · {step.window.executable}
+              {step.window.width} × {step.window.height} · {step.window.class} · {step.window.executable}
             </p>
           ) : null}
           {step.kind === 'several' ? (
@@ -180,7 +177,10 @@ export function Picker({
                     <small>
                       {each.width} × {each.height}
                     </small>
-                    <small>{each.executable}</small>
+                    <small>
+                      {each.class} · {each.executable}
+                    </small>
+                    {step.reads === each.handle ? <small className="ok">Would be read now</small> : <small />}
                   </button>
                 </li>
               ))}
@@ -192,7 +192,7 @@ export function Picker({
               className="btn"
               disabled={busy}
               onClick={() => {
-                onEditApplication(step.app.id);
+                onEditApplication(step.app.summary);
               }}
             >
               Change how it&apos;s found

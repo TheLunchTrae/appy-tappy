@@ -14,24 +14,22 @@ export interface SavedRef {
 }
 
 interface Props {
-  readonly apps: readonly AppSummary[];
   /** The reference to change, or null to make one. */
   readonly existing: SavedRef | null;
   /** The application a new reference starts with, such as one just added for it, or null to let the user choose. */
   readonly app: string | null;
   readonly onCancel: () => void;
   readonly onSaved: () => void;
-  /** Leaves to add an application, and comes back with it chosen. */
-  readonly onAddApplication: () => void;
-  /** Leaves to change how the application with this ID is found, and comes back to it. */
-  readonly onEditApplication: (app: string) => void;
+  /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
+  readonly onAddApplication: (chosen: string | null) => void;
+  /** Leaves to change how `app` is found, and comes back to it. */
+  readonly onEditApplication: (app: AppSummary) => void;
   /** Hears what leaving the flow would lose. */
   readonly onHeld: (held: Held) => void;
 }
 
 /** Making or changing a reference: choose its application, then capture its window and teach it the characters. */
 export function ReferenceFlow({
-  apps,
   existing,
   app,
   onCancel,
@@ -53,7 +51,6 @@ export function ReferenceFlow({
   if (picking || choice === null) {
     return (
       <Picker
-        apps={apps}
         heading={existing === null ? 'New reference' : `Edit ${existing.reference.name}`}
         lockedApp={existing?.app ?? null}
         startApp={choice?.app ?? app}

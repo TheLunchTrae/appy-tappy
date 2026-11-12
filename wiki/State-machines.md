@@ -663,23 +663,16 @@ stateDiagram-v2
 The value and reference flows open the application flow for themselves:
 **Add application** for a new application, and **Change how it's found** for
 the chosen one. That application flow keeps the flow that opened it as its
-`opener`. When it saves, `App.tsx` reads the saved files again and then shows
-the opener with the saved application's ID as the one it starts with
-(`resume` in `apps/setup/src/lib/flow.ts`); the application editor counts as
-saving until then. **Cancel** shows the opener as it was. A tab still leaves
-both flows for its page. The opener holds no unsaved work while the
-application flow covers it, because it opens that flow only from its
-[picker](#picker), before a capture starts, so the question a tab asks names
-only the application's changes.
-
-The unsaved work of a flow, such as its screenshots and recording, lives in the
-flow's components and in the owner thread. Each flow reports what leaving it
-would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
-ask before they drop unsaved work. While a save runs, both are disabled. A save closes
-its flow only while that flow is still open (`saved` in `App.tsx`), so a save
-that finishes after the user moved on leaves the next flow alone. Leaving the
-value or reference flow unmounts it and stops its capture, which clears its screenshots and
-recording.
+`opener`, with the application its picker showed chosen (`openerWith` in
+`apps/setup/src/lib/flow.ts`). `afterApplication` there decides what follows
+the application flow. A save shows the opener with the saved application's ID
+as the one it starts with, and **Cancel** shows it with the application its
+picker had chosen. Opened from a page, a save shows the Applications page and
+**Cancel** the page under the flow. A save that finishes after the user left
+the flow changes nothing. A tab still leaves both flows for its page. The
+opener holds no unsaved work while the application flow covers it, because it
+opens that flow only from its [picker](#picker), before a capture starts, so
+the question a tab asks names only the application's changes.
 
 ### Picker
 
@@ -687,27 +680,34 @@ The first step of the value and reference flows
 (`apps/setup/src/components/Picker.tsx`) chooses the application and finds
 the window to capture. Its state is the chosen application, the window picked
 among several, the capture it asked for (`Start`), and the newest look at the
-open windows (`Look`, from `apps/setup/src/lib/useOpenWindows.ts`).
-`pickerStep` in `apps/setup/src/lib/picker.ts` names where those stand as one
-`PickerStep`.
+saved applications and the open windows (`Look`, from
+`apps/setup/src/lib/useAppWindows.ts`). `pickerStep` in
+`apps/setup/src/lib/picker.ts` names where those stand as one `PickerStep`.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NoApplications: no application is saved
-    [*] --> Choosing: several applications are saved
-    [*] --> Resolving: the flow has its application, one was handed over, or only one is saved
-    [*] --> Missing: the flow's own application is not among the saved ones
+    [*] --> Looking: the picker opens and the first look starts
+    Looking --> NoApplications: the look finds no saved application
+    Looking --> Choosing: it finds several, and none is chosen
+    Looking --> Missing: the chosen application is not among them
+    Looking --> One: the chosen application, or the only one, has one window that fits best
+    Looking --> Several: it has several that fit equally well
+    Looking --> None: it has no window to capture
+    Looking --> LookFailed: the look fails
+    LookFailed --> Looking: Refresh, before any look answered
+    LookFailed --> Resolving: Refresh, after one answered
     NoApplications --> [*]: Add application
     Choosing --> [*]: Add application
     Choosing --> Resolving: an application is chosen
+    Missing --> Resolving: Refresh, or another application is chosen
     Resolving --> One: the look finds one window that fits best
     Resolving --> Several: the look finds several that fit equally well
     Resolving --> None: the look finds no window to capture
     Resolving --> LookFailed: the look fails
-    One --> Resolving: Refresh windows, or another application is chosen
-    Several --> Resolving: Refresh windows, or another application is chosen
-    None --> Resolving: Refresh windows, or another application is chosen
-    LookFailed --> Resolving: Refresh windows, or another application is chosen
+    Resolving --> Missing: the look no longer finds the application
+    One --> Resolving: Refresh, or another application is chosen
+    Several --> Resolving: Refresh, or another application is chosen
+    None --> Resolving: Refresh, or another application is chosen
     Several --> Several: a window is picked
     Several --> [*]: Change how it's found
     None --> [*]: Change how it's found
@@ -718,24 +718,38 @@ stateDiagram-v2
     Starting --> Several: the capture is refused, the picker shows why
 ```
 
+- A look is one `list_app_windows` command, so its applications, windows,
+  and fits come from one listing of the desktop. One starts when the picker
+  opens and on **Refresh**. An answer is dropped once another look replaced
+  it. What the last look that answered found stays on show while the next
+  one is made.
+- **Looking** is before any look answered: not even the applications are
+  known.
+- **LookFailed** is a look that could not read the saved applications or list
+  the windows. It shows the reason, whatever application is chosen, and
+  **Refresh** looks again.
 - **NoApplications** and **Choosing** show the list of saved applications
-  with **Add application** in it. A flow that has its application, **Fix at
-  this size** or **Edit** on a reference, shows no list and never reaches
-  them.
-- **Resolving** waits for a look that knows the chosen application. A look
-  starts when the picker opens, when a saved application's match changes,
-  and on **Refresh windows**. Each look's answer is dropped once another
-  look replaced it.
+  with **Add application** in it. With one saved application there is no
+  choice, and the picker resolves that one. A flow that has its application,
+  **Fix at this size** or **Edit** on a reference, shows no list and never
+  reaches them.
+- **Missing** is a chosen application that the look does not find: the flow's
+  own, one handed over by the application flow, or the last choice. The
+  picker says so instead of asking for a choice as if none had been made. A
+  flow with its own application leaves it by **Cancel**, or by a **Refresh**
+  that finds the application again; otherwise
+  choosing another application or **Add application** leaves it.
+- **Resolving** resolves the chosen application's window: at once from a
+  look that has answered, and otherwise when the look under way answers.
+  While a look is under way after one answered, a picker with no application
+  chosen stays in **Choosing** or **NoApplications**.
 - **One** has the window to capture. **Several** has one once the user picks
   it among the windows that fit equally well; a look that no longer lists the
-  picked window leaves none picked.
+  picked window leaves none picked. Both say when the windows are only the
+  application's fallback.
 - **None** is no window to capture: nothing fits, or a session reads a window
   the list of open windows leaves out, such as one with no title. Only
-  **Refresh windows**, another application, or **Change how it's found**
-  leaves it.
-- **LookFailed** shows the error; **Refresh windows** looks again.
-- **Missing** is a flow whose own application has no readable file. Only
-  **Cancel** leaves it.
+  **Refresh**, another application, or **Change how it's found** leaves it.
 - **Starting** disables every control but **Cancel** until `pick_window`
   answers. A refusal, such as a window that closed since the look, shows in
   the step it came from, and the next choice or look clears it.

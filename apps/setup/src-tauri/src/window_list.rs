@@ -115,8 +115,8 @@ pub(crate) struct WindowFit {
     /// Whether it is the window a new session would read now.
     pub(crate) best: bool,
     /// Whether it fits as well as the window a new session would read. A
-    /// session reads one of these, whichever shows in front, so a value can
-    /// be drawn on any of them.
+    /// session reads one of these, so a value can be drawn on any of them.
+    /// Only offered windows count: one the list leaves out ties with none.
     pub(crate) tied: bool,
 }
 

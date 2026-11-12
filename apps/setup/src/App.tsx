@@ -15,7 +15,7 @@ import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
 import { type Fixing, NewValue } from './pages/NewValue.tsx';
-import { type TakesApplication, resume } from './lib/flow.ts';
+import { type Ended, type TakesApplication, afterApplication, openerWith } from './lib/flow.ts';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
@@ -50,6 +50,9 @@ type Flow =
 
 /** A flow that opens the application flow for the application it needs. */
 type Opener = Extract<Flow, TakesApplication>;
+
+/** The flow that adds or changes an application. */
+type ApplicationFlow = Extract<Flow, { readonly kind: 'application' }>;
 
 /** What leaving each kind of flow before it is saved loses. */
 const LOST: Readonly<Record<Flow['kind'], string>> = {
@@ -183,36 +186,44 @@ export function App() {
         break;
     }
   };
-  // A save closes its own flow, for the flow `next` that opened it or else the page `target`, and nothing once
-  // the user has left it for another.
-  const saved = (opened: Flow, target: Page, next: Flow | null = null): void => {
-    if (openFlow.current !== opened) {
-      return;
-    }
-    if (next === null) {
+  // A save closes its own flow, and nothing once the user has left it for another.
+  const saved = (opened: Flow, target: Page): void => {
+    if (openFlow.current === opened) {
       goTo(target);
-    } else {
-      open(next);
     }
   };
-  // What lets the value or reference flow `opener` open the application flow and show again when that ends.
+  // What lets the value or reference flow `opener` open the application flow, and show again when that ends as
+  // its picker stood.
   const applicationFor = (opener: Opener) => ({
-    onAddApplication: (): void => {
-      open({ kind: 'application', existing: null, opener });
+    onAddApplication: (chosen: string | null): void => {
+      open({ kind: 'application', existing: null, opener: openerWith(opener, chosen) });
     },
-    onEditApplication: (id: string): void => {
-      const existing = apps?.find((app) => app.id === id);
-      if (existing !== undefined) {
-        open({ kind: 'application', existing, opener: { ...opener, app: id } });
-      }
+    onEditApplication: (existing: AppSummary): void => {
+      open({ kind: 'application', existing, opener: openerWith(opener, existing.id) });
     },
   });
+  // Shows what follows the application flow `opened` once it saved or was canceled.
+  const endApplication = (opened: ApplicationFlow, ended: Ended): void => {
+    const after = afterApplication(opened.opener, ended, openFlow.current === opened);
+    switch (after.kind) {
+      case 'nothing':
+        break;
+      case 'flow':
+        open(after.flow);
+        break;
+      case 'applications':
+        goTo('applications');
+        break;
+      case 'page':
+        open(null);
+        break;
+    }
+  };
 
   const content = (() => {
     if (flow?.kind === 'value') {
       return (
         <NewValue
-          apps={apps ?? []}
           fixing={flow.fixing}
           app={flow.app}
           onCancel={() => {
@@ -231,12 +242,11 @@ export function App() {
         <ApplicationEditor
           existing={flow.existing}
           onCancel={() => {
-            open(resume(flow.opener, null));
+            endApplication(flow, { kind: 'canceled' });
           }}
-          onSaved={async (id) => {
-            // The lists are read first, so the flow that opened this one finds the application in them.
-            await refresh();
-            saved(flow, 'applications', resume(flow.opener, id));
+          onSaved={(id) => {
+            endApplication(flow, { kind: 'saved', id });
+            background(refresh());
           }}
           onHeld={setHeld}
         />
@@ -245,7 +255,6 @@ export function App() {
     if (flow?.kind === 'reference') {
       return (
         <ReferenceFlow
-          apps={apps ?? []}
           existing={flow.existing}
           app={flow.app}
           onCancel={() => {
