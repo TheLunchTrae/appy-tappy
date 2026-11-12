@@ -113,8 +113,8 @@ interface Props {
   readonly trail: readonly string[];
   readonly onCancel: () => void;
   readonly onChangeWindow: () => void;
-  /** Hears what the flow saved: a value, or a reference. The capture counts as saving until this settles. */
-  readonly onSaved: (made: Made) => Promise<void>;
+  /** Hears what the flow saved: where a value is, or the application of a reference. */
+  readonly onSaved: (made: Made) => void;
   /** Hears what leaving the capture would lose. */
   readonly onHeld: (held: Held) => void;
 }
@@ -267,17 +267,19 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
     }
     setSaving(true);
     try {
-      await onSaved(
-        fixing === null
-          ? await saveValue({
-              app: choice.app,
-              valueName: valueName.trim(),
-              check: built.spec,
-              screenshot: draft.drawnOn,
-              pin,
-            })
-          : await saveFix({ app: choice.app, value: fixing.id, check: built.spec, screenshot: draft.drawnOn }),
-      );
+      let made: Made;
+      if (fixing === null) {
+        made = await saveValue({
+          app: choice.app,
+          valueName: valueName.trim(),
+          check: built.spec,
+          screenshot: draft.drawnOn,
+          pin,
+        });
+      } else {
+        made = await saveFix({ app: choice.app, value: fixing.id, check: built.spec, screenshot: draft.drawnOn });
+      }
+      onSaved(made);
     } catch (error: unknown) {
       setSaveError(errorText(error));
     } finally {
@@ -378,7 +380,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
       });
       setSaveError(null);
       if (mode.kind === 'reference') {
-        await onSaved({ app: saved.app, value: null });
+        onSaved({ app: saved.app, value: null });
         return;
       }
       await appFile.reload();

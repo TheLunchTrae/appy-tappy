@@ -25,7 +25,7 @@ export interface AutomationFlow {
   readonly draft: Draft | null;
   /** The application the condition starts with: the one chosen before another flow opened, or the one that flow saved. */
   readonly app: string | null;
-  /** The value of `app` that the value flow saved, which the condition starts with. */
+  /** The value of `app` that the value flow saved, which the condition picks once the saved values list it. */
   readonly value: string | null;
 }
 
@@ -63,7 +63,10 @@ export interface ApplicationFlow {
  */
 export type Flow = AutomationFlow | ValueFlow | ReferenceFlow | ApplicationFlow;
 
-/** What a flow that saved hands to the flow that opened it: the application, and the value when it saved one. */
+/**
+ * What a flow that saved made for the flow that opened it: the application it belongs to, and the value when it
+ * saved one.
+ */
 export interface Made {
   readonly app: string;
   readonly value: string | null;
@@ -80,54 +83,63 @@ function waitingUnder(flow: Flow): readonly Opener[] {
 }
 
 /**
- * The automation flow as it waits under a flow it opens: with the `draft` it shows again and the application `app`
- * chosen for its condition, and no value to hand it yet.
+ * The automation flow as it waits under a flow it opens: with the `draft` it shows again, and no value to pick
+ * yet.
  */
-export function waiting(flow: AutomationFlow, draft: Draft, app: string | null): AutomationFlow {
-  return { ...flow, draft, app, value: null };
-}
-
-/** The value flow opened for the automation flow `opener`, starting with the application its condition has. */
-export function valueFor(opener: AutomationFlow): ValueFlow {
-  return { kind: 'value', fixing: null, app: opener.app, opener };
+export function waiting(flow: AutomationFlow, draft: Draft): AutomationFlow {
+  return { ...flow, draft, value: null };
 }
 
 /**
- * The application flow opened for `opener`: to add an application, or to change `existing`, which the opener then
- * starts with when it shows again.
+ * The value flow opened for the automation flow `opener`, starting with `app`, the application its condition has
+ * chosen. The opener keeps that application, so it shows again as the user left it.
  */
-export function applicationFor(opener: Opener, existing: AppSummary | null): ApplicationFlow {
-  return { kind: 'application', existing, opener: existing === null ? opener : { ...opener, app: existing.id } };
+export function valueFor(opener: AutomationFlow, app: string): ValueFlow {
+  return { kind: 'value', fixing: null, app, opener: { ...opener, app } };
 }
 
 /**
- * What shows when `ended` ends: the flow that opened it, starting with what it `made` when it saved, or as it was
- * when it was canceled. Null, for the page, when no flow opened it.
+ * The application flow opened for `opener`, to add an application or to change `existing`. The opener keeps
+ * `chosen`, the application it shows chosen, so it shows again as the user left it.
  */
-export function resume(ended: Flow, made: Made | null): Opener | null {
-  const opener = openerOf(ended);
-  if (opener === null || made === null) {
-    return opener;
-  }
-  return opener.kind === 'automation' ? { ...opener, app: made.app, value: made.value } : { ...opener, app: made.app };
+export function applicationFor(opener: Opener, chosen: string | null, existing: AppSummary | null): ApplicationFlow {
+  return { kind: 'application', existing, opener: { ...opener, app: chosen } };
 }
 
-/** Where a save leads: to the flow that opened the saved one, to the page that lists what it saved, or nowhere. */
-export type Next =
+/**
+ * How a flow ended: it saved, with what it made for a flow that opened it or null when it made nothing a flow
+ * starts with, or the user canceled it.
+ */
+export type Ended = { readonly kind: 'saved'; readonly made: Made | null } | { readonly kind: 'canceled' };
+
+/**
+ * What the window shows once a flow ended: nothing else than it shows now, the flow that opened it, the page that
+ * lists what it saved, or the page under it.
+ */
+export type After =
+  | { readonly kind: 'nothing' }
   | { readonly kind: 'flow'; readonly flow: Opener }
-  | { readonly kind: 'page' }
-  | { readonly kind: 'stay' };
+  | { readonly kind: 'listed' }
+  | { readonly kind: 'page' };
 
 /**
- * Where the save of the flow `saved` leads while `open` shows. A save closes only its own flow, so one that
- * finishes after the user moved on changes nothing.
+ * What follows `flow`. `open` says the flow is still the one the window shows: a save that finishes after the user
+ * left it for another changes nothing. A flow that waits under it shows again: with the saved application chosen,
+ * and for an automation the saved value to pick, or as it was left when the flow was canceled.
  */
-export function afterSave(open: Flow | null, saved: Flow, made: Made | null): Next {
-  if (open !== saved) {
-    return { kind: 'stay' };
+export function afterFlow(flow: Flow, ended: Ended, open: boolean): After {
+  if (!open) {
+    return { kind: 'nothing' };
   }
-  const flow = resume(saved, made);
-  return flow === null ? { kind: 'page' } : { kind: 'flow', flow };
+  const opener = openerOf(flow);
+  if (opener === null) {
+    return { kind: ended.kind === 'saved' ? 'listed' : 'page' };
+  }
+  if (ended.kind === 'canceled' || ended.made === null) {
+    return { kind: 'flow', flow: opener };
+  }
+  const { app, value } = ended.made;
+  return { kind: 'flow', flow: opener.kind === 'automation' ? { ...opener, app, value } : { ...opener, app } };
 }
 
 /** The page each kind of flow opens from. */

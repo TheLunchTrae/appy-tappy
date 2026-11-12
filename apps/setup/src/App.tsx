@@ -10,14 +10,13 @@ import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
 import { NewValue } from './pages/NewValue.tsx';
 import {
+  type Ended,
   type Flow,
-  type Made,
   type Opener,
-  afterSave,
+  afterFlow,
   applicationFor,
   heldInAll,
   lostText,
-  resume,
   trail,
   valueFor,
   waiting,
@@ -177,39 +176,35 @@ export function App() {
         break;
     }
   };
-  // A save closes its own flow, for the flow that opened it or else the page that lists what it saved, and
-  // nothing once the user has left it for another.
-  const saved = (ended: Flow, made: Made | null = null): void => {
-    const next = afterSave(openFlow.current, ended, made);
-    switch (next.kind) {
-      case 'flow':
-        open(next.flow);
+  // Shows what follows the flow `ended` once it saved or was canceled. What it saved is read into the lists at
+  // once, for the page or the flow that shows next.
+  const end = (ended: Flow, how: Ended): void => {
+    const after = afterFlow(ended, how, openFlow.current === ended);
+    switch (after.kind) {
+      case 'nothing':
         break;
-      case 'page':
+      case 'flow':
+        open(after.flow);
+        break;
+      case 'listed':
         goTo(LISTED_ON[ended.kind]);
         break;
-      case 'stay':
+      case 'page':
+        open(null);
         break;
     }
-  };
-  // The save of a value or reference flow. When a flow waits for what it made, the lists are read first, so that
-  // flow finds it in them.
-  const captured = async (ended: Flow, made: Made): Promise<void> => {
-    if (resume(ended, null) !== null) {
-      await refresh();
+    if (how.kind === 'saved') {
+      background(refresh());
     }
-    saved(ended, made);
   };
-  // What lets the flow `opener` open the application flow from its picker and show again when that ends.
+  // What lets the flow `opener` open the application flow from its picker, and show again when that ends as its
+  // picker stood.
   const pickerFor = (opener: Opener) => ({
-    onAddApplication: (): void => {
-      open(applicationFor(opener, null));
+    onAddApplication: (chosen: string | null): void => {
+      open(applicationFor(opener, chosen, null));
     },
-    onEditApplication: (id: string): void => {
-      const existing = apps?.find((app) => app.id === id);
-      if (existing !== undefined) {
-        open(applicationFor(opener, existing));
-      }
+    onEditApplication: (existing: AppSummary): void => {
+      open(applicationFor(opener, existing.id, existing));
     },
   });
   const path = flow === null ? [] : trail(flow);
@@ -218,14 +213,15 @@ export function App() {
     if (flow?.kind === 'value') {
       return (
         <NewValue
-          apps={apps ?? []}
           fixing={flow.fixing}
           app={flow.app}
           trail={path}
           onCancel={() => {
-            open(resume(flow, null));
+            end(flow, { kind: 'canceled' });
           }}
-          onSaved={(made) => captured(flow, made)}
+          onSaved={(made) => {
+            end(flow, { kind: 'saved', made });
+          }}
           {...pickerFor(flow)}
           onHeld={setReported}
         />
@@ -237,12 +233,10 @@ export function App() {
           existing={flow.existing}
           trail={path}
           onCancel={() => {
-            open(resume(flow, null));
+            end(flow, { kind: 'canceled' });
           }}
-          onSaved={async (id) => {
-            // The lists are read first, so the flow that opened this one finds the application in them.
-            await refresh();
-            saved(flow, { app: id, value: null });
+          onSaved={(id) => {
+            end(flow, { kind: 'saved', made: { app: id, value: null } });
           }}
           onHeld={setReported}
         />
@@ -251,14 +245,15 @@ export function App() {
     if (flow?.kind === 'reference') {
       return (
         <ReferenceFlow
-          apps={apps ?? []}
           existing={flow.existing}
           app={flow.app}
           trail={path}
           onCancel={() => {
-            open(null);
+            end(flow, { kind: 'canceled' });
           }}
-          onSaved={(made) => captured(flow, made)}
+          onSaved={(made) => {
+            end(flow, { kind: 'saved', made });
+          }}
           {...pickerFor(flow)}
           onHeld={setReported}
         />
@@ -270,17 +265,16 @@ export function App() {
           apps={apps ?? []}
           flow={flow}
           onCancel={() => {
-            open(null);
+            end(flow, { kind: 'canceled' });
           }}
           onSaved={() => {
-            saved(flow);
-            background(refresh());
+            end(flow, { kind: 'saved', made: null });
           }}
           onAddApplication={(draft, app) => {
-            open(applicationFor(waiting(flow, draft, app), null));
+            open(applicationFor(waiting(flow, draft), app, null));
           }}
           onNewValue={(draft, app) => {
-            open(valueFor(waiting(flow, draft, app)));
+            open(valueFor(waiting(flow, draft), app));
           }}
           onHeld={setReported}
         />

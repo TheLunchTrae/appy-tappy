@@ -25,8 +25,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
-    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner,
+    Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -213,6 +213,13 @@ pub(crate) async fn find_click(app: AppHandle, at: ClickAtDef) -> Result<FoundCl
 #[tauri::command]
 pub(crate) async fn list_apps(app: AppHandle) -> Result<Vec<AppSummary>, String> {
     ask(&app, Owner::apps).await?
+}
+
+/// The saved applications and the open windows, with the windows each
+/// application's match takes, from one listing of the desktop.
+#[tauri::command]
+pub(crate) async fn list_app_windows(app: AppHandle) -> Result<AppWindows, String> {
+    ask(&app, Owner::app_windows).await?
 }
 
 /// Saves an application's name and window match over the application

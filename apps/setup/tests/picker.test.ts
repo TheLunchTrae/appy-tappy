@@ -5,21 +5,15 @@ import { exactWindow } from '../src/lib/matching.ts';
 import {
   type Look,
   type PickerApp,
+  type Seen,
   captureWindow,
   isRunning,
+  known,
   offersMatchEdit,
-  pickerApps,
   pickerStep,
-  startingApp,
+  seen,
   stepStatus,
 } from '../src/lib/picker.ts';
-
-const example: PickerApp = {
-  id: 'example',
-  name: 'Example App',
-  window: exactWindow({ title: 'Example App', class: 'ExampleWindow', executable: 'Example.exe' }),
-};
-const player: PickerApp = { ...example, id: 'player', name: 'Player' };
 
 function open(handle: number, title: string): WindowChoice {
   return { handle, title, class: 'ExampleWindow', executable: 'Example.exe', width: 1280, height: 720 };
@@ -33,110 +27,188 @@ const read: WindowFit = { handle: 3, fallback: false, best: true, tied: true };
 const twin: WindowFit = { handle: 8, fallback: false, best: false, tied: true };
 const worse: WindowFit = { handle: 5, fallback: false, best: false, tied: false };
 
-/** A look that found `fits` for Example App among every window above. */
-function found(fits: readonly WindowFit[]): Look {
-  return { kind: 'found', windows: [main, second, settings], fits: new Map([['example', fits]]) };
+/** A saved application as the look answers it. */
+function summary(id: string, name: string | null): AppSummary {
+  return {
+    id,
+    file:
+      name === null
+        ? null
+        : {
+            format: 1,
+            name,
+            window: exactWindow({ title: name, class: 'ExampleWindow', executable: `${id}.exe` }),
+            sizeChanges: 'often',
+            antiCheat: 'unknown',
+            values: [],
+            references: [],
+          },
+    error: name === null ? 'broken' : null,
+    windows: [],
+    running: null,
+  };
+}
+
+function app(id: string, name: string, fits: readonly WindowFit[]): PickerApp {
+  return { id, name, executable: `${id}.exe`, fits, summary: summary(id, name) };
+}
+
+const player = app('player', 'Player', []);
+
+/** What a look found: Example App with `fits` and Player, among every window above. */
+function found(fits: readonly WindowFit[], others: readonly PickerApp[] = [player]): Seen {
+  return { apps: [app('example', 'Example App', fits), ...others], windows: [main, second, settings], antiCheat: [] };
+}
+
+function answered(fits: readonly WindowFit[], others?: readonly PickerApp[]): Look {
+  return { kind: 'seen', seen: found(fits, others) };
 }
 
 /** Where the picker stands with Example App chosen. */
 function chosen(look: Look, picked: number | null = null) {
-  return pickerStep({ saved: [example, player], locked: false, chosen: 'example', look, picked });
+  return pickerStep({ locked: false, chosen: 'example', look, picked });
 }
 
-describe('the applications', () => {
-  test('are the saved ones whose files read', () => {
-    const summary = (id: string, file: AppSummary['file']): AppSummary => ({
-      id,
-      file,
-      error: file === null ? 'broken' : null,
-      windows: [],
-      running: null,
-    });
-    const file: AppSummary['file'] = {
-      format: 1,
-      name: 'Example App',
-      window: example.window,
-      sizeChanges: 'often',
-      antiCheat: 'unknown',
-      values: [],
-      references: [],
+const example = app('example', 'Example App', [read]);
+
+describe('a look', () => {
+  test('keeps the applications whose files read, with their fits', () => {
+    const answer = {
+      open: { windows: [main], antiCheat: ['BattlEye'] },
+      apps: [
+        { app: summary('broken', null), fits: [] },
+        { app: summary('example', 'Example App'), fits: [read] },
+      ],
     };
-    expect(pickerApps([summary('broken', null), summary('example', file)])).toEqual([example]);
+    expect(seen(answer)).toEqual({ apps: [example], windows: [main], antiCheat: ['BattlEye'] });
   });
 
-  test('start with the one the flow belongs to, then the one handed over, then the only one', () => {
-    expect(startingApp([example, player], 'player', 'example')).toBe('player');
-    expect(startingApp([example, player], null, 'example')).toBe('example');
-    expect(startingApp([example], null, null)).toBe('example');
-    expect(startingApp([example, player], null, null)).toBeNull();
-    expect(startingApp([], null, null)).toBeNull();
+  test('keeps what the last one found on show while the next is made or fails', () => {
+    const before = found([read]);
+    expect(known({ kind: 'seen', seen: before })).toBe(before);
+    expect(known({ kind: 'looking', before })).toBe(before);
+    expect(known({ kind: 'failed', error: 'no answer', before })).toBe(before);
+    expect(known({ kind: 'looking', before: null })).toBeNull();
   });
 
-  test('say whether each runs once a look has answered', () => {
-    expect(isRunning({ kind: 'looking' }, 'example')).toBeNull();
-    expect(isRunning({ kind: 'failed', error: 'no answer' }, 'example')).toBeNull();
-    expect(isRunning(found([read]), 'example')).toBe(true);
-    expect(isRunning(found([]), 'example')).toBe(false);
-    expect(isRunning(found([read]), 'player')).toBeNull();
+  test('says whether each application runs only once it has answered', () => {
+    expect(isRunning(answered([read]), example)).toBe(true);
+    expect(isRunning(answered([]), player)).toBe(false);
+    expect(isRunning({ kind: 'looking', before: found([read]) }, example)).toBeNull();
+    expect(isRunning({ kind: 'failed', error: 'no answer', before: found([read]) }, example)).toBeNull();
   });
 });
 
 describe('the picker', () => {
-  test('asks for an application before it looks for a window', () => {
-    const look = found([read]);
-    const before = { locked: false, chosen: null, look, picked: null };
-    expect(pickerStep({ ...before, saved: [] })).toEqual({ kind: 'no-applications' });
-    expect(pickerStep({ ...before, saved: [example, player] })).toEqual({ kind: 'choosing' });
-    // An application just added shows once the list that has it arrives.
-    expect(pickerStep({ ...before, saved: [player], chosen: 'example' })).toEqual({ kind: 'choosing' });
-  });
-
-  test('has nothing to choose when the application a flow belongs to has gone', () => {
-    const gone = pickerStep({ saved: [player], locked: true, chosen: 'example', look: found([read]), picked: null });
-    expect(gone).toEqual({ kind: 'missing' });
-    expect(captureWindow(gone)).toBeNull();
-  });
-
-  test('waits for the look, and for one that knows the chosen application', () => {
-    expect(chosen({ kind: 'looking' })).toEqual({ kind: 'resolving', app: example });
-    const before: Look = { kind: 'found', windows: [main], fits: new Map() };
-    expect(chosen(before)).toEqual({ kind: 'resolving', app: example });
-  });
-
-  test('says why when the look fails', () => {
-    const failed = chosen({ kind: 'failed', error: 'Windows did not answer' });
-    expect(failed).toEqual({ kind: 'failed', app: example, error: 'Windows did not answer' });
-    expect(captureWindow(failed)).toBeNull();
-    expect(stepStatus(failed)).toEqual({
-      text: "Couldn't look for Example App's window: Windows did not answer. Refresh windows to try again.",
-      warn: true,
+  test('knows nothing until the first look answers', () => {
+    const step = pickerStep({
+      locked: false,
+      chosen: 'example',
+      look: { kind: 'looking', before: null },
+      picked: null,
     });
+    expect(step).toEqual({ kind: 'looking' });
+    expect(captureWindow(step)).toBeNull();
+  });
+
+  test('says why when the applications or the windows cannot be read, whatever was found before', () => {
+    for (const before of [null, found([read])]) {
+      const failed = chosen({ kind: 'failed', error: 'Windows did not answer', before });
+      expect(failed).toEqual({ kind: 'failed', error: 'Windows did not answer' });
+      expect(captureWindow(failed)).toBeNull();
+      expect(stepStatus(failed)).toEqual({
+        text: "Couldn't read the saved applications and the open windows: Windows did not answer. Refresh to try again.",
+        warn: true,
+      });
+    }
+  });
+
+  test('asks for an application before it looks for a window', () => {
+    const before = { locked: false, chosen: null, picked: null };
+    const none: Look = { kind: 'seen', seen: { apps: [], windows: [main], antiCheat: [] } };
+    expect(pickerStep({ ...before, look: none })).toEqual({ kind: 'no-applications' });
+    expect(pickerStep({ ...before, look: answered([read]) })).toEqual({ kind: 'choosing' });
+  });
+
+  test('takes the only saved application without asking', () => {
+    const step = pickerStep({ locked: false, chosen: null, look: answered([read], []), picked: null });
+    expect(step).toEqual({ kind: 'one', app: example, window: main, fallback: false });
+  });
+
+  test('says so when the chosen application is not among the saved ones, and offers no choice in its place', () => {
+    const look = answered([read]);
+    const handed = pickerStep({ locked: false, chosen: 'gone', look, picked: null });
+    expect(handed).toEqual({ kind: 'missing', locked: false });
+    expect(stepStatus(handed).text).toStartWith("The application chosen here isn't among the saved applications");
+    expect(stepStatus(handed).warn).toBe(true);
+    const own = pickerStep({ locked: true, chosen: 'gone', look, picked: null });
+    expect(own).toEqual({ kind: 'missing', locked: true });
+    expect(stepStatus(own).text).toStartWith("The application this belongs to can't be read any more");
+    expect(captureWindow(own)).toBeNull();
+  });
+
+  test('waits for the look under way, naming the application the last one found', () => {
+    expect(chosen({ kind: 'looking', before: found([read]) })).toEqual({ kind: 'resolving', app: example });
   });
 
   test('captures the one window the application reads without asking', () => {
-    const one = chosen(found([read, worse]));
-    expect(one).toEqual({ kind: 'one', app: example, window: main });
+    const one = chosen(answered([read, worse]));
+    expect(one).toEqual({
+      kind: 'one',
+      app: app('example', 'Example App', [read, worse]),
+      window: main,
+      fallback: false,
+    });
     expect(captureWindow(one)).toEqual(main);
     expect(stepStatus(one)).toEqual({ text: "Example App's window is “Example App - Save 3”.", warn: false });
     expect(offersMatchEdit(one)).toBe(false);
   });
 
+  test('says when the one window is only the fallback', () => {
+    const one = chosen(answered([{ ...read, fallback: true }]));
+    expect(one.kind === 'one' && one.fallback).toBe(true);
+    expect(stepStatus(one).text).toBe(
+      "Example App's window is “Example App - Save 3”. It is the fallback: no open window matches everything that must match.",
+    );
+  });
+
   test('asks which of the windows that fit equally well, and offers no other', () => {
-    const several = chosen(found([read, twin, worse]));
-    expect(several).toEqual({ kind: 'several', app: example, windows: [main, second], picked: null });
+    const several = chosen(answered([read, twin, worse]));
+    expect(several).toMatchObject({
+      kind: 'several',
+      windows: [main, second],
+      picked: null,
+      reads: 3,
+      fallback: false,
+    });
     expect(captureWindow(several)).toBeNull();
-    expect(stepStatus(several).text).toStartWith('2 open windows fit Example App equally well');
-    expect(stepStatus(several).warn).toBe(false);
+    expect(stepStatus(several)).toEqual({
+      text: "2 open windows fit Example App equally well, and AppyTappy reads one of them. Pick the one to capture, or change how it's found so that only one fits.",
+      warn: false,
+    });
     expect(offersMatchEdit(several)).toBe(true);
 
-    expect(captureWindow(chosen(found([read, twin, worse]), 8))).toEqual(second);
+    expect(captureWindow(chosen(answered([read, twin, worse]), 8))).toEqual(second);
     // A window that fits worse is never read, so it cannot be the one picked.
-    expect(captureWindow(chosen(found([read, twin, worse]), 5))).toBeNull();
+    expect(captureWindow(chosen(answered([read, twin, worse]), 5))).toBeNull();
+  });
+
+  test('marks the window a session would read now among several, and says when they are the fallback', () => {
+    const fallbacks = chosen(
+      answered([
+        { ...twin, best: true, fallback: true },
+        { ...read, best: false, fallback: true },
+      ]),
+    );
+    expect(fallbacks).toMatchObject({ kind: 'several', reads: 8, fallback: true });
+    expect(stepStatus(fallbacks).text).toEndWith(
+      'They are the fallback: no open window matches everything that must match.',
+    );
   });
 
   test('says so when no window fits, and offers no window', () => {
-    const none = chosen(found([]));
-    expect(none).toEqual({ kind: 'none', app: example, unlisted: false });
+    const none = chosen(answered([]));
+    expect(none).toMatchObject({ kind: 'none', unlisted: false });
     expect(captureWindow(none)).toBeNull();
     expect(stepStatus(none).text).toStartWith("Example App isn't open, or its window doesn't match");
     expect(stepStatus(none).warn).toBe(true);
@@ -144,13 +216,8 @@ describe('the picker', () => {
   });
 
   test('offers no window when a session reads one that is not listed', () => {
-    const unlisted = chosen(found([{ ...read, best: false, tied: false }, worse]));
-    expect(unlisted).toEqual({ kind: 'none', app: example, unlisted: true });
+    const unlisted = chosen(answered([{ ...read, best: false, tied: false }, worse]));
+    expect(unlisted).toMatchObject({ kind: 'none', unlisted: true });
     expect(stepStatus(unlisted).text).toStartWith("AppyTappy reads a window of Example App that can't be captured");
-  });
-
-  test('leaves out a window that closed after it was matched', () => {
-    const closed: WindowFit = { handle: 21, fallback: false, best: false, tied: true };
-    expect(chosen(found([read, closed]))).toEqual({ kind: 'one', app: example, window: main });
   });
 });

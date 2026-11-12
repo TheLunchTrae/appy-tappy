@@ -11,7 +11,6 @@ import type { Held } from '../lib/unsaved.ts';
 const VALUE = { kind: 'value' } as const;
 
 interface Props {
-  readonly apps: readonly AppSummary[];
   /** The saved value to fix at the window's size now, or null to make a new value. */
   readonly fixing: Fixing | null;
   /** The application a new value starts with, such as one just added for it, or null to let the user choose. */
@@ -19,12 +18,12 @@ interface Props {
   /** The way to this flow, for its breadcrumb. */
   readonly trail: readonly string[];
   readonly onCancel: () => void;
-  /** Hears where the value was saved. The capture counts as saving until this settles. */
-  readonly onSaved: (made: Made) => Promise<void>;
-  /** Leaves to add an application, and comes back with it chosen. */
-  readonly onAddApplication: () => void;
-  /** Leaves to change how the application with this ID is found, and comes back to it. */
-  readonly onEditApplication: (app: string) => void;
+  /** Hears where the value was saved. */
+  readonly onSaved: (made: Made) => void;
+  /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
+  readonly onAddApplication: (chosen: string | null) => void;
+  /** Leaves to change how `app` is found, and comes back to it. */
+  readonly onEditApplication: (app: AppSummary) => void;
   /** Hears what leaving the flow would lose. */
   readonly onHeld: (held: Held) => void;
 }
@@ -32,7 +31,6 @@ interface Props {
 /** Making a value, or fixing a saved one at another window size: choose the application, then capture its window
  * and check what to read. */
 export function NewValue({
-  apps,
   fixing,
   app,
   trail,
@@ -56,7 +54,6 @@ export function NewValue({
   if (picking || choice === null) {
     return (
       <Picker
-        apps={apps}
         heading={fixing === null ? 'New value' : `Fix ${fixing.value.name} at this size`}
         trail={trail}
         lockedApp={fixing?.app ?? null}

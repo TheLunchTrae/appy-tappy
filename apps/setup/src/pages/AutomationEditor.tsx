@@ -28,13 +28,12 @@ import {
 import { clickApps, targetSummary } from '../lib/click.ts';
 import type { AutomationFlow } from '../lib/flow.ts';
 import { ACTIONS_HINT, COOLDOWN_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
-import { pickerApps } from '../lib/picker.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
-import { watchGuide, watchStep, watching } from '../lib/watch.ts';
+import { arrived, watchApps, watchGuide, watchStep, watching } from '../lib/watch.ts';
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
 type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
@@ -486,11 +485,11 @@ interface Props {
 export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplication, onNewValue, onHeld }: Props) {
   const { existing } = flow;
   const [start] = useState<Draft>(() => startingDraft(existing));
-  const [draft, setDraft] = useState<Draft>(() =>
-    watching(flow.draft ?? start, valueChoices(apps), flow.app, flow.value),
-  );
+  const [draft, setDraft] = useState<Draft>(() => watching(flow.draft ?? start, flow.app));
   // The application chosen for the condition before a value of it is picked.
   const [chosenApp, setChosenApp] = useState(flow.app);
+  // The value a flow just saved for the condition, until the saved values list it and the draft picks it.
+  const [made, setMade] = useState(flow.value);
   const [nextKey, setNextKey] = useState(() => unusedKey(draft.actions));
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -519,12 +518,19 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
   }, []);
 
   const choices = useMemo(() => valueChoices(apps), [apps]);
-  const saved = useMemo(() => pickerApps(apps), [apps]);
-  const step = watchStep(saved, choices, draft, chosenApp);
+  const saved = useMemo(() => watchApps(apps), [apps]);
+  const step = watchStep({ saved, choices, draft, chosen: chosenApp, made });
   const guide = watchGuide(step);
   const choice = step.kind === 'ready' ? step.choice : null;
   // The application the condition watches, or null before one is chosen.
-  const watched = 'app' in step ? step.app.id : step.kind === 'missing' ? step.id : null;
+  const watched = 'app' in step ? step.app.id : 'id' in step ? step.id : null;
+  const landed = arrived({ choices, chosen: chosenApp, made });
+  useEffect(() => {
+    if (landed !== null) {
+      setDraft((current) => withSource(current, landed));
+      setMade(null);
+    }
+  }, [landed]);
   const built = buildAutomation(draft, choices, existing?.id ?? '', apps);
   const typedWhen = choice === null ? null : buildWhen(draft, choice);
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
@@ -630,7 +636,8 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
                 onChange={(event) => {
                   const picked = event.target.value;
                   setChosenApp(picked);
-                  setDraft((current) => watching(current, choices, picked, null));
+                  setMade(null);
+                  setDraft((current) => watching(current, picked));
                   setSaveError(null);
                 }}
               >
@@ -639,11 +646,11 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
                     Pick an application
                   </option>
                 ) : null}
-                {step.kind === 'missing' ? (
-                  <option value={step.id} disabled>
-                    {step.id} (not saved)
+                {watched === null || saved.some((app) => app.id === watched) ? null : (
+                  <option value={watched} disabled>
+                    {step.kind === 'arriving' ? 'Reading…' : `${watched} (not saved)`}
                   </option>
-                ) : null}
+                )}
                 {saved.map((app) => (
                   <option key={app.id} value={app.id}>
                     {app.name}
@@ -768,7 +775,7 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
           {choice === null ? null : (
             <LiveReading key={`${choice.app}/${choice.value.id}`} choice={choice} when={liveWhen} />
           )}
-          {step.kind === 'no-applications' || step.kind === 'value' ? null : (
+          {step.kind === 'no-applications' || step.kind === 'value' || step.kind === 'arriving' ? null : (
             <p className="note">
               {runningApp === null || runningApp === undefined
                 ? 'One value for now. Conditions that combine several values come later.'

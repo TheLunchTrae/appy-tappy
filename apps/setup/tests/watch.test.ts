@@ -2,8 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { AppSummary, CheckDef, ValueDef } from '../src/lib/bindings.ts';
 import { EMPTY_DRAFT, valueChoices } from '../src/lib/automation.ts';
-import { pickerApps } from '../src/lib/picker.ts';
-import { watchGuide, watchStep, watching } from '../src/lib/watch.ts';
+import { arrived, watchApps, watchGuide, watchStep, watching } from '../src/lib/watch.ts';
 
 function value(id: string, name: string, check: CheckDef): ValueDef {
   return {
@@ -59,8 +58,13 @@ const player = app('player', 'Player', [icon]);
 const fresh = app('fresh', 'Fresh', []);
 const broken: AppSummary = { id: 'broken', file: null, error: 'the file is not valid', windows: [], running: null };
 
-function step(apps: readonly AppSummary[], draft = EMPTY_DRAFT, chosen: string | null = null) {
-  return watchStep(pickerApps(apps), valueChoices(apps), draft, chosen);
+function step(
+  apps: readonly AppSummary[],
+  draft = EMPTY_DRAFT,
+  chosen: string | null = null,
+  made: string | null = null,
+) {
+  return watchStep({ saved: watchApps(apps), choices: valueChoices(apps), draft, chosen, made });
 }
 
 describe('choosing what to watch', () => {
@@ -97,21 +101,50 @@ describe('choosing what to watch', () => {
     expect('choice' in at ? at.choice.value.name : null).toBe('Status');
   });
 
-  test("follows the watched value's application rather than the one chosen before it", () => {
-    const draft = { ...EMPTY_DRAFT, source: { app: 'example', value: 'progress' } };
-    const at = step([example, player], draft, 'player');
-    expect('app' in at ? at.app.id : null).toBe('example');
-  });
-
   test('asks for a value again when the watched one is not saved any more', () => {
     const gone = { ...EMPTY_DRAFT, source: { app: 'example', value: 'gone' } };
     expect(step([example, player], gone).kind).toBe('pick');
     expect(step([fresh, player], { ...EMPTY_DRAFT, source: { app: 'fresh', value: 'gone' } }).kind).toBe('value');
   });
 
-  test('says so when the watched application cannot be read', () => {
+  test("says so when the watched value's application cannot be read", () => {
     const draft = { ...EMPTY_DRAFT, source: { app: 'broken', value: 'progress' } };
     expect(step([example, broken], draft)).toEqual({ kind: 'missing', id: 'broken' });
+    // Also once the editor showed again with that application chosen.
+    expect(step([example, broken], draft, 'broken')).toEqual({ kind: 'missing', id: 'broken' });
+  });
+});
+
+describe('what a flow just saved', () => {
+  const choices = valueChoices([example, player]);
+
+  test('is awaited while the saved lists lack the application', () => {
+    expect(step([example], EMPTY_DRAFT, 'player')).toEqual({ kind: 'arriving', id: 'player' });
+    expect(step([], EMPTY_DRAFT, 'player')).toEqual({ kind: 'arriving', id: 'player' });
+  });
+
+  test('is awaited until its value is picked, whatever the draft watched before', () => {
+    const watched = { ...EMPTY_DRAFT, source: { app: 'example', value: 'progress' } };
+    expect(step([example], EMPTY_DRAFT, 'example', 'hull')).toEqual({ kind: 'arriving', id: 'example' });
+    expect(step([example], watched, 'example', 'hull')).toEqual({ kind: 'arriving', id: 'example' });
+    expect(step([example], watched, 'example', 'status')).toEqual({ kind: 'arriving', id: 'example' });
+    expect(step([example], watched, 'example').kind).toBe('ready');
+  });
+
+  test('is picked once the saved values list it', () => {
+    expect(arrived({ choices, chosen: 'player', made: 'icon' })?.value.name).toBe('Icon');
+    expect(arrived({ choices, chosen: 'example', made: 'status' })?.states).toEqual(['Paused', 'Live']);
+  });
+
+  test('is not picked before the lists have it, nor from another application', () => {
+    expect(arrived({ choices, chosen: 'player', made: 'hull' })).toBeNull();
+    expect(arrived({ choices, chosen: 'player', made: 'progress' })).toBeNull();
+    expect(arrived({ choices: [], chosen: 'player', made: 'icon' })).toBeNull();
+  });
+
+  test('is nothing when no flow saved a value', () => {
+    expect(arrived({ choices, chosen: 'player', made: null })).toBeNull();
+    expect(arrived({ choices, chosen: null, made: 'icon' })).toBeNull();
   });
 });
 
@@ -139,6 +172,10 @@ describe('the guide to the next step', () => {
     });
   });
 
+  test('says what it waits for, and leads nowhere meanwhile', () => {
+    expect(guide([example], 'player')).toEqual({ text: 'Reading what you saved…', opens: null, warn: false });
+  });
+
   test('warns about an application that cannot be read, and only then', () => {
     const draft = { ...EMPTY_DRAFT, source: { app: 'broken', value: 'progress' } };
     expect(guide([example, broken], null, draft)?.warn).toBe(true);
@@ -152,42 +189,19 @@ describe('the guide to the next step', () => {
 });
 
 describe('the draft once an application is chosen', () => {
-  const choices = valueChoices([example, player]);
   const typed = { ...EMPTY_DRAFT, name: 'Pause music', number: '90' };
-
-  test('picks the value a flow just saved, with a comparison that suits it', () => {
-    expect(watching(typed, choices, 'player', 'icon')).toEqual({
-      ...typed,
-      source: { app: 'player', value: 'icon' },
-      is: 'equals',
-    });
-    expect(watching(typed, choices, 'example', 'status')).toEqual({
-      ...typed,
-      source: { app: 'example', value: 'status' },
-      is: 'equals',
-      state: 'Paused',
-    });
-  });
+  const watched = { ...typed, source: { app: 'example', value: 'progress' } };
 
   test('drops a value of another application', () => {
-    const watched = { ...typed, source: { app: 'example', value: 'progress' } };
-    expect(watching(watched, choices, 'player', null)).toEqual({ ...typed, source: null });
+    expect(watching(watched, 'player')).toEqual({ ...typed, source: null });
   });
 
   test("keeps the application's own value", () => {
-    const watched = { ...typed, source: { app: 'example', value: 'progress' } };
-    expect(watching(watched, choices, 'example', null)).toBe(watched);
+    expect(watching(watched, 'example')).toBe(watched);
   });
 
-  test('keeps the draft when the value is not among the saved ones', () => {
-    const watched = { ...typed, source: { app: 'example', value: 'progress' } };
-    expect(watching(watched, choices, 'example', 'unsaved')).toBe(watched);
-    expect(watching(watched, choices, 'player', 'unsaved')).toEqual({ ...typed, source: null });
-  });
-
-  test('is unchanged with no application', () => {
-    const watched = { ...typed, source: { app: 'example', value: 'progress' } };
-    expect(watching(watched, choices, null, null)).toBe(watched);
-    expect(watching(typed, choices, null, 'icon')).toBe(typed);
+  test('is unchanged with no application, or with no value yet', () => {
+    expect(watching(watched, null)).toBe(watched);
+    expect(watching(typed, 'player')).toBe(typed);
   });
 });

@@ -57,14 +57,23 @@ AppyTappy captures only a window it would read for the application, so what you
 draw is what your automations see.
 
 - **The application isn't open, or its window doesn't match.** Open the
-  application and select **Refresh windows**. If it is open, the way
-  AppyTappy finds its window no longer fits, such as after its title changed:
-  select **Change how it's found** to
+  application and select **Refresh**. If it is open, the way AppyTappy finds
+  its window no longer fits, such as after its title changed: select
+  **Change how it's found** to
   [change it](Applications.md#how-appytappy-finds-the-window), and saving or
   canceling brings you back.
-- **Several windows fit equally well.** AppyTappy reads whichever of them is
-  in front, so it lists them and asks which to capture. Pick one, or select
+- **Several windows fit equally well.** AppyTappy reads one of them, as
+  [How AppyTappy finds the window](Applications.md#how-appytappy-finds-the-window)
+  describes, so it lists them and asks which to capture. Each shows its size,
+  window class, and executable, and **Read if it starts now** marks the one
+  AppyTappy would read if the application started now. Pick one, or select
   **Change how it's found** so that only one fits.
+- **The window is the fallback.** AppyTappy says so when no open window
+  matches everything that must match and it reads the
+  [fallback](Applications.md#how-appytappy-finds-the-window) instead. You can
+  capture it; check that it is the window you mean.
+- **The applications couldn't be read.** AppyTappy says why. Select
+  **Refresh** to read them again.
 
 ## Checks
 
