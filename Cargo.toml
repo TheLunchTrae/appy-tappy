@@ -14,14 +14,14 @@ publish.workspace = true
 # The policy tests tokenize Rust syntax, including attributes inside macro
 # bodies, without mistaking comments or literals for code, and read the JSON
 # that Cargo, mise, and cargo-mutants write.
-proc-macro2 = "=1.0.107"
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
-syn = { version = "=3.0.9", features = ["full"] }
+proc-macro2 = "1.0.107"
+serde.workspace = true
+serde_json.workspace = true
+syn = { version = "3.0.9", features = ["full"] }
 # The policy tests read Cargo manifests, Cargo configuration, and the mise task
 # fragment. Cargo permits explicit target source paths with arbitrary
 # extensions, so the source scan parses manifests to see those compiler inputs.
-toml = "=1.1.8"
+toml = "1.1.8"
 
 # The lint wall lives at workspace scope so growth cannot silently shed it:
 # every member crate (including this root package) opts in with
@@ -38,6 +38,25 @@ rust-version = "1.99.1"
 license = "GPL-3.0-only"
 repository = "https://github.com/TheLunchTrae/appy-tappy"
 publish = false
+
+# Dependencies that more than one package uses, so each version is written
+# once; a package names one with `name.workspace = true` and adds its own
+# features. Versions are ranges, not exact pins: Cargo.lock pins what builds,
+# and `cargo update -p <crate>` moves it within the range without a manifest
+# edit. The workspace's own crates carry the workspace version above, which a
+# minor release bumps here too.
+[workspace.dependencies]
+appytappy-actions = { version = "0.1.0", path = "crates/actions" }
+appytappy-config = { version = "0.1.0", path = "crates/config" }
+appytappy-engine = { version = "0.1.0", path = "crates/engine" }
+appytappy-platform = { version = "0.1.0", path = "crates/platform" }
+appytappy-sources = { version = "0.1.0", path = "crates/sources" }
+mutants = "0.0.4"
+proptest = "1.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+ts-rs = "12.0.1"
+windows = "0.62.2"
 
 # Agent-optimized posture: the lint groups below are denied, and the only
 # sanctioned escape is a per-site `#[expect(lint, reason = "...")]`;

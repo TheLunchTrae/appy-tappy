@@ -367,8 +367,8 @@ Pin any intermittently killed mutant with a deterministic example test.
 
 A surviving mutant needs a test that kills it, removal of unreachable code,
 or a per-site `#[mutants::skip]` with a source reason explaining why no test
-can distinguish it. The first skip adds `mutants = "0.0.4"` as a regular
-dependency; remove it when the last skip disappears. Classification and
+can distinguish it. The first skip adds `mutants.workspace = true` as a
+regular dependency; remove it when the last skip disappears. Classification and
 coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
@@ -386,6 +386,20 @@ Prefer the standard library. For each added dependency, state the complexity
 it removes. `rust:deny` checks dependency policy including development
 dependencies; `rust:machete` checks unused regular dependencies. Review
 dev/build dependency use separately and report duplicate-version warnings.
+
+Manifests take version ranges, and the committed lockfiles (`Cargo.lock`, both
+`bun.lock` files, and `.config/mise/mise.lock`) pin what builds; CI installs
+from them unchanged. Write the version in use as the floor, without `=`:
+Cargo's default caret for crates, `^` for Bun packages, and a version prefix
+for mise tools. A crate that more than one package uses goes in the root
+`[workspace.dependencies]`. Hold to the minor with `~` only what must match a
+counterpart or breaks in minors: `tauri` and the hotkey plugin with their
+`@tauri-apps/*` packages, and TypeScript with `oxlint-tsgolint`, which carries
+its compiler. Update `react` and `react-dom` together, since React refuses to
+start when they differ. Three stay exact: `rust-toolchain.toml`, because the
+lint wall follows the toolchain's lints; `packageManager`, which takes only an
+exact version and moves with mise's Bun; and the hygiene task's Python, because
+mise resolves a task's own tools to the newest match when it locks.
 
 For a non-trivial change, obtain an independent read-only review of tests,
 changed code, exceptions, and affected contracts. Add focused reviewers when

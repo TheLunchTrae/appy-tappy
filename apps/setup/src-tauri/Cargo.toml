@@ -18,62 +18,65 @@ custom-protocol = ["tauri/custom-protocol"]
 [dependencies]
 # Sends the click the user asks for on the click target screen, the way the
 # runtime clicks.
-appytappy-actions = { version = "=0.1.0", path = "../../../crates/actions" }
-appytappy-config = { version = "=0.1.0", path = "../../../crates/config" }
+appytappy-actions.workspace = true
+appytappy-config.workspace = true
 # Tells the runtime to read the automations again after each save.
-appytappy-platform = { version = "=0.1.0", path = "../../../crates/platform" }
-appytappy-sources = { version = "=0.1.0", path = "../../../crates/sources" }
+appytappy-platform.workspace = true
+appytappy-sources.workspace = true
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
-mutants = "0.0.4"
+mutants.workspace = true
 # Reads a recorded reading's text so the user only corrects it: a pure-Rust
 # neural text reader, so it runs the same on every system and needs no
 # operating system OCR. Only its recognition model loads, from the file
 # wiki/Setup-app.md names. Not used by the runtime.
-ocrs = { version = "=0.13.1", default-features = false, features = ["onnx"] }
+ocrs = { version = "0.13.1", default-features = false, features = ["onnx"] }
 # Loads the text reader's model file, and gives the rectangle of the line
 # it reads.
-rten = { version = "=0.26.0", default-features = false, features = ["onnx_format"] }
-rten-imageproc = "=0.26.0"
+rten = { version = "0.26.0", default-features = false, features = ["onnx_format"] }
+rten-imageproc = "0.26.0"
 # Command arguments and replies cross into the web UI as JSON.
-serde = { version = "=1.0.229", features = ["derive"] }
+serde.workspace = true
 # Keeps a downloaded update's release manifest until the user installs it,
 # and the tests feed the commands the JSON the UI sends.
-serde_json = "=1.0.154"
+serde_json.workspace = true
 # The window, the web view, and the bridge between the React UI and Rust.
-tauri = { version = "=2.12.5", features = [] }
+# `~` holds it and the hotkey plugin to their minor release, because the Tauri
+# CLI refuses to build when a crate and its package in apps/setup/package.json
+# are on different minors; move both sides together.
+tauri = { version = "~2.12.5", features = [] }
 # The screenshot hotkey, which works while the other application has the keyboard focus.
-tauri-plugin-global-shortcut = "=2.4.1"
+tauri-plugin-global-shortcut = "~2.4.1"
 # Checks GitHub Releases for a newer AppyTappy and installs it when the user
 # agrees, checking the download against the update key. Release builds
 # configure it, as wiki/Installer.md describes. Without zip,
 # because the update is the installer itself.
-tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
+tauri-plugin-updater = { version = "2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # Keeps one copy of the setup app running, so two copies cannot overwrite
 # each other's saves, and brings its window forward when another starts.
-tauri-plugin-single-instance = "=2.5.5"
+tauri-plugin-single-instance = "2.5.5"
 # Each command awaits the owner thread's answer on a oneshot channel, so a
 # slow request never freezes the window; Tauri does not re-export it.
-tokio = { version = "=1.54.1", features = ["sync"] }
+tokio = { version = "1.54.1", features = ["sync"] }
 
 [dev-dependencies]
 # The bindings test writes the TypeScript types of the commands' arguments and
 # answers and checks them against the page's bindings.ts, so the page cannot
 # drift from the Rust side. Only the tests derive them, so the program builds
 # without ts-rs.
-appytappy-config = { version = "=0.1.0", path = "../../../crates/config", features = ["ts"] }
+appytappy-config = { workspace = true, features = ["ts"] }
 # Generates the frames a recording sees, to check that it keeps every shape
 # they show once and counts each rightly, and labeled screenshots for the
 # round trip of a reference from the editor through its saved file to the
 # runtime's reader, a trust boundary.
-proptest = "=1.12.0"
+proptest.workspace = true
 # A stand-in for the running app, so the host's tests need no window.
-tauri = { version = "=2.12.5", features = ["test"] }
-ts-rs = "=12.0.1"
+tauri = { version = "~2.12.5", features = ["test"] }
+ts-rs.workspace = true
 
 [build-dependencies]
 # Embeds the app's configuration, icon, and Windows manifest.
-tauri-build = { version = "=2.7.4", features = [] }
+tauri-build = { version = "2.7.4", features = [] }
 
 [lints]
 workspace = true

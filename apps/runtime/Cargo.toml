@@ -10,24 +10,24 @@ publish.workspace = true
 
 [dependencies]
 # Runs each automation's actions and undoes them after.
-appytappy-actions = { version = "=0.1.0", path = "../../crates/actions" }
-appytappy-config = { version = "=0.1.0", path = "../../crates/config" }
+appytappy-actions.workspace = true
+appytappy-config.workspace = true
 # Decides when each automation fires from the values the runtime reads.
-appytappy-engine = { version = "=0.1.0", path = "../../crates/engine" }
-appytappy-platform = { version = "=0.1.0", path = "../../crates/platform" }
-appytappy-sources = { version = "=0.1.0", path = "../../crates/sources" }
+appytappy-engine.workspace = true
+appytappy-platform.workspace = true
+appytappy-sources.workspace = true
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
-mutants = "0.0.4"
+mutants.workspace = true
 
 [build-dependencies]
 # Compiles runtime.rc, the program's icon, and links it into the program on
 # Windows.
-embed-resource = "=3.0.12"
+embed-resource = "3.0.12"
 # Links the Visual C++ runtime into the program, so it starts on a PC without
 # the Visual C++ Redistributable. The Universal C runtime stays a Windows DLL.
 # Builds for other systems skip it.
-static_vcruntime = "=3.0.0"
+static_vcruntime = "3.0.0"
 
 [lints]
 workspace = true
