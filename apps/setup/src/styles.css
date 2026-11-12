@@ -1622,6 +1622,11 @@ select {
   background: var(--base);
 }
 
+/* A state that keeps its saved picture, which the editor has no screenshot of */
+.state.saved {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .state[aria-current='true'] {
   border-color: var(--capture);
 }

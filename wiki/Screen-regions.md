@@ -139,11 +139,12 @@ log says it once for each reason, not once for each size the window
 passes.
 
 State pictures are named after the value and the state's place, such as
-`status-1.png`, and a fix's after the value, the fix's number, and the
+`status-1.png`. A fix's pictures, and those of a drawing whose states an
+edit took again, are named after the value, a number for the set, and the
 state's place, such as `status-2-1.png`. Value IDs have no `-`, so the two
-never clash. A fix saved again at its size takes a number no saved fix
-uses, so its new pictures never overwrite the ones it replaces, and the
-setup app deletes the old ones once the file is saved.
+never clash. Each new set takes a number no saved picture of the value
+uses, so its pictures never overwrite the ones it replaces, and the setup
+app deletes the old ones once the file is saved.
 
 ## Content that moves
 

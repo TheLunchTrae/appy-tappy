@@ -6,7 +6,8 @@ watch values and act on them.
 
 The **Values** page lists each saved value under its application, with how
 it reads and the automations that use it. A green dot marks an application
-whose window is open now.
+whose window is open now. **Edit** and **Delete** sit at the end of each
+value's row.
 
 ## Make a value
 
@@ -226,8 +227,8 @@ The Values page shows each value's size and side under **Region**, such as
 While the application runs, the Values page adds a column for the window's
 size now, such as **At 3440 × 1440 now**, with what each value reads there.
 Each value has **Fix at this size** beside it there, unless the window is at
-the size the value was first drawn at. At that size, a value that reads wrong
-is deleted and made again. **Matches no state** isn't always wrong: the
+the size the value was first drawn at. At that size, [edit the
+value](#edit-a-value) instead. **Matches no state** isn't always wrong: the
 region may show none of the states right now.
 
 1. AppyTappy finds the application's window and names it; select
@@ -262,6 +263,98 @@ read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once
 which values it doesn't read at the window's size and why, and says it again
 only when the reason changes.
 
+## Edit a value
+
+Select **Edit** next to a value to change it without making it again. The
+value stays the same value, whatever you change, its name included, so the
+automations that use it keep using it.
+
+An edit changes the value as it was first drawn, which every window size
+reads or scales from. A [fix](#fix-a-value-at-one-size) leaves that alone
+and draws the value again at one other size. The editor is headed
+**Edit** with the value's name and saves with **Save changes**; a fix is
+headed **Fix** and saves with **Save fix**.
+
+1. AppyTappy finds the application's window and names it; select
+   **Capture this window**. If it has none to capture, see
+   [When the window isn't found](#when-the-window-isnt-found). AppyTappy
+   takes a screenshot of the window and opens the value as it is saved. The
+   application has to be running, as for a fix, whatever you change.
+2. **Where to read.** Change the **Value name**, the **Check**,
+   **This content may move**, or **Stays at**, or move the region.
+   **Stays at** opens as automatic unless the value was saved with another
+   side than the one its region is nearest, and
+   **This content may move** opens on for a value drawn as a reading area.
+   A **Color** or **State** check cannot have a reading area, so changing
+   the check to one of them turns it off.
+3. **How to read it.** Change the reference, **Whole number only**, the
+   colors, the states' names, or the **Tolerance**. The box under them shows
+   what the value would read on the live window once saved.
+4. Select **Save changes**. **Discard**, or leaving the editor, keeps the
+   value as it was saved. Leaving asks first only once you changed
+   something.
+
+### The window's size while you edit
+
+A value's region is in the pixels of the window size it was drawn at. While
+the window has that size, the region starts exactly where it was saved, and
+you can move it.
+
+At any other size, the editor says so, such as **Progress was drawn at
+1920 × 1080, and the window is 2560 × 1440 on this screenshot**, and shows no
+region on that screenshot. The region and a **State** check's pictures stay
+as they are saved; everything else can still change. To change them, do one
+of these:
+
+- Resize the window to the size the value was drawn at and take a
+  screenshot. The region then shows on it.
+- Select **Discard**, then **Fix at this size** on the Values page, to
+  change how the value reads at the window's size now only.
+
+The box under **How to read it** shows what the edited value reads at the
+window's size now: scaled, at its fix, or
+**Not read at 2560 × 1440, the window's size now**, as
+[Window size](#window-size) describes.
+
+### States in an edit
+
+A **State** check keeps the picture saved for each state while the region
+stays where it was. **States** then lists each state with
+**Saved picture**: rename a state there, or change the **Tolerance**.
+
+To change a state's picture, or to add or remove a state, take every state
+again. Select a screenshot that shows the first state and select
+**Take the states again**, then add the others as for a new value; each
+takes the next state's name. Every screenshot has to be at the size the
+value was drawn at. Moving the region needs the same, since the saved
+pictures no longer fit it: the editor says
+**The region changed, so each state needs a new screenshot**, and saves once
+each state has one. Removing every state you took brings the saved pictures
+back, while the region is where it was saved.
+
+### What an edit will not do silently
+
+- **Automations.** An edit that would stop an automation is not saved: one
+  that makes the value read another kind of thing, such as yes or no instead
+  of a number, or that renames or removes a state an automation's condition
+  names. The editor names those automations as soon as the change is made.
+  Change or delete them first, then edit the value.
+- **Fixes.** A fix reads the value the way it was first drawn, so the value's
+  fixes stay while the check keeps its kind and a **State** check keeps its
+  states in order: renamed with their saved pictures, or taken again under
+  the names they had. Any other change leaves the fixes unusable. The editor
+  then lists them, such as
+  **Saving this removes its fix at 3440 × 1440**, and saves only once you
+  turn on **Remove its fix**. If the fixes it would remove are not the ones
+  you agreed to lose, the save is refused and lists them again.
+- **What a fix reads with.** A fix that stays keeps its region, its
+  pictures, and the reference it reads with. When you pick another reference
+  for a **Number** value, a fix that read with the old reference keeps
+  reading with it, so the old reference still cannot be deleted while that
+  fix uses it. One thing does follow the edit: **Whole number only** is the
+  value's setting at every size, so changing it changes how its fixes read
+  too.
+
 ## When an application updates
 
 An update can move what a value reads, so AppyTappy remembers which build of
@@ -275,7 +368,7 @@ When the application runs a different build, the Values page says so under the
 application's name, such as **Changed since its values were checked (1.4.2.0
 then, 1.5.0.0 now)**. AppyTappy still reads the values. Check what each one
 reads now, such as with the application's [overlay](Applications.md#overlay),
-and make any that read wrong again. Then select **Mark as checked**, which
+and [edit](#edit-a-value) any that read wrong. Then select **Mark as checked**, which
 records the build that runs now. The application has to be running for that.
 While it runs and no build is recorded, such as for values made before AppyTappy
 recorded builds, the Values page offers **Mark as checked** too.

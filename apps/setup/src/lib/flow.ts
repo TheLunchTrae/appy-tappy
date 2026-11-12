@@ -4,10 +4,12 @@ import type { AppSummary, AutomationDef, ReferenceDef, ValueDef } from './bindin
 import { type Draft, startingDraft } from './automation.ts';
 import { type Held, held } from './unsaved.ts';
 
-/** A saved value to draw again at the window's size now, and its application's ID. */
-export interface Fixing {
+/** A saved value to change, and its application's ID. */
+export interface Changing {
   readonly app: string;
   readonly value: ValueDef;
+  /** Whether it is drawn again at the window's size now, as a fix, or edited as it was first drawn. */
+  readonly how: 'fix' | 'edit';
 }
 
 /** A saved reference and the application it belongs to. */
@@ -41,21 +43,21 @@ export interface Handed {
 }
 
 /**
- * Making a value, or fixing a saved one at another window size. It opens the application flow from its picker.
- * Only a new value is made for an automation: a fix opens from the Values page alone.
+ * Making a value, fixing a saved one at another window size, or editing a saved one. It opens the application flow
+ * from its picker. Only a new value is made for an automation: a fix and an edit open from the Values page alone.
  */
 export type ValueFlow =
   | {
       readonly kind: 'value';
-      readonly fixing: null;
+      readonly changing: null;
       /** The application the picker starts with, or null to let the user choose. */
       readonly app: string | null;
       readonly opener: AutomationFlow | null;
     }
   | {
       readonly kind: 'value';
-      readonly fixing: Fixing;
-      /** The application the picker showed chosen when it opened the application flow, which is the fix's own. */
+      readonly changing: Changing;
+      /** The application the picker showed chosen when it opened the application flow, which is the value's own. */
       readonly app: string | null;
       readonly opener: null;
     };
@@ -117,7 +119,7 @@ export function waiting(flow: AutomationFlow, draft: Draft): AutomationFlow {
  * chosen. The opener keeps that application, so it shows again as the user left it.
  */
 export function valueFor(opener: AutomationFlow, app: string): ValueFlow {
-  return { kind: 'value', fixing: null, app, opener: { ...opener, app } };
+  return { kind: 'value', changing: null, app, opener: { ...opener, app } };
 }
 
 /**
@@ -178,13 +180,21 @@ const PAGE_NAMES: Readonly<Record<Flow['kind'], string>> = {
   application: 'Applications',
 };
 
+/** A value flow as a breadcrumb names it: a new value, or the fix or the edit of a saved one. */
+function changeName(changing: Changing | null): string {
+  if (changing === null) {
+    return 'New value';
+  }
+  return `${changing.how === 'fix' ? 'Fix' : 'Edit'} ${changing.value.name}`;
+}
+
 /** A waiting flow as a breadcrumb names it. */
 function crumbName(flow: Opener): string {
   switch (flow.kind) {
     case 'automation':
       return flow.existing?.name ?? 'New automation';
     case 'value':
-      return flow.fixing === null ? 'New value' : `Fix ${flow.fixing.value.name}`;
+      return changeName(flow.changing);
     case 'reference':
       return flow.existing?.reference.name ?? 'New reference';
   }
@@ -241,12 +251,16 @@ const LOST: Readonly<Record<Flow['kind'], string>> = {
   application: 'The changes to this application are lost.',
 };
 
+/** What leaving an edit of a saved value before it is saved loses: the value itself stays as it is saved. */
+const EDIT_LOST = 'The screenshots and the changes to this value are lost.';
+
 /**
  * What the question before leaving `flow` says: what the open flow loses when it `reported` work, and the changes
  * to an automation that waits under it.
  */
 export function lostText(flow: Flow, reported: Held): string {
-  const here = reported === 'nothing' ? null : LOST[flow.kind];
+  const lost = flow.kind === 'value' && flow.changing?.how === 'edit' ? EDIT_LOST : LOST[flow.kind];
+  const here = reported === 'nothing' ? null : lost;
   const under = waitingUnder(flow).some(holdsWork)
     ? `The unsaved changes to the automation are lost${here === null ? '' : ' too'}.`
     : null;
