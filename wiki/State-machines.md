@@ -691,15 +691,23 @@ stateDiagram-v2
     Clicking --> Answered: the click was sent, and to which window
     Clicking --> Failed: why it was not sent
     Finding --> Idle: the target changes
-    Clicking --> Idle: the target changes
     Answered --> Idle: the target changes
     Failed --> Idle: the target changes
 ```
 
-- **Finding** and **Clicking.** The owner thread is asked, and the try keeps
-  its attempt number. The screen's buttons wait meanwhile, as they do while a
-  drawn picture is kept. Both commands end by themselves: the owner waits at
-  most a second for a picture's frame.
+- **Finding** and **Clicking.** The try starts with the press and keeps its
+  attempt number. A drawn picture is kept first, then the owner thread is
+  asked, and the screen's buttons wait meanwhile. Every way the try can end
+  answers it, a target that is not set up included, so none stays under way.
+  Both commands end by themselves. The owner waits at most a second for a
+  picture's frame. For a click sent to the window it then waits at most half
+  a second for the windows' answers to where the place is on them, and for a
+  click with the cursor about a tenth of a second while the buttons are held.
+- **Clicking locks the target.** A click that is being sent is a real click,
+  so from the press until its answer the button, **How to click**, where it
+  clicks, and the application cannot change. A click that was sent therefore
+  always shows its answer. `tryStep` also keeps **Clicking** through a change
+  that reaches it all the same.
 - **Answered.** **Find it now** answers where the click would land, which the
   live view marks. **Click it now** answers that the click was sent and names
   the window. When that is another window than the one the screen shows, the
@@ -708,13 +716,13 @@ stateDiagram-v2
   window that refused the click. The next try or a change of the target
   leaves the state.
 - **The target changes.** A change of where the click lands goes back to
-  **Idle** from every state. A change of the button or of **How to click**
-  does too, except that it keeps where **Find it now** said the click would
-  land, since neither moves that place.
-- **A late answer.** The settings stay enabled while a try is under way. An
-  answer whose attempt number is not that of the try under way is dropped,
-  so the answer to a click sent one way never shows after the user chose the
-  other. The click itself was sent: only its answer is dropped.
+  **Idle** from every state but **Clicking**. A change of the button or of
+  **How to click** does too, except that it keeps where **Find it now** said
+  the click would land, since neither moves that place.
+- **A late answer.** The settings stay enabled while **Find it now** looks,
+  which clicks nothing. An answer whose attempt number is not that of the
+  try under way is dropped, so where an earlier target would land never
+  shows for the target as it is set up now.
 
 ### Update notice
 

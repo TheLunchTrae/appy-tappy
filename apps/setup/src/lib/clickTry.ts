@@ -14,7 +14,8 @@ export type TryAnswer =
 
 /**
  * Trying a click target. A try under way has a number, so an answer that comes back after the target changed, or after
- * a later try started, is told apart and dropped.
+ * a later try started, is told apart and dropped. A find can be dropped that way. A click cannot: it is a real click
+ * once it is asked for, so the target stays as it is until its answer shows.
  */
 export type Try =
   | { readonly kind: 'idle' }
@@ -31,7 +32,8 @@ export type TryEvent =
   | { readonly kind: 'failed'; readonly attempt: number; readonly message: string }
   /**
    * The user changed the target: `place` for where it clicks, which no earlier answer speaks for, or `press` for the
-   * button or the way it clicks, which leaves where it would land as it was.
+   * button or the way it clicks, which leaves where it would land as it was. The screen lets nothing change while a
+   * click is being sent, and a change that comes then all the same does not drop the click's answer.
    */
   | { readonly kind: 'changed'; readonly what: 'place' | 'press' };
 
@@ -45,6 +47,9 @@ export function tryStep(state: Try, event: TryEvent): Try {
     case 'click':
       return { kind: 'clicking', attempt: event.attempt };
     case 'changed':
+      if (state.kind === 'clicking') {
+        return state;
+      }
       return event.what === 'press' && state.kind === 'answered' && state.answer.kind === 'found' ? state : IDLE;
     case 'answered':
     case 'failed':

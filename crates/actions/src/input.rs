@@ -2,7 +2,7 @@
 //! windows that [`Input`] reads and sends to.
 
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_config::action::Modifier;
 use appytappy_config::anti_cheat::ProcessId;
@@ -95,6 +95,9 @@ pub trait Input {
     /// Waits for `time`, while pressed keys or buttons are held down.
     fn hold(&mut self, time: Duration);
 
+    /// The time now, by a clock that never goes back.
+    fn now(&mut self) -> Instant;
+
     /// The screen place (`x`, `y`), in screen pixels, in the pixels that
     /// `window`'s program counts the screen in. They differ for a window
     /// that Windows stretches, because its program does not follow its
@@ -160,16 +163,16 @@ pub trait Input {
     fn bounds(&mut self, window: u64) -> io::Result<(i32, i32, i32, i32)>;
 
     /// What `window` answers when Windows asks where on it the screen place
-    /// `at` is, as it does to route the mouse (`WM_NCHITTEST`). It waits a
-    /// moment for the window's answer.
+    /// `at` is, as it does to route the mouse (`WM_NCHITTEST`). It waits
+    /// for the window's answer, at most `wait`.
     ///
     /// # Errors
     ///
-    /// Returns [`io::ErrorKind::PermissionDenied`] when Windows blocks
-    /// messages to the window, as [`Input::post`] does, and the operating
-    /// system's error otherwise, including for a window that did not answer
-    /// in time.
-    fn hit_test(&mut self, window: u64, at: (i16, i16)) -> io::Result<usize>;
+    /// Returns [`io::ErrorKind::TimedOut`] when the window did not answer
+    /// within `wait`, [`io::ErrorKind::PermissionDenied`] when Windows
+    /// blocks messages to the window, as [`Input::post`] does, and the
+    /// operating system's error otherwise.
+    fn hit_test(&mut self, window: u64, at: (i16, i16), wait: Duration) -> io::Result<usize>;
 
     /// The style bits of `window`'s class, as Windows keeps them, which say
     /// whether the window is told about double clicks. A window that closed
@@ -194,7 +197,8 @@ pub trait Input {
 }
 
 /// The input of a platform AppyTappy does not support: every call fails
-/// with [`io::ErrorKind::Unsupported`], and [`Input::hold`] does not wait.
+/// with [`io::ErrorKind::Unsupported`], except that [`Input::hold`] does
+/// not wait and [`Input::now`] reads the clock.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Unsupported;
 
@@ -248,6 +252,10 @@ impl Input for Unsupported {
 
     fn hold(&mut self, _time: Duration) {}
 
+    fn now(&mut self) -> Instant {
+        Instant::now()
+    }
+
     fn own_place(&mut self, _window: u64, _x: i32, _y: i32) -> io::Result<(i32, i32)> {
         unsupported()
     }
@@ -276,7 +284,7 @@ impl Input for Unsupported {
         unsupported()
     }
 
-    fn hit_test(&mut self, _window: u64, _at: (i16, i16)) -> io::Result<usize> {
+    fn hit_test(&mut self, _window: u64, _at: (i16, i16), _wait: Duration) -> io::Result<usize> {
         unsupported()
     }
 
@@ -327,7 +335,7 @@ mod tests {
             input.below(7).map(drop),
             input.style(7).map(drop),
             input.bounds(7).map(drop),
-            input.hit_test(7, (0, 0)).map(drop),
+            input.hit_test(7, (0, 0), Duration::ZERO).map(drop),
             input.class_style(7).map(drop),
             input.post(7, message),
         ]

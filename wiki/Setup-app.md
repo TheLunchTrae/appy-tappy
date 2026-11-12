@@ -95,8 +95,9 @@ This page covers what the user guide leaves out.
   button's press: `click_now` in the owner checks the anti-cheat classes,
   reads the click's picture from its file, and has the host place and send it
   as the runtime does ([Trying a click](Actions.md#trying-a-click)). The
-  owner thread waits for it, up to a second for a picture's frame, so other
-  commands wait meanwhile. It answers the window the click went to, and the
+  owner thread waits for it, up to a second for a picture's frame and half a
+  second more for the answers of the windows a click sent to the window asks,
+  so other commands wait meanwhile. It answers the window the click went to, and the
   screen says when that is not the window it picked. While anti-cheat blocks
   the click, the button stays in the tab order with `aria-disabled`, is
   described by the note that says why, and sends nothing. The click's return

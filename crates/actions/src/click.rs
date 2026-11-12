@@ -11,7 +11,7 @@
 //! one thing.
 
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::click::{ClickButton, ClickDelivery};
@@ -66,6 +66,14 @@ const MAX_DEPTH: usize = 64;
 /// How many child windows of one window a click sent as messages looks
 /// through, for the same reason. A window has far fewer.
 const MAX_SIBLINGS: usize = 4096;
+
+/// How long the windows under a click sent as messages may take in all to
+/// answer where its place is on them, so a click cannot hold up the actions
+/// behind it for longer, however many windows it asks.
+const WALK_TIME: Duration = Duration::from_millis(500);
+
+/// How long one window may take to answer where a place is on it.
+const ASK_TIME: Duration = Duration::from_millis(200);
 
 /// The window style bit of a window that is not hidden: `WS_VISIBLE`.
 const STYLE_VISIBLE: u32 = 0x1000_0000;
@@ -394,15 +402,38 @@ struct Landing {
 /// A window that is disabled takes no click at all, as while it shows a
 /// dialog. The place is first put in the pixels the window's program
 /// counts the screen in, which are not the screen's own for a window that
-/// Windows stretches.
+/// Windows stretches. The windows asked have [`WALK_TIME`] in all to
+/// answer.
 fn landing<I: Input>(input: &mut I, click: &PlacedClick) -> Result<Landing, ActionError> {
     if disabled(input.style(click.window)?) {
         return Err(ActionError::WindowDisabled(click.app.clone()));
     }
     let (x, y) = click.at;
     let place = input.own_place(click.window, x, y)?;
-    under(input, click.window, place, MAX_DEPTH, &click.app)?
+    let started = input.now();
+    let walk = Walk {
+        app: &click.app,
+        // A clock that cannot count that far leaves no time to ask.
+        deadline: started.checked_add(WALK_TIME).unwrap_or(started),
+    };
+    under(input, click.window, place, MAX_DEPTH, walk)?
         .ok_or_else(|| ActionError::Unreachable(click.app.clone()))
+}
+
+/// What looking for the window under a click keeps all the way down.
+#[derive(Debug, Clone, Copy)]
+struct Walk<'click> {
+    /// The application's name, for messages.
+    app: &'click str,
+    /// When the windows must have answered.
+    deadline: Instant,
+}
+
+/// How long a window asked at `now` may take to answer, or `None` once
+/// `deadline` has come: [`ASK_TIME`], or what is left when that is less.
+fn ask_time(now: Instant, deadline: Instant) -> Option<Duration> {
+    let left = deadline.saturating_duration_since(now);
+    (!left.is_zero()).then(|| left.min(ASK_TIME))
 }
 
 /// The window that the mouse reaches at `place` in `window` or the windows
@@ -418,15 +449,18 @@ fn landing<I: Input>(input: &mut I, click: &PlacedClick) -> Result<Landing, Acti
 /// it; nowhere the mouse stops, as a label or a group box answers, so the
 /// click goes on to the window behind; or on another part, such as a title
 /// bar, a border, or a scroll bar, which gets other messages that a click
-/// does not send.
+/// does not send. A window gets [`ASK_TIME`] to answer, and no longer than
+/// what is left until `walk`'s deadline.
 fn under<I: Input>(
     input: &mut I,
     window: u64,
     place: (i32, i32),
     depth: usize,
-    app: &str,
+    walk: Walk<'_>,
 ) -> Result<Option<Landing>, ActionError> {
+    let Walk { app, deadline } = walk;
     let unreachable = || ActionError::Unreachable(app.to_owned());
+    let too_slow = || ActionError::TooSlow(app.to_owned());
     let Some(deeper) = depth.checked_sub(1) else {
         return Err(unreachable());
     };
@@ -441,7 +475,7 @@ fn under<I: Input>(
             if !hidden(style)
                 && !disabled(style)
                 && holds(input.bounds(child)?, place)
-                && let Some(found) = under(input, child, place, deeper, app)?
+                && let Some(found) = under(input, child, place, deeper, walk)?
             {
                 return Ok(Some(found));
             }
@@ -452,9 +486,14 @@ fn under<I: Input>(
         }
     }
     let asked = short(place).ok_or_else(unreachable)?;
-    let answer = input
-        .hit_test(window, asked)
-        .map_err(|error| refused(error, app))?;
+    let wait = ask_time(input.now(), deadline).ok_or_else(too_slow)?;
+    let answer = input.hit_test(window, asked, wait).map_err(|error| {
+        if error.kind() == io::ErrorKind::TimedOut {
+            too_slow()
+        } else {
+            refused(error, app)
+        }
+    })?;
     match hit_code(answer) {
         HIT_THROUGH => Ok(None),
         HIT_CLIENT => short(point)
@@ -654,6 +693,14 @@ mod tests {
         windows: Windows,
         /// How asking a window where a place is on it fails, if it does.
         asking_fails: Option<io::ErrorKind>,
+        /// When the clock started, once it was read.
+        started: Option<Instant>,
+        /// How long the clock has run since.
+        elapsed: Duration,
+        /// How long each window takes to answer where a place is on it.
+        answer_takes: Duration,
+        /// How long each window asked was given to answer.
+        waits: Vec<Duration>,
         /// How each next post fails, first first, with `None` for one that
         /// works; once it runs out, a post works.
         posts_fail: Vec<Option<io::ErrorKind>>,
@@ -813,10 +860,22 @@ mod tests {
             Ok(self.pane(window)?.edges())
         }
 
-        fn hit_test(&mut self, window: u64, at: (i16, i16)) -> io::Result<usize> {
+        fn now(&mut self) -> Instant {
+            self.started
+                .get_or_insert_with(Instant::now)
+                .checked_add(self.elapsed)
+                .expect("a short time")
+        }
+
+        fn hit_test(&mut self, window: u64, at: (i16, i16), wait: Duration) -> io::Result<usize> {
             if let Some(kind) = self.asking_fails {
                 return Err(kind.into());
             }
+            self.waits.push(wait);
+            self.elapsed = self
+                .elapsed
+                .checked_add(self.answer_takes)
+                .expect("a short time");
             let place = (i32::from(at.0), i32::from(at.1));
             let pane = self.pane(window)?;
             let (left, top) = pane.origin;
@@ -1526,6 +1585,47 @@ mod tests {
     }
 
     #[test]
+    fn the_windows_asked_have_half_a_second_in_all_to_answer() {
+        // The mouse goes through windows 12 and 13 to window 9, so a click
+        // asks all three, each of which takes `each` to answer.
+        let asked = |each: Duration| {
+            let mut desk = behind();
+            desk.panes.entry(9).or_default().children = vec![12, 13];
+            for window in [12, 13] {
+                desk.panes.insert(
+                    window,
+                    Pane {
+                        origin: (90, 180),
+                        size: (50, 40),
+                        answers: Some(usize::MAX),
+                        ..Pane::default()
+                    },
+                );
+            }
+            desk.answer_takes = each;
+            let sent = first(&mut desk, (100, 200));
+            (sent, desk.waits, desk.log)
+        };
+        let ms = Duration::from_millis;
+        // Each window gets 200 ms, and the last one only what is left.
+        let (sent, waits, _) = asked(ms(200));
+        assert_eq!(sent.ok().as_deref(), Some("post 9 Move 40,50"));
+        assert_eq!(waits, [ms(200), ms(200), ms(100)]);
+        let (sent, waits, _) = asked(ms(249));
+        assert_eq!(sent.ok().as_deref(), Some("post 9 Move 40,50"));
+        assert_eq!(waits, [ms(200), ms(200), ms(2)]);
+        // With nothing left, the last window is not asked, and nothing is
+        // sent.
+        let (sent, waits, log) = asked(ms(250));
+        assert!(
+            matches!(&sent, Err(ActionError::TooSlow(app)) if app == "Target App"),
+            "{sent:?}"
+        );
+        assert_eq!(waits, [ms(200), ms(200)]);
+        assert_eq!(log, Vec::<String>::new());
+    }
+
+    #[test]
     fn windows_without_end_get_no_message() {
         let mut desk = behind();
         desk.windows = Windows::Endless;
@@ -1558,7 +1658,12 @@ mod tests {
         desk.asking_fails = Some(io::ErrorKind::TimedOut);
         assert!(matches!(
             click(&mut desk, &posted(ClickButton::Left), &watched()),
-            Err(ActionError::Os(error)) if error.kind() == io::ErrorKind::TimedOut
+            Err(ActionError::TooSlow(app)) if app == "Target App"
+        ));
+        desk.asking_fails = Some(io::ErrorKind::BrokenPipe);
+        assert!(matches!(
+            click(&mut desk, &posted(ClickButton::Left), &watched()),
+            Err(ActionError::Os(error)) if error.kind() == io::ErrorKind::BrokenPipe
         ));
         assert_eq!(desk.log, Vec::<String>::new());
 

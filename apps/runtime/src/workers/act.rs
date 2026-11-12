@@ -522,9 +522,18 @@ mod tests {
             Ok((1000, 500, 1200, 600))
         }
 
-        fn hit_test(&mut self, _window: u64, _at: (i16, i16)) -> io::Result<usize> {
+        fn hit_test(
+            &mut self,
+            _window: u64,
+            _at: (i16, i16),
+            _wait: Duration,
+        ) -> io::Result<usize> {
             // The place is in the window's client area.
             Ok(1)
+        }
+
+        fn now(&mut self) -> Instant {
+            Instant::now()
         }
 
         fn class_style(&mut self, _window: u64) -> io::Result<u32> {

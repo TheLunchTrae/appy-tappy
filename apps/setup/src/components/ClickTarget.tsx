@@ -316,13 +316,16 @@ function TargetStage({
   const pictureSize = shownPicture === null ? null : { width: shownPicture.width, height: shownPicture.height };
   const area = drawnHere === null || pictureSize === null ? null : searchArea(drawnHere.region, pictureSize);
 
+  // A click that is being sent is a real click, so the target stays as it is until the click's answer shows.
+  const sending = tried.kind === 'clicking';
+
   const changed = (): void => {
     tryNext({ kind: 'changed', what: 'place' });
     setError(null);
   };
 
   const setRegion = (region: Rect, selection: SelectionSpec | null): void => {
-    if (selected === null) {
+    if (selected === null || sending) {
       return;
     }
     changed();
@@ -330,7 +333,7 @@ function TargetStage({
   };
 
   const selectWith = (steps: SelectionSpec['steps']): void => {
-    if (selected === null) {
+    if (selected === null || sending) {
       return;
     }
     const on = selected;
@@ -369,7 +372,7 @@ function TargetStage({
   };
   const onPoint = (event: PointerEvent<HTMLDivElement>): void => {
     const point = pointAt(event);
-    if (point === null || pictureSize === null) {
+    if (point === null || pictureSize === null || sending) {
       return;
     }
     if (mode === 'spot') {
@@ -420,7 +423,8 @@ function TargetStage({
     return base.kind === 'picture' ? { ...base, search, press: drawn.press, tolerance } : base;
   };
 
-  const run = (task: (at: ClickAtDef) => Promise<void>): void => {
+  /** Runs `task` on the target as set up now, and hands `problem` why when there is no target to run it on. */
+  const run = (task: (at: ClickAtDef) => Promise<void>, problem: (message: string) => void = setError): void => {
     setBusy(true);
     setError(null);
     background(
@@ -428,14 +432,14 @@ function TargetStage({
         try {
           const at = await target();
           if (at === null) {
-            setError(
+            problem(
               mode === 'spot' ? 'Click where the click should land first.' : 'Draw the picture to click on first.',
             );
             return;
           }
           await task(at);
         } catch (caught: unknown) {
-          setError(caught instanceof Error ? caught.message : errorText(caught));
+          problem(caught instanceof Error ? caught.message : errorText(caught));
         } finally {
           setBusy(false);
         }
@@ -448,18 +452,22 @@ function TargetStage({
     return attempts.current;
   };
 
+  // A try starts with the press, and every way it can end answers it, so none stays under way.
   const findNow = (): void => {
     const attempt = nextAttempt();
+    const failed = (message: string): void => {
+      tryNext({ kind: 'failed', attempt, message });
+    };
+    tryNext({ kind: 'find', attempt });
     run(async (at) => {
-      tryNext({ kind: 'find', attempt });
       try {
         tryNext({ kind: 'answered', attempt, answer: { kind: 'found', at: await findClick(at) } });
       } catch (caught: unknown) {
-        tryNext({ kind: 'failed', attempt, message: errorText(caught) });
+        failed(errorText(caught));
       }
       // The result shows on the live window.
       setSelected(null);
-    });
+    }, failed);
   };
 
   const use = (): void => {
@@ -487,8 +495,12 @@ function TargetStage({
     }
     const shown = window.handle;
     const attempt = nextAttempt();
+    const failed = (message: string): void => {
+      tryNext({ kind: 'failed', attempt, message });
+    };
+    // From here until its answer, the button, the way to click, and the place cannot change.
+    tryNext({ kind: 'click', attempt });
     run(async (at) => {
-      tryNext({ kind: 'click', attempt });
       try {
         const sent = await clickNow({ watched, app, button, delivery, returnFocus, at });
         const elsewhere = sent.window !== shown;
@@ -498,9 +510,9 @@ function TargetStage({
           answer: { kind: 'sent', message: sentText(delivery, appName, sent.title, elsewhere), elsewhere },
         });
       } catch (caught: unknown) {
-        tryNext({ kind: 'failed', attempt, message: errorText(caught) });
+        failed(errorText(caught));
       }
-    });
+    }, failed);
   };
   const landed = tried.kind === 'answered' && tried.answer.kind === 'found' ? tried.answer.at : null;
   const elsewhere = tried.kind === 'answered' && tried.answer.kind === 'sent' && tried.answer.elsewhere;
@@ -588,7 +600,7 @@ function TargetStage({
                 shown={shown}
                 region={drawnHere?.region ?? null}
                 label="Picture"
-                editable
+                editable={!sending}
                 picking={false}
                 tool={tool}
                 onRegion={(region) => {
@@ -685,6 +697,7 @@ function TargetStage({
                 key={option}
                 type="button"
                 aria-pressed={mode === option}
+                disabled={sending}
                 onClick={() => {
                   changed();
                   setMode(option);
@@ -764,6 +777,7 @@ function TargetStage({
                   min={0}
                   max={LIMITS.maxTolerance}
                   value={tolerance}
+                  disabled={sending}
                   aria-label="How alike it must look"
                   onChange={(event) => {
                     changed();
@@ -778,6 +792,7 @@ function TargetStage({
                   max={LIMITS.maxTolerance}
                   aria-describedby="hint-click-tolerance"
                   value={tolerance}
+                  disabled={sending}
                   onChange={(event) => {
                     const value = Number.parseInt(event.target.value, 10);
                     if (Number.isInteger(value) && value >= 0 && value <= LIMITS.maxTolerance) {
@@ -820,6 +835,7 @@ function TargetStage({
                 key={option}
                 type="button"
                 aria-pressed={button === option}
+                disabled={sending}
                 onClick={() => {
                   tryNext({ kind: 'changed', what: 'press' });
                   onButton(option);
@@ -845,6 +861,7 @@ function TargetStage({
                 key={option}
                 type="button"
                 aria-pressed={delivery === option}
+                disabled={sending}
                 onClick={() => {
                   tryNext({ kind: 'changed', what: 'press' });
                   onDelivery(option);

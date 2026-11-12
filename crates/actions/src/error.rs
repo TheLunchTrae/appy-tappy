@@ -62,6 +62,10 @@ pub enum ActionError {
     /// application's window is disabled and takes no input, as while it
     /// shows a dialog.
     WindowDisabled(String),
+    /// A click sent as messages was not sent, because the named
+    /// application's windows took too long to answer where its place is on
+    /// them.
+    TooSlow(String),
     /// A click sent as messages was not sent, because Windows blocks
     /// messages to the named application's window: its program runs with
     /// more rights than AppyTappy, as one started as administrator does.
@@ -124,6 +128,11 @@ impl fmt::Display for ActionError {
                 "the click was not sent, because {target}'s window takes no clicks now, as \
                  while it shows a dialog"
             ),
+            Self::TooSlow(target) => write!(
+                formatter,
+                "the click was not sent, because {target}'s windows took too long to answer where \
+                 its place is on them"
+            ),
             Self::MessageBlocked(target) => write!(
                 formatter,
                 "the click was not sent, because Windows blocks messages to {target}, which runs \
@@ -156,6 +165,7 @@ impl Error for ActionError {
             | Self::CursorBlocked(_)
             | Self::Unreachable(_)
             | Self::WindowDisabled(_)
+            | Self::TooSlow(_)
             | Self::MessageBlocked(_)
             | Self::Unplaced
             | Self::FocusNotReturned => None,
@@ -215,6 +225,10 @@ mod tests {
             (
                 ActionError::WindowDisabled("Target App".to_owned()),
                 "Target App's window takes no clicks now",
+            ),
+            (
+                ActionError::TooSlow("Target App".to_owned()),
+                "Target App's windows took too long",
             ),
             (
                 ActionError::MessageBlocked("Target App".to_owned()),

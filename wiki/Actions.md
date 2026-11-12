@@ -298,7 +298,9 @@ where the place is on it (`WM_NCHITTEST`, sent with `SendMessageTimeoutW`):
 It goes at most 64 windows deep and through at most 4,096 children of one
 window, far more than Windows has. Unlike the mouse, it asks every child in
 turn whichever thread owns it; the mouse goes on behind a window it goes
-through only to windows of the same thread.
+through only to windows of the same thread. While the adapter waits for a
+window's answer, its thread handles no message sent to it (`SMTO_BLOCK`), so
+nothing else runs on that thread in the middle of a click.
 
 A window that Windows stretches, because its program does not follow its
 monitor's scale, counts in its own pixels, and its mouse messages name places
@@ -342,9 +344,12 @@ What a click sent as messages cannot promise:
   window's own pixels rests on what Microsoft documents, as above, and on no
   check of a stretched window yet: the CI display is not scaled, so the
   adapter's test of it shows only that the calls work.
-- **A busy window holds the click up for a moment.** Asking a window where a
-  place is on it waits up to 200 ms for the answer. A window that does not
-  answer in time gets no click, and the log says so.
+- **Busy windows hold the click up for a moment.** Each window that is asked
+  where the place is on it has up to 200 ms to answer, and all the windows a
+  click asks have 500 ms between them, however many they are. When a window
+  does not answer in time, or the 500 ms run out, the click is not sent, and
+  the log says so. The actions behind the click wait that long at most for
+  the answers, and so does the setup app during **Click it now**.
 - **The application may think the pointer stays.** The messages say that the
   pointer came to the click's place, and nothing says that it left, so an
   application that highlights what the pointer is over may keep the highlight

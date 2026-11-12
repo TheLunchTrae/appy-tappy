@@ -23,12 +23,27 @@ describe('trying a click target', () => {
     });
   });
 
-  test('an answer to a try that the user changed the target under is dropped', () => {
+  test('an answer to a find that the user changed the target under is dropped', () => {
     for (const what of ['place', 'press'] as const) {
-      const changed = after({ kind: 'click', attempt: 1 }, { kind: 'changed', what });
+      const changed = after({ kind: 'find', attempt: 1 }, { kind: 'changed', what });
       expect(changed).toEqual(IDLE);
-      expect(tryStep(changed, { kind: 'answered', attempt: 1, answer: sent })).toEqual(IDLE);
+      expect(tryStep(changed, { kind: 'answered', attempt: 1, answer: found })).toEqual(IDLE);
       expect(tryStep(changed, { kind: 'failed', attempt: 1, message: 'Late.' })).toEqual(IDLE);
+    }
+  });
+
+  test('a click that is being sent keeps its try through a change, so its answer always shows', () => {
+    for (const what of ['place', 'press'] as const) {
+      const sending = after({ kind: 'click', attempt: 1 }, { kind: 'changed', what });
+      expect(sending).toEqual({ kind: 'clicking', attempt: 1 });
+      expect(tryStep(sending, { kind: 'answered', attempt: 1, answer: sent })).toEqual({
+        kind: 'answered',
+        answer: sent,
+      });
+      expect(tryStep(sending, { kind: 'failed', attempt: 1, message: 'No window.' })).toEqual({
+        kind: 'failed',
+        message: 'No window.',
+      });
     }
   });
 

@@ -702,8 +702,17 @@ mod tests {
             no_mouse()
         }
 
-        fn hit_test(&mut self, _window: u64, _at: (i16, i16)) -> io::Result<usize> {
+        fn hit_test(
+            &mut self,
+            _window: u64,
+            _at: (i16, i16),
+            _wait: Duration,
+        ) -> io::Result<usize> {
             no_mouse()
+        }
+
+        fn now(&mut self) -> Instant {
+            Instant::now()
         }
 
         fn class_style(&mut self, _window: u64) -> io::Result<u32> {

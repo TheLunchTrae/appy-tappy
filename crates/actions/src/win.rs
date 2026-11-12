@@ -52,7 +52,8 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
 use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, HWND, LPARAM, POINT, RECT, WPARAM,
+    ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, ERROR_SUCCESS, HWND, LPARAM, POINT, RECT, SetLastError,
+    WPARAM,
 };
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
@@ -86,8 +87,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GA_ROOT, GCL_STYLE, GET_WINDOW_CMD, GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetAncestor,
     GetClassLongPtrW, GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics,
     GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsHungAppWindow,
-    PostMessageW, SM_SWAPBUTTON, SMTO_ABORTIFHUNG, SW_SHOWNOACTIVATE, SendMessageTimeoutW,
-    SetCursorPos, SetForegroundWindow, WM_NCHITTEST, WindowFromPoint,
+    PostMessageW, SM_SWAPBUTTON, SMTO_ABORTIFHUNG, SMTO_BLOCK, SW_SHOWNOACTIVATE,
+    SendMessageTimeoutW, SetCursorPos, SetForegroundWindow, WM_NCHITTEST, WindowFromPoint,
 };
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
@@ -102,10 +103,6 @@ const MEDIA_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How often a pending media request is checked.
 const MEDIA_POLL: Duration = Duration::from_millis(5);
-
-/// How long, in milliseconds, a window may take to answer where a place is
-/// on it, so a window that is busy cannot stall the action worker.
-const HIT_TEST_WAIT_MS: u32 = 200;
 
 /// How long opening a program, file, or link may take before it counts as
 /// failed, so a program that is slow to start cannot stall the action
@@ -587,16 +584,23 @@ impl Input for WindowsInput {
         thread::sleep(time);
     }
 
+    fn now(&mut self) -> Instant {
+        Instant::now()
+    }
+
     fn own_place(&mut self, window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
         let handle = handle(window)?;
         let mut point = POINT { x, y };
+        forget_last_error();
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `point` is a live local the call reads and writes, and the
         // call fails without harm when no such window exists.
         let converted =
             unsafe { PhysicalToLogicalPointForPerMonitorDPI(Some(handle), &raw mut point) };
         if !converted.as_bool() {
-            return Err(gone());
+            return Err(failed(
+                "the place could not be converted to the window's own pixels",
+            ));
         }
         Ok((point.x, point.y))
     }
@@ -656,40 +660,48 @@ impl Input for WindowsInput {
         Ok((edges.left, edges.top, edges.right, edges.bottom))
     }
 
-    fn hit_test(&mut self, window: u64, at: (i16, i16)) -> io::Result<usize> {
+    fn hit_test(&mut self, window: u64, at: (i16, i16), wait: Duration) -> io::Result<usize> {
         let handle = handle(window)?;
         let place = isize::try_from(pack(at)).map_err(io::Error::other)?;
+        let wait = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
         let mut answer = 0_usize;
+        // The call does not always say why it failed, so an error that an
+        // earlier call left is cleared first.
+        forget_last_error();
+        // While it waits, this thread handles no message that another thread
+        // sends it (`SMTO_BLOCK`). Without the flag, Windows lets such a
+        // message run during the wait, and so in the middle of a click.
+        // Nothing sends the clicking threads a message today: neither the
+        // action thread nor the setup app's owner thread has a window, and
+        // the action thread is in COM's multithreaded apartment, whose calls
+        // arrive on other threads and not as window messages, as a
+        // single-threaded apartment's do. The flag keeps a click whole on
+        // any thread that makes this call. Its cost is that a window which
+        // sends this thread a message while it answers waits for nothing,
+        // so the wait runs out and the click is not sent.
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `answer` is a live local the call writes before it
         // returns. The call hands the window two integers, waits no longer
-        // than its timeout for the window's answer, and fails without harm
-        // when no such window exists.
+        // than `wait` for the window's answer, and fails without harm when
+        // no such window exists.
         let asked = unsafe {
             SendMessageTimeoutW(
                 handle,
                 WM_NCHITTEST,
                 WPARAM(0),
                 LPARAM(place),
-                SMTO_ABORTIFHUNG,
-                HIT_TEST_WAIT_MS,
+                SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                wait,
                 Some(&raw mut answer),
             )
         };
         if asked.0 != 0 {
             return Ok(answer);
         }
-        // Windows refuses a message to a window of a program that runs with
-        // more rights than this one, which reads as a denied permission.
-        let error = io::Error::last_os_error();
-        // A timeout may leave no error code behind.
-        if error.raw_os_error() == Some(0) {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "the window did not answer where the place is on it",
-            ));
-        }
-        Err(error)
+        // The system's error says why: the wait ran out, or Windows refuses
+        // a message to a window of a program that runs with more rights
+        // than this one, which reads as a denied permission.
+        Err(failed("the window did not answer where the place is on it"))
     }
 
     fn class_style(&mut self, window: u64) -> io::Result<u32> {
@@ -990,6 +1002,51 @@ fn related(window: HWND, relation: GET_WINDOW_CMD) -> Option<u64> {
     found.ok().and_then(number)
 }
 
+/// A Windows call that failed: what it was for, and the system's error.
+#[derive(Debug)]
+struct Failed {
+    /// What the call was for, as a clause.
+    doing: &'static str,
+    /// The system's last error after the call.
+    cause: io::Error,
+}
+
+impl fmt::Display for Failed {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // A call that leaves no error code behind did not say why.
+        if self.cause.raw_os_error() == Some(0) {
+            write!(formatter, "{}, and Windows gave no reason", self.doing)
+        } else {
+            write!(formatter, "{}: {}", self.doing, self.cause)
+        }
+    }
+}
+
+impl std::error::Error for Failed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
+
+/// The error for a call that says only that it failed: `doing`, what the
+/// call was for, with the system's last error as its kind and its cause.
+/// [`forget_last_error`] runs before such a call, so the error is its own.
+fn failed(doing: &'static str) -> io::Error {
+    let cause = io::Error::last_os_error();
+    io::Error::new(cause.kind(), Failed { doing, cause })
+}
+
+/// Clears this thread's last error, before a call that does not always set
+/// one when it fails.
+fn forget_last_error() {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes one integer and changes only this thread's own
+    // last error.
+    unsafe {
+        SetLastError(ERROR_SUCCESS);
+    }
+}
+
 /// The error for a window that Windows no longer knows, where the call says
 /// only that it failed.
 fn gone() -> io::Error {
@@ -1167,6 +1224,7 @@ impl fmt::Debug for Lister {
 mod tests {
     use std::env;
     use std::os::windows::ffi::OsStrExt;
+    use std::time::Duration;
 
     use appytappy_config::action::OpenTarget;
     use appytappy_config::anti_cheat::ProcessId;
@@ -1499,11 +1557,15 @@ mod tests {
             i16::try_from(x).expect("near"),
             i16::try_from(y).expect("near"),
         );
-        assert_eq!(low(input.hit_test(lower, at).expect("answered")), HTCLIENT);
-        assert_eq!(low(input.hit_test(top, at).expect("answered")), HTCLIENT);
+        let wait = Duration::from_millis(200);
+        let asked = |input: &mut WindowsInput, window| {
+            low(input.hit_test(window, at, wait).expect("answered"))
+        };
+        assert_eq!(asked(&mut input, lower), HTCLIENT);
+        assert_eq!(asked(&mut input, top), HTCLIENT);
         let label = window.child(w!("STATIC"), WS_VISIBLE, 50, 150);
         assert_eq!(
-            low(input.hit_test(label, at).expect("answered")),
+            asked(&mut input, label),
             u32::from_ne_bytes(HTTRANSPARENT.to_ne_bytes()),
             "the mouse goes through a label"
         );
@@ -1682,7 +1744,16 @@ mod tests {
         assert_eq!(input.below(gone).expect("looked"), None);
         assert_eq!(input.style(gone).expect("looked"), 0);
         assert_eq!(input.class_style(gone).expect("looked"), 0);
-        assert!(input.hit_test(gone, (0, 0)).is_err());
+        let unanswered = input
+            .hit_test(gone, (0, 0), Duration::from_millis(200))
+            .expect_err("no such window");
+        assert_ne!(unanswered.kind(), std::io::ErrorKind::TimedOut);
+        assert!(
+            unanswered
+                .to_string()
+                .starts_with("the window did not answer where the place is on it"),
+            "{unanswered}"
+        );
         let refused = input.post(gone, message).expect_err("no such window");
         assert_ne!(refused.kind(), std::io::ErrorKind::PermissionDenied);
         // No window at all would mean this thread's own queue.
