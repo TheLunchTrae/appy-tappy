@@ -84,6 +84,37 @@ select **Keep this window** or **Stay** to carry on, as
 State names are up to 32 characters, with no space at either end. Two states
 cannot share a name, ignoring case, and none can be named `none`.
 
+### Show matching pixels
+
+A **Bar fill** and a **Color** check each have a switch under their colors
+that tints the pixels the colors match on the screenshot shown, so you can
+see what a color or a tolerance takes in instead of guessing. The tint
+follows as you pick another color, drag **Tolerance**, or move the region.
+It is magenta or green, whichever stands out more against the color you
+picked, and the screenshot shows through it. The tint is only a guide: it
+changes neither the screenshot nor the value, and turning the switch off
+shows the plain screenshot again. It needs a screenshot, so while the live
+view shows, it asks you to select one.
+
+- **Show matching pixels**, for a bar fill, tints the region's filled pixels
+  in one color and its empty pixels in stripes of the other. Under the
+  switch, AppyTappy counts the filled pixels, the empty ones, and those that
+  are neither. A pixel is neither when it is too far from both colors, such
+  as a border or a label, and the reading leaves it out. If parts of the bar
+  stay untinted, pick the color again on that part.
+- **Show pixels within the tolerance**, for a color check, tints each pixel of
+  the region that is within the tolerance on its own, and counts them. The
+  value itself does not go by single pixels: it compares the region's average
+  color. So under the switch AppyTappy also shows what the value goes by on
+  this screenshot: the region's average color, its distance from the
+  **Color to look for**, and whether the value is yes. The distance is the
+  largest difference in red, green, or blue between the two colors, and the
+  value is yes while the distance is at most the tolerance. A region can read
+  yes with few pixels tinted, or no with many, when its colors average out.
+
+A [reference](References.md#make-a-reference) has the same switch for its
+characters' color.
+
 ## Select the thing in a state
 
 A **State** check compares every pixel of its region, so a background that

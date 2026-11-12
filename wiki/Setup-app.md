@@ -58,6 +58,26 @@ This page covers what the user guide leaves out.
   is ignored. The UI gets the
   selection's box and its runs of selected pixels, and shades the rest of the
   region itself.
+- **Matching pixels.** The preview's tint comes from the owner, never from
+  the page: `match_pixels` takes a screenshot's index, a rectangle of it, and
+  the rule, and answers the pixels the rule takes (`match_preview.rs`). Each
+  rule asks the function its reader asks, so the tint and the reading agree
+  at the tolerance's edge: `DigitReader::is_ink` for a reference's
+  characters, `BarFill::classify` for a bar, and `ColorMatch::near` for a
+  color check, which the check itself asks about the region's average color.
+  A color check's answer carries that average, its distance from the color,
+  and what the check reads on the rectangle. The answer holds each kind of
+  pixel as a count and as runs in the rectangle, spelled as a selection's
+  are. A kind with more than 500,000 runs carries only its count, and the
+  page says that it tints none of them. The page draws the runs
+  (`lib/matchPreview.ts`) on a canvas of the rectangle's own pixels inside
+  the frame that holds the screenshot, placed in fractions of the frame, so
+  the tint stays on its pixels at any size the frame shows at, and under the
+  surface that takes the pointer. The page asks for a reference's characters
+  on the whole screenshot and counts those in the region itself, so moving
+  the region asks nothing. A whole 3840 by 2160 screenshot takes the owner
+  about 25 ms. [State machines](State-machines.md#matching-pixels-preview)
+  maps its requests and answers.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to

@@ -1,5 +1,7 @@
 // The capture screen's fields for selecting the thing in a region, and for the checks that read with no reference.
 
+import type { ReactNode } from 'react';
+
 import { LIMITS } from '../lib/bindings.ts';
 import type { Draft } from '../lib/check.ts';
 import { type SelectTool, SELECT_TOOLS, TOOL_NAMES } from '../lib/selection.ts';
@@ -98,12 +100,14 @@ interface ColorProps {
   readonly draft: Draft;
   readonly picking: ColorTarget | null;
   readonly canPick: boolean;
+  /** The matching pixels preview of these colors. */
+  readonly preview: ReactNode;
   readonly onDraft: (update: (draft: Draft) => Draft) => void;
   readonly onPicking: (target: ColorTarget | null) => void;
 }
 
 /** The fields of a bar fill or a color check, whose colors are picked from a screenshot. */
-export function ColorFields({ draft, picking, canPick, onDraft, onPicking }: ColorProps) {
+export function ColorFields({ draft, picking, canPick, preview, onDraft, onPicking }: ColorProps) {
   const color = (target: ColorTarget, label: string, hint?: string) => (
     <ColorField
       key={target}
@@ -122,6 +126,7 @@ export function ColorFields({ draft, picking, canPick, onDraft, onPicking }: Col
       <>
         {color('filled', 'Filled color', BAR_COLORS_HINT)}
         {color('empty', 'Empty color')}
+        {preview}
       </>
     );
   }
@@ -135,6 +140,7 @@ export function ColorFields({ draft, picking, canPick, onDraft, onPicking }: Col
           onDraft((current) => ({ ...current, tolerance: value }));
         }}
       />
+      {preview}
     </>
   );
 }

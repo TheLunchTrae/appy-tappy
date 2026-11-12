@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Four guards drop such stale messages:
+it was about has gone. Five guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -33,6 +33,10 @@ it was about has gone. Four guards drop such stale messages:
   reader sends back for a discarded recording is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Request numbers.** The capture screen numbers each request of its
+  matching pixels preview (`apps/setup/src/lib/matchPreview.ts`). An answer
+  or a failure that carries another number than the newest request's, or
+  that arrives once the preview is off, is dropped.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -756,6 +760,59 @@ stateDiagram-v2
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
+
+### Matching pixels preview
+
+The capture screen's matching pixels preview
+(`apps/setup/src/lib/matchPreview.ts`, driven by `useMatchPreview.ts`) tints
+the pixels of the screenshot shown that a color setting takes. Its state is
+on the page only: which setting the user turned it on for, the number of the
+request whose answer is awaited, the newest answer, and the newest failure.
+The owner thread keeps nothing for it; each request is one `match_pixels`
+command.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Off
+    Off --> Blocked: the switch is turned on with nothing to ask
+    Off --> Waiting: the switch is turned on
+    Blocked --> Waiting: what was missing arrives
+    Waiting --> Shown: the newest request is answered
+    Waiting --> Failed: the newest request fails
+    Waiting --> Waiting: what to ask changes, which numbers a new request
+    Shown --> Waiting: what to ask changes
+    Failed --> Waiting: what to ask changes
+    Waiting --> Blocked: what to ask goes missing
+    Shown --> Blocked: what to ask goes missing
+    Failed --> Blocked: what to ask goes missing
+    Blocked --> Off: the switch is turned off, or its setting leaves the inspector
+    Waiting --> Off: the switch is turned off, or its setting leaves the inspector
+    Shown --> Off: the switch is turned off, or its setting leaves the inspector
+    Failed --> Off: the switch is turned off, or its setting leaves the inspector
+```
+
+- **What to ask** (`plan`) is the screenshot shown, a rectangle of it, and the
+  rule: a reference's characters on the whole screenshot, or a bar's or a
+  color check's colors in the region. A change to any of them makes a new
+  request with the next number, sent once nothing has changed for 80 ms, so a
+  dragged slider asks when it rests.
+- **Blocked** has nothing to ask and says why under the switch: the live view
+  shows instead of a screenshot, a color is not picked, or the region is not
+  drawn. It awaits no answer, so an answer still on its way is dropped.
+- **Waiting** keeps the tint of the last answer while it is for the same
+  rectangle of the same screenshot (`tinted`), so the tint does not flicker
+  under the slider. An answer for another screenshot or rectangle stops
+  showing at once.
+- **Failed** shows why under the switch, such as a screenshot that is gone or
+  a region that reaches past the window, and tints nothing. The next change
+  to what is asked leaves it.
+- **Off** shows the plain screenshot in the same render that turns the switch
+  off, and forgets the answer. The switch is on for one setting at a time, so
+  another setting's preview starts off, and a setting whose fields are not in
+  the inspector shows no tint.
+- Only the newest request counts (`step`): an answer or a failure that
+  carries an older number, or that arrives in **Off** or **Blocked**, changes
+  nothing.
 
 ### Recording
 

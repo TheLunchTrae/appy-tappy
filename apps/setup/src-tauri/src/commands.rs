@@ -23,6 +23,7 @@ use tokio::sync::oneshot;
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
@@ -112,6 +113,20 @@ pub(crate) async fn select(
     selection: SelectionSpec,
 ) -> Result<Option<SelectionView>, String> {
     ask(&app, move |owner| owner.select(screenshot, &selection)).await?
+}
+
+/// The pixels of `area` on the screenshot `screenshot` that `rule` takes.
+#[tauri::command]
+pub(crate) async fn match_pixels(
+    app: AppHandle,
+    screenshot: usize,
+    area: RegionSpec,
+    rule: MatchRule,
+) -> Result<MatchView, String> {
+    ask(&app, move |owner| {
+        owner.match_pixels(screenshot, area, rule)
+    })
+    .await?
 }
 
 /// Sets up the check the live reading uses.

@@ -22,6 +22,13 @@ window, or select **New reference from this region** while you
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
    click the characters on a screenshot. **Tolerance** says how far a pixel's
    color may be from it and still count: drag the slider or type a number.
+   Turn on **Show matching pixels** to tint every pixel on the screenshot
+   that counts as part of the characters, and watch the tint as you drag
+   **Tolerance**. Raise it until the characters are tinted whole, and lower it
+   if the background around them is tinted too. Under the switch, AppyTappy
+   counts the tinted pixels in the region and on the rest of the screenshot.
+   The tint is only a guide, as
+   [Show matching pixels](Values.md#show-matching-pixels) describes.
 3. **Teach it the characters.** Draw a region around text on a screenshot,
    then type what it shows, such as `87%`. AppyTappy learns the shape of each
    character from what you type. Label screenshots until

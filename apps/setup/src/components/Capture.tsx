@@ -35,6 +35,7 @@ import { type Point, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
 import { PinPicker } from './PinPicker.tsx';
 import { Hint } from './Hint.tsx';
+import { MatchOverlay, MatchPreviewField } from './MatchPreview.tsx';
 import { FIX_HINT, READ_WITH_HINT, guessPin, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
@@ -44,6 +45,7 @@ import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useLiveCheck } from '../lib/useLiveCheck.ts';
+import { useMatchPreview } from '../lib/useMatchPreview.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
@@ -235,6 +237,15 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const drawnSize = drawnPicture === undefined ? null : { width: drawnPicture.width, height: drawnPicture.height };
   const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
+  // The preview is for the color fields the inspector shows now.
+  const colorFields = step === 'how' && fixing === null && (draft.kind === 'barFill' || draft.kind === 'color');
+  const preview = useMatchPreview(
+    editing !== null ? 'ink' : colorFields ? draft.kind : null,
+    draft,
+    selected,
+    shownPicture,
+  );
+  const previewField = <MatchPreviewField preview={preview} region={draft.region} />;
   const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
   const frameStyle = {
     left: (space.width - shown.width) / 2,
@@ -561,6 +572,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             ) : shownPicture === null ? null : (
               <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
             )}
+            {shownPicture === null ? null : <MatchOverlay tint={preview.tint} size={shownPicture} />}
             {native === undefined ? null : (
               <RegionSurface
                 size={native}
@@ -874,6 +886,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   draft={draft}
                   picking={picking}
                   canPick={shownPicture !== null}
+                  preview={previewField}
                   onDraft={setDraft}
                   onPicking={setPicking}
                 />
@@ -940,6 +953,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
               }
             }}
+            preview={previewField}
             record={
               <RecordPanel
                 view={recording}

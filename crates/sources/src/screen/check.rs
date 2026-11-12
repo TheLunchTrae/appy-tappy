@@ -91,32 +91,58 @@ impl BarFill {
         Ok(Self { filled, empty })
     }
 
+    /// What `pixel` counts as, as `[blue, green, red, unused]` like
+    /// [`Image::pixels`] holds it: the nearer of the two colors when it is
+    /// within half their distance of it, the empty color on a tie, and
+    /// neither otherwise.
+    #[must_use]
+    pub fn classify(self, pixel: [u8; 4]) -> BarPixel {
+        let reach = distance(
+            [self.empty.blue, self.empty.green, self.empty.red, 0],
+            self.filled,
+        );
+        let to_filled = distance(pixel, self.filled);
+        let to_empty = distance(pixel, self.empty);
+        // Squared distances, so half the distance is a quarter of `reach`.
+        if to_filled.min(to_empty).saturating_mul(4) > reach {
+            BarPixel::Neither
+        } else if to_filled < to_empty {
+            BarPixel::Filled
+        } else {
+            BarPixel::Empty
+        }
+    }
+
     /// The filled share of `image`, from 0 to 100.
     ///
     /// # Errors
     ///
     /// Returns [`CheckError::NoBar`] when no pixel is near either color.
     pub fn percent(self, image: &Image) -> Result<Number, CheckError> {
-        let reach = distance(
-            [self.empty.blue, self.empty.green, self.empty.red, 0],
-            self.filled,
-        );
         let mut filled = 0_u64;
         let mut counted = 0_u64;
         for &pixel in image.pixels() {
-            let to_filled = distance(pixel, self.filled);
-            let to_empty = distance(pixel, self.empty);
-            // Squared distances, so half the distance is a quarter of `reach`.
-            let near = to_filled.min(to_empty).saturating_mul(4) <= reach;
+            let class = self.classify(pixel);
             // Pixel counts fit in a u64, so these additions never wrap.
-            filled = filled.wrapping_add(u64::from(near && to_filled < to_empty));
-            counted = counted.wrapping_add(u64::from(near));
+            filled = filled.wrapping_add(u64::from(class == BarPixel::Filled));
+            counted = counted.wrapping_add(u64::from(class != BarPixel::Neither));
         }
         if counted == 0 {
             return Err(CheckError::NoBar);
         }
         Number::new(filled as f64 * 100.0 / counted as f64).ok_or(CheckError::NoBar)
     }
+}
+
+/// What one pixel of a bar counts as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarPixel {
+    /// Part of the bar's filled share.
+    Filled,
+    /// Part of the bar's empty share.
+    Empty,
+    /// Far from both colors, such as a border or a label, and left out.
+    Neither,
 }
 
 /// A bar's filled and empty colors were the same.
@@ -146,21 +172,48 @@ impl ColorMatch {
     /// Whether the average color of `image` is within the tolerance.
     #[must_use]
     pub fn matches(self, image: &Image) -> bool {
-        let mut sums = [0_u64; 3];
-        let mut pixels = 0_u64;
-        for pixel in image.pixels() {
-            for (sum, &channel) in sums.iter_mut().zip(pixel) {
-                // At most 8192² pixels of 255 each, far below u64::MAX.
-                *sum = sum.wrapping_add(u64::from(channel));
-            }
-            pixels = pixels.wrapping_add(1);
-        }
-        let [blue, green, red] = sums.map(|sum| sum.checked_div(pixels).unwrap_or_default());
-        let near = |average: u64, target: u8| {
-            average.abs_diff(u64::from(target)) <= u64::from(self.tolerance)
-        };
-        near(blue, self.color.blue) && near(green, self.color.green) && near(red, self.color.red)
+        self.near(average(image))
     }
+
+    /// Whether each of `color`'s red, green, and blue is within the
+    /// tolerance of the looked-for color's.
+    #[must_use]
+    pub fn near(self, color: Rgb) -> bool {
+        self.farthest_channel(color) <= self.tolerance
+    }
+
+    /// How far `color` is from the looked-for color: the largest difference
+    /// among their red, green, and blue, which the tolerance bounds.
+    #[must_use]
+    pub fn farthest_channel(self, color: Rgb) -> u8 {
+        color
+            .red
+            .abs_diff(self.color.red)
+            .max(color.green.abs_diff(self.color.green))
+            .max(color.blue.abs_diff(self.color.blue))
+    }
+}
+
+/// The average color of `image`: the mean of each of its pixels' red, green,
+/// and blue, rounded down.
+#[must_use]
+pub fn average(image: &Image) -> Rgb {
+    let mut sums = [0_u64; 3];
+    let mut pixels = 0_u64;
+    for pixel in image.pixels() {
+        for (sum, &channel) in sums.iter_mut().zip(pixel) {
+            // At most 8192² pixels of 255 each, far below u64::MAX.
+            *sum = sum.wrapping_add(u64::from(channel));
+        }
+        pixels = pixels.wrapping_add(1);
+    }
+    // A mean of bytes is a byte, and an image is never empty.
+    let [blue, green, red] = sums.map(|sum| {
+        sum.checked_div(pixels)
+            .and_then(|mean| u8::try_from(mean).ok())
+            .unwrap_or_default()
+    });
+    Rgb { red, green, blue }
 }
 
 /// Whether a region looks like a saved picture of the same region, such as
@@ -509,6 +562,15 @@ mod tests {
     }
 
     #[test]
+    fn a_bar_pixel_is_filled_empty_or_neither() {
+        let bar = BarFill::new(GREEN, GRAY).unwrap();
+        let pixel = |color: Rgb| [color.blue, color.green, color.red, 255];
+        assert_eq!(bar.classify(pixel(GREEN)), BarPixel::Filled);
+        assert_eq!(bar.classify(pixel(GRAY)), BarPixel::Empty);
+        assert_eq!(bar.classify(pixel(WHITE)), BarPixel::Neither);
+    }
+
+    #[test]
     fn bar_fill_skips_a_dark_border() {
         let black = Rgb {
             red: 0,
@@ -555,6 +617,47 @@ mod tests {
         assert_eq!(
             Check::Color(red).read(&solid(1, dark)),
             Ok(Value::Flag(true))
+        );
+    }
+
+    #[test]
+    fn a_color_is_as_far_as_its_farthest_channel() {
+        let red = ColorMatch {
+            color: Rgb {
+                red: 200,
+                green: 20,
+                blue: 20,
+            },
+            tolerance: 10,
+        };
+        let color = |red, green, blue| Rgb { red, green, blue };
+        assert_eq!(red.farthest_channel(color(197, 25, 20)), 5);
+        assert_eq!(red.farthest_channel(color(200, 20, 13)), 7);
+        assert_eq!(red.farthest_channel(color(209, 20, 20)), 9);
+        // Exactly the tolerance is near; one more is not.
+        assert!(red.near(color(210, 10, 30)));
+        assert!(!red.near(color(210, 9, 30)));
+    }
+
+    #[test]
+    fn the_average_color_is_each_channels_mean_rounded_down() {
+        let dark = Rgb {
+            red: 10,
+            green: 0,
+            blue: 255,
+        };
+        let light = Rgb {
+            red: 13,
+            green: 1,
+            blue: 255,
+        };
+        assert_eq!(
+            average(&row(&[dark, light, light])),
+            Rgb {
+                red: 12,
+                green: 0,
+                blue: 255
+            }
         );
     }
 
