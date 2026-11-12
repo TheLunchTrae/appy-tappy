@@ -1,25 +1,25 @@
 import { useEffect, useState } from 'react';
 
-import type { AppSummary, ReferenceDef } from '../lib/bindings.ts';
+import type { AppSummary } from '../lib/bindings.ts';
 import { stopCapture } from '../lib/api.ts';
 import { Capture, type CaptureMode } from '../components/Capture.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
+import type { Made, SavedRef } from '../lib/flow.ts';
 import { background } from '../lib/repeat.ts';
 import type { Held } from '../lib/unsaved.ts';
-
-/** A saved reference and the application it belongs to. */
-export interface SavedRef {
-  readonly app: string;
-  readonly reference: ReferenceDef;
-}
 
 interface Props {
   /** The reference to change, or null to make one. */
   readonly existing: SavedRef | null;
   /** The application a new reference starts with, such as one just added for it, or null to let the user choose. */
   readonly app: string | null;
+  /** The way to this flow, for its breadcrumb. */
+  readonly trail: readonly string[];
+  /** Whether the flow shows because another flow opened it or ended, so the focus has to land somewhere. */
+  readonly continued: boolean;
   readonly onCancel: () => void;
-  readonly onSaved: () => void;
+  /** Hears where the reference was saved. */
+  readonly onSaved: (made: Made) => void;
   /** Leaves to add an application, and comes back with it chosen, or with `chosen` when that is canceled. */
   readonly onAddApplication: (chosen: string | null) => void;
   /** Leaves to change how `app` is found, and comes back to it. */
@@ -32,6 +32,8 @@ interface Props {
 export function ReferenceFlow({
   existing,
   app,
+  trail,
+  continued,
   onCancel,
   onSaved,
   onAddApplication,
@@ -52,6 +54,8 @@ export function ReferenceFlow({
     return (
       <Picker
         heading={existing === null ? 'New reference' : `Edit ${existing.reference.name}`}
+        trail={trail}
+        continued={continued}
         lockedApp={existing?.app ?? null}
         startApp={choice?.app ?? app}
         startWindow={choice?.window.handle ?? null}
@@ -69,6 +73,7 @@ export function ReferenceFlow({
     <Capture
       choice={choice}
       mode={mode}
+      trail={trail}
       onCancel={onCancel}
       onChangeWindow={() => {
         setPicking(true);
