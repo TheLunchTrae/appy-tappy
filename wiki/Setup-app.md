@@ -383,6 +383,19 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   was added, and a row that no line break ends within that much is given up
   at the next line break. The summary covers the newest file only, so a trace
   that has moved to its next file starts its numbers again.
+- `trace_files` lists the `trace-*.csv` files, newest first, by when each was
+  last written. `trace_metrics` and `trace_rows` read the picked file through a
+  `TraceView` in `debug/trace_view.rs`, which reads it from its first row, at
+  most two 4 MiB windows a call, and keeps its place between calls. The page
+  asks again at once while it has more to read. The view keeps each count for
+  the whole file and by the second for its last 10 minutes, the newest 20,000
+  times of each kind with when each happened, and the newest 100,000 rows,
+  each name held once and let go with the last row that uses it, so a long trace
+  holds about the same amount, more only for each value and automation it
+  names. A range is measured back from the newest row. The view starts over
+  when the file shrinks, and `close_trace` lets it go as the page leaves its
+  **Metrics** and **Trace rows** tabs. Each read the page starts makes the
+  ones before it stale, so an older answer never replaces a newer one.
 - `read_log` returns the last 64 KB of `runtime.log` or `setup.log`, as whole
   lines.
 - `debug_bundle` hands the owner's file locations to a blocking task, which

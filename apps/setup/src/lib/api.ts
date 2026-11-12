@@ -27,6 +27,7 @@ import type {
   RecordingView,
   ReferenceSaveSpec,
   RegionSpec,
+  RowFilter,
   SaveSpec,
   SavedReference,
   SavedValue,
@@ -34,6 +35,10 @@ import type {
   SelectionView,
   SettingsFile,
   SettingsView,
+  TraceFile,
+  TraceMetrics,
+  TraceRange,
+  TraceRows,
   UpdateOffer,
   WhenDef,
   WindowDef,
@@ -350,6 +355,30 @@ export async function openTraceFolder(): Promise<void> {
 /** Whether the runtime runs, and the newest trace file read so far, for the Debug page. */
 export async function debugOverview(): Promise<DebugOverview> {
   return invoke<DebugOverview>('debug_overview');
+}
+
+/** The trace files, newest first. */
+export async function traceFiles(): Promise<ReadonlyArray<TraceFile>> {
+  return invoke<ReadonlyArray<TraceFile>>('trace_files');
+}
+
+/**
+ * The metrics of the trace file `file` over `range`. Each call reads on from where the last one on that
+ * file stopped; `progress` says how much is read, and the page asks again at once while it is less than
+ * the file.
+ */
+export async function traceMetrics(file: string, range: TraceRange): Promise<TraceMetrics> {
+  return invoke<TraceMetrics>('trace_metrics', { file, range });
+}
+
+/** The rows of the trace file `file` that `filter` picks, read on like {@link traceMetrics}. */
+export async function traceRows(file: string, filter: RowFilter): Promise<TraceRows> {
+  return invoke<TraceRows>('trace_rows', { file, filter });
+}
+
+/** Lets go of the trace file the metrics and rows read. */
+export async function closeTrace(): Promise<void> {
+  await invoke('close_trace');
 }
 
 /** The end of `log`, whole lines only, or an empty string before anything was logged. */

@@ -913,11 +913,13 @@ tries again; the page works the same without it. A line the log cannot take is
 lost, and the command's answer reaches the page either way. While open, it
 rotates as **Log rotation** says.
 
-### Trace tail
+### Trace rows reader
 
-`TraceTail` in `apps/setup/src-tauri/src/debug/trace_file.rs` keeps the Debug
-page's place in the newest trace file. The owner thread holds one and keeps it
-while the newest file stays the same; a newer file gets a new tail.
+`RowReader` in `apps/setup/src-tauri/src/debug/trace_file.rs` reads a trace
+file's rows from where its last read stopped. The overview's trace tail and
+the metrics' trace view each hold one. It reads in one of two ways: **Skip**
+for the tail, which follows what happens now, and **CatchUp** for the view,
+which reads every row in the end.
 
 ```mermaid
 stateDiagram-v2
@@ -925,19 +927,59 @@ stateDiagram-v2
     HeaderUnknown --> HeaderUnknown: the header is not all written yet
     HeaderUnknown --> Reading: the header matches this version
     HeaderUnknown --> OtherVersion: the header is another version's
-    Reading --> Reading: a poll reads the rows added since the last one
-    Reading --> Cut: more was added than one read takes
-    Cut --> Reading: the next line break
+    Reading --> Reading: a read takes the rows added since the last one
+    Reading --> Cut: Skip, and more was added than one read takes
     Reading --> Cut: no row ends within one read's worth
+    Cut --> Reading: the next line break
     Reading --> HeaderUnknown: the file shrank, so it was replaced
+    Cut --> HeaderUnknown: the file shrank, so it was replaced
     OtherVersion --> HeaderUnknown: the file shrank, so it was replaced
 ```
 
-A read takes at most 4 MiB. In **Cut**, the tail drops everything up to the
-next line break, so it never reads half a row, and the summary says it read
-only the newest rows. A row ends at a line break outside quotes; a cut that
-lands inside a quoted line break can read the quotes the wrong way round, and
-the next whole read's worth with no row end puts it back in **Cut**, so the
-buffer stays bounded. **OtherVersion** reads no rows and shows why. The
-timings keep the newest 10,000 of each kind, so memory stays fixed however
-long the trace runs.
+A read takes at most 4 MiB. In **Cut**, the reader drops everything up to the
+next line break, so it never reads half a row, and says it skipped rows. A row
+ends at a line break outside quotes; a cut that lands inside a quoted line
+break can read the quotes the wrong way round, and the next whole read's worth
+with no row end puts it back in **Cut**, so the buffer stays bounded. In
+**CatchUp**, only that misread leads to **Cut**. **OtherVersion** reads no
+rows: it passes over the file and shows why. A file that shrank is read again
+from its start in the same read, and the read says so, so its holder lets go
+of the rows it had.
+
+### Trace tail
+
+`TraceTail` in `apps/setup/src-tauri/src/debug/trace_file.rs` keeps the Debug
+overview's place in the newest trace file, with a
+[trace rows reader](#trace-rows-reader) that skips. The owner thread holds one
+and keeps it while the newest file stays the same; a newer file gets a new
+tail. When its reader says the file was replaced, it drops its timings and
+rows and counts the new file's. The summary says when it read only the newest
+rows. The timings keep the newest 10,000 of each kind, so memory stays fixed
+however long the trace runs.
+
+### Trace view
+
+`owner.trace_view` in `apps/setup/src-tauri/src/owner/debug.rs` holds a
+`TraceView` from `debug/trace_view.rs` for the Debug page's **Metrics** and
+**Trace rows** tabs, with a [trace rows reader](#trace-rows-reader) that
+catches up.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Viewing: the page asks for a trace file's metrics or rows
+    Viewing --> Viewing: another ask for the same file reads on, at most two reads
+    Viewing --> Viewing: another file is asked for, so the view starts again on it
+    Viewing --> Viewing: the file shrank, so the view lets go of what it read
+    Viewing --> None: the page leaves both trace tabs
+```
+
+A name that is not a bare `trace-*.csv` file in the trace folder is refused
+before any view changes. Only one file is viewed at a time. The view keeps
+each count for the whole file and by the second for the last 10 minutes, the
+newest 20,000 times of each kind and the newest 100,000 rows, so it holds
+about the same amount however long the trace, more only for each value and
+automation it names. A file from another version shows why and holds no rows.
+On the page, each read it starts makes the reads before it stale, and a
+stale read stops between its steps and shows nothing, so a read that
+outlasts the page never builds a view again after `close_trace`.

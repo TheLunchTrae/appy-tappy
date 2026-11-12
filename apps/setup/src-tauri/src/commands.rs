@@ -26,6 +26,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
+use crate::debug::trace_file::TraceFile;
+use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::{Card, OverlayView};
@@ -674,6 +676,48 @@ pub(crate) async fn set_starts_with_windows(app: AppHandle, on: bool) -> Result<
 #[tauri::command]
 pub(crate) async fn debug_overview(app: AppHandle) -> Result<DebugOverview, String> {
     try_ask(&app, "debug_overview", Owner::debug_overview).await
+}
+
+/// The trace files, newest first.
+#[tauri::command]
+pub(crate) async fn trace_files(app: AppHandle) -> Result<Vec<TraceFile>, String> {
+    try_ask(&app, "trace_files", |owner| owner.trace_files()).await
+}
+
+/// The metrics of the trace file `file` over `range`.
+#[tauri::command]
+pub(crate) async fn trace_metrics(
+    app: AppHandle,
+    file: String,
+    range: TraceRange,
+) -> Result<TraceMetrics, String> {
+    try_ask(&app, "trace_metrics", move |owner| {
+        owner.trace_metrics(&file, range)
+    })
+    .await
+}
+
+/// The rows of the trace file `file` that `filter` picks.
+#[tauri::command]
+pub(crate) async fn trace_rows(
+    app: AppHandle,
+    file: String,
+    filter: RowFilter,
+) -> Result<TraceRows, String> {
+    try_ask(&app, "trace_rows", move |owner| {
+        owner.trace_rows(&file, &filter)
+    })
+    .await
+}
+
+/// Lets go of the trace file the metrics and rows read.
+#[tauri::command]
+pub(crate) async fn close_trace(app: AppHandle) -> Result<(), String> {
+    try_ask(&app, "close_trace", |owner| {
+        owner.close_trace();
+        Ok(())
+    })
+    .await
 }
 
 /// The end of `log`, or nothing before anything was logged.

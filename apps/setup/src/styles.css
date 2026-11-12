@@ -2225,3 +2225,130 @@ select {
 .window-list .window-score {
   grid-column: 1 / -1;
 }
+
+/* Debug page tabs, metrics and trace rows */
+.page-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.page-tabs .tab {
+  padding: 8px 14px;
+}
+
+.page-tabs .tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--capture);
+  font-weight: 600;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.logbox.tall {
+  max-height: 560px;
+}
+
+.card-head .end {
+  margin-left: auto;
+}
+
+.trace-picker,
+.row-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.chart {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chart-bars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+  padding-top: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chart-bar {
+  flex: 1;
+  background: var(--outline);
+  border-radius: 2px 2px 0 0;
+}
+
+.chart-bar.over {
+  background: var(--warn);
+}
+
+.chart-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--holds);
+  color: var(--holds);
+  font-size: 11px;
+  padding-left: 3px;
+}
+
+.chart-mark.p95 {
+  border-left-color: var(--capture);
+  color: var(--capture);
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+}
+
+.trace-rows tr.same-frame td {
+  background: var(--raise);
+}
+
+.frame-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--outline);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.frame-link[aria-pressed='true'] {
+  color: var(--capture);
+}
+
+.row-filters .field.narrow .input {
+  width: 110px;
+}
+
+.trace-picker + * {
+  margin-top: 4px;
+}
+
+.trace-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Each kind of row is as wide as its name. */
+.seg.kinds {
+  grid-auto-columns: auto;
+}
+
+.seg.kinds button {
+  padding: 5px 10px;
+}

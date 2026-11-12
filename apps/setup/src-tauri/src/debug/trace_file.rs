@@ -29,7 +29,7 @@ const NEWEST: usize = 8;
 const SAMPLES: usize = 10_000;
 
 /// The most a tail reads at a time, from the end of the file.
-const WINDOW: u64 = 4 * 1024 * 1024;
+pub(crate) const WINDOW: u64 = 4 * 1024 * 1024;
 
 /// One row of a trace file, as the page shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -71,6 +71,11 @@ impl Spread {
     fn of(samples: &VecDeque<u64>) -> Option<Self> {
         let mut samples: Vec<u64> = samples.iter().copied().collect();
         samples.sort_unstable();
+        Self::of_sorted(&samples)
+    }
+
+    /// The spread of `samples`, sorted from smallest, or `None` without any.
+    pub(crate) fn of_sorted(samples: &[u64]) -> Option<Self> {
         // The nearest rank: the smallest sample that at least `part`
         // percent of the samples are no larger than.
         let count = samples.len();
@@ -126,33 +131,89 @@ pub(crate) struct TraceSummary {
 /// Returns the error from listing the folder, except a folder that is not
 /// there yet, which holds no trace.
 pub(crate) fn newest(folder: &Path) -> io::Result<Option<PathBuf>> {
-    let entries = match fs::read_dir(folder) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let mut traces: Vec<(SystemTime, PathBuf)> = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        let is_trace = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(is_trace_name);
-        if !is_trace {
-            continue;
-        }
-        traces.push((entry.metadata()?.modified()?, path));
-    }
-    // Files written in the same moment go by name, so the answer does not
-    // hang on the order the folder lists them in.
-    Ok(traces.into_iter().max().map(|(_time, path)| path))
+    Ok(list(folder)?
+        .into_iter()
+        .next()
+        .map(|file| folder.join(file.name)))
 }
 
-/// A trace file read so far: where the next read starts, and what the rows
-/// up to there came to.
+/// A trace file, as the Debug page lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TraceFile {
+    /// Its name.
+    pub(crate) name: String,
+    /// Its size.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub(crate) bytes: u64,
+}
+
+/// The trace files in `folder`, the one that changed last first.
+///
+/// # Errors
+///
+/// Returns the error from listing the folder, except a folder that is not
+/// there yet, which holds no trace.
+pub(crate) fn list(folder: &Path) -> io::Result<Vec<TraceFile>> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut traces: Vec<(SystemTime, TraceFile)> = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !is_trace_name(&name) {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        traces.push((
+            metadata.modified()?,
+            TraceFile {
+                name,
+                bytes: metadata.len(),
+            },
+        ));
+    }
+    // Files written in the same moment go by name, so the order does not
+    // hang on the order the folder lists them in.
+    traces.sort_unstable_by(|a, b| (b.0, &b.1.name).cmp(&(a.0, &a.1.name)));
+    Ok(traces.into_iter().map(|(_time, file)| file).collect())
+}
+
+/// How a [`RowReader`] takes a file that grew by more than it reads at a
+/// time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Behind {
+    /// Skips to [`WINDOW`] bytes before the end, so each read costs the same
+    /// and follows what happens now.
+    Skip,
+    /// Reads on from where it stopped, a window at a time, so every row is
+    /// read in the end.
+    CatchUp,
+}
+
+/// What a read of a trace file came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Read {
+    /// The file's size.
+    pub(crate) bytes: u64,
+    /// Whether a whole window was read, so more can be waiting.
+    pub(crate) full: bool,
+    /// Whether the file was shorter than what was read before, so another
+    /// file took its place and was read from its start. The rows read before
+    /// are from the old file.
+    pub(crate) restarted: bool,
+}
+
+/// A trace file's rows, read a window at a time from where the last read
+/// stopped, a whole row at a time.
 #[derive(Debug)]
-pub(crate) struct TraceTail {
+pub(crate) struct RowReader {
     path: PathBuf,
     /// How far the file has been read.
     read: u64,
@@ -165,16 +226,11 @@ pub(crate) struct TraceTail {
     mid_row: bool,
     /// Whether rows were skipped.
     skipped: bool,
-    frame_to_action: VecDeque<u64>,
-    rule_handling: VecDeque<u64>,
-    action_run: VecDeque<u64>,
-    dropped: u64,
-    newest: VecDeque<TraceRow>,
 }
 
-impl TraceTail {
-    /// A tail of `path` that has read nothing yet.
-    pub(crate) fn new(path: PathBuf) -> Self {
+impl RowReader {
+    /// A reader of `path` that has read nothing yet.
+    pub(crate) const fn new(path: PathBuf) -> Self {
         Self {
             path,
             read: 0,
@@ -182,41 +238,74 @@ impl TraceTail {
             header: None,
             mid_row: false,
             skipped: false,
-            frame_to_action: VecDeque::new(),
-            rule_handling: VecDeque::new(),
-            action_run: VecDeque::new(),
-            dropped: 0,
-            newest: VecDeque::new(),
         }
     }
 
-    /// The file this tail reads.
+    /// The file this reader reads.
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Reads the rows added since the last read, at most [`WINDOW`] bytes
-    /// of them, and sums up what it read.
+    /// The file's name.
+    pub(crate) fn file_name(&self) -> String {
+        self.path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+    }
+
+    /// Why the file's rows cannot be read, once its first line shows it is
+    /// from another version.
+    pub(crate) fn problem(&self) -> Option<String> {
+        (self.header == Some(false)).then(|| {
+            "This trace is from another version of AppyTappy, so its rows cannot be read here."
+                .to_owned()
+        })
+    }
+
+    /// Whether rows were skipped, so the rows read start after the file's
+    /// first.
+    pub(crate) const fn skipped(&self) -> bool {
+        self.skipped
+    }
+
+    /// How far the file has been read.
+    pub(crate) const fn position(&self) -> u64 {
+        self.read
+    }
+
+    /// Reads at most [`WINDOW`] bytes added since the last read, and gives
+    /// `row` each whole row in them, oldest first.
     ///
     /// # Errors
     ///
     /// Returns the error from reading the file.
-    pub(crate) fn update(&mut self) -> io::Result<TraceSummary> {
+    pub(crate) fn read(&mut self, behind: Behind, row: impl FnMut(TraceRow)) -> io::Result<Read> {
         let mut file = File::open(&self.path)?;
         let bytes = file.metadata()?.len();
-        if bytes < self.read {
-            // The file was replaced by a shorter one: read it again.
-            *self = Self::new(self.path.clone());
+        let restarted = bytes < self.read;
+        if restarted {
+            *self = Self::new(mem::take(&mut self.path));
         }
+        let waiting = Read {
+            bytes,
+            full: false,
+            restarted,
+        };
         if self.header.is_none() {
             match first_line(&mut file)? {
                 Some(line) => self.header = Some(line == HEADER),
                 // The header is not all written yet.
-                None => return Ok(self.summary(bytes)),
+                None => return Ok(waiting),
             }
         }
+        if self.header == Some(false) {
+            // No row of another version's trace can be read, so its rows are
+            // passed over rather than read.
+            self.read = bytes;
+            return Ok(waiting);
+        }
         let skip_to = bytes.saturating_sub(WINDOW);
-        if skip_to > self.read {
+        if behind == Behind::Skip && skip_to > self.read {
             // Too much to read: start a window before the end, after the next
             // line break, and drop the start of a row cut in two.
             self.read = skip_to;
@@ -226,18 +315,20 @@ impl TraceTail {
         }
         file.seek(SeekFrom::Start(self.read))?;
         let mut added = Vec::new();
-        let count = (&mut file).take(WINDOW).read_to_end(&mut added)?;
-        self.read = self
-            .read
-            .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
-        self.take(&added);
-        Ok(self.summary(bytes))
+        let count =
+            u64::try_from((&mut file).take(WINDOW).read_to_end(&mut added)?).unwrap_or(u64::MAX);
+        self.read = self.read.saturating_add(count);
+        self.take(&added, row);
+        Ok(Read {
+            full: count == WINDOW,
+            ..waiting
+        })
     }
 
     /// Takes `added`, the bytes the file gained, a whole row at a time. A
     /// row ends at a line break outside quotes, since a quoted field can
     /// hold one.
-    fn take(&mut self, added: &[u8]) {
+    fn take(&mut self, added: &[u8], mut each: impl FnMut(TraceRow)) {
         self.partial.extend_from_slice(added);
         let mut start = 0_usize;
         let mut quoted = false;
@@ -263,7 +354,7 @@ impl TraceTail {
                 continue;
             }
             if let Some(row) = parse_row(line) {
-                self.count(row);
+                each(row);
             }
         }
         self.partial.drain(..start.min(self.partial.len()));
@@ -276,7 +367,76 @@ impl TraceTail {
             self.skipped = true;
         }
     }
+}
 
+/// The newest trace file read so far: the rows up to where the last read
+/// stopped, as the overview sums them up.
+#[derive(Debug)]
+pub(crate) struct TraceTail {
+    reader: RowReader,
+    counts: TailCounts,
+}
+
+/// What a [`TraceTail`]'s rows came to.
+#[derive(Debug, Default)]
+struct TailCounts {
+    frame_to_action: VecDeque<u64>,
+    rule_handling: VecDeque<u64>,
+    action_run: VecDeque<u64>,
+    dropped: u64,
+    newest: VecDeque<TraceRow>,
+}
+
+impl TraceTail {
+    /// A tail of `path` that has read nothing yet.
+    pub(crate) fn new(path: PathBuf) -> Self {
+        Self {
+            reader: RowReader::new(path),
+            counts: TailCounts::default(),
+        }
+    }
+
+    /// The file this tail reads.
+    pub(crate) fn path(&self) -> &Path {
+        self.reader.path()
+    }
+
+    /// Reads the rows added since the last read, at most [`WINDOW`] bytes
+    /// of them, and sums up what it read.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from reading the file.
+    pub(crate) fn update(&mut self) -> io::Result<TraceSummary> {
+        let mut rows = Vec::new();
+        let read = self.reader.read(Behind::Skip, |row| rows.push(row))?;
+        if read.restarted {
+            self.counts = TailCounts::default();
+        }
+        for row in rows {
+            self.counts.count(row);
+        }
+        Ok(self.summary(read.bytes))
+    }
+
+    /// What the rows read so far come to, for a file of `bytes`.
+    fn summary(&self, bytes: u64) -> TraceSummary {
+        let counts = &self.counts;
+        TraceSummary {
+            file: self.reader.file_name(),
+            bytes,
+            problem: self.reader.problem(),
+            frame_to_action: Spread::of(&counts.frame_to_action),
+            rule_handling: Spread::of(&counts.rule_handling),
+            action_run: Spread::of(&counts.action_run),
+            dropped: counts.dropped,
+            partial: self.reader.skipped(),
+            newest: counts.newest.iter().cloned().collect(),
+        }
+    }
+}
+
+impl TailCounts {
     /// Adds `row` to the timings and the newest rows.
     fn count(&mut self, row: TraceRow) {
         match row.event.as_str() {
@@ -305,29 +465,6 @@ impl TraceTail {
             self.newest.pop_front();
         }
         self.newest.push_back(row);
-    }
-
-    /// What the rows read so far come to, for a file of `bytes`.
-    fn summary(&self, bytes: u64) -> TraceSummary {
-        let file = self
-            .path
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        let problem = (self.header == Some(false)).then(|| {
-            "This trace is from another version of AppyTappy, so its rows cannot be read here."
-                .to_owned()
-        });
-        TraceSummary {
-            file,
-            bytes,
-            problem,
-            frame_to_action: Spread::of(&self.frame_to_action),
-            rule_handling: Spread::of(&self.rule_handling),
-            action_run: Spread::of(&self.action_run),
-            dropped: self.dropped,
-            partial: self.skipped,
-            newest: self.newest.iter().cloned().collect(),
-        }
     }
 }
 
@@ -537,6 +674,21 @@ mod tests {
             Some(folder.join("trace-tie.csv")),
             "a tie goes by name"
         );
+        let listed = list(&folder).expect("listed");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|file| file.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "trace-tie.csv",
+                "trace-new.CSV",
+                "trace-mid.csv",
+                "trace-old.csv"
+            ],
+            "the one that changed last first"
+        );
+        assert!(listed.iter().all(|file| file.bytes == 0));
         fs::remove_dir_all(&folder).expect("clean up");
     }
 
@@ -625,24 +777,20 @@ mod tests {
 
     #[test]
     fn a_row_that_never_ends_is_given_up_after_a_window() {
-        let mut tail = TraceTail::new(PathBuf::from("trace-a.csv"));
-        tail.header = Some(true);
+        let mut reader = RowReader::new(PathBuf::from("trace-a.csv"));
+        reader.header = Some(true);
+        let mut times: Vec<u64> = Vec::new();
         // A cut inside a quoted line break leaves a quote open.
-        tail.take(b"lines\",Pause,,40,,ok\n");
+        reader.take(b"lines\",Pause,,40,,ok\n", |row| times.push(row.time_ns));
         let filler = b"1,a,b,c,d,e,,,\n".repeat(usize::try_from(WINDOW).expect("fits") / 15 + 1);
-        tail.take(&filler);
-        assert!(tail.partial.is_empty(), "the buffer stays bounded");
-        assert!(tail.skipped);
-        tail.take(b"tail of a row\n2,a,b,c,d,e,,,\n");
-        assert_eq!(
-            tail.summary(0)
-                .newest
-                .iter()
-                .map(|row| row.time_ns)
-                .collect::<Vec<_>>(),
-            [2],
-            "rows read again after the next line break"
-        );
+        reader.take(&filler, |row| times.push(row.time_ns));
+        assert!(reader.partial.is_empty(), "the buffer stays bounded");
+        assert!(reader.skipped());
+        assert!(times.is_empty(), "no row ended outside the open quote");
+        reader.take(b"tail of a row\n2,a,b,c,d,e,,,\n", |row| {
+            times.push(row.time_ns);
+        });
+        assert_eq!(times, [2]);
     }
 
     #[test]
@@ -717,15 +865,12 @@ mod tests {
     #[test]
     fn a_row_cut_in_two_is_dropped_up_to_its_line_break() {
         let times = |added: &[u8]| {
-            let mut tail = TraceTail::new(PathBuf::from("trace-a.csv"));
-            tail.header = Some(true);
-            tail.mid_row = true;
-            tail.take(added);
-            tail.summary(0)
-                .newest
-                .iter()
-                .map(|row| row.time_ns)
-                .collect::<Vec<_>>()
+            let mut reader = RowReader::new(PathBuf::from("trace-a.csv"));
+            reader.header = Some(true);
+            reader.mid_row = true;
+            let mut times = Vec::new();
+            reader.take(added, |row| times.push(row.time_ns));
+            times
         };
         assert_eq!(
             times(b"1,a,b,c,d,e,,,\n2,a,b,c,d,e,,,\n"),
