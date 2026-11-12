@@ -144,6 +144,7 @@ impl<H: Host> Owner<H> {
                 region: saved.region,
                 check: saved.check,
                 pin: Some(spec.pin),
+                reading_area: spec.reading_area,
                 fixes: Vec::new(),
             };
             read_back(&screen, found, &saved.pictures)?;
@@ -361,6 +362,7 @@ mod tests {
                 tolerance: 0,
             },
             pin: None,
+            reading_area: false,
             fixes: Vec::new(),
         };
         std::fs::write(app.folder.join("old.png"), &png).expect("writes");
@@ -474,6 +476,17 @@ mod tests {
             ),
             "a value is saved at one window size"
         );
+        // Only a check that reads anywhere in its region has a reading area.
+        let mut area = spec("example", "Icon visible", STATE);
+        area.reading_area = true;
+        assert_eq!(
+            harness.ask(save(area)),
+            Err(
+                "value \"icon_visible\": its region is a reading area, which only a number or \
+                 bar fill check can read"
+                    .to_owned()
+            )
+        );
         let saved = harness
             .ask(save(spec("example", "Icon visible", STATE)))
             .expect("saves a new app");
@@ -484,9 +497,9 @@ mod tests {
                 value: "icon_visible".to_owned()
             }
         );
-        harness
-            .ask(save(spec("example", "Progress bar", BAR)))
-            .expect("adds to the app");
+        let mut bar = spec("example", "Progress bar", BAR);
+        bar.reading_area = true;
+        harness.ask(save(bar)).expect("adds to the app");
         assert_eq!(
             harness.ask(save(spec("example", "Progress BAR", BAR))),
             Err(
@@ -508,6 +521,12 @@ mod tests {
         assert_eq!(file.name, "Example App");
         let ids: Vec<&str> = file.values.iter().map(|value| value.id.as_str()).collect();
         assert_eq!(ids, ["icon_visible", "progress_bar"]);
+        let areas: Vec<bool> = file
+            .values
+            .iter()
+            .map(|value| value.screen.reading_area)
+            .collect();
+        assert_eq!(areas, [false, true], "a value keeps what its save said");
         assert_eq!(
             file.values[0].screen.window_size,
             SizeDef {

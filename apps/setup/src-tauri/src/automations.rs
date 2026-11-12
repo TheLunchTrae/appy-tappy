@@ -380,6 +380,7 @@ mod tests {
                 },
                 check,
                 pin: None,
+                reading_area: false,
                 fixes: Vec::new(),
             },
         };

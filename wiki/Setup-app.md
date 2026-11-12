@@ -102,8 +102,17 @@ This page covers what the user guide leaves out.
   automation editor reads about twice a second and shows numbers as read, to
   four decimals unless more are needed to compare them with the target.
 - **Window sizes.** A new value saves the side of the window it stays at
-  as `pin`, the guess from where its region is unless the user picks
-  another. The Values page reads each running application's values about
+  as `pin`. The pin follows where the region is, the same guess the runtime
+  makes for a value saved without one, until the user picks a side by hand
+  ([Pin choice](State-machines.md#pin-choice)); either way the file names
+  it. Guide lines over the screenshot run from the region to the edges or
+  the middle of the window that the pin measures from (`PinGuides.tsx`).
+  **This content may move** asks for a reading area where the check can
+  read one, and the value saves it as `readingArea`
+  ([Content that moves](Screen-regions.md#content-that-moves)). A fix of
+  such a value asks for a reading area at its size too, and has no flag of
+  its own.
+  The Values page reads each running application's values about
   once a second at the window's size now, with a capture of its own like an
   overlay's, whether the overlay is on or not, and stops when the page
   closes (`live_values`, `stop_live_values`). The automation editor's
@@ -274,6 +283,7 @@ the fix's number, such as `status-2-1.png`.
           "whole": true
         },
         "pin": "topRight",
+        "readingArea": true,
         "fixes": [
           {
             "windowSize": { "width": 3440, "height": 1440 },
@@ -348,7 +358,9 @@ An application's `sizeChanges` is `often` or `rarely`, and `often` when the
 file leaves it out. A value's `pin` is one of `topLeft`, `topCenter`,
 `topRight`, `middleLeft`, `center`, `middleRight`, `bottomLeft`,
 `bottomCenter`, and `bottomRight`, and is guessed from where the region is
-when the file leaves it out. Each of its `fixes` has its own window size and
+when the file leaves it out. Its `readingArea` is `true` when the region was
+drawn as a reading area and left out otherwise; only a number or bar fill
+check may have it, and it changes nothing the value reads. Each of its `fixes` has its own window size and
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 

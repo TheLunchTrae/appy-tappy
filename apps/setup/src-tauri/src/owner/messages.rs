@@ -113,6 +113,9 @@ pub(crate) struct SaveSpec {
     /// The side of the window the region stays at as the window changes
     /// size.
     pub(crate) pin: PinDef,
+    /// Whether the region was drawn as a reading area, larger than what it
+    /// reads. Only a check that reads anywhere in its region may have one.
+    pub(crate) reading_area: bool,
 }
 
 /// A saved value drawn again at another window size, as the UI describes
