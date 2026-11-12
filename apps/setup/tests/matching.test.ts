@@ -159,7 +159,7 @@ describe('sentence', () => {
 });
 
 describe('a window score', () => {
-  const loose = { title: false, class: false };
+  const loose = { mustMatch: { title: false, class: false }, fallback: 'none' } as const;
   const score = (parts: Partial<WindowScore>): WindowScore => ({
     handle: 1,
     title: true,
@@ -176,15 +176,19 @@ describe('a window score', () => {
   });
 
   test('says why the match leaves a window out', () => {
-    expect(scoreText(score({ executable: false, title: false }), { title: true, class: false })).toEndWith(
+    const titled = { mustMatch: { title: true, class: false }, fallback: 'none' } as const;
+    expect(scoreText(score({ executable: false, title: false }), titled)).toEndWith(
       'Not taken: its executable differs.',
     );
-    expect(scoreText(score({ title: false }), { title: true, class: false })).toEndWith(
-      'Not taken: its title must match.',
-    );
-    expect(scoreText(score({ class: false }), { title: true, class: true })).toEndWith(
+    expect(scoreText(score({ title: false }), titled)).toEndWith('Not taken: its title must match.');
+    expect(scoreText(score({ class: false }), { mustMatch: { title: true, class: true }, fallback: 'none' })).toEndWith(
       'Not taken: its class must match.',
     );
-    expect(scoreText(score({ title: false }), loose)).toEndWith('Not taken: another window matches everything ticked.');
+  });
+
+  test('says when a window that qualifies takes the place of the fallback', () => {
+    expect(
+      scoreText(score({ title: false }), { mustMatch: { title: true, class: false }, fallback: 'executable' }),
+    ).toEndWith('Not taken: its title must match, and a window that does is open, so the fallback is not used.');
   });
 });

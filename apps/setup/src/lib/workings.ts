@@ -2,12 +2,15 @@
 
 import type { GlyphView, ReadingColor, StateView } from './bindings.ts';
 
-/** How close a character is to a glyph, as a whole percent of the cells either inks that agree. */
+/**
+ * How close a character is to a glyph, as a whole percent of the cells either inks that agree. It rounds down, so a
+ * character that does not match never shows the 75% a match needs.
+ */
 export function closeness(glyph: GlyphView): number {
   if (glyph.inked === 0) {
     return 100;
   }
-  return Math.round(100 * (1 - glyph.differing / glyph.inked));
+  return Math.floor((100 * (glyph.inked - glyph.differing)) / glyph.inked);
 }
 
 /** A share of `whole` as a whole percent, or null when there is nothing to share. */
@@ -25,21 +28,10 @@ export function channelsText(color: ReadingColor): string {
   return `R ${color.red} G ${color.green} B ${color.blue}`;
 }
 
-/** A state's average difference per channel, to one decimal, or null when nothing was compared. */
-export function averageDifference(state: StateView): number | null {
-  return state.channels === 0 ? null : Math.round((10 * state.total) / state.channels) / 10;
-}
-
 /**
- * The state a read takes: the closest within its tolerance, the first one on a tie, or null when none is within.
+ * A state's average difference per channel, to one decimal, or null when nothing was compared. It rounds up, so a
+ * state outside its tolerance never shows as within it.
  */
-export function readState(states: readonly StateView[]): string | null {
-  let best: { readonly name: string; readonly average: number } | null = null;
-  for (const state of states) {
-    const average = averageDifference(state);
-    if (state.within && average !== null && (best === null || average < best.average)) {
-      best = { name: state.name, average };
-    }
-  }
-  return best?.name ?? null;
+export function averageDifference(state: StateView): number | null {
+  return state.channels === 0 ? null : Math.ceil((10 * state.total) / state.channels) / 10;
 }

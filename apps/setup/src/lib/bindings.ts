@@ -1239,7 +1239,11 @@ tolerance: number,
  * Whether the region is within the tolerance. The read is the closest
  * state that is.
  */
-within: boolean, }>;
+within: boolean,
+/**
+ * Whether the read took this state.
+ */
+read: boolean, }>;
 
 /**
  * What a value is compared with: a number, yes or no, or a state's name.

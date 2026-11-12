@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { StateView } from '../src/lib/bindings.ts';
-import { averageDifference, channelsText, closeness, cssColor, percentOf, readState } from '../src/lib/workings.ts';
+import { averageDifference, channelsText, closeness, cssColor, percentOf } from '../src/lib/workings.ts';
 
 describe('closeness', () => {
-  test('is the share of inked cells that agree', () => {
+  test('is the share of inked cells that agree, rounded down', () => {
     expect(closeness({ character: '7', differing: 2, inked: 8, matches: true })).toBe(75);
-    expect(closeness({ character: '7', differing: 1, inked: 3, matches: false })).toBe(67);
+    expect(closeness({ character: '7', differing: 1, inked: 3, matches: false })).toBe(66);
+    // 74.8% does not match, so it never shows as the 75% a match needs.
+    expect(closeness({ character: '7', differing: 63, inked: 250, matches: false })).toBe(74);
     expect(closeness({ character: '7', differing: 0, inked: 0, matches: true })).toBe(100);
   });
 });
@@ -33,17 +35,13 @@ describe('states', () => {
     channels: 6,
     tolerance: 10,
     within,
+    read: false,
   });
 
-  test('average their difference per channel', () => {
+  test('average their difference per channel, rounded up', () => {
     expect(averageDifference(state('On', 61, true))).toBe(10.2);
     expect(averageDifference({ ...state('On', 0, true), channels: 0 })).toBe(null);
-  });
-
-  test('read as the closest within its tolerance, the first on a tie', () => {
-    expect(readState([state('On', 30, true), state('Off', 12, true), state('Dim', 12, true)])).toBe('Off');
-    expect(readState([state('On', 300, false), state('Off', 12, true)])).toBe('Off');
-    expect(readState([state('On', 300, false)])).toBe(null);
-    expect(readState([])).toBe(null);
+    // 10.04 is outside a tolerance of 10, so it never shows as 10.
+    expect(averageDifference({ ...state('On', 251, false), channels: 25 })).toBe(10.1);
   });
 });

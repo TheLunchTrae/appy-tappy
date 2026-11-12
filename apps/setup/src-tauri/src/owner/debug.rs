@@ -86,11 +86,10 @@ impl<H: Host> Owner<H> {
     ) -> Result<CaptureOutline, String> {
         let stores = self.stores()?;
         let found = stores.app(app)?;
-        let watching = automations::load(stores)?;
+        let watched = automations::watched_values(stores, app)?;
         Ok(outline::outline(
-            app,
             &found.file,
-            &watching,
+            &watched,
             Size { width, height },
             |name| found.picture(name),
         ))

@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 use std::io;
 
 use appytappy_config::app_file::{AppFile, RegionDef};
-use appytappy_config::automation_file::AutomationsFile;
 
 use appytappy_sources::screen::saved;
 use appytappy_sources::screen::{Layout, Region, Size};
@@ -42,23 +41,16 @@ pub(crate) struct OutlinedValue {
     pub(crate) problem: Option<String>,
 }
 
-/// The outline of `file`, saved as the application `app`, on a window of
-/// `size`, with `automations` saying which values the runtime watches.
-/// `picture` reads a picture in the application's folder, as the runtime
-/// reads it to build a value's check.
+/// The outline of `file` on a window of `size`, with `watched` the IDs of
+/// the values the runtime reads, as [`crate::automations::watched_values`]
+/// gives them. `picture` reads a picture in the application's folder, as the
+/// runtime reads it to build a value's check.
 pub(crate) fn outline(
-    app: &str,
     file: &AppFile,
-    automations: &AutomationsFile,
+    watched: &BTreeSet<String>,
     size: Size,
     picture: impl FnMut(&str) -> io::Result<Vec<u8>> + Clone,
 ) -> CaptureOutline {
-    let watched: BTreeSet<&str> = automations
-        .automations
-        .iter()
-        .filter(|automation| automation.enabled && automation.when.app == app)
-        .map(|automation| automation.when.value.as_str())
-        .collect();
     let placed: Vec<(bool, Result<Region, String>)> = file
         .values
         .iter()
@@ -76,7 +68,7 @@ pub(crate) fn outline(
                     .map(|at| at.region)
                     .map_err(|unread| format!("It does not read here: {unread}."))
             });
-            (watched.contains(value.id.as_str()), region)
+            (watched.contains(&value.id), region)
         })
         .collect();
     let copies = Layout::new(
@@ -122,9 +114,6 @@ mod tests {
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT, ScreenDef, SizeChangesDef, SizeDef, ValueDef,
         WindowDef,
-    };
-    use appytappy_config::automation_file::{
-        ActionDef, AutomationDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
     };
     use appytappy_config::window_match::WindowFacts;
 
@@ -186,31 +175,9 @@ mod tests {
         }
     }
 
-    fn watching(app: &str, value: &str, enabled: bool) -> AutomationDef {
-        AutomationDef {
-            id: format!("{app}-{value}"),
-            name: format!("Watch {value}"),
-            enabled,
-            when: WhenDef {
-                app: app.to_owned(),
-                value: value.to_owned(),
-                is: ComparisonDef::Equals,
-                target: TargetDef::Flag(true),
-            },
-            actions: vec![ActionDef::Media {
-                command: MediaCommandDef::Pause,
-                app: None,
-            }],
-            undo: false,
-            cooldown_ms: 0,
-        }
-    }
-
-    fn automations(watching: Vec<AutomationDef>) -> AutomationsFile {
-        AutomationsFile {
-            automations: watching,
-            ..AutomationsFile::default()
-        }
+    /// The watched set of `ids`.
+    fn watching(ids: &[&str]) -> BTreeSet<String> {
+        ids.iter().map(|id| (*id).to_owned()).collect()
     }
 
     fn no_pictures(_name: &str) -> io::Result<Vec<u8>> {
@@ -236,16 +203,7 @@ mod tests {
                 value("middle", region(40, 20, 4, 4)),
             ],
         );
-        let outline = outline(
-            "example",
-            &file,
-            &automations(vec![
-                watching("example", "left", true),
-                watching("example", "right", true),
-            ]),
-            WINDOW,
-            no_pictures,
-        );
+        let outline = outline(&file, &watching(&["left", "right"]), WINDOW, no_pictures);
         assert_eq!(outline.copies, [region(0, 0, 4, 4), region(90, 40, 4, 4)]);
         assert_eq!(
             regions(&outline),
@@ -269,46 +227,19 @@ mod tests {
                 value("b", region(12, 12, 18, 18)),
             ],
         );
-        let outline = outline(
-            "example",
-            &file,
-            &automations(vec![
-                watching("example", "a", true),
-                watching("example", "b", true),
-            ]),
-            WINDOW,
-            no_pictures,
-        );
+        let outline = outline(&file, &watching(&["a", "b"]), WINDOW, no_pictures);
         assert_eq!(outline.copies, [region(10, 10, 20, 20)]);
-    }
-
-    #[test]
-    fn only_enabled_automations_of_this_application_count() {
-        let file = app(SizeChangesDef::Rarely, vec![value("a", region(0, 0, 4, 4))]);
-        let outline = outline(
-            "example",
-            &file,
-            &automations(vec![
-                watching("example", "a", false),
-                watching("other", "a", true),
-            ]),
-            WINDOW,
-            no_pictures,
-        );
-        assert_eq!(outline.copies, []);
-        assert_eq!(regions(&outline), [(false, Some(region(0, 0, 4, 4)))]);
     }
 
     #[test]
     fn a_value_reads_where_its_window_size_puts_it() {
         let values = vec![value("a", region(10, 10, 4, 4))];
-        let watched = automations(vec![watching("example", "a", true)]);
+        let watched = watching(&["a"]);
         let doubled = Size {
             width: 200,
             height: 100,
         };
         let scaled = outline(
-            "example",
             &app(SizeChangesDef::Often, values.clone()),
             &watched,
             doubled,
@@ -317,7 +248,6 @@ mod tests {
         assert_eq!(scaled.copies, [region(20, 20, 8, 8)]);
         assert_eq!(regions(&scaled), [(true, Some(region(20, 20, 8, 8)))]);
         let unread = outline(
-            "example",
             &app(SizeChangesDef::Rarely, values),
             &watched,
             doubled,
@@ -337,13 +267,7 @@ mod tests {
             SizeChangesDef::Rarely,
             vec![value("a", region(98, 0, 4, 4))],
         );
-        let outline = outline(
-            "example",
-            &file,
-            &automations(vec![watching("example", "a", true)]),
-            WINDOW,
-            no_pictures,
-        );
+        let outline = outline(&file, &watching(&["a"]), WINDOW, no_pictures);
         assert_eq!(outline.copies, []);
         assert_eq!(regions(&outline), [(true, None)]);
         assert!(

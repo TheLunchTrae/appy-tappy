@@ -282,6 +282,7 @@ mod tests {
     use appytappy_sources::screen::Size;
 
     use crate::check_spec::CheckSpec;
+    use crate::debug::workings::WorkingsView;
     use crate::owner::run;
     use crate::owner::test_support::{FakeHost, Harness, frame_image, harness};
     use crate::pixels;
@@ -458,10 +459,37 @@ mod tests {
             .ask(|owner| owner.set_check(&spec))
             .expect("valid check");
         assert_eq!(harness.ask(|owner| owner.reading()), Ok(None));
+        assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(
             harness.ask(|owner| owner.reading()),
             Ok(Some(Reading::Number(50.0)))
+        );
+        harness.wait(Duration::from_millis(30));
+        let details = harness
+            .ask(|owner| owner.explain_reading())
+            .expect("explains")
+            .expect("a frame arrived");
+        assert_eq!(details.frame_age_ms, 30, "by the owner's clock");
+        assert!(
+            matches!(
+                details.workings,
+                Some(WorkingsView::BarFill { filled, counted }) if filled * 2 == counted
+            ),
+            "{details:?}"
+        );
+    }
+
+    #[test]
+    fn the_reading_s_details_wait_for_a_check_and_a_frame() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        assert_eq!(harness.ask(|owner| owner.explain_reading()), Ok(None));
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(
+            harness.ask(|owner| owner.explain_reading()),
+            Ok(None),
+            "no check yet"
         );
     }
 
@@ -490,6 +518,12 @@ mod tests {
         assert!(
             harness
                 .ask(|owner| owner.reading())
+                .expect_err("outside")
+                .contains("past the edge")
+        );
+        assert!(
+            harness
+                .ask(|owner| owner.explain_reading())
                 .expect_err("outside")
                 .contains("past the edge")
         );

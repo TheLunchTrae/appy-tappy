@@ -8,7 +8,7 @@
 use appytappy_config::signal::StateName;
 
 use super::Image;
-use super::check::{Check, CheckError};
+use super::check::{Check, CheckError, Difference};
 use super::digits::CharacterScore;
 use crate::system::Rgb;
 
@@ -56,8 +56,12 @@ impl StateScore {
     /// Whether the region is within the state's tolerance, as a read
     /// judges it. A read takes the closest state that is.
     #[must_use]
-    pub const fn within(&self) -> bool {
-        self.total <= self.channels.saturating_mul(self.tolerance as u64)
+    pub fn within(&self) -> bool {
+        Difference {
+            total: self.total,
+            channels: self.channels,
+        }
+        .within(self.tolerance)
     }
 }
 

@@ -887,7 +887,11 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               )}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
-              <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
+              {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
+              <ReadingDetailsBox
+                key={built.ok ? built.spec.kind : 'none'}
+                ask={check.state.kind === 'set' ? explainReading : null}
+              />
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               <p className="note">
@@ -979,7 +983,11 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             }
           />
           <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
-          <ReadingDetailsBox ask={check.state.kind === 'set' ? explainReading : null} />
+          {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
+          <ReadingDetailsBox
+            key={built.ok ? built.spec.kind : 'none'}
+            ask={check.state.kind === 'set' ? explainReading : null}
+          />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
           <div className="actions">

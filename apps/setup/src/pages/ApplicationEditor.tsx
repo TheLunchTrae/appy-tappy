@@ -134,7 +134,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
           selected={selected}
           fits={fits}
           onChoose={choose}
-          scores={scores === null || window === null ? null : { windows: scores, mustMatch: window.mustMatch }}
+          scores={scores === null || window === null ? null : { windows: scores, rules: window }}
         />
         <aside className="side" aria-label="Application">
           <h2>Application</h2>

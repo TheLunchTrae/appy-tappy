@@ -343,11 +343,7 @@ impl DigitReader {
         let mut ranked: Vec<GlyphScore> = self
             .glyphs
             .iter()
-            .map(|glyph| GlyphScore {
-                character: glyph.character,
-                differing: cells(shape, &glyph.shape, |a, b| a ^ b),
-                inked: cells(shape, &glyph.shape, |a, b| a | b),
-            })
+            .map(|glyph| GlyphScore::of(shape, glyph))
             .collect();
         ranked.sort_by_key(|score| score.differing);
         let best = ranked.first().copied();
@@ -358,15 +354,16 @@ impl DigitReader {
         CharacterScore { best, runner_up }
     }
 
-    /// The character of the closest learned glyph, if it is close enough.
+    /// The character of the closest learned glyph, if it is close enough,
+    /// by the scores [`DigitReader::explain`] shows. A tie goes to the glyph
+    /// learned first.
     fn best_match(&self, shape: &Shape) -> Option<char> {
-        let (glyph, differing) = self
-            .glyphs
+        self.glyphs
             .iter()
-            .map(|glyph| (glyph, cells(shape, &glyph.shape, |a, b| a ^ b)))
-            .min_by_key(|(_, differing)| *differing)?;
-        let set = cells(shape, &glyph.shape, |a, b| a | b);
-        (differing.saturating_mul(4) <= set).then_some(glyph.character)
+            .map(|glyph| GlyphScore::of(shape, glyph))
+            .min_by_key(|score| score.differing)
+            .filter(|score| score.matches())
+            .map(|score| score.character)
     }
 }
 
@@ -393,6 +390,15 @@ pub struct GlyphScore {
 }
 
 impl GlyphScore {
+    /// How close `shape` is to `glyph`.
+    fn of(shape: &Shape, glyph: &Glyph) -> Self {
+        Self {
+            character: glyph.character,
+            differing: cells(shape, &glyph.shape, |a, b| a ^ b),
+            inked: cells(shape, &glyph.shape, |a, b| a | b),
+        }
+    }
+
     /// Whether the character is close enough to read as this glyph, by the
     /// same rule as [`DigitReader::read`].
     #[must_use]

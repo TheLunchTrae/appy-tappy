@@ -2,8 +2,10 @@
 //! debug details show: how long the check took, how old the frame was, and
 //! the check's scores from [`Check::explain`].
 
+use std::hint;
 use std::time::{Duration, Instant};
 
+use appytappy_config::signal::Value;
 use appytappy_sources::screen::Image;
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::digits::{CharacterScore, GlyphScore};
@@ -119,6 +121,8 @@ pub(crate) struct StateView {
     /// Whether the region is within the tolerance. The read is the closest
     /// state that is.
     pub(crate) within: bool,
+    /// Whether the read took this state.
+    pub(crate) read: bool,
 }
 
 /// The details of `check` reading `region`, a crop of a frame that arrived
@@ -126,14 +130,19 @@ pub(crate) struct StateView {
 /// runtime's read of the region takes, without the scores.
 pub(crate) fn details(check: &Check, region: &Image, frame_age: Duration) -> ReadingDetails {
     let started = Instant::now();
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "only the read's time counts here; the editor shows its value from its own read"
-    )]
-    let _ = check.read(region);
+    // Kept from being optimized away, so the time is a whole read's.
+    let read = hint::black_box(check.read(region));
     let took = started.elapsed();
     let (workings, problem) = match check.explain(region) {
-        Ok(workings) => (Some(workings.into()), None),
+        Ok(workings) => {
+            let mut view = WorkingsView::from(workings);
+            if let (WorkingsView::State { states }, Ok(Value::State(name))) = (&mut view, &read)
+                && let Some(state) = states.iter_mut().find(|state| state.name == name.as_str())
+            {
+                state.read = true;
+            }
+            (Some(view), None)
+        },
         Err(error) => (None, Some(error.to_string())),
     };
     ReadingDetails {
@@ -165,6 +174,7 @@ impl From<Workings> for WorkingsView {
                     .into_iter()
                     .map(|state| StateView {
                         within: state.within(),
+                        read: false,
                         name: state.name.as_str().to_owned(),
                         total: state.total,
                         channels: state.channels,
@@ -203,5 +213,83 @@ impl From<Rgb> for ReadingColor {
             green: color.green,
             blue: color.blue,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use appytappy_config::signal::StateName;
+    use appytappy_sources::screen::Size;
+    use appytappy_sources::screen::check::{ImageMatch, StateMatch};
+
+    use super::*;
+
+    /// A row of pixels, white for `#` and black for `.`.
+    fn row(cells: &str) -> Image {
+        let bgra = cells
+            .chars()
+            .flat_map(|cell| {
+                let value = if cell == '#' { 255 } else { 0 };
+                [value, value, value, 255]
+            })
+            .collect();
+        let size = Size {
+            width: u32::try_from(cells.len()).expect("fits"),
+            height: 1,
+        };
+        Image::new(size, bgra).expect("matching length")
+    }
+
+    /// A state check of `states`, each a name and its picture, all with
+    /// `tolerance`.
+    fn states(states: &[(&str, &str)], tolerance: u8) -> Check {
+        Check::State(StateMatch::new(
+            states
+                .iter()
+                .map(|(name, picture)| {
+                    (
+                        StateName::new(name).expect("a name"),
+                        ImageMatch::new(row(picture), None, tolerance).expect("a picture"),
+                    )
+                })
+                .collect(),
+        ))
+    }
+
+    /// The names of the states `details` marks as read.
+    fn read(details: &ReadingDetails) -> Vec<String> {
+        let Some(WorkingsView::State { states }) = &details.workings else {
+            panic!("state workings: {details:?}");
+        };
+        states
+            .iter()
+            .filter(|state| state.read)
+            .map(|state| state.name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_state_marked_read_is_the_one_the_read_takes() {
+        let age = Duration::from_millis(12);
+        let check = states(&[("On", "##"), ("Half", "#."), ("Off", "..")], 255);
+        let details = details(&check, &row("##"), age);
+        assert_eq!(read(&details), ["On"]);
+        assert_eq!(details.frame_age_ms, 12);
+        assert_eq!(details.problem, None);
+        assert_eq!(read(&super::details(&check, &row("#."), age)), ["Half"]);
+        // None within its tolerance: the read takes no state of the check.
+        let strict = states(&[("On", "##"), ("Off", "..")], 0);
+        assert_eq!(
+            read(&super::details(&strict, &row("#."), age)),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_region_the_check_cannot_compare_says_why() {
+        let check = states(&[("On", "##")], 255);
+        let details = details(&check, &row("###"), Duration::ZERO);
+        assert_eq!(details.workings, None);
+        assert!(details.problem.is_some());
     }
 }

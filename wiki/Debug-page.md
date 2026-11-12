@@ -30,13 +30,14 @@ The same setting adds debug details to the pages that read a window live.
     filled one, before it is rounded.
 - **Capture outlines.** On a screenshot in the value editor, dashed outlines
   show the rectangles the background part copies out of each frame at that
-  window size, for the values that enabled automations watch. A solid outline
-  marks each watched value and a faint one each other saved value, with its
-  name. A line under the preview counts them, and names each value that does
+  window size, for the values watched by enabled automations that can run. A
+  solid outline marks each watched value and a faint one each other saved
+  value, with its name. A line under the preview counts them, and names each value that does
   not read at that size, with why.
 - **Window match.** In the application editor, each open window says which of
   its title, class and executable match, and why the match leaves it out if
-  it does.
+  it does, such as a field that must match or, with the fallback on, another
+  window that qualifies.
 
 ## Runtime
 

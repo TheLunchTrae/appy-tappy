@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { MustMatchDef, WindowChoice, WindowDef, WindowFit, WindowScore } from '../lib/bindings.ts';
+import type { WindowChoice, WindowDef, WindowFit, WindowScore } from '../lib/bindings.ts';
 import { errorText, matchWindows, windowScores } from '../lib/api.ts';
-import { fitLabel, scoreText } from '../lib/matching.ts';
+import { type MatchRules, fitLabel, scoreText } from '../lib/matching.ts';
 import { useSettings } from '../lib/settings.ts';
 
 /** How long after a change the match waits before it looks for windows again. */
@@ -91,7 +91,7 @@ interface Props {
   /** Says why the list is empty when no window is open. */
   readonly emptyText?: string;
   /** For the debug details, how each window compares with the match, and which fields it requires. */
-  readonly scores?: { readonly windows: readonly WindowScore[]; readonly mustMatch: MustMatchDef } | null;
+  readonly scores?: { readonly windows: readonly WindowScore[]; readonly rules: MatchRules } | null;
 }
 
 /** The open windows to pick from, filtered by title or executable, marking those an application's match takes. */
@@ -121,8 +121,9 @@ export function WindowsPanel({ windows, listError, selected, fits, onChoose, emp
       {listError === null ? null : <p className="warn">{listError}</p>}
       <ul className="window-list">
         {shown.map((window) => {
-          const label = fitLabel(fits, window.handle);
           const score = scores?.windows.find((each) => each.handle === window.handle);
+          // With scores, the label comes from the same read of the windows, so the two always agree.
+          const label = fitLabel(score === undefined ? fits : score.fit === null ? [] : [score.fit], window.handle);
           return (
             <li key={window.handle}>
               <button
@@ -139,7 +140,7 @@ export function WindowsPanel({ windows, listError, selected, fits, onChoose, emp
                 <small>{window.executable}</small>
                 {label === null ? <small /> : <small className={label.className}>{label.text}</small>}
                 {score === undefined || scores === null || scores === undefined ? null : (
-                  <small className="window-score">{scoreText(score, scores.mustMatch)}</small>
+                  <small className="window-score">{scoreText(score, scores.rules)}</small>
                 )}
               </button>
             </li>

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { ReadingDetails, WorkingsView } from '../lib/bindings.ts';
 import { durationText } from '../lib/debug.ts';
 import { useRepeat } from '../lib/repeat.ts';
 import { useSettings } from '../lib/settings.ts';
-import { averageDifference, channelsText, closeness, cssColor, percentOf, readState } from '../lib/workings.ts';
+import { averageDifference, channelsText, closeness, cssColor, percentOf } from '../lib/workings.ts';
 
 /** How long the details wait between reads. A read scores every glyph, so it runs less often than the reading. */
 const DETAILS_PAUSE_MS = 500;
@@ -33,7 +33,8 @@ function Characters({ workings }: { readonly workings: Extract<WorkingsView, { k
       </ul>
       <p className="note">
         Each character read, how closely it matches the reference, and the closest other character. A character reads at
-        75% or closer. A close second means the reference needs more samples of both.
+        75% or closer. A close second means the reference needs more samples of both. A read stops at the first
+        character after the number, so any after it are shown but not read.
       </p>
     </>
   );
@@ -63,8 +64,7 @@ function Workings({ workings }: { readonly workings: WorkingsView }) {
           looking for {channelsText(workings.color)}, each within {workings.tolerance}
         </p>
       );
-    case 'state': {
-      const read = readState(workings.states);
+    case 'state':
       return (
         <table className="table state-scores">
           <caption className="note">How far the region is from each state, on average per color channel</caption>
@@ -77,10 +77,10 @@ function Workings({ workings }: { readonly workings: WorkingsView }) {
           </thead>
           <tbody>
             {workings.states.map((state) => (
-              <tr key={state.name} className={state.name === read ? 'read' : undefined}>
+              <tr key={state.name} className={state.read ? 'read' : undefined}>
                 <td>
                   {state.name}
-                  {state.name === read ? <span className="note"> (read)</span> : null}
+                  {state.read ? <span className="note"> (read)</span> : null}
                 </td>
                 <td>{averageDifference(state) ?? '–'}</td>
                 <td>{state.tolerance}</td>
@@ -89,7 +89,6 @@ function Workings({ workings }: { readonly workings: WorkingsView }) {
           </tbody>
         </table>
       );
-    }
   }
 }
 
@@ -101,15 +100,28 @@ export function ReadingDetailsBox({ ask }: { readonly ask: (() => Promise<Readin
   const { showDebug } = useSettings().settings;
   const [details, setDetails] = useState<ReadingDetails | null>(null);
   const active = showDebug && ask !== null;
+  // Whether the box still reads, so an answer that arrives after it stopped is dropped rather than shown when it
+  // starts again.
+  const reading = useRef(active);
+  useEffect(() => {
+    reading.current = active;
+    if (!active) {
+      setDetails(null);
+    }
+  }, [active]);
   useRepeat(
     async () => {
       if (ask === null) {
         return;
       }
+      let answer: ReadingDetails | null;
       try {
-        setDetails(await ask());
+        answer = await ask();
       } catch {
-        setDetails(null);
+        answer = null;
+      }
+      if (reading.current) {
+        setDetails(answer);
       }
     },
     DETAILS_PAUSE_MS,
