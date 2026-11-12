@@ -6,7 +6,8 @@ app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
 `screen/image.rs` holds images and regions, `screen/layout.rs` where a
 capture packs the regions it copies, `screen/capture.rs` the capture trait,
-`screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
+`screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
+proposal of a bar's colors, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
 the saved checks, `screen/scale.rs` and `screen/resample.rs` how a value
 reads at another window size, and `schedule.rs` the read interval.
@@ -261,6 +262,102 @@ with and without it (`saved::build`).
 Colors are alike when each channel is within the tolerance, as for the color
 check. Selections combine with union and difference, and `mask_in` gives the
 mask of any region, as after the user adjusts the box by hand.
+
+## Bar detection
+
+`screen::detect` proposes a bar fill check's two colors, so the user does
+not have to click them. It infers only what the bar reader can use. The
+reader counts pixels near two colors wherever they are, with no direction,
+tolerance, or edge, so the detector's whole answer is two colors. It refuses
+a region rather than propose colors the reader would read wrongly. Each
+threshold below is a constant at the top of `screen/detect.rs`, which says
+what it is for.
+
+- **Layout.** The region's long side is its width, or its height when it is
+  taller than wide. Each column along it takes the median color of its
+  pixels, which a thin border, a thin label, and shading across the bar do
+  not move. The columns' colors are gathered into classes of alike colors
+  (`SAME`), and the bar's two colors are the most common class and the most
+  common one far enough apart from it (`APART`), each on at least a part's
+  worth of columns (`PARTS`, `MIN_PART`).
+- **Two plain parts and nothing between.** A column belongs to a part only
+  while it is as near the part's color as one plain color stays (`SAME`),
+  which is nearer than the reader needs. The columns must then read, from
+  the start: the filled part, at most an edge of columns that belong to
+  neither (`EDGE`), and the empty part. Columns that belong to neither may
+  lie only before and after the two, and take up only so much of the long
+  side (`COVER`): a border, a rounded cap, some background. A column of
+  another color inside a part refuses the region, so a segmented, striped,
+  or fading fill is not proposed.
+- **Which color is filled.** The reader cannot tell, so the color at the
+  start of the long side is: the left of a wide region, the bottom of a tall
+  one. The setup app's **Swap colors** turns it around.
+- **The reader agrees.** `BarFill::percent` must read the screenshot within
+  `AGREE` points of the fill its layout shows. Otherwise something beside
+  the bar has one of the colors, or part of the bar has another shade, and
+  the region is refused. Past `ROUGH`
+  points the proposal says that readings can be a few points off.
+- **Every screenshot.** The colors come from the first screenshot whose
+  layout shows a bar, the one the region was drawn on first. Each other
+  screenshot must then show the same two colors the same way, as a full, an
+  empty, or a partly filled bar that the reader agrees with, or show neither
+  color on a part's worth of columns, as a screenshot of something else
+  does. One that shows a color but not the bar refuses the region and is
+  named: a bar that changes color with its fill or between screenshots
+  cannot be read with two colors. Two screenshots that show both parts at
+  fills a part apart say that the bar moves, which a picture in two colors
+  would not.
+- **Around a label.** A label, an icon, or what lies beside a loosely drawn
+  bar hides the layout in the columns it covers, though the reader leaves
+  its pixels out and reads the bar all the same. So when the whole region
+  shows no bar, the detector looks again over only the lanes that each show
+  the bar from end to end on their own: two plain parts by the lane's own
+  colors, under the same rule as the columns. It takes the lanes that do so
+  on every screenshot where enough lanes do, and needs a share of the
+  region's lanes to be left (`CLEAR`). Each of those lanes spans the bar by
+  itself, so where they lie across the bar does not matter. The same rules
+  then hold over those lanes on every screenshot, with the reader still
+  reading the whole region. A fill that is striped, segmented, or fading in
+  every lane leaves no such lane and stays refused. One that is so in only
+  some lanes leaves the others, and is held to the two rules below. The
+  proposal says that it went by part of the region.
+- **Even spread.** The reader divides the pixels of the filled color by
+  those of either color. So what lies over part of the bar, stays there, and
+  has neither color shifts the reading by an amount that depends on the
+  fill: a label, an icon, a fade in some lanes. A screenshot shows that at
+  one fill only, where the reader may well agree. So on every screenshot
+  that shows the bar, the pixels the reader counts have to be spread evenly
+  along the bar: were the fill to end at any column, the share of the
+  counted pixels before that column may differ from the column's place along
+  the bar by no more than `AGREE`.
+- **Even parts.** What lowers the count in one part only and moves with the
+  fill, such as a shine in another shade along the filled part, leaves the
+  counted pixels spread evenly while the bar is nearly full or nearly empty.
+  So on every screenshot that shows both parts, the detector takes what the
+  reader counts in a column of each part: the median over the part's
+  columns, the lower of the middle two. A shine over half a part's columns
+  or more lowers it, whichever columns it leaves free, while a label, an
+  icon, or a rounded end over fewer columns does not, and is held to the
+  even spread. From those two counts the detector works out what every fill
+  would read, and none may differ from the fill by more than `AGREE`. A
+  shine across both parts lowers both counts alike and passes.
+
+A refusal carries a `NoBar` reason. The detector does not find a bar drawn as
+separate segments, a striped, textured, or fading fill, a bar with a trail
+between its parts, a bar with a shine in another shade over half or more of
+one part's columns, a bar under a label or an icon that leaves too few lanes
+free or takes the reader
+too far off at some fill, or a bar that fills from its middle. A fill that
+fades so little along the bar that it stays one plain color is proposed, and
+every screenshot must still read with it. Text or marks in one of the bar's
+own two colors cannot be told from the bar on a screenshot where they blend
+into a part, with detected colors or hand-picked ones. The reader reads some
+of those bars with hand-picked colors; supporting them here needs a wider
+detector, not another reader.
+
+A shade over fewer than half of a part's columns passes the even parts rule,
+so such a bar can be proposed and then read some points off at other fills,
+as it does with hand-picked colors.
 
 ## Read interval
 

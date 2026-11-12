@@ -34,6 +34,12 @@ macro_rules! with_commands {
             commands::remove_screenshots(indexes: Vec<usize>) -> ();
             /// What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected.
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;
+            /// The filled and the empty color of the bar in `region`, which was drawn on screenshot `screenshot`, found
+            /// on the screenshots of that one's window size; or why none are proposed.
+            commands::detect_bar(region: RegionSpec, screenshot: usize) -> BarDetection;
+            /// What a bar of the colors `filled` and `empty` reads in `region`, drawn on screenshot `screenshot`, on each
+            /// screenshot of that one's window size.
+            commands::measure_bar(region: RegionSpec, screenshot: usize, filled: ColorSpec, empty: ColorSpec) -> BarMeasure;
             /// The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
             /// to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
             commands::match_pixels(screenshot: usize, area: RegionSpec, rule: MatchRule) -> MatchView;

@@ -54,13 +54,13 @@ impl Check {
     }
 }
 
-/// The squared distance between a pixel's blue, green, and red bytes and a
-/// color. It is at most 3 * 255², so it never overflows a `u32`.
-fn distance([blue, green, red, _]: [u8; 4], color: Rgb) -> u32 {
+/// The squared distance between two colors. It is at most 3 * 255², so it
+/// never overflows a `u32`.
+pub(super) fn distance(one: Rgb, other: Rgb) -> u32 {
     let square = |a: u8, b: u8| u32::from(a.abs_diff(b)).wrapping_mul(u32::from(a.abs_diff(b)));
-    square(blue, color.blue)
-        .wrapping_add(square(green, color.green))
-        .wrapping_add(square(red, color.red))
+    square(one.blue, other.blue)
+        .wrapping_add(square(one.green, other.green))
+        .wrapping_add(square(one.red, other.red))
 }
 
 /// A bar's fill: the share of its pixels nearer the filled color than the
@@ -91,20 +91,39 @@ impl BarFill {
         Ok(Self { filled, empty })
     }
 
+    /// The color of the filled part.
+    #[must_use]
+    pub const fn filled(self) -> Rgb {
+        self.filled
+    }
+
+    /// The color of the empty part.
+    #[must_use]
+    pub const fn empty(self) -> Rgb {
+        self.empty
+    }
+
+    /// This bar with its two colors the other way around.
+    #[must_use]
+    pub const fn turned(self) -> Self {
+        Self {
+            filled: self.empty,
+            empty: self.filled,
+        }
+    }
+
     /// What `pixel` counts as, as `[blue, green, red, unused]` like
     /// [`Image::pixels`] holds it: the nearer of the two colors when it is
     /// within half their distance of it, the empty color on a tie, and
     /// neither otherwise.
     #[must_use]
-    pub fn classify(self, pixel: [u8; 4]) -> BarPixel {
-        let reach = distance(
-            [self.empty.blue, self.empty.green, self.empty.red, 0],
-            self.filled,
-        );
-        let to_filled = distance(pixel, self.filled);
-        let to_empty = distance(pixel, self.empty);
-        // Squared distances, so half the distance is a quarter of `reach`.
-        if to_filled.min(to_empty).saturating_mul(4) > reach {
+    pub fn classify(self, [blue, green, red, _]: [u8; 4]) -> BarPixel {
+        let color = Rgb { red, green, blue };
+        let to_filled = distance(color, self.filled);
+        let to_empty = distance(color, self.empty);
+        // Squared distances, so half the distance is a quarter of the
+        // distance between the two colors.
+        if to_filled.min(to_empty).saturating_mul(4) > distance(self.filled, self.empty) {
             BarPixel::Neither
         } else if to_filled < to_empty {
             BarPixel::Filled

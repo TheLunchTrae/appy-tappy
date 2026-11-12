@@ -967,6 +967,21 @@ div.match-answer {
   align-items: center;
 }
 
+.btn.detect,
+.btn.swap {
+  align-self: flex-start;
+}
+
+.bar-readings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-variant-numeric: tabular-nums;
+}
+
 .range input {
   flex: 1;
   accent-color: var(--capture);
