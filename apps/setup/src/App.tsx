@@ -12,6 +12,7 @@ import { NewValue } from './pages/NewValue.tsx';
 import {
   type Ended,
   type Flow,
+  type Made,
   type Opener,
   afterFlow,
   applicationFor,
@@ -21,6 +22,7 @@ import {
   valueFor,
   waiting,
 } from './lib/flow.ts';
+import { supersedes } from './lib/reads.ts';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
@@ -57,6 +59,8 @@ const REFRESH_MS = 3000;
 export function App() {
   const [page, setPage] = useState<Page>('automations');
   const [flow, setFlow] = useState<Flow | null>(null);
+  // Whether the open flow shows because another flow opened it or ended, which took the focused control with it.
+  const [continued, setContinued] = useState(false);
   // What the open flow would lose, as it reports it, and what leaving it would lose with the flows that wait under it.
   const [reported, setReported] = useState<Held>('nothing');
   const held = heldInAll(flow, reported);
@@ -69,6 +73,10 @@ export function App() {
   const openFlow = useRef(flow);
   openFlow.current = flow;
   const [apps, setApps] = useState<readonly AppSummary[] | null>(null);
+  // The reads of the saved lists, numbered as they start: the newest started, and the newest whose answer was
+  // taken. `listed` is the number of the read `apps` is from.
+  const reads = useRef({ started: 0, applied: 0 });
+  const [listed, setListed] = useState(0);
   const [automations, setAutomations] = useState<readonly AutomationSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
@@ -124,9 +132,17 @@ export function App() {
 
   const refresh = useCallback(async (): Promise<void> => {
     // The two files are read apart, so a broken automations file still lists the values.
+    reads.current.started += 1;
+    const read = reads.current.started;
     const [appsRead, automationsRead] = await Promise.allSettled([listApps(), listAutomations()]);
+    // Reads overlap, so an answer that arrives after a newer one would put older lists back.
+    if (!supersedes(read, reads.current.applied)) {
+      return;
+    }
+    reads.current.applied = read;
     if (appsRead.status === 'fulfilled') {
       setApps(appsRead.value);
+      setListed(read);
       setLoadError(null);
     } else {
       setLoadError(errorText(appsRead.reason));
@@ -153,13 +169,15 @@ export function App() {
     settings: null,
   };
 
-  const open = (next: Flow | null): void => {
+  const open = (next: Flow | null, after: 'page' | 'flow' = 'page'): void => {
     setLeaving(null);
     setFlow(next);
+    setContinued(after === 'flow');
   };
   const goTo = (target: Page): void => {
     setLeaving(null);
     setFlow(null);
+    setContinued(false);
     setPage(target);
   };
   // A tab leaves an open flow only once the user agrees to lose its work, and never while it saves.
@@ -176,15 +194,17 @@ export function App() {
         break;
     }
   };
-  // Shows what follows the flow `ended` once it saved or was canceled. What it saved is read into the lists at
-  // once, for the page or the flow that shows next.
-  const end = (ended: Flow, how: Ended): void => {
+  // Shows what follows the flow `ended` once it saved `made` or, with 'canceled', was canceled. What it saved is
+  // read into the lists at once, for the page or the flow that shows next.
+  const end = (ended: Flow, made: Made | null | 'canceled'): void => {
+    const how: Ended =
+      made === 'canceled' ? { kind: 'canceled' } : { kind: 'saved', made, read: reads.current.started };
     const after = afterFlow(ended, how, openFlow.current === ended);
     switch (after.kind) {
       case 'nothing':
         break;
       case 'flow':
-        open(after.flow);
+        open(after.flow, 'flow');
         break;
       case 'listed':
         goTo(LISTED_ON[ended.kind]);
@@ -201,10 +221,10 @@ export function App() {
   // picker stood.
   const pickerFor = (opener: Opener) => ({
     onAddApplication: (chosen: string | null): void => {
-      open(applicationFor(opener, chosen, null));
+      open(applicationFor(opener, chosen, null), 'flow');
     },
     onEditApplication: (existing: AppSummary): void => {
-      open(applicationFor(opener, existing.id, existing));
+      open(applicationFor(opener, existing.id, existing), 'flow');
     },
   });
   const path = flow === null ? [] : trail(flow);
@@ -216,11 +236,12 @@ export function App() {
           fixing={flow.fixing}
           app={flow.app}
           trail={path}
+          continued={continued}
           onCancel={() => {
-            end(flow, { kind: 'canceled' });
+            end(flow, 'canceled');
           }}
           onSaved={(made) => {
-            end(flow, { kind: 'saved', made });
+            end(flow, made);
           }}
           {...pickerFor(flow)}
           onHeld={setReported}
@@ -233,10 +254,10 @@ export function App() {
           existing={flow.existing}
           trail={path}
           onCancel={() => {
-            end(flow, { kind: 'canceled' });
+            end(flow, 'canceled');
           }}
           onSaved={(id) => {
-            end(flow, { kind: 'saved', made: { app: id, value: null } });
+            end(flow, { app: id, value: null });
           }}
           onHeld={setReported}
         />
@@ -248,11 +269,12 @@ export function App() {
           existing={flow.existing}
           app={flow.app}
           trail={path}
+          continued={continued}
           onCancel={() => {
-            end(flow, { kind: 'canceled' });
+            end(flow, 'canceled');
           }}
           onSaved={(made) => {
-            end(flow, { kind: 'saved', made });
+            end(flow, made);
           }}
           {...pickerFor(flow)}
           onHeld={setReported}
@@ -263,18 +285,21 @@ export function App() {
       return (
         <AutomationEditor
           apps={apps ?? []}
+          listed={listed}
+          readError={loadError}
           flow={flow}
+          continued={continued}
           onCancel={() => {
-            end(flow, { kind: 'canceled' });
+            end(flow, 'canceled');
           }}
           onSaved={() => {
-            end(flow, { kind: 'saved', made: null });
+            end(flow, null);
           }}
           onAddApplication={(draft, app) => {
-            open(applicationFor(waiting(flow, draft), app, null));
+            open(applicationFor(waiting(flow, draft), app, null), 'flow');
           }}
           onNewValue={(draft, app) => {
-            open(valueFor(waiting(flow, draft), app));
+            open(valueFor(waiting(flow, draft), app), 'flow');
           }}
           onHeld={setReported}
         />
@@ -304,10 +329,10 @@ export function App() {
             loadError={automationError ?? loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'automation', existing: null, draft: null, app: null, value: null });
+              open({ kind: 'automation', existing: null, draft: null, app: null, handed: null });
             }}
             onEdit={(summary) => {
-              open({ kind: 'automation', existing: summary.automation, draft: null, app: null, value: null });
+              open({ kind: 'automation', existing: summary.automation, draft: null, app: null, handed: null });
             }}
           />
         );

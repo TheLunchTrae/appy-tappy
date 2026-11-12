@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Five guards drop such stale messages:
+it was about has gone. Six guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -37,6 +37,10 @@ it was about has gone. Five guards drop such stale messages:
   the flow that saved is still the one open (`afterFlow` in
   `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
   on leaves the next flow alone.
+- **List reads.** The setup app numbers each read of the saved applications
+  and automations as it starts. An answer older than the newest one taken is
+  dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
+  started before a save and answers late never puts older lists back.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -668,7 +672,8 @@ stateDiagram-v2
 ```
 
 **Open** is one flow on screen with up to two waiting under it. The types
-allow only these stacks, the flow on screen last:
+allow only these stacks, the flow on screen last; a fix of a saved value is a
+value flow that no automation opens:
 
 | Stack                            | How it comes about                                                                             |
 | -------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -691,7 +696,8 @@ allow only these stacks, the flow on screen last:
   save shows the opener with what the save answered: the application's ID to
   a value or reference flow, whose picker starts with it, and the
   application's ID with the value's ID from `save_value` to the automation
-  flow. **Cancel** shows the opener as it was left. With none waiting, a save
+  flow, with the number of the newest read of the saved lists started before
+  the save was heard. **Cancel** shows the opener as it was left. With none waiting, a save
   opens the page that lists what was saved and **Cancel** the page under the
   flow.
 - **Tab.** What leaving loses is what the open flow reports
@@ -718,13 +724,15 @@ flow open with the reason, and changes nothing that waits.
 The **When** card of the automation editor
 (`apps/setup/src/pages/AutomationEditor.tsx`) chooses the application, then
 one of its values. Its state is the draft's watched value, the application
-chosen before a value is picked, the value a flow just saved for it, and the
-saved applications and values as the pages' lists have them. `watchStep` in
-`apps/setup/src/lib/watch.ts` names where those stand as one `WatchStep`.
+chosen before a value is picked, what a flow just handed over (`Handed` in
+`apps/setup/src/lib/flow.ts`), and the saved applications and values as the
+newest read of the pages' lists has them, with that read's number.
+`watchStep` in `apps/setup/src/lib/watch.ts` names where those stand as one
+`WatchStep`.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NoApplications: no application is saved
+    [*] --> NoApplications: no saved application reads
     [*] --> Choosing: several are saved and none is chosen
     [*] --> Value: the only or chosen application has no value
     [*] --> Pick: it has values and none is picked
@@ -741,32 +749,66 @@ stateDiagram-v2
     Pick --> [*]: New value
     Ready --> Pick: another application is chosen
     Ready --> Value: another application, without values, is chosen
+    Ready --> Missing: a read no longer lists the application
     Ready --> [*]: New value, Add application, or Save automation
-    Missing --> Pick: another application is chosen
+    Missing --> Pick: another application is chosen, or a read lists the application again
     Missing --> Value: another application, without values, is chosen
+    Missing --> [*]: Add application
     Arriving --> Value: the lists show the saved application
     Arriving --> Ready: the lists show the saved value, and the draft picks it
-    Arriving --> Pick: another application is chosen
+    Arriving --> Missing: a read newer than the save answers without the application
+    Arriving --> Pick: a read newer than the save answers without the value, or another application is chosen
+    Arriving --> Value: a read newer than the save answers without the value, and the application has none
+    Arriving --> Arriving: a read fails, the card says why
+    Arriving --> [*]: Add application
 ```
 
 - **NoApplications**, **Choosing**, **Value**, and **Pick** say which step
   comes next, and **NoApplications** and **Value** make the flow that takes
-  it the main button. **Add application** is offered in every state, and
-  **New value** in each that has an application the lists know.
+  it the main button. **NoApplications** says so when applications are saved
+  but none of their files reads. **Add application** is offered in every
+  state, and **New value** in each that has an application the lists know.
 - **Ready** has a value to compare, which the editor reads live.
-- **Missing** is a watched value whose application has no readable file.
-  Choosing another application leaves it.
-- **Arriving** is what a flow just saved before the pages' lists show it:
-  the handed-over application is not listed yet, or the saved value is not
-  picked yet. The save started a read of the saved files, and they are read
-  again every three seconds while the editor is open. When the lists show
-  the value, the draft picks it (`arrived`) with a comparison that suits it.
-  If the lists never show it, such as while the saved files cannot be read,
-  the editor stays here: choosing another application drops what it waited
-  for, and **Cancel** leaves the editor.
+- **Arriving** is exactly this: a flow handed something over, and no read of
+  the saved lists that started after the hand-over has answered. `App.tsx`
+  numbers the reads, the hand-over carries the number of the newest read
+  started before it, and `watchStep` compares that with the number of the
+  read the lists are from. Each save starts a read, and the lists are read
+  again every three seconds while the editor is open, so a read that failed
+  is tried again; meanwhile the card says why it failed. A value handed over
+  takes the place of the draft's watched value at once (`returned`), so until
+  it is picked the draft has no value: **Save automation** is off, and the
+  foot of the editor says that what was saved is being read (`readiness`).
+  When the lists show the value, the draft picks it (`arrived`) in the same
+  render, with a comparison that suits it, and the card names it.
+- A read newer than the hand-over that answers without what was handed over
+  ends **Arriving**: nothing is on its way any more. A missing application
+  is **Missing**. A missing value is **Pick**, or **Value** when the
+  application has no other, and both say that the saved value is gone.
+- **Missing** is a chosen application that the saved lists do not have with a
+  readable file: the watched value's, one chosen by hand whose file broke
+  since, or one a flow just saved. It says which, and the draft stays while
+  the user chooses another application or adds it again.
+- Every state can be left with the draft kept: by a choice in the card, or by
+  **Add application**, which is offered in all of them.
 - Opening **Add application** or **New value** ends the editor, and a new
   one opens when that flow ends, with the draft and what the flow saved, as
-  [Pages and flows](#pages-and-flows) describes.
+  [Pages and flows](#pages-and-flows) describes. Opening one while
+  **Arriving** drops what the editor waited for. Nothing is lost by that,
+  since the draft holds no value meanwhile: the saved value is in the list to
+  pick once the editor shows again.
+
+When the editor shows again after a flow it opened, the focus moves to the
+control the step is taken with (`editorLanding` in
+`apps/setup/src/lib/landing.ts`): **Add application**, the application list,
+**New value**, the value list, or the comparison once a value is picked.
+While **Arriving** it waits and moves when the step is known. The card's
+guide is a status region that stays mounted and describes those controls, so
+a screen reader hears the step, that what was saved is being read, and the
+value once it is picked. The [picker](#picker) does the same when it shows
+after another flow (`pickerLanding`): the focus moves to
+**Capture this window** once there is a window, and otherwise to the way
+forward.
 
 ### Picker
 

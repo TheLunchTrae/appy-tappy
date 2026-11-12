@@ -41,7 +41,7 @@ import { StatesField } from './StatesField.tsx';
 import { CHECK_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
-import type { Made } from '../lib/flow.ts';
+import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useLiveCheck } from '../lib/useLiveCheck.ts';
@@ -889,7 +889,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               <p className="note">
                 {fixing === null
-                  ? `Saved values show on the Values page, under ${choice.name}.`
+                  ? savedNote(trail, choice.name)
                   : `The fix shows on the Values page, beside ${fixing.name}.`}
               </p>
               <div className="actions">

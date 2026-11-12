@@ -7,12 +7,13 @@ import {
   type AutomationFlow,
   type Ended,
   type Made,
-  type ReferenceFlow,
+  type RefFlow,
   type ValueFlow,
   afterFlow,
   applicationFor,
   heldInAll,
   lostText,
+  savedNote,
   trail,
   valueFor,
   waiting,
@@ -41,24 +42,25 @@ const progress: ValueDef = {
 
 const example: AppSummary = { id: 'example', file: null, error: null, windows: [], running: null };
 
-const automation: AutomationFlow = { kind: 'automation', existing: null, draft: null, app: null, value: null };
+const automation: AutomationFlow = { kind: 'automation', existing: null, draft: null, app: null, handed: null };
 const typed = { ...EMPTY_DRAFT, name: 'Pause music' };
 /** A new automation with a name typed, as it waits under a flow it opened. */
 const waits = waiting(automation, typed);
 const value: ValueFlow = { kind: 'value', fixing: null, app: null, opener: null };
-const reference: ReferenceFlow = { kind: 'reference', existing: null, app: null };
+const reference: RefFlow = { kind: 'reference', existing: null, app: null };
 const application: ApplicationFlow = { kind: 'application', existing: null, opener: null };
 
 const canceled: Ended = { kind: 'canceled' };
+/** A save heard after the read of the saved lists numbered 4 started. */
 function saved(made: Made | null): Ended {
-  return { kind: 'saved', made };
+  return { kind: 'saved', made, read: 4 };
 }
 const savedPlayer = saved({ app: 'player', value: null });
 
 describe('a flow opens another', () => {
-  test('an automation waits with its draft, and with no value from an earlier flow to pick', () => {
-    const before = { ...automation, app: 'player', value: 'volume' };
-    expect(waiting(before, typed)).toEqual({ ...automation, draft: typed, app: 'player', value: null });
+  test('an automation waits with its draft, and with nothing an earlier flow handed to it', () => {
+    const before = { ...automation, app: 'player', handed: { value: 'volume', after: 2 } };
+    expect(waiting(before, typed)).toEqual({ ...automation, draft: typed, app: 'player', handed: null });
   });
 
   test('a value for an automation starts with the application its condition has, which the automation keeps', () => {
@@ -95,14 +97,23 @@ describe('a flow opened for another ends', () => {
     });
     expect(afterFlow(applicationFor(waits, 'example', null), savedPlayer, true)).toEqual({
       kind: 'flow',
-      flow: { ...waits, app: 'player' },
+      flow: { ...waits, app: 'player', handed: { value: null, after: 4 } },
     });
   });
 
-  test('a saved value is what the automation that opened its flow picks, with the draft it left', () => {
+  test('a saved value is handed to the automation that opened its flow, with the draft it left', () => {
     expect(afterFlow(valueFor(waits, 'example'), saved({ app: 'player', value: 'volume' }), true)).toEqual({
       kind: 'flow',
-      flow: { ...automation, draft: typed, app: 'player', value: 'volume' },
+      flow: { ...automation, draft: typed, app: 'player', handed: { value: 'volume', after: 4 } },
+    });
+  });
+
+  test('what is handed over says which read of the saved lists it came after', () => {
+    const later: Ended = { kind: 'saved', made: { app: 'player', value: 'volume' }, read: 9 };
+    const after = afterFlow(valueFor(waits, 'example'), later, true);
+    expect(after.kind === 'flow' && after.flow.kind === 'automation' ? after.flow.handed : null).toEqual({
+      value: 'volume',
+      after: 9,
     });
   });
 
@@ -166,7 +177,7 @@ describe('the breadcrumb', () => {
   test('names a waiting flow by what it changes', () => {
     const editing = { ...automation, existing: pauseMusic };
     expect(trail(valueFor(editing, 'example'))).toEqual(['Automations', 'Pause music']);
-    const fixing = { ...value, fixing: { app: 'example', value: progress } };
+    const fixing: ValueFlow = { kind: 'value', fixing: { app: 'example', value: progress }, app: null, opener: null };
     expect(trail(applicationFor(fixing, 'example', example))).toEqual(['Values', 'Fix Progress']);
     const percent = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
     const changing = { ...reference, existing: { app: 'example', reference: percent } };
@@ -232,4 +243,11 @@ describe('leaving a stack of flows', () => {
       'Leave without saving? The unsaved changes to the automation are lost.',
     );
   });
+});
+
+test('a capture says where its value shows once saved: back in the automation that waits, or on its page', () => {
+  expect(savedNote(trail(value), 'Example App')).toBe('Saved values show on the Values page, under Example App.');
+  expect(savedNote(trail(valueFor(waits, 'example')), 'Example App')).toBe(
+    'Saving returns to the automation with this value picked. The value also shows on the Values page, under Example App.',
+  );
 });

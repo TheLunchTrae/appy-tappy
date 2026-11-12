@@ -42,7 +42,14 @@ This page covers what the user guide leaves out.
   those flows for the automation, which waits under them with its draft
   (`lib/flow.ts`). `save_value` answers the saved value's application and ID,
   which the editor picks once the pages' lists show it, so nothing is looked
-  up by name. [Pages and flows](State-machines.md#pages-and-flows) and
+  up by name. Until then the draft has no value and cannot be saved. The
+  pages' lists are read every three seconds and after each save; the reads
+  are numbered, so an answer that arrives after a newer one is dropped
+  (`lib/reads.ts`), and the editor can tell what is still on its way from
+  what a newer read shows to be gone. When a flow shows because another
+  ended, the focus lands on the control the next step is taken with
+  (`lib/landing.ts`). [Pages and flows](State-machines.md#pages-and-flows)
+  and
   [What an automation watches](State-machines.md#what-an-automation-watches)
   list the transitions.
 - **Application editor.** A new application's match starts from the picked

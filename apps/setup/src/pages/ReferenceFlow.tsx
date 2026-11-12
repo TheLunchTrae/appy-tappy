@@ -15,6 +15,8 @@ interface Props {
   readonly app: string | null;
   /** The way to this flow, for its breadcrumb. */
   readonly trail: readonly string[];
+  /** Whether the flow shows because another flow opened it or ended, so the focus has to land somewhere. */
+  readonly continued: boolean;
   readonly onCancel: () => void;
   /** Hears where the reference was saved. */
   readonly onSaved: (made: Made) => void;
@@ -31,6 +33,7 @@ export function ReferenceFlow({
   existing,
   app,
   trail,
+  continued,
   onCancel,
   onSaved,
   onAddApplication,
@@ -52,6 +55,7 @@ export function ReferenceFlow({
       <Picker
         heading={existing === null ? 'New reference' : `Edit ${existing.reference.name}`}
         trail={trail}
+        continued={continued}
         lockedApp={existing?.app ?? null}
         startApp={choice?.app ?? app}
         startWindow={choice?.window.handle ?? null}

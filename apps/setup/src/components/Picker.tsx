@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { AppSummary, WindowChoice } from '../lib/bindings.ts';
 import { errorText, pickWindow } from '../lib/api.ts';
+import { pickerLanding, useLanding } from '../lib/landing.ts';
 import { captureWindow, isRunning, known, offersMatchEdit, pickerStep, stepStatus } from '../lib/picker.ts';
 import { background } from '../lib/repeat.ts';
 import { useAppWindows } from '../lib/useAppWindows.ts';
@@ -24,6 +25,8 @@ interface Props {
   readonly heading: string;
   /** The way to the picker's flow, for its breadcrumb. */
   readonly trail: readonly string[];
+  /** Whether the picker shows because another flow opened its flow or ended, so the focus has to land somewhere. */
+  readonly continued: boolean;
   /** The saved application the flow belongs to already, such as a reference's own, or null to let the user choose. */
   readonly lockedApp: string | null;
   /** The application chosen at first: the last choice's, or one handed over to this flow. */
@@ -42,6 +45,7 @@ interface Props {
 export function Picker({
   heading,
   trail,
+  continued,
   lockedApp,
   startApp,
   startWindow,
@@ -60,6 +64,8 @@ export function Picker({
   const status = stepStatus(step);
   const target = captureWindow(step);
   const busy = start === 'starting';
+  const page = useRef<HTMLElement>(null);
+  useLanding(continued, pickerLanding(step), page);
 
   const choose = (app: string): void => {
     setChosen(app);
@@ -82,7 +88,7 @@ export function Picker({
   };
 
   return (
-    <main className="page">
+    <main className="page" ref={page}>
       <Trail trail={trail} here={heading} />
       <div className="page-head">
         <h1>{heading}</h1>
@@ -95,6 +101,7 @@ export function Picker({
           <button
             type="button"
             className="btn"
+            data-landing="refresh"
             disabled={busy}
             onClick={() => {
               setStart('idle');
@@ -142,6 +149,7 @@ export function Picker({
                 <button
                   type="button"
                   className="add"
+                  data-landing="add-application"
                   disabled={busy}
                   onClick={() => {
                     onAddApplication('app' in step ? step.app.id : null);
@@ -167,10 +175,11 @@ export function Picker({
           ) : null}
           {step.kind === 'several' ? (
             <ul className="window-list" aria-label="Windows that fit">
-              {step.windows.map((each) => (
+              {step.windows.map((each, index) => (
                 <li key={each.handle}>
                   <button
                     type="button"
+                    data-landing={index === 0 ? 'windows' : undefined}
                     aria-pressed={step.picked?.handle === each.handle}
                     disabled={busy}
                     onClick={() => {
@@ -195,6 +204,7 @@ export function Picker({
             <button
               type="button"
               className="btn"
+              data-landing="match"
               disabled={busy}
               onClick={() => {
                 onEditApplication(step.app.summary);
@@ -215,6 +225,7 @@ export function Picker({
             <button
               type="button"
               className="btn primary"
+              data-landing="capture"
               disabled={target === null || busy}
               onClick={() => {
                 background(capture());

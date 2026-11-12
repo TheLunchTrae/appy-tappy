@@ -25,21 +25,43 @@ export interface AutomationFlow {
   readonly draft: Draft | null;
   /** The application the condition starts with: the one chosen before another flow opened, or the one that flow saved. */
   readonly app: string | null;
-  /** The value of `app` that the value flow saved, which the condition picks once the saved values list it. */
-  readonly value: string | null;
+  /** What a flow the editor opened just saved for `app`, or null when none did. */
+  readonly handed: Handed | null;
 }
 
-/** Making a value, or fixing a saved one at another window size. It opens the application flow from its picker. */
-export interface ValueFlow {
-  readonly kind: 'value';
-  readonly fixing: Fixing | null;
-  /** The application the picker starts with, or null to let the user choose. */
-  readonly app: string | null;
-  readonly opener: AutomationFlow | null;
+/** What a flow saved for the automation that opened it, as the automation's editor takes it. */
+export interface Handed {
+  /** The value of the application that the value flow saved, which the condition picks, or null for an application. */
+  readonly value: string | null;
+  /**
+   * The number of the newest read of the saved lists that started before the save was heard. Any later read
+   * started after the save, so its answer has what was saved, or shows that it is gone.
+   */
+  readonly after: number;
 }
+
+/**
+ * Making a value, or fixing a saved one at another window size. It opens the application flow from its picker.
+ * Only a new value is made for an automation: a fix opens from the Values page alone.
+ */
+export type ValueFlow =
+  | {
+      readonly kind: 'value';
+      readonly fixing: null;
+      /** The application the picker starts with, or null to let the user choose. */
+      readonly app: string | null;
+      readonly opener: AutomationFlow | null;
+    }
+  | {
+      readonly kind: 'value';
+      readonly fixing: Fixing;
+      /** The application the picker showed chosen when it opened the application flow, which is the fix's own. */
+      readonly app: string | null;
+      readonly opener: null;
+    };
 
 /** Making or changing a reference. It opens the application flow from its picker. */
-export interface ReferenceFlow {
+export interface RefFlow {
   readonly kind: 'reference';
   readonly existing: SavedRef | null;
   /** The application the picker starts with, or null to let the user choose. */
@@ -47,7 +69,7 @@ export interface ReferenceFlow {
 }
 
 /** A flow that opens another flow and waits under it. */
-export type Opener = AutomationFlow | ValueFlow | ReferenceFlow;
+export type Opener = AutomationFlow | ValueFlow | RefFlow;
 
 /** Adding or changing an application. */
 export interface ApplicationFlow {
@@ -61,7 +83,7 @@ export interface ApplicationFlow {
  * that one as its `opener`, which waits under it and shows again when it ends. At most three are stacked: an
  * automation, a value for it, and an application for that value.
  */
-export type Flow = AutomationFlow | ValueFlow | ReferenceFlow | ApplicationFlow;
+export type Flow = AutomationFlow | ValueFlow | RefFlow | ApplicationFlow;
 
 /**
  * What a flow that saved made for the flow that opened it: the application it belongs to, and the value when it
@@ -83,11 +105,11 @@ function waitingUnder(flow: Flow): readonly Opener[] {
 }
 
 /**
- * The automation flow as it waits under a flow it opens: with the `draft` it shows again, and no value to pick
- * yet.
+ * The automation flow as it waits under a flow it opens: with the `draft` it shows again, and nothing handed to
+ * it yet.
  */
 export function waiting(flow: AutomationFlow, draft: Draft): AutomationFlow {
-  return { ...flow, draft, value: null };
+  return { ...flow, draft, handed: null };
 }
 
 /**
@@ -107,10 +129,13 @@ export function applicationFor(opener: Opener, chosen: string | null, existing: 
 }
 
 /**
- * How a flow ended: it saved, with what it made for a flow that opened it or null when it made nothing a flow
- * starts with, or the user canceled it.
+ * How a flow ended: it saved, or the user canceled it. A save has what it made for a flow that opened it, or
+ * null when it made nothing a flow starts with, and the number of the newest read of the saved lists that
+ * started before the save was heard.
  */
-export type Ended = { readonly kind: 'saved'; readonly made: Made | null } | { readonly kind: 'canceled' };
+export type Ended =
+  | { readonly kind: 'saved'; readonly made: Made | null; readonly read: number }
+  | { readonly kind: 'canceled' };
 
 /**
  * What the window shows once a flow ended: nothing else than it shows now, the flow that opened it, the page that
@@ -125,7 +150,7 @@ export type After =
 /**
  * What follows `flow`. `open` says the flow is still the one the window shows: a save that finishes after the user
  * left it for another changes nothing. A flow that waits under it shows again: with the saved application chosen,
- * and for an automation the saved value to pick, or as it was left when the flow was canceled.
+ * and for an automation what was handed to it, or as it was left when the flow was canceled.
  */
 export function afterFlow(flow: Flow, ended: Ended, open: boolean): After {
   if (!open) {
@@ -139,7 +164,10 @@ export function afterFlow(flow: Flow, ended: Ended, open: boolean): After {
     return { kind: 'flow', flow: opener };
   }
   const { app, value } = ended.made;
-  return { kind: 'flow', flow: opener.kind === 'automation' ? { ...opener, app, value } : { ...opener, app } };
+  return {
+    kind: 'flow',
+    flow: opener.kind === 'automation' ? { ...opener, app, handed: { value, after: ended.read } } : { ...opener, app },
+  };
 }
 
 /** The page each kind of flow opens from. */
@@ -169,6 +197,17 @@ function crumbName(flow: Opener): string {
 export function trail(flow: Flow): readonly string[] {
   const under = waitingUnder(flow);
   return [PAGE_NAMES[(under[0] ?? flow).kind], ...under.map(crumbName)];
+}
+
+/**
+ * Where a new value of the application named `app` shows once it is saved, as its capture says before the save:
+ * `way` is the way to the value's flow, which is longer than its page when an automation waits for the value.
+ */
+export function savedNote(way: readonly string[], app: string): string {
+  const listed = `on the Values page, under ${app}`;
+  return way.length > 1
+    ? `Saving returns to the automation with this value picked. The value also shows ${listed}.`
+    : `Saved values show ${listed}.`;
 }
 
 /**

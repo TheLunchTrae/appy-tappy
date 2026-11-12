@@ -71,7 +71,11 @@ application, it is chosen for you.
   Saving the value brings you back to the automation with that value picked.
 
 Whichever you open, the automation keeps its name, condition, actions, and
-the rest as you left them, and **Cancel** there returns to it unchanged. So a
+the rest as you left them, and **Cancel** there returns to it unchanged. When
+you come back, the keyboard focus is on the next step. For a moment the
+automation can say **Reading what you saved…**, and it can be saved once the
+value is picked. If the application or the value is gone by then, the
+automation says so and keeps what you entered. So a
 first automation needs no other page: select **New automation**, add the
 application, make the value, and then say what happens.
 

@@ -28,12 +28,13 @@ import {
 import { clickApps, targetSummary } from '../lib/click.ts';
 import type { AutomationFlow } from '../lib/flow.ts';
 import { ACTIONS_HINT, COOLDOWN_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
+import { editorLanding, useLanding } from '../lib/landing.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
-import { arrived, watchApps, watchGuide, watchStep, watching } from '../lib/watch.ts';
+import { arrived, readiness, returned, watchApps, watchGuide, watchStep, watching } from '../lib/watch.ts';
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
 type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
@@ -131,6 +132,9 @@ function KeysField({ label, keys, onChange }: KeysFieldProps) {
 }
 
 const EXECUTABLES_ID = 'running-executables';
+
+/** The ID of the When card's guide, which describes the controls the next step is taken with. */
+const GUIDE_ID = 'watch-guide';
 
 interface ActionTargetProps {
   readonly action: ActionDraft;
@@ -463,11 +467,17 @@ function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly 
 
 interface Props {
   readonly apps: readonly AppSummary[];
+  /** The number of the read of the saved lists `apps` is from. */
+  readonly listed: number;
+  /** Why the newest read of the saved lists failed, or null when it answered. */
+  readonly readError: string | null;
   /**
    * The automation to make or change. After a flow the editor opened ends, it also has the draft to show again, the
-   * application its condition starts with, and the value that flow saved.
+   * application its condition starts with, and what that flow saved.
    */
   readonly flow: AutomationFlow;
+  /** Whether the editor shows because a flow it opened ended, so the focus has to land somewhere. */
+  readonly continued: boolean;
   readonly onCancel: () => void;
   readonly onSaved: () => void;
   /** Leaves to add an application, and comes back with `draft` and that application chosen. */
@@ -482,14 +492,28 @@ interface Props {
  * Making or changing an automation: the application and the value it watches, the actions it runs, and whether it
  * undoes them. It leads to adding the application and making the value when the one to watch is not saved yet.
  */
-export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplication, onNewValue, onHeld }: Props) {
+export function AutomationEditor({
+  apps,
+  listed,
+  readError,
+  flow,
+  continued,
+  onCancel,
+  onSaved,
+  onAddApplication,
+  onNewValue,
+  onHeld,
+}: Props) {
   const { existing } = flow;
   const [start] = useState<Draft>(() => startingDraft(existing));
-  const [draft, setDraft] = useState<Draft>(() => watching(flow.draft ?? start, flow.app));
+  const [draft, setDraft] = useState<Draft>(() => returned(flow.draft ?? start, flow.app, flow.handed));
   // The application chosen for the condition before a value of it is picked.
   const [chosenApp, setChosenApp] = useState(flow.app);
-  // The value a flow just saved for the condition, until the saved values list it and the draft picks it.
-  const [made, setMade] = useState(flow.value);
+  // What a flow just saved for the condition, until the draft picks its value or the user chooses something else.
+  const [handed, setHanded] = useState(flow.handed);
+  // The value the draft picked because a flow just saved it, which the card names.
+  const [justPicked, setJustPicked] = useState<string | null>(null);
+  const card = useRef<HTMLElement>(null);
   const [nextKey, setNextKey] = useState(() => unusedKey(draft.actions));
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -519,19 +543,22 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
 
   const choices = useMemo(() => valueChoices(apps), [apps]);
   const saved = useMemo(() => watchApps(apps), [apps]);
-  const step = watchStep({ saved, choices, draft, chosen: chosenApp, made });
-  const guide = watchGuide(step);
+  // The value a flow just saved is picked as soon as the saved values list it. The state is set while rendering,
+  // so no frame shows the card between the two.
+  const landed = arrived({ choices, chosen: chosenApp, handed });
+  if (landed !== null) {
+    setDraft(withSource(draft, landed));
+    setHanded(null);
+    setJustPicked(landed.value.id);
+  }
+  const step = watchStep({ apps, choices, listed, readError, draft, chosen: chosenApp, handed });
+  const guide = watchGuide(step, justPicked);
   const choice = step.kind === 'ready' ? step.choice : null;
   // The application the condition watches, or null before one is chosen.
   const watched = 'app' in step ? step.app.id : 'id' in step ? step.id : null;
-  const landed = arrived({ choices, chosen: chosenApp, made });
-  useEffect(() => {
-    if (landed !== null) {
-      setDraft((current) => withSource(current, landed));
-      setMade(null);
-    }
-  }, [landed]);
+  useLanding(continued, editorLanding(step), card);
   const built = buildAutomation(draft, choices, existing?.id ?? '', apps);
+  const ready = readiness(built, step);
   const typedWhen = choice === null ? null : buildWhen(draft, choice);
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
   const undoWords = built.ok ? undoText(built.automation.actions) : null;
@@ -555,7 +582,7 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
   };
 
   const save = async (): Promise<void> => {
-    if (!built.ok) {
+    if (!built.ok || !ready.ready) {
       return;
     }
     setSaving(true);
@@ -621,22 +648,27 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
           />
         </div>
 
-        <section className="card" aria-labelledby="when-heading">
+        <section className="card" aria-labelledby="when-heading" ref={card}>
           <div className="with-hint">
             <h2 id="when-heading">When</h2>
             <Hint topic="When">{WHEN_HINT}</Hint>
           </div>
-          {guide === null ? null : <p className={guide.warn ? 'warn' : 'guide'}>{guide.text}</p>}
+          {/* Stays mounted, so a screen reader announces each step, and what a flow saved once it is picked. */}
+          <p id={GUIDE_ID} className={guide?.warn === true ? 'warn guide' : 'guide'} role="status">
+            {guide?.text ?? ''}
+          </p>
           <div className="watch-row">
             {step.kind === 'no-applications' ? null : (
               <select
                 className="input"
                 aria-label="Application"
+                aria-describedby={GUIDE_ID}
+                data-landing="application"
                 value={watched ?? ''}
                 onChange={(event) => {
                   const picked = event.target.value;
                   setChosenApp(picked);
-                  setMade(null);
+                  setHanded(null);
                   setDraft((current) => watching(current, picked));
                   setSaveError(null);
                 }}
@@ -662,6 +694,8 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
               <button
                 type="button"
                 className={guide?.opens === 'value' ? 'btn primary' : 'btn'}
+                aria-describedby={GUIDE_ID}
+                data-landing="new-value"
                 onClick={() => {
                   onNewValue(draft, step.app.id);
                 }}
@@ -672,6 +706,8 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
             <button
               type="button"
               className={guide?.opens === 'application' ? 'btn primary' : 'btn'}
+              aria-describedby={GUIDE_ID}
+              data-landing="add-application"
               onClick={() => {
                 onAddApplication(draft, watched);
               }}
@@ -684,10 +720,13 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
               <select
                 className="input value-select"
                 aria-label="Value"
+                aria-describedby={GUIDE_ID}
+                data-landing="value"
                 value={choice === null ? '' : choice.value.id}
                 onChange={(event) => {
                   const picked = step.values.find((option) => option.value.id === event.target.value);
                   if (picked !== undefined) {
+                    setHanded(null);
                     setDraft((current) => withSource(current, picked));
                     setSaveError(null);
                   }
@@ -705,6 +744,8 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
               <select
                 className="input"
                 aria-label="Comparison"
+                aria-describedby={GUIDE_ID}
+                data-landing="comparison"
                 value={draft.is}
                 disabled={choice === null}
                 onChange={(event) => {
@@ -913,7 +954,7 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
         <div className="editor-foot">
           {/* Both regions stay mounted, so a screen reader announces each change of their text. */}
           <span className="note" role="status">
-            {saveError === null ? (built.ok ? 'Ready to save.' : built.next) : ''}
+            {saveError === null ? ready.text : ''}
           </span>
           <span className="warn" role="alert">
             {saveError ?? ''}
@@ -924,7 +965,7 @@ export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplicati
           <button
             type="button"
             className="btn primary"
-            disabled={!built.ok || saving}
+            disabled={!ready.ready || saving}
             onClick={() => {
               background(save());
             }}
