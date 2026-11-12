@@ -227,6 +227,12 @@ moves: boolean,
  */
 rough: boolean,
 /**
+ * Whether the colors were found over only the strips of the
+ * region that show the bar from end to end, past a label, an icon,
+ * or what lies beside the bar.
+ */
+around: boolean,
+/**
  * How many older screenshots of the window size were not looked
  * at.
  */

@@ -66,8 +66,8 @@ This page covers what the user guide leaves out.
   the region and a few passes over it. It hands them to
   [the detector](Screen-regions.md#bar-detection), the drawn-on one first,
   and answers the two colors, the screenshot they were found on, the ones
-  that show the bar and the ones that show neither color, and how many
-  older ones it left out; or a sentence that says why none are proposed and
+  that show the bar and the ones that show neither color, whether it went
+  by only part of the region, and how many older ones it left out; or a sentence that says why none are proposed and
   names the screenshots concerned. `measure_bar` reads the same screenshots
   with two colors through the bar reader itself, and answers the pixels
   that count as filled and as empty on the screenshot shown, which the UI

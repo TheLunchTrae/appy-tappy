@@ -13,6 +13,12 @@
 //! reader has no direction, so that is a convention the user can turn
 //! around.
 //!
+//! A label, an icon, or what lies beside a loosely drawn bar hides that
+//! layout in the columns it covers, though the reader leaves its pixels out
+//! and reads the bar all the same. So where the whole region shows no bar,
+//! the detector looks again over only the lanes that each show the bar from
+//! end to end on their own.
+//!
 //! The colors come from one screenshot's layout. Every other screenshot of
 //! the region then has to show the same two colors the same way, at any
 //! fill, or neither of them, and on each one [`BarFill::percent`] has to read
@@ -34,8 +40,7 @@ pub const MIN_LENGTH: usize = 12;
 /// a bar stays this near its color along the whole part.
 const SAME: u32 = 16 * 16;
 
-/// The squared distance a filled and an empty color need between them, and
-/// that a pixel has to differ by between two screenshots to have changed.
+/// The squared distance a filled and an empty color need between them.
 const APART: u32 = 32 * 32;
 
 /// The most different colors gathered from a region. A bar shows two and a
@@ -49,7 +54,7 @@ const COVER: usize = 85;
 
 /// A part of a bar is at least one in this many of the long side's columns.
 /// It is also how far two screenshots' fills have to differ to show the bar
-/// moving, and how much of a lane has to change to show where the bar is.
+/// moving.
 const PARTS: usize = 20;
 
 /// The fewest columns that make a part of a bar, however short the region.
@@ -58,6 +63,11 @@ const MIN_PART: usize = 3;
 /// The most columns between the two parts that belong to neither, as an
 /// anti-aliased edge does.
 const EDGE: usize = 2;
+
+/// The share of a region's lanes, in percent, that have to show the bar
+/// from end to end on their own for the detector to go by those lanes
+/// alone, past a label or what lies beside the bar.
+const CLEAR: usize = 20;
 
 /// How far, in points of fill, the reader may be from the fill a layout
 /// shows. Past it the colors are not proposed.
@@ -87,6 +97,10 @@ pub struct BarProposal {
     /// a screenshot, as a label or a soft edge on the bar causes. It is
     /// never more than a few points off.
     pub rough: bool,
+    /// Whether the colors were found over only some of the region's lanes,
+    /// the ones that show the bar from end to end, because a label, an
+    /// icon, or what lies beside the bar hides it in the others.
+    pub around: bool,
 }
 
 /// Why no bar is proposed for a region.
@@ -167,23 +181,21 @@ pub fn detect_bar(first: &Image, others: &[Image]) -> Result<BarProposal, NoBar>
         Ok(proposal) => return Ok(proposal),
         Err(reason) => reason,
     };
-    // Whatever is drawn beside a loosely drawn bar outvotes it in each
-    // column. So look again at only the lanes where the screenshots differ,
-    // which the bar's moving part is in, and then at only the lanes that
-    // show more than one color.
-    let narrower: [&dyn Fn() -> Vec<bool>; 2] =
-        [&|| moving_lanes(first, &images), &|| busy_lanes(&images)];
-    let mut reasons = vec![whole];
-    for lanes in narrower {
-        match propose(&images, &lanes()) {
-            Ok(proposal) => return Ok(proposal),
-            Err(reason) => reasons.push(reason),
-        }
-    }
+    // Whatever else is drawn in the region outvotes the bar in the columns
+    // it covers, so look again at only the lanes that show the bar from end
+    // to end on their own.
+    let clear = match propose(&images, &clear_lanes(&images)) {
+        Ok(proposal) => {
+            return Ok(BarProposal {
+                around: true,
+                ..proposal
+            });
+        },
+        Err(reason) => reason,
+    };
     // A reason about a bar that was found says more than why the whole
     // region shows none.
-    let telling = reasons.iter().copied().find(|reason| reason.tells());
-    Err(telling.unwrap_or(whole))
+    Err(if clear.tells() { clear } else { whole })
 }
 
 impl NoBar {
@@ -194,32 +206,29 @@ impl NoBar {
     }
 }
 
-/// The lanes of which at least a part's worth of pixels differ between
-/// `first` and another of `images`.
-fn moving_lanes(first: &Image, images: &[(usize, &Image)]) -> Vec<bool> {
-    let strip = Strip::new(first);
-    let changed = |index: usize| {
-        let here = first.pixels().get(index);
-        images.iter().any(|(_, other)| {
-            let pair = here.zip(other.pixels().get(index));
-            pair.is_some_and(|(one, two)| distance(color(*one), color(*two)) >= APART)
-        })
+/// The lanes that show a bar from end to end on their own, on every one of
+/// `images` where at least [`CLEAR`] percent of the lanes do; or no lane
+/// when fewer than that are left, or there is no such image. A label, an
+/// icon, a border along the bar, and what lies beside the bar are in none
+/// of them. An image with fewer such lanes, as one of a full bar or of
+/// something else, has no say.
+fn clear_lanes(images: &[(usize, &Image)]) -> Vec<bool> {
+    let enough = |lanes: &Vec<bool>| {
+        let clear = lanes.iter().filter(|&&clear| clear).count();
+        covers(clear, lanes.len(), CLEAR)
     };
-    (0..strip.lanes())
-        .map(|lane| {
-            let indexes = (0..strip.length()).filter_map(|column| strip.index(column, lane));
-            indexes.filter(|&index| changed(index)).count() >= part(strip.length())
-        })
-        .collect()
-}
-
-/// The lanes that show more than one color on one of `images`.
-fn busy_lanes(images: &[(usize, &Image)]) -> Vec<bool> {
-    let strips: Vec<Strip<'_>> = images.iter().map(|&(_, image)| Strip::new(image)).collect();
-    let lanes = strips.first().map_or(0, |strip| strip.lanes());
-    (0..lanes)
-        .map(|lane| strips.iter().any(|strip| !strip.plain(lane)))
-        .collect()
+    let each = images.iter().map(|&(_, image)| {
+        let strip = Strip::new(image);
+        let clear = (0..strip.lanes()).map(|lane| two_parts(&strip.lane(lane)).is_ok());
+        clear.collect::<Vec<bool>>()
+    });
+    let on_all = each.filter(enough).reduce(|mut all, lanes| {
+        for (clear, also) in all.iter_mut().zip(lanes) {
+            *clear &= also;
+        }
+        all
+    });
+    on_all.filter(enough).unwrap_or_default()
 }
 
 /// The bar that the `kept` lanes of `images` show: the colors of the first
@@ -269,22 +278,30 @@ fn propose(images: &[(usize, &Image)], kept: &[bool]) -> Result<BarProposal, NoB
         shown_on,
         moves: most - least >= 100.0 / PARTS as f64,
         rough,
+        around: false,
     })
 }
 
-/// The bar that `columns`, the columns of `image`, lay out as: its two main
-/// colors, the one at the start as the filled one.
+/// The bar that `columns`, the columns of `image`, lay out as, its two main
+/// colors with the one at the start as the filled one, when the reader reads
+/// `image` as full as that layout looks.
 fn from_layout(image: &Image, columns: &[Rgb]) -> Result<BarFill, NoBar> {
-    let pair = two_colors(&classes(columns.iter().copied()), part(columns.len()))?;
-    let both = |bar: &BarFill| matches!(laid_out(columns, *bar), Some(Shown::Both { .. }));
-    let bar = [pair, pair.turned()]
-        .into_iter()
-        .find(both)
-        .ok_or(NoBar::NotABar)?;
+    let bar = two_parts(columns)?;
     match verdict(image, columns, bar) {
         Verdict::Shows { .. } => Ok(bar),
         Verdict::Absent | Verdict::Differs => Err(NoBar::Misread),
     }
+}
+
+/// The bar whose two parts `colors` lay out as, from their start to their
+/// end: their two main colors, the one at the start as the filled one.
+fn two_parts(colors: &[Rgb]) -> Result<BarFill, NoBar> {
+    let pair = two_colors(&classes(colors.iter().copied()), part(colors.len()))?;
+    let both = |bar: &BarFill| matches!(laid_out(colors, *bar), Some(Shown::Both { .. }));
+    [pair, pair.turned()]
+        .into_iter()
+        .find(both)
+        .ok_or(NoBar::NotABar)
 }
 
 /// A bar of the most common color of `classes` and the most common one
@@ -492,14 +509,11 @@ impl<'a> Strip<'a> {
             .collect()
     }
 
-    /// Whether lane `lane` shows one color, but for fewer pixels than make
-    /// a part of a bar.
-    fn plain(self, lane: usize) -> bool {
-        let colors = || (0..self.length()).filter_map(move |column| self.at(column, lane));
-        median(colors()).is_none_or(|middle| {
-            let off = colors().filter(|&color| distance(color, middle) >= APART);
-            off.count() < part(self.length())
-        })
+    /// The colors of lane `lane`, from the start.
+    fn lane(self, lane: usize) -> Vec<Rgb> {
+        (0..self.length())
+            .filter_map(|column| self.at(column, lane))
+            .collect()
     }
 }
 
@@ -645,6 +659,16 @@ mod tests {
             shown_on: vec![0],
             moves: false,
             rough: false,
+            around: false,
+        }
+    }
+
+    /// The proposal of green on gray from one screenshot, found over only
+    /// the lanes that show the bar from end to end.
+    fn around() -> BarProposal {
+        BarProposal {
+            around: true,
+            ..alone(GREEN, GRAY)
         }
     }
 
@@ -731,13 +755,13 @@ mod tests {
         // with them.
         assert!((reads(&image, &[]) - 41.0).abs() < 1.0);
         // A border as thick as the bar outvotes it in each column, until
-        // the lanes that are all border are left out.
+        // only the lanes that show the bar are looked at.
         let framed = picture(100, 10, |x, y| match y {
             3..7 if x < 40 => GREEN,
             3..7 => GRAY,
             _ => WHITE,
         });
-        assert_eq!(detect_bar(&framed, &[]), Ok(alone(GREEN, GRAY)));
+        assert_eq!(detect_bar(&framed, &[]), Ok(around()));
     }
 
     #[test]
@@ -1001,9 +1025,9 @@ mod tests {
         assert_eq!(detect_bar(&tall, &[]), Err(NoBar::Tiny));
     }
 
-    /// A bar of six lanes in a region of thirty, on `background`.
-    fn loose(background: Rgb, filled: u32) -> Image {
-        picture(100, 30, move |x, y| match (x, y) {
+    /// A bar of six lanes in a region of `height`, on `background`.
+    fn loose(height: u32, background: Rgb, filled: u32) -> Image {
+        picture(100, height, move |x, y| match (x, y) {
             (5..95, 12..18) if x < filled.saturating_add(5) => GREEN,
             (5..95, 12..18) => GRAY,
             _ => background,
@@ -1012,10 +1036,12 @@ mod tests {
 
     #[test]
     fn a_bar_drawn_loosely_on_a_plain_background_is_found() {
-        assert_eq!(detect_bar(&loose(BLACK, 45), &[]), Ok(alone(GREEN, GRAY)));
-        assert!((reads(&loose(BLACK, 45), &[]) - 50.0).abs() < 1e-9);
-        // Nothing to find in the lanes that are not plain either.
-        assert_eq!(detect_bar(&loose(BLACK, 0), &[]), Err(NoBar::OneColor));
+        assert_eq!(detect_bar(&loose(30, BLACK, 45), &[]), Ok(around()));
+        assert!((reads(&loose(30, BLACK, 45), &[]) - 50.0).abs() < 1e-9);
+        // The bar has to be a fifth of the region's lanes: six of 30.
+        assert_eq!(detect_bar(&loose(31, BLACK, 45), &[]), Err(NoBar::OneColor));
+        // No lane of a full or an empty bar shows two parts.
+        assert_eq!(detect_bar(&loose(30, BLACK, 0), &[]), Err(NoBar::OneColor));
     }
 
     #[test]
@@ -1158,32 +1184,39 @@ mod tests {
     }
 
     #[test]
-    fn something_over_the_bar_on_another_screenshot_is_refused() {
+    fn something_over_part_of_the_bar_is_looked_around_on_every_screenshot() {
         let cream = Rgb {
             red: 255,
             green: 255,
             blue: 225,
         };
-        let tooltip = picture(100, 20, |x, y| match x {
-            30..70 if y < 14 => cream,
-            0..50 => GREEN,
-            _ => GRAY,
-        });
+        let tooltip = |from: u32| {
+            picture(100, 20, move |x, y| match x {
+                _ if x >= from && x < from.saturating_add(40) && y < 14 => cream,
+                0..50 => GREEN,
+                _ => GRAY,
+            })
+        };
+        // Six lanes of twenty stay free of it, and it hides as much of one
+        // part as of the other, so the reader still reads a half.
+        let found = BarProposal {
+            shown_on: vec![0, 1],
+            ..around()
+        };
         assert_eq!(
-            detect_bar(&bar(100, 20, 50), std::slice::from_ref(&tooltip)),
+            detect_bar(&bar(100, 20, 50), &[tooltip(30)]),
+            Ok(found.clone())
+        );
+        assert_eq!(detect_bar(&tooltip(30), &[bar(100, 20, 50)]), Ok(found));
+        // Over the filled part alone it takes the reader too far off.
+        assert_eq!(
+            detect_bar(&bar(100, 20, 50), &[tooltip(5)]),
             Err(NoBar::Differs {
                 found_on: 0,
                 image: 1
             })
         );
-        assert_eq!(
-            detect_bar(&tooltip, &[bar(100, 20, 50)]),
-            Err(NoBar::Differs {
-                found_on: 1,
-                image: 0
-            })
-        );
-        // The colors the other way around are not the same bar either.
+        // The colors the other way around are not the same bar.
         let turned = picture(100, 8, |x, _| if x < 30 { GRAY } else { GREEN });
         assert_eq!(
             detect_bar(&bar(100, 8, 30), &[turned]),
@@ -1234,49 +1267,31 @@ mod tests {
         );
     }
 
-    /// A bar of four lanes in front of a background that is busy in every
-    /// lane.
-    fn over_a_scene(filled: u32) -> Image {
-        picture(100, 20, move |x, y| match y {
-            8..12 if x < filled => GREEN,
-            8..12 => GRAY,
-            _ if x.is_multiple_of(2) => BLUE,
-            _ => WHITE,
-        })
-    }
-
     #[test]
-    fn the_lanes_that_change_between_screenshots_find_a_bar_over_a_busy_background() {
-        assert_eq!(detect_bar(&over_a_scene(30), &[]), Err(NoBar::NotABar));
+    fn a_bar_over_a_busy_background_is_found_in_the_lanes_that_show_it() {
+        // Four lanes of twenty hold the bar, and every other lane is busy.
+        let over_a_scene = |filled: u32| {
+            picture(100, 20, move |x, y| match y {
+                8..12 if x < filled => GREEN,
+                8..12 => GRAY,
+                _ if x.is_multiple_of(2) => BLUE,
+                _ => WHITE,
+            })
+        };
+        assert_eq!(detect_bar(&over_a_scene(30), &[]), Ok(around()));
         assert_eq!(
             detect_bar(&over_a_scene(30), &[over_a_scene(70)]),
-            Ok(moving(0, &[0, 1]))
-        );
-        // A part's worth of a lane has to change: five columns of 100.
-        assert_eq!(
-            detect_bar(&over_a_scene(30), &[over_a_scene(35)]),
-            Ok(moving(0, &[0, 1]))
-        );
-        assert_eq!(
-            detect_bar(&over_a_scene(30), &[over_a_scene(34)]),
-            Err(NoBar::NotABar)
-        );
-        // Something small that changes elsewhere, such as a cursor, points
-        // at no lane.
-        let cursor = picture(100, 20, |x, y| match (x, y) {
-            (60..64, 2..5) => BLACK,
-            _ => over_a_scene(30).pixel(x, y).unwrap(),
-        });
-        assert_eq!(
-            detect_bar(&over_a_scene(30), &[cursor]),
-            Err(NoBar::NotABar)
+            Ok(BarProposal {
+                around: true,
+                ..moving(0, &[0, 1])
+            })
         );
     }
 
     #[test]
     fn a_reason_about_a_bar_that_was_found_is_the_one_given() {
-        // The whole region shows one color, and the lanes that changed show
-        // a bar whose colors also lie beside it.
+        // The whole region shows one color, and the lanes that show a bar
+        // show one whose colors also lie beside it.
         let beside = |filled: u32| {
             picture(100, 30, move |x, y| {
                 if x < filled && (12..18).contains(&y) {
@@ -1288,7 +1303,7 @@ mod tests {
         };
         assert_eq!(detect_bar(&beside(30), &[beside(70)]), Err(NoBar::Misread));
         // The whole region shows a bar that another screenshot differs
-        // from, which no narrower look changes.
+        // from, which looking at fewer lanes does not change.
         let bright = Rgb {
             red: 120,
             green: 255,
@@ -1302,6 +1317,277 @@ mod tests {
                 image: 1
             })
         );
+    }
+
+    /// Whether `text`, drawn in a 3 by 5 font with `scale` pixels to the
+    /// dot, covers the pixel (`x`, `y`) of its own box.
+    fn glyph(text: &str, scale: u32, x: u32, y: u32) -> bool {
+        const FONT: [(char, [&str; 5]); 5] = [
+            ('0', ["###", "#.#", "#.#", "#.#", "###"]),
+            ('2', ["###", "..#", "###", "#..", "###"]),
+            ('5', ["###", "#..", "###", "..#", "###"]),
+            ('7', ["###", "..#", "..#", "..#", "..#"]),
+            ('%', ["#.#", "..#", ".#.", "#..", "#.#"]),
+        ];
+        let dot = |pixel: u32| usize::try_from(pixel.checked_div(scale).unwrap()).unwrap();
+        let (letter, column) = (
+            dot(x).checked_div(4).unwrap(),
+            dot(x).checked_rem(4).unwrap(),
+        );
+        let rows = text.chars().nth(letter).and_then(|letter| {
+            let known = FONT.iter().find(|(known, _)| *known == letter);
+            known.map(|(_, rows)| rows)
+        });
+        let row = rows.and_then(|rows| rows.get(dot(y)));
+        row.and_then(|row| row.as_bytes().get(column)) == Some(&b'#')
+    }
+
+    /// A bar 200 long and `height` high inside a black border one pixel
+    /// thick, its first `filled` columns filled, with `text` of three
+    /// characters in white at its center, `scale` pixels to the dot.
+    fn labeled(filled: u32, height: u32, text: &'static str, scale: u32) -> Image {
+        let left = 200_u32
+            .saturating_sub(scale.saturating_mul(11))
+            .checked_div(2)
+            .unwrap();
+        let top = height
+            .saturating_sub(scale.saturating_mul(5))
+            .checked_div(2)
+            .unwrap();
+        picture(200, height, move |x, y| {
+            let inside = x.checked_sub(left).zip(y.checked_sub(top));
+            match (x, y) {
+                (0 | 199, _) | (_, 0) => BLACK,
+                _ if y.saturating_add(1) == height => BLACK,
+                _ if inside.is_some_and(|(x, y)| glyph(text, scale, x, y)) => WHITE,
+                _ if x < filled => GREEN,
+                _ => GRAY,
+            }
+        })
+    }
+
+    /// `image` with each pixel beside a white one blended half into white,
+    /// as an anti-aliased label is.
+    fn haloed(image: &Image) -> Image {
+        let size = image.size();
+        let white = |x: Option<u32>, y: Option<u32>| {
+            x.zip(y).and_then(|(x, y)| image.pixel(x, y)) == Some(WHITE)
+        };
+        picture(size.width, size.height, |x, y| {
+            let here = image.pixel(x, y).unwrap();
+            let beside = white(x.checked_sub(1), Some(y))
+                || white(x.checked_add(1), Some(y))
+                || white(Some(x), y.checked_sub(1))
+                || white(Some(x), y.checked_add(1));
+            if here != WHITE && beside {
+                mix(here, WHITE, 500)
+            } else {
+                here
+            }
+        })
+    }
+
+    /// The fills and the labels that say them.
+    const LABELS: [(u32, &str, f64); 3] =
+        [(50, "25%", 25.0), (100, "50%", 50.0), (150, "75%", 75.0)];
+
+    #[test]
+    fn a_bar_is_found_around_a_label_whatever_it_says() {
+        // A label 10 high on a bar 20 high, 15 on 24, and 10 on 16.
+        for (height, scale) in [(20, 2), (24, 3), (16, 2)] {
+            for (filled, text, fill) in LABELS {
+                let image = labeled(filled, height, text, scale);
+                let proposal = detect_bar(&image, &[]);
+                assert!(proposal.is_ok(), "{text} on {height}: {proposal:?}");
+                let bar = proposal.unwrap().bar;
+                assert_eq!(bar, BarFill::new(GREEN, GRAY).unwrap());
+                let reads = bar.percent(&image).unwrap().raw();
+                assert!(
+                    (reads - fill).abs() < 2.0,
+                    "{text} on {height} reads {reads}"
+                );
+            }
+        }
+        // The same bar is found with or without going around its label,
+        // by where the label's dots fall.
+        let around = |text| detect_bar(&labeled(100, 24, text, 3), &[]).unwrap().around;
+        assert!(!around("25%"));
+        assert!(around("50%"));
+    }
+
+    #[test]
+    fn a_bar_is_found_around_an_anti_aliased_label() {
+        for (filled, text, fill) in LABELS {
+            let image = haloed(&labeled(filled, 20, text, 2));
+            let proposal = detect_bar(&image, &[]);
+            assert!(proposal.is_ok(), "{text}: {proposal:?}");
+            let bar = proposal.unwrap().bar;
+            assert_eq!(bar, BarFill::new(GREEN, GRAY).unwrap());
+            let reads = bar.percent(&image).unwrap().raw();
+            assert!((reads - fill).abs() < 2.0, "{text} reads {reads}");
+        }
+    }
+
+    #[test]
+    fn a_bar_is_found_around_an_icon_at_its_center() {
+        let icon = |side: u32, filled: u32| {
+            let from = 100_u32.saturating_sub(side.checked_div(2).unwrap());
+            let top = 10_u32.saturating_sub(side.checked_div(2).unwrap());
+            picture(200, 20, move |x, y| {
+                match (x.checked_sub(from), y.checked_sub(top)) {
+                    (Some(x), Some(y)) if x < side && y < side => WHITE,
+                    _ if x < filled => GREEN,
+                    _ => GRAY,
+                }
+            })
+        };
+        for (side, filled, fill) in [(8, 50, 25.0), (12, 50, 25.0), (12, 150, 75.0)] {
+            let image = icon(side, filled);
+            let proposal = detect_bar(&image, &[]);
+            assert!(proposal.is_ok(), "{side} at {filled}: {proposal:?}");
+            let reads = proposal.unwrap().bar.percent(&image).unwrap().raw();
+            assert!(
+                (reads - fill).abs() < 2.0,
+                "{side} at {filled} reads {reads}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_label_too_tall_for_its_bar_leaves_too_few_lanes() {
+        // A label 10 high on a bar 12 high, in its border, covers every
+        // lane of the bar at some column.
+        assert_eq!(
+            detect_bar(&labeled(100, 12, "50%", 2), &[]),
+            Err(NoBar::NotABar)
+        );
+        // Two lanes of a bar 18 high stay free at each side of a label 10
+        // high, which is a fifth of the 20 lanes with the border's.
+        let free = |lanes: u32| {
+            picture(200, 20, move |x, y| match (x, y) {
+                (0 | 199, _) | (_, 0 | 19) => BLACK,
+                (60..140, _)
+                    if y > lanes && y < 19_u32.saturating_sub(lanes) && x.is_multiple_of(2) =>
+                {
+                    WHITE
+                },
+                (0..100, _) => GREEN,
+                _ => GRAY,
+            })
+        };
+        assert_eq!(detect_bar(&free(2), &[]), Ok(around()));
+        assert_eq!(detect_bar(&free(1), &[]), Err(NoBar::NotABar));
+    }
+
+    /// `image`, 200 by 10, under a white block over most of its lanes.
+    fn under_a_block(image: &Image) -> Image {
+        picture(200, 10, |x, y| match (x, y) {
+            (90..110, 2..8) => WHITE,
+            _ => image.pixel(x, y).unwrap(),
+        })
+    }
+
+    #[test]
+    fn what_touches_every_lane_is_refused_around_a_label_too() {
+        // The block alone is looked around.
+        let plain = under_a_block(&bar(200, 10, 50));
+        assert_eq!(detect_bar(&plain, &[]), Ok(around()));
+        let dark = Rgb {
+            red: 20,
+            green: 150,
+            blue: 40,
+        };
+        let striped = picture(200, 10, |x, y| {
+            match x.saturating_add(y).checked_div(4).unwrap() {
+                _ if x >= 50 => GRAY,
+                stripe if stripe.is_multiple_of(2) => GREEN,
+                _ => dark,
+            }
+        });
+        let segmented = picture(200, 10, |x, _| match x.checked_div(20).unwrap() {
+            _ if x.checked_rem(20).unwrap() >= 18 => BLACK,
+            segment if segment < 5 => GREEN,
+            _ => GRAY,
+        });
+        let from = Rgb {
+            red: 0,
+            green: 90,
+            blue: 0,
+        };
+        let to = Rgb {
+            red: 80,
+            green: 255,
+            blue: 80,
+        };
+        let trail = picture(200, 10, |x, _| match x {
+            0..60 => GREEN,
+            60..100 => WHITE,
+            _ => GRAY,
+        });
+        for (name, image) in [
+            ("striped", striped),
+            ("segmented", segmented),
+            ("fading", fading(from, to, 100)),
+            ("with a trail", trail),
+        ] {
+            assert_eq!(clear_lanes(&[(0, &image)]), [false; 0], "{name}");
+            assert_eq!(
+                detect_bar(&under_a_block(&image), &[]),
+                Err(NoBar::NotABar),
+                "{name}"
+            );
+        }
+        // A bar that changes color is found around the block on the first
+        // screenshot, and its colors do not read the second.
+        assert_eq!(
+            detect_bar(&under_a_block(&health(40)), &[under_a_block(&health(160))]),
+            Err(NoBar::Differs {
+                found_on: 0,
+                image: 1
+            })
+        );
+        // So is a fill that fades a little, once more of it shows.
+        let mild = |filled| {
+            let from = Rgb {
+                red: 30,
+                green: 180,
+                blue: 50,
+            };
+            let to = Rgb {
+                red: 60,
+                green: 240,
+                blue: 80,
+            };
+            under_a_block(&fading(from, to, filled))
+        };
+        assert_eq!(
+            detect_bar(&mild(40), &[mild(160)]),
+            Err(NoBar::Differs {
+                found_on: 0,
+                image: 1
+            })
+        );
+        // The colors beside the bar are still held against the proposal.
+        let beside = picture(200, 30, |x, y| match (x, y) {
+            (90..110, 12..16) => WHITE,
+            (0..90, 8..22) => GREEN,
+            _ => GRAY,
+        });
+        assert_eq!(detect_bar(&beside, &[]), Err(NoBar::Misread));
+    }
+
+    #[test]
+    fn two_screenshots_with_different_labels_are_both_read() {
+        let [first, second] = [labeled(50, 24, "25%", 3), labeled(100, 24, "50%", 3)];
+        let proposal = detect_bar(&first, std::slice::from_ref(&second)).unwrap();
+        assert_eq!(proposal.bar, BarFill::new(GREEN, GRAY).unwrap());
+        assert_eq!(proposal.shown_on, [0, 1]);
+        assert!(proposal.moves);
+        assert!(proposal.around, "the second label hides the layout");
+        for (image, fill) in [(&first, 25.0), (&second, 50.0)] {
+            let reads = proposal.bar.percent(image).unwrap().raw();
+            assert!((reads - fill).abs() < 2.0, "reads {reads}, drawn at {fill}");
+        }
     }
 
     #[test]
@@ -1384,34 +1670,40 @@ mod tests {
     }
 
     #[test]
-    fn a_lane_is_plain_until_a_part_of_it_is_another_color() {
-        let image = picture(100, 4, |x, y| match (x, y) {
-            (0..4, 0) | (0..5, 1) => GREEN,
-            (0..5, 2) => Rgb { red: 86, ..GRAY },
-            (0..5, 3) => Rgb { red: 87, ..GRAY },
+    fn a_lane_is_clear_when_it_shows_the_bar_from_end_to_end_on_its_own() {
+        // Lanes: a border, the bar, the bar under a label, a full bar, and
+        // the bar with a soft edge and a border at each end.
+        let image = picture(100, 5, |x, y| match (x, y) {
+            (_, 0) | (0 | 99, 4) => BLACK,
+            (45..55, 2) => WHITE,
+            (40 | 41, 4) => red(90),
+            (_, 3) | (0..40, _) => GREEN,
             _ => GRAY,
         });
-        let strip = Strip::new(&image);
-        assert!(strip.plain(0), "4 columns are fewer than a part");
-        assert!(!strip.plain(1), "5 columns are a part");
-        assert!(
-            strip.plain(2),
-            "a color within 32 of the lane's is the same"
+        let other = picture(100, 5, |_, _| BLACK);
+        assert_eq!(
+            clear_lanes(&[(0, &other), (1, &image)]),
+            [false, true, false, false, true],
+            "an image with no clear lane has no say"
         );
-        assert!(!strip.plain(3), "a color 32 from the lane's is another");
-    }
-
-    #[test]
-    fn a_lane_moves_when_a_part_of_it_changes_by_what_two_colors_need() {
-        let first = picture(100, 3, |_, _| red(0));
-        let other = picture(100, 3, |x, y| match (x, y) {
-            (0..5, 0) | (0..4, 1) => red(32),
-            (_, 2) => red(31),
-            _ => red(0),
+        assert_eq!(clear_lanes(&[(0, &other)]), [false; 0]);
+        // Only the lanes that are clear on every image with enough of them.
+        let lower = picture(100, 5, |x, y| match (x, y) {
+            (45..55, 0 | 1) => WHITE,
+            (0..40, _) => GREEN,
+            _ => GRAY,
         });
-        let images = [(0, &first), (1, &other)];
-        assert_eq!(moving_lanes(&first, &images), [true, false, false]);
-        assert_eq!(busy_lanes(&images), [true, false, false]);
+        assert_eq!(
+            clear_lanes(&[(0, &image), (1, &lower)]),
+            [false, false, false, false, true]
+        );
+        // Too few when none is clear on both.
+        let upper = picture(100, 5, |x, y| match (x, y) {
+            (45..55, 1 | 4) => WHITE,
+            (0..40, _) => GREEN,
+            _ => GRAY,
+        });
+        assert_eq!(clear_lanes(&[(0, &image), (1, &upper)]), [false; 0]);
     }
 
     #[test]

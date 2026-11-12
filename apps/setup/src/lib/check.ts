@@ -15,6 +15,7 @@ import {
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
+import { sameContent } from './unsaved.ts';
 
 /** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
 type CharactersSpec = Extract<CheckSpec, { readonly kind: 'characters' }>;
@@ -169,11 +170,12 @@ export interface LiveReading {
 }
 
 /**
- * The reading `read` holds when `built`, the check as it stands, is the very check that read it, and else null: a
- * reading never outlives its check, so a check being tried shows no reading of the one before it.
+ * The reading `read` holds when `built`, the check as it stands, has the content of the check that read it, and
+ * else null: a reading never outlives its check, so a check being tried shows no reading of another one before it.
+ * A draft change that leaves the check as it was, such as a new name, keeps the reading.
  */
 export function readingOf(read: LiveReading | null, built: Built): Reading | null {
-  return read?.of === built ? read.reading : null;
+  return read !== null && sameContent(read.of, built) ? read.reading : null;
 }
 
 /** The draft's check, or what the user still has to do. */

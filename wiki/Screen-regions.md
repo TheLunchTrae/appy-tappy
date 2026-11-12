@@ -209,17 +209,24 @@ what it is for.
   cannot be read with two colors. Two screenshots that show both parts at
   fills a part apart say that the bar moves, which a picture in two colors
   would not.
-- **Loose regions.** When the whole region shows no bar, two narrower looks
-  follow, each held to the same rules on every screenshot: only the lanes
-  of which a part's worth of pixels differs between screenshots, which finds
-  a bar in front of a busy background once it moved, and then only the lanes
-  that are not one plain color, which finds a bar with plain background or
-  a thick border above and below it.
+- **Around a label.** A label, an icon, or what lies beside a loosely drawn
+  bar hides the layout in the columns it covers, though the reader leaves
+  its pixels out and reads the bar all the same. So when the whole region
+  shows no bar, the detector looks again over only the lanes that each show
+  the bar from end to end on their own: two plain parts by the lane's own
+  colors, under the same rule as the columns. It takes the lanes that do so
+  on every screenshot where enough lanes do, and needs a share of the
+  region's lanes to be left (`CLEAR`). Each of those lanes spans the bar by
+  itself, so where they lie across the bar does not matter. The same rules
+  then hold over those lanes on every screenshot, with the reader still
+  reading the whole region. Stripes, segments, and a fading fill touch every
+  lane, so no lane shows the bar and they stay refused. The proposal says
+  that it went by part of the region.
 
 A refusal carries a `NoBar` reason. The detector does not find a bar drawn
 as separate segments, a striped, textured, or fading fill, a bar with a
-trail between its parts, a bar whose label covers most of its height, or a
-bar that fills from its middle. A fill that fades so little along the bar
+trail between its parts, a bar under a label or an icon that leaves too few
+lanes free, or a bar that fills from its middle. A fill that fades so little along the bar
 that it stays one plain color is proposed, and every screenshot must still
 read with it. The reader reads some of those bars with hand-picked colors;
 supporting them here needs a wider detector, not another reader.

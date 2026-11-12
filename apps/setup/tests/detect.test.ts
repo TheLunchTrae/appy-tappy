@@ -30,6 +30,7 @@ const proposed: Proposal = {
   without: [],
   moves: true,
   rough: false,
+  around: false,
   leftOut: 0,
 };
 const nonePicked = { filled: null, empty: null };
@@ -169,6 +170,9 @@ describe('detectingText', () => {
     );
     expect(detectingText(found({ ...proposed, rough: true }), held, position)).toBe(
       `${start} On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
+    );
+    expect(detectingText(found({ ...proposed, around: true, rough: true }), held, position)).toBe(
+      `${start} A label, an icon, or something else lies in part of the region, so AppyTappy went by the strips that show the bar from end to end. The marks leave its pixels out unless they have one of the two colors. On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
     );
     expect(detectingText(found({ ...proposed, leftOut: 1 }), held, position)).toBe(
       `${start} One older screenshot of this size was not looked at. ${side}`,

@@ -169,6 +169,11 @@ function foundText(proposal: Proposal, position: (index: number) => number): str
       ),
     );
   }
+  if (proposal.around) {
+    said.push(
+      'A label, an icon, or something else lies in part of the region, so AppyTappy went by the strips that show the bar from end to end. The marks leave its pixels out unless they have one of the two colors.',
+    );
+  }
   if (proposal.rough) {
     said.push(
       'On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes.',

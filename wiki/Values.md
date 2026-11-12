@@ -109,6 +109,10 @@ bar, and proposes them only when they read every screenshot it looked at:
   you see, or take a screenshot at another fill and detect again.
 - A screenshot that shows neither color in the region, such as one of a
   menu, is named and not compared.
+- When something else lies in part of the region, such as a label or an
+  icon over the bar, or background beside it, it goes by the strips of the
+  region that show the bar from end to end, and says so. The tints then
+  leave the label's pixels out.
 - When the colors read a screenshot a few points off where the bar ends on
   it, as a label or a soft edge on the bar causes, it says so.
 
@@ -135,16 +139,18 @@ It proposes no colors, and says why and what to do, when:
 - The two colors are too close to tell apart.
 - The region does not look like a bar of two plain colors. That goes for a
   bar made of separate segments, a striped or textured fill, a fill that
-  fades along the bar, a label that covers most of the bar's height, and a
-  region drawn loosely over a busy background when no other screenshot
-  shows the bar at another fill.
+  fades along the bar, and a label, an icon, or a busy background that
+  leaves too few strips of the bar free from end to end. Around a label or
+  an icon, draw the region over a strip of the bar above or below it.
 - The two colors do not read the region as full as the bar looks: they also
   show beside the bar, or part of the bar has another shade. Draw the region
   more closely.
 - The colors found on one screenshot do not read another that shows one of
   them. The bar changes color as it fills or from one screenshot to the
-  next, or something covers it there, such as a tooltip. Two colors cannot
-  read a bar that changes color, whoever picks them.
+  next, or a label, an icon, or something else such as a tooltip covers most
+  of its height there. Two colors cannot read a bar that changes color,
+  whoever picks them. Around a label, draw the region over a strip of the
+  bar above or below it.
 - The region is too short to hold a bar.
 
 Where two colors can read the bar, pick them by hand then: the check reads

@@ -40,8 +40,8 @@ it was about has gone. Six guards drop such stale messages:
   and shows only while they are the same.
 - **Checks.** The capture screen keeps each live reading with the check the
   owner read it with (`readingOf` in `apps/setup/src/lib/check.ts`), and
-  shows it only while that is the check being tried, so a reading never
-  shows under a check that did not make it.
+  shows it only while the check being tried has that check's content, so a
+  reading never shows under another check than the one that made it.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.

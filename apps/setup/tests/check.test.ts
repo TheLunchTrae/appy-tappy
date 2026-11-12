@@ -406,9 +406,12 @@ test('a reading shows only for the check that read it', () => {
   const built = buildSpec(bar, 'example');
   const read = { of: built, reading: { kind: 'number', value: 62 } } as const;
   expect(readingOf(read, built)).toEqual({ kind: 'number', value: 62 });
-  // The same check built again, as after any change to the draft, is another check being tried.
-  expect(readingOf(read, buildSpec(bar, 'example'))).toBeNull();
+  // The same check built again, as after a change to the draft that leaves it as it was, keeps its reading.
+  expect(readingOf(read, buildSpec({ ...bar, labels: new Map([[0, '5']]) }, 'example'))).toEqual(read.reading);
+  // Any other check shows none: another color, another region, or one that cannot be built yet.
   expect(readingOf(read, buildSpec({ ...bar, empty: red }, 'example'))).toBeNull();
+  expect(readingOf(read, buildSpec({ ...bar, region: { ...region, x: 2 } }, 'example'))).toBeNull();
+  expect(readingOf(read, buildSpec({ ...bar, empty: null }, 'example'))).toBeNull();
   expect(readingOf({ of: built, reading: null }, built)).toBeNull();
   expect(readingOf(null, built)).toBeNull();
 });

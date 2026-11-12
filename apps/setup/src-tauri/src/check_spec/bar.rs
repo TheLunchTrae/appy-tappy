@@ -52,6 +52,10 @@ pub(crate) enum BarDetection {
         /// Whether the colors read a screenshot a few points off where the
         /// bar ends on it.
         rough: bool,
+        /// Whether the colors were found over only the strips of the
+        /// region that show the bar from end to end, past a label, an icon,
+        /// or what lies beside the bar.
+        around: bool,
         /// How many older screenshots of the window size were not looked
         /// at.
         left_out: usize,
@@ -146,7 +150,7 @@ fn advice(reason: NoBar, drawn_on: usize, screenshot: impl Fn(usize) -> usize) -
             "On screenshot {drawn}, the region's two main colors are too close to tell apart as filled and empty. If the bar is full or empty there, take a screenshot where it is partly filled. Otherwise pick the colors by hand."
         ),
         NoBar::NotABar => format!(
-            "On screenshot {drawn}, the region does not look like a bar: one plain color from the left, or from the bottom of a tall region, and another plain color after it. Draw the region closely around the bar, or pick the colors by hand."
+            "On screenshot {drawn}, the region does not look like a bar: one plain color from the left, or from the bottom of a tall region, and another plain color after it. If a label or an icon covers most of the bar's height, draw the region over a strip of the bar above or below it. Otherwise draw the region closely around the bar, or pick the colors by hand."
         ),
         NoBar::Misread => format!(
             "On screenshot {drawn}, the two colors found do not read the region as full as the bar looks: they also show beside the bar, or part of the bar has another shade. Draw the region closely around the bar, or pick the colors by hand."
@@ -155,7 +159,7 @@ fn advice(reason: NoBar, drawn_on: usize, screenshot: impl Fn(usize) -> usize) -
             let found = screenshot(found_on).saturating_add(1);
             let other = screenshot(image).saturating_add(1);
             format!(
-                "The colors of the bar on screenshot {found} do not read screenshot {other}, which shows one of them but not the bar in both. A bar that changes color as it fills, or from one screenshot to the next, cannot be read with two colors. If something covers the bar on screenshot {other}, pick the colors by hand."
+                "The colors of the bar on screenshot {found} do not read screenshot {other}, which shows one of them but not the bar in both. A bar that changes color as it fills, or from one screenshot to the next, cannot be read with two colors. If a label, an icon, or something else covers most of the bar's height on screenshot {other}, draw the region over a strip of the bar above or below it, or pick the colors by hand."
             )
         },
     }
@@ -246,6 +250,7 @@ pub(crate) fn detect(
                 without,
                 moves: proposal.moves,
                 rough: proposal.rough,
+                around: proposal.around,
                 left_out,
             }
         },
@@ -394,6 +399,7 @@ mod tests {
                 "without": [],
                 "moves": false,
                 "rough": false,
+                "around": false,
                 "leftOut": 0,
             }),
             "the screenshot of another window size is not looked at"
@@ -424,6 +430,7 @@ mod tests {
                 "without": [4],
                 "moves": true,
                 "rough": false,
+                "around": false,
                 "leftOut": 0,
             })
         );
@@ -449,8 +456,33 @@ mod tests {
         let screenshots = [screenshot(30, 15), screenshot(40, 10), shot(30, 5, red)];
         assert_eq!(
             declined(detect(&screenshots, BAR, 2)),
-            "The colors of the bar on screenshot 3 do not read screenshot 1, which shows one of them but not the bar in both. A bar that changes color as it fills, or from one screenshot to the next, cannot be read with two colors. If something covers the bar on screenshot 1, pick the colors by hand."
+            "The colors of the bar on screenshot 3 do not read screenshot 1, which shows one of them but not the bar in both. A bar that changes color as it fills, or from one screenshot to the next, cannot be read with two colors. If a label, an icon, or something else covers most of the bar's height on screenshot 1, draw the region over a strip of the bar above or below it, or pick the colors by hand."
         );
+    }
+
+    #[test]
+    fn a_bar_found_around_a_label_says_so() {
+        // Three pixels of the bar's first row are black, as a label's are:
+        // pixels 44 to 46 of the screenshot, in its empty part. Only the
+        // bar's second row shows it from end to end.
+        let mut bgra = screenshot(30, 5).as_bgra().to_vec();
+        bgra[176..188].fill(0);
+        let labeled = Image::new(
+            Size {
+                width: 30,
+                height: 4,
+            },
+            bgra,
+        )
+        .expect("the same size");
+        let detection = found(detect(&[labeled], BAR, 0));
+        assert_eq!(detection["around"], true);
+        assert_eq!(
+            detection["filled"],
+            json!({"red": 40, "green": 210, "blue": 60})
+        );
+        let strips = "draw the region over a strip of the bar above or below it";
+        assert!(advice(NoBar::NotABar, 0, |number| number).contains(strips));
     }
 
     #[test]
