@@ -23,6 +23,8 @@ export function useStateSelections(
   readonly masks: ReadonlyMap<number, Masking>;
   /** Which pixels of the region the selection leaves out on the screenshot shown, or null. */
   readonly ignored: Uint8Array | null;
+  /** The selection last made on each screenshot, by its index. */
+  readonly selections: ReadonlyMap<number, Selection>;
   readonly error: string | null;
   /** Adds a step on the screenshot shown, to its state or to a new one. */
   readonly addStep: (step: SelectStep) => void;
@@ -114,5 +116,5 @@ export function useStateSelections(
     setError(null);
     setDraft((current) => withStateStep(current, selected, step));
   };
-  return { masks, ignored, error, addStep };
+  return { masks, ignored, selections, error, addStep };
 }

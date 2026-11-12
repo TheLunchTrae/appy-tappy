@@ -37,13 +37,24 @@ pub(crate) struct RegionSpec {
     pub(crate) height: u32,
 }
 
-/// A color the user picked on a screenshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// A color of a screenshot: one the user picked on it, or one the setup app
+/// read from it for the UI to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ColorSpec {
     red: u8,
     green: u8,
     blue: u8,
+}
+
+impl From<Rgb> for ColorSpec {
+    fn from(color: Rgb) -> Self {
+        Self {
+            red: color.red,
+            green: color.green,
+            blue: color.blue,
+        }
+    }
 }
 
 impl From<ColorSpec> for ColorDef {

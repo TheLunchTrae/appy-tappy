@@ -619,6 +619,65 @@ select {
   image-rendering: pixelated;
 }
 
+/* The matching pixels preview: its tint lies on the screenshot's own pixels, under the region. */
+.match-box {
+  position: absolute;
+  pointer-events: none;
+}
+
+.match-box canvas {
+  image-rendering: pixelated;
+}
+
+.match-found,
+div.match-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* What shows is for earlier settings until the answer for these arrives. */
+.match-found.updating .match-answer {
+  opacity: 0.55;
+}
+
+.match-status {
+  min-height: 1lh;
+}
+
+.match-key {
+  background: currentcolor;
+}
+
+.match-key.striped {
+  background: repeating-linear-gradient(135deg, currentcolor 0 2px, transparent 2px 4px);
+}
+
+.match-key.clear {
+  background: none;
+}
+
+.match-legend {
+  list-style: none;
+  padding: 0;
+  font-size: 12px;
+}
+
+.match-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 10px;
+  font-size: 12px;
+}
+
+.match-facts dt {
+  color: var(--muted);
+}
+
+.match-facts dd {
+  text-align: right;
+}
+
 .rough {
   position: absolute;
   border: 1.5px dashed rgb(255 255 255 / 75%);

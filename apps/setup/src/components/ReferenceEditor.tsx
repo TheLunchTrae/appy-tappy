@@ -25,6 +25,8 @@ interface Props {
   readonly recorded: readonly string[];
   /** The values that read with the saved reference. */
   readonly readers: readonly string[];
+  /** The matching pixels preview of the characters' color. */
+  readonly preview: ReactNode;
   /** The recording panel. */
   readonly record: ReactNode;
   readonly onName: (name: string) => void;
@@ -82,6 +84,7 @@ export function ReferenceEditor(props: Props) {
         value={tolerance}
         onChange={props.onTolerance}
       />
+      {props.preview}
       <div className="field">
         <span className="name">
           <label htmlFor="label-text">What the region shows on this screenshot</label>
