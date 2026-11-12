@@ -133,7 +133,7 @@ stateDiagram-v2
   stop, and dropping the inputs ends detection. Each reader is stopped, and
   every thread is joined.
 
-**Open problems**
+#### Open problems
 
 - [#297](https://github.com/TheLunchTrae/appy-tappy/issues/297): after the
   action thread starts again, what the old thread changed stays changed, and
@@ -339,7 +339,7 @@ stateDiagram-v2
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
 
-**Open problems**
+#### Open problems
 
 - [#298](https://github.com/TheLunchTrae/appy-tappy/issues/298): a reader that
   panics stops its application's readings without telling the owner, until
