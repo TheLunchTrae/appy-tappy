@@ -25,6 +25,10 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::debug::bundle::BundleSpec;
+use crate::debug::outline::CaptureOutline;
+use crate::debug::trace_file::TraceFile;
+use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
+use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
@@ -34,7 +38,7 @@ use crate::owner::{
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
-use crate::window_list::{WindowFit, WindowList};
+use crate::window_list::{WindowFit, WindowList, WindowScore};
 
 /// The UI's way to the owner thread.
 #[derive(Debug)]
@@ -165,6 +169,27 @@ pub(crate) async fn read_value(app: AppHandle) -> Result<Option<Reading>, String
     try_ask(&app, "read_value", |owner| owner.reading()).await
 }
 
+/// How the check reads the newest frame, for the debug details.
+#[tauri::command]
+pub(crate) async fn explain_reading(app: AppHandle) -> Result<Option<ReadingDetails>, String> {
+    try_ask(&app, "explain_reading", |owner| owner.explain_reading()).await
+}
+
+/// What the runtime copies out of each frame of `application`'s window at
+/// `width` by `height`, and where each saved value reads there.
+#[tauri::command]
+pub(crate) async fn capture_outline(
+    app: AppHandle,
+    application: String,
+    width: u32,
+    height: u32,
+) -> Result<CaptureOutline, String> {
+    try_ask(&app, "capture_outline", move |owner| {
+        owner.capture_outline(&application, width, height)
+    })
+    .await
+}
+
 /// Captures the region of the saved value `value` of the application
 /// `application` on its window, for the automation editor, and returns the
 /// watch's number.
@@ -193,6 +218,18 @@ pub(crate) async fn watched_reading(
     .await
 }
 
+/// How the watch's value reads now, for the debug details.
+#[tauri::command]
+pub(crate) async fn explain_watched(
+    app: AppHandle,
+    watch: u64,
+) -> Result<Option<ReadingDetails>, String> {
+    try_ask(&app, "explain_watched", move |owner| {
+        owner.explain_watched(watch)
+    })
+    .await
+}
+
 /// Stops the watch, unless another capture replaced it already.
 #[tauri::command]
 pub(crate) async fn stop_watching(app: AppHandle, watch: u64) -> Result<(), String> {
@@ -211,6 +248,18 @@ pub(crate) async fn match_windows(
 ) -> Result<Vec<WindowFit>, String> {
     try_ask(&app, "match_windows", move |owner| {
         owner.match_windows(&window)
+    })
+    .await
+}
+
+/// How each open window compares with `window`, for the debug details.
+#[tauri::command]
+pub(crate) async fn window_scores(
+    app: AppHandle,
+    window: WindowDef,
+) -> Result<Vec<WindowScore>, String> {
+    try_ask(&app, "window_scores", move |owner| {
+        owner.window_scores(&window)
     })
     .await
 }
@@ -627,6 +676,48 @@ pub(crate) async fn set_starts_with_windows(app: AppHandle, on: bool) -> Result<
 #[tauri::command]
 pub(crate) async fn debug_overview(app: AppHandle) -> Result<DebugOverview, String> {
     try_ask(&app, "debug_overview", Owner::debug_overview).await
+}
+
+/// The trace files, newest first.
+#[tauri::command]
+pub(crate) async fn trace_files(app: AppHandle) -> Result<Vec<TraceFile>, String> {
+    try_ask(&app, "trace_files", |owner| owner.trace_files()).await
+}
+
+/// The metrics of the trace file `file` over `range`.
+#[tauri::command]
+pub(crate) async fn trace_metrics(
+    app: AppHandle,
+    file: String,
+    range: TraceRange,
+) -> Result<TraceMetrics, String> {
+    try_ask(&app, "trace_metrics", move |owner| {
+        owner.trace_metrics(&file, range)
+    })
+    .await
+}
+
+/// The rows of the trace file `file` that `filter` picks.
+#[tauri::command]
+pub(crate) async fn trace_rows(
+    app: AppHandle,
+    file: String,
+    filter: RowFilter,
+) -> Result<TraceRows, String> {
+    try_ask(&app, "trace_rows", move |owner| {
+        owner.trace_rows(&file, &filter)
+    })
+    .await
+}
+
+/// Lets go of the trace file the metrics and rows read.
+#[tauri::command]
+pub(crate) async fn close_trace(app: AppHandle) -> Result<(), String> {
+    try_ask(&app, "close_trace", |owner| {
+        owner.close_trace();
+        Ok(())
+    })
+    .await
 }
 
 /// The end of `log`, or nothing before anything was logged.

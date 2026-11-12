@@ -383,6 +383,19 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   was added, and a row that no line break ends within that much is given up
   at the next line break. The summary covers the newest file only, so a trace
   that has moved to its next file starts its numbers again.
+- `trace_files` lists the `trace-*.csv` files, newest first, by when each was
+  last written. `trace_metrics` and `trace_rows` read the picked file through a
+  `TraceView` in `debug/trace_view.rs`, which reads it from its first row, at
+  most two 4 MiB windows a call, and keeps its place between calls. The page
+  asks again at once while it has more to read. The view keeps each count for
+  the whole file and by the second for its last 10 minutes, the newest 20,000
+  times of each kind with when each happened, and the newest 100,000 rows,
+  each name held once and let go with the last row that uses it, so a long trace
+  holds about the same amount, more only for each value and automation it
+  names. A range is measured back from the newest row. The view starts over
+  when the file shrinks, and `close_trace` lets it go as the page leaves its
+  **Metrics** and **Trace rows** tabs. Each read the page starts makes the
+  ones before it stale, so an older answer never replaces a newer one.
 - `read_log` returns the last 64 KB of `runtime.log` or `setup.log`, as whole
   lines.
 - `debug_bundle` hands the owner's file locations to a blocking task, which
@@ -391,6 +404,33 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   returned bytes with the WebView's save picker. Pictures are stored,
   everything else is deflated, with the `zip` crate and its pure-Rust deflate
   backend. `setup.log` records the whole time, packing included.
+
+The same setting adds debug details to the editors. The page asks for them
+only while `showDebug` is true, so with it off they cost nothing:
+
+- `explain_reading` and `explain_watched` score the region of the newest frame
+  that the value editor's check or the automation editor's watch read, with
+  `Check::explain` from `appytappy-sources`. A read decides with the same
+  scores: a number's read takes the closest glyph by `GlyphScore`, and a
+  state's by the `Difference` that `StateScore::within` also checks. The state
+  marked as read comes from a read of the same region, so the scores and the
+  state marked as read always agree; the runtime never asks for them. The live
+  reading above them is its own read, so it can come from a frame before or
+  after. The page asks every 500 ms, less often than the reading, as scoring a
+  number checks each character against every glyph.
+- `capture_outline` builds the saved application's capture as the runtime
+  would at the screenshot's window size, in `debug/outline.rs`: the values
+  that its enabled automations watch, of those `Runnable::new` says can run,
+  as `automations::watched_values` gives them, each placed with
+  `SavedValue::at`, then `Layout::new` for the rectangles copied. It answers
+  every saved value, with where it reads or why it does not, and the page
+  draws them over the screenshot. The page asks again when the window size or
+  the saved file changes.
+- `window_scores` compares each window that the picker lists with the match
+  being edited, field by field, with the same `Pattern::matches` the match
+  uses, and gives the `WindowFit` that `match_windows` gives the windows it
+  takes. With scores, the window list takes each window's label from its
+  score, so the label and the score come from the same read of the windows.
 
 Every command passes its own name to `ask` or `try_ask`, which a test in
 `bindings.rs` checks against the command table. `debug_bundle` passes its name

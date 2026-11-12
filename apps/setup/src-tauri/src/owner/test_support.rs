@@ -337,10 +337,13 @@ impl Harness {
         frame: io::Result<(Size, &Image)>,
         interval: Duration,
     ) {
+        // The frame arrives now by the owner's clock, so the times the owner
+        // works out from it follow `wait`.
+        let received = self.owner.host.clock;
         let frame = frame.map(|(window_size, image)| Frame {
             window_size,
             image,
-            received: Instant::now(),
+            received,
             delay: Duration::ZERO,
         });
         assert_eq!(handler(frame), interval);

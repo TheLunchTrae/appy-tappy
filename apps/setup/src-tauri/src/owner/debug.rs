@@ -1,10 +1,15 @@
-//! The Debug page: whether the runtime runs, the newest trace file, both
-//! logs, and the debug bundle.
+//! The Debug page: whether the runtime runs, the newest trace file, the
+//! metrics and rows of a chosen one, both logs, and the debug bundle.
 
 use std::time::Duration;
 
+use appytappy_sources::screen::Size;
+
+use crate::automations;
 use crate::debug::bundle::{BundleJob, BundleSpec};
-use crate::debug::trace_file::{self, TraceTail};
+use crate::debug::outline::{self, CaptureOutline};
+use crate::debug::trace_file::{self, TraceFile, TraceTail};
+use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows, TraceView};
 use crate::debug::{DebugOverview, LogName, log_tail};
 use crate::settings;
 use crate::stores::Stores;
@@ -51,6 +56,55 @@ impl<H: Host> Owner<H> {
         })
     }
 
+    /// The trace files, newest first.
+    pub(crate) fn trace_files(&self) -> Result<Vec<TraceFile>, String> {
+        trace_file::list(&self.debug_stores()?.traces)
+            .map_err(|error| format!("AppyTappy cannot list the trace files: {error}."))
+    }
+
+    /// The metrics of the trace file `file` over `range`, read on from where
+    /// the last call on it stopped.
+    pub(crate) fn trace_metrics(
+        &mut self,
+        file: &str,
+        range: TraceRange,
+    ) -> Result<TraceMetrics, String> {
+        self.trace_view(file).map(|view| view.metrics(range))
+    }
+
+    /// The rows of the trace file `file` that `filter` picks, read on from
+    /// where the last call on it stopped.
+    pub(crate) fn trace_rows(
+        &mut self,
+        file: &str,
+        filter: &RowFilter,
+    ) -> Result<TraceRows, String> {
+        self.trace_view(file).map(|view| view.rows(filter))
+    }
+
+    /// Lets go of the trace file the metrics and rows read, as the Debug
+    /// page leaves its trace tabs.
+    pub(crate) fn close_trace(&mut self) {
+        self.trace_view = None;
+    }
+
+    /// The view of the trace file `file`, read on. A view of another file is
+    /// let go, as the page reads one at a time.
+    fn trace_view(&mut self, file: &str) -> Result<&TraceView, String> {
+        if !trace_file::is_trace_name(file) {
+            return Err(format!("{file} is not a trace file."));
+        }
+        let path = self.debug_stores()?.traces.join(file);
+        let view = match self.trace_view.take() {
+            Some(view) if view.path() == path => view,
+            _ => TraceView::new(path),
+        };
+        let view = self.trace_view.insert(view);
+        view.update()
+            .map_err(|error| format!("AppyTappy cannot read {file}: {error}."))?;
+        Ok(view)
+    }
+
     /// The newest lines of `log`, or nothing before anything was logged.
     pub(crate) fn read_log(&self, log: LogName) -> Result<String, String> {
         let path = self.debug_stores()?.logs.join(log.file());
@@ -69,6 +123,26 @@ impl<H: Host> Owner<H> {
     /// The debug bundle `spec` asks for, to make away from this thread.
     pub(crate) fn debug_bundle(&self, spec: BundleSpec) -> Result<BundleJob, String> {
         Ok(BundleJob::new(self.debug_stores()?.clone(), spec))
+    }
+
+    /// What the runtime copies out of each frame of the saved application
+    /// `app`'s window at `width` by `height` pixels, and where each of its
+    /// saved values reads there, for the value editor's preview.
+    pub(crate) fn capture_outline(
+        &self,
+        app: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<CaptureOutline, String> {
+        let stores = self.stores()?;
+        let found = stores.app(app)?;
+        let watched = automations::watched_values(stores, app)?;
+        Ok(outline::outline(
+            &found.file,
+            &watched,
+            Size { width, height },
+            |name| found.picture(name),
+        ))
     }
 
     /// Records in `setup.log` that `command` took `took`, and why it failed,
@@ -95,10 +169,14 @@ mod tests {
     use std::fs;
     use std::io::{Cursor, Read as _};
 
+    use appytappy_config::app_file::RegionDef;
+    use appytappy_config::automation_file::{
+        ActionDef, AutomationDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
+    };
     use zip::ZipArchive;
 
     use crate::debug::trace_file::{HEADER, Spread};
-    use crate::owner::test_support::{harness_with, scratch_store};
+    use crate::owner::test_support::{harness_with, scratch_store, with_saved_bar};
 
     use super::*;
 
@@ -227,6 +305,73 @@ mod tests {
             Some(("trace-2026-11-12-110000.csv".to_owned(), 0)),
             "a newer trace is read from its start"
         );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_picked_trace_is_read_on_one_file_at_a_time_and_let_go() {
+        let (stores, root) = scratch_store("owner-debug-view");
+        let traces = stores.traces.clone();
+        fs::create_dir_all(&traces).expect("folder");
+        let mut harness = harness_with(false, Ok(stores));
+        // Larger than one update reads, so each call reads on from the last.
+        let row = "1000,reader,read,Example,health,3,1000,,\n";
+        let older = "trace-2026-11-12-100000.csv";
+        fs::write(
+            traces.join(older),
+            format!("{HEADER}\n{}", row.repeat(12 * 1024 * 1024 / row.len())),
+        )
+        .expect("write");
+        fs::File::options()
+            .write(true)
+            .open(traces.join(older))
+            .expect("open")
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .expect("age it");
+        let newer = "trace-2026-11-12-110000.csv";
+        fs::write(traces.join(newer), format!("{HEADER}\n{row}{row}")).expect("write");
+
+        let files = harness.ask(|owner| owner.trace_files()).expect("listed");
+        let names: Vec<&str> = files.iter().map(|file| file.name.as_str()).collect();
+        assert_eq!(names, [newer, older], "newest first");
+        assert_eq!(
+            harness.ask(|owner| owner.trace_metrics("../trace-a.csv", TraceRange::Whole)),
+            Err("../trace-a.csv is not a trace file.".to_owned())
+        );
+
+        let read = |harness: &mut crate::owner::test_support::Harness, file: &str| {
+            harness
+                .ask(|owner| owner.trace_metrics(file, TraceRange::Whole))
+                .expect("metrics")
+                .progress
+                .read
+        };
+        let first = read(&mut harness, older);
+        assert!(read(&mut harness, older) > first, "the same file reads on");
+        assert_eq!(
+            harness
+                .ask(|owner| {
+                    owner.trace_rows(
+                        newer,
+                        &RowFilter {
+                            range: TraceRange::Whole,
+                            categories: vec![
+                                appytappy_config::settings_file::TraceCategory::Readings,
+                            ],
+                            app: None,
+                            took_over_ns: None,
+                            search: String::new(),
+                        },
+                    )
+                })
+                .expect("rows")
+                .matching,
+            2
+        );
+        assert_eq!(read(&mut harness, older), first, "another file let it go");
+        assert!(read(&mut harness, older) > first);
+        harness.ask(Owner::close_trace);
+        assert_eq!(read(&mut harness, older), first, "closing let it go");
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -378,5 +523,59 @@ mod tests {
             "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_outline_shows_what_an_enabled_automation_watches() {
+        let (mut harness, root) = with_saved_bar("owner-debug-outline");
+        let unwatched = harness
+            .ask(|owner| owner.capture_outline("example", 4, 2))
+            .expect("outline");
+        assert_eq!(unwatched.copies, []);
+        assert_eq!(unwatched.values.len(), 1);
+        let value = unwatched.values[0].id.clone();
+        harness
+            .ask(|owner| {
+                owner.save_automation(
+                    None,
+                    AutomationDef {
+                        id: String::new(),
+                        name: "Pause when full".to_owned(),
+                        enabled: true,
+                        when: WhenDef {
+                            app: "example".to_owned(),
+                            value,
+                            is: ComparisonDef::AtLeast,
+                            target: TargetDef::Number(100.0),
+                        },
+                        actions: vec![ActionDef::Media {
+                            command: MediaCommandDef::Pause,
+                            app: None,
+                        }],
+                        undo: false,
+                        cooldown_ms: 0,
+                    },
+                )
+            })
+            .expect("saves");
+        let watched = harness
+            .ask(|owner| owner.capture_outline("example", 4, 2))
+            .expect("outline");
+        let whole = RegionDef {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 2,
+        };
+        assert_eq!(watched.copies, [whole]);
+        assert!(watched.values[0].watched);
+        assert_eq!(watched.values[0].region, Some(whole));
+        assert!(
+            harness
+                .ask(|owner| owner.capture_outline("missing", 4, 2))
+                .is_err(),
+            "an application that is not saved has no outline"
+        );
+        fs::remove_dir_all(root).expect("cleans up");
     }
 }

@@ -17,6 +17,8 @@ use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Region, Size};
 
+use crate::debug::workings::{self, ReadingDetails};
+
 use super::host::Host;
 use super::messages::{Live, Message, Seen};
 use super::{Owner, WATCH_INTERVAL};
@@ -47,6 +49,8 @@ pub(super) struct Watched {
     settle: Settle,
     /// What the newest frame showed, or `None` before one arrived.
     pub(super) seen: Option<Seen>,
+    /// When the newest frame was seen.
+    seen_at: Option<Instant>,
     /// Why the capture stopped, once it has.
     pub(super) failure: Option<String>,
 }
@@ -111,6 +115,7 @@ impl<H: Host> Owner<H> {
             copying: region,
             settle: Settle::new(size),
             seen: None,
+            seen_at: None,
             failure: None,
         });
         Ok(watch)
@@ -130,6 +135,7 @@ impl<H: Host> Owner<H> {
         };
         watched.settle.saw(size, now);
         watched.seen = Some(seen);
+        watched.seen_at = Some(now);
         self.settle_watch(now);
     }
 
@@ -232,6 +238,29 @@ impl<H: Host> Owner<H> {
         })
     }
 
+    /// How the watched value's check reads the newest frame, for the debug
+    /// details: `None` while the watched value does not read, which
+    /// [`Owner::watched_reading`] explains; an error once the watch was
+    /// stopped or replaced.
+    pub(crate) fn explain_watched(&self, watch: u64) -> Result<Option<ReadingDetails>, String> {
+        let watched = self
+            .watched
+            .as_ref()
+            .filter(|watched| watched.id == watch)
+            .ok_or_else(|| "No value is watched.".to_owned())?;
+        let (placed_at, placed) = &watched.placed;
+        let (Some(Seen::Region { window_size, image }), Ok(at), Some(seen_at)) =
+            (&watched.seen, placed, watched.seen_at)
+        else {
+            return Ok(None);
+        };
+        if window_size != placed_at || watched.failure.is_some() {
+            return Ok(None);
+        }
+        let age = self.host.now().saturating_duration_since(seen_at);
+        Ok(Some(workings::details(watched.check.check(at), image, age)))
+    }
+
     /// Stops watch `watch`, unless another capture took its place.
     pub(crate) fn stop_watching(&mut self, watch: u64) {
         if self
@@ -255,6 +284,8 @@ const fn advice(unread: Unread) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use appytappy_config::app_file::WindowDef;
     use appytappy_config::automation_file::{ComparisonDef, TargetDef};
     use appytappy_sources::screen::{FrameHandler, Image, Region};
@@ -262,6 +293,7 @@ mod tests {
     use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::CheckSpec;
+    use crate::debug::workings::WorkingsView;
     use crate::owner::messages::Reading;
     use crate::owner::test_support::{
         FakeHost, Harness, STATE, WINDOW, add_example_app, example_build, frame_image,
@@ -273,6 +305,12 @@ mod tests {
     fn watch(app: &str, value: &str) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<u64, String> {
         let (app, value) = (app.to_owned(), value.to_owned());
         move |owner: &mut Owner<FakeHost>| owner.watch(&app, &value)
+    }
+
+    fn explain(
+        watch: u64,
+    ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<Option<ReadingDetails>, String> {
+        move |owner: &mut Owner<FakeHost>| owner.explain_watched(watch)
     }
 
     fn watched(
@@ -331,7 +369,25 @@ mod tests {
         let (watch, mut handler) = watch_bar(&mut harness);
         assert_eq!(harness.closed.try_recv(), Ok(7), "the capture was replaced");
         assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
+        assert_eq!(harness.ask(explain(watch)), Ok(None), "no frame yet");
         harness.deliver_at(&mut handler, Ok((WINDOW, &frame_image())), WATCH_INTERVAL);
+        harness.wait(Duration::from_millis(20));
+        let details = harness
+            .ask(explain(watch))
+            .expect("explains")
+            .expect("read at its size");
+        assert_eq!(details.frame_age_ms, 20, "by the owner's clock");
+        assert!(
+            matches!(
+                details.workings,
+                Some(WorkingsView::BarFill { filled, counted }) if filled * 2 == counted
+            ),
+            "{details:?}"
+        );
+        assert_eq!(
+            harness.ask(explain(watch.wrapping_add(1))),
+            Err("No value is watched.".to_owned())
+        );
         let read = |holds| {
             Ok(Live::Read {
                 reading: Reading::Number(50.0),
@@ -383,6 +439,11 @@ mod tests {
             Ok(Live::Waiting),
             "until the size settles"
         );
+        assert_eq!(
+            harness.ask(explain(watch)),
+            Ok(None),
+            "a frame of another size than the value was placed at"
+        );
         harness.wait(SETTLE);
         assert_eq!(harness.ask(watched(watch, None)), read(None));
         assert!(harness.closed.try_recv().is_err(), "the capture goes on");
@@ -428,6 +489,11 @@ mod tests {
             Ok(Live::Lost {
                 message: "Progress bar cannot be read: the window closed.".to_owned()
             })
+        );
+        assert_eq!(
+            harness.ask(explain(watch)),
+            Ok(None),
+            "a failed capture's last frame is not explained"
         );
         assert_eq!(
             harness.closed.try_recv(),

@@ -34,6 +34,8 @@ macro_rules! with_commands {
             commands::set_check(spec: CheckSpec) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
+            /// How the check reads the newest frame, for the debug details, or null without a check or a frame.
+            commands::explain_reading() -> Option<ReadingDetails>;
             /// Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
             /// recording, which needs the same region, ink and window size; otherwise starts a new one.
             commands::start_recording(
@@ -54,16 +56,24 @@ macro_rules! with_commands {
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
             /// can.
             commands::review_problems(spec: CheckSpec) -> Vec<Option<String>>;
+            /// What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
+            /// where each of its saved values reads there.
+            commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the
             /// watch's number.
             commands::watch_value(application: String, value: String) -> U64AsNumber;
             /// What the watch's value reads now, and whether `when` holds for it. Fails once the watch was stopped or
             /// replaced.
             commands::watched_reading(watch: U64AsNumber, when: Option<WhenDef>) -> Live;
+            /// How the watch's value reads now, for the debug details, or null while it does not read. Fails once the
+            /// watch was stopped or replaced.
+            commands::explain_watched(watch: U64AsNumber) -> Option<ReadingDetails>;
             /// Stops the watch, unless another capture replaced it already.
             commands::stop_watching(watch: U64AsNumber) -> ();
             /// The running windows `window` takes, the one a new session would read first.
             commands::match_windows(window: WindowDef) -> Vec<WindowFit>;
+            /// How each open window compares with `window`: which fields match, and how the match takes it.
+            commands::window_scores(window: WindowDef) -> Vec<WindowScore>;
             /// The window a new session would read for `window`, or null while none fits.
             commands::read_window(window: WindowDef) -> OptionalU64AsNumber;
             /// Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
@@ -138,6 +148,16 @@ macro_rules! with_commands {
             commands::open_trace_folder() -> ();
             /// Whether the runtime runs, and the newest trace file read so far, for the Debug page.
             commands::debug_overview() -> DebugOverview;
+            /// The trace files, newest first.
+            commands::trace_files() -> Vec<TraceFile>;
+            /// The metrics of the trace file `file` over `range`. Each call reads on from where the last one on that
+            /// file stopped; `progress` says how much is read, and the page asks again at once while it is less than
+            /// the file.
+            commands::trace_metrics(file: String, range: TraceRange) -> TraceMetrics;
+            /// The rows of the trace file `file` that `filter` picks, read on like {@link traceMetrics}.
+            commands::trace_rows(file: String, filter: RowFilter) -> TraceRows;
+            /// Lets go of the trace file the metrics and rows read.
+            commands::close_trace() -> ();
             /// The end of `log`, whole lines only, or an empty string before anything was logged.
             commands::read_log(log: LogName) -> String;
             /// Opens the logs folder in File Explorer.

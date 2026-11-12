@@ -62,6 +62,10 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::debug::bundle::BundleSpec;
+use crate::debug::outline::CaptureOutline;
+use crate::debug::trace_file::TraceFile;
+use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
+use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
@@ -74,7 +78,7 @@ use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::updates::UpdateOffer;
-use crate::window_list::{WindowFit, WindowList};
+use crate::window_list::{WindowFit, WindowList, WindowScore};
 use crate::{commands, updates};
 
 /// The command to write the files again.
@@ -924,6 +928,14 @@ fn constants() -> String {
         format!(
             "/** Every trace category, in the order the page lists them. */\nexport const TRACE_CATEGORIES = {} as const satisfies readonly TraceCategory[];\n",
             literal(&trace_categories())
+        ),
+        format!(
+            "/** The first line of a trace file, which names its fields. */\nexport const TRACE_HEADER = {};\n",
+            literal(&crate::debug::trace_file::HEADER)
+        ),
+        format!(
+            "/** How many of the newest times of each kind the Debug page's metrics keep. */\nexport const TRACE_SAMPLES = {};\n",
+            crate::debug::trace_view::SAMPLES
         ),
         format!(
             "/**\n * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it\n * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read\n * each the same.\n */\nexport const PARSE_CASES = {} as const;\n",

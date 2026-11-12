@@ -10,6 +10,7 @@ import type {
   AutomationDef,
   AutomationSummary,
   BundleSpec,
+  CaptureOutline,
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
@@ -22,9 +23,11 @@ import type {
   OverlayModeDef,
   OverlayView,
   Reading,
+  ReadingDetails,
   RecordingView,
   ReferenceSaveSpec,
   RegionSpec,
+  RowFilter,
   SaveSpec,
   SavedReference,
   SavedValue,
@@ -32,11 +35,16 @@ import type {
   SelectionView,
   SettingsFile,
   SettingsView,
+  TraceFile,
+  TraceMetrics,
+  TraceRange,
+  TraceRows,
   UpdateOffer,
   WhenDef,
   WindowDef,
   WindowFit,
   WindowList,
+  WindowScore,
 } from './bindings.ts';
 import { type Picture, decodePicture } from './pixels.ts';
 
@@ -87,6 +95,11 @@ export async function readValue(): Promise<Reading | null> {
   return invoke<Reading | null>('read_value');
 }
 
+/** How the check reads the newest frame, for the debug details, or null without a check or a frame. */
+export async function explainReading(): Promise<ReadingDetails | null> {
+  return invoke<ReadingDetails | null>('explain_reading');
+}
+
 /**
  * Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
  * recording, which needs the same region, ink and window size; otherwise starts a new one.
@@ -124,6 +137,14 @@ export async function reviewProblems(spec: CheckSpec): Promise<ReadonlyArray<str
 }
 
 /**
+ * What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
+ * where each of its saved values reads there.
+ */
+export async function captureOutline(application: string, width: number, height: number): Promise<CaptureOutline> {
+  return invoke<CaptureOutline>('capture_outline', { application, width, height });
+}
+
+/**
  * Captures a saved value's region on its application's window, replacing any capture, and returns the
  * watch's number.
  */
@@ -139,6 +160,14 @@ export async function watchedReading(watch: number, when: WhenDef | null): Promi
   return invoke<Live>('watched_reading', { watch, when });
 }
 
+/**
+ * How the watch's value reads now, for the debug details, or null while it does not read. Fails once the
+ * watch was stopped or replaced.
+ */
+export async function explainWatched(watch: number): Promise<ReadingDetails | null> {
+  return invoke<ReadingDetails | null>('explain_watched', { watch });
+}
+
 /** Stops the watch, unless another capture replaced it already. */
 export async function stopWatching(watch: number): Promise<void> {
   await invoke('stop_watching', { watch });
@@ -147,6 +176,11 @@ export async function stopWatching(watch: number): Promise<void> {
 /** The running windows `window` takes, the one a new session would read first. */
 export async function matchWindows(window: WindowDef): Promise<ReadonlyArray<WindowFit>> {
   return invoke<ReadonlyArray<WindowFit>>('match_windows', { window });
+}
+
+/** How each open window compares with `window`: which fields match, and how the match takes it. */
+export async function windowScores(window: WindowDef): Promise<ReadonlyArray<WindowScore>> {
+  return invoke<ReadonlyArray<WindowScore>>('window_scores', { window });
 }
 
 /** The window a new session would read for `window`, or null while none fits. */
@@ -321,6 +355,30 @@ export async function openTraceFolder(): Promise<void> {
 /** Whether the runtime runs, and the newest trace file read so far, for the Debug page. */
 export async function debugOverview(): Promise<DebugOverview> {
   return invoke<DebugOverview>('debug_overview');
+}
+
+/** The trace files, newest first. */
+export async function traceFiles(): Promise<ReadonlyArray<TraceFile>> {
+  return invoke<ReadonlyArray<TraceFile>>('trace_files');
+}
+
+/**
+ * The metrics of the trace file `file` over `range`. Each call reads on from where the last one on that
+ * file stopped; `progress` says how much is read, and the page asks again at once while it is less than
+ * the file.
+ */
+export async function traceMetrics(file: string, range: TraceRange): Promise<TraceMetrics> {
+  return invoke<TraceMetrics>('trace_metrics', { file, range });
+}
+
+/** The rows of the trace file `file` that `filter` picks, read on like {@link traceMetrics}. */
+export async function traceRows(file: string, filter: RowFilter): Promise<TraceRows> {
+  return invoke<TraceRows>('trace_rows', { file, filter });
+}
+
+/** Lets go of the trace file the metrics and rows read. */
+export async function closeTrace(): Promise<void> {
+  await invoke('close_trace');
 }
 
 /** The end of `log`, whole lines only, or an empty string before anything was logged. */

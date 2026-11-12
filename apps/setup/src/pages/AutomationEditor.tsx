@@ -1,7 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type AppSummary, type AutomationDef, type MediaCommandDef, NO_STATE, type WhenDef } from '../lib/bindings.ts';
-import { errorText, listWindows, saveAutomation, stopWatching, watchValue, watchedReading } from '../lib/api.ts';
+import {
+  type AppSummary,
+  type AutomationDef,
+  type MediaCommandDef,
+  NO_STATE,
+  type ReadingDetails,
+  type WhenDef,
+} from '../lib/bindings.ts';
+import {
+  errorText,
+  explainWatched,
+  listWindows,
+  saveAutomation,
+  stopWatching,
+  watchValue,
+  watchedReading,
+} from '../lib/api.ts';
 import {
   type ActionDraft,
   type Draft,
@@ -31,6 +46,7 @@ import { ACTIONS_HINT, COOLDOWN_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
 import { Hint } from '../components/Hint.tsx';
+import { ReadingDetailsBox } from '../components/ReadingDetails.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
 
@@ -450,13 +466,21 @@ function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly 
     true,
   );
   const holds = live?.kind === 'read' && live.holds === true;
+  // Reads the watch the live reading holds now, which can change between reads.
+  const askDetails = useCallback(
+    async (): Promise<ReadingDetails | null> => (watch.current === null ? null : explainWatched(watch.current)),
+    [],
+  );
   return (
-    <div className={holds ? 'live-reading holds' : 'live-reading'}>
-      <p>{liveText(live, choice, when)}</p>
-      <p className="visually-hidden" role="status">
-        {liveAnnouncement(live)}
-      </p>
-    </div>
+    <>
+      <div className={holds ? 'live-reading holds' : 'live-reading'}>
+        <p>{liveText(live, choice, when)}</p>
+        <p className="visually-hidden" role="status">
+          {liveAnnouncement(live)}
+        </p>
+      </div>
+      <ReadingDetailsBox ask={live?.kind === 'read' ? askDetails : null} />
+    </>
   );
 }
 

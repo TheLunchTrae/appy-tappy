@@ -325,15 +325,85 @@ impl DigitReader {
         shape
     }
 
-    /// The character of the closest learned glyph, if it is close enough.
-    fn best_match(&self, shape: &Shape) -> Option<char> {
-        let (glyph, differing) = self
+    /// How each character in `image` scores against the learned glyphs:
+    /// its closest glyph and the closest of another character, left to
+    /// right. A read decides with the same scores.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`DigitReader::shapes`].
+    pub fn explain(&self, image: &Image) -> Result<Vec<CharacterScore>, ReadError> {
+        let Shapes(shapes) = self.shapes(image)?;
+        Ok(shapes.iter().map(|shape| self.score(shape)).collect())
+    }
+
+    /// The closest glyph to `shape`, and the closest of another character.
+    /// A tie goes to the glyph learned first, as in [`DigitReader::read`].
+    fn score(&self, shape: &Shape) -> CharacterScore {
+        let mut ranked: Vec<GlyphScore> = self
             .glyphs
             .iter()
-            .map(|glyph| (glyph, cells(shape, &glyph.shape, |a, b| a ^ b)))
-            .min_by_key(|(_, differing)| *differing)?;
-        let set = cells(shape, &glyph.shape, |a, b| a | b);
-        (differing.saturating_mul(4) <= set).then_some(glyph.character)
+            .map(|glyph| GlyphScore::of(shape, glyph))
+            .collect();
+        ranked.sort_by_key(|score| score.differing);
+        let best = ranked.first().copied();
+        let runner_up = ranked
+            .iter()
+            .find(|score| best.is_some_and(|best| best.character != score.character))
+            .copied();
+        CharacterScore { best, runner_up }
+    }
+
+    /// The character of the closest learned glyph, if it is close enough,
+    /// by the scores [`DigitReader::explain`] shows. A tie goes to the glyph
+    /// learned first.
+    fn best_match(&self, shape: &Shape) -> Option<char> {
+        self.glyphs
+            .iter()
+            .map(|glyph| GlyphScore::of(shape, glyph))
+            .min_by_key(|score| score.differing)
+            .filter(|score| score.matches())
+            .map(|score| score.character)
+    }
+}
+
+/// How one character in a region scores, from [`DigitReader::explain`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharacterScore {
+    /// The closest learned glyph, or `None` when the reader knows none.
+    pub best: Option<GlyphScore>,
+    /// The closest glyph of another character, or `None` when the reader
+    /// knows no other character.
+    pub runner_up: Option<GlyphScore>,
+}
+
+/// How close a character is to one learned glyph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GlyphScore {
+    /// The glyph's character.
+    pub character: char,
+    /// How many of the 16 by 16 grid's cells differ from the glyph's.
+    pub differing: u32,
+    /// How many cells either shape inks. The glyph matches when at most a
+    /// quarter of them differ.
+    pub inked: u32,
+}
+
+impl GlyphScore {
+    /// How close `shape` is to `glyph`.
+    fn of(shape: &Shape, glyph: &Glyph) -> Self {
+        Self {
+            character: glyph.character,
+            differing: cells(shape, &glyph.shape, |a, b| a ^ b),
+            inked: cells(shape, &glyph.shape, |a, b| a | b),
+        }
+    }
+
+    /// Whether the character is close enough to read as this glyph, by the
+    /// same rule as [`DigitReader::read`].
+    #[must_use]
+    pub const fn matches(self) -> bool {
+        self.differing.saturating_mul(4) <= self.inked
     }
 }
 
@@ -967,6 +1037,13 @@ mod tests {
         let mut one_missing = shape;
         one_missing[0] = 0b0111;
         assert_eq!(reader.best_match(&one_missing), Some('7'));
+        // The scores the editor shows follow the same rule.
+        for (shape, matches) in [(one_off, true), (two_off, false), (one_missing, true)] {
+            let best = reader.score(&shape).best.expect("a glyph");
+            assert_eq!(best.matches(), matches);
+        }
+        let best = reader.score(&two_off).best.expect("a glyph");
+        assert_eq!((best.differing, best.inked), (2, 6));
     }
 
     #[test]
