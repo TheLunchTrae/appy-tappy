@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,6 +22,10 @@ const DRAFT_FILE: &str = "draft.json";
 /// The end of the name of the folder a draft is written to before it takes
 /// the place of the old one; it is not a draft ID, so the list skips it.
 const SAVING: &str = ".saving";
+
+/// The end of the name the old draft is moved to while the new one takes its
+/// place; it is not a draft ID either.
+const OLD: &str = ".old";
 
 /// The longest draft ID.
 const MAX_ID_LEN: usize = 32;
@@ -121,13 +125,15 @@ impl DraftStore {
         }
     }
 
-    /// Every draft, oldest first; a folder without a draft file, or one a
-    /// save is still writing, is left out. No folder yet holds none.
+    /// Every draft, oldest first, after putting back any a stopped save left
+    /// moved aside; a folder without a draft file, or one a save is still
+    /// writing, is left out. No folder yet holds none.
     ///
     /// # Errors
     ///
     /// Returns the error from listing the folder.
     pub(crate) fn list(&self) -> io::Result<Vec<DraftSummary>> {
+        self.tidy();
         let mut drafts = Vec::new();
         for (id, folder) in self.entries()? {
             if !is_draft_id(&id) || !folder.join(DRAFT_FILE).is_file() {
@@ -156,9 +162,10 @@ impl DraftStore {
     /// or reference goes, so the item has one; a value can have a fix draft
     /// for each window size, so fixes are left alone. Answers the draft's ID.
     ///
-    /// The draft is written to a folder of its own and only then put in the
-    /// place of the old one, so a save that fails partway leaves the old
-    /// draft as it was.
+    /// The draft is written to a folder of its own, each file flushed to the
+    /// disk, and only then swapped in for the old one, so a save that fails
+    /// or stops partway leaves the old draft, or puts it back at the next
+    /// list.
     ///
     /// # Errors
     ///
@@ -179,16 +186,23 @@ impl DraftStore {
             new_id(&taken)
         };
         let folder = self.draft_folder(&id)?;
-        self.remove_unfinished_saves()?;
-        let staging = self.folder.join(format!("{id}{SAVING}"));
+        // Each save has folders of its own, so one a stopped save left, and
+        // could not remove yet, never mixes with this one.
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let staging = self.folder.join(format!("{id}.{stamp}{SAVING}"));
         fs::create_dir_all(&staging)?;
         for (index, bytes) in screenshots.iter().enumerate() {
-            fs::write(staging.join(shot_name(index)), bytes)?;
+            write_synced(&staging.join(shot_name(index)), bytes)?;
         }
         let json = serde_json::to_string_pretty(draft).map_err(io::Error::other)?;
-        fs::write(staging.join(DRAFT_FILE), json.as_bytes())?;
-        self.delete(&id)?;
-        fs::rename(&staging, &folder)?;
+        write_synced(&staging.join(DRAFT_FILE), json.as_bytes())?;
+        self.swap_in(
+            &staging,
+            &folder,
+            &self.folder.join(format!("{id}.{stamp}{OLD}")),
+        )?;
         if draft.changes.is_some() && draft.kind != DraftKind::Fix {
             for other in existing.iter().filter(|other| {
                 other.id != id
@@ -204,15 +218,42 @@ impl DraftStore {
         Ok(id)
     }
 
-    /// Removes the folders of saves that stopped before they were put in
-    /// place.
-    fn remove_unfinished_saves(&self) -> io::Result<()> {
-        for (name, folder) in self.entries()? {
-            if name.ends_with(SAVING) {
-                fs::remove_dir_all(folder)?;
+    /// Puts the draft written to `staging` in place of the one at `folder`,
+    /// which is first moved to `aside`. Tidying then removes the old one, or
+    /// puts it back when the new one did not take its place, so one of the
+    /// two is always there.
+    fn swap_in(&self, staging: &Path, folder: &Path, aside: &Path) -> io::Result<()> {
+        if folder.exists() {
+            fs::rename(folder, aside)?;
+        }
+        let moved = fs::rename(staging, folder);
+        self.tidy();
+        moved
+    }
+
+    /// Puts back an old draft that a stopped save moved aside without putting
+    /// the new one in its place, and removes what stopped saves left. A
+    /// folder that cannot be moved or removed now is tried again next time.
+    fn tidy(&self) {
+        let Ok(entries) = self.entries() else {
+            return;
+        };
+        for (name, path) in &entries {
+            if name.ends_with(OLD) {
+                let id = name.split_once('.').map_or(name.as_str(), |(id, _)| id);
+                let folder = self.folder.join(id);
+                if is_draft_id(id) && !folder.exists() {
+                    drop(fs::rename(path, folder));
+                } else {
+                    drop(fs::remove_dir_all(path));
+                }
             }
         }
-        Ok(())
+        for (name, path) in &entries {
+            if name.ends_with(SAVING) {
+                drop(fs::remove_dir_all(path));
+            }
+        }
     }
 
     /// What the drafts folder holds, by name, leaving out names that are not
@@ -272,6 +313,14 @@ impl DraftStore {
             .flat_map(|draft| draft.pictures)
             .collect())
     }
+}
+
+/// Writes `bytes` to `path` and flushes them to the disk, so a draft that is
+/// in place holds what was written.
+fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// The draft in `folder`, or why it cannot be read, as a sentence.
@@ -424,7 +473,7 @@ mod tests {
         let saved = draft(DraftKind::Value, None);
         let id = store.save(None, &saved, &[vec![1]]).expect("saves");
         // A save that stopped partway leaves its own folder, never the draft's.
-        let staging = store.folder.join(format!("{id}{SAVING}"));
+        let staging = store.folder.join(format!("{id}.1{SAVING}"));
         fs::create_dir_all(&staging).expect("folder");
         fs::write(staging.join(DRAFT_FILE), "{").expect("writes");
         fs::write(staging.join(shot_name(0)), [9]).expect("writes");
@@ -432,11 +481,29 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].draft.as_ref(), Some(&saved));
         assert_eq!(store.screenshots(&id).expect("reads"), [vec![1]]);
+        assert!(!staging.exists(), "listing clears it away");
 
-        // The next save clears it away.
+        // A save that stopped after moving the old draft aside, before the
+        // new one took its place, gets the old one back at the next list.
+        let folder = store.draft_folder(&id).expect("an ID");
+        let aside = store.folder.join(format!("{id}.2{OLD}"));
+        fs::rename(&folder, &aside).expect("moves aside");
+        let listed = store.list().expect("lists");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(store.screenshots(&id).expect("reads"), [vec![1]]);
+        assert!(!aside.exists());
+
+        // One left behind once the new draft is in place goes.
+        fs::create_dir_all(&aside).expect("folder");
         store.save(Some(&id), &saved, &[vec![3]]).expect("saves");
-        assert!(!staging.exists());
+        assert!(!aside.exists());
         assert_eq!(store.screenshots(&id).expect("reads"), [vec![3]]);
+
+        // A stray file with a save's ending, which cannot be removed as a
+        // folder, never stops a save.
+        fs::write(store.folder.join(format!("{id}.3{SAVING}")), b"stray").expect("writes");
+        store.save(Some(&id), &saved, &[vec![4]]).expect("saves");
+        assert_eq!(store.screenshots(&id).expect("reads"), [vec![4]]);
         fs::remove_dir_all(root).expect("clean up");
     }
 

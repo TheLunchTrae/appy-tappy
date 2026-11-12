@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { PinDef, ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
-import { errorText, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
+import { errorText, listDrafts, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type Built,
@@ -48,7 +48,7 @@ import {
   restoreSetup,
   storeSetup,
 } from '../lib/captureDraft.ts';
-import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
+import { type ReportDraft, type Resumed, draftsOf, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
@@ -197,6 +197,32 @@ export function Capture({ choice, mode, restored, onCancel, onChangeWindow, onSa
   const recording = recorder.view;
 
   const setup: CaptureSetup = { valueName, step, pinned, editing, draft };
+  // The application's references that have a draft of changes. Drafts change only in flows, and this is the open
+  // one, so reading them once is enough; when they cannot be read, every reference can be edited.
+  const [drafted, setDrafted] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    let live = true;
+    background(
+      listDrafts()
+        .then((drafts) => {
+          if (live) {
+            setDrafted(
+              new Set(
+                draftsOf(drafts, 'reference').flatMap(({ def }) =>
+                  def.app === appId && def.changes !== null ? [def.changes] : [],
+                ),
+              ),
+            );
+          }
+        })
+        .catch(() => {
+          // Without the drafts, nothing is held back.
+        }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [appId]);
   const [leavingWindow, setLeavingWindow] = useState(false);
   const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
 
@@ -952,6 +978,7 @@ export function Capture({ choice, mode, restored, onCancel, onChangeWindow, onSa
                   onEdit={(id) => {
                     openEditor(file?.references.find((reference) => reference.id === id) ?? null);
                   }}
+                  drafted={drafted}
                   onNew={() => {
                     openEditor(null);
                   }}

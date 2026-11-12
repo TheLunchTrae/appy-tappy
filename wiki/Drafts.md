@@ -37,7 +37,8 @@ value can have a fix draft for each window size.
 A saved item that has a draft of changes shows **Draft changes**, and
 **Finish draft** in place of **Edit**, so you carry on from the draft. To edit
 it as saved instead, finish the draft and select **Delete draft**; the saved
-item stays as it was.
+item stays as it was. For the same reason, a new value can pick a reference
+that has a draft of changes but can't edit it there.
 
 A draft whose application was removed or can't be read, or whose value no
 longer exists, says so and can only be deleted. So can a draft saved by

@@ -107,6 +107,21 @@ describe('the shape a draft keeps', () => {
       'state',
       'undo',
     ]);
+    expect(Object.keys(newAction(0, 'click')).sort()).toEqual([
+      'app',
+      'at',
+      'button',
+      'clickApp',
+      'command',
+      'key',
+      'keys',
+      'kind',
+      'opens',
+      'percent',
+      'returnFocus',
+      'sound',
+      'target',
+    ]);
     const stored = storeSetup({ valueName: '', step: 'how', pinned: null, editing: null, draft: EMPTY_DRAFT });
     expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'pinned', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([

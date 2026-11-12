@@ -386,9 +386,11 @@ format was saved by another version and can only be deleted. A value,
 reference, or fix keeps its labels, but not a recording or the readings kept
 from one, which live with the recording.
 
-A save writes the draft into a folder of its own, `{id}.saving`, and only then
-puts it in place of the old one, so a save that stops partway leaves the old
-draft as it was; the next save removes what it left. A draft of changes to an
+A save writes the draft into a folder of its own, ending in `.saving`, with
+each file flushed to the disk. It then moves the old draft aside, to a folder
+ending in `.old`, and moves the new one into place. Listing the drafts tidies
+up after a save that stopped: it puts an old draft back when the new one never
+took its place, and removes the rest. A draft of changes to an
 automation, application, or reference replaces any other draft of the same
 saved item. A value can have a fix draft for each window size, so fix drafts
 never replace each other. Finishing a draft opens its flow; a value, fix,
