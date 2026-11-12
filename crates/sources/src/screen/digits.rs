@@ -40,17 +40,27 @@ const GRID_COLUMNS: u32 = 32;
 const MAX_CHARACTERS: usize = 24;
 
 /// The most glyphs a reader learns.
-const MAX_GLYPHS: usize = 256;
+pub const MAX_GLYPHS: usize = 256;
 
 /// The longest number a read assembles, in characters.
 const MAX_NUMBER_LEN: usize = 24;
 
 /// A character's shape: one `u32` of cells per grid row.
-type Shape = [u32; 16];
+pub type Shape = [u32; 16];
 
 /// The shapes of an image's characters, from [`DigitReader::shapes`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shapes(Vec<Shape>);
+
+impl Shapes {
+    /// Each character's shape, left to right. A reader learns one glyph for
+    /// each different shape, so two characters with equal shapes teach it
+    /// the same glyph.
+    #[must_use]
+    pub fn characters(&self) -> &[Shape] {
+        &self.0
+    }
+}
 
 /// One learned character and its shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -919,7 +929,10 @@ mod tests {
     fn shapes_tell_characters_apart_but_not_their_size() {
         let reader = DigitReader::new(WHITE, 0);
         let twelve = reader.shapes(&draw(&TWELVE)).unwrap();
-        assert_eq!(twelve.0.len(), 2);
+        let [one, two] = twelve.characters() else {
+            panic!("two characters, not {twelve:?}");
+        };
+        assert_ne!(one, two);
         let mut noisy = TWELVE.to_vec();
         noisy.extend([".....", "....#"]);
         assert_eq!(reader.shapes(&draw(&noisy)), Ok(twelve.clone()));

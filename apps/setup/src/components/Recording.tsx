@@ -2,8 +2,10 @@ import { useEffect, useRef } from 'react';
 
 import type { RecordedReading, RecordingView } from '../lib/bindings.ts';
 import { PictureCanvas } from './canvas.tsx';
-import type { Picture } from '../lib/pixels.ts';
-import { type ReviewEntry, clock, seen, tileNote } from '../lib/review.ts';
+import { CharacterChips, MissingChips } from './CharacterChips.tsx';
+import type { Discovery } from '../lib/discovery.ts';
+import { type Color, type Picture, hex } from '../lib/pixels.ts';
+import { type ReviewEntry, addedShapes, clock, reviewOrder, seen, sighted, tileNote } from '../lib/review.ts';
 
 /** How many of the newest readings the panel lists while recording. */
 const LISTED = 6;
@@ -28,8 +30,80 @@ function guess(reading: RecordedReading): { readonly text: string; readonly pend
   }
 }
 
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/**
+ * The characters a recording found so far: the needed ones nothing shows yet, the ones only the text reader's
+ * guesses show, and the ones the reference knows or the user checked.
+ */
+function Discovered({
+  found,
+  needs,
+  ink,
+}: {
+  readonly found: Discovery;
+  /** Whether the reference says which characters it needs, so that some can be missing. */
+  readonly needs: boolean;
+  readonly ink: Color;
+}) {
+  return (
+    <dl className="discovered" aria-live="polite">
+      {needs ? (
+        <div>
+          <dt>Still missing</dt>
+          <dd>
+            {found.missing.length === 0 ? (
+              <span className="ok">None. Every character it needs has shown.</span>
+            ) : (
+              <MissingChips characters={found.missing} />
+            )}
+          </dd>
+        </div>
+      ) : null}
+      {found.unchecked.length === 0 ? null : (
+        <div>
+          <dt>Found, not checked yet</dt>
+          <dd>
+            <span className="glyphs unchecked" aria-label={`Characters: ${found.unchecked.join(' ')}`}>
+              {found.unchecked.map((character) => (
+                <span key={character} className="glyph" style={{ color: hex(ink) }} aria-hidden="true">
+                  {character}
+                </span>
+              ))}
+            </span>
+            <span className="note">AppyTappy read these. They count once you check them in review.</span>
+          </dd>
+        </div>
+      )}
+      {found.found.length === 0 ? null : (
+        <div>
+          <dt>Found</dt>
+          <dd>
+            <CharacterChips characters={found.found} ink={ink} />
+          </dd>
+        </div>
+      )}
+      {found.unnamed === 0 ? null : (
+        <div>
+          <dt>Without text</dt>
+          <dd className="note">
+            {plural(found.unnamed, 'shape has', 'shapes have')} no character yet. Type what their readings show in
+            review.
+          </dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
 interface PanelProps {
   readonly view: RecordingView | null;
+  /** The characters the recording found so far. */
+  readonly found: Discovery;
+  /** Whether the reference says which characters it needs. */
+  readonly needs: boolean;
   readonly reviewing: boolean;
   /** How many readings the check learns from now. */
   readonly kept: number;
@@ -54,7 +128,7 @@ interface PanelProps {
 
 /** The inspector's part for recording a number's region. */
 export function RecordPanel(props: PanelProps) {
-  const { view, reviewing, kept, keeping, blocked, appName, crops, error, settingsChanged } = props;
+  const { view, found, needs, reviewing, kept, keeping, blocked, appName, crops, error, settingsChanged } = props;
   const isRecording = view?.recording === true;
   // Starting removes the Start button, so focus moves to Stop rather than the page.
   const stopButton = useRef<HTMLButtonElement>(null);
@@ -67,6 +141,7 @@ export function RecordPanel(props: PanelProps) {
   // command's success clears only its own error.
   const warn = (
     <>
+      {view === null || view.full === null ? null : <p className="warn">{view.full}</p>}
       {view === null || view.problem === null ? null : <p className="warn">{view.problem}</p>}
       {error === null ? null : <p className="warn">{error}</p>}
     </>
@@ -78,7 +153,7 @@ export function RecordPanel(props: PanelProps) {
           Record readings
         </h3>
         <p className="note">
-          Record the region while you use {appName}. Each different reading is kept once and read as text, so you only
+          Record the region while you use {appName}. Each character it shows is kept once and read as text, so you only
           check it.
         </p>
         {warn}
@@ -103,10 +178,11 @@ export function RecordPanel(props: PanelProps) {
           Recording
         </h3>
         <p aria-live="polite">
-          {count === 1 ? '1 different reading so far.' : `${count} different readings so far.`}
-          {view.full ? ' That is as many as one recording keeps.' : ''}
+          {plural(view.shapes.length, 'different shape', 'different shapes')} so far, in{' '}
+          {plural(count, 'kept reading', 'kept readings')}.
         </p>
         {warn}
+        <Discovered found={found} needs={needs} ink={view.settings.ink} />
         {count === 0 ? null : (
           <ul className="found">
             {newest.map(({ reading, index }) => {
@@ -121,7 +197,10 @@ export function RecordPanel(props: PanelProps) {
             })}
           </ul>
         )}
-        <p className="note">Recording goes on while you use {appName}. Come back here to stop.</p>
+        <p className="note">
+          Recording goes on while you use {appName}. {needs ? 'Make it show what is still missing, then come' : 'Come'}{' '}
+          back here to stop.
+        </p>
         <div className="row">
           <button type="button" className="btn primary" ref={stopButton} onClick={props.onStop}>
             Stop and review
@@ -156,6 +235,7 @@ export function RecordPanel(props: PanelProps) {
           : `Learned from ${kept === 1 ? '1 recorded reading' : `${kept} recorded readings`}.`}
       </p>
       {warn}
+      {count === 0 ? null : <Discovered found={found} needs={needs} ink={view.settings.ink} />}
       {settingsChanged ? (
         <p className="note">
           The region, color or tolerance changed since recording. Record more needs the recording&apos;s own.
@@ -182,8 +262,58 @@ export function RecordPanel(props: PanelProps) {
   );
 }
 
+/** What a reading adds to the kept ones: its new characters with how often each showed, or that it adds nothing. */
+function Adds({
+  reading,
+  entry,
+  places,
+  view,
+}: {
+  readonly reading: RecordedReading;
+  readonly entry: ReviewEntry;
+  /** The places in the reading of the shapes no other kept reading teaches. */
+  readonly places: readonly number[];
+  readonly view: RecordingView;
+}) {
+  const added = addedShapes(reading, entry.text, places, view.shapes);
+  if (added.length === 0) {
+    return <span className="meta">Adds nothing: other kept readings show its characters.</span>;
+  }
+  if (added.some((each) => each.character === null)) {
+    return (
+      <span className="meta">
+        Shows {plural(added.length, 'shape', 'shapes')} no kept reading has. Its text names them once it has a character
+        for each.
+      </span>
+    );
+  }
+  return (
+    <span className="meta adds">
+      {entry.keep ? 'Adds' : 'Would add'}
+      <ul>
+        {added.map((each, index) => (
+          <li key={index}>
+            <span className="glyphs">
+              <span className="glyph" style={{ color: hex(view.settings.ink) }}>
+                {each.character}
+              </span>
+            </span>
+            {sighted(each.shape)}
+          </li>
+        ))}
+      </ul>
+    </span>
+  );
+}
+
 interface SheetProps {
   readonly view: RecordingView;
+  /** The characters the recording found, by what review keeps now. */
+  readonly found: Discovery;
+  /** Whether the reference says which characters it needs. */
+  readonly needs: boolean;
+  /** For each reading, the places in it of the shapes no other kept reading teaches. */
+  readonly adds: readonly (readonly number[])[];
   readonly entries: readonly ReviewEntry[];
   /** Why the check cannot learn a kept reading, by reading index. */
   readonly problems: ReadonlyMap<number, string>;
@@ -197,7 +327,7 @@ interface SheetProps {
 
 /** Every reading of a stopped recording, to keep or leave out and to correct. */
 export function ReviewSheet(props: SheetProps) {
-  const { view, entries, problems, crops, blocked, error, onEntry, onKeepAll } = props;
+  const { view, found, needs, adds, entries, problems, crops, blocked, error, onEntry, onKeepAll } = props;
   // Opening review removes the button that had focus, so focus moves here.
   const head = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -212,8 +342,9 @@ export function ReviewSheet(props: SheetProps) {
           </h2>
           <p>
             Check each reading&apos;s text and fix any the reader got wrong. Kept readings teach the number check its
-            characters, like labeled screenshots.
+            characters, like labeled screenshots. A reading is kept for the characters no other kept reading shows.
           </p>
+          {view.readings.length === 0 ? null : <Discovered found={found} needs={needs} ink={view.settings.ink} />}
           <p id="keep-blocked" className={blocked === null ? 'note' : 'note pending'} aria-live="polite">
             {blocked ?? ''}
           </p>
@@ -246,7 +377,11 @@ export function ReviewSheet(props: SheetProps) {
         </p>
       ) : (
         <ul className="sheet" aria-label="Recorded readings">
-          {view.readings.map((reading, index) => {
+          {reviewOrder(view.readings).map((index) => {
+            const reading = view.readings[index];
+            if (reading === undefined) {
+              return null;
+            }
             const entry = entries[index] ?? { keep: false, text: '' };
             const when = clock(reading.firstMs);
             const problem = problems.get(index);
@@ -284,6 +419,7 @@ export function ReviewSheet(props: SheetProps) {
                 <span className="meta">
                   First at {when}, {seen(reading.seen)}
                 </span>
+                <Adds reading={reading} entry={entry} places={adds[index] ?? []} view={view} />
                 {note === null ? null : (
                   <span id={noteId} className={flagged ? 'flag' : 'meta'}>
                     {note}

@@ -5,7 +5,16 @@ import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useStat
 import type { RecordedLabel, RecordingView, ReferenceRef } from './bindings.ts';
 import { errorText, reviewProblems } from './api.ts';
 import { type Draft, reviewSpec } from './check.ts';
-import { type ReviewEntry, editAll, entries, flaggedReadings, keepBlocked, keptLabels } from './review.ts';
+import {
+  type ReviewEntry,
+  checkedReadings,
+  editAll,
+  entries,
+  flaggedReadings,
+  keepBlocked,
+  keptAdditions,
+  keptLabels,
+} from './review.ts';
 
 /** How long review waits after the last edit before it asks which readings the check cannot learn. */
 const REVIEW_DELAY_MS = 200;
@@ -34,6 +43,10 @@ export function useReview(
   readonly close: () => void;
   /** Each reading's entry: the user's edit where there is one, or its start. */
   readonly entries: readonly ReviewEntry[];
+  /** The readings the user has checked, where the rest of what review keeps is the text reader's guess. */
+  readonly checked: ReadonlySet<number>;
+  /** For each reading, the places in it of the shapes no other kept reading teaches. */
+  readonly adds: readonly (readonly number[])[];
   /** The readings Keep would keep, with their text. */
   readonly keeping: readonly RecordedLabel[];
   /** Why the check cannot learn each flagged reading, by its index. */
@@ -67,6 +80,8 @@ export function useReview(
     [recording, edits, draft.recorded],
   );
   const keeping = useMemo(() => keptLabels(all), [all]);
+  const userChecked = useMemo(() => checkedReadings(all, edits, draft.recorded), [all, edits, draft.recorded]);
+  const adds = useMemo(() => keptAdditions(recording?.readings ?? [], all), [recording, all]);
   const toReview = useMemo(() => reviewSpec(draft, keeping, reference), [draft, keeping, reference]);
   const reviewKey = toReview === null ? '' : JSON.stringify(toReview);
   // The effect below runs when the spec's contents change, not on each new
@@ -142,6 +157,8 @@ export function useReview(
     show: setReviewing,
     close,
     entries: all,
+    checked: userChecked,
+    adds,
     keeping,
     flagged,
     keepBlocked: keepBlocked(keeping, flagged, checked),

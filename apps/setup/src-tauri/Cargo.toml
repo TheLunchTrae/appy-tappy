@@ -59,6 +59,9 @@ tokio = { version = "=1.54.1", features = ["sync"] }
 # drift from the Rust side. Only the tests derive them, so the program builds
 # without ts-rs.
 appytappy-config = { version = "=0.1.0", path = "../../../crates/config", features = ["ts"] }
+# Generates the frames a recording sees, to check that it keeps every shape
+# they show once and counts each rightly.
+proptest = "=1.12.0"
 # A stand-in for the running app, so the host's tests need no window.
 tauri = { version = "=2.12.5", features = ["test"] }
 ts-rs = "=12.0.1"
