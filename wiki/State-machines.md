@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Four guards drop such stale messages:
+it was about has gone. Five guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -33,6 +33,11 @@ it was about has gone. Four guards drop such stale messages:
   reader sends back for a discarded recording is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Check numbers.** The capture screen gives each check it tries on the
+  live window a number, which is in force from when the owner took the check
+  until the draft changes. An answer to a read asked under another number,
+  or under none, is dropped (`afterRead` in
+  `apps/setup/src/lib/liveCheck.ts`).
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -769,6 +774,50 @@ stateDiagram-v2
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
+
+### Live check
+
+The capture screen tries the check being set up on the live window
+(`useLiveCheck` in `apps/setup/src/lib/useLiveCheck.ts`). Its state is
+`state`, a `CheckState`; `read`, the reading or the problem shown; `tried`,
+the number of the newest check tried; and `inForce`, the number of the check
+the owner reads with, or none.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Setting: the draft makes a check
+    Setting --> Set: the owner took the check
+    Setting --> Failed: the owner refused the check
+    Set --> Set: a read answers
+    Setting --> Setting: the check changes
+    Set --> Setting: the check changes
+    Failed --> Setting: the check changes
+    Setting --> Idle: the draft no longer makes a check
+    Set --> Idle: the draft no longer makes a check
+    Failed --> Idle: the draft no longer makes a check
+```
+
+- **Idle.** The draft lacks something, and the box says what. Nothing is
+  shown as read.
+- **Setting** (`pending`). The check waits 250 ms for the draft to hold
+  still, then goes to the owner with `set_check`. Each change of the check
+  takes the next number, starts the wait again, and leaves no number in
+  force, and the owner's answer for a check the draft has left is ignored.
+  The box says it is trying the check. The last reading is kept, to show
+  until the first read with the new check answers, and a problem is cleared.
+- **Set.** The owner took the check, and its number is in force. The window
+  is read every 120 ms with `read_value`, each read after the last answered.
+  An answer replaces what the box shows: a reading, or why the frame cannot
+  be read.
+- **Failed** (`error`). The owner refused the check, such as a label its
+  reference cannot learn, and the box says why. The owner keeps the check it
+  had, and nothing is read until the check changes.
+- A read notes the number in force when it is asked, and its answer is taken
+  only while that number is still in force. So an answer under an older
+  check is dropped, reading or problem, and so is one asked between a change
+  of the check and the owner taking the new one, which the owner read with
+  the check before (`afterRead`).
 
 ### Recording
 

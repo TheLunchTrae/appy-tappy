@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Reading } from './bindings.ts';
 import { errorText, readValue, setCheck } from './api.ts';
 import type { Built, CheckState } from './check.ts';
+import { afterRead, type InForce, type LiveRead, type ReadAnswer } from './liveCheck.ts';
 import { useRepeat } from './repeat.ts';
 
 /** How long the check waits after the last change before it is tried. */
@@ -13,13 +13,11 @@ const CHECK_DELAY_MS = 250;
 const READING_PAUSE_MS = 120;
 
 /** What the check being set up reads on the live window. */
-export interface LiveCheck {
+export interface LiveCheck extends LiveRead {
   readonly state: CheckState;
-  /** What it read on the newest frame, or null before a frame arrived or while it cannot be read. */
-  readonly reading: Reading | null;
-  /** Why the newest frame could not be read, or null while it can. */
-  readonly problem: string | null;
 }
+
+const NOTHING_READ: LiveRead = { reading: null, problem: null };
 
 /**
  * Tries `built`'s check on the live window once it has not changed for a moment, and reads the window with it while
@@ -27,24 +25,27 @@ export interface LiveCheck {
  */
 export function useLiveCheck(built: Built): LiveCheck {
   const [state, setState] = useState<CheckState>({ kind: 'idle' });
-  const [reading, setReading] = useState<Reading | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  // Counts the checks tried, so a read asked under an older check is dropped when it answers.
+  const [read, setRead] = useState<LiveRead>(NOTHING_READ);
+  // The number of the newest check tried, and of the one the Rust side reads with: see `afterRead`.
   const tried = useRef(0);
+  const inForce = useRef<InForce>(null);
   useEffect(() => {
     tried.current += 1;
-    setProblem(null);
+    inForce.current = null;
+    const number = tried.current;
     if (!built.ok) {
       setState({ kind: 'idle' });
-      setReading(null);
+      setRead(NOTHING_READ);
       return undefined;
     }
     setState({ kind: 'pending' });
+    setRead((shown) => ({ ...shown, problem: null }));
     let current = true;
     const timer = setTimeout(() => {
       setCheck(built.spec)
         .then(() => {
           if (current) {
+            inForce.current = number;
             setState({ kind: 'set' });
           }
         })
@@ -61,22 +62,16 @@ export function useLiveCheck(built: Built): LiveCheck {
   }, [built]);
 
   const readNow = useCallback(async (): Promise<void> => {
-    const asked = tried.current;
-    // A function, because the check after the await must see a check tried meanwhile.
-    const isCurrent = (): boolean => tried.current === asked;
+    const asked = inForce.current;
+    let answer: ReadAnswer;
     try {
-      const read = await readValue();
-      if (isCurrent()) {
-        setReading(read);
-        setProblem(null);
-      }
+      answer = { ok: true, reading: await readValue() };
     } catch (error: unknown) {
-      if (isCurrent()) {
-        setReading(null);
-        setProblem(errorText(error));
-      }
+      answer = { ok: false, problem: errorText(error) };
     }
+    const now = inForce.current;
+    setRead((shown) => afterRead(shown, asked, now, answer));
   }, []);
   useRepeat(readNow, READING_PAUSE_MS, state.kind === 'set');
-  return { state, reading, problem };
+  return { state, ...read };
 }

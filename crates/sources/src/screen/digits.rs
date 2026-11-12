@@ -773,13 +773,10 @@ impl fmt::Display for ReadError {
                 closest,
                 read,
             } => {
-                // People count characters from 1.
+                // People count characters from 1. The read may list fewer
+                // characters than the region shows, so it gives no total.
                 let number = position.saturating_add(1);
-                write!(
-                    formatter,
-                    ": it read `{read}`, and character {number} of {} is ",
-                    read.len
-                )?;
+                write!(formatter, ": it read `{read}`, and character {number} is ")?;
                 match closest {
                     Some(closest) => {
                         write!(formatter, "closest to the `{closest}` it learned")
@@ -866,7 +863,7 @@ mod tests {
                     read: read_text("87?"),
                 },
                 "a character has a shape the reference has not learned",
-                ": it read `8 7 ?`, and character 3 of 3 is closest to the `%` it learned",
+                ": it read `8 7 ?`, and character 3 is closest to the `%` it learned",
             ),
             (
                 ReadError::UnknownCharacter {
@@ -875,7 +872,7 @@ mod tests {
                     read: read_text("?"),
                 },
                 "a character has a shape the reference has not learned",
-                ": it read `?`, and character 1 of 1 is unlike any, since it has learned none",
+                ": it read `?`, and character 1 is unlike any, since it has learned none",
             ),
             (
                 ReadError::NoNumber {

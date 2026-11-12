@@ -1891,16 +1891,16 @@ mod tests {
         let one = frame_image(3, 2, |x, _| x == 0);
         let two = frame_image(3, 2, |x, _| x != 1);
         let none = frame_image(3, 2, |_, _| false);
-        let unlearned = |read: &str, of: usize| {
-            format!(
-                "value 0 cannot be read: a character has a shape the reference has not \
-                 learned: it read `{read}`, and character 1 of {of} is unlike any, since it \
-                 has learned none"
-            )
-        };
         frames.handle(Ok(frame(&one, WINDOW)));
         frames.handle(Ok(frame(&two, WINDOW)));
-        assert_eq!(problems(&readings), [unlearned("?", 1)]);
+        assert_eq!(
+            problems(&readings),
+            [
+                "value 0 cannot be read: a character has a shape the reference has not \
+                 learned: it read `?`, and character 1 is unlike any, since it has learned \
+                 none"
+            ]
+        );
         // Another way to fail is another problem, said once however the
         // region flickers between the two.
         for _ in 0..2 {
