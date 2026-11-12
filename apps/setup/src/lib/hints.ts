@@ -89,3 +89,7 @@ export const TRACE_HINT =
 /** What marking an application's values as checked does. */
 export const MARK_CHECKED_HINT =
   'Records the build of the application running now, so the Values page tells you again only when it changes.';
+
+/** Saving an unfinished item as a draft. */
+export const DRAFT_HINT =
+  "A draft keeps what you set up so you can finish it later. It never runs and isn't part of what AppyTappy reads until you finish and save it.";

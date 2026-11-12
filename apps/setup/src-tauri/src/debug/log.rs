@@ -19,6 +19,7 @@ pub(crate) const REPEATED: &[&str] = &[
     "found_state",
     "list_apps",
     "list_automations",
+    "list_drafts",
     "list_windows",
     "live_values",
     "look_recording_state",

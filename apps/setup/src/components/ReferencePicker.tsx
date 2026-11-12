@@ -15,6 +15,8 @@ interface Props {
   readonly whole: boolean;
   readonly onSelect: (reference: string) => void;
   readonly onEdit: (reference: string) => void;
+  /** The references that have a draft of changes, which are changed by finishing it instead. */
+  readonly drafted: ReadonlySet<string>;
   readonly onNew: () => void;
   /** Opens the picked reference, or a new one, to record the region's readings. */
   readonly onRecord: () => void;
@@ -64,7 +66,12 @@ export function ReferencePicker(props: Props) {
           </div>
         )}
         <div className="choices">
-          {chosen === null ? null : (
+          {chosen === null ? null : props.drafted.has(chosen.id) ? (
+            // Editing it here would change it apart from its draft, which finishing later would undo.
+            <span className="note">
+              {chosen.name} has a draft of changes. Finish it on the References page to change it.
+            </span>
+          ) : (
             <button
               type="button"
               className="btn small"

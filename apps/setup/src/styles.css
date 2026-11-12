@@ -57,7 +57,8 @@ select {
 /* Shell */
 .shell {
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr);
+  /* The nav grows when a question in it takes more lines than the tabs. */
+  grid-template-rows: minmax(48px, auto) minmax(0, 1fr);
   height: 100%;
 }
 
@@ -100,6 +101,16 @@ select {
 .nav .confirm-none,
 .update {
   margin-left: auto;
+}
+
+/* A long question wraps beside its answers and keeps clear of the nav's edges. */
+.nav .confirm-none {
+  padding: 6px 0;
+  min-width: 0;
+}
+
+.nav .confirm-none > .confirm {
+  flex-shrink: 0;
 }
 
 /* The update notice keeps to one line at the nav's end. */
@@ -493,9 +504,15 @@ select {
   color: var(--capture);
 }
 
+/* The open flow, which is inert while leaving saves the drafts. It takes no box of its own. */
+.flow-hold {
+  display: contents;
+}
+
 .actions {
   margin-top: auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
 }
@@ -2600,6 +2617,56 @@ div.match-answer {
   gap: 6px;
   align-items: center;
   color: var(--text);
+}
+
+/* A draft's mark: dashed, since it doesn't run until it is finished. Changes to a saved item take the capture color. */
+.pill.draft {
+  background: transparent;
+  border: 1px dashed var(--muted);
+  color: var(--muted);
+}
+
+.pill.changes {
+  background: transparent;
+  border: 1px dashed var(--capture);
+  color: var(--capture);
+}
+
+tr.draft-row > td:not(.end):not(.row-actions) {
+  opacity: 0.85;
+}
+
+.draft-missing {
+  display: block;
+  margin-top: 2px;
+}
+
+/* What an unfinished item still needs, beside its save buttons. */
+.missing-list {
+  margin: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.missing-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Drafts that cannot be read, listed under the automations. */
+.draft-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-list > li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
 }
 
 /* Debug page */

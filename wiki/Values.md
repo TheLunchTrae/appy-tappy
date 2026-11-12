@@ -52,12 +52,16 @@ back to the automation with the value picked.
    empty colors are the same, it says why there, and so it does when it
    can't read the live window, such as a number with a character its
    reference hasn't learned.
-5. **Save.** Select **Save value**. **Back** returns to the first step.
+5. **Save.** Select **Save value**. **Back** returns to the first step. To
+   finish it later, select **Save as draft** on either step
+   ([Drafts](Drafts.md)).
 
 AppyTappy keeps the screenshots until you remove them, select
 **Change window**, or leave the new value, and saves only the part inside the
 box you drew, as
 [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps) describes.
+Only a [draft](Drafts.md) keeps the screenshots themselves, until you finish
+or delete it.
 Before a change of window or leaving drops work you have not saved, it asks
 first: select **Keep this window** or **Stay** to carry on, as
 [Leave before you save](Getting-started.md#leave-before-you-save) describes.
@@ -202,8 +206,9 @@ and needs no other screenshot.
 One recording keeps at most 16 screenshots, then stops and says so: remove the
 ones you do not need and start again to keep more. Something that fades in or
 out can leave a screenshot or two of the fade. Each screenshot is the whole
-window, kept in memory until you remove it, change window, or leave; AppyTappy
-never writes one to disk.
+window, kept in memory until you remove it, change window, or leave. AppyTappy
+writes one to disk only when you select **Save as draft**, which keeps the
+recorded screenshots with the ones you took.
 
 Keep the window the size it was when you took the screenshot you drew the
 region on: at another size, recording pauses and says to resize the window. If
@@ -576,7 +581,8 @@ headed **Fix** and saves with **Save fix**.
    what the value would read on the live window once saved.
 4. Select **Save changes**. **Discard**, or leaving the editor, keeps the
    value as it was saved. Leaving asks first only once you changed
-   something.
+   something. An edit can't be saved as a [draft](Drafts.md): it changes a
+   value your automations already use, so it is either saved or dropped.
 
 ### The window's size while you edit
 

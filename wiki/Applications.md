@@ -14,7 +14,8 @@ how AppyTappy finds its window, its anti-cheat setting, its
   of open windows, and choose what has to match to
   [find it again](#how-appytappy-finds-the-window). Give it a name, answer
   [how often its window changes size](#how-often-the-window-changes-size),
-  and select **Save application**.
+  and select **Save application**, or **Save as draft** to finish it later
+  ([Drafts](Drafts.md)).
 - **Change.** Select **Edit** on its row to change its name, how its window
   is found, or how often it changes size. Its values stay as they are.
 - **Remove.** Select **Remove** on its row and confirm. Its values go with it.

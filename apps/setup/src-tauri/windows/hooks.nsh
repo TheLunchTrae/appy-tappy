@@ -74,13 +74,15 @@
 !macroend
 
 ; Tauri's "Delete the application data" box removes only the setup app's web
-; view data, so it also removes AppyTappy's saved values, automations, and
-; logs. The install folder is the logs' parent, so it goes once it is empty.
+; view data, so it also removes AppyTappy's saved values, automations, logs,
+; and drafts, whose screenshots show whole windows. The install folder is
+; their parent, so it goes once it is empty.
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
     RMDir /r "$APPDATA\AppyTappy"
     RMDir /r "$LOCALAPPDATA\AppyTappy\logs"
+    RMDir /r "$LOCALAPPDATA\AppyTappy\drafts"
     RMDir "$LOCALAPPDATA\AppyTappy"
   ${EndIf}
 !macroend

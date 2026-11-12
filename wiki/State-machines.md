@@ -58,9 +58,11 @@ it was about has gone. Eleven guards drop such stale messages:
 - **The open flow.** A save's answer closes the setup app's flow only while
   the flow that saved is still the one open (`afterFlow` in
   `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
-  on leaves the next flow alone.
-- **List reads.** The setup app numbers each read of the saved applications
-  and automations as it starts. An answer older than the newest one taken is
+  on leaves the next flow alone. The draft saves of leaving with
+  **Save as draft** carry the flow they are for in the same way, and
+  `keepStep` drops an answer for any other flow than the open one.
+- **List reads.** The setup app numbers each read of the saved applications,
+  automations, and drafts as it starts. An answer older than the newest one taken is
   dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
   started before a save and answers late never puts older lists back.
 
@@ -693,6 +695,7 @@ the flows, and the transitions between them are pure functions there.
 stateDiagram-v2
     [*] --> Page
     Page --> Open: New or Edit opens a flow with none waiting
+    Page --> Open: Finish or Finish draft opens the draft's flow where it left off, with none waiting
     Open --> Open: the open flow opens another and waits under it
     Open --> Open: Cancel with a flow waiting shows that flow as it was left
     Open --> Page: Cancel with none waiting
@@ -701,15 +704,30 @@ stateDiagram-v2
     Saving --> Open: saved with a flow waiting, which shows again with what was made
     Saving --> Page: saved with none waiting, the page that lists it opens
     Saving --> Saving: the tabs, Cancel, and Leave wait until the save ends
+    Open --> SavingDraft: Save as draft in the open flow
+    SavingDraft --> Open: the draft save fails, the flow shows why
+    SavingDraft --> Open: saved with a flow waiting, which shows again as it was left
+    SavingDraft --> Page: saved with none waiting, the page that lists the draft opens
+    Open --> DeletingDraft: Delete draft, confirmed, in a flow that finishes a draft
+    DeletingDraft --> Page: the draft is deleted, the page that lists it opens
+    DeletingDraft --> Open: the delete fails, the flow shows why
     Open --> Page: a tab is pressed and no flow holds unsaved work
     Open --> Asking: a tab is pressed and the open flow or a waiting one holds unsaved work
     Asking --> Page: Leave drops every flow
     Asking --> Open: Stay
+    Asking --> KeepingHere: Save as draft, and the open flow holds work a draft keeps
+    Asking --> KeepingUnder: Save as draft, and only an automation that waits holds work
+    KeepingHere --> KeepingUnder: the open flow's draft is saved, and an automation waits with work
+    KeepingHere --> Page: the open flow's draft is saved and nothing waits with work, the asked page opens
+    KeepingHere --> Asking: the save fails, the question shows why
+    KeepingUnder --> Page: the automation's draft is saved, the asked page opens
+    KeepingUnder --> Asking: the save fails, the question shows why
 ```
 
 **Open** is one flow on screen with up to two waiting under it. The types
 allow only these stacks, the flow on screen last; a fix or an edit of a saved
-value is a value flow that no automation opens:
+value is a value flow that no automation opens, and a flow that finishes a
+draft opens from its page with none waiting:
 
 | Stack                            | How it comes about                                                                             |
 | -------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -739,11 +757,70 @@ value is a value flow that no automation opens:
 - **Tab.** What leaving loses is what the open flow reports
   (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
   that waits (`heldInAll`). A fix and an edit start from the screenshot the
-  capture takes when they open, so that screenshot is not unsaved work. With nothing unsaved the tab's page opens. With
-  unsaved work the question asks first, and `lostText` names what the open
-  flow loses and the automation's unsaved changes. **Leave** drops every
-  flow, and **Stay** keeps the stack as it is. While a save runs, the tabs
-  and the question's answers wait.
+  capture takes when they open, so that screenshot is not unsaved work, and a
+  flow that finishes a draft starts from what the draft kept (`startOf` for
+  an automation), so an unchanged draft is not unsaved work either. With
+  nothing unsaved the tab's page opens. With unsaved work the question asks
+  first, and `leaveQuestion` names what the open flow loses, the automation's
+  unsaved changes, and what **Save as draft** keeps of them. **Leave** drops
+  every flow, and **Stay** keeps the stack as it is. While a save runs, the
+  tabs and the question's answers wait.
+- **A saved draft is what a flow holds, written down.** A flow's unsaved work
+  and its draft are one thing: an automation's draft keeps the
+  `AutomationSetup` its flow carries while it waits, the editor's draft and
+  the application chosen, and a value, fix, or reference keeps its capture's
+  setup with the screenshots ([Drafts](Setup-app.md#drafts)). Each open flow
+  reports how to save its draft to `App.tsx` (`useDraft` in
+  `apps/setup/src/lib/drafts.ts`). An edit of a saved value reports none: it
+  is never a draft, and its question says so.
+- **Save as draft in a flow.** The flow saves its draft and ends as
+  `drafted`. `afterFlow` then shows the page that lists the draft, or, with a
+  flow waiting, that flow as it was left with nothing handed to it: a value
+  kept as a draft is not a saved value, so the automation that waits still
+  has none to watch. Saving a draft counts as a save, so the tabs and the
+  question's answers wait for it, and so does **Change window**.
+- **Save as draft in the question.** Each flow of the stack that holds work
+  becomes a draft of its own, and nothing links them: first the open flow's,
+  when it reported work and can be a draft, then that of an automation that
+  waits with changes (`draftUnder`), saved over the draft that automation
+  finishes when it finishes one. The question offers the answer whenever one
+  of the two would be kept, and its text names exactly those, so nothing a
+  draft keeps is called lost for good. The automation's draft is finished
+  later from the Automations page, without the value or application flow it
+  had opened, and the value's from the Values page, where saving it no longer
+  returns to the automation. `keepStep` is the transition: it takes the
+  state (`Keeping`: idle, the open flow's draft saving, or the waiting
+  automation's saving) and the press or a save's answer, and gives the state
+  that follows with what `App.tsx` does next: send a save, show a failure, or
+  leave. A draft save that fails returns to the question, which shows why,
+  with the stack as it was. When the open flow's draft is saved, the flow
+  comes to know it (`resumed`), so when the automation's save fails after it,
+  a second try saves over that draft, and saving the flow's item later
+  deletes it. The automation's draft is the last save, and its success
+  leaves, so no automation flow shows again without knowing a draft that was
+  written for it. While either save runs, the tabs and the question's answers
+  wait and the open flow is inert, so nothing in it can end or save it. An
+  answer for a flow that is no longer the open one, or for a save that is not
+  the one under way, is dropped.
+- **An application opened from a picker.** **Change how it's found** opens
+  the application flow for the picker's flow (`applicationFor`). When the
+  application has a draft of changes, the flow finishes that draft, and the
+  button says **Finish draft**, as the Applications page does, so there is one
+  way to change an application that has a draft.
+- **Finishing a draft.** **Finish** or **Finish draft** opens the flow
+  `resumedFlow` makes from the draft, on the saved item it changes when that
+  is still saved. A flow that finishes a draft deletes the draft once its
+  item is saved, and its **Delete draft** deletes it without saving the item
+  and ends the flow as `drafted`. A draft that stays because the delete after
+  a save failed shows on its page, where it can be finished and deleted. A
+  saved automation, application, or reference with a draft of changes offers
+  **Finish draft** in place of **Edit**, so the saved item and its draft
+  never change apart. A value, fix, or reference flow that finishes a draft
+  brings the draft's screenshots back only after its window is picked, since
+  picking a window clears the session's. **Change window** after that asks
+  first, then starts the capture over without what the draft kept; a draft
+  saved then still replaces the same draft, and leaving without one keeps it
+  as it was.
 - **A save that finishes after the user moved on.** `App.tsx` tells
   `afterFlow` whether the flow that saved is still the one open, by identity,
   and `afterFlow` changes nothing when it is not. The tabs and **Cancel** are
@@ -757,9 +834,14 @@ value is a value flow that no automation opens:
   while the user picks. A click picture taken for an automation's draft
   stays while the automation's flow is open or waits under a flow it opened,
   since the draft that names it waits with it. Once no automation flow is
-  left, on a save, **Cancel**, or **Leave**, the window removes the click
-  pictures that no saved automation names (`holdsAutomation`,
-  [Pictures kept](Setup-app.md#pictures-kept)).
+  left, on a save, **Save as draft**, **Cancel**, or **Leave**, the window
+  removes the click pictures that neither a saved automation nor a saved
+  draft names (`holdsAutomation`,
+  [Pictures kept](Setup-app.md#pictures-kept)). Deleting an automation's
+  draft from the Automations page does the same, so its pictures go with it.
+  A saved draft is the one thing that keeps pictures past its flow: its
+  screenshots are copied into its folder when it is saved, and the capture's
+  own still go when the flow closes.
 
 No flow waits for the saved files to be read again before it closes. Each
 save starts that read, and whatever shows next copes with lists that lack
@@ -1073,7 +1155,10 @@ stateDiagram-v2
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
   above, so no frame, screenshot, recorded reading, or find outlives the
-  capture.
+  capture. Saving a draft copies the screenshots to the draft's folder
+  first; a flow that finishes that draft puts them back into `screenshots`
+  after its window is picked (`restore_draft_screenshots`), each under the
+  index it had, and changes no other field.
   The page stops it when a value or reference flow closes, on **Change
   window**, and when a click's target screen closes or looks for its window
   again.
@@ -1777,9 +1862,18 @@ file without telling anyone.
 
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the
-click pictures none of them names, and so does the end of the automation's
-flow, so a target set up for an automation that was not saved leaves no file.
+click pictures that neither they nor a draft names, and so does the end of
+the automation's flow, so a target set up for an automation that was neither
+saved nor kept as a draft leaves no file. While the drafts cannot be listed,
+none is removed.
 [Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
+
+Drafts are files of the setup app alone, in their own folder, and saving or
+deleting one tells no one. Each draft's folder is in one of three states: in
+place, being written beside it in a `.saving` folder, or moved aside to an
+`.old` folder while the new one takes its place. A save that stops between
+them leaves the old draft, or the next listing puts it back, as
+[Drafts](Setup-app.md#drafts) describes.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another

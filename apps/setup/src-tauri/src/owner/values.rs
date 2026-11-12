@@ -15,6 +15,7 @@ use appytappy_sources::system::{ProcessEntry, WindowEntry};
 use crate::applications::{self, AppSpec};
 use crate::automations;
 use crate::check_spec::{self, Pictures};
+use crate::drafts::{DraftDef, DraftKind};
 use crate::stores::SavedApp;
 use crate::window_list;
 
@@ -242,7 +243,27 @@ impl<H: Host> Owner<H> {
             }
             Ok(Edit::Save((), Vec::new()))
         })
-        .map(|saved| saved.answer)
+        .map(|saved| saved.answer)?;
+        // Nothing can finish a fix of a value that is gone.
+        self.delete_drafts(|draft| {
+            draft.kind == DraftKind::Fix
+                && draft.app.as_deref() == Some(app)
+                && draft.changes.as_deref() == Some(value)
+        });
+        Ok(())
+    }
+
+    /// Deletes the drafts that `gone` takes, after what they belong to was
+    /// removed. The removal worked either way: a draft that stays says on
+    /// its page that it can only be deleted.
+    fn delete_drafts(&self, gone: impl Fn(&DraftDef) -> bool) {
+        if let Ok(stores) = self.stores() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the item is removed; a draft that stays can be deleted on its page"
+            )]
+            let _ = stores.drafts.delete_where(gone);
+        }
     }
 
     /// Saves `class` as the anti-cheat class of the application `app`. A
@@ -274,7 +295,14 @@ impl<H: Host> Owner<H> {
     /// way.
     pub(crate) fn remove_app(&mut self, app: &str) -> Result<Option<String>, String> {
         applications::check_removable(self.stores()?, app)?;
-        self.write_app(app, Changed::Applications, Write::Remove)
+        let removed = self.write_app(app, Changed::Applications, Write::Remove)?;
+        // Nothing can finish a value, fix, or reference of an application
+        // that is gone, and its draft of changes has nothing to change.
+        self.delete_drafts(|draft| {
+            draft.app.as_deref() == Some(app)
+                || (draft.kind == DraftKind::Application && draft.changes.as_deref() == Some(app))
+        });
+        Ok(removed)
     }
 }
 
@@ -451,6 +479,65 @@ mod tests {
             Err("no windows here".to_owned())
         );
         assert!(harness.ask(Owner::apps).is_ok());
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn drafts_go_with_the_value_or_the_application_they_belong_to() {
+        let (stores, root) = scratch_store("drafts-gone");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        harness
+            .ask(|owner| owner.save(&spec("example", "Progress bar", BAR)))
+            .expect("saves");
+        let draft = |kind, app: Option<&str>, changes: Option<&str>| DraftDef {
+            kind,
+            app: app.map(str::to_owned),
+            changes: changes.map(str::to_owned),
+            name: "Draft".to_owned(),
+            missing: Vec::new(),
+            pictures: Vec::new(),
+            state: serde_json::Value::Null,
+        };
+        let mut keep = |draft: DraftDef| {
+            harness
+                .ask(move |owner| owner.save_draft(None, &draft, false))
+                .expect("saves the draft")
+        };
+        let fix = keep(draft(DraftKind::Fix, Some("example"), Some("progress_bar")));
+        let other_fix = keep(draft(DraftKind::Fix, Some("example"), Some("other")));
+        let elsewhere = keep(draft(DraftKind::Fix, Some("another"), Some("progress_bar")));
+        let value = keep(draft(DraftKind::Value, Some("example"), None));
+        let changes = keep(draft(DraftKind::Application, None, Some("example")));
+        let new_app = keep(draft(DraftKind::Application, None, None));
+        let automation = keep(draft(DraftKind::Automation, None, Some("example")));
+        let left = |harness: &mut Harness| -> Vec<String> {
+            harness
+                .ask(|owner| owner.list_drafts())
+                .expect("lists")
+                .into_iter()
+                .map(|summary| summary.id)
+                .collect()
+        };
+
+        harness
+            .ask(|owner| owner.delete("example", "progress_bar"))
+            .expect("deletes the value");
+        assert!(!left(&mut harness).contains(&fix), "its fix draft goes");
+        assert_eq!(left(&mut harness).len(), 6, "and no other draft");
+
+        harness
+            .ask(|owner| owner.remove_app("example"))
+            .expect("removes the application");
+        assert_eq!(
+            left(&mut harness),
+            [elsewhere, new_app, automation],
+            "every draft of the application goes, and its draft of changes"
+        );
+        drop((other_fix, value, changes));
         std::fs::remove_dir_all(root).expect("clean up");
     }
 

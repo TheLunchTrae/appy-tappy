@@ -31,6 +31,7 @@ use crate::debug::trace_file::TraceFile;
 use crate::debug::trace_view::{RowFilter, TraceMetrics, TraceRange, TraceRows};
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
+use crate::drafts::{DraftDef, DraftSummary};
 use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
@@ -949,4 +950,44 @@ pub(crate) async fn debug_bundle(app: AppHandle, contents: BundleSpec) -> Result
     })
     .await?;
     made.map(Response::new)
+}
+
+/// Every saved draft.
+#[tauri::command]
+pub(crate) async fn list_drafts(app: AppHandle) -> Result<Vec<DraftSummary>, String> {
+    try_ask(&app, "list_drafts", |owner| owner.list_drafts()).await
+}
+
+/// Saves `draft` over the draft `id`, or as a new one, with this session's
+/// screenshots when `screenshots` is set, and answers its ID.
+#[tauri::command]
+pub(crate) async fn save_draft(
+    app: AppHandle,
+    id: Option<String>,
+    draft: DraftDef,
+    screenshots: bool,
+) -> Result<String, String> {
+    try_ask(&app, "save_draft", move |owner| {
+        owner.save_draft(id.as_deref(), &draft, screenshots)
+    })
+    .await
+}
+
+/// Makes the screenshots of the draft `id` this session's, and answers the
+/// index each has.
+#[tauri::command]
+pub(crate) async fn restore_draft_screenshots(
+    app: AppHandle,
+    id: String,
+) -> Result<Vec<usize>, String> {
+    try_ask(&app, "restore_draft_screenshots", move |owner| {
+        owner.restore_draft_screenshots(&id)
+    })
+    .await
+}
+
+/// Deletes the draft `id` with its screenshots.
+#[tauri::command]
+pub(crate) async fn delete_draft(app: AppHandle, id: String) -> Result<(), String> {
+    try_ask(&app, "delete_draft", move |owner| owner.delete_draft(&id)).await
 }

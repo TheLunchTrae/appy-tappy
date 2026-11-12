@@ -79,6 +79,14 @@ impl Locations {
         self.local.join("enabled.txt")
     }
 
+    /// The folder where the setup app keeps drafts, the items the user saved
+    /// before finishing them, each in its own folder. The runtime never
+    /// reads it.
+    #[must_use]
+    pub fn drafts(&self) -> PathBuf {
+        self.local.join("drafts")
+    }
+
     /// The folder that holds one folder per application, each with its
     /// authoring file and pictures.
     #[must_use]
@@ -128,6 +136,7 @@ mod tests {
         .expect("absolute paths");
         assert_eq!(locations.logs(), local.join("AppyTappy").join("logs"));
         assert_eq!(locations.traces(), local.join("AppyTappy").join("traces"));
+        assert_eq!(locations.drafts(), local.join("AppyTappy").join("drafts"));
         assert_eq!(
             locations.enabled(),
             local.join("AppyTappy").join("enabled.txt")

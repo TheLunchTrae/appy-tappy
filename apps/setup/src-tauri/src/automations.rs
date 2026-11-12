@@ -246,31 +246,43 @@ pub(crate) fn save(
     Ok(id)
 }
 
-/// Saves `file` as the automations, then removes the click pictures none of
-/// them names, such as those of a target that was replaced or deleted.
+/// Saves `file` as the automations, then removes the click pictures that
+/// neither they nor a draft name, such as those of a target that was
+/// replaced or deleted.
 fn write(stores: &Stores, file: &AutomationsFile) -> Result<(), String> {
     stores
         .automations
         .save(file)
         .map_err(|error| error.to_string())?;
-    // No one reads a picture no automation names, so one that stays changes
+    // No one reads a picture nothing names, so one that stays changes
     // nothing, and the next save tries again.
     #[expect(
         clippy::let_underscore_must_use,
         reason = "the save worked; an unused picture that stays is harmless"
     )]
-    let _ = stores.automations.prune_pictures(file);
+    let _ = prune_pictures(stores, file);
     Ok(())
 }
 
-/// Removes the click pictures no saved automation names: those taken for a
-/// target of an automation the user then did not save.
-pub(crate) fn forget_unsaved_pictures(stores: &Stores) -> Result<(), String> {
-    let file = load(stores)?;
+/// Removes the click pictures that no automation in `file` and no draft
+/// names. When the drafts cannot be listed, it removes none, since a draft
+/// may name any.
+fn prune_pictures(stores: &Stores, file: &AutomationsFile) -> Result<(), String> {
+    let drafted = stores
+        .drafts
+        .pictures()
+        .map_err(|error| error.to_string())?;
     stores
         .automations
-        .prune_pictures(&file)
+        .prune_pictures(file, &drafted)
         .map_err(|error| error.to_string())
+}
+
+/// Removes the click pictures that no saved automation and no draft names:
+/// those taken for a target of an automation the user then neither saved nor
+/// kept as a draft, and those of a draft that was deleted.
+pub(crate) fn forget_unsaved_pictures(stores: &Stores) -> Result<(), String> {
+    prune_pictures(stores, &load(stores)?)
 }
 
 /// Turns the automation `id` on or off. One that cannot run as saved stays
@@ -432,6 +444,7 @@ mod tests {
     use appytappy_sources::screen::{Image, Size};
 
     use super::*;
+    use crate::drafts::{DraftDef, DraftKind};
     use crate::stores;
 
     /// Fresh stores for one test, holding the application `example` with a
@@ -957,6 +970,72 @@ mod tests {
         assert!(saved.exists(), "the file the automations are saved in");
         fs::write(saved, b"{").expect("breaks");
         assert!(forget_unsaved_pictures(&stores).is_err());
+        assert!(stores.automations.picture(&waiting).is_ok());
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_picture_a_draft_names_stays() {
+        let (stores, folder) = stores("click-drafted");
+        let drafted = stores.automations.add_picture(&png(1)).expect("adds");
+        let draft = DraftDef {
+            kind: DraftKind::Automation,
+            app: None,
+            changes: None,
+            name: "Click".to_owned(),
+            missing: vec!["Pick a value to watch".to_owned()],
+            pictures: vec![drafted.clone()],
+            state: serde_json::Value::Null,
+        };
+        let id = stores
+            .drafts
+            .save(None, &draft, &[])
+            .expect("saves the draft");
+        let kept = stores.automations.add_picture(&png(2)).expect("adds");
+        save(&stores, None, clicking(&stores, "Click", &kept)).expect("saves");
+        assert!(
+            stores.automations.picture(&drafted).is_ok(),
+            "the draft keeps it"
+        );
+        // The end of an automation's flow keeps what a draft names too.
+        let unsaved = stores.automations.add_picture(&png(3)).expect("adds");
+        assert_eq!(forget_unsaved_pictures(&stores), Ok(()));
+        assert!(stores.automations.picture(&unsaved).is_err(), "forgotten");
+        assert!(
+            stores.automations.picture(&drafted).is_ok(),
+            "the draft keeps it"
+        );
+        // While a draft cannot be read, nothing says which pictures it
+        // names, so every picture stays, through a save too.
+        let file = folder
+            .join("AppyTappy")
+            .join("drafts")
+            .join(&id)
+            .join("draft.json");
+        let text = fs::read_to_string(&file).expect("the draft's file");
+        fs::write(&file, "{").expect("breaks the draft");
+        let spare = stores.automations.add_picture(&png(7)).expect("adds");
+        assert!(forget_unsaved_pictures(&stores).is_err());
+        save(&stores, None, clicking(&stores, "Meanwhile", &kept)).expect("saves");
+        assert!(stores.automations.picture(&drafted).is_ok());
+        assert!(stores.automations.picture(&spare).is_ok());
+        fs::write(&file, text).expect("mends the draft");
+        assert_eq!(forget_unsaved_pictures(&stores), Ok(()));
+        assert!(stores.automations.picture(&spare).is_err(), "pruned again");
+        assert!(stores.automations.picture(&drafted).is_ok());
+        // Once the draft is deleted, nothing names its picture.
+        stores.drafts.delete(&id).expect("deletes the draft");
+        assert_eq!(forget_unsaved_pictures(&stores), Ok(()));
+        assert!(stores.automations.picture(&drafted).is_err(), "pruned");
+        assert!(stores.automations.picture(&kept).is_ok());
+        // While the drafts cannot be listed, nothing says which pictures
+        // they name, so every picture stays.
+        let waiting = stores.automations.add_picture(&png(4)).expect("adds");
+        let drafts = folder.join("AppyTappy").join("drafts");
+        fs::remove_dir_all(&drafts).expect("removes the drafts folder");
+        fs::write(&drafts, b"not a folder").expect("blocks the listing");
+        assert!(forget_unsaved_pictures(&stores).is_err());
+        save(&stores, None, clicking(&stores, "Another", &kept)).expect("saves");
         assert!(stores.automations.picture(&waiting).is_ok());
         fs::remove_dir_all(folder).expect("clean up");
     }

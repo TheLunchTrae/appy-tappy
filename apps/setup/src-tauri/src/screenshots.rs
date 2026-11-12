@@ -1,6 +1,7 @@
 //! The session's screenshots: whole frames of the picked window, kept in
 //! memory from when each is taken or recorded until it is removed or the
-//! capture ends. None is ever written to disk.
+//! capture ends. Only a draft writes them to disk, in its own folder
+//! ([`crate::drafts`]).
 
 use appytappy_sources::screen::Image;
 
@@ -40,6 +41,22 @@ impl Screenshots {
         if let Some(slot) = self.0.get_mut(index) {
             *slot = None;
         }
+    }
+
+    /// The screenshots a draft kept, each under the index it had when the
+    /// draft was saved; the indexes between them are empty, as after a
+    /// removal.
+    pub(crate) fn restored(kept: Vec<(usize, Image)>) -> Self {
+        let mut slots = Vec::new();
+        for (index, image) in kept {
+            if slots.len() <= index {
+                slots.resize_with(index.saturating_add(1), || None);
+            }
+            if let Some(slot) = slots.get_mut(index) {
+                *slot = Some(image);
+            }
+        }
+        Self(slots)
     }
 
     /// Releases every screenshot; the next one kept is index 0 again.
@@ -106,5 +123,17 @@ mod tests {
         screenshots.clear();
         assert_eq!(screenshots.get(0), None);
         assert_eq!(screenshots.push(pixel(5)), 0);
+    }
+
+    #[test]
+    fn restored_screenshots_keep_their_indexes() {
+        let mut screenshots = Screenshots::restored(vec![(2, pixel(3)), (0, pixel(1))]);
+        assert_eq!(screenshots.get(0), Some(&pixel(1)));
+        assert_eq!(screenshots.get(1), None);
+        assert_eq!(screenshots.get(2), Some(&pixel(3)));
+        assert_eq!(screenshots.push(pixel(4)), 3, "the next takes a new index");
+        let packed = Screenshots::restored(vec![(0, pixel(1)), (1, pixel(2))]);
+        assert_eq!(packed.slots(), [Some(pixel(1)), Some(pixel(2))]);
+        assert_eq!(Screenshots::restored(Vec::new()).slots(), []);
     }
 }

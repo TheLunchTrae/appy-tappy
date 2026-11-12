@@ -136,12 +136,15 @@ and who gets it. It holds:
 
 - your settings and automations;
 - each application's settings, without its pictures unless you include them;
+- each [draft](Drafts.md)'s settings, without its screenshots unless you
+  include pictures;
 - both logs and their older copies;
 - the newest trace file, unless you leave it out;
 - the AppyTappy Setup version and when the bundle was made.
 
 **Include pictures** adds the pictures your values, references, and click
 actions keep, which [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps)
-lists. They are off at first, because they show parts of your applications'
-windows. Even without them, the bundle holds your applications' window titles
+lists, and the screenshots your drafts keep. They are off at first, because
+they show parts of your applications' windows, and a draft's screenshots show
+whole windows. Even without them, the bundle holds your applications' window titles
 and executable names.

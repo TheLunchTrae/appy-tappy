@@ -452,6 +452,11 @@ mod tests {
         fs::create_dir_all(&pictures).expect("pictures folder");
         fs::write(pictures.join("click-1.png"), [3]).expect("picture");
         fs::write(pictures.join("click-1.png.tmp"), [3]).expect("half-written picture");
+        let draft = locations.drafts().join("0000019a");
+        fs::create_dir_all(&draft).expect("draft folder");
+        fs::write(draft.join("draft.json"), "{}").expect("draft file");
+        fs::write(draft.join("shot-0.png"), [4]).expect("screenshot");
+        fs::write(draft.join("notes.txt"), "mine").expect("another file");
         fs::create_dir_all(&stores.logs).expect("logs");
         fs::write(stores.logs.join("setup.log"), "pick_window took 1.0 ms\n").expect("log");
         fs::create_dir_all(&stores.traces).expect("traces");
@@ -475,6 +480,7 @@ mod tests {
                 "about.txt",
                 "settings.json",
                 "apps/example/app.json",
+                "drafts/0000019a/draft.json",
                 "logs/setup.log"
             ]
         );
@@ -499,6 +505,10 @@ mod tests {
             "{names:?}"
         );
         assert!(
+            names.contains(&"drafts/0000019a/shot-0.png".to_owned()),
+            "a draft's screenshots are pictures: {names:?}"
+        );
+        assert!(
             names
                 .iter()
                 .all(|name| !name.contains("notes") && !name.contains("png.tmp")),
@@ -519,7 +529,7 @@ mod tests {
             .expect("bundle");
         assert_eq!(
             unzip(outside, "about.txt").0.len(),
-            4,
+            5,
             "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");

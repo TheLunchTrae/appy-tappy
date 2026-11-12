@@ -271,19 +271,22 @@ impl AutomationStore {
         Ok(name)
     }
 
-    /// Removes the click pictures that no automation in `file` names, such
-    /// as one taken for a target the user did not keep, and the temporary
-    /// files an earlier run left in their folder. Only a file named as
-    /// [`AutomationStore::add_picture`] names one goes, so a file the user
-    /// put in the folder stays. A folder that does not exist yet holds
-    /// none.
+    /// Removes the click pictures that no automation in `file` names and
+    /// `keep` does not hold, such as one taken for a target the user did not
+    /// keep, and the temporary files an earlier run left in their folder.
+    /// `keep` holds those that something other than the file still needs.
+    /// Only a file named as [`AutomationStore::add_picture`] names one goes,
+    /// so a file the user put in the folder stays. A folder that does not
+    /// exist yet holds none.
     ///
     /// # Errors
     ///
     /// Returns the error from listing the folder or removing a picture.
-    pub fn prune_pictures(&self, file: &AutomationsFile) -> io::Result<()> {
+    pub fn prune_pictures(&self, file: &AutomationsFile, keep: &[String]) -> io::Result<()> {
+        let mut named = file.images();
+        named.extend(keep.iter().map(String::as_str));
         let folder = self.pictures();
-        remove_unnamed(&folder, &file.images(), |name| click_number(name).is_some())?;
+        remove_unnamed(&folder, &named, |name| click_number(name).is_some())?;
         remove_leftovers(&folder);
         Ok(())
     }
@@ -979,7 +982,7 @@ mod tests {
         let store = AutomationStore::new(root.join("automations.json"));
         let empty = AutomationsFile::default();
         store
-            .prune_pictures(&empty)
+            .prune_pictures(&empty, &[])
             .expect("no folder holds no pictures");
         assert_eq!(store.add_picture(b"one").expect("adds"), "click-1.png");
         assert_eq!(store.add_picture(b"two").expect("adds"), "click-2.png");
@@ -988,7 +991,14 @@ mod tests {
         let json = r#"{"format":1,"automations":[{"id":"a","name":"A","enabled":true,"when":{"app":"app","value":"v","is":"atLeast","target":1},"actions":[{"kind":"click","app":"other","button":"left","at":{"kind":"picture","image":"click-2.png","windowSize":{"width":100,"height":100},"search":{"x":0,"y":0,"width":10,"height":10},"press":{"x":1,"y":1},"tolerance":20}}],"undo":false,"cooldownMs":0}]}"#;
         let file = AutomationsFile::parse(json).expect("valid");
         assert_eq!(file.images(), ["click-2.png"]);
-        store.prune_pictures(&file).expect("prunes");
+        store
+            .prune_pictures(&file, &["click-1.png".to_owned()])
+            .expect("prunes");
+        assert!(
+            store.pictures().join("click-1.png").exists(),
+            "one that is kept stays"
+        );
+        store.prune_pictures(&file, &[]).expect("prunes");
         assert!(!store.pictures().join("click-1.png").exists());
         assert!(store.pictures().join("click-2.png").exists());
         assert!(store.pictures().join("notes.txt").exists());
@@ -1001,7 +1011,7 @@ mod tests {
             fs::write(store.pictures().join(mine), b"mine").expect("write");
         }
         fs::create_dir(store.pictures().join("click-7.png")).expect("create");
-        store.prune_pictures(&file).expect("prunes");
+        store.prune_pictures(&file, &[]).expect("prunes");
         assert_eq!(
             names_in(&store.pictures()),
             [
@@ -1045,7 +1055,11 @@ mod tests {
         fs::create_dir_all(&root).expect("folder");
         // A file where the folder should be cannot be listed.
         fs::write(store.pictures(), b"not a folder").expect("write");
-        assert!(store.prune_pictures(&AutomationsFile::default()).is_err());
+        assert!(
+            store
+                .prune_pictures(&AutomationsFile::default(), &[])
+                .is_err()
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -1139,7 +1153,7 @@ mod tests {
         }
         age(&cut_short);
         automations
-            .prune_pictures(&AutomationsFile::default())
+            .prune_pictures(&AutomationsFile::default(), &[])
             .expect("prunes");
         assert!(!cut_short.exists(), "another run's old one goes");
         assert!(under_way.exists(), "a write under way stays");

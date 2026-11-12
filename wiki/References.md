@@ -46,7 +46,8 @@ select **Capture this window**, as the first step of
    [record the region](#record-readings) to collect them as they show.
 5. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
-   teach them later.
+   teach them later. To finish it later instead, select **Save as draft**
+   ([Drafts](Drafts.md)). A draft doesn't keep a recording.
 
 The box at the bottom of the panel shows what the reference reads on the
 live window, a few times a second. When it can't read the window, it says why

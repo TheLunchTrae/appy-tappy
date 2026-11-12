@@ -58,8 +58,9 @@ This page covers what the user guide leaves out.
 - **Screenshots.** The owner thread keeps the session's screenshots, taken or
   [recorded](#recording-looks), in memory until the user removes them or
   their capture stops: on **Change window**, when another window is picked, or
-  when the flow closes ([Pictures kept](#pictures-kept)); none is written to
-  disk. A recording, with the looks or readings it holds, goes with them.
+  when the flow closes ([Pictures kept](#pictures-kept)). None is written to
+  disk unless the user saves a [draft](#drafts), which copies them to its
+  folder. A recording, with the looks or readings it holds, goes with them.
   Each screenshot is named by the index it got when it was kept
   (`screenshots.rs`).
   Removing one releases its pixels and leaves its index empty, so the indexes
@@ -638,6 +639,9 @@ the value is read again.
 
 ## Saved files
 
+Drafts are kept apart from these files, in `%LOCALAPPDATA%\AppyTappy\drafts\`,
+so the runtime never reads them ([Drafts](#drafts)).
+
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures it needs: each reference's labeled screenshots, cropped to
@@ -826,23 +830,96 @@ application's anti-cheat class starts as `unknown`, which blocks key press
 actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
+## Drafts
+
+A draft is an item the user saved before it was finished
+([Drafts](Drafts.md) in the user guide). It is what its flow holds, written
+down: the same state the flow would carry while it waits under another flow
+or shows on screen ([Pages and flows](State-machines.md#pages-and-flows)).
+The setup app keeps each in its own folder under
+`%LOCALAPPDATA%\AppyTappy\drafts\`, named by an ID made from the time it was
+first saved (`apps/setup/src-tauri/src/drafts.rs`). The folder holds
+`draft.json` and, for a value, fix, or reference, the capture's screenshots,
+each as `shot-{index}.png` under the index it has in the capture, so the
+indexes of removed screenshots stay empty. The runtime never reads this
+folder, so a draft never runs and the authoring files never hold an
+unfinished item.
+
+`draft.json` names the kind of flow that finishes it, the application it
+belongs to, the saved item it changes (null for a new one), the name and the
+sentences the lists show, the click pictures it names, and `state`: what the
+flow had set up. Only the page reads `state`, marked with its own format and
+kind (`apps/setup/src/lib/drafts.ts`). A draft whose `state` has another
+format was saved by another version and can only be deleted.
+
+What each kind keeps in `state`:
+
+| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                                | What it does not keep                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                                  | A value or application flow the editor had opened, and what such a flow would hand back                                                |
+| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                             | The window picked in the list                                                                                                          |
+| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference and **Whole number only**), the reference being edited with the characters it needs, and which screenshots a recording kept | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
+
+Screenshots follow one rule, however they were kept: every screenshot the
+capture holds when the draft is saved goes into the draft, those a
+[recording of looks](#recording-looks) kept as well as those the user took,
+and the strip marks the recorded ones again when the draft is finished. A
+recording itself lives on the owner thread with the capture and is not
+written: its readings and the looks it knows go when the flow closes. An
+[edit of a saved value](State-machines.md#value-edit) is never a draft. It starts
+from the value as it is saved and is checked against the automations that use
+it when it is saved, so a copy kept for later would be a second, stale state
+of a value that runs meanwhile. Its leave question says so and offers no
+**Save as draft**. A fix adds a drawing at one more size and changes nothing
+saved until it is saved, so it can be a draft.
+
+A save writes the draft into a folder of its own, ending in `.saving`, with
+each file flushed to the disk. It then moves the old draft aside, to a folder
+ending in `.old`, and moves the new one into place. Listing the drafts tidies
+up after a save that stopped: it puts an old draft back when that save's own
+`.saving` folder shows the new one never took its place, keeping that folder
+until the old one is back, and removes the rest. Deleting a draft first
+removes what a stopped save of it left, so tidying never brings a deleted
+draft back. A draft of changes to an
+automation, application, or reference replaces any other draft of the same
+saved item, and a save that cannot remove the older one still worked: the
+page takes the newest. Fix drafts never replace each other and are not keyed
+by window size, so a value can have several, each finished from its own row.
+A fix draft copies how its value is read (`fixDraft`); once the value's
+check, colors, or states are edited, the draft no longer fits it, and its row
+says so and offers only **Delete** (`fixOutdated` in `lib/captureDraft.ts`).
+A value draft that kept the reference editor open takes that reference again
+from the application's file when it is finished (`refreshedEditing`).
+Removing an application deletes the drafts that belong to it, and deleting a
+value its fix drafts (`DraftStore::delete_where`), since nothing could finish
+them; that is best effort, and one that stays says it can only be deleted. Finishing a draft opens its flow; a value, fix,
+or reference asks for the window again, and once it is picked, the draft's
+screenshots replace the session's, each under the index the draft's state
+refers to. Saving the item deletes the draft.
+[Pictures kept](#pictures-kept) says how long a draft's pictures stay.
+
 ## Pictures kept
 
-AppyTappy keeps a picture only where reading or clicking needs one, cut to
-the region the user drew or to the box around text it found that the user
-added, and never the rest of the window. A window's whole
-frame exists only in memory while its capture is open. A file holds a region
-alone, which is as much of the window as the user drew. The user guide says
-so in [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
+AppyTappy keeps a picture only while something saved needs it. A saved value,
+reference, or click needs one to read or to click, cut to the region the user
+drew or to the box around text it found that the user added, and never the
+rest of the window. A saved [draft](#drafts) needs the pictures its flow was
+working on, so that the flow can go on: a capture's screenshots, each a whole
+frame, and an automation's click pictures. Nothing else outlives its flow: a
+window's whole frame otherwise exists only in memory while its capture is
+open. The user guide says so in
+[What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
 
 ### In memory
 
 The owner thread and the page hold these for the picked window. All of them
 go when its capture stops (`Owner::stop`): the user selects **Change window**,
 another window is picked, or the flow closes: on **Discard**, **Cancel**, a
-page tab, or the save of what the flow makes. A reference saved from inside a
-value flow leaves the flow, and so its capture, open. Closing AppyTappy Setup
-ends the process.
+page tab, or the save of what the flow makes or of its draft. A reference
+saved from inside a value flow leaves the flow, and so its capture, open.
+Closing AppyTappy Setup ends the process. **Save as draft** copies the
+screenshots to the draft's folder before the flow closes; the copies in
+memory go with the capture all the same.
 
 | What                               | Held by            | How much of the window                                    |
 | ---------------------------------- | ------------------ | --------------------------------------------------------- |
@@ -877,6 +954,13 @@ keeps its value's region of the newest frame.
 | `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out  |
 | `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                |
 | `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out |
+| `drafts\{draft}\shot-{index}.png`    | A screenshot of a value, fix, or reference draft: the whole frame, as the capture held it |
+
+The first four are in `%APPDATA%\AppyTappy\`, and a draft's screenshots in
+`%LOCALAPPDATA%\AppyTappy\`, where the runtime never reads. A draft's
+screenshots are the only files that hold more of a window than a region the
+user drew. A draft of an automation names its click pictures in `draft.json`
+and keeps them in `clicks` with the others.
 
 A number, bar fill, or color value saves no picture of its own. Nothing else
 AppyTappy writes holds pixels: the runtime's log and its [trace](Trace.md)
@@ -885,7 +969,9 @@ name, time, and failure as text, never its arguments or its answer, and the
 [MCP server](Development.md#tools)'s `screen_sample` answers the colors of
 single points of the screen, at most `SCREEN_POINTS_LIMIT` a call. A
 [debug bundle](#debug-page) copies the picture files above into the zip file
-the user saves, and only when the user includes them.
+the user saves, a draft's screenshots among them, and only when the user
+includes them. Each draft's `draft.json` goes in either way, as each
+application's `app.json` does.
 
 A sample of a labeled screenshot or a recorded reading keeps the whole region,
 not only the box around its characters. A
@@ -907,11 +993,20 @@ more pixels as ink sees only those within the margin.
   program ended in the middle of go with the application's next save.
 - A click's picture is written when its target is set up, before its
   automation is saved. Each save of the automations removes the click
-  pictures none of them names, and so does the end of the automation's flow
-  (`forget_unsaved_click_pictures`), which covers a target set up for an
-  automation the user then did not save. While the editor waits under a
-  value or application flow it opened, its draft still names its pictures,
-  so they stay until the automation is saved or left (`holdsAutomation`).
+  pictures that neither a saved automation nor a saved draft names, and so
+  does the end of the automation's flow (`forget_unsaved_click_pictures`),
+  which covers a target set up for an automation the user then neither saved
+  nor kept as a draft. While the editor waits under a value or application
+  flow it opened, the draft it holds still names its pictures, so they stay
+  until the automation is saved, saved as a draft, or left
+  (`holdsAutomation`).
+- A draft's pictures go with the draft. Deleting a draft, or saving the item
+  it was a draft of, removes its folder with its screenshots. The click
+  pictures an automation's draft named are then named by the saved
+  automation, or by nothing: the page removes those that nothing names when
+  the draft is deleted from the Automations page, and at the end of the flow
+  that finished or deleted it. Saving a draft again with fewer screenshots
+  keeps only those.
 - Both remove only files named as the table above names them. Any other file
   in those folders stays, such as one the user put there, and so does a
   picture that a file edited by hand names. Removing an application removes
@@ -921,7 +1016,14 @@ more pixels as ink sees only those within the margin.
   click pictures.
 - Nothing is removed when AppyTappy Setup starts. An application whose file
   cannot be read keeps every picture, and so do the click pictures while the
-  automations file cannot be read, since nothing says which they name.
+  automations file or the drafts folder cannot be read, since nothing says
+  which they name. A draft whose file cannot be read counts the same way:
+  nothing says which click pictures it names, so `DraftStore::pictures`
+  answers an error and no click picture is removed until that draft reads
+  again or the user deletes it, which its row says. It keeps its own
+  screenshots until it is deleted.
+- The uninstaller's **Delete the application data** removes the drafts folder
+  with the saved files and the logs ([Installer](Installer.md)).
 
 ## Debug page
 

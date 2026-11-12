@@ -87,8 +87,8 @@ export function ExportBundle({ trace, onClose }: Props) {
         <span className="what">
           <label htmlFor="bundle-pictures">Include pictures</label>
           <span className="note" id="bundle-pictures-note">
-            The pictures your values, references and click actions keep. They show parts of your applications&apos;
-            windows.
+            The pictures your values, references and click actions keep, and the screenshots your drafts keep. They show
+            parts of your applications&apos; windows, and a draft&apos;s screenshots show whole windows.
           </span>
         </span>
       </div>

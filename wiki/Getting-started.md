@@ -101,6 +101,12 @@ click's target screen, and when AppyTappy Setup closes. A reference you make
 or change while you make a value is part of that value: saving the reference
 keeps the screenshots, and they go when the value is saved or left.
 
+The one exception is a [draft](Drafts.md). When you select **Save as draft**
+on a value, a fix, or a reference, AppyTappy saves its screenshots, each the
+whole window, in the draft, so you can go on drawing on them later. They are
+deleted when you finish the draft or delete it. A draft of an automation
+keeps the pictures its clicks look for in the same way.
+
 A **Bar fill** or **Color** value keeps only its colors, and a **Number**
 value only which reference it reads with. Deleting a value, a reference, or
 an automation, removing a fix, or removing an application deletes its
@@ -111,8 +117,9 @@ your values and keeps nothing it sees. Its
 [log](Troubleshooting.md#appytappys-log) and the
 [runtime trace](Settings.md#runtime-trace) hold text, such as a value's name
 and what it read, and never a picture. A
-[debug bundle](Debug-page.md#debug-bundle) holds copies of the pictures above
-only when you include them, in a file you save yourself.
+[debug bundle](Debug-page.md#debug-bundle) holds copies of the pictures above,
+a draft's screenshots among them, only when you include them, in a file you
+save yourself.
 
 ## Update
 
@@ -144,9 +151,9 @@ Uninstall AppyTappy from the **Apps** section of Windows Settings, like any
 other program. The uninstaller closes the background part and stops it
 from starting at sign-in.
 
-Your applications, values, and automations stay on your PC, so a later
-install finds them. To remove them too, select **Delete the application data**
-in the uninstaller.
+Your applications, values, automations, and [drafts](Drafts.md) stay on your
+PC, so a later install finds them. To remove them too, with the screenshots
+your drafts keep, select **Delete the application data** in the uninstaller.
 
 If the installer or the uninstaller asks you to close AppyTappy Setup and you
 cancel, the background part stays closed until you next sign in.
@@ -156,11 +163,16 @@ cancel, the background part stays closed until you next sign in.
 While you make or change an application, a value, a reference, or an
 automation, selecting a page, even the one it opened from, first asks whether
 to leave without saving when you have changed something, because what you have
-not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
-save is still under way, the pages, **Leave**, **Change window**, and
-**Discard** or **Cancel** wait for it to finish.
+not saved is lost. Select **Stay** to carry on, **Save as draft** to keep it as a
+[draft](Drafts.md) and finish it later, or **Leave** to drop it. While a save is
+still under way, the pages, **Leave**, **Change window**, and **Discard** or
+**Cancel** wait for it to finish. An [edit of a saved value](Values.md#edit-a-value)
+can't be saved as a draft, so its question offers only **Stay** and **Leave**.
 
 When you opened one from another, such as a value from a new automation,
 **Cancel** returns to the one you came from, as you left it. Selecting a page
 leaves all of them, so the question also names the unsaved changes to the
-automation.
+automation. **Save as draft** there keeps each of them as a draft of its own:
+the value on the **Values** page and the automation on the **Automations**
+page. You finish them one at a time, and the automation's draft opens without
+the value you were making for it.

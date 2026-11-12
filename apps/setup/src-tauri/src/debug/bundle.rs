@@ -3,10 +3,11 @@
 //! Nothing is sent anywhere.
 //!
 //! It holds the files as they are on disk, so a file that cannot be read
-//! shows why: the settings, the automations, each application's file, both
-//! logs and their old files, and a note of the setup app's version. On
-//! request it also holds the pictures, which can show the applications'
-//! windows, and the newest trace file.
+//! shows why: the settings, the automations, each application's file, each
+//! draft's file, both logs and their old files, and a note of the setup
+//! app's version. On request it also holds the pictures, which can show the
+//! applications' windows, a draft's whole screenshots among them, and the
+//! newest trace file.
 
 use std::fs::{self, File};
 use std::io::{self, Cursor, Write as _};
@@ -25,7 +26,8 @@ use crate::stores::Stores;
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BundleSpec {
-    /// The pictures the values, references and click actions learned from.
+    /// The pictures the values, references and click actions learned from,
+    /// and the screenshots the drafts keep.
     pub(crate) pictures: bool,
     /// The name of the trace file to add, the one the dialog showed, or
     /// `None` for no trace. Only a trace file in the trace folder is added.
@@ -97,6 +99,16 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         bundle.folder(&format!("apps/{name}"), &app, |file| {
             file == "app.json" || (spec.pictures && is_picture(file))
+        })?;
+    }
+    // A draft's folder holds its file and, for a value, fix, or reference,
+    // its screenshots; the click pictures it names are with the others.
+    for draft in folders(&locations.drafts())? {
+        let name = draft
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        bundle.folder(&format!("drafts/{name}"), &draft, |file| {
+            file == "draft.json" || (spec.pictures && is_picture(file))
         })?;
     }
     for log in LOGS {

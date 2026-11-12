@@ -1,6 +1,7 @@
 // How an application's window match is edited and described.
 
-import type { FallbackDef, WindowChoice, WindowDef, WindowFit, WindowScore } from './bindings.ts';
+import type { FallbackDef, SizeChangesDef, WindowChoice, WindowDef, WindowFit, WindowScore } from './bindings.ts';
+import type { Kept } from './drafts.ts';
 
 /** One of the things an application's window is recognized by. */
 export type MatchField = 'title' | 'class' | 'executable';
@@ -165,4 +166,22 @@ export function fitCount(fits: readonly WindowFit[] | null): string {
 export function sentence(text: string): string {
   const trimmed = text.trim();
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+/** What the application editor sets up, which a draft of an application keeps. */
+export interface AppSetup {
+  readonly name: string;
+  readonly window: WindowDef | null;
+  readonly sizeChanges: SizeChangesDef;
+}
+
+/** What a draft of an application keeps: the editor's setup. */
+export type AppKept = Kept<'application', AppSetup>;
+
+/** What `setup` still needs before it can be saved, a sentence each. */
+export function unfinishedApp(setup: AppSetup): readonly string[] {
+  return [
+    setup.window === null ? "Pick the application's window." : null,
+    setup.name.trim() === '' ? 'Name the application.' : null,
+  ].filter((part) => part !== null);
 }
