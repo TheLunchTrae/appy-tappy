@@ -232,26 +232,38 @@ impl DraftStore {
     }
 
     /// Puts back an old draft that a stopped save moved aside without putting
-    /// the new one in its place, and removes what stopped saves left. A
-    /// folder that cannot be moved or removed now is tried again next time.
+    /// the new one in its place, and removes what stopped saves left. A save
+    /// stopped there when its own `.saving` folder is still beside the old
+    /// one; an old one without it was replaced, so it goes. A folder that
+    /// cannot be moved or removed now is tried again next time.
     fn tidy(&self) {
         let Ok(entries) = self.entries() else {
             return;
         };
         for (name, path) in &entries {
-            if name.ends_with(OLD) {
-                let id = name.split_once('.').map_or(name.as_str(), |(id, _)| id);
-                let folder = self.folder.join(id);
-                if is_draft_id(id) && !folder.exists() {
-                    drop(fs::rename(path, folder));
-                } else {
-                    drop(fs::remove_dir_all(path));
-                }
-            }
+            let Some(save) = name.strip_suffix(OLD) else {
+                continue;
+            };
+            let id = save.split_once('.').map_or(save, |(id, _)| id);
+            let folder = self.folder.join(id);
+            let stopped = self.folder.join(format!("{save}{SAVING}")).exists();
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "tidying is tried again at the next list"
+            )]
+            let _ = if stopped && is_draft_id(id) && !folder.exists() {
+                fs::rename(path, folder)
+            } else {
+                fs::remove_dir_all(path)
+            };
         }
         for (name, path) in &entries {
             if name.ends_with(SAVING) {
-                drop(fs::remove_dir_all(path));
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "tidying is tried again at the next list"
+                )]
+                let _ = fs::remove_dir_all(path);
             }
         }
     }
@@ -294,9 +306,17 @@ impl DraftStore {
     /// Returns the error from removing its folder.
     pub(crate) fn delete(&self, id: &str) -> io::Result<()> {
         match fs::remove_dir_all(self.draft_folder(id)?) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            removed => removed,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+            removed => removed?,
         }
+        // A copy a save moved aside goes too, so tidying never brings it back.
+        let prefix = format!("{id}.");
+        for (name, path) in self.entries()? {
+            if name.starts_with(&prefix) && name.ends_with(OLD) {
+                fs::remove_dir_all(path)?;
+            }
+        }
+        Ok(())
     }
 
     /// The click pictures the drafts name, which saving the automations
@@ -487,17 +507,41 @@ mod tests {
         // new one took its place, gets the old one back at the next list.
         let folder = store.draft_folder(&id).expect("an ID");
         let aside = store.folder.join(format!("{id}.2{OLD}"));
+        let stopped = store.folder.join(format!("{id}.2{SAVING}"));
         fs::rename(&folder, &aside).expect("moves aside");
+        fs::create_dir_all(&stopped).expect("folder");
         let listed = store.list().expect("lists");
         assert_eq!(listed.len(), 1);
         assert_eq!(store.screenshots(&id).expect("reads"), [vec![1]]);
         assert!(!aside.exists());
+        assert!(!stopped.exists());
 
         // One left behind once the new draft is in place goes.
         fs::create_dir_all(&aside).expect("folder");
         store.save(Some(&id), &saved, &[vec![3]]).expect("saves");
         assert!(!aside.exists());
         assert_eq!(store.screenshots(&id).expect("reads"), [vec![3]]);
+
+        // One left behind by a save that finished never brings back a draft
+        // deleted later, and deleting removes it anyway.
+        fs::create_dir_all(&aside).expect("folder");
+        fs::rename(&folder, store.folder.join("Kept aside")).expect("moves");
+        assert_eq!(
+            store.list().expect("lists"),
+            [],
+            "without its save, it is not put back"
+        );
+        assert!(!aside.exists());
+        fs::rename(store.folder.join("Kept aside"), &folder).expect("moves back");
+        fs::create_dir_all(&aside).expect("folder");
+        fs::create_dir_all(&stopped).expect("folder");
+        let other = store.folder.join(format!("other.9{OLD}"));
+        fs::create_dir_all(&other).expect("folder");
+        store.delete(&id).expect("deletes");
+        assert!(!aside.exists(), "deleting takes it");
+        assert!(other.exists(), "and leaves another draft's");
+        assert_eq!(store.list().expect("lists"), []);
+        store.save(Some(&id), &saved, &[vec![3]]).expect("saves");
 
         // A stray file with a save's ending, which cannot be removed as a
         // folder, never stops a save.

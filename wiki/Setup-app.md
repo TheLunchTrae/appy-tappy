@@ -389,8 +389,10 @@ from one, which live with the recording.
 A save writes the draft into a folder of its own, ending in `.saving`, with
 each file flushed to the disk. It then moves the old draft aside, to a folder
 ending in `.old`, and moves the new one into place. Listing the drafts tidies
-up after a save that stopped: it puts an old draft back when the new one never
-took its place, and removes the rest. A draft of changes to an
+up after a save that stopped: it puts an old draft back when that save's own
+`.saving` folder shows the new one never took its place, and removes the rest.
+Deleting a draft also removes any old copy of it, so tidying never brings a
+deleted draft back. A draft of changes to an
 automation, application, or reference replaces any other draft of the same
 saved item. A value can have a fix draft for each window size, so fix drafts
 never replace each other. Finishing a draft opens its flow; a value, fix,
