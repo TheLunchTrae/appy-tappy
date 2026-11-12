@@ -9,13 +9,13 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-appytappy-config = { version = "=0.1.0", path = "../config" }
+appytappy-config.workspace = true
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
-mutants = "0.0.4"
+mutants.workspace = true
 # Reads and writes the PNG files that hold a screen binding's reference image;
 # a hand-written decoder would need its own inflate implementation.
-png = "=0.18.1"
+png = "0.18.1"
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
 # in `win.rs` and `win/capture.rs` calls. Capture uses them directly rather
@@ -25,7 +25,7 @@ png = "=0.18.1"
 # `Win32_Graphics_Dwm` reads the size a capture frames a window at before
 # the capture starts.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "=0.62.2", features = [
+windows = { workspace = true, features = [
   "Foundation",
   "Wdk_System_SystemInformation",
   "Graphics",
@@ -52,7 +52,7 @@ windows = { version = "=0.62.2", features = [
 
 [dev-dependencies]
 # Generates images for the reference-image round trip, a trust boundary.
-proptest = "=1.12.0"
+proptest.workspace = true
 
 # Times each check and capture-to-decision latency with a small harness of
 # its own, which reports percentiles. `criterion` 0.8 depends on `alloca`,
