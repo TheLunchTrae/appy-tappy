@@ -213,11 +213,11 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
         })
     }
 
-    #[mutants::skip] // Sets a named Windows event, which no test can observe.
     fn now(&self) -> Instant {
         Instant::now()
     }
 
+    #[mutants::skip] // Sets a named Windows event, which no test can observe.
     fn reload_runtime(&self) {
         #[expect(
             clippy::let_underscore_must_use,
