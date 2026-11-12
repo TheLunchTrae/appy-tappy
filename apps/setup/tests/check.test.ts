@@ -6,6 +6,7 @@ import {
   buildSpec,
   DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
+  findBlocked,
   fixDraft,
   fromReference,
   newestOfSize,
@@ -377,6 +378,22 @@ test("recording waits for a drawn region and the characters' color", () => {
   expect(recordBlocked({ ...ready, region: null })).toBe('Draw the region on a screenshot to record it.');
   expect(recordBlocked({ ...ready, drawnOn: null })).toBe('Draw the region on a screenshot to record it.');
   expect(recordBlocked({ ...ready, ink: null })).toBe("Pick the characters' color to record.");
+});
+
+test('finding more like it waits for a drawn region, the color, and a screenshot of the size it was drawn at', () => {
+  const ready = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red };
+  const size = { width: 800, height: 600 };
+  const drawFirst = 'Draw the region around one sample on a screenshot first.';
+  expect(findBlocked(ready, size, size)).toBeNull();
+  expect(findBlocked({ ...ready, region: null }, size, size)).toBe(drawFirst);
+  // A saved value's region starts with no screenshot drawn on, so its pixels may be another size's.
+  expect(findBlocked({ ...ready, drawnOn: null }, size, size)).toBe(drawFirst);
+  expect(findBlocked(ready, null, size)).toBe(drawFirst);
+  expect(findBlocked({ ...ready, ink: null }, size, size)).toBe("Pick the characters' color first.");
+  const other = 'Show a screenshot at 800 × 600, the size the region was drawn at, to search it.';
+  expect(findBlocked(ready, size, { width: 800, height: 601 })).toBe(other);
+  expect(findBlocked(ready, size, { width: 801, height: 600 })).toBe(other);
+  expect(findBlocked(ready, size, null)).toBe(other);
 });
 
 describe('fixDraft', () => {

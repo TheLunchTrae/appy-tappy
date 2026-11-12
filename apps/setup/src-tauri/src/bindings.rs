@@ -61,6 +61,7 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, Label, RegionSpec};
+use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
@@ -70,6 +71,7 @@ use crate::owner::{
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
+use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::updates::UpdateOffer;

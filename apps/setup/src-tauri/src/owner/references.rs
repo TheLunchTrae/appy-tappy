@@ -18,7 +18,7 @@ impl<H: Host> Owner<H> {
         let references = |reference: &ReferenceRef| self.saved_reference(reference);
         work(Session {
             screenshots: &self.screenshots,
-            recording: self.recording.as_ref(),
+            recording: self.readings(),
             references: &references,
         })
     }

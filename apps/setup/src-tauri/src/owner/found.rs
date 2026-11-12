@@ -364,11 +364,26 @@ mod tests {
         harness.ask(Owner::forget_found);
         assert_eq!(harness.ask(|owner| owner.found_state()), None);
         harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
-        let _next = harness.pick();
+        let next = harness.pick();
         assert_eq!(
             harness.ask(|owner| owner.found_state()),
             None,
             "another window drops it"
+        );
+        let mut handler = next;
+        harness.deliver(&mut handler, Ok(&marks()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let found = harness.ask(find_like(region(0, 0, 4, 5))).expect("found");
+        harness.ask(Owner::stop);
+        assert_eq!(
+            harness.ask(|owner| owner.found_state()),
+            None,
+            "stopping the capture, as Change window does, drops it"
+        );
+        assert_eq!(
+            harness.ask(move |owner: &mut Owner<FakeHost>| owner.found_pixels(found.id, 0, 20)),
+            None,
+            "and the finds' pixels with it"
         );
     }
 

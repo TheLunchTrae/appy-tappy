@@ -16,6 +16,7 @@ import type { FoundLabel } from './found.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
+import { sameSize, sizeText } from './sizes.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
 
 /** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
@@ -159,6 +160,23 @@ export function recordBlocked(draft: Draft): string | null {
   }
   if (draft.ink === null) {
     return "Pick the characters' color to record.";
+  }
+  return null;
+}
+
+/**
+ * Why Find more like it cannot search the screenshot of size `shown` yet, or null when it can. The region's pixels
+ * are those of the screenshot it was drawn on, of size `drawn`, so the search needs a screenshot of that size.
+ */
+export function findBlocked(draft: Draft, drawn: Size | null, shown: Size | null): string | null {
+  if (draft.region === null || draft.drawnOn === null || drawn === null) {
+    return 'Draw the region around one sample on a screenshot first.';
+  }
+  if (draft.ink === null) {
+    return "Pick the characters' color first.";
+  }
+  if (shown === null || !sameSize(shown, drawn)) {
+    return `Show a screenshot at ${sizeText(drawn)}, the size the region was drawn at, to search it.`;
   }
   return null;
 }
