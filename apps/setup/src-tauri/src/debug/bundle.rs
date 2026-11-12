@@ -267,6 +267,8 @@ mod tests {
             .file_if_there("a", &missing)
             .expect("missing is fine");
         assert!(bundle.file_if_there("b", &scratch).is_err());
+        // A path under a file cannot be opened, and is not simply missing.
+        assert!(bundle.file_if_there("e", &file.join("inside")).is_err());
         bundle
             .folder("c", &missing, |_name| true)
             .expect("missing is fine");

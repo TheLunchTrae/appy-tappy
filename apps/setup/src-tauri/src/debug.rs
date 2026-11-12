@@ -95,6 +95,12 @@ mod tests {
         assert_eq!(log_tail(&path).expect("missing"), "");
         fs::write(&path, "first\nsecond\n").expect("write");
         assert_eq!(log_tail(&path).expect("short"), "first\nsecond\n");
+        // Two lines that fit the tail together are both kept.
+        let two = format!("{}\n{}\n", "a".repeat(30 * 1024), "b".repeat(30 * 1024));
+        fs::write(&path, &two).expect("write");
+        assert_eq!(log_tail(&path).expect("both"), two);
+        // A path under a file cannot be opened, and is not simply missing.
+        assert!(log_tail(&path.join("inside")).is_err());
         let long = format!("{}\nlast\n", "x".repeat(70 * 1024));
         fs::write(&path, long).expect("write");
         assert_eq!(log_tail(&path).expect("long"), "last\n");
