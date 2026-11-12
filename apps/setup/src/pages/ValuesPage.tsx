@@ -29,7 +29,7 @@ import {
   sizeText,
 } from '../lib/sizes.ts';
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
-import type { Fixing } from './NewValue.tsx';
+import type { Changing } from '../lib/flow.ts';
 import { type Resumed, draftProblem, draftsOf } from '../lib/drafts.ts';
 import { KIND_NAMES } from '../lib/check.ts';
 import { CaptureDraftRow } from '../components/Drafts.tsx';
@@ -94,6 +94,7 @@ interface AppRowsProps {
   readonly onDelete: (value: string) => void;
   readonly onMarkChecked: () => void;
   readonly onFix: (value: ValueDef) => void;
+  readonly onEdit: (value: ValueDef) => void;
   readonly onRemoveFix: (value: string, size: SizeDef) => void;
   /** Its value and fix drafts. */
   readonly drafts: readonly Resumed[];
@@ -182,6 +183,7 @@ function AppRows({
   onDelete,
   onMarkChecked,
   onFix,
+  onEdit,
   onRemoveFix,
   drafts,
   rows,
@@ -300,15 +302,26 @@ function AppRows({
                   </button>
                 </span>
               ) : (
-                <button
-                  type="button"
-                  className="btn small"
-                  onClick={() => {
-                    onConfirm(key);
-                  }}
-                >
-                  Delete
-                </button>
+                <span className="confirm">
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => {
+                      onEdit(value);
+                    }}
+                  >
+                    Edit<span className="visually-hidden"> {value.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => {
+                      onConfirm(key);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </span>
               )}
             </td>
           </tr>
@@ -325,8 +338,8 @@ interface Props {
   readonly loadError: string | null;
   readonly onChanged: () => Promise<void>;
   readonly onNew: () => void;
-  /** Opens the flow that draws a saved value again at its window's size now. */
-  readonly onFix: (fixing: Fixing) => void;
+  /** Opens the flow that fixes a saved value at its window's size now, or edits it. */
+  readonly onChange: (changing: Changing) => void;
   /** Every saved draft, or null before they are read. */
   readonly drafts: readonly DraftSummary[] | null;
   readonly onFinish: (resumed: Resumed) => void;
@@ -351,7 +364,7 @@ export function ValuesPage({
   loadError,
   onChanged,
   onNew,
-  onFix,
+  onChange,
   drafts,
   onFinish,
   onDeleteDraft,
@@ -485,7 +498,10 @@ export function ValuesPage({
                   background(markAsChecked(app.id));
                 }}
                 onFix={(value) => {
-                  onFix({ app: app.id, value });
+                  onChange({ app: app.id, value, how: 'fix' });
+                }}
+                onEdit={(value) => {
+                  onChange({ app: app.id, value, how: 'edit' });
                 }}
                 onRemoveFix={(value, size) => {
                   background(unfix(app.id, value, size));

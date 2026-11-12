@@ -164,7 +164,8 @@ select {
   cursor: pointer;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.45;
   cursor: default;
 }
@@ -466,9 +467,34 @@ select {
   font-weight: 600;
 }
 
+/* A flow that knows its application has only that application's window to find. */
+.picker.alone {
+  grid-template-columns: minmax(0, 480px);
+}
+
+/* The windows that fit an application equally well, listed in the side panel only as tall as they are. */
+.side .window-list {
+  flex: none;
+}
+
+.side > .btn {
+  align-self: flex-start;
+}
+
+.window-list button:disabled {
+  cursor: default;
+}
+
+/* Adding an application is a choice among the saved applications, marked as the one that makes something. */
+.window-list button.add .title::before {
+  content: '+ ';
+  color: var(--capture);
+}
+
 .actions {
   margin-top: auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
 }
@@ -512,6 +538,15 @@ select {
   color: var(--text);
 }
 
+/* The view, and the row under it with the hint and the zoom. */
+.viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .view {
   position: relative;
   flex: 1;
@@ -520,16 +555,41 @@ select {
   overflow: hidden;
   background: #111317;
   border: 1px solid var(--line);
+  /* A drag on the picture selects no text, which a later press could drag in place of the region. */
+  user-select: none;
+}
+
+/* A zoomed picture pans by scrolling. */
+.scroller {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+/* The picture and the room around it: as large as the view at least, and as large as the zoomed picture needs. */
+.pad {
+  display: grid;
+  place-items: center;
+  width: max-content;
+  height: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  /* Cuts off the surface's reach, so it leaves nothing to scroll to. */
+  overflow: clip;
 }
 
 .frame {
-  position: absolute;
+  position: relative;
 }
 
 .frame canvas {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.frame.crisp canvas {
+  image-rendering: pixelated;
 }
 
 .surface {
@@ -539,47 +599,110 @@ select {
   touch-action: none;
 }
 
+/* A surface that takes drags reaches over the room around the picture, so a drag can start there. */
+.surface.reach::before {
+  content: '';
+  position: absolute;
+  inset: -100vmax;
+}
+
 .surface.picking {
   cursor: copy;
 }
 
-.marquee {
+/* The picture around the region, dimmed a little. Its shape leaves the region out. */
+.dim {
   position: absolute;
-  border: 2px solid var(--capture);
-  box-shadow: 0 0 0 9999px rgb(0 0 0 / 38%);
+  inset: 0;
+  background: rgb(0 0 0 / 30%);
   pointer-events: none;
 }
 
-.marquee .corner {
+/*
+ * The region's outline lies outside its box: a light line with a dark one around it, so it shows on any picture and
+ * covers nothing the region holds.
+ */
+.marquee {
+  --outline: var(--capture);
+
   position: absolute;
-  width: 10px;
-  height: 10px;
-  background: var(--capture);
+  box-shadow:
+    0 0 0 1px var(--outline),
+    0 0 0 2px rgb(0 0 0 / 85%);
+  pointer-events: none;
+}
+
+/* The inside of a region that can be moved. */
+.marquee .grip {
+  position: absolute;
+  inset: 0;
+  cursor: move;
   pointer-events: auto;
 }
 
+/*
+ * A corner takes presses over more than the square it draws. It reaches 12 pixels out from the box and up to 4 into
+ * it, less into a small box, so that the box keeps 8 pixels each way, or all of a smaller side, to be moved by.
+ */
+.marquee .corner {
+  position: absolute;
+  width: calc(12px + clamp(0px, (100% - 8px) / 2, 4px));
+  height: calc(12px + clamp(0px, (100% - 8px) / 2, 4px));
+  pointer-events: auto;
+}
+
+/* The square a corner draws lies outside the box, with its inner tip on the box's. */
+.marquee .corner::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--outline);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 85%);
+}
+
 .marquee .nw {
-  left: -6px;
-  top: -6px;
+  left: -12px;
+  top: -12px;
   cursor: nwse-resize;
+}
+
+.marquee .nw::after {
+  left: 6px;
+  top: 6px;
 }
 
 .marquee .ne {
-  right: -6px;
-  top: -6px;
+  right: -12px;
+  top: -12px;
   cursor: nesw-resize;
+}
+
+.marquee .ne::after {
+  right: 6px;
+  top: 6px;
 }
 
 .marquee .sw {
-  left: -6px;
-  bottom: -6px;
+  left: -12px;
+  bottom: -12px;
   cursor: nesw-resize;
 }
 
+.marquee .sw::after {
+  left: 6px;
+  bottom: 6px;
+}
+
 .marquee .se {
-  right: -6px;
-  bottom: -6px;
+  right: -12px;
+  bottom: -12px;
   cursor: nwse-resize;
+}
+
+.marquee .se::after {
+  right: 6px;
+  bottom: 6px;
 }
 
 .shade-box {
@@ -594,6 +717,65 @@ select {
   image-rendering: pixelated;
 }
 
+/* The matching pixels preview: its tint lies on the screenshot's own pixels, under the region. */
+.match-box {
+  position: absolute;
+  pointer-events: none;
+}
+
+.match-box canvas {
+  image-rendering: pixelated;
+}
+
+.match-found,
+div.match-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* What shows is for earlier settings until the answer for these arrives. */
+.match-found.updating .match-answer {
+  opacity: 0.55;
+}
+
+.match-status {
+  min-height: 1lh;
+}
+
+.match-key {
+  background: currentcolor;
+}
+
+.match-key.striped {
+  background: repeating-linear-gradient(135deg, currentcolor 0 2px, transparent 2px 4px);
+}
+
+.match-key.clear {
+  background: none;
+}
+
+.match-legend {
+  list-style: none;
+  padding: 0;
+  font-size: 12px;
+}
+
+.match-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 10px;
+  font-size: 12px;
+}
+
+.match-facts dt {
+  color: var(--muted);
+}
+
+.match-facts dd {
+  text-align: right;
+}
+
 .rough {
   position: absolute;
   border: 1.5px dashed rgb(255 255 255 / 75%);
@@ -605,29 +787,72 @@ select {
   cursor: cell;
 }
 
+/* The region's label, which takes 26 pixels beside the box: TAG_ROOM in RegionSurface.tsx. */
 .marquee .tag {
   position: absolute;
-  top: 100%;
-  left: -2px;
   white-space: nowrap;
-  background: var(--capture);
+  background: var(--outline);
   color: var(--on-capture);
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 0 0 4px 4px;
+  line-height: 16px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.marquee .tag.above {
+  bottom: calc(100% + 8px);
+}
+
+.marquee .tag.below {
+  top: calc(100% + 8px);
+}
+
+.marquee .tag.inside {
+  top: 4px;
+}
+
+.marquee .tag.left {
+  left: -2px;
+}
+
+.marquee .tag.right {
+  right: -2px;
+}
+
+.marquee .tag.inside.left {
+  left: 4px;
+}
+
+.marquee .tag.inside.right {
+  right: 4px;
+}
+
+.view-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .hint {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  background: rgb(20 22 28 / 85%);
-  padding: 6px 10px;
-  border-radius: 6px;
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   color: var(--muted);
-  pointer-events: none;
+}
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zoom-level {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 .strip {
@@ -667,6 +892,28 @@ select {
   display: block;
   max-width: 100%;
   max-height: 100%;
+}
+
+/* The strip scrolls once a recording fills it, so its note keeps a width it can be read at. */
+.strip .note {
+  min-width: 240px;
+}
+
+.strip .btn {
+  flex: none;
+}
+
+/* A screenshot's number and time, after a dot when a recording kept it. */
+.thumb .when {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.thumb .when .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--live);
 }
 
 .thumb[aria-pressed='true'] .shot {
@@ -721,6 +968,21 @@ select {
   align-items: center;
 }
 
+.btn.detect,
+.btn.swap {
+  align-self: flex-start;
+}
+
+.bar-readings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-variant-numeric: tabular-nums;
+}
+
 .range input {
   flex: 1;
   accent-color: var(--capture);
@@ -741,6 +1003,8 @@ select {
   background: var(--base);
   border: 1px solid var(--line);
   min-height: 66px;
+  /* A reason it cannot be read runs to several lines, which the panel scrolls to rather than squeezing. */
+  flex: none;
 }
 
 .reading strong {
@@ -900,6 +1164,29 @@ select {
 
 .value-select {
   border-color: var(--capture);
+}
+
+/* What the condition watches: the application, and the flows that add an application or make a value for it. */
+.watch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-row .input {
+  flex: 0 1 280px;
+  min-width: 0;
+}
+
+/* The next step toward a value to watch, said where the step is taken. */
+.guide {
+  max-width: 68ch;
+}
+
+/* The guide stays in the page while it has nothing to say, without the card's gap around it. */
+.guide:empty {
+  margin-bottom: -10px;
 }
 
 .live-reading {
@@ -1308,11 +1595,10 @@ select {
 }
 
 .marquee.recording {
-  border-color: var(--live);
+  --outline: var(--live);
 }
 
 .marquee.recording .tag {
-  background: var(--live);
   color: #fff;
 }
 
@@ -1501,8 +1787,210 @@ select {
   border-color: var(--warn);
 }
 
+/* What a reading adds to the kept ones: each new character with how often it showed. */
+.tile .adds ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tile .adds li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The characters a recording found so far, in rows of a name and its characters. */
+.discovered {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.discovered > div {
+  display: grid;
+  grid-template-columns: 9.5em 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.discovered dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.discovered dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+/* What only readings that are left out could teach, with the readings to keep for it. */
+.untaught {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  max-width: 70ch;
+}
+
+.untaught p {
+  color: var(--warn);
+}
+
+.untaught .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. */
+.glyphs.unchecked .glyph {
+  border: 1px dashed var(--muted);
+  background: none;
+}
+
+/* Text found like the first sample, to check before it teaches the reference. */
+.autofill {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--base);
+  border: 1px solid color-mix(in srgb, var(--capture) 45%, var(--line));
+}
+
+.autofill h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.autofill h3:focus {
+  outline: none;
+}
+
+.autofill p {
+  margin: 0;
+}
+
+.autofill ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.autofill li {
+  display: grid;
+  grid-template-columns: 18px 20px 92px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.autofill .n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px dashed var(--capture);
+  color: var(--capture);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.autofill .n.flagged {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.autofill .crop {
+  height: 34px;
+}
+
+/* Scaled down whole, since the row's height is not one a canvas can fill. */
+.autofill .crop canvas {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 34px;
+}
+
+.autofill li.off .crop,
+.autofill li.off .input {
+  opacity: 0.45;
+}
+
+.autofill .input.bad {
+  border-color: var(--warn);
+}
+
+.autofill .flag {
+  grid-column: 3 / 5;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.autofill .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Numbered outlines over the found text on the screenshot. */
+.found-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.found-marks .mark {
+  position: absolute;
+  border: 2px dashed var(--capture);
+  border-radius: 3px;
+}
+
+.found-marks .mark.flagged {
+  border-color: var(--warn);
+}
+
+.found-marks .mark.off {
+  opacity: 0.4;
+}
+
+.found-marks .mark span {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  padding: 3px 6px;
+  border-radius: 3px 3px 3px 0;
+  background: var(--capture);
+  color: var(--on-capture);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.found-marks .mark.flagged span {
+  background: var(--warn);
+}
+
 /* A hidden view or strip stays out of the layout, whatever its display. */
-.view[hidden],
+.viewer[hidden],
 .strip[hidden] {
   display: none;
 }
@@ -1573,6 +2061,11 @@ select {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--base);
+}
+
+/* A state that keeps its saved picture, which the editor has no screenshot of */
+.state.saved {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .state[aria-current='true'] {
@@ -1671,10 +2164,60 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+.glyph.pending {
+  outline: 2px dashed var(--capture);
+  outline-offset: -2px;
+}
+
 .glyphs.large .glyph {
   min-width: 36px;
   height: 40px;
   font-size: 22px;
+}
+
+/* Characters a reference has yet to learn: outlined, since it has no shape to show for them. */
+.glyphs.missing .glyph {
+  border: 1px dashed var(--warn);
+  background: none;
+  color: var(--warn);
+}
+
+.missing-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* The characters a reference needs: presets to turn on, in rows that wrap. */
+.needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.need {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.need:has(input:checked) {
+  background: var(--raise);
+}
+
+.need input {
+  accent-color: var(--capture);
+}
+
+.need small {
+  color: var(--muted);
 }
 
 .choices {
@@ -1860,6 +2403,59 @@ select {
   background: var(--capture);
 }
 
+/* What a region keeps its distance from as the window changes size, over the screenshot. */
+.pin-guides {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pin-guides line {
+  stroke: var(--capture);
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 80%));
+}
+
+.pin-guides .guide {
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.pin-guides .mark {
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.pin-guides .mark.middle {
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+  stroke-linecap: butt;
+}
+
+/* A region drawn as a reading area: larger than what it reads, which may be anywhere inside. */
+.marquee.area {
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 85%);
+  outline: 1px dashed var(--outline);
+  background: rgb(242 179 61 / 10%);
+}
+
+.name > .toggle {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* The notice under a side chosen by hand stays in the page while it has nothing to say, and takes no room then. */
+.pin-notice:not(:empty) {
+  margin-top: 5px;
+}
+
+/* What This content may move comes to, as paragraphs spaced like the field's own parts. */
+.moving-says {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 /* A value's reading at the window's size now, or why it has none. */
 .now {
   display: flex;
@@ -1983,6 +2579,11 @@ select {
 .click-app {
   grid-column: span 2;
   min-width: 0;
+}
+
+.click-tries {
+  display: flex;
+  gap: 8px;
 }
 
 .click-options {

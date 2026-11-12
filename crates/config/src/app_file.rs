@@ -31,8 +31,8 @@ const MAX_IMAGE_NAME_LEN: usize = 64;
 
 /// The longest ID [`value_id`] makes, in bytes. It leaves room for the
 /// pictures named after the value, such as `{id}-16.png` for a state
-/// check's sixteenth state and `{id}-9-16.png` for it in a fix, within
-/// [`MAX_IMAGE_NAME_LEN`].
+/// check's sixteenth state and `{id}-10-16.png` for it in a fix or in a
+/// drawing whose states were taken again, within [`MAX_IMAGE_NAME_LEN`].
 const MAX_VALUE_ID_LEN: usize = 48;
 
 /// The longest ID [`reference_id`] makes, in bytes. It leaves room for the
@@ -382,6 +382,18 @@ pub struct ReferenceDef {
     pub tolerance: u8,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
+    /// The characters the user says it needs to know, such as
+    /// `0123456789.%`, or `None` when the user chose none.
+    ///
+    /// Setup guidance only. The setup app shows which of them the samples
+    /// have yet to teach, and writes them each once, in order, when it saves
+    /// the reference. Nothing that learns or reads looks at it, and no rule
+    /// of the file covers it: it adds no glyph, labels no shape, leaves how
+    /// a number is read as it is, and never stops a file from loading,
+    /// whatever text it holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub expects: Option<String>,
 }
 
 /// A value read from a region of the window's frame.
@@ -407,6 +419,18 @@ pub struct ScreenDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub pin: Option<PinDef>,
+    /// Whether the user drew the region as a reading area: larger than what
+    /// it reads, to cover every place content that moves inside the window
+    /// can show. Left out of the file when it is not.
+    ///
+    /// Setup guidance only. The setup app shows the region as a reading
+    /// area when the value is listed or drawn again. Nothing that places
+    /// or reads the region looks at it, so the value reads the same with
+    /// and without it. Only a check that
+    /// [reads anywhere in its region](CheckDef::reads_anywhere) may have
+    /// one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reading_area: bool,
     /// The value drawn again at other window sizes, each read exactly at its
     /// own size. Always written, even when empty, since the setup app reads
     /// the file's JSON as is.
@@ -694,6 +718,19 @@ impl CheckDef {
         }
     }
 
+    /// Whether the check reads its content wherever it is in the region, so
+    /// that the region may be a reading area: a number check finds its
+    /// characters anywhere in it, and a bar fill check counts its colors
+    /// anywhere in it. A color check averages the whole region and a state
+    /// check compares it pixel by pixel, so their content has to stay put.
+    #[must_use]
+    pub const fn reads_anywhere(&self) -> bool {
+        match self {
+            Self::Number { .. } | Self::BarFill { .. } => true,
+            Self::Color { .. } | Self::State { .. } => false,
+        }
+    }
+
     /// The states this check tells apart; none for a check of another kind.
     #[must_use]
     pub fn states(&self) -> &[StateDef] {
@@ -853,10 +890,12 @@ impl AppFile {
     /// Checks the rules JSON alone cannot: the format version, a name for
     /// the application and each value and reference, a window match that
     /// passes [`WindowDef::check`], valid and unique IDs, picture file names,
-    /// at least one sample for a reference, and checks that pass
-    /// [`CheckDef::check`]. Whether a value's pictures and region can be
+    /// at least one sample for a reference, checks that pass
+    /// [`CheckDef::check`], and a reading area only for a check that reads
+    /// anywhere in its region. Whether a value's pictures and region can be
     /// read is up to `appytappy-sources`' `saved::build`, so a value that
-    /// cannot be read stops only itself.
+    /// cannot be read stops only itself. A reference's expected characters
+    /// are setup guidance, which no rule covers.
     ///
     /// # Errors
     ///
@@ -908,12 +947,32 @@ fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
         .try_for_each(|sample| check_image(&sample.image))
 }
 
+/// Whether a label teaches `character`: every character but whitespace,
+/// which a label may hold anywhere and a reference skips.
+///
+/// A reference learns one shape for each such character of a sample's text,
+/// exactly as typed: `A` and `a` are two characters, and nothing folds case
+/// or combines marks. The setup app counts a reference's expected characters
+/// the same way.
+#[must_use]
+pub fn is_label_character(character: char) -> bool {
+    !character.is_whitespace()
+}
+
 /// Checks one value's part of the file's rules, answering the problem as a
-/// sentence: a name, a check that passes [`CheckDef::check`], and picture
+/// sentence: a name, a check that passes [`CheckDef::check`], a reading
+/// area only for a check that
+/// [reads anywhere in its region](CheckDef::reads_anywhere), and picture
 /// names the folder can hold.
 fn check_value(value: &ValueDef) -> Result<(), String> {
     if value.name.trim().is_empty() {
         return Err("it has no name".to_owned());
+    }
+    if value.screen.reading_area && !value.screen.check.reads_anywhere() {
+        return Err(
+            "its region is a reading area, which only a number or bar fill check can read"
+                .to_owned(),
+        );
     }
     value
         .screen
@@ -1000,6 +1059,14 @@ pub fn value_id(name: &str) -> String {
     id_from_name(name, "value", MAX_VALUE_ID_LEN)
 }
 
+/// The ID for a new value named `name` that no ID in `taken` uses yet:
+/// [`value_id`] of the name, or that with `_2`, `_3` and so on when a renamed
+/// value still has it.
+#[must_use]
+pub fn new_value_id(name: &str, taken: &[&str]) -> String {
+    free_id(value_id(name), MAX_VALUE_ID_LEN, taken)
+}
+
 /// A reference ID made from a name the user typed, such as `percent_font`
 /// from `Percent font`, the way [`value_id`] makes one, with a `reference`
 /// prefix where it needs one.
@@ -1013,19 +1080,22 @@ pub fn reference_id(name: &str) -> String {
 /// renamed reference still has it.
 #[must_use]
 pub fn new_reference_id(name: &str, taken: &[&str]) -> String {
-    let id = reference_id(name);
+    free_id(reference_id(name), MAX_REFERENCE_ID_LEN, taken)
+}
+
+/// `id`, or `id` with `_2`, `_3` and so on, cut to fit `max_len` bytes,
+/// whichever comes first that no ID in `taken` uses.
+fn free_id(id: String, max_len: usize, taken: &[&str]) -> String {
     if !taken.contains(&id.as_str()) {
         return id;
     }
     let mut base = id;
-    base.truncate(MAX_REFERENCE_ID_LEN.saturating_sub(4));
+    base.truncate(max_len.saturating_sub(4));
     let base = base.trim_end_matches('_');
     // `taken` is finite, so one of its length plus one numbers is free.
     (2_usize..=taken.len().saturating_add(2))
         .map(|number| format!("{base}_{number}"))
-        .find(|candidate| {
-            candidate.len() <= MAX_REFERENCE_ID_LEN && !taken.contains(&candidate.as_str())
-        })
+        .find(|candidate| candidate.len() <= max_len && !taken.contains(&candidate.as_str()))
         .unwrap_or_else(|| base.to_owned())
 }
 
@@ -1040,16 +1110,44 @@ pub fn sample_name(reference: &str, number: usize) -> String {
 /// The file name of the picture of a value's `state`th state, counted from
 /// 1.
 ///
-/// It is `{value}-{state}.png` for its drawing, such as `status-2.png`, and
-/// `{value}-{fix}-{state}.png` for its picture in a fix numbered `fix`, such
-/// as `status-1-2.png`. A value's ID has no hyphen, so neither name is
-/// another value's. No reference's sample can have either: a sample's name
-/// has the reference's ID after `ref-`, which starts with a letter.
+/// It is `{value}-{state}.png` for a new value's drawing, such as
+/// `status-2.png`, and `{value}-{set}-{state}.png` for its picture in the
+/// set numbered `set`, such as `status-1-2.png`: a fix's pictures, or the
+/// drawing's once an edit took its states again. A value's ID has no hyphen,
+/// so neither name is another value's. No reference's sample can have
+/// either: a sample's name has the reference's ID after `ref-`, which starts
+/// with a letter.
 #[must_use]
-pub fn state_image_name(value: &str, fix: Option<usize>, state: usize) -> String {
-    match fix {
-        Some(fix) => format!("{value}-{fix}-{state}.png"),
+pub fn state_image_name(value: &str, set: Option<usize>, state: usize) -> String {
+    match set {
+        Some(set) => format!("{value}-{set}-{state}.png"),
         None => format!("{value}-{state}.png"),
+    }
+}
+
+/// Whether `name` is a file name AppyTappy itself gives a picture in an
+/// application's folder.
+///
+/// That is a reference's sample as [`sample_name`] names it, or a state's
+/// picture as [`state_image_name`] names it, for a first drawing or a fix.
+/// A file with any other name, such as one the user put in the folder, is
+/// not AppyTappy's to remove.
+#[must_use]
+pub(crate) fn is_own_image_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".png").filter(|_| is_image_name(name)) else {
+        return false;
+    };
+    let id = |part: &str| SignalName::new(part).is_ok();
+    let number = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    let mut parts = stem.split('-');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(value), Some(state), None, None) => id(value) && number(state),
+        // A sample's middle part is an ID, which starts with a letter, and a
+        // fix's is a number, so a name is one or the other.
+        (Some(first), Some(middle), Some(last), None) => {
+            number(last) && ((first == "ref" && id(middle)) || (id(first) && number(middle)))
+        },
+        _ => false,
     }
 }
 
@@ -1140,6 +1238,7 @@ mod tests {
                         whole: true,
                     },
                     pin: Some(PinDef::TopCenter),
+                    reading_area: false,
                     fixes: Vec::new(),
                 },
             }],
@@ -1156,6 +1255,7 @@ mod tests {
                     image: sample_name("percent", 1),
                     text: "87%".to_owned(),
                 }],
+                expects: None,
             }],
         }
     }
@@ -1190,6 +1290,43 @@ mod tests {
     }
 
     #[test]
+    fn a_reference_s_expected_characters_are_left_out_until_chosen_and_round_trip() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(!json.contains("expects"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        file.references[0].expects = Some("0123456789.%Aa".to_owned());
+        let json = file.to_json();
+        assert!(json.contains("\"expects\": \"0123456789.%Aa\""), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn no_rule_covers_what_a_reference_expects() {
+        // Setup guidance that a person edited by hand: repeats, whitespace,
+        // a control character, nothing at all, or far more than the setup
+        // app saves. The file loads as it does without it.
+        let plain = dash();
+        for odd in ["11 ", "", "0 1\u{7}\n", &"x".repeat(5000)] {
+            let mut file = dash();
+            file.references[0].expects = Some(odd.to_owned());
+            assert_eq!(file.check(), Ok(()), "{odd:?}");
+            let read = AppFile::parse(&file.to_json()).expect("loads");
+            assert_eq!(read.references[0].expects.as_deref(), Some(odd));
+            assert_eq!(read.values, plain.values);
+            assert_eq!(read.references[0].samples, plain.references[0].samples);
+        }
+    }
+
+    #[test]
+    fn a_label_teaches_every_character_but_whitespace() {
+        assert!(is_label_character('1') && is_label_character('\u{7}'));
+        assert!(is_label_character('\u{feff}') && is_label_character('\u{301}'));
+        assert!(!is_label_character(' ') && !is_label_character('\n'));
+        assert!(!is_label_character('\u{85}') && !is_label_character('\u{3000}'));
+    }
+
+    #[test]
     fn what_a_file_leaves_out_takes_its_default() {
         let file = dash();
         let json = file.to_json();
@@ -1212,6 +1349,50 @@ mod tests {
         rarely.size_changes = SizeChangesDef::Rarely;
         assert!(rarely.to_json().contains("\"sizeChanges\": \"rarely\""));
         assert_eq!(AppFile::parse(&rarely.to_json()), Ok(rarely));
+    }
+
+    #[test]
+    fn a_reading_area_is_left_out_until_set_and_only_for_a_check_that_reads_anywhere() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(!json.contains("readingArea"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        let black = ColorDef {
+            red: 0,
+            green: 0,
+            blue: 0,
+        };
+        let bar = CheckDef::BarFill {
+            filled: RED,
+            empty: black,
+        };
+        let color = CheckDef::Color {
+            color: RED,
+            tolerance: 9,
+        };
+        let state = states(&[("Paused", "status-1.png")]);
+        // A number or a bar is read wherever it is in its region.
+        file.values[0].screen.reading_area = true;
+        let json = file.to_json();
+        assert!(json.contains("\"readingArea\": true"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        file.values[0].screen.check = bar;
+        assert_eq!(file.check(), Ok(()));
+        // A color or a state needs its content to stay put.
+        for check in [color, state] {
+            file.values[0].screen.check = check;
+            assert_eq!(
+                file.check(),
+                Err(AppFileError::Value(
+                    "progress".to_owned(),
+                    "its region is a reading area, which only a number or bar fill check can read"
+                        .to_owned()
+                ))
+            );
+            file.values[0].screen.reading_area = false;
+            assert_eq!(file.check(), Ok(()));
+            file.values[0].screen.reading_area = true;
+        }
     }
 
     fn fix(images: &[&str]) -> FixDef {
@@ -1716,6 +1897,42 @@ mod tests {
     }
 
     #[test]
+    fn only_the_names_appytappy_gives_pictures_are_its_own() {
+        for name in [
+            "ref-percent_font-3.png",
+            "status-1.png",
+            "status-2-1.png",
+            // A value named `ref`, and a fix of it.
+            "ref-1.png",
+            "ref-1-2.png",
+        ] {
+            assert!(is_own_image_name(name), "{name}");
+        }
+        let long = format!("a-{}.png", "1".repeat(61));
+        for name in [
+            "photo.png",
+            "icon_visible.png",
+            "holiday-snap.png",
+            "holiday-snap-1.png",
+            "status-2-x.png",
+            "status-1-2-3.png",
+            "ref-9x-1.png",
+            "1-2.png",
+            "9-1-1.png",
+            "status-.png",
+            "-1.png",
+            "Status-1.png",
+            "status-1.PNG",
+            "status-1.jpg",
+            "status-1",
+            "status-1.png.bak",
+            long.as_str(),
+        ] {
+            assert!(!is_own_image_name(name), "{name}");
+        }
+    }
+
+    #[test]
     fn value_ids_come_from_the_names_users_type() {
         let cases = [
             ("Progress", "progress"),
@@ -1737,6 +1954,23 @@ mod tests {
         assert!(SignalName::new(&long).is_ok());
         // The last state's picture named after the longest ID still fits.
         assert!(is_image_name(&format!("{long}-{MAX_STATES}.png")));
+        // A renamed value keeps its ID, so a new value named like its old
+        // name takes that ID with a number, which still fits a fix's
+        // pictures.
+        assert_eq!(new_value_id("Progress", &["other"]), "progress");
+        assert_eq!(
+            new_value_id("Progress", &["progress", "progress_2"]),
+            "progress_3"
+        );
+        let numbered = new_value_id(&"abc".repeat(30), &[long.as_str()]);
+        assert_eq!(numbered.len(), MAX_VALUE_ID_LEN.saturating_sub(2));
+        assert!(numbered.ends_with("_2"));
+        assert!(SignalName::new(&numbered).is_ok());
+        assert!(is_image_name(&state_image_name(
+            &long,
+            Some(MAX_FIXES.saturating_add(2)),
+            MAX_STATES
+        )));
     }
 
     #[test]

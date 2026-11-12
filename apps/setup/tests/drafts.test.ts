@@ -2,8 +2,15 @@ import { describe, expect, test } from 'bun:test';
 
 import type { AppSummary, DraftDef, DraftKind, DraftSummary } from '../src/lib/bindings.ts';
 import { EMPTY_DRAFT as EMPTY_AUTOMATION, newAction, unfinished, valueChoices } from '../src/lib/automation.ts';
-import { captureMissing, keptSetup, labeledCharacters, restoreSetup, storeSetup } from '../src/lib/captureDraft.ts';
-import { EMPTY_DRAFT } from '../src/lib/check.ts';
+import {
+  type CaptureSetup,
+  captureMissing,
+  keptSetup,
+  labeledCharacters,
+  restoreSetup,
+  storeSetup,
+} from '../src/lib/captureDraft.ts';
+import { type Draft, EMPTY_DRAFT } from '../src/lib/check.ts';
 import {
   DRAFT_FORMAT,
   draftOfSaved,
@@ -51,6 +58,16 @@ const apps: readonly AppSummary[] = [
   },
 ];
 
+/** What a new value's capture has set up before the user does anything. */
+const EMPTY_SETUP: CaptureSetup = {
+  valueName: '',
+  step: 'where',
+  mayMove: false,
+  editing: null,
+  draft: EMPTY_DRAFT,
+  recordedShots: [],
+};
+
 function def(kind: DraftKind, state: unknown, changes: string | null = null, app: string | null = null): DraftDef {
   return { kind, app, changes, name: 'Draft', missing: [], pictures: [], state };
 }
@@ -71,11 +88,10 @@ describe('what a draft keeps', () => {
   });
 
   test('a capture keeps its labels and drops the recording readings', () => {
-    const setup = {
+    const setup: CaptureSetup = {
+      ...EMPTY_SETUP,
       valueName: 'Score',
-      step: 'how' as const,
-      pinned: null,
-      editing: null,
+      step: 'how',
       draft: { ...EMPTY_DRAFT, labels: new Map([[0, '12']]), recorded: new Map([[3, '45']]) },
     };
     // The draft goes through JSON, as the file keeps it.
@@ -87,6 +103,67 @@ describe('what a draft keeps', () => {
     expect(back?.draft.recorded.size).toBe(0);
     expect(keptSetup(def('reference', kept))).toBeNull();
     expect(restoreSetup(storeSetup(setup)).draft.labels.get(0)).toBe('12');
+  });
+
+  test('a capture comes back with everything it set up, but for what belongs to a recording', () => {
+    const black = { red: 0, green: 0, blue: 0 };
+    const region = { x: 3, y: 4, width: 20, height: 10 };
+    // Every field of the check's draft, each away from what a new value starts with.
+    const draft: Draft = {
+      kind: 'state',
+      region,
+      drawnOn: 2,
+      pin: { kind: 'byHand', pin: 'bottomRight' },
+      tolerance: 7,
+      ink: black,
+      labels: new Map([
+        [0, '12%'],
+        [2, '7'],
+      ]),
+      recorded: new Map([[3, '45']]),
+      found: [{ screenshot: 2, region: { x: 1, y: 2, width: 3, height: 4 }, text: '99' }],
+      filled: { red: 1, green: 2, blue: 3 },
+      empty: { red: 4, green: 5, blue: 6 },
+      color: { red: 7, green: 8, blue: 9 },
+      states: [
+        {
+          name: 'Paused',
+          screenshot: 0,
+          steps: [
+            { kind: 'snap', region, combine: 'add' },
+            { kind: 'click', x: 5, y: 6, combine: 'remove' },
+          ],
+        },
+      ],
+      stateNames: ['Playing'],
+      colorMatch: 31,
+      ignoreBackground: false,
+      reference: 'percent',
+      whole: true,
+    };
+    const drawn: Readonly<Record<string, unknown>> = { ...draft };
+    for (const [key, start] of Object.entries(EMPTY_DRAFT)) {
+      expect([key, drawn[key]]).not.toEqual([key, start]);
+    }
+    const setup: CaptureSetup = {
+      valueName: 'Score',
+      step: 'how',
+      mayMove: true,
+      editing: {
+        existing: null,
+        name: 'Digits',
+        expects: ['1', '2', '%'],
+        valueRegion: { region, drawnOn: 0 },
+      },
+      draft,
+      recordedShots: [2],
+    };
+    const made: Readonly<Record<string, unknown>> = { ...setup };
+    for (const [key, start] of Object.entries(EMPTY_SETUP)) {
+      expect([key, made[key]]).not.toEqual([key, start]);
+    }
+    const kept: unknown = JSON.parse(JSON.stringify(keep('value', storeSetup(setup))));
+    expect(keptSetup(def('value', kept))).toEqual({ ...setup, draft: { ...draft, recorded: new Map() } });
   });
 });
 
@@ -113,6 +190,7 @@ describe('the shape a draft keeps', () => {
       'button',
       'clickApp',
       'command',
+      'delivery',
       'key',
       'keys',
       'kind',
@@ -122,18 +200,20 @@ describe('the shape a draft keeps', () => {
       'sound',
       'target',
     ]);
-    const stored = storeSetup({ valueName: '', step: 'how', pinned: null, editing: null, draft: EMPTY_DRAFT });
-    expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'pinned', 'step', 'valueName']);
+    const stored = storeSetup(EMPTY_SETUP);
+    expect(Object.keys(stored).sort()).toEqual(['draft', 'editing', 'mayMove', 'recordedShots', 'step', 'valueName']);
     expect(Object.keys(stored.draft).sort()).toEqual([
       'color',
       'colorMatch',
       'drawnOn',
       'empty',
       'filled',
+      'found',
       'ignoreBackground',
       'ink',
       'kind',
       'labels',
+      'pin',
       'reference',
       'region',
       'stateNames',
@@ -220,7 +300,7 @@ describe('what an unfinished item still needs', () => {
   });
 
   test('a capture needs a name and a region, then what the check asks for', () => {
-    const setup = { valueName: '', step: 'where' as const, pinned: null, editing: null, draft: EMPTY_DRAFT };
+    const setup = EMPTY_SETUP;
     const next = { ok: false, next: 'Pick the reference.' } as const;
     expect(captureMissing(setup, next, false)).toEqual(['Name the value.', 'Draw the region where it shows.']);
     expect(captureMissing(setup, next, true)).toEqual(['Draw the region where it shows.']);
@@ -230,16 +310,16 @@ describe('what an unfinished item still needs', () => {
       draft: { ...EMPTY_DRAFT, region: { x: 0, y: 0, width: 4, height: 4 } },
     };
     expect(captureMissing(drawn, next, false)).toEqual(['Pick the reference.']);
-    const editing = { ...drawn, editing: { existing: null, name: '', valueRegion: { region: null, drawnOn: null } } };
+    const editing = {
+      ...drawn,
+      editing: { existing: null, name: '', expects: [], valueRegion: { region: null, drawnOn: null } },
+    };
     expect(captureMissing(editing, next, false)).toEqual(['Name the reference.']);
   });
 
   test('a reference draft lists each labeled character once', () => {
     const setup = {
-      valueName: '',
-      step: 'where' as const,
-      pinned: null,
-      editing: null,
+      ...EMPTY_SETUP,
       draft: {
         ...EMPTY_DRAFT,
         labels: new Map([

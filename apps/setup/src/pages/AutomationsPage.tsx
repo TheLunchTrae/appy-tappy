@@ -4,7 +4,6 @@ import type { AppSummary, AutomationSummary, DraftSummary } from '../lib/binding
 import { deleteAutomation, errorText, setAutomationEnabled } from '../lib/api.ts';
 import {
   COMPARISON_NAMES,
-  type Draft,
   type ValueChoice,
   actionText,
   findValue,
@@ -14,7 +13,8 @@ import {
 import { Hint } from '../components/Hint.tsx';
 import { NEEDS_RUNNING_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
-import { type Kept, type Resumed, draftOfSaved, draftProblem, isKept, newDrafts } from '../lib/drafts.ts';
+import { type Resumed, draftOfSaved, draftProblem, newDrafts } from '../lib/drafts.ts';
+import { keptAutomation } from '../lib/flow.ts';
 import { DraftActions, DraftNote, DraftPill } from '../components/Drafts.tsx';
 
 interface RowProps {
@@ -162,9 +162,6 @@ function Row({
   );
 }
 
-/** What a draft of an automation keeps. */
-type AutomationKept = Kept<'automation', Draft>;
-
 interface DraftRowProps {
   readonly resumed: Resumed;
   readonly choices: readonly ValueChoice[];
@@ -176,7 +173,7 @@ interface DraftRowProps {
 /** A new automation saved as a draft: what it has so far, and that it doesn't run. */
 function DraftRow({ resumed, choices, problem, onFinish, onDelete }: DraftRowProps) {
   const { def } = resumed;
-  const kept = isKept<AutomationKept>(def.state, 'automation') ? def.state.state : null;
+  const kept = keptAutomation(def)?.draft ?? null;
   const source = kept?.source ?? null;
   const value = source === null ? null : findValue(choices, source);
   const actions = kept?.actions.length ?? 0;
@@ -305,8 +302,8 @@ export function AutomationsPage({
   );
   // A draft that cannot be read has no kind, so it is listed here, on the first page.
   const unreadable = (drafts ?? []).filter((summary) => summary.draft === null);
-  const hasValues = choices.length > 0;
-  const canCreate = hasValues && loadError === null;
+  // A new automation leads to adding its application and making its value when none is saved yet.
+  const canCreate = apps !== null && loadError === null;
   const head = (
     <div className="page-head">
       <h1 ref={headingRef} tabIndex={-1}>
@@ -329,15 +326,14 @@ export function AutomationsPage({
       return (
         <div className="empty">
           <h2>No automations yet</h2>
-          {hasValues ? (
+          <p>
+            An automation watches one of your values and runs actions in order when it becomes true, such as pausing
+            music when a number on screen reaches 90 or lowering an application&apos;s volume while an icon shows.
+          </p>
+          {choices.length > 0 ? null : (
             <p>
-              An automation watches one of your values and runs actions in order when it becomes true, such as pausing
-              music when a number on screen reaches 90 or lowering an application&apos;s volume while an icon shows.
-            </p>
-          ) : (
-            <p>
-              An automation watches a value, so save a value first on the Values page. Then come back here to say what
-              happens when it changes.
+              No value is saved yet. New automation takes you through adding the application and making the value to
+              watch, then back to say what happens when it changes.
             </p>
           )}
           {canCreate ? (

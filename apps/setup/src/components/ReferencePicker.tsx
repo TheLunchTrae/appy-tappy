@@ -1,7 +1,8 @@
 import type { AppFile } from '../lib/bindings.ts';
+import { referenceCoverage } from '../lib/expected.ts';
 import { readers, referenceCharacters } from '../lib/reference.ts';
 import { REFERENCE_HINT } from '../lib/hints.ts';
-import { CharacterChips } from './CharacterChips.tsx';
+import { CharacterChips, MissingNote } from './CharacterChips.tsx';
 import { Hint } from './Hint.tsx';
 
 interface Props {
@@ -17,6 +18,8 @@ interface Props {
   /** The references that have a draft of changes, which are changed by finishing it instead. */
   readonly drafted: ReadonlySet<string>;
   readonly onNew: () => void;
+  /** Opens the picked reference, or a new one, to record the region's readings. */
+  readonly onRecord: () => void;
   readonly onWhole: (whole: boolean) => void;
 }
 
@@ -56,6 +59,7 @@ export function ReferencePicker(props: Props) {
                     <small>{used === 0 ? 'No values yet' : `Used by ${used} ${used === 1 ? 'value' : 'values'}`}</small>
                   </span>
                   <CharacterChips characters={referenceCharacters(reference)} ink={reference.ink} />
+                  <MissingNote characters={referenceCoverage(reference).missing} />
                 </button>
               );
             })}
@@ -87,7 +91,20 @@ export function ReferencePicker(props: Props) {
           >
             New reference from this region
           </button>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!hasRegion}
+            title={hasRegion ? undefined : 'Draw the region first'}
+            onClick={props.onRecord}
+          >
+            Record readings
+          </button>
         </div>
+        <span className="note">
+          Record readings watches the region while you use {appName} and keeps each different reading, to teach{' '}
+          {chosen === null ? 'a new reference' : chosen.name} its characters.
+        </span>
       </div>
       <div className="field">
         <label className="toggle">

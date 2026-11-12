@@ -6,7 +6,8 @@ app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
 `screen/image.rs` holds images and regions, `screen/layout.rs` where a
 capture packs the regions it copies, `screen/capture.rs` the capture trait,
-`screen/check.rs` and `screen/digits.rs` the checks, `screen/mask.rs` and
+`screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
+proposal of a bar's colors, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
 the saved checks, `screen/scale.rs` and `screen/resample.rs` how a value
 reads at another window size, and `schedule.rs` the read interval.
@@ -31,14 +32,19 @@ the same answer on every system, and allocate nothing per read.
   other character ends the number, so `12/50` reads as 12, and so does a `,`
   that is not followed by exactly three digits, so `12,5` reads as 12 rather
   than guessing that the `,` is a decimal point. A read finds the ink (pixels
-  near the text color), splits it into characters at blank columns, scales
-  each one to a fixed grid, and picks the closest learned shape. The text line
-  is the band of rows with the most ink, so a stray speck elsewhere in the
-  region does not throw it off. A character it has not learned fails the read
-  rather than being guessed, unless the number has already ended, as in the
-  "HP" of "37% HP". It does not read rotated text, characters that touch, or
-  text on a background that shares the text's color; those need a different
-  check.
+  near the text color), splits it into characters at blank columns, and
+  scales each one to a fixed grid by the height of the text line. The text
+  line is the band of rows with the most ink, so a stray speck elsewhere in
+  the region does not throw it off. Each character takes the closest learned
+  shape, if the two are the same but for their edges, as
+  [Matching](#matching) describes. A character it has not learned fails the
+  read rather than being guessed, unless the number has already ended, as in
+  the "HP" of "37% HP", and a read that fails
+  [says at which stage](#why-a-number-is-not-read). It does not read rotated
+  text, characters that touch, or text on a background that shares the
+  text's color; those need a different check. A character drawn as marks
+  with blank columns between them, as some fonts draw `%`, is one character
+  for each mark.
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
   filled spot and one empty spot. The check counts the region's pixels closer
   to each color and ignores pixels near neither, such as a border or a label:
@@ -54,6 +60,57 @@ the same answer on every system, and allocate nothing per read.
   changing background behind the thing does not count. Each mask becomes runs
   of kept pixel indexes once, when the check loads, so a read walks the runs
   without testing each pixel.
+
+### Matching
+
+An application that scales its interface, or centers a number whose width
+changes, draws the same character at another fraction of a pixel each time,
+so its edge pixels differ from the ones the reference learned. Counting the
+grid cells that differ cannot tell that from another character: an edge that
+moves by a fraction of a pixel changes many cells without moving any of
+them far, while a different character has cells far from any of the
+other's.
+
+So a match looks at where the cells differ. A cell that one shape sets is
+apart when the other sets neither that cell nor one beside it, left, right,
+above, or below. A moved or thicker edge sets cells beside the other
+shape's, so none is apart; a stroke that one character has and the other
+lacks is. The closest learned shape has the fewest cells apart, then the
+fewest that differ at all, and it matches when at most 1 in 32 of the cells
+either shape sets are apart (`CELLS_PER_APART` in `screen/digits.rs`). The
+tests draw text as a game does, bold with an outline and anti-aliased at any
+fraction of a pixel (`screen/digits/drawn.rs`), and read it at any
+fraction and at other sizes from three labeled pictures.
+
+Two limits follow from the grid. Where the text line is less than 16 pixels tall, a
+cell is smaller than a pixel, so a moved edge is more than a cell and the
+reference needs more labeled pictures. And the grid is scaled by the text
+line's height, which is that of the characters the region shows: a
+character that reaches above or below the digits, such as a `,`, makes the
+line taller and every shape beside it another, so the reference learns the
+digits again from pictures that show it.
+
+### Why a number is not read
+
+A read fails at one of four stages, `ReadError` in `screen/digits.rs`, and
+its message says which, in the same words in the setup app and in the
+runtime's log:
+
+- **No ink.** No pixel in the region has the characters' color.
+- **Too many characters.** The region holds more than 24.
+- **An unlearned shape.** A character matched no learned shape. The message
+  shows every character the read made out, with a `?` for each unlearned
+  one, such as `8 7 ?`, and names the learned character the first of them is
+  closest to. No number is made of the characters that did match.
+- **No number.** Every character matched, and they hold no digits, such as
+  `%` alone. The message shows them.
+
+The runtime logs each stage a value fails at (`ReadError::stage`) once
+until the value reads again, so a counter that stays unreadable while it
+counts is one line, with what its first failed read showed, and a region
+that flickers between two stages is two.
+[Troubleshooting](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
+says what the user does about each.
 
 On the fixture screenshots, each check takes 2 to 10 microseconds per read on
 one CPU core, and a state check about that much for each of its states;
@@ -99,7 +156,12 @@ its values read at a size they were not drawn at.
   half away from zero, and its width and height are the distance between
   them, at least 1 pixel, so a region that touches the side it is pinned to
   still touches it. A region that scales outside the window does not read
-  there.
+  there. A frame is the whole window, title bar and borders included, and
+  those do not grow with the window: a value drawn in a window with a title
+  bar scales to a spot lower than its place in the same application in
+  fullscreen, by about the title bar's height, so it needs a fix there. The
+  runtime's log says when a value could not be read where its region scales
+  to, and to fix it at that size if the region is off.
 - **Rarely** reads each value only at the sizes it was drawn at, so nothing
   is guessed.
 
@@ -116,7 +178,9 @@ setup app and the runtime refuse such a file with the same checks
 `SavedValue::at` resolves where a value reads at a size: its drawing made
 there, the first or a fix, or its first drawing scaled, or why it does not
 read (`Unread`). A number reads at any size, since a character's shape is
-scaled to a fixed grid before it is compared; a bar or color check counts
+scaled to a fixed grid before it is compared and a match lets its edges
+land a cell away; at a size so small that its strokes merge, a fix with a
+reference learned at that size reads it. A bar or color check counts
 colors, which do not change with size. A state check compares pixel by
 pixel, so a scaled region needs its pictures and masks redrawn at its size.
 `resample` redraws each axis on its own: shrinking averages the pixels each
@@ -139,11 +203,46 @@ log says it once for each reason, not once for each size the window
 passes.
 
 State pictures are named after the value and the state's place, such as
-`status-1.png`, and a fix's after the value, the fix's number, and the
+`status-1.png`. A fix's pictures, and those of a drawing whose states an
+edit took again, are named after the value, a number for the set, and the
 state's place, such as `status-2-1.png`. Value IDs have no `-`, so the two
-never clash. A fix saved again at its size takes a number no saved fix
-uses, so its new pictures never overwrite the ones it replaces, and the
-setup app deletes the old ones once the file is saved.
+never clash. Each new set takes a number no saved picture of the value
+uses, so its pictures never overwrite the ones it replaces, and the setup
+app deletes the old ones once the file is saved.
+
+## Content that moves
+
+A check reads one fixed region. Nothing in the runtime looks for a value or
+follows it, so content that moves around inside the window, such as a number
+that shifts as it gains digits, is read only where the region covers it. A
+pin is no help with that: it places the region when the window changes size.
+
+Two checks read their content wherever it is inside the region, so a region
+drawn larger than the content, a reading area, covers every place it shows:
+
+- **Number** finds the ink anywhere in the region, so blank margin on any
+  side changes nothing. All ink on the text's rows is read as characters,
+  left to right, so other ink of the text's color beside the number is read
+  with it. A shape the reference has not learned fails the read when it
+  comes before the number or right after its digits; once a learned
+  character such as `%` has ended the number, a shape after it is skipped.
+  The line read is the run of inked rows that holds the most ink, so ink
+  above or below the number, with a blank row between, is skipped unless it
+  holds more.
+- **Bar fill** counts the pixels near its two colors wherever they are: each
+  pixel within half the distance between the two colors of the nearer one.
+  Any other pixel that near either color counts with the bar's.
+
+**Color** averages the whole region, and **State** compares it pixel by
+pixel, so both need their content to stay put in the region. The setup app's
+**This content may move** option says this where the region is drawn.
+
+A value saves that its region is a reading area as `readingArea`, which only
+a number or bar fill check may have (`AppFile::check`,
+`CheckDef::reads_anywhere`). It is setup guidance: the Values page names the
+region a reading area, and a fix of the value asks for one again. Nothing
+that places or reads the region looks at it, so the value reads the same
+with and without it (`saved::build`).
 
 ## Selection
 
@@ -163,6 +262,102 @@ setup app deletes the old ones once the file is saved.
 Colors are alike when each channel is within the tolerance, as for the color
 check. Selections combine with union and difference, and `mask_in` gives the
 mask of any region, as after the user adjusts the box by hand.
+
+## Bar detection
+
+`screen::detect` proposes a bar fill check's two colors, so the user does
+not have to click them. It infers only what the bar reader can use. The
+reader counts pixels near two colors wherever they are, with no direction,
+tolerance, or edge, so the detector's whole answer is two colors. It refuses
+a region rather than propose colors the reader would read wrongly. Each
+threshold below is a constant at the top of `screen/detect.rs`, which says
+what it is for.
+
+- **Layout.** The region's long side is its width, or its height when it is
+  taller than wide. Each column along it takes the median color of its
+  pixels, which a thin border, a thin label, and shading across the bar do
+  not move. The columns' colors are gathered into classes of alike colors
+  (`SAME`), and the bar's two colors are the most common class and the most
+  common one far enough apart from it (`APART`), each on at least a part's
+  worth of columns (`PARTS`, `MIN_PART`).
+- **Two plain parts and nothing between.** A column belongs to a part only
+  while it is as near the part's color as one plain color stays (`SAME`),
+  which is nearer than the reader needs. The columns must then read, from
+  the start: the filled part, at most an edge of columns that belong to
+  neither (`EDGE`), and the empty part. Columns that belong to neither may
+  lie only before and after the two, and take up only so much of the long
+  side (`COVER`): a border, a rounded cap, some background. A column of
+  another color inside a part refuses the region, so a segmented, striped,
+  or fading fill is not proposed.
+- **Which color is filled.** The reader cannot tell, so the color at the
+  start of the long side is: the left of a wide region, the bottom of a tall
+  one. The setup app's **Swap colors** turns it around.
+- **The reader agrees.** `BarFill::percent` must read the screenshot within
+  `AGREE` points of the fill its layout shows. Otherwise something beside
+  the bar has one of the colors, or part of the bar has another shade, and
+  the region is refused. Past `ROUGH`
+  points the proposal says that readings can be a few points off.
+- **Every screenshot.** The colors come from the first screenshot whose
+  layout shows a bar, the one the region was drawn on first. Each other
+  screenshot must then show the same two colors the same way, as a full, an
+  empty, or a partly filled bar that the reader agrees with, or show neither
+  color on a part's worth of columns, as a screenshot of something else
+  does. One that shows a color but not the bar refuses the region and is
+  named: a bar that changes color with its fill or between screenshots
+  cannot be read with two colors. Two screenshots that show both parts at
+  fills a part apart say that the bar moves, which a picture in two colors
+  would not.
+- **Around a label.** A label, an icon, or what lies beside a loosely drawn
+  bar hides the layout in the columns it covers, though the reader leaves
+  its pixels out and reads the bar all the same. So when the whole region
+  shows no bar, the detector looks again over only the lanes that each show
+  the bar from end to end on their own: two plain parts by the lane's own
+  colors, under the same rule as the columns. It takes the lanes that do so
+  on every screenshot where enough lanes do, and needs a share of the
+  region's lanes to be left (`CLEAR`). Each of those lanes spans the bar by
+  itself, so where they lie across the bar does not matter. The same rules
+  then hold over those lanes on every screenshot, with the reader still
+  reading the whole region. A fill that is striped, segmented, or fading in
+  every lane leaves no such lane and stays refused. One that is so in only
+  some lanes leaves the others, and is held to the two rules below. The
+  proposal says that it went by part of the region.
+- **Even spread.** The reader divides the pixels of the filled color by
+  those of either color. So what lies over part of the bar, stays there, and
+  has neither color shifts the reading by an amount that depends on the
+  fill: a label, an icon, a fade in some lanes. A screenshot shows that at
+  one fill only, where the reader may well agree. So on every screenshot
+  that shows the bar, the pixels the reader counts have to be spread evenly
+  along the bar: were the fill to end at any column, the share of the
+  counted pixels before that column may differ from the column's place along
+  the bar by no more than `AGREE`.
+- **Even parts.** What lowers the count in one part only and moves with the
+  fill, such as a shine in another shade along the filled part, leaves the
+  counted pixels spread evenly while the bar is nearly full or nearly empty.
+  So on every screenshot that shows both parts, the detector takes what the
+  reader counts in a column of each part: the median over the part's
+  columns, the lower of the middle two. A shine over half a part's columns
+  or more lowers it, whichever columns it leaves free, while a label, an
+  icon, or a rounded end over fewer columns does not, and is held to the
+  even spread. From those two counts the detector works out what every fill
+  would read, and none may differ from the fill by more than `AGREE`. A
+  shine across both parts lowers both counts alike and passes.
+
+A refusal carries a `NoBar` reason. The detector does not find a bar drawn as
+separate segments, a striped, textured, or fading fill, a bar with a trail
+between its parts, a bar with a shine in another shade over half or more of
+one part's columns, a bar under a label or an icon that leaves too few lanes
+free or takes the reader
+too far off at some fill, or a bar that fills from its middle. A fill that
+fades so little along the bar that it stays one plain color is proposed, and
+every screenshot must still read with it. Text or marks in one of the bar's
+own two colors cannot be told from the bar on a screenshot where they blend
+into a part, with detected colors or hand-picked ones. The reader reads some
+of those bars with hand-picked colors; supporting them here needs a wider
+detector, not another reader.
+
+A shade over fewer than half of a part's columns passes the even parts rule,
+so such a bar can be proposed and then read some points off at other fills,
+as it does with hand-picked colors.
 
 ## Read interval
 

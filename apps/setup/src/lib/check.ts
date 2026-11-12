@@ -3,6 +3,7 @@
 import {
   type CheckDef,
   type CheckSpec,
+  type Label,
   LIMITS,
   type RecordedLabel,
   type RecordingSettings,
@@ -11,8 +12,11 @@ import {
   type SelectStep,
   type StateSpec,
 } from './bindings.ts';
+import type { FoundLabel } from './found.ts';
+import { AUTOMATIC, type PinChoice } from './pin.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
+import { sameSize, sizeText } from './sizes.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
 
 /** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
@@ -55,6 +59,8 @@ export interface Draft {
   readonly region: Rect | null;
   /** The screenshot the region was drawn on, whose window size the region's pixels refer to. */
   readonly drawnOn: number | null;
+  /** How a new value's pin is picked. It lives beside the region, since a region drawn anew changes both. */
+  readonly pin: PinChoice;
   readonly tolerance: number;
   /** The reference's characters' color. */
   readonly ink: Color | null;
@@ -62,6 +68,8 @@ export interface Draft {
   readonly labels: ReadonlyMap<number, string>;
   /** What each reading kept from the recording shows, by reading index. */
   readonly recorded: ReadonlyMap<number, string>;
+  /** Text found like the first sample and added, each at its own region of a screenshot. */
+  readonly found: readonly FoundLabel[];
   readonly filled: Color | null;
   readonly empty: Color | null;
   readonly color: Color | null;
@@ -83,10 +91,12 @@ export const EMPTY_DRAFT: Draft = {
   kind: 'number',
   region: null,
   drawnOn: null,
+  pin: AUTOMATIC,
   tolerance: DEFAULT_TOLERANCE.number,
   ink: null,
   labels: new Map(),
   recorded: new Map(),
+  found: [],
   filled: null,
   empty: null,
   color: null,
@@ -154,6 +164,23 @@ export function recordBlocked(draft: Draft): string | null {
   return null;
 }
 
+/**
+ * Why Find more like it cannot search the screenshot of size `shown` yet, or null when it can. The region's pixels
+ * are those of the screenshot it was drawn on, of size `drawn`, so the search needs a screenshot of that size.
+ */
+export function findBlocked(draft: Draft, drawn: Size | null, shown: Size | null): string | null {
+  if (draft.region === null || draft.drawnOn === null || drawn === null) {
+    return 'Draw the region around one sample on a screenshot first.';
+  }
+  if (draft.ink === null) {
+    return "Pick the characters' color first.";
+  }
+  if (shown === null || !sameSize(shown, drawn)) {
+    return `Show a screenshot at ${sizeText(drawn)}, the size the region was drawn at, to search it.`;
+  }
+  return null;
+}
+
 /** Whether the check being set up was tried on the live window yet, and how it went. */
 export type CheckState =
   | { readonly kind: 'idle' }
@@ -170,11 +197,13 @@ function missing(next: string): { readonly ok: false; readonly next: string } {
   return { ok: false, next };
 }
 
-function labelsOf(draft: Draft): readonly { readonly screenshot: number; readonly text: string }[] {
-  return [...draft.labels]
+/** The labeled screenshots, by screenshot, then the text found and added, in the order it was added. */
+function labelsOf(draft: Draft): readonly Label[] {
+  const typed = [...draft.labels]
     .map(([screenshot, text]) => ({ screenshot, text: text.trim() }))
     .filter((label) => label.text.length > 0)
     .toSorted((left, right) => left.screenshot - right.screenshot);
+  return [...typed, ...draft.found];
 }
 
 function recordedOf(draft: Draft): readonly RecordedLabel[] {
@@ -208,6 +237,14 @@ export function reviewSpec(
     labels: labelsOf(draft),
     recorded: kept,
   };
+}
+
+/**
+ * The characters `draft` teaches so far, its kept recorded readings included, added to `reference` when it names a
+ * saved one; null until the draft has a region and the characters' color.
+ */
+export function taughtSpec(draft: Draft, reference: ReferenceRef | null): CharactersSpec | null {
+  return reviewSpec(draft, recordedOf(draft), reference);
 }
 
 /** The characters `draft` teaches the reference `reference`, or a new one when null; or what it still needs. */
@@ -351,15 +388,17 @@ export function toReference(draft: Draft, existing: ReferenceDef | null): Draft 
     tolerance: existing?.tolerance ?? DEFAULT_TOLERANCE.number,
     labels: new Map(),
     recorded: new Map(),
+    found: [],
   };
 }
 
 /**
  * `draft` leaving the reference editor for the value it was opened from: the value's region, and the screenshot it
- * was drawn on, come back, whatever region the reference was taught on, and the editor's labels and recorded readings are dropped.
+ * was drawn on, come back, whatever region the reference was taught on, and the editor's labels, recorded readings and
+ * found text are dropped.
  */
 export function fromReference(draft: Draft, value: Drawn): Draft {
-  return { ...draft, region: value.region, drawnOn: value.drawnOn, labels: new Map(), recorded: new Map() };
+  return { ...draft, region: value.region, drawnOn: value.drawnOn, labels: new Map(), recorded: new Map(), found: [] };
 }
 
 /**
@@ -379,6 +418,15 @@ export function fixDraft(check: CheckDef): Draft {
     case 'state':
       return { ...start, tolerance: check.tolerance, stateNames: check.states.map((state) => state.name) };
   }
+}
+
+/**
+ * `draft`, a fix's, with its region at `region` on the screenshot `shot`, where the value reads at that screenshot's
+ * size; unchanged when it reads nowhere there, or a region is drawn already. The capture opens a fix on a
+ * screenshot it takes itself, so what this makes of the opening draft is what leaving the fix loses nothing of.
+ */
+export function withFixRegion(draft: Draft, region: Rect | null, shot: number): Draft {
+  return region === null || draft.region !== null ? draft : { ...draft, region, drawnOn: shot };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

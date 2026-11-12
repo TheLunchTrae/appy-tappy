@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   type AppSummary,
-  type AutomationDef,
   type AutomationSummary,
   DEFAULT_SETTINGS,
   type DraftSummary,
@@ -11,9 +10,11 @@ import {
 import {
   deleteDraft,
   errorText,
+  forgetUnsavedClickPictures,
   listApps,
   listAutomations,
   listDrafts,
+  saveDraft,
   loadSettings,
   saveSettings,
   syncOverlays,
@@ -24,9 +25,26 @@ import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
-import { type Fixing, NewValue } from './pages/NewValue.tsx';
+import { NewValue } from './pages/NewValue.tsx';
+import {
+  type Ended,
+  type Flow,
+  type Made,
+  type Opener,
+  afterFlow,
+  applicationFor,
+  draftUnder,
+  heldInAll,
+  holdsAutomation,
+  leaveQuestion,
+  resumedFlow,
+  trail,
+  valueFor,
+  waiting,
+} from './lib/flow.ts';
+import { supersedes } from './lib/reads.ts';
 import { background, useRepeat } from './lib/repeat.ts';
-import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
+import { ReferenceFlow } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
@@ -48,25 +66,12 @@ const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
   { id: 'settings', name: 'Settings' },
 ];
 
-/**
- * What the window shows in place of a page: a flow that makes or changes something, and the draft it finishes, or
- * null.
- */
-type Flow = (
-  | { readonly kind: 'value'; readonly fixing: Fixing | null }
-  | { readonly kind: 'automation'; readonly existing: AutomationDef | null }
-  | { readonly kind: 'application'; readonly existing: AppSummary | null }
-  | { readonly kind: 'reference'; readonly existing: SavedRef | null }
-) & { readonly draft: Resumed | null };
-
-/** What leaving each kind of flow before it is saved loses, and that a draft can keep it. */
-const LOST: Readonly<Record<Flow['kind'], string>> = {
-  value:
-    'Leave this value? Save it as a draft to finish later, or leave and lose the screenshots and the region. A draft does not keep a recording.',
-  reference:
-    'Leave this reference? Save it as a draft to finish later, or leave and lose the screenshots and labels. A draft does not keep a recording.',
-  automation: 'Leave this automation? Save it as a draft to finish later, or leave and lose the changes.',
-  application: 'Leave this application? Save it as a draft to finish later, or leave and lose the changes.',
+/** The page that lists what each kind of flow saves. */
+const LISTED_ON: Readonly<Record<Flow['kind'], Page>> = {
+  automation: 'automations',
+  application: 'applications',
+  value: 'values',
+  reference: 'references',
 };
 
 /** How often the saved files are read again, which also refreshes which applications are running. */
@@ -75,8 +80,11 @@ const REFRESH_MS = 3000;
 export function App() {
   const [page, setPage] = useState<Page>('automations');
   const [flow, setFlow] = useState<Flow | null>(null);
-  // What the open flow would lose, as it reports it.
-  const [held, setHeld] = useState<Held>('nothing');
+  // Whether the open flow shows because another flow opened it or ended, which took the focused control with it.
+  const [continued, setContinued] = useState(false);
+  // What the open flow would lose, as it reports it, and what leaving it would lose with the flows that wait under it.
+  const [reported, setReported] = useState<Held>('nothing');
+  const held = heldInAll(flow, reported);
   // The page a press asked to leave the flow for, while the question asks whether to; and the last one asked for,
   // whose tab takes focus back after the answer.
   const [leaving, setLeaving] = useState<Page | null>(null);
@@ -86,12 +94,18 @@ export function App() {
   const openFlow = useRef(flow);
   openFlow.current = flow;
   const [apps, setApps] = useState<readonly AppSummary[] | null>(null);
+  // The reads of the saved lists, numbered as they start: the newest started, and the newest whose answer was
+  // taken. `listed` is the number of the read `apps` is from.
+  const reads = useRef({ started: 0, applied: 0 });
+  const [listed, setListed] = useState(0);
   const [automations, setAutomations] = useState<readonly AutomationSummary[] | null>(null);
   const [drafts, setDrafts] = useState<readonly DraftSummary[] | null>(null);
   // How the open flow saves its draft, which the leave question offers, and why its last try failed.
   const draftSaver = useRef<DraftSaver | null>(null);
   const [canDraft, setCanDraft] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
+  // Whether leaving is saving the drafts, which the question's answers wait for.
+  const [keeping, setKeeping] = useState(false);
   const reportDraft = useCallback((save: DraftSaver | null): void => {
     draftSaver.current = save;
     setCanDraft(save !== null);
@@ -150,13 +164,21 @@ export function App() {
 
   const refresh = useCallback(async (): Promise<void> => {
     // Each is read apart, so a broken automations file still lists the values.
+    reads.current.started += 1;
+    const read = reads.current.started;
     const [appsRead, automationsRead, draftsRead] = await Promise.allSettled([
       listApps(),
       listAutomations(),
       listDrafts(),
     ]);
+    // Reads overlap, so an answer that arrives after a newer one would put older lists back.
+    if (!supersedes(read, reads.current.applied)) {
+      return;
+    }
+    reads.current.applied = read;
     if (appsRead.status === 'fulfilled') {
       setApps(appsRead.value);
+      setListed(read);
       setLoadError(null);
     } else {
       setLoadError(errorText(appsRead.reason));
@@ -179,6 +201,18 @@ export function App() {
   useEffect(() => {
     background(syncOverlays());
   }, []);
+  // A click picture is kept as a file while its target is set up, and the automation's draft names it, also while
+  // the editor waits under a value or application flow it opened. Once no automation flow is left, those that
+  // neither the saved automations nor a saved draft name go, such as after Cancel.
+  const automating = holdsAutomation(flow);
+  useEffect(() => {
+    if (!automating) {
+      return undefined;
+    }
+    return () => {
+      background(forgetUnsavedClickPictures());
+    };
+  }, [automating]);
   // A flow that makes a value or a reference captures a window, so the lists wait until it ends.
   useRepeat(refresh, REFRESH_MS, flow?.kind !== 'value' && flow?.kind !== 'reference');
 
@@ -190,74 +224,67 @@ export function App() {
     settings: null,
   };
 
-  const open = (next: Flow | null): void => {
+  const open = (next: Flow | null, after: 'page' | 'flow' = 'page'): void => {
     setLeaving(null);
     setLeaveError(null);
     setFlow(next);
+    setContinued(after === 'flow');
   };
   const goTo = (target: Page): void => {
     setLeaving(null);
     setLeaveError(null);
     setFlow(null);
+    setContinued(false);
     setPage(target);
   };
-  // Saves the open flow's draft, then leaves for the page the press asked for.
-  const leaveWithDraft = async (target: Page): Promise<void> => {
-    const save = draftSaver.current;
+  const question = flow === null ? null : leaveQuestion(flow, reported, canDraft);
+  // Saves a draft of each flow that holds work, then leaves for the page the press asked for: the open flow's own
+  // draft first, then that of an automation that waits under it. The open flow remembers its draft, so a second
+  // try after the automation's failed saves over it.
+  const leaveWithDrafts = async (target: Page): Promise<void> => {
     const opened = openFlow.current;
-    if (save === null) {
+    if (opened === null) {
       return;
     }
-    const failed = await save();
-    if (openFlow.current !== opened) {
-      // The flow closed while its draft saved; the lists show the draft at the next read.
-      return;
+    const save = reported === 'unsaved' ? draftSaver.current : null;
+    const under = draftUnder(opened, apps ?? []);
+    setKeeping(true);
+    try {
+      const failed = save === null ? null : await save();
+      if (failed !== null) {
+        setLeaveError(`The draft could not be saved. ${failed}`);
+        return;
+      }
+      if (under !== null) {
+        try {
+          await saveDraft(under.id, under.def, false);
+        } catch (error: unknown) {
+          setLeaveError(
+            `The automation's draft could not be saved. ${errorText(error)}${save === null ? '' : ' The draft of what shows here is saved.'}`,
+          );
+          return;
+        }
+      }
+    } finally {
+      setKeeping(false);
     }
-    if (failed === null) {
+    // A flow that closed while its draft saved shows nothing new; the lists show the draft at the next read.
+    if (openFlow.current === opened) {
       goTo(target);
-      await refresh();
-    } else {
-      setLeaveError(`The draft could not be saved. ${failed}`);
     }
+    await refresh();
   };
   // Opens the flow that finishes `resumed`, on the saved item it changes when that is still there.
   const finish = (resumed: Resumed): void => {
-    const { def } = resumed;
-    const changed = def.changes;
-    switch (def.kind) {
-      case 'automation':
-        open({
-          kind: 'automation',
-          existing: automations?.find((summary) => summary.automation.id === changed)?.automation ?? null,
-          draft: resumed,
-        });
-        break;
-      case 'application':
-        open({ kind: 'application', existing: apps?.find((app) => app.id === changed) ?? null, draft: resumed });
-        break;
-      case 'value':
-        open({ kind: 'value', fixing: null, draft: resumed });
-        break;
-      case 'fix': {
-        const value = apps?.find((app) => app.id === def.app)?.file?.values.find((each) => each.id === changed);
-        if (def.app !== null && value !== undefined) {
-          open({ kind: 'value', fixing: { app: def.app, value }, draft: resumed });
-        }
-        break;
-      }
-      case 'reference': {
-        const reference = apps?.find((app) => app.id === def.app)?.file?.references.find((each) => each.id === changed);
-        open({
-          kind: 'reference',
-          existing: def.app === null || reference === undefined ? null : { app: def.app, reference },
-          draft: resumed,
-        });
-        break;
-      }
+    const next = resumedFlow(resumed, apps ?? [], automations ?? []);
+    if (next !== null) {
+      open(next);
     }
   };
+  // Deletes a draft from its list. No flow is open then, so the click pictures it alone named go with it.
   const removeDraft = async (id: string): Promise<void> => {
     await deleteDraft(id);
+    background(forgetUnsavedClickPictures());
     await refresh();
   };
   // A tab leaves an open flow only once the user agrees to lose its work, and never while it saves.
@@ -274,32 +301,61 @@ export function App() {
         break;
     }
   };
-  // A save closes its own flow, and nothing once the user has left it for another. It may have saved or removed a
-  // draft, so the lists are read again.
-  const saved = (opened: Flow, target: Page): void => {
-    if (openFlow.current === opened) {
-      goTo(target);
+  // Shows what follows the flow `ended` once it saved `made`, with 'drafted' saved or deleted its draft, or with
+  // 'canceled' was canceled. What it saved is read into the lists at once, for the page or the flow that shows next.
+  const end = (ended: Flow, made: Made | null | 'drafted' | 'canceled'): void => {
+    const how: Ended =
+      made === 'canceled' || made === 'drafted' ? { kind: made } : { kind: 'saved', made, read: reads.current.started };
+    const after = afterFlow(ended, how, openFlow.current === ended);
+    switch (after.kind) {
+      case 'nothing':
+        break;
+      case 'flow':
+        open(after.flow, 'flow');
+        break;
+      case 'listed':
+        goTo(LISTED_ON[ended.kind]);
+        break;
+      case 'page':
+        open(null);
+        break;
     }
-    background(refresh());
+    if (how.kind !== 'canceled') {
+      background(refresh());
+    }
   };
+  // What lets the flow `opener` open the application flow from its picker, and show again when that ends as its
+  // picker stood.
+  const pickerFor = (opener: Opener) => ({
+    onAddApplication: (chosen: string | null): void => {
+      open(applicationFor(opener, chosen, null), 'flow');
+    },
+    onEditApplication: (existing: AppSummary): void => {
+      open(applicationFor(opener, existing.id, existing), 'flow');
+    },
+  });
+  const path = flow === null ? [] : trail(flow);
 
   const content = (() => {
     if (flow?.kind === 'value') {
       return (
         <NewValue
-          apps={apps ?? []}
-          fixing={flow.fixing}
-          draft={flow.draft}
+          changing={flow.changing}
+          app={flow.app}
+          draft={flow.resumed}
+          trail={path}
+          continued={continued}
           onCancel={() => {
-            open(null);
+            end(flow, 'canceled');
           }}
-          onSaved={() => {
-            saved(flow, 'values');
+          onSaved={(made) => {
+            end(flow, made);
           }}
-          onAddApplication={() => {
-            open({ kind: 'application', existing: null, draft: null });
+          onDrafted={() => {
+            end(flow, 'drafted');
           }}
-          onHeld={setHeld}
+          {...pickerFor(flow)}
+          onHeld={setReported}
           onDraft={reportDraft}
         />
       );
@@ -308,14 +364,18 @@ export function App() {
       return (
         <ApplicationEditor
           existing={flow.existing}
-          draft={flow.draft}
+          draft={flow.resumed}
+          trail={path}
           onCancel={() => {
-            open(null);
+            end(flow, 'canceled');
           }}
-          onSaved={() => {
-            saved(flow, 'applications');
+          onSaved={(id) => {
+            end(flow, { app: id, value: null });
           }}
-          onHeld={setHeld}
+          onDrafted={() => {
+            end(flow, 'drafted');
+          }}
+          onHeld={setReported}
           onDraft={reportDraft}
         />
       );
@@ -323,19 +383,22 @@ export function App() {
     if (flow?.kind === 'reference') {
       return (
         <ReferenceFlow
-          apps={apps ?? []}
           existing={flow.existing}
-          draft={flow.draft}
+          app={flow.app}
+          draft={flow.resumed}
+          trail={path}
+          continued={continued}
           onCancel={() => {
-            open(null);
+            end(flow, 'canceled');
           }}
-          onSaved={() => {
-            saved(flow, 'references');
+          onSaved={(made) => {
+            end(flow, made);
           }}
-          onAddApplication={() => {
-            open({ kind: 'application', existing: null, draft: null });
+          onDrafted={() => {
+            end(flow, 'drafted');
           }}
-          onHeld={setHeld}
+          {...pickerFor(flow)}
+          onHeld={setReported}
           onDraft={reportDraft}
         />
       );
@@ -344,15 +407,26 @@ export function App() {
       return (
         <AutomationEditor
           apps={apps ?? []}
-          existing={flow.existing}
-          draft={flow.draft}
+          listed={listed}
+          readError={loadError}
+          flow={flow}
+          continued={continued}
           onCancel={() => {
-            open(null);
+            end(flow, 'canceled');
           }}
           onSaved={() => {
-            saved(flow, 'automations');
+            end(flow, null);
           }}
-          onHeld={setHeld}
+          onDrafted={() => {
+            end(flow, 'drafted');
+          }}
+          onAddApplication={(draft, app) => {
+            open(applicationFor(waiting(flow, draft), app, null), 'flow');
+          }}
+          onNewValue={(draft, app) => {
+            open(valueFor(waiting(flow, draft), app), 'flow');
+          }}
+          onHeld={setReported}
           onDraft={reportDraft}
         />
       );
@@ -362,15 +436,15 @@ export function App() {
         return (
           <ValuesPage
             apps={apps}
-            automations={automations}
             drafts={drafts}
+            automations={automations}
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'value', fixing: null, draft: null });
+              open({ kind: 'value', changing: null, app: null, opener: null, resumed: null });
             }}
-            onFix={(fixing) => {
-              open({ kind: 'value', fixing, draft: null });
+            onChange={(changing) => {
+              open({ kind: 'value', changing, app: null, opener: null, resumed: null });
             }}
             onFinish={finish}
             onDeleteDraft={removeDraft}
@@ -380,15 +454,22 @@ export function App() {
         return (
           <AutomationsPage
             apps={apps}
-            automations={automations}
             drafts={drafts}
+            automations={automations}
             loadError={automationError ?? loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'automation', existing: null, draft: null });
+              open({ kind: 'automation', existing: null, draft: null, app: null, handed: null, resumed: null });
             }}
             onEdit={(summary) => {
-              open({ kind: 'automation', existing: summary.automation, draft: null });
+              open({
+                kind: 'automation',
+                existing: summary.automation,
+                draft: null,
+                app: null,
+                handed: null,
+                resumed: null,
+              });
             }}
             onFinish={finish}
             onDeleteDraft={removeDraft}
@@ -402,10 +483,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onAdd={() => {
-              open({ kind: 'application', existing: null, draft: null });
+              open({ kind: 'application', existing: null, opener: null, resumed: null });
             }}
             onEdit={(app) => {
-              open({ kind: 'application', existing: app, draft: null });
+              open({ kind: 'application', existing: app, opener: null, resumed: null });
             }}
             onFinish={finish}
             onDeleteDraft={removeDraft}
@@ -419,10 +500,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'reference', existing: null, draft: null });
+              open({ kind: 'reference', existing: null, app: null, resumed: null });
             }}
             onEdit={(existing) => {
-              open({ kind: 'reference', existing, draft: null });
+              open({ kind: 'reference', existing, app: null, resumed: null });
             }}
             onFinish={finish}
             onDeleteDraft={removeDraft}
@@ -446,7 +527,7 @@ export function App() {
                 className="tab"
                 ref={id === askedFor ? control : undefined}
                 aria-current={page === id && flow === null ? 'page' : undefined}
-                disabled={held === 'saving'}
+                disabled={held === 'saving' || keeping}
                 onClick={() => {
                   pressTab(id);
                 }}
@@ -459,16 +540,16 @@ export function App() {
           {leaving === null || flow === null ? null : (
             <Question
               refs={refs}
-              label={canDraft ? `Leave this ${flow.kind}?` : 'Leave without saving?'}
+              label="Leave without saving?"
               keepLabel="Stay"
               actLabel="Leave"
-              busy={held === 'saving'}
+              busy={held === 'saving' || keeping}
               middle={
-                canDraft
+                question?.drafts === true
                   ? {
                       label: 'Save as draft',
                       onPress: () => {
-                        background(leaveWithDraft(leaving));
+                        background(leaveWithDrafts(leaving));
                       },
                     }
                   : undefined
@@ -481,7 +562,7 @@ export function App() {
                 goTo(leaving);
               }}
             >
-              {leaveError ?? (canDraft ? LOST[flow.kind] : 'Leave without saving? What it has set up is lost.')}
+              {leaveError ?? question?.text}
             </Question>
           )}
           <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />

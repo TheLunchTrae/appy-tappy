@@ -29,6 +29,7 @@ import { SIZE_CHANGES, SIZE_CHANGES_HINT, SIZE_CHANGE_TEXT } from '../lib/sizes.
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { DRAFT_HINT } from '../lib/hints.ts';
+import { Trail } from '../components/Trail.tsx';
 import { WindowsPanel, useWindowFits } from '../components/WindowsPanel.tsx';
 
 /** The setup as `resumed` keeps it, or else as `saved` has it, or a new application's. */
@@ -44,9 +45,13 @@ interface Props {
   readonly existing: AppSummary | null;
   /** The draft the editor finishes, or null. */
   readonly draft: Resumed | null;
+  /** The way to this editor, for its breadcrumb. */
+  readonly trail: readonly string[];
   readonly onCancel: () => void;
-  /** Closes the editor once the application or its draft is saved. */
-  readonly onSaved: () => void;
+  /** Hears the saved application's ID. */
+  readonly onSaved: (id: string) => void;
+  /** Closes the editor once its draft is saved or deleted. */
+  readonly onDrafted: () => void;
   /** Hears what leaving the editor would lose. */
   readonly onHeld: (held: Held) => void;
   /** Hears how to save the editor's draft. */
@@ -60,7 +65,16 @@ function choiceLabel(option: SizeChangesDef): string {
 }
 
 /** Adding an application, or changing one's name, how its window is found and how often that window changes size. */
-export function ApplicationEditor({ existing, draft: resumed, onCancel, onSaved, onHeld, onDraft }: Props) {
+export function ApplicationEditor({
+  existing,
+  draft: resumed,
+  trail,
+  onCancel,
+  onSaved,
+  onDrafted,
+  onHeld,
+  onDraft,
+}: Props) {
   const saved = existing?.file ?? null;
   const [start] = useState<AppSetup>(() => startAppSetup(saved, resumed));
   const [list, setList] = useState<WindowList | null>(null);
@@ -88,7 +102,7 @@ export function ApplicationEditor({ existing, draft: resumed, onCancel, onSaved,
     }),
     false,
     onDraft,
-    onSaved,
+    onDrafted,
   );
   const holds = held(busy || drafting.saving, start, setup);
   useReportHeld(onHeld, holds);
@@ -131,9 +145,9 @@ export function ApplicationEditor({ existing, draft: resumed, onCancel, onSaved,
     }
     setBusy(true);
     try {
-      await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges });
+      const id = await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges });
       await drafting.finished();
-      onSaved();
+      onSaved(id);
     } catch (error: unknown) {
       setSaveError(errorText(error));
     } finally {
@@ -141,10 +155,12 @@ export function ApplicationEditor({ existing, draft: resumed, onCancel, onSaved,
     }
   };
 
+  const heading = saved === null ? 'New application' : `Edit ${saved.name}`;
   return (
     <main className="page">
+      <Trail trail={trail} here={heading} />
       <div className="page-head">
-        <h1>{saved === null ? 'New application' : `Edit ${saved.name}`}</h1>
+        <h1>{heading}</h1>
         <span className="lead">Pick its window, then choose what has to match to find it again.</span>
         <div className="end">
           <button

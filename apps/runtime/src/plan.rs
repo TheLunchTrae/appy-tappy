@@ -385,6 +385,9 @@ mod tests {
     };
 
     fn value(id: &str, check: CheckDef) -> ValueDef {
+        // Setup guidance the plan never reads: each check that may have a
+        // reading area has one here, and plans as it does without.
+        let reading_area = check.reads_anywhere();
         ValueDef {
             id: id.to_owned(),
             name: format!("The {id}"),
@@ -401,6 +404,7 @@ mod tests {
                 },
                 check,
                 pin: None,
+                reading_area,
                 fixes: Vec::new(),
             },
         }
@@ -658,7 +662,9 @@ mod tests {
 
     #[test]
     fn clicks_keep_their_targets_and_pictures() {
-        use appytappy_config::automation_file::{ClickAtDef, ClickButtonDef, CornerDef, PointDef};
+        use appytappy_config::automation_file::{
+            ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef, PointDef,
+        };
         use appytappy_config::click::ClickAt;
         use appytappy_sources::screen::click::ClickSearch;
 
@@ -674,6 +680,7 @@ mod tests {
             automation.actions = vec![ActionDef::Click {
                 app: "target".to_owned(),
                 button: ClickButtonDef::Left,
+                delivery: ClickDeliveryDef::Cursor,
                 return_focus: true,
                 at,
             }];
@@ -819,6 +826,7 @@ mod tests {
                 image: sample_name("digits", 1),
                 text: "11".to_owned(),
             }],
+            expects: None,
         });
         let mut missing = example.clone();
         missing.references.clear();
@@ -830,7 +838,7 @@ mod tests {
         )]);
         let mut asked = Vec::new();
         let plan = compile(
-            &[stored("example", Ok(example))],
+            &[stored("example", Ok(example.clone()))],
             &automations,
             |app, name| {
                 asked.push(format!("{app}/{name}"));
@@ -840,6 +848,21 @@ mod tests {
         );
         assert_eq!(asked, ["example/ref-digits-1.png"]);
         assert_eq!(plan.problems, Vec::<String>::new());
+        // What the reference expects is setup guidance. Whatever a file
+        // holds there, even text no setup app would save, the file reads
+        // and the plan is the same.
+        for expected in ["0123456789", "11 ", "", &"x".repeat(5000)] {
+            let mut guided = example.clone();
+            guided.references[0].expects = Some(expected.to_owned());
+            let loaded = AppFile::parse(&guided.to_json()).map_err(|error| error.to_string());
+            let guided = compile(
+                &[stored("example", loaded)],
+                &automations,
+                |_, _| Ok(picture.clone()),
+                no_click_pictures,
+            );
+            assert_eq!(guided, plan, "{expected:?}");
+        }
         let plan = compile(
             &[stored("example", Ok(missing))],
             &automations,

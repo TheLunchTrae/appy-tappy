@@ -1,9 +1,10 @@
 //! Drafts: listing, saving, and deleting them, and taking a value's or a
 //! reference's screenshots back from its draft.
 
-use appytappy_sources::screen::Image;
+use appytappy_sources::screen::{Image, ImageError};
 
 use crate::drafts::{DraftDef, DraftSummary};
+use crate::screenshots::Screenshots;
 
 use super::Owner;
 use super::host::Host;
@@ -29,9 +30,12 @@ impl<H: Host> Owner<H> {
         let stores = self.stores()?;
         let pictures = if screenshots {
             self.screenshots
+                .slots()
                 .iter()
-                .map(Image::encode_png)
-                .collect::<Result<Vec<_>, _>>()
+                .enumerate()
+                .filter_map(|(index, slot)| Some((index, slot.as_ref()?)))
+                .map(|(index, image)| Ok((index, image.encode_png()?)))
+                .collect::<Result<Vec<_>, ImageError>>()
                 .map_err(|error| format!("A screenshot could not be kept: {error}."))?
         } else {
             Vec::new()
@@ -43,20 +47,21 @@ impl<H: Host> Owner<H> {
     }
 
     /// Makes the screenshots of the draft `id` this session's, in place of
-    /// any it took, so each keeps the index it had when the draft was saved.
-    /// Answers how many there are.
-    pub(crate) fn restore_draft_screenshots(&mut self, id: &str) -> Result<usize, String> {
+    /// any it took, each under the index it had when the draft was saved.
+    /// Answers those indexes, lowest first.
+    pub(crate) fn restore_draft_screenshots(&mut self, id: &str) -> Result<Vec<usize>, String> {
         let screenshots = self
             .stores()?
             .drafts
             .screenshots(id)
             .map_err(|error| error.to_string())?
-            .iter()
-            .map(|bytes| Image::decode_png(bytes))
-            .collect::<Result<Vec<_>, _>>()
+            .into_iter()
+            .map(|(index, bytes)| Ok((index, Image::decode_png(&bytes)?)))
+            .collect::<Result<Vec<_>, ImageError>>()
             .map_err(|error| format!("A screenshot of the draft cannot be read: {error}."))?;
-        self.screenshots = screenshots;
-        Ok(self.screenshots.len())
+        let indexes = screenshots.iter().map(|(index, _)| *index).collect();
+        self.screenshots = Screenshots::restored(screenshots);
+        Ok(indexes)
     }
 
     /// Deletes the draft `id`.
@@ -99,6 +104,9 @@ mod tests {
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
         assert_eq!(harness.ask(Owner::screenshot), Ok(1));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(2));
+        // A removed screenshot leaves its index empty, in the draft too.
+        assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[1])), Ok(()));
         let id = harness
             .ask(|owner| owner.save_draft(None, &value_draft(), true))
             .expect("saves");
@@ -117,17 +125,18 @@ mod tests {
         assert_eq!(harness.ask(|owner| owner.screenshot_pixels(0, 4)), None);
         assert_eq!(
             harness.ask(|owner| owner.restore_draft_screenshots(&id)),
-            Ok(2)
+            Ok(vec![0, 2])
         );
-        for index in [0, 1] {
+        for index in [0, 2] {
             assert_eq!(
                 harness.ask(|owner| owner.screenshot_pixels(index, 4)),
                 Some(pixels::rgba(&frame_image(), 4))
             );
         }
+        assert_eq!(harness.ask(|owner| owner.screenshot_pixels(1, 4)), None);
         assert_eq!(
             harness.ask(|owner| owner.restore_draft_screenshots(&without)),
-            Ok(0),
+            Ok(Vec::new()),
             "a draft without screenshots leaves none"
         );
 

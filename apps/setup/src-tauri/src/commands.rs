@@ -22,14 +22,18 @@ use tokio::sync::oneshot;
 
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
-use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::check_spec::bar::{BarDetection, BarMeasure};
+use crate::check_spec::{CheckSpec, ColorSpec, Label, RegionSpec};
 use crate::drafts::{DraftDef, DraftSummary};
+use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
-    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
+    FixSpec, FoundClick, FoundView, Live, Message, Owner, Reading, ReferenceSaveSpec, Run,
+    SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
+use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::window_list::{WindowFit, WindowList};
@@ -104,6 +108,13 @@ pub(crate) async fn screenshot(
         .map(pixels)
 }
 
+/// Removes the screenshots `indexes` names and releases their pixels, or
+/// says why it cannot.
+#[tauri::command]
+pub(crate) async fn remove_screenshots(app: AppHandle, indexes: Vec<usize>) -> Result<(), String> {
+    ask(&app, move |owner| owner.remove_screenshots(&indexes)).await?
+}
+
 /// What the steps in `selection` select on the screenshot `screenshot`;
 /// `None` when they leave nothing selected.
 #[tauri::command]
@@ -113,6 +124,46 @@ pub(crate) async fn select(
     selection: SelectionSpec,
 ) -> Result<Option<SelectionView>, String> {
     ask(&app, move |owner| owner.select(screenshot, &selection)).await?
+}
+
+/// The colors of the bar in `region`, drawn on screenshot `screenshot`.
+#[tauri::command]
+pub(crate) async fn detect_bar(
+    app: AppHandle,
+    region: RegionSpec,
+    screenshot: usize,
+) -> Result<BarDetection, String> {
+    ask(&app, move |owner| owner.detect_bar(region, screenshot)).await?
+}
+
+/// What a bar of the colors `filled` and `empty` reads in `region` on the
+/// screenshots.
+#[tauri::command]
+pub(crate) async fn measure_bar(
+    app: AppHandle,
+    region: RegionSpec,
+    screenshot: usize,
+    filled: ColorSpec,
+    empty: ColorSpec,
+) -> Result<BarMeasure, String> {
+    ask(&app, move |owner| {
+        owner.measure_bar(region, screenshot, filled, empty)
+    })
+    .await?
+}
+
+/// The pixels of `area` on the screenshot `screenshot` that `rule` takes.
+#[tauri::command]
+pub(crate) async fn match_pixels(
+    app: AppHandle,
+    screenshot: usize,
+    area: RegionSpec,
+    rule: MatchRule,
+) -> Result<MatchView, String> {
+    ask(&app, move |owner| {
+        owner.match_pixels(screenshot, area, rule)
+    })
+    .await?
 }
 
 /// Sets up the check the live reading uses.
@@ -190,6 +241,12 @@ pub(crate) async fn add_click_picture(
     .await?
 }
 
+/// Removes the click pictures no saved automation names.
+#[tauri::command]
+pub(crate) async fn forget_unsaved_click_pictures(app: AppHandle) -> Result<(), String> {
+    ask(&app, |owner| owner.forget_unsaved_click_pictures()).await?
+}
+
 /// The click picture `image`, at most `max_width` wide.
 #[tauri::command]
 pub(crate) async fn click_picture(
@@ -210,10 +267,23 @@ pub(crate) async fn find_click(app: AppHandle, at: ClickAtDef) -> Result<FoundCl
     ask(&app, move |owner| owner.find_click(&at)).await?
 }
 
+/// Sends the click `click` now, once, and answers the window it went to.
+#[tauri::command]
+pub(crate) async fn click_now(app: AppHandle, click: ClickSpec) -> Result<ClickSent, String> {
+    ask(&app, move |owner| owner.click_now(&click)).await?
+}
+
 /// The saved applications and their values.
 #[tauri::command]
 pub(crate) async fn list_apps(app: AppHandle) -> Result<Vec<AppSummary>, String> {
     ask(&app, Owner::apps).await?
+}
+
+/// The saved applications and the open windows, with the windows each
+/// application's match takes, from one listing of the desktop.
+#[tauri::command]
+pub(crate) async fn list_app_windows(app: AppHandle) -> Result<AppWindows, String> {
+    ask(&app, Owner::app_windows).await?
 }
 
 /// Saves an application's name and window match over the application
@@ -243,6 +313,32 @@ pub(crate) async fn remove_app(
 #[tauri::command]
 pub(crate) async fn save_value(app: AppHandle, spec: SaveSpec) -> Result<SavedValue, String> {
     ask(&app, move |owner| owner.save(&spec)).await?
+}
+
+/// Reads the live frame with a saved value as `spec` edits it, and answers
+/// what saving the edit would do. Nothing is saved.
+#[tauri::command]
+pub(crate) async fn try_edit(app: AppHandle, spec: EditSpec) -> Result<EditPreview, String> {
+    ask(&app, move |owner| owner.try_edit(&spec)).await?
+}
+
+/// Saves a saved value as `spec` edits it, under the ID it has, and
+/// removes the fixes at the window sizes `drop_fixes`, which must be
+/// exactly the ones the edit leaves unusable.
+#[tauri::command]
+pub(crate) async fn edit_value(
+    app: AppHandle,
+    spec: EditSpec,
+    drop_fixes: Vec<SizeDef>,
+) -> Result<SavedValue, String> {
+    ask(&app, move |owner| owner.edit_value(&spec, &drop_fixes)).await?
+}
+
+/// The size of the picked window on its newest frame, or `None` before one
+/// arrived.
+#[tauri::command]
+pub(crate) async fn window_size(app: AppHandle) -> Result<Option<SizeDef>, String> {
+    ask(&app, |owner| owner.window_size()).await
 }
 
 /// Where the saved value `value` of the application `application` starts
@@ -456,22 +552,47 @@ pub(crate) async fn start_recording(
     .await?
 }
 
-/// Stops the recording, keeping its readings for review.
+/// Stops the recording, of readings or of looks, keeping what it recorded.
 #[tauri::command]
 pub(crate) async fn stop_recording(app: AppHandle) -> Result<(), String> {
     ask(&app, Owner::stop_recording).await
 }
 
-/// Forgets the recording and its readings.
+/// Forgets the recording, of readings or of looks.
 #[tauri::command]
 pub(crate) async fn discard_recording(app: AppHandle) -> Result<(), String> {
     ask(&app, Owner::discard_recording).await
 }
 
-/// The recording and its readings so far; `None` without one.
+/// The recording of readings and its readings so far; `None` without one.
 #[tauri::command]
 pub(crate) async fn recording_state(app: AppHandle) -> Result<Option<RecordingView>, String> {
     ask(&app, |owner| owner.recording_state()).await
+}
+
+/// Records the looks of `region` of the picked window, drawn on
+/// `screenshot`, keeping a screenshot of each look no screenshot shows yet,
+/// in place of any recording.
+#[tauri::command]
+pub(crate) async fn start_look_recording(
+    app: AppHandle,
+    region: RegionSpec,
+    tolerance: u8,
+    screenshot: usize,
+) -> Result<(), String> {
+    ask(&app, move |owner| {
+        owner.start_look_recording(region, tolerance, screenshot)
+    })
+    .await?
+}
+
+/// The recording of looks and the screenshots it kept so far; `None`
+/// without one.
+#[tauri::command]
+pub(crate) async fn look_recording_state(
+    app: AppHandle,
+) -> Result<Option<LookRecordingView>, String> {
+    ask(&app, |owner| owner.look_recording_state()).await
 }
 
 /// A recorded reading, at most `max_width` wide; no bytes for an unknown
@@ -495,6 +616,63 @@ pub(crate) async fn review_problems(
     spec: CheckSpec,
 ) -> Result<Vec<Option<String>>, String> {
     ask(&app, move |owner| owner.review_problems(&spec)).await?
+}
+
+/// Finds text like what `region` of screenshot `screenshot` shows, in the
+/// characters' color and at their size, elsewhere on that screenshot and
+/// away from `added`, in place of any earlier search.
+#[tauri::command]
+pub(crate) async fn find_like(
+    app: AppHandle,
+    screenshot: usize,
+    region: RegionSpec,
+    added: Vec<RegionSpec>,
+    ink: ColorSpec,
+    tolerance: u8,
+) -> Result<FoundView, String> {
+    ask(&app, move |owner| {
+        owner.find_like(screenshot, region, &added, ink, tolerance)
+    })
+    .await?
+}
+
+/// The search and the text read for each find so far; `None` without one.
+#[tauri::command]
+pub(crate) async fn found_state(app: AppHandle) -> Result<Option<FoundView>, String> {
+    ask(&app, |owner| owner.found_state()).await
+}
+
+/// A find of search `search`, at most `max_width` wide; no bytes for an
+/// unknown index or a search that was replaced.
+#[tauri::command]
+pub(crate) async fn found_picture(
+    app: AppHandle,
+    search: u64,
+    index: usize,
+    max_width: u32,
+) -> Result<Response, String> {
+    ask(&app, move |owner| {
+        owner.found_pixels(search, index, max_width)
+    })
+    .await
+    .map(pixels)
+}
+
+/// Forgets the search.
+#[tauri::command]
+pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
+    ask(&app, Owner::forget_found).await
+}
+
+/// Why the reference `spec` teaches cannot learn each of `found`, in
+/// order: `None` for one it can.
+#[tauri::command]
+pub(crate) async fn found_problems(
+    app: AppHandle,
+    spec: CheckSpec,
+    found: Vec<Label>,
+) -> Result<Vec<Option<String>>, String> {
+    ask(&app, move |owner| owner.found_problems(&spec, &found)).await?
 }
 
 /// The saved settings, or the defaults and why the file cannot be read.
@@ -554,10 +732,13 @@ pub(crate) async fn save_draft(
     .await?
 }
 
-/// Makes the screenshots of the draft `id` this session's, and answers how
-/// many there are.
+/// Makes the screenshots of the draft `id` this session's, and answers the
+/// index each has.
 #[tauri::command]
-pub(crate) async fn restore_draft_screenshots(app: AppHandle, id: String) -> Result<usize, String> {
+pub(crate) async fn restore_draft_screenshots(
+    app: AppHandle,
+    id: String,
+) -> Result<Vec<usize>, String> {
     ask(&app, move |owner| owner.restore_draft_screenshots(&id)).await?
 }
 

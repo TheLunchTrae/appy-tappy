@@ -53,8 +53,25 @@ pub enum ActionError {
     /// in the named application's window, such as while another window
     /// confines the cursor.
     CursorBlocked(String),
+    /// A click sent as messages was not sent, because its place in the
+    /// named application's window is not in a window's client area, such as
+    /// on a title bar, a border, or a scroll bar, or is too far in for a
+    /// mouse message to name.
+    Unreachable(String),
+    /// A click sent as messages was not sent, because the named
+    /// application's window is disabled and takes no input, as while it
+    /// shows a dialog.
+    WindowDisabled(String),
+    /// A click sent as messages was not sent, because the named
+    /// application's windows took too long to answer where its place is on
+    /// them.
+    TooSlow(String),
+    /// A click sent as messages was not sent, because Windows blocks
+    /// messages to the named application's window: its program runs with
+    /// more rights than AppyTappy, as one started as administrator does.
+    MessageBlocked(String),
     /// A click reached the journal without a place: the runtime places
-    /// clicks and runs them through [`crate::Actions::click`].
+    /// clicks and runs them through [`crate::click`].
     Unplaced,
     /// The click landed, but the window that was in front did not get the
     /// focus back.
@@ -101,6 +118,26 @@ impl fmt::Display for ActionError {
                 formatter,
                 "the click did not click, because the cursor could not reach its place in {target}"
             ),
+            Self::Unreachable(target) => write!(
+                formatter,
+                "the click was not sent, because a click sent to the window cannot land at its \
+                 place in {target}, such as on a title bar, a border, or a scroll bar"
+            ),
+            Self::WindowDisabled(target) => write!(
+                formatter,
+                "the click was not sent, because {target}'s window takes no clicks now, as \
+                 while it shows a dialog"
+            ),
+            Self::TooSlow(target) => write!(
+                formatter,
+                "the click was not sent, because {target}'s windows took too long to answer where \
+                 its place is on them"
+            ),
+            Self::MessageBlocked(target) => write!(
+                formatter,
+                "the click was not sent, because Windows blocks messages to {target}, which runs \
+                 with more rights than AppyTappy, as a program started as administrator does"
+            ),
             Self::Unplaced => formatter.write_str("the click was not placed on the screen"),
             Self::FocusNotReturned => formatter.write_str(
                 "the click landed, but Windows did not give the focus back to the window that was in front",
@@ -126,6 +163,10 @@ impl Error for ActionError {
             | Self::HeldDown
             | Self::NotBroughtToFront(_)
             | Self::CursorBlocked(_)
+            | Self::Unreachable(_)
+            | Self::WindowDisabled(_)
+            | Self::TooSlow(_)
+            | Self::MessageBlocked(_)
             | Self::Unplaced
             | Self::FocusNotReturned => None,
         }
@@ -176,6 +217,22 @@ mod tests {
             (
                 ActionError::CursorBlocked("Target App".to_owned()),
                 "reach its place in Target App",
+            ),
+            (
+                ActionError::Unreachable("Target App".to_owned()),
+                "cannot land at its place in Target App",
+            ),
+            (
+                ActionError::WindowDisabled("Target App".to_owned()),
+                "Target App's window takes no clicks now",
+            ),
+            (
+                ActionError::TooSlow("Target App".to_owned()),
+                "Target App's windows took too long",
+            ),
+            (
+                ActionError::MessageBlocked("Target App".to_owned()),
+                "blocks messages to Target App",
             ),
             (ActionError::Unplaced, "not placed"),
         ] {

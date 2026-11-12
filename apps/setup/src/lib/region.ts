@@ -63,33 +63,48 @@ export function fromCorners(start: Point, end: Point, bounds: Size): Rect | null
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-/** The corner opposite `corner`, which stays put while `corner` is dragged. */
-function opposite(rect: Rect, corner: Corner): Point {
-  const right = rect.x + rect.width;
-  const bottom = rect.y + rect.height;
+/** The corner across the rectangle from `corner`, which stays put while `corner` is dragged. */
+export function across(corner: Corner): Corner {
   switch (corner) {
     case 'nw':
-      return { x: right, y: bottom };
+      return 'se';
     case 'ne':
-      return { x: rect.x, y: bottom };
+      return 'sw';
     case 'sw':
-      return { x: right, y: rect.y };
+      return 'ne';
     case 'se':
-      return { x: rect.x, y: rect.y };
+      return 'nw';
   }
 }
 
-/** `rect` with `corner` dragged to `to`, or `rect` itself when that would cover no pixel. */
-export function dragCorner(rect: Rect, corner: Corner, to: Point, bounds: Size): Rect {
-  return fromCorners(opposite(rect, corner), to, bounds) ?? rect;
+/** Where `corner` of `rect` is. */
+export function cornerAt(rect: Rect, corner: Corner): Point {
+  return {
+    x: corner === 'nw' || corner === 'sw' ? rect.x : rect.x + rect.width,
+    y: corner === 'nw' || corner === 'ne' ? rect.y : rect.y + rect.height,
+  };
 }
 
-/** `rect` moved by (`dx`, `dy`) whole pixels, stopping at the edges of `bounds`. */
+/**
+ * `rect` moved by (`dx`, `dy`) whole pixels, stopping at the edges of `bounds`. A rectangle wider or taller than
+ * `bounds` is cut to it, so the result always lies inside.
+ */
 export function moveRect(rect: Rect, dx: number, dy: number, bounds: Size): Rect {
+  const width = Math.min(rect.width, bounds.width);
+  const height = Math.min(rect.height, bounds.height);
   return {
-    ...rect,
-    x: clamp(rect.x + Math.round(dx), 0, Math.max(bounds.width - rect.width, 0)),
-    y: clamp(rect.y + Math.round(dy), 0, Math.max(bounds.height - rect.height, 0)),
+    x: clamp(rect.x + Math.round(dx), 0, bounds.width - width),
+    y: clamp(rect.y + Math.round(dy), 0, bounds.height - height),
+    width,
+    height,
+  };
+}
+
+/** The pixel of a `bounds`-sized picture under `point`, or the nearest one when `point` is on or past its far edge. */
+export function pixelAt(point: Point, bounds: Size): Point {
+  return {
+    x: clamp(Math.floor(point.x), 0, Math.max(bounds.width - 1, 0)),
+    y: clamp(Math.floor(point.y), 0, Math.max(bounds.height - 1, 0)),
   };
 }
 
@@ -115,5 +130,36 @@ export function toPicture(point: Point, shown: Size, picture: Size): Point {
   return {
     x: (point.x * picture.width) / shown.width,
     y: (point.y * picture.height) / shown.height,
+  };
+}
+
+/** `point`, in a picture's own pixels, measured on the picture drawn at `shown` size. */
+export function fromPicture(point: Point, shown: Size, picture: Size): Point {
+  if (picture.width <= 0 || picture.height <= 0) {
+    return { x: 0, y: 0 };
+  }
+  return {
+    x: (point.x * shown.width) / picture.width,
+    y: (point.y * shown.height) / picture.height,
+  };
+}
+
+/** Where a region's label goes, and which of the box's sides it lines up with. */
+export interface TagPlace {
+  readonly side: 'above' | 'below' | 'inside';
+  readonly align: 'left' | 'right';
+}
+
+/**
+ * Where the label of `rect` goes on a picture drawn at `scale`, when the label needs `room` drawn pixels: above the
+ * box where the picture has that room, else below it, and inside it only when neither side has room. It lines up
+ * with the box's side that is farther from the picture's edge, so it stays over the picture.
+ */
+export function tagPlace(rect: Rect, picture: Size, scale: number, room: number): TagPlace {
+  const above = rect.y * scale;
+  const below = (picture.height - rect.y - rect.height) * scale;
+  return {
+    side: above >= room ? 'above' : below >= room ? 'below' : 'inside',
+    align: rect.x + rect.width / 2 <= picture.width / 2 ? 'left' : 'right',
   };
 }

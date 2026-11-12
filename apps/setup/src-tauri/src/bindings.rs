@@ -39,11 +39,11 @@ use appytappy_config::action::{
     OpenTarget, SoundFile,
 };
 use appytappy_config::app_file::{
-    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
+    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef, is_label_character,
 };
 use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, CornerDef, MAX_COOLDOWN_MS,
-    MediaCommandDef, WhenDef,
+    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
+    MAX_COOLDOWN_MS, MediaCommandDef, WhenDef,
 };
 use appytappy_config::click::{MAX_SEARCH_PIXELS, Spot};
 use appytappy_config::settings_file::{
@@ -60,16 +60,22 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
-use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::check_spec::bar::{BarDetection, BarMeasure};
+use crate::check_spec::{
+    CheckSpec, ColorSpec, Label, MAX_EXPECTED_CHARACTERS, RegionSpec, expected_characters,
+};
 use crate::drafts::{DraftDef, DraftSummary};
+use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
-    AppSummary, ClickPictureView, FixSpec, FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec,
-    SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
+    FoundClick, FoundView, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId,
+    SavedValue,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
+use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::updates::UpdateOffer;
@@ -465,6 +471,7 @@ fn sample_actions() -> Vec<ActionDef> {
         ActionDef::Click {
             app: "app".to_owned(),
             button: ClickButtonDef::Left,
+            delivery: ClickDeliveryDef::Cursor,
             return_focus: true,
             at: ClickAtDef::Spot {
                 corner: CornerDef::TopLeft,
@@ -543,6 +550,40 @@ fn cases(samples: &[String], parse: impl Fn(&str) -> Option<String>) -> serde_js
         .iter()
         .map(|text| json!({ "text": text, "read": parse(text) }))
         .collect()
+}
+
+/// Texts whose characters a page could count differently from the Rust
+/// side: white space beyond ASCII, such as the next line character and the
+/// ideographic space; a byte order mark and a zero width space, which are
+/// not white space; control characters; a combining mark; and characters
+/// outside the Basic Multilingual Plane, which UTF-16 sorts before the
+/// fullwidth forms. The last two hold as many characters as a reference
+/// expects, and one more.
+fn character_samples() -> Vec<String> {
+    let distinct = |count: usize| ('\u{100}'..).take(count).collect::<String>();
+    let mut samples: Vec<String> = [
+        "87.5%",
+        " 1 2\t3\n",
+        "%10 0%",
+        "Aa",
+        "",
+        "   ",
+        "1\u{85}2",
+        "\u{feff}12",
+        "1\u{3000}2\u{a0}3",
+        "\u{2028}x\u{2029}\u{200b}",
+        "e\u{301}",
+        "\u{1d7d9}z\u{ff11}9\u{1f600}",
+        "1\u{7}2\u{7f}\u{9f}",
+    ]
+    .iter()
+    .map(|&text| text.to_owned())
+    .collect();
+    samples.extend([
+        distinct(MAX_EXPECTED_CHARACTERS),
+        distinct(MAX_EXPECTED_CHARACTERS.checked_add(1).expect("small")),
+    ]);
+    samples
 }
 
 /// The samples the parsers read, one for each way they accept or refuse,
@@ -739,6 +780,12 @@ fn parse_cases() -> serde_json::Value {
             .ok()
             .map(|()| text.to_owned())
         }),
+        "labelCharacters": cases(&character_samples(), |text| {
+            Some(text.chars().filter(|&character| is_label_character(character)).collect())
+        }),
+        "expectedCharacters": cases(&character_samples(), |text| {
+            expected_characters(text).ok().map(Option::unwrap_or_default)
+        }),
         "spotPlacement": spot_cases(),
     })
 }
@@ -841,6 +888,7 @@ fn constants() -> String {
         "maxActionAppBytes": MAX_APP_NAME_LEN,
         "maxCooldownMs": MAX_COOLDOWN_MS,
         "maxStates": MAX_STATES,
+        "maxExpectedCharacters": MAX_EXPECTED_CHARACTERS,
         "maxTargetBytes": MAX_TARGET_LEN,
         "maxTraceFileMb": MAX_TRACE_FILE_MB,
         "maxTraceFiles": MAX_TRACE_FILES,
@@ -871,7 +919,7 @@ fn constants() -> String {
     });
     [
         format!(
-            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states, the settings' ranges, the highest tolerance, and the most pixels a click's search area holds, as the\n * saved files take them.\n */\nexport const LIMITS = {} as const;\n",
+            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most\n * pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
             literal(&limits)
         ),
         format!(
@@ -903,7 +951,7 @@ fn constants() -> String {
             literal(&trace_categories())
         ),
         format!(
-            "/**\n * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it\n * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read\n * each the same.\n */\nexport const PARSE_CASES = {} as const;\n",
+            "/**\n * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts, app names, labels and expected\n * characters: the text it keeps, or null when it refuses one; and where sample spots land in sample windows. The\n * page's own checks must read each the same.\n */\nexport const PARSE_CASES = {} as const;\n",
             literal(&parse_cases())
         ),
         format!(

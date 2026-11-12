@@ -143,45 +143,6 @@ export function sentence(text: string): string {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
-/**
- * Whether the application `name` reads the picked window `handle`, as the value picker says it. A new session reads
- * only the window marked best, so a value drawn on any other window would never be read. `titleOf` names an open
- * window.
- */
-export function pickedStatus(
-  name: string,
-  handle: number,
-  fits: readonly WindowFit[] | null,
-  error: string | null,
-  titleOf: (handle: number) => string | null,
-): { readonly text: string; readonly ok: boolean } {
-  if (error !== null) {
-    return {
-      text: `Couldn't check whether ${name} finds this window: ${sentence(error)} Refresh windows to try again.`,
-      ok: false,
-    };
-  }
-  if (fits === null) {
-    return { text: `Checking whether ${name} finds this window…`, ok: false };
-  }
-  const read = fits.find((fit) => fit.best);
-  if (read?.handle === handle) {
-    return { text: `${name} reads this window.`, ok: true };
-  }
-  const change = `change how ${name} is found on the Applications page`;
-  if (fits.length === 0) {
-    return {
-      text: `${name} doesn't find this window, so the value would never be read. Pick another window, or ${change}.`,
-      ok: false,
-    };
-  }
-  const other = read === undefined ? null : titleOf(read.handle);
-  return {
-    text: `${name} reads ${other === null ? 'another window' : `“${other}”`} instead, so the value would never be read here. Pick that window, or ${change}.`,
-    ok: false,
-  };
-}
-
 /** What the application editor sets up, which a draft of an application keeps. */
 export interface AppSetup {
   readonly name: string;

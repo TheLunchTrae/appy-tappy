@@ -1,26 +1,107 @@
 name: Release
 
-# Builds the Windows installer. A pushed v* tag signs it for the updater when
-# the repository has the update key, attests where it was built, and
-# publishes it as a GitHub release. A manual
-# run on any branch or tag keeps it as a test build in the run's artifacts,
-# without an attestation. Nothing else starts it. wiki/Installer.md
-# describes the builds and the update key.
+# Builds the Windows installer from a manual run, and only from one.
+# With Publish off, the default, the installer is a test build in the run's
+# artifacts, from any branch, with no signature or attestation. With Publish
+# on, a run on main releases the workspace version from Cargo.toml: it signs
+# the installer for the updater when the repository has the update key,
+# attests where it was built, tags the built commit and publishes the GitHub
+# release. Pre-release marks that release as a pre-release, which the updater
+# skips. wiki/Installer.md describes the builds, the update key, and the
+# settings the release relies on.
+run-name: ${{ inputs.publish && (inputs.prerelease && 'Pre-release' || 'Release') || 'Test build' }} of ${{ github.ref_name }}
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a release of the version in Cargo.toml (main only)
+        type: boolean
+        default: false
+      prerelease:
+        description: Mark the published release as a pre-release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# Releases from main run one at a time, so two runs cannot publish one
+# version. Test builds, and publishing runs off main that prepare stops, queue
+# only behind runs of the same branch.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.publish && github.ref == 'refs/heads/main' && 'publish' || github.ref }}
 
 jobs:
+  # Names the release and, for a publishing run, stops before the build when
+  # it cannot publish: off main, or with the version already released or
+  # tagged at another commit. A tag at this commit is a run that failed after
+  # tagging, so a re-run picks it up.
+  prepare:
+    name: prepare
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Check out Cargo.toml
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: /Cargo.toml
+          sparse-checkout-cone-mode: false
+      # The same reading as the installer:build task, which also fails a
+      # release build whose tag does not name this version.
+      - name: Read the version
+        id: version
+        run: |
+          set -eu
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          [ -n "$version" ] || { echo "::error::Cargo.toml has no workspace version"; exit 1; }
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+      - name: Check that the release is new
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -eu
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::A release publishes only from main; run this on main or turn Publish off for a test build."
+            exit 1
+          fi
+          # Prints the response, or nothing for a 404; fails on any other error.
+          lookup() {
+            if out=$(gh api "$1" 2>&1); then
+              printf '%s' "$out"
+            else
+              case $out in
+                *"(HTTP 404)"*) ;;
+                *) printf '%s\n' "$out" >&2; return 1 ;;
+              esac
+            fi
+          }
+          release=$(lookup "repos/$GH_REPO/releases/tags/$TAG")
+          if [ -n "$release" ]; then
+            echo "::error::$TAG is already released. Bump the workspace version in Cargo.toml for a new release."
+            exit 1
+          fi
+          ref=$(lookup "repos/$GH_REPO/git/ref/tags/$TAG")
+          if [ -n "$ref" ]; then
+            commit=$(gh api "repos/$GH_REPO/commits/refs/tags/$TAG" --jq .sha)
+            if [ "$commit" != "$GITHUB_SHA" ]; then
+              echo "::error::$TAG already tags $commit, not $GITHUB_SHA. Bump the workspace version in Cargo.toml for a new release."
+              exit 1
+            fi
+            echo "::notice::$TAG already tags this commit, so this run publishes it."
+          fi
+      - name: Note the unused pre-release input
+        if: inputs.prerelease && !inputs.publish
+        run: echo "::warning::Pre-release applies only to a published release, so this test build ignores it."
+
   installer:
     name: installer
+    needs: prepare
     runs-on: windows-2025
     timeout-minutes: 60
     outputs:
@@ -44,7 +125,7 @@ jobs:
           cache: true
       - name: Build the installer
         env:
-          INSTALLER_TAG: ${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name || '' }}
+          INSTALLER_TAG: ${{ inputs.publish && needs.prepare.outputs.tag || '' }}
           # The update key's public half. The setup app checks for updates only
           # when the build has it.
           UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
@@ -63,15 +144,15 @@ jobs:
   # Signs the installer for the updater and writes latest.json, which the
   # setup app reads to find a newer release. Only this job gets the update
   # key's private half, so nothing that builds the installer can read it. The
-  # half lives in the update-signing environment, which only v* tags can
-  # deploy to. A repository without the update key skips it, and the release
-  # then carries no latest.json.
+  # half lives in the release environment, which only main can deploy to, and
+  # this job runs only when publishing. A repository without the update key
+  # skips it, and the release then carries no latest.json.
   sign:
     name: sign
-    needs: installer
-    if: github.event_name == 'push' && github.ref_type == 'tag' && vars.UPDATER_PUBLIC_KEY != ''
+    needs: [prepare, installer]
+    if: inputs.publish && vars.UPDATER_PUBLIC_KEY != ''
     runs-on: ubuntu-26.04
-    environment: update-signing
+    environment: release
     timeout-minutes: 10
     outputs:
       artifact-id: ${{ steps.keep.outputs.artifact-id }}
@@ -102,7 +183,7 @@ jobs:
         run: mise run ui:install
       - name: Sign the update
         env:
-          INSTALLER_TAG: ${{ github.ref_name }}
+          INSTALLER_TAG: ${{ needs.prepare.outputs.tag }}
           UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -122,13 +203,16 @@ jobs:
 
   release:
     name: release
-    needs: [installer, sign]
+    needs: [prepare, installer, sign]
     # Runs after a skipped sign job too, for a repository without the update
     # key, but not after a failed one or a cancelled run.
     if: >-
-      !cancelled() && github.event_name == 'push' && github.ref_type == 'tag' &&
+      !cancelled() && inputs.publish && github.ref == 'refs/heads/main' &&
       needs.installer.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped')
     runs-on: ubuntu-26.04
+    # The same environment as the sign job, so only main can publish. This job
+    # reads none of its secrets.
+    environment: release
     timeout-minutes: 10
     permissions:
       contents: write
@@ -151,7 +235,30 @@ jobs:
       - name: Warn about the missing update key
         if: needs.sign.result == 'skipped'
         run: echo "::warning::The repository has no UPDATER_PUBLIC_KEY variable, so this release's setup app does not check for updates and the release has no latest.json."
-      # Records the workflow, commit, and tag that built the installer, so
+      # The tag comes first, on the commit the installer was built from, so a
+      # ruleset that blocks it stops the run before any attestation or release
+      # exists. A tag already on this commit, from a run that failed after
+      # tagging, is kept.
+      - name: Tag the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -eu
+          if out=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --silent 2>&1); then
+            commit=$(gh api "repos/$GH_REPO/commits/refs/tags/$TAG" --jq .sha)
+            if [ "$commit" != "$GITHUB_SHA" ]; then
+              echo "::error::$TAG already tags $commit, not $GITHUB_SHA."
+              exit 1
+            fi
+          else
+            case $out in
+              *"(HTTP 404)"*) gh api "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA" --silent ;;
+              *) printf '%s\n' "$out" >&2; exit 1 ;;
+            esac
+          fi
+      # Records the workflow, commit, and branch that built the installer, so
       # `gh attestation verify` can check a download against this repository.
       - name: Attest the installer
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -161,9 +268,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -eu
           set -- installer/*-setup.exe
           [ ! -f update/latest.json ] || set -- "$@" update/latest.json
+          [ "$PRERELEASE" != true ] || set -- "$@" --prerelease
           gh release create "$TAG" "$@" --title "AppyTappy $TAG" --generate-notes --verify-tag

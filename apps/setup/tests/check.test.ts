@@ -6,6 +6,7 @@ import {
   buildSpec,
   DEFAULT_TOLERANCE,
   EMPTY_DRAFT,
+  findBlocked,
   fixDraft,
   fromReference,
   newestOfSize,
@@ -15,6 +16,7 @@ import {
   settingsDiffer,
   stateOn,
   toReference,
+  withFixRegion,
   withKind,
   withoutState,
   withState,
@@ -197,6 +199,24 @@ describe('buildCharacters', () => {
     });
   });
 
+  test('teaches found text after the labeled screenshots, each at its own region', () => {
+    const found = { x: 40, y: 50, width: 30, height: 12 };
+    const draft = {
+      ...EMPTY_DRAFT,
+      region,
+      drawnOn: 0,
+      ink: red,
+      labels: new Map([[0, '87%']]),
+      found: [{ screenshot: 0, region: found, text: '93.4%' }],
+    };
+    const built = buildCharacters(draft, null);
+    expect(built.ok && built.spec.labels).toEqual([
+      { screenshot: 0, text: '87%' },
+      { screenshot: 0, region: found, text: '93.4%' },
+    ]);
+    expect(buildCharacters({ ...draft, labels: new Map() }, null).ok).toBe(true);
+  });
+
   test('teaches kept recorded readings alone, in reading order', () => {
     const draft = {
       ...EMPTY_DRAFT,
@@ -295,6 +315,7 @@ describe('the reference editor', () => {
       region: taught,
       drawnOn: 3,
       labels: new Map([[0, '100%']]),
+      found: [{ screenshot: 0, region: taught, text: '99%' }],
     };
     expect(fromReference(editor, { region, drawnOn: 0 })).toEqual({
       ...editor,
@@ -302,6 +323,7 @@ describe('the reference editor', () => {
       drawnOn: 0,
       labels: new Map(),
       recorded: new Map(),
+      found: [],
     });
   });
 });
@@ -358,6 +380,22 @@ test("recording waits for a drawn region and the characters' color", () => {
   expect(recordBlocked({ ...ready, ink: null })).toBe("Pick the characters' color to record.");
 });
 
+test('finding more like it waits for a drawn region, the color, and a screenshot of the size it was drawn at', () => {
+  const ready = { ...EMPTY_DRAFT, region, drawnOn: 0, ink: red };
+  const size = { width: 800, height: 600 };
+  const drawFirst = 'Draw the region around one sample on a screenshot first.';
+  expect(findBlocked(ready, size, size)).toBeNull();
+  expect(findBlocked({ ...ready, region: null }, size, size)).toBe(drawFirst);
+  // A saved value's region starts with no screenshot drawn on, so its pixels may be another size's.
+  expect(findBlocked({ ...ready, drawnOn: null }, size, size)).toBe(drawFirst);
+  expect(findBlocked(ready, null, size)).toBe(drawFirst);
+  expect(findBlocked({ ...ready, ink: null }, size, size)).toBe("Pick the characters' color first.");
+  const other = 'Show a screenshot at 800 × 600, the size the region was drawn at, to search it.';
+  expect(findBlocked(ready, size, { width: 800, height: 601 })).toBe(other);
+  expect(findBlocked(ready, size, { width: 801, height: 600 })).toBe(other);
+  expect(findBlocked(ready, size, null)).toBe(other);
+});
+
 describe('fixDraft', () => {
   test("starts from the saved check's kind and settings, with no region", () => {
     expect(fixDraft({ kind: 'number', reference: 'percent', whole: true })).toEqual({
@@ -378,6 +416,15 @@ describe('fixDraft', () => {
       tolerance: 7,
       color: red,
     });
+  });
+
+  test('starts its region where the value reads on its first screenshot, unless one is drawn', () => {
+    const draft = fixDraft({ kind: 'barFill', filled: red, empty: gray });
+    expect(withFixRegion(draft, region, 2)).toEqual({ ...draft, region, drawnOn: 2 });
+    // Scaled past the window, the value reads nowhere there.
+    expect(withFixRegion(draft, null, 2)).toBe(draft);
+    const drawn = { ...draft, region: { ...region, x: 9 }, drawnOn: 5 };
+    expect(withFixRegion(drawn, region, 2)).toBe(drawn);
   });
 
   test('names the states taken at the new size after the saved ones, in order', () => {

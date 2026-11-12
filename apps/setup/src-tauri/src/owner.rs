@@ -5,7 +5,7 @@
 //! A command sends a [`Run`], work that runs on this thread with the state
 //! and answers on a oneshot channel. The state is
 //! the picked window's capture, its newest frame, the session's screenshots,
-//! and the check the user is setting up.
+//! what it records, and the check the user is setting up.
 //!
 //! This file keeps the state and the thread's loop, and the one way each
 //! save of an application reaches the runtime, the overlays and their
@@ -17,12 +17,17 @@ mod automations;
 mod capture;
 mod clicks;
 mod drafts;
+mod edits;
 mod fixes;
+mod found;
 mod host;
+mod looks;
 mod messages;
 mod overlays;
 mod recording;
 mod references;
+#[cfg(test)]
+mod retention;
 mod settings;
 #[cfg(test)]
 mod test_support;
@@ -42,16 +47,18 @@ use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::check_spec::{Pictures, RegionCheck};
 use crate::overlay::{Overlays, Purpose};
-use crate::recording::{Recording, ocr};
+use crate::recording::{Recorder, ocr};
+use crate::screenshots::Screenshots;
 use crate::stores::{SavedApp, Stores};
 use crate::updates::Downloaded;
 
-pub(crate) use self::clicks::{ClickPictureView, FoundClick};
+pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
+pub(crate) use self::found::FoundView;
 pub(crate) use self::host::{Desktop, Host};
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, FixSpec, Live, Message, Reading, ReferenceSaveSpec, Run, SaveSpec,
-    SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading,
+    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use self::watch::Watched;
 
@@ -80,13 +87,20 @@ pub(crate) struct Owner<H: Host> {
     latest: Option<Image>,
     /// Why the picked window's capture failed, until a good frame arrives.
     failure: Option<CaptureFailure>,
-    screenshots: Vec<Image>,
+    screenshots: Screenshots,
     check: Option<RegionCheck>,
-    /// The region the user records, with the readings it showed.
-    recording: Option<Recording>,
-    /// Counts recordings, so text read for one the user discarded or
-    /// replaced is dropped.
+    /// What the capture records: the readings a number's region shows or
+    /// the looks a value's region shows, one recording at a time.
+    recording: Option<Recorder>,
+    /// Counts recordings of both kinds, so text read for one the user
+    /// discarded or replaced is dropped.
     recording_id: u64,
+    /// The text found like a reference's sample, until the user adds it or
+    /// moves on.
+    found: Option<found::Found>,
+    /// Counts searches, so text read for one the user dismissed or replaced
+    /// is dropped.
+    search_id: u64,
     /// Sends new readings to the text reader's thread.
     ocr: Sender<ocr::Job>,
     /// The saved value the automation editor watches.
@@ -121,10 +135,12 @@ impl<H: Host> Owner<H> {
             session: None,
             latest: None,
             failure: None,
-            screenshots: Vec::new(),
+            screenshots: Screenshots::new(),
             check: None,
             recording: None,
             recording_id: 0,
+            found: None,
+            search_id: 0,
             ocr,
             watched: None,
             overlays: Overlays::new(Purpose::Overlay),
@@ -153,13 +169,17 @@ impl<H: Host> Owner<H> {
                 text,
             } => {
                 if let Some(current) = self
-                    .recording
-                    .as_mut()
+                    .readings_mut()
                     .filter(|current| current.id == recording)
                 {
                     current.read(index, text);
                 }
             },
+            Message::FoundText {
+                search,
+                index,
+                text,
+            } => self.found_text(search, index, text),
             Message::CaptureFailed {
                 generation,
                 failure,
@@ -273,16 +293,18 @@ impl<H: Host> Owner<H> {
     }
 
     /// Writes `write` to the folder of the application `app`, then tells who
-    /// reads what `changed` names, opens or closes the overlay windows to
-    /// match when `changed` can change which show, and removes the pictures
-    /// a saved file no longer names. Answers why an overlay window could not
-    /// open or close, if one could not.
+    /// reads what `changed` names, removes the pictures the file as saved
+    /// does not name, and opens or closes the overlay windows to match when
+    /// `changed` can change which show. Answers why an overlay window could
+    /// not open or close, if one could not.
     ///
-    /// A save that failed changed nothing, so no one is told. A removal that
-    /// failed partway may have removed some of the application's files, so
-    /// they are read again either way. No one reads a picture the file no
-    /// longer names, so a failure to remove one changes nothing they read,
-    /// and the save stands; the application's next save tries again.
+    /// A save that failed changed nothing anyone reads, so no one is told,
+    /// and the pictures it wrote before it failed go, since the file still
+    /// saved does not name them. A removal that failed partway may have
+    /// removed some of the application's files, so they are read again
+    /// either way. No one reads a picture the file does not name, so a
+    /// failure to remove one changes nothing they read, and the save
+    /// stands; the application's next save tries again.
     pub(super) fn write_app(
         &mut self,
         app: &str,
@@ -298,18 +320,18 @@ impl<H: Host> Owner<H> {
         if written.is_ok() || matches!(write, Write::Remove) {
             self.tell(changed);
         }
+        if let Write::Save(..) = write {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "no one reads a picture the saved file does not name, and the next save tries again"
+            )]
+            let _ = self.prune_saved(app);
+        }
         written?;
         let windows = changed
             .windows()
             .then(|| self.sync_overlay_windows().err())
             .flatten();
-        if let Write::Save(file, _) = write {
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "no one reads a picture the saved file no longer names, and the next save tries again"
-            )]
-            let _ = self.prune(app, file);
-        }
         Ok(windows)
     }
 
@@ -325,13 +347,23 @@ impl<H: Host> Owner<H> {
         Ok(saved)
     }
 
-    /// Removes the pictures of the application `app` that `file` no longer
-    /// names.
+    /// Removes the pictures of the application `app` that `file` does not
+    /// name, of those AppyTappy named.
     pub(super) fn prune(&self, app: &str, file: &AppFile) -> Result<(), String> {
         self.stores()?
             .apps
             .prune(app, file)
             .map_err(|error| error.to_string())
+    }
+
+    /// Removes the pictures of the application `app` that its file, as it
+    /// is saved now, does not name: the new file after a save that worked,
+    /// and the one before it after a save that failed, whose pictures no
+    /// file names. An application whose saved file cannot be read keeps
+    /// every picture, since nothing says which it names.
+    fn prune_saved(&self, app: &str) -> Result<(), String> {
+        let saved = self.stores()?.app(app)?;
+        self.prune(app, &saved.file)
     }
 
     /// Does what follows from a change to the saved files: each overlay
@@ -452,8 +484,95 @@ mod tests {
 
     use crate::overlay::OverlayWindow;
 
-    use super::test_support::with_saved_bar;
+    use super::test_support::{Harness, STATE, spec, with_saved_bar};
     use super::*;
+
+    /// The folder of `Example App`, holding the state `Icon visible` with
+    /// its picture and two files of the user's own.
+    fn folder_with_a_picture(harness: &mut Harness) -> std::path::PathBuf {
+        harness
+            .ask(|owner| owner.save(&spec("example", "Icon visible", STATE)))
+            .expect("saves");
+        let folder = harness
+            .ask(|owner| owner.stores().map(|stores| stores.apps.folder("example")))
+            .expect("stores");
+        for mine in ["holiday.png", "notes.txt"] {
+            std::fs::write(folder.join(mine), b"mine").expect("writes");
+        }
+        folder
+    }
+
+    /// The names of the files in `folder`, sorted.
+    fn names_in(folder: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(folder)
+            .expect("lists")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .file_name()
+                    .into_string()
+                    .expect("utf-8")
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_save_that_fails_leaves_none_of_the_pictures_it_wrote() {
+        let (mut harness, root) = with_saved_bar("failed-save");
+        let folder = folder_with_a_picture(&mut harness);
+        harness.forget_reloads();
+        let failed = harness.ask(|owner| {
+            owner.update_app("example", Changed::Values, |_owner, found| {
+                found.file.name = "Renamed".to_owned();
+                // The second picture cannot be written, so the save stops
+                // after it wrote the first and before it writes the file.
+                Ok(Edit::Save(
+                    (),
+                    vec![
+                        ("status-1.png".to_owned(), vec![1]),
+                        ("Not A Name.png".to_owned(), vec![2]),
+                    ],
+                ))
+            })
+        });
+        assert_eq!(
+            failed,
+            Err("\"Not A Name.png\" is not a valid picture name".to_owned())
+        );
+        assert_eq!(
+            names_in(&folder),
+            ["app.json", "holiday.png", "icon_visible-1.png", "notes.txt"],
+            "the picture it wrote is gone, and nothing else is"
+        );
+        let file = harness
+            .ask(|owner| owner.stores()?.app("example"))
+            .expect("saved")
+            .file;
+        assert_eq!(file.name, "Example App", "kept as saved");
+        assert_eq!(harness.reloads(), 0, "no one is told");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_save_removes_the_pictures_an_interrupted_save_left() {
+        let (mut harness, root) = with_saved_bar("interrupted-save");
+        let folder = folder_with_a_picture(&mut harness);
+        // The program ended after a save wrote a value's, a fix's and a
+        // reference's pictures and before it wrote the file that names them.
+        for left in ["status-1.png", "icon_visible-1-1.png", "ref-digits-1.png"] {
+            std::fs::write(folder.join(left), b"left").expect("writes");
+        }
+        harness
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .expect("the next save of the application");
+        assert_eq!(
+            names_in(&folder),
+            ["app.json", "holiday.png", "icon_visible-1.png", "notes.txt"]
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
 
     #[test]
     fn each_change_reaches_who_reads_it_once_it_is_saved() {

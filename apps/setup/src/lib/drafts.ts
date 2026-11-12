@@ -1,7 +1,7 @@
 // Drafts: what a flow keeps of an item the user saved before it was finished, apart from the saved files, so it never
 // runs until it is finished.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { AppSummary, DraftDef, DraftKind, DraftSummary } from './bindings.ts';
 import { deleteDraft, errorText, saveDraft } from './api.ts';
@@ -127,23 +127,30 @@ interface DraftSaving {
 
 /**
  * Saving the draft of a flow that finishes `resumed`, or makes a new item when it is null. `make` gives the draft as
- * the flow has it now, and `screenshots` says whether the capture's screenshots go with it. The flow reports its
- * saver to `report` while it shows, so leaving it can save the draft too, and calls `onClosed` after its own button
- * saved or deleted the draft; the lists are read again then.
+ * the flow has it now, or is null for a flow that is never a draft, such as an edit of a saved value; `screenshots`
+ * says whether the capture's screenshots go with it. The flow reports its saver to `report` while it shows, so
+ * leaving it can save the draft too, and calls `onClosed` after its own button saved or deleted the draft; the lists
+ * are read again then. A flow that stays open after its draft was saved, because leaving stopped at another save,
+ * saves over that draft the next time and removes it once its item is saved.
  */
 export function useDraft(
   resumed: Resumed | null,
-  make: () => DraftDef,
+  make: (() => DraftDef) | null,
   screenshots: boolean,
   report: ReportDraft,
   onClosed: () => void,
 ): DraftSaving {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The ID of the flow's draft: the one it finishes, or the one its first save made.
+  const id = useRef(resumed?.id ?? null);
   const save: DraftSaver = async () => {
+    if (make === null) {
+      return 'It cannot be saved as a draft.';
+    }
     setSaving(true);
     try {
-      await saveDraft(resumed?.id ?? null, make(), screenshots);
+      id.current = await saveDraft(id.current, make(), screenshots);
       setError(null);
       return null;
     } catch (failure: unknown) {
@@ -155,8 +162,9 @@ export function useDraft(
     }
   };
   // The saver changes with each render, so App's ref always holds the newest; it goes with the flow.
+  const drafts = make !== null;
   useEffect(() => {
-    report(save);
+    report(drafts ? save : null);
   });
   useEffect(
     () => () => {
@@ -189,11 +197,11 @@ export function useDraft(
       onClosed();
     },
     finished: async () => {
-      if (resumed === null) {
+      if (id.current === null) {
         return;
       }
       try {
-        await deleteDraft(resumed.id);
+        await deleteDraft(id.current);
       } catch {
         // The item is saved; a draft that stays shows on its page, where it can be deleted.
       }

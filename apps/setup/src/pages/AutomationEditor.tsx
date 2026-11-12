@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { type AppSummary, type AutomationDef, type MediaCommandDef, NO_STATE, type WhenDef } from '../lib/bindings.ts';
+import { type AppSummary, type MediaCommandDef, NO_STATE, type WhenDef } from '../lib/bindings.ts';
 import { errorText, listWindows, saveAutomation, stopWatching, watchValue, watchedReading } from '../lib/api.ts';
 import {
   type ActionDraft,
@@ -8,46 +8,35 @@ import {
   type LiveState,
   COMPARISONS,
   COMPARISON_NAMES,
-  EMPTY_DRAFT,
   MEDIA_NAMES,
   type ValueChoice,
   buildAutomation,
   buildWhen,
   clicksBlocked,
-  findValue,
   keysBlocked,
   liveAnnouncement,
   liveText,
   newAction,
-  draftPictures,
   readsState,
   readsText,
-  toDraft,
   undoText,
   unfinished,
+  unusedKey,
   valueChoices,
   withSource,
 } from '../lib/automation.ts';
-import { clickApps, targetSummary } from '../lib/click.ts';
+import { clickApps, returnsFocus, targetSummary } from '../lib/click.ts';
+import { type AutomationFlow, automationDraft, startOf } from '../lib/flow.ts';
 import { ACTIONS_HINT, COOLDOWN_HINT, DRAFT_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
+import { editorLanding, useLanding } from '../lib/landing.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
 import { DeleteDraft } from '../components/Drafts.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
-import { type Kept, type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
+import { type ReportDraft, useDraft } from '../lib/drafts.ts';
 import { actionKeys } from '../lib/shortcut.ts';
-
-/** What a draft of an automation keeps: the editor's state. */
-type AutomationKept = Kept<'automation', Draft>;
-
-/** The editor's state as `resumed` keeps it, or else as `existing` is saved, or a new automation's. */
-function startDraft(existing: AutomationDef | null, resumed: Resumed | null): Draft {
-  if (resumed !== null && isKept<AutomationKept>(resumed.def.state, 'automation')) {
-    return resumed.def.state.state;
-  }
-  return existing === null ? EMPTY_DRAFT : toDraft(existing);
-}
+import { arrived, readiness, returned, watchApps, watchGuide, watchStep, watching } from '../lib/watch.ts';
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
 type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
@@ -145,6 +134,9 @@ function KeysField({ label, keys, onChange }: KeysFieldProps) {
 }
 
 const EXECUTABLES_ID = 'running-executables';
+
+/** The ID of the When card's guide, which describes the controls the next step is taken with. */
+const GUIDE_ID = 'watch-guide';
 
 interface ActionTargetProps {
   readonly action: ActionDraft;
@@ -249,7 +241,7 @@ function ClickFields({ action, label, apps, onChange, onTarget }: ClickFieldsPro
           {action.at?.kind === 'picture' ? (
             <ClickPictureThumb image={action.at.image} label={`${label}: the picture it clicks on`} />
           ) : null}
-          <span>{targetSummary(action.button, action.at)}</span>
+          <span>{targetSummary(action.button, action.at, action.delivery)}</span>
         </span>
         <button
           type="button"
@@ -265,23 +257,25 @@ function ClickFields({ action, label, apps, onChange, onTarget }: ClickFieldsPro
           You set it up on a screenshot of the window, so the application must be open.
         </Hint>
       </span>
-      <span className="click-options">
-        <label>
-          <input
-            type="checkbox"
-            aria-describedby={hintFocus}
-            checked={action.returnFocus}
-            onChange={(event) => {
-              onChange({ ...action, returnFocus: event.target.checked });
-            }}
-          />
-          Go back to the window that was in front
-        </label>
-        <Hint topic="Go back to the window that was in front" id={hintFocus}>
-          After the click, the window you were using gets the focus back, so you can carry on. Turn it off when the
-          click opens something you want to use, such as a menu.
-        </Hint>
-      </span>
+      {action.delivery === 'cursor' ? (
+        <span className="click-options">
+          <label>
+            <input
+              type="checkbox"
+              aria-describedby={hintFocus}
+              checked={action.returnFocus}
+              onChange={(event) => {
+                onChange({ ...action, returnFocus: event.target.checked });
+              }}
+            />
+            Go back to the window that was in front
+          </label>
+          <Hint topic="Go back to the window that was in front" id={hintFocus}>
+            After the click, the window you were using gets the focus back, so you can carry on. Turn it off when the
+            click opens something you want to use, such as a menu.
+          </Hint>
+        </span>
+      ) : null}
     </>
   );
 }
@@ -477,27 +471,74 @@ function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly 
 
 interface Props {
   readonly apps: readonly AppSummary[];
-  /** The saved automation to change, or null for a new one. */
-  readonly existing: AutomationDef | null;
-  /** The draft the editor finishes, or null. */
-  readonly draft: Resumed | null;
+  /** The number of the read of the saved lists `apps` is from. */
+  readonly listed: number;
+  /** Why the newest read of the saved lists failed, or null when it answered. */
+  readonly readError: string | null;
+  /**
+   * The automation to make or change. After a flow the editor opened ends, it also has the draft to show again, the
+   * application its condition starts with, and what that flow saved.
+   */
+  readonly flow: AutomationFlow;
+  /** Whether the editor shows because a flow it opened ended, so the focus has to land somewhere. */
+  readonly continued: boolean;
   readonly onCancel: () => void;
-  /** Closes the editor once the automation or its draft is saved. */
   readonly onSaved: () => void;
+  /** Closes the editor once its draft is saved or deleted. */
+  readonly onDrafted: () => void;
+  /** Leaves to add an application, and comes back with `draft` and that application chosen. */
+  readonly onAddApplication: (draft: Draft, app: string | null) => void;
+  /** Leaves to make a value for the application `app`, and comes back with `draft` and that value picked. */
+  readonly onNewValue: (draft: Draft, app: string) => void;
   /** Hears what leaving the editor would lose. */
   readonly onHeld: (held: Held) => void;
   /** Hears how to save the editor's draft. */
   readonly onDraft: ReportDraft;
 }
 
-/** Making or changing an automation: the value it watches, the actions it runs, and whether it undoes them. */
-export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onSaved, onHeld, onDraft }: Props) {
-  const [start] = useState<Draft>(() => startDraft(existing, resumed));
-  const [draft, setDraft] = useState<Draft>(start);
-  // Each action's key is new to the editor, so the next one goes past the highest a draft kept.
-  const [nextKey, setNextKey] = useState(() => Math.max(-1, ...draft.actions.map((action) => action.key)) + 1);
+/**
+ * Making or changing an automation: the application and the value it watches, the actions it runs, and whether it
+ * undoes them. It leads to adding the application and making the value when the one to watch is not saved yet.
+ */
+export function AutomationEditor({
+  apps,
+  listed,
+  readError,
+  flow,
+  continued,
+  onCancel,
+  onSaved,
+  onDrafted,
+  onAddApplication,
+  onNewValue,
+  onHeld,
+  onDraft,
+}: Props) {
+  const { existing, resumed } = flow;
+  // What the editor starts with, which leaving it loses nothing of: what its draft kept, or the saved automation.
+  const [start] = useState<Draft>(() => startOf(flow).draft);
+  const [draft, setDraft] = useState<Draft>(() => returned(flow.draft ?? start, flow.app, flow.handed));
+  // The application chosen for the condition before a value of it is picked.
+  const [chosenApp, setChosenApp] = useState(flow.app);
+  // What a flow just saved for the condition, until the draft picks its value or the user chooses something else.
+  const [handed, setHanded] = useState(flow.handed);
+  // The value the draft picked because a flow just saved it, which the card names.
+  const [justPicked, setJustPicked] = useState<string | null>(null);
+  const card = useRef<HTMLElement>(null);
+  const [nextKey, setNextKey] = useState(() => unusedKey(draft.actions));
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // A draft keeps what the flow holds of its automation, as it would wait under a flow the editor opens.
+  const drafting = useDraft(
+    resumed,
+    () => automationDraft(flow, { draft, app: chosenApp }, apps),
+    false,
+    onDraft,
+    onDrafted,
+  );
+  const busy = saving || drafting.saving;
+  const holds = held(busy, start, draft);
+  useReportHeld(onHeld, holds);
   const [executables, setExecutables] = useState<readonly string[]>([]);
   // The click action whose target is being set up, by its key, or null while the editor shows.
   const [targeting, setTargeting] = useState<number | null>(null);
@@ -522,26 +563,24 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
   }, []);
 
   const choices = useMemo(() => valueChoices(apps), [apps]);
-  const choice = draft.source === null ? null : findValue(choices, draft.source);
+  const saved = useMemo(() => watchApps(apps), [apps]);
+  // The value a flow just saved is picked as soon as the saved values list it. The state is set while rendering,
+  // so no frame shows the card between the two.
+  const landed = arrived({ choices, chosen: chosenApp, handed });
+  if (landed !== null) {
+    setDraft(withSource(draft, landed));
+    setHanded(null);
+    setJustPicked(landed.value.id);
+  }
+  const step = watchStep({ apps, choices, listed, readError, draft, chosen: chosenApp, handed });
+  const guide = watchGuide(step, justPicked);
+  const choice = step.kind === 'ready' ? step.choice : null;
+  // The application the condition watches, or null before one is chosen.
+  const watched = 'app' in step ? step.app.id : 'id' in step ? step.id : null;
+  useLanding(continued, editorLanding(step), card);
   const built = buildAutomation(draft, choices, existing?.id ?? '', apps);
+  const ready = readiness(built, step);
   const missing = unfinished(draft, choices, apps);
-  const drafting = useDraft(
-    resumed,
-    () => ({
-      kind: 'automation',
-      app: null,
-      changes: existing?.id ?? null,
-      name: draft.name.trim() === '' ? (existing?.name ?? 'New automation') : draft.name.trim(),
-      missing,
-      pictures: draftPictures(draft),
-      state: keep('automation', draft),
-    }),
-    false,
-    onDraft,
-    onSaved,
-  );
-  const holds = held(saving || drafting.saving, start, draft);
-  useReportHeld(onHeld, holds);
   const typedWhen = choice === null ? null : buildWhen(draft, choice);
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
   const undoWords = built.ok ? undoText(built.automation.actions) : null;
@@ -553,7 +592,18 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
     action.kind === 'click' && action.clickApp !== '' ? [action.clickApp] : [],
   );
   const clickWarning = choice === null ? null : clicksBlocked(clickedApps, choice, apps);
-  const clickedNames = [...new Set(clickedApps.map((id) => apps.find((app) => app.id === id)?.file?.name ?? id))];
+  // The applications clicked in with the cursor, and those a click is sent to, since each note says what its way does.
+  const clickedBy = (delivery: ActionDraft['delivery']): readonly string[] => [
+    ...new Set(
+      draft.actions.flatMap((action) =>
+        action.kind === 'click' && action.clickApp !== '' && action.delivery === delivery
+          ? [apps.find((app) => app.id === action.clickApp)?.file?.name ?? action.clickApp]
+          : [],
+      ),
+    ),
+  ];
+  const clickedNames = clickedBy('cursor');
+  const sentNames = clickedBy('message');
 
   const update = (change: Partial<Draft>): void => {
     setDraft((current) => ({ ...current, ...change }));
@@ -565,7 +615,7 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
   };
 
   const save = async (): Promise<void> => {
-    if (!built.ok) {
+    if (!built.ok || !ready.ready) {
       return;
     }
     setSaving(true);
@@ -579,14 +629,20 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
     }
   };
 
-  const appsWithValues = apps.filter((app) => app.file !== null && app.file.values.length > 0);
   const targeted = targeting === null ? undefined : draft.actions.find((action) => action.key === targeting);
   if (targeted !== undefined) {
     return (
       <ClickTarget
         apps={apps}
         automation={draft.name.trim() === '' ? (existing?.name ?? 'New automation') : draft.name.trim()}
-        initial={{ app: targeted.clickApp, button: targeted.button, at: targeted.at }}
+        watched={draft.source?.app ?? null}
+        initial={{
+          app: targeted.clickApp,
+          button: targeted.button,
+          delivery: targeted.delivery,
+          returnFocus: targeted.returnFocus,
+          at: targeted.at,
+        }}
         onCancel={() => {
           setTargeting(null);
         }}
@@ -598,9 +654,9 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
                     ...old,
                     clickApp: target.app,
                     button: target.button,
+                    delivery: target.delivery,
                     at: target.at,
-                    // A right click usually opens a menu, which going back to the window in front would close.
-                    returnFocus: target.button === old.button ? old.returnFocus : target.button !== 'right',
+                    returnFocus: returnsFocus(target.button, old),
                   }
                 : old,
             ),
@@ -633,114 +689,181 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
           />
         </div>
 
-        <section className="card" aria-labelledby="when-heading">
+        <section className="card" aria-labelledby="when-heading" ref={card}>
           <div className="with-hint">
             <h2 id="when-heading">When</h2>
             <Hint topic="When">{WHEN_HINT}</Hint>
           </div>
-          <div className="when-row">
-            <select
-              className="input value-select"
-              aria-label="Value"
-              value={draft.source === null ? '' : `${draft.source.app}/${draft.source.value}`}
-              onChange={(event) => {
-                const picked = choices.find((option) => `${option.app}/${option.value.id}` === event.target.value);
-                if (picked !== undefined) {
-                  setDraft((current) => withSource(current, picked));
-                  setSaveError(null);
-                }
-              }}
-            >
-              <option value="" disabled>
-                Pick a value
-              </option>
-              {appsWithValues.map((app) => (
-                <optgroup key={app.id} label={app.file?.name ?? app.id}>
-                  {app.file?.values.map((value) => (
-                    <option key={value.id} value={`${app.id}/${value.id}`}>
-                      {value.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <select
-              className="input"
-              aria-label="Comparison"
-              value={draft.is}
-              disabled={choice === null}
-              onChange={(event) => {
-                const picked = COMPARISONS[choice?.kind ?? 'number'].find(
-                  (comparison) => comparison === event.target.value,
-                );
-                if (picked !== undefined) {
-                  update({ is: picked });
-                }
-              }}
-            >
-              {COMPARISONS[choice?.kind ?? 'number'].map((comparison) => (
-                <option key={comparison} value={comparison}>
-                  {COMPARISON_NAMES[comparison]}
-                </option>
-              ))}
-            </select>
-            {choice?.kind === 'state' ? (
+          {/* Stays mounted, so a screen reader announces each step, and what a flow saved once it is picked. */}
+          <p id={GUIDE_ID} className={guide?.warn === true ? 'warn guide' : 'guide'} role="status">
+            {guide?.text ?? ''}
+          </p>
+          <div className="watch-row">
+            {step.kind === 'no-applications' ? null : (
               <select
                 className="input"
-                aria-label="State"
-                value={draft.state}
+                aria-label="Application"
+                aria-describedby={GUIDE_ID}
+                data-landing="application"
+                value={watched ?? ''}
                 onChange={(event) => {
-                  update({ state: event.target.value });
+                  const picked = event.target.value;
+                  setChosenApp(picked);
+                  setHanded(null);
+                  setDraft((current) => watching(current, picked));
+                  setSaveError(null);
                 }}
               >
-                {readsState(choice, draft.state) ? null : (
-                  <option value={draft.state} disabled>
-                    {draft.state === '' ? 'Pick a state' : `${draft.state} (no longer read)`}
+                {step.kind === 'choosing' ? (
+                  <option value="" disabled>
+                    Pick an application
+                  </option>
+                ) : null}
+                {watched === null || saved.some((app) => app.id === watched) ? null : (
+                  <option value={watched} disabled>
+                    {step.kind === 'arriving' ? 'Reading…' : `${watched} (not saved)`}
                   </option>
                 )}
-                {[...choice.states, NO_STATE].map((state) => (
-                  <option key={state} value={state}>
-                    {state}
+                {saved.map((app) => (
+                  <option key={app.id} value={app.id}>
+                    {app.name}
                   </option>
                 ))}
               </select>
-            ) : choice?.kind === 'flag' ? (
-              <div className="seg" role="group" aria-label="Yes or no">
-                {[true, false].map((flag) => (
-                  <button
-                    key={String(flag)}
-                    type="button"
-                    aria-pressed={draft.flag === flag}
-                    onClick={() => {
-                      update({ flag });
-                    }}
-                  >
-                    {flag ? 'Yes' : 'No'}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <input
-                className="input"
-                aria-label="Number"
-                inputMode="decimal"
-                placeholder="90"
-                disabled={choice === null}
-                value={draft.number}
-                onChange={(event) => {
-                  update({ number: event.target.value });
-                }}
-              />
             )}
+            {'app' in step ? (
+              <button
+                type="button"
+                className={guide?.opens === 'value' ? 'btn primary' : 'btn'}
+                aria-describedby={GUIDE_ID}
+                data-landing="new-value"
+                onClick={() => {
+                  onNewValue(draft, step.app.id);
+                }}
+              >
+                New value
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={guide?.opens === 'application' ? 'btn primary' : 'btn'}
+              aria-describedby={GUIDE_ID}
+              data-landing="add-application"
+              onClick={() => {
+                onAddApplication(draft, watched);
+              }}
+            >
+              Add application
+            </button>
           </div>
+          {step.kind === 'pick' || step.kind === 'ready' ? (
+            <div className="when-row">
+              <select
+                className="input value-select"
+                aria-label="Value"
+                aria-describedby={GUIDE_ID}
+                data-landing="value"
+                value={choice === null ? '' : choice.value.id}
+                onChange={(event) => {
+                  const picked = step.values.find((option) => option.value.id === event.target.value);
+                  if (picked !== undefined) {
+                    setHanded(null);
+                    setDraft((current) => withSource(current, picked));
+                    setSaveError(null);
+                  }
+                }}
+              >
+                <option value="" disabled>
+                  Pick a value
+                </option>
+                {step.values.map((option) => (
+                  <option key={option.value.id} value={option.value.id}>
+                    {option.value.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="input"
+                aria-label="Comparison"
+                aria-describedby={GUIDE_ID}
+                data-landing="comparison"
+                value={draft.is}
+                disabled={choice === null}
+                onChange={(event) => {
+                  const picked = COMPARISONS[choice?.kind ?? 'number'].find(
+                    (comparison) => comparison === event.target.value,
+                  );
+                  if (picked !== undefined) {
+                    update({ is: picked });
+                  }
+                }}
+              >
+                {COMPARISONS[choice?.kind ?? 'number'].map((comparison) => (
+                  <option key={comparison} value={comparison}>
+                    {COMPARISON_NAMES[comparison]}
+                  </option>
+                ))}
+              </select>
+              {choice?.kind === 'state' ? (
+                <select
+                  className="input"
+                  aria-label="State"
+                  value={draft.state}
+                  onChange={(event) => {
+                    update({ state: event.target.value });
+                  }}
+                >
+                  {readsState(choice, draft.state) ? null : (
+                    <option value={draft.state} disabled>
+                      {draft.state === '' ? 'Pick a state' : `${draft.state} (no longer read)`}
+                    </option>
+                  )}
+                  {[...choice.states, NO_STATE].map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
+                </select>
+              ) : choice?.kind === 'flag' ? (
+                <div className="seg" role="group" aria-label="Yes or no">
+                  {[true, false].map((flag) => (
+                    <button
+                      key={String(flag)}
+                      type="button"
+                      aria-pressed={draft.flag === flag}
+                      onClick={() => {
+                        update({ flag });
+                      }}
+                    >
+                      {flag ? 'Yes' : 'No'}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  className="input"
+                  aria-label="Number"
+                  inputMode="decimal"
+                  placeholder="90"
+                  disabled={choice === null}
+                  value={draft.number}
+                  onChange={(event) => {
+                    update({ number: event.target.value });
+                  }}
+                />
+              )}
+            </div>
+          ) : null}
           {choice === null ? null : (
             <LiveReading key={`${choice.app}/${choice.value.id}`} choice={choice} when={liveWhen} />
           )}
-          <p className="note">
-            {runningApp === null || runningApp === undefined
-              ? 'One value for now. Conditions that combine several values come later.'
-              : `Runs while ${runningApp.file?.name ?? runningApp.id} is open. ${choice === null ? 'The value reads a number.' : readsText(choice)}`}
-          </p>
+          {step.kind === 'no-applications' || step.kind === 'value' || step.kind === 'arriving' ? null : (
+            <p className="note">
+              {runningApp === null || runningApp === undefined
+                ? 'One value for now. Conditions that combine several values come later.'
+                : `Runs while ${runningApp.file?.name ?? runningApp.id} is open. ${choice === null ? 'The value reads a number.' : readsText(choice)}`}
+            </p>
+          )}
         </section>
 
         <section className="card" aria-labelledby="do-heading">
@@ -789,6 +912,14 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
               {[choice.appName, ...clickedNames.filter((name) => name !== choice.appName)].join(' or ')} is the window
               in front. AppyTappy brings {clickedNames.join(' and ')} to the front for a moment, clicks, puts the cursor
               back, and goes back to the window that was in front if you ask it to. A picture that is not found is not
+              clicked.
+            </p>
+          )}
+          {sentNames.length === 0 ? null : (
+            <p className="note">
+              For a click sent to the window of {sentNames.join(' or ')}, AppyTappy does not move the cursor or bring a
+              window to the front. Some applications ignore a click sent this way, and nothing tells AppyTappy whether
+              it worked, so test it with Click it now where you set up the target. A picture that is not found is not
               clicked.
             </p>
           )}
@@ -870,10 +1001,10 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
         </section>
 
         <div className="editor-foot">
-          {/* The regions stay mounted, so a screen reader announces each change of their text. */}
+          {/* Both regions stay mounted, so a screen reader announces each change of their text. */}
           <div className="missing-list" role="status">
-            {saveError !== null ? null : built.ok ? (
-              <span className="note">Ready to save.</span>
+            {saveError !== null ? null : built.ok || step.kind === 'arriving' ? (
+              <span className="note">{ready.text}</span>
             ) : (
               <>
                 <span className="note">Save it as a draft to finish later. Before it can run:</span>
@@ -890,11 +1021,11 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
           <span className="warn" role="alert">
             {saveError ?? drafting.error ?? ''}
           </span>
-          <button type="button" className="btn" disabled={saving || drafting.saving} onClick={onCancel}>
+          <button type="button" className="btn" disabled={busy} onClick={onCancel}>
             Cancel
           </button>
           {resumed === null ? null : (
-            <DeleteDraft changes={existing !== null} disabled={saving || drafting.saving} onDelete={drafting.discard} />
+            <DeleteDraft changes={existing !== null} disabled={busy} onDelete={drafting.discard} />
           )}
           <span className="with-hint">
             <button
@@ -915,7 +1046,7 @@ export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onS
           <button
             type="button"
             className="btn primary"
-            disabled={!built.ok || saving || drafting.saving}
+            disabled={!ready.ready || busy}
             onClick={() => {
               background(save());
             }}

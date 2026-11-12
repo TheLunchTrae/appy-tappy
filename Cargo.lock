@@ -120,11 +120,13 @@ dependencies = [
 name = "appytappy-setup"
 version = "0.1.0"
 dependencies = [
+ "appytappy-actions",
  "appytappy-config",
  "appytappy-platform",
  "appytappy-sources",
  "mutants",
  "ocrs",
+ "proptest",
  "rten",
  "rten-imageproc",
  "serde",

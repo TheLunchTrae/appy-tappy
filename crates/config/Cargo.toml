@@ -11,12 +11,12 @@ publish.workspace = true
 [dependencies]
 # The authoring files are JSON: serde maps them onto typed structs, and
 # serde_json reads and writes the text.
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
+serde.workspace = true
+serde_json.workspace = true
 # Writes the TypeScript types of the file formats for the setup app's page,
 # so the page cannot drift from the files. Only the setup app's tests turn on
 # `ts`, so neither program builds with it.
-ts-rs = { version = "=12.0.1", optional = true }
+ts-rs = { workspace = true, optional = true }
 
 [features]
 # Derives `ts_rs::TS` on the types the setup app's page reads and sends.

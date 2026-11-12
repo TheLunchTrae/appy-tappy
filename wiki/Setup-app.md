@@ -14,17 +14,62 @@ This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
 
-- **Picker.** A value's picker only chooses a saved application; the
-  Applications page adds, edits, and removes them. Picking a window a saved
-  application finds chooses that application. Capture stays off until the
-  open windows are matched, and then only allows a window that fits the
-  application's match as well as any other, since the runtime reads one of
-  those.
+- **Picker.** The picker of a value or reference chooses a saved application
+  and then resolves that application's window with its own match
+  (`lib/picker.ts`); [Picker](State-machines.md#picker) lists its states. One
+  look (`lib/useAppWindows.ts`) is one `list_app_windows` command: the owner
+  reads the saved applications and lists the desktop once, and answers the
+  applications, the open windows, and the windows each application's match
+  takes, so the three agree. The picker shows the applications from that
+  answer, not from the pages' list, so **Refresh** reads them again and a
+  failed read shows with its reason. `window_list::matching` marks the window
+  a new session would read as `best`, and every offered window that fits as
+  well as it as `tied`. `tied` covers only offered windows: one the list
+  filters out, untitled, without a size, or of a desktop class, ties with
+  none even where the runtime could read it, and when the runtime reads such
+  a window no offered window is tied. Capture allows only a tied window,
+  since the runtime reads one of those: the only one without asking, or the
+  one the user picks among several. A window the match takes with a worse fit
+  is never offered. The chosen application's ID travels with the captured
+  window as the `Choice`, and every save names it, so nothing reads the owner
+  back from the window. **Add application** and **Change how it's found**
+  open the application flow for the picker's flow, as
+  [Pages and flows](State-machines.md#pages-and-flows) describes.
+- **One flow from an automation.** The automation editor is where a first
+  automation starts: its condition chooses the application, then one of that
+  application's values (`lib/watch.ts`), and says which step is missing while
+  there is no value to compare. **Add application** and **New value** open
+  those flows for the automation, which waits under them with its draft
+  (`lib/flow.ts`). `save_value` answers the saved value's application and ID,
+  which the editor picks once the pages' lists show it, so nothing is looked
+  up by name. Until then the draft has no value and cannot be saved. The
+  pages' lists are read every three seconds and after each save; the reads
+  are numbered, so an answer that arrives after a newer one is dropped
+  (`lib/reads.ts`), and the editor can tell what is still on its way from
+  what a newer read shows to be gone. When a flow shows because another
+  ended, the focus lands on the control the next step is taken with
+  (`lib/landing.ts`). [Pages and flows](State-machines.md#pages-and-flows)
+  and
+  [What an automation watches](State-machines.md#what-an-automation-watches)
+  list the transitions.
 - **Application editor.** A new application's match starts from the picked
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
-- **Screenshots.** The owner thread keeps the session's screenshots until
-  another window is picked or the user leaves the new value. The draft keeps
+- **Screenshots.** The owner thread keeps the session's screenshots, taken or
+  [recorded](#recording-looks), in memory until the user removes them or
+  their capture stops: on **Change window**, when another window is picked, or
+  when the flow closes ([Pictures kept](#pictures-kept)). None is written to
+  disk unless the user saves a [draft](#drafts), which copies them to its
+  folder. A recording, with the looks or readings it holds, goes with them.
+  Each screenshot is named by the index it got when it was kept
+  (`screenshots.rs`).
+  Removing one releases its pixels and leaves its index empty, so the indexes
+  the draft holds stay right, and the strip numbers a screenshot by its index
+  so its number never changes. The UI refuses to remove a screenshot the draft
+  uses: the one its region is drawn on, one a state is taken from, a labeled
+  one, and the value's own while the reference editor is open over it
+  (`lib/looks.ts`). A check that names a removed screenshot is refused like
+  one that names a screenshot of another session. The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
   a labeled screenshot, a recording, or a compared screenshot of another
@@ -32,20 +77,61 @@ This page covers what the user guide leaves out.
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
+- **Region.** The region is kept in the pixels of the screenshot it is drawn
+  on, whatever size the screenshot shows at. `ZoomView` lays the picture out:
+  the whole picture with room around it at first, and larger by the zoom,
+  which belongs to screenshots of one size. `RegionSurface` reads the pointer
+  against the picture's box on the page at each pointer event, and again when
+  a scroll or a zoom moves the picture under a pointer that stays still, so
+  the zoom, the scroll, and the window's size are no state of the drag. The
+  region's outline, its label, and the dim around it are drawn by `Marquee`,
+  outside the box. A corner takes presses 12 pixels out from the box and up
+  to 4 into it, less into a small box, which keeps 8 pixels each way, or all
+  of a smaller side, to be moved by (`.marquee .corner` in `styles.css`). The
+  zoom controls stay focusable at their limits and say so with
+  `aria-disabled`, and the percentage is a status that screen readers hear
+  when it changes. The surface reaches over the
+  room around the picture, which is how a drag starts outside it, and only
+  while a tool drags: a click that picks a color or selects a pixel lands on
+  the picture alone. `onRegion` is called once, when a drag is let go
+  ([Region drag](State-machines.md#region-drag)), so a check runs for the
+  finished region and not for each one on the way. A selection that fails
+  says why above the view, on either step.
 - **Capture failures.** A frame error shows in the preview until the next good
   frame of the same capture; only a closed window ends the capture. While a
   failure stands, a screenshot is refused, and a recording stops with the
   failure as its problem. Once the window has closed, no recording starts or goes
   on until another window is picked.
+- **Live reading.** `read_value` answers what the check being set up reads
+  on the newest frame, or why that frame cannot be read, in the check's own
+  words (`CheckError`), which the box under the check shows in place of a
+  reading. A reference being taught is read by the reader its labels teach
+  (`CheckSpec::Characters`), never by the text reader, and the runtime
+  builds the same reader from the saved file
+  (`check_spec/round_trip.rs`). The region is read where it was drawn,
+  whatever size the live window has, so a window resized since its
+  screenshot shows another spot there.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
   capture counts its screenshots and recording too, since only the session
-  has them. The page tabs, the page already shown included, ask before they
+  has them. A fix and an edit open on a screenshot the capture takes
+  itself, and start from what they show once the region is placed on it
+  (`withFixRegion`, `placedOn`), so leaving one that nobody touched asks
+  nothing. The page tabs, the page already shown included, ask before they
   drop unsaved work, and **Change window** asks the same. While a save runs,
   the tabs, **Change window**, the questions' answers, and **Discard** or
   **Cancel** wait. A save closes its flow only while that flow is still open,
-  so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
+  so one that finishes after the user moved on leaves the next flow alone.
+  Leaving a capture, as **Change window** also does, stops it, which drops
+  its screenshots and recording.
+  A flow opened for another unmounts that one, so what a waiting flow would
+  lose has to travel in its `Flow` value. Only the automation editor opens a
+  flow while it holds work, so it hands over its draft, and the window counts
+  that draft with what the open flow reports (`heldInAll`). A tab then asks
+  even when the open flow holds nothing, and the question names both losses
+  (`lostText`). **Cancel** in a flow opened for another shows that one again
+  and drops only its own work.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner
@@ -58,13 +144,78 @@ This page covers what the user guide leaves out.
   is ignored. The UI gets the
   selection's box and its runs of selected pixels, and shades the rest of the
   region itself.
+- **Bar detection.** **Detect the bar** sends the region and the screenshot
+  it was drawn on (`detect_bar`). The owner cuts the region from that
+  screenshot and from the newest others of its window size that the session
+  still keeps, taken or recorded, at most `MAX_OTHERS` of them
+  (`check_spec/bar.rs`), since the region means another
+  spot at another size and each screenshot costs the owner thread a copy of
+  the region and a few passes over it. It hands them to [the
+  detector](Screen-regions.md#bar-detection), the drawn-on one first, and
+  answers the two colors, the screenshot they were found on, the ones that
+  show the bar and the ones that show neither color, whether it went by only
+  part of the region, and how many older ones it left out; or a sentence
+  that says why none are proposed and names the screenshots concerned.
+  `measure_bar` reads the same screenshots with two colors through the bar
+  reader itself, and answers what each one reads. The UI measures the
+  draft's colors, or the detected ones while it asks whether they replace
+  colors picked by hand, so the list describes hand-picked colors as well.
+  Which pixels count is the matching pixels preview's to show. Colors found
+  go into a draft with no color at once. An edit's region sits on the
+  newest screenshot of the size its value was drawn at, so both commands
+  look at the screenshots of that size whichever one shows, and the UI asks
+  for one while there is none. A fix keeps its value's colors and offers
+  neither. [Bar detection](State-machines.md#bar-detection) covers the
+  request and its stale answers.
+- **Matching pixels.** The preview's tint comes from the owner, never from
+  the page: `match_pixels` takes a screenshot's index, a rectangle of it, and
+  the rule, and answers the pixels the rule takes (`match_preview.rs`). Each
+  rule asks the function its reader asks, so the tint and the reading agree
+  at the tolerance's edge: `DigitReader::is_ink` for a reference's
+  characters, `BarFill::classify` for a bar, and `ColorMatch::near` for a
+  color check, which the check itself asks about the region's average color.
+  A color check's answer carries that average, its distance from the color,
+  and what the check reads on the rectangle. The answer holds each kind of
+  pixel as a count and as runs in the rectangle, spelled as a selection's
+  are. The runs cross to the page as JSON, so the answer caps them: a kind
+  with more than 500,000 runs carries only its count, and the page says that
+  it tints none of them. The page draws the runs
+  (`lib/matchPreview.ts`) on a canvas of the rectangle's own pixels inside
+  the frame that holds the screenshot, placed in fractions of the frame, so
+  the tint stays on its pixels at any size the frame shows at, and under the
+  surface that takes the pointer. The page asks for a reference's characters
+  on the whole screenshot and counts those in the region itself, so moving
+  the region asks nothing. It awaits one request at a time and sends the
+  newest settings when that one is answered, so the tint follows a dragged
+  slider as fast as the owner answers. A request the page stopped awaiting,
+  as when the switch is turned off, may still be with the owner, and its
+  answer is dropped.
+  [State machines](State-machines.md#matching-pixels-preview) maps its
+  requests and answers. **Show selected pixels** asks the owner nothing of
+  its own: it draws the runs the `select` answer for the screenshot shown
+  already carries, on the same canvas. That selection is remade once
+  **Color match** rests (`SELECT_DELAY_MS`), so until then the tint is the
+  last selection's and its count says that it is updating; a `select` that
+  fails drops the tint. The tint is the selection, not what the state check
+  compares: that is the selected pixels that lie in the region while
+  **Ignore the background** is on, and the whole region otherwise, and the
+  switch's help says which.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to
   four decimals unless more are needed to compare them with the target.
 - **Window sizes.** A new value saves the side of the window it stays at
-  as `pin`, the guess from where its region is unless the user picks
-  another. The Values page reads each running application's values about
+  as `pin`. The pin follows where the region is, the same guess the runtime
+  makes for a value saved without one, until the user picks a side by hand
+  ([Pin choice](State-machines.md#pin-choice)); either way the file names
+  it. Guide lines over the screenshot run from the region to the edges or
+  the middle of the window that the pin measures from (`PinGuides.tsx`).
+  **This content may move** asks for a reading area where the check can
+  read one, and the value saves it as `readingArea`
+  ([Content that moves](Screen-regions.md#content-that-moves)). A fix of
+  such a value asks for a reading area at its size too, and has no flag of
+  its own.
+  The Values page reads each running application's values about
   once a second at the window's size now, with a capture of its own like an
   overlay's, whether the overlay is on or not, and stops when the page
   closes (`live_values`, `stop_live_values`). The automation editor's
@@ -77,6 +228,53 @@ This page covers what the user guide leaves out.
   other states than the value's, and saves it over any fix at the same size
   (`save_fix`, `remove_fix`). A fix of a number names its own reference only
   when it differs from the value's.
+- **Editing a value.** **Edit** opens the capture locked to the value's
+  application, on a first screenshot like a fix's. The draft starts as the
+  saved value (`lib/edit.ts`), with its region on no screenshot. Once a
+  screenshot of the window size the value was drawn at exists, the region
+  sits on the newest one (`useValueEdit`); on a screenshot of any other
+  size the region does not show and cannot be drawn. The page sends an
+  `EditSpec`: the value's ID, its name, its pin, whether its region is a
+  reading area, and a drawing. The pin and the reading area are picked as
+  for a new value, on the capture's draft and with **This content may
+  move**, and open as the saved value has them: the pin by hand only when
+  it is saved and is not the side the region is nearest (`pickedPin`). The
+  owner refuses a reading area on a check that does not read anywhere in
+  its region, tried or saved, so an edit that makes a number a color has to
+  turn it off; the page sends it only for a check that reads one. The flag
+  is setup guidance, so the value's fixes stay whatever it says. A `kept`
+  drawing keeps the saved region and spells the check as the file does, so
+  it needs no screenshot and the window may have any size; a state check in
+  it names the value's saved pictures in their order, under the names the
+  states have now. A `drawn` drawing is a check on a screenshot, which must
+  have the window size the value was drawn at, and a state check in it
+  takes every state's picture again. The owner builds the value as edited
+  once (`owner/edits.rs`) for both commands. `try_edit` reads it back with
+  `saved::build` and makes it the live check where `SavedValue::at` places
+  it at the newest frame's size, so the editor's reading is the runtime's at
+  the window's size now, and answers an `EditPreview`: why the value is not
+  read at that size, the fixes the edit removes, and the automations that
+  refuse it. An edit that cannot be tried clears the live check, so nothing
+  reads with the edit before it. The page asks the owner for the window's
+  size twice a second (`window_size`, the newest frame's own size, not the
+  scaled live view's) and tries the edit again when it changes, and after a
+  save the owner refused. `edit_value` saves the same value over the saved
+  one, under its ID, and leaves the application's `checked` build alone. It
+  refuses an edit when an automation's condition suits the saved value but
+  not the edited one (`TargetDef::suits`). The page sends the window sizes
+  of the fixes the user agreed to lose as `dropFixes`, and the owner
+  refuses the save, listing the fixes it would remove, unless those are
+  exactly the ones the edit removes. An edit removes a value's fixes when
+  the check's kind changes or a state check's states no longer line up with
+  the fixes' pictures: each state has to keep its picture or its name, in
+  the same place. A fix that stays keeps the reference it reads with: when a number value's
+  reference changes, a fix that read with the old one names it, and a fix
+  that named the new one names none, so a fix still names a reference only
+  when it differs from the value's. A fix has no `whole` of its own and
+  follows the value's. A value saved without a `pin` keeps none while the
+  edit names the side guessed from its region, so an edit that changes
+  nothing writes nothing. A value keeps its ID when renamed, and a new
+  value named like a renamed one's old name gets that ID with a number.
 - **References.** A number value names a reference of its own application
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
@@ -85,14 +283,53 @@ This page covers what the user guide leaves out.
   reference belongs to a saved application. It keeps its ID when renamed, and
   a new one named like a renamed one's old name gets that ID with a number.
   One that a value reads with cannot be deleted.
+- **Expected characters.** A reference may list the characters the user says
+  it needs, as [Choose what it needs](References.md#choose-what-it-needs)
+  describes. The list guides and never decides. `appytappy-sources` builds a
+  reference's reader from its color, tolerance, and samples alone, so the
+  list adds no glyph, labels no shape, and leaves number parsing as it is.
+  No rule of the file covers it either: the runtime and the setup app load
+  an application whatever its list holds. The save is the one place that
+  shapes it. `expected_characters` in `check_spec.rs` writes each character a
+  label teaches that is no control character, once, the digits `0` to `9`
+  first and the rest by code point, and refuses more than
+  `MAX_EXPECTED_CHARACTERS`, which the page reads as
+  `LIMITS.maxExpectedCharacters` to say so before the save. The page keeps
+  the list as one set of characters. `lib/expected.ts` reads a saved list as
+  that same set, so one written by hand shows as its characters and the next
+  save writes it in order; it reads each preset's state back from the set;
+  and its `coverage` splits the set and the learned characters into known,
+  missing, and extra, for the editor, the References page, and the reference
+  picker. The learned characters are those of the saved samples, the labeled
+  screenshots, and the kept readings. The save sends the set beside the
+  `characters` check, not in it, and it replaces what the saved reference
+  expected. A character is counted as a label's is: `is_label_character` in
+  `appytappy-config` serves the learner and the save, and the samples in
+  `PARSE_CASES` hold the page's reading of labels and lists to the Rust
+  side's.
 - **Key recording.** **Record** takes the next keys pressed, Tab included,
   and records a letter as the keyboard layout types it.
 - **Saving an automation** checks that its value is still saved and that the
   target is the kind the condition compares. A key press action also needs the
   application's anti-cheat class to be `none`
   ([Key presses](Actions.md#key-presses)).
-- **Reload.** Saving or removing an application, saving or deleting a value,
-  a reference or an automation, switching an automation on or off, changing
+- **Click it now.** The click target screen sends a click only from that
+  button's press: `click_now` in the owner checks the anti-cheat classes,
+  reads the click's picture from its file, and has the host place and send it
+  as the runtime does ([Trying a click](Actions.md#trying-a-click)). The
+  owner thread waits for it, up to a second for a picture's frame and half a
+  second more for the answers of the windows a click sent to the window asks,
+  so other commands wait meanwhile. It answers the window the click went to, and the
+  screen says when that is not the window it picked. While anti-cheat blocks
+  the click, the button stays in the tab order with `aria-disabled`, is
+  described by the note that says why, and sends nothing. The click's return
+  of the focus follows the same
+  rule as **Use this target**: what the action had while its button is the
+  same, and otherwise on unless it is a right click (`returnsFocus` in
+  `lib/click.ts`). [Click target tries](State-machines.md#click-target-tries)
+  maps the screen's states.
+- **Reload.** Saving or removing an application, saving, editing or deleting
+  a value, saving or deleting a reference or an automation, switching an automation on or off, changing
   an anti-cheat class, and changing a setting set the reload event, so the
   runtime reads the files again at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](Architecture.md#the-runtime)
@@ -100,21 +337,134 @@ This page covers what the user guide leaves out.
 
 ## Recording
 
-[Recording readings](References.md#record-readings) samples the frames
-the reference editor's preview capture already takes, about 30 a second, in
-the owner thread (`recording.rs`). Each frame is cut to the region and reduced
+A capture records one thing at a time (`Recorder` in `recording.rs`): the
+readings a number's region shows, for a reference to learn, or
+[the looks a value's region shows](#recording-looks), each kept as a
+screenshot. Both sample the frames the preview capture already takes, about 30
+a second, in the owner thread, and share when they record and why they stop
+(`recording/lifecycle.rs`): a frame of another size than the screenshot the
+region was drawn on is skipped, a capture failure stops the recording with the
+failure as its problem, and a closed window ends it. Starting one kind
+replaces a recording of the other. Recordings of both kinds are numbered from
+one counter.
+
+[Recording readings](References.md#record-readings) runs in the reference
+editor. A number value's **Record readings** opens that editor on the value's
+region, for the reference picked or a new one. A saved reference has its
+characters' color, so its recording starts at once; for a new one the editor
+opens on the screenshot the region is drawn on, with the color next to pick. Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
-into characters, and scales each to the grid the check compares. A crop whose
-shapes equal a kept reading's is another sighting of that reading, because it
-would teach the check nothing new. A blended edge seldom changes a grid
-cell, and when it does the reading is kept twice, which costs a tile in review
-and teaches no wrong shape. One stroke of a different character changes a
-shape however long the number. The
-shapes ignore size, so a counter drawn larger is the same reading. Every kept
-reading is compared, not only the latest, so a value that comes back is not
-kept twice. A crop with no ink is skipped, and so
-is a frame of another size than the screenshot the region was drawn on. One
-recording keeps at most 200 readings.
+into characters, and scales each to the grid the check compares. A crop with
+no ink is skipped, and so is a frame of another size than the screenshot the
+region was drawn on.
+
+A recording collects shapes, not readings (`recording/sightings.rs`). A crop
+is kept when it shows a shape no kept reading has, and the first frame that
+shows a new shape is the one kept. Any other crop would teach the check
+nothing, so it is only counted, with one exception below. A digit, a `%`,
+and a `.` are shapes alike: whatever `DigitReader::shapes` makes one
+character is one shape.
+
+- **What counts as the same shape.** Two shapes are the same only when every
+  grid cell is, which is how `DigitReader::learn` tells glyphs apart. Shapes
+  that differ in a cell are not merged, because nothing in a grid tells a
+  blended edge from a second character, and merging would hide a glyph the
+  check needs. So one character can be several shapes: a blended edge that
+  changes a cell is one, and so is a digit beside a `,`, because the grid
+  scales by the line's height and the `,` makes the line taller. Each costs a
+  kept reading and teaches no wrong shape.
+- **Clean carriers.** A reading is learned only when its text names every
+  shape in it, so a shape whose one kept reading also holds something no
+  character names, such as a neighbor caught half drawn, could never be
+  taught. A kept reading carries a shape cleanly when every other shape in
+  it has shown in another reading too, which a passing shape seldom does. A
+  crop of known shapes is kept after all when it would carry cleanly a shape
+  that no kept reading carries so (`Sightings::worth_keeping`). The counts
+  only grow, so a shape stays cleanly carried once it is, and each shape
+  costs at most two kept readings: one that first shows it and one that
+  first carries it cleanly. Since **Record more** goes on with the same
+  shapes and counts, recording on fixes a shape that was first caught
+  badly. A shape that shows in two different readings counts as a
+  character, so something that stays beside a value through several
+  readings is not told from one.
+- **Evidence.** Each shape holds how many frames showed it and how many
+  different readings did. A reading is counted as different by a 64-bit
+  fingerprint of its shapes, so no frame is kept to count it. A kept reading
+  also holds how many frames showed exactly it. These are counts of what the
+  recording saw. They are not a match score and say nothing of whether a
+  label is right, so the UI shows them as counts and never as a percentage.
+- **Bounds.** Recording runs until the user stops it. It holds at most
+  `MAX_SHAPES` different shapes, the 256 glyphs a reference learns, and
+  counts at most `MAX_READINGS` different readings, 1,048,576 fingerprints
+  or about 16 MB, which a timer that changes every frame reaches in about
+  ten hours. A frame that does not fit, with more new shapes than there is
+  room for or with one reading too many, is not counted and makes the
+  recording full: it keeps and counts no more, and its view says why in
+  words. The shapes bound the kept readings at two each, 512. What those
+  hold is not bounded by a number: a kept reading holds its crop at four
+  bytes a pixel, so it grows with the region the user draws, 72 KB a reading
+  for a region 300 by 60 pixels and 8 MB for a whole 1920 by 1080 window.
+- **Sizes.** A frame of another window size is skipped because a recording
+  has a region and no [pin](Screen-regions.md#window-sizes): only a value
+  says which side of the window its region keeps its distance from, and a
+  reference's region is drawn only to teach. Placing it at another size
+  would mean guessing the pin, and a wrong guess records other pixels. A
+  reference learned at one size reads at others, since shapes scale to the
+  grid, so the limit is where the recording looks, not what it learns.
+- **Color and tolerance.** The shapes are the ones the recording's own
+  characters' color and tolerance show, and "every shape is in a kept
+  reading" holds for those. A reference learns the kept crops again with the
+  color and tolerance it has at the save, as it does its labeled
+  screenshots. If the user changes either before saving, a crop can split
+  into other shapes: its text may have another count of characters than the
+  crop then shows, which `review_problems` and the save refuse by name, and
+  a shape the recording counted as known may be in no kept crop. The page's
+  own lists still follow the recording's shapes, so they can be off until
+  **Use its settings** puts the recording's color and tolerance back.
+- **Signs in several marks.** The reader splits characters at columns with no
+  ink. A sign whose marks share no column, such as a `%` drawn as two dots
+  and a stroke apart, is one shape for each mark, each time alike, and no
+  one-character label can teach it.
+
+The page works out what the shapes mean, because the labels live there
+(`lib/review.ts`, `lib/discovery.ts`). A reading's text names its shapes
+when it has one character for each. From that, while recording and in
+review, the page shows the characters the reference needs that nothing
+shows, using the [expected characters](#behavior-the-guide-leaves-out) and
+`coverage`; the ones only the text reader's unchecked guesses show; and the
+ones the reference knows or a reading the user checked shows. A reading is
+checked once the user edits it, which **Keep all** does to every reading, or
+keeps it with the **Keep** button. A guess is never counted as learned: a
+character is learned only when the user keeps its reading and the reference
+learns it as before.
+
+In review, a reading adds the shapes no other kept reading teaches
+(`additions`). Going through the kept readings in order, one whose every
+shape another still shows is dropped, and each shape counts for the first of
+the rest that shows it. A reading that adds nothing starts left out. Three
+rules keep that default from hiding anything:
+
+- **A start is decided once** (`decide`). Review decides a reading's start
+  when it first shows the reading with its text read, against the readings
+  the user edited and the ones decided before, which stay as they are. After
+  that only the user changes its **Keep**. A text that arrives later decides
+  its own reading alone.
+- **Texts are compared on every shape** (`disagreements`). When two
+  readings' texts give one shape two characters, both are flagged, kept or
+  left out, and neither starts left out. With both kept, the owner's
+  `review_problems` flags the later one as it always did, and **Keep**
+  waits. The owner stays the authority for what is kept; the page's
+  comparison is what reaches the readings that are left out, and it does not
+  hold **Keep** back by itself.
+- **What is left untaught is named** (`untaught`). When the only readings
+  whose text could teach a shape are left out, by default or by the user, a
+  notice above the readings names the characters and offers the readings to
+  keep for them, worked out against the current edits. It describes the
+  **Keep** button too. It does not stop the user: leaving a character out
+  can be what they want.
+
+Review lists the readings that add shapes first, in an order that follows
+the shapes alone, so tiles stay put while the user types.
 
 Kept readings are named by index in the spec the UI sends, so their pixels
 never cross into the UI except as thumbnails. A reference learns its saved
@@ -131,13 +481,107 @@ UI then offers **Use its settings**, which puts the recording's region, color,
 and tolerance back on the draft. The region stays on the screenshot it was
 drawn on when that one has the recording's window size, and otherwise moves to
 the newest screenshot of that size. Kept readings are lost only on a discard,
-when another window is picked, or when the flow is left, such as on **Change
-window**; a closed window keeps them for review. **Back** and Escape leave
+on **Change window**, or when the flow is left; a closed window keeps them
+for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
+
+### Finding more like it
+
+[Find more like it](References.md#find-more-like-it) searches the screenshot
+the user labels for more text like the region shows (`recording/find.rs`). It
+marks each pixel as ink with the reference's color and tolerance, as
+`DigitReader` does, and takes the band of inked rows with the most ink in the
+region, as the reader segments it. It joins touching ink, corners included,
+into blobs, leaving out blobs over twice that band's height, such as a panel in
+the same color. The sample's height is its tallest blob centered in the region,
+and a run's is its tallest blob, so a comma or a mark below the characters
+measures neither. Blobs whose rows meet and that start no further than the
+sample's height past each other join into a run of text; runs are looked up by
+bands of rows and dropped from the lookup once the next blobs start too far
+right of them, so a screenshot full of ink takes well under a second. A run
+within 15% of the sample's height (`SIZE_PERCENT`) that touches neither the
+region nor a find added already is a find; a shorter or taller run, at least
+half the sample's height, counts as another size, and smaller specks are
+ignored. Finds go top to bottom, then left to right; the first 12
+(`MAX_FOUND`) are kept with a margin of a quarter
+of the sample's height, and the rest are counted.
+
+The owner keeps the search (`owner/found.rs`) with each find's pixels and
+sends each to the text reader. A new search replaces it, and dismissing,
+adding, **Change window**, picking another window, or leaving the flow
+forgets it; reads already
+queued for a forgotten search still run, and their text is dropped. Pictures
+of finds are asked for by the search's number, so an answer for a replaced
+search is empty. The UI lists
+the finds, polls while text is still being read, and asks which kept finds the
+reference cannot learn (`found_problems`), learning them after the draft's own
+labels the way review learns recorded readings. Added finds become labels with
+a `region` of their own on their screenshot, which the reference cuts instead
+of the spec's region, so they save as samples like any labeled screenshot.
+
+### Recording looks
+
+[Recording screenshots](Values.md#record-screenshots) is for the checks that
+are set up on screenshots: a state, a bar fill, and a color
+(`recording/looks.rs`, `owner/looks.rs`). A frame is cut to the region and
+compared with every look the recording knows. Each look is an `ImageMatch` of
+the whole region, the comparison a state check makes with a state's whole
+picture: two looks are the same when the average difference of their red,
+green, and blue is at most the tolerance. A frame that shows a look it does
+not know is kept whole in the screenshot store, like a screenshot the user
+takes, so every tool that works on a screenshot works on it. Only the crop of
+a frame is compared; the whole frame is copied only when it is kept.
+
+- **The whole region.** A state check with **Ignore the background** compares
+  only the pixels each state selects, and a recording does not: it has no
+  selection to compare within, since a state gets its selection on a
+  screenshot the recording has yet to keep. So a changing background behind
+  the thing makes most frames new looks, which stops the recording at its
+  limit, and a small change in a large region can stay within the tolerance
+  and never be kept. Comparing within the draft's state selections is left
+  out.
+- **Sensitivity.** The UI sends the tolerance when the recording starts
+  (`lookTolerance`). For a state check it is the check's own **Tolerance**,
+  so one control adjusts both. A bar's and a color's own tolerance compare
+  colors, not looks, so they record with 16, the tolerance a state check
+  starts with.
+- **What it knows.** A recording starts knowing the region on every screenshot
+  of the same window size that the session holds, taken or recorded. So the
+  look of the screenshot the region was drawn on is not kept again, and
+  recording again keeps only what is new. A screenshot removed since is not
+  known, so its look is kept again if it shows.
+- **Bounds.** A recording keeps at most 16 screenshots (`MAX_LOOKS`, the most
+  states a check holds), then stops with the limit as its problem. A screenshot
+  is a whole window at four bytes a pixel, about 8 MB at 1920 by 1080, so one
+  recording holds at most about 130 MB there. Each new recording may keep 16
+  more, and the screenshots the user takes have no limit; removing a
+  screenshot releases it at once, and the capture's end releases all of them.
+- **Cost.** A comparison is one pass over the region for each look known,
+  until one matches, on the owner thread, which also answers the UI. After
+  each comparison the recording rests four times as long as that frame took
+  from arriving to compared (`REST`), and a frame that comes meanwhile only
+  becomes the preview. So comparing takes at most a fifth of the owner
+  thread's time, whatever the region's size and the number of looks, and less
+  while the thread is behind, since a frame that waited took longer. A frame's
+  wait behind a slow command counts too, so a recording rests longer after
+  the owner was busy, while the panel still says it records. Frames
+  cannot pile up behind it, and a command waits for one comparison at most:
+  one pass over the region for each look known. A small region has every frame
+  compared. A large one that shows many looks has fewer frames compared, so
+  it can miss a look that shows only briefly.
+- **Review.** There is no review sheet: the UI lists each kept screenshot in
+  the strip as the recording reports it (`useLookRecording`), marked as
+  recorded, and the user keeps or removes them there. The owner refuses to
+  remove a screenshot while a recording of looks records, and the UI says so:
+  the recording knows each look it kept and would not keep a removed one
+  again. Stopping shows the first kept screenshot that the strip lists, and
+  the panel counts what the recording kept against the strip. A stopped recording only says what it kept and why it stopped;
+  discarding it, or starting readings in the reference editor, leaves its
+  screenshots in the strip.
 
 ### The text reader
 
-The text reader guesses each new reading's text so review only needs corrections
+The text reader guesses each new reading's text, and each find's, so review only needs corrections
 (`recording/ocr.rs`). It is [`ocrs`](https://github.com/robertknight/ocrs), a
 pure-Rust neural text reader, so it reads the same on every system without the
 operating system's OCR. Only its recognition model loads: the region holds one
@@ -145,8 +589,9 @@ line, so there is no text to find first. It runs on a thread of its own, because
 a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
 as black text on white with a margin, whatever the application's colors
-(`recording/ink.rs`). Text for a recording the user discarded or replaced is
-dropped by the recording's number. Only the setup app uses it; the runtime reads
+(`recording/ink.rs`). Text for a recording or a search the user discarded or
+replaced is dropped by its number, and a queued job of a recording or search
+that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
 regions](Screen-regions.md#checks)).
 
@@ -189,8 +634,8 @@ condition still holds, so it neither runs again nor undoes what it changed
 while the window is out of sight.
 A value that does not read at the window's size is not read. Once the
 window has settled at that size, the runtime logs why and that the window
-should be resized or the value fixed at that size, once until the reason
-changes.
+should be resized or the value fixed at that size, each reason once until
+the value is read again.
 
 ## Saved files
 
@@ -200,12 +645,15 @@ so the runtime never reads them ([Drafts](#drafts)).
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures it needs: each reference's labeled screenshots, cropped to
-the region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
+the region or to an added find's own region, then its kept recorded readings, named `ref-{reference}-{n}.png`;
 and each state check's pictures, named after its value and the state's
 place, such as `status-1.png`, and transparent where the state's selection
 leaves the background out
 ([Saved pictures](Screen-regions.md#saved-pictures)). A fix's pictures add
-the fix's number, such as `status-2-1.png`.
+a number, such as `status-2-1.png`, and so do the pictures of a drawing
+whose states an edit took again. Each new set takes the smallest number no
+saved picture of the value has, so a save never overwrites a picture the
+saved file still names.
 
 ```json
 {
@@ -238,6 +686,7 @@ the fix's number, such as `status-2-1.png`.
           "whole": true
         },
         "pin": "topRight",
+        "readingArea": true,
         "fixes": [
           {
             "windowSize": { "width": 3440, "height": 1440 },
@@ -254,7 +703,8 @@ the fix's number, such as `status-2-1.png`.
       "name": "Percent font",
       "ink": { "red": 255, "green": 255, "blue": 255 },
       "tolerance": 40,
-      "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }]
+      "samples": [{ "image": "ref-percent_font-1.png", "text": "87.5%" }],
+      "expects": "0123456789.%"
     }
   ]
 }
@@ -312,9 +762,18 @@ An application's `sizeChanges` is `often` or `rarely`, and `often` when the
 file leaves it out. A value's `pin` is one of `topLeft`, `topCenter`,
 `topRight`, `middleLeft`, `center`, `middleRight`, `bottomLeft`,
 `bottomCenter`, and `bottomRight`, and is guessed from where the region is
-when the file leaves it out. Each of its `fixes` has its own window size and
+when the file leaves it out. Its `readingArea` is `true` when the region was
+drawn as a reading area and left out otherwise; only a number or bar fill
+check may have it, and it changes nothing the value reads. Each of its `fixes` has its own window size and
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
+
+A reference's `expects` is the characters the user says it needs to know,
+and is left out when the user chose none. Only the setup app reads it, to
+show which characters a reference has yet to learn, so no rule covers it and
+a file loads whatever it holds. The setup app writes each character once,
+exactly as labels spell them, so `A` and `a` are two characters: the digits
+first, then the rest by code point.
 
 An application's `overlay` is left out until the user first picks one. Its
 `mode` is `overlay` or `pictureInPicture`, and once the panel has been moved
@@ -339,6 +798,11 @@ or `"none"`, as its target. A state check is saved with its states in order:
 An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
+A click that looks for a picture names it by file name, and the picture is in
+the `clicks` folder beside `automations.json`, named `click-{n}.png`.
+[Pictures kept](#pictures-kept) says what each picture holds and when it is
+removed.
+
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
 `settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
 file and renames it over the old one, so a crash never leaves half a file; a
@@ -346,9 +810,9 @@ later save in that folder removes a temporary file that a crash left between the
 two steps, once it is ten minutes old. A file that cannot be read is listed with
 the reason and left alone; an automations file that cannot be read as a whole,
 such as one with another format version, is not replaced: until it is fixed, the
-setup app saves no automations, removes no application, and deletes no value,
-because it checks that file to see whether an automation still uses the
-application or value. One automation that breaks a rule on its own, such as
+setup app saves no automations, removes no application, and edits or deletes
+no value, because it checks that file to see whether an automation still uses
+the application or value. One automation that breaks a rule on its own, such as
 after a hand edit, is kept in the file and listed with its problem, and nothing
 runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask
@@ -369,22 +833,45 @@ actions until the user sets it
 ## Drafts
 
 A draft is an item the user saved before it was finished
-([Drafts](Drafts.md) in the user guide). The setup app keeps each in its own
-folder under `%LOCALAPPDATA%\AppyTappy\drafts\`, named by an ID made from the
-time it was first saved (`apps/setup/src-tauri/src/drafts.rs`). The folder
-holds `draft.json` and, for a value, fix, or reference, the session's
-screenshots as `shot-0.png`, `shot-1.png` and so on, in the order they were
-taken. The runtime never reads this folder, so a draft never runs and the
-authoring files never hold an unfinished item.
+([Drafts](Drafts.md) in the user guide). It is what its flow holds, written
+down: the same state the flow would carry while it waits under another flow
+or shows on screen ([Pages and flows](State-machines.md#pages-and-flows)).
+The setup app keeps each in its own folder under
+`%LOCALAPPDATA%\AppyTappy\drafts\`, named by an ID made from the time it was
+first saved (`apps/setup/src-tauri/src/drafts.rs`). The folder holds
+`draft.json` and, for a value, fix, or reference, the capture's screenshots,
+each as `shot-{index}.png` under the index it has in the capture, so the
+indexes of removed screenshots stay empty. The runtime never reads this
+folder, so a draft never runs and the authoring files never hold an
+unfinished item.
 
 `draft.json` names the kind of flow that finishes it, the application it
 belongs to, the saved item it changes (null for a new one), the name and the
 sentences the lists show, the click pictures it names, and `state`: what the
 flow had set up. Only the page reads `state`, marked with its own format and
 kind (`apps/setup/src/lib/drafts.ts`). A draft whose `state` has another
-format was saved by another version and can only be deleted. A value,
-reference, or fix keeps its labels, but not a recording or the readings kept
-from one, which live with the recording.
+format was saved by another version and can only be deleted.
+
+What each kind keeps in `state`:
+
+| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                                | What it does not keep                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                                  | A value or application flow the editor had opened, and what such a flow would hand back                                                |
+| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                             | The window picked in the list                                                                                                          |
+| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference and **Whole number only**), the reference being edited with the characters it needs, and which screenshots a recording kept | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
+
+Screenshots follow one rule, however they were kept: every screenshot the
+capture holds when the draft is saved goes into the draft, those a
+[recording of looks](#recording-looks) kept as well as those the user took,
+and the strip marks the recorded ones again when the draft is finished. A
+recording itself lives on the owner thread with the capture and is not
+written: its readings and the looks it knows go when the flow closes. An
+[edit of a saved value](State-machines.md#value-edit) is never a draft. It starts
+from the value as it is saved and is checked against the automations that use
+it when it is saved, so a copy kept for later would be a second, stale state
+of a value that runs meanwhile. Its leave question says so and offers no
+**Save as draft**. A fix adds a drawing at one more size and changes nothing
+saved until it is saved, so it can be a draft.
 
 A save writes the draft into a folder of its own, ending in `.saving`, with
 each file flushed to the disk. It then moves the old draft aside, to a folder
@@ -398,9 +885,126 @@ automation, application, or reference replaces any other draft of the same
 saved item. A value can have a fix draft for each window size, so fix drafts
 never replace each other. Finishing a draft opens its flow; a value, fix,
 or reference asks for the window again, and once it is picked, the draft's
-screenshots replace the session's, so each keeps the index the draft's state
-refers to. Saving the item deletes the draft. Saving the automations keeps the
-click pictures a draft names, so finishing it later still finds them.
+screenshots replace the session's, each under the index the draft's state
+refers to. Saving the item deletes the draft.
+[Pictures kept](#pictures-kept) says how long a draft's pictures stay.
+
+## Pictures kept
+
+AppyTappy keeps a picture only while something saved needs it. A saved value,
+reference, or click needs one to read or to click, cut to the region the user
+drew or to the box around text it found that the user added, and never the
+rest of the window. A saved [draft](#drafts) needs the pictures its flow was
+working on, so that the flow can go on: a capture's screenshots, each a whole
+frame, and an automation's click pictures. Nothing else outlives its flow: a
+window's whole frame otherwise exists only in memory while its capture is
+open. The user guide says so in
+[What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
+
+### In memory
+
+The owner thread and the page hold these for the picked window. All of them
+go when its capture stops (`Owner::stop`): the user selects **Change window**,
+another window is picked, or the flow closes: on **Discard**, **Cancel**, a
+page tab, or the save of what the flow makes or of its draft. A reference
+saved from inside a value flow leaves the flow, and so its capture, open.
+Closing AppyTappy Setup ends the process. **Save as draft** copies the
+screenshots to the draft's folder before the flow closes; the copies in
+memory go with the capture all the same.
+
+| What                               | Held by            | How much of the window                                    |
+| ---------------------------------- | ------------------ | --------------------------------------------------------- |
+| The newest frame                   | Owner              | All of it; each frame replaces the one before             |
+| The live view                      | Page               | All of it, scaled down to `LIVE_MAX_WIDTH` at most        |
+| Each screenshot                    | Owner and page     | All of it, and a thumbnail `THUMB_WIDTH` wide on the page |
+| Each recorded reading              | Owner and page     | The region; a recording keeps at most `MAX_READINGS`      |
+| Each look a recording knows        | Owner              | The region, once for each screenshot it knew or kept      |
+| The check being tried              | Owner              | The region, once for each state                           |
+| A new reading, for the text reader | Text reader thread | The region's ink, until it is read                        |
+| Each find of a search              | Owner and page     | Its box; the page's is `CROP_WIDTH` wide at most          |
+| A find, for the text reader        | Text reader thread | The find's ink, until it is read                          |
+
+A capture holds as many screenshots as the user takes, and at most
+`MAX_LOOKS` more for each [recording of looks](#recording-looks). A screenshot
+the user removes goes at once. Setting up a click's
+target is a capture like a value's, and its screen stops the capture when it
+closes and each time it looks for the window again. A recording's readings
+or looks also go when it is discarded or another replaces it; the screenshots
+a recording of looks kept stay with the capture's others.
+
+The automation editor's live reading, the overlays, and the Values page
+capture only the regions of the values they read, as the runtime does. The
+overlays and the Values page keep the readings alone, and the live reading
+keeps its value's region of the newest frame.
+
+### On disk
+
+| File                                 | What it holds                                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot or kept reading, or a find's box |
+| `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out  |
+| `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                |
+| `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out |
+| `drafts\{draft}\shot-{index}.png`    | A screenshot of a value, fix, or reference draft: the whole frame, as the capture held it |
+
+The first four are in `%APPDATA%\AppyTappy\`, and a draft's screenshots in
+`%LOCALAPPDATA%\AppyTappy\`, where the runtime never reads. A draft's
+screenshots are the only files that hold more of a window than a region the
+user drew. A draft of an automation names its click pictures in `draft.json`
+and keeps them in `clicks` with the others.
+
+A number, bar fill, or color value saves no picture of its own. Nothing else
+AppyTappy writes holds pixels: the runtime's log and its [trace](Trace.md)
+hold names, readings, and timings as text, and the
+[MCP server](Development.md#tools)'s `screen_sample` answers the colors of
+single points of the screen, at most `SCREEN_POINTS_LIMIT` a call.
+
+A sample of a labeled screenshot or a recorded reading keeps the whole region,
+not only the box around its characters. A
+reference that is edited learns its saved samples again with the color and
+tolerance the editor has then, and another color or a higher tolerance counts
+pixels as ink that a box cut for the saved settings would have dropped. A
+state's picture is the whole region because that is what the check compares.
+An added find's sample is the box the search cut around its text, with a
+margin of a quarter of the text's height, so a color or tolerance that counts
+more pixels as ink sees only those within the margin.
+
+### Removal
+
+- After each save of an application's file, `Owner::write_app` removes the
+  pictures in its folder that the file as saved does not name
+  (`AppStore::prune`). So the pictures of a deleted value, fix, or reference
+  go with it; a save that fails takes back the pictures it wrote, since the
+  file still saved does not name them; and pictures left by a save that the
+  program ended in the middle of go with the application's next save.
+- A click's picture is written when its target is set up, before its
+  automation is saved. Each save of the automations removes the click
+  pictures that neither a saved automation nor a saved draft names, and so
+  does the end of the automation's flow (`forget_unsaved_click_pictures`),
+  which covers a target set up for an automation the user then neither saved
+  nor kept as a draft. While the editor waits under a value or application
+  flow it opened, the draft it holds still names its pictures, so they stay
+  until the automation is saved, saved as a draft, or left
+  (`holdsAutomation`).
+- A draft's pictures go with the draft. Deleting a draft, or saving the item
+  it was a draft of, removes its folder with its screenshots. The click
+  pictures an automation's draft named are then named by the saved
+  automation, or by nothing: the page removes those that nothing names when
+  the draft is deleted from the Automations page, and at the end of the flow
+  that finished or deleted it. Saving a draft again with fewer screenshots
+  keeps only those.
+- Both remove only files named as the table above names them. Any other file
+  in those folders stays, such as one the user put there, and so does a
+  picture that a file edited by hand names. Removing an application removes
+  its folder with everything in it.
+- A temporary file that a crash left goes at the next save in its folder, as
+  [Saved files](#saved-files) describes, and one in `clicks` goes with the
+  click pictures.
+- Nothing is removed when AppyTappy Setup starts. An application whose file
+  cannot be read keeps every picture, and so do the click pictures while the
+  automations file or the drafts folder cannot be read, since nothing says
+  which they name. A draft whose file cannot be read names no click picture;
+  it keeps its own screenshots until it is deleted.
 
 ## Page types
 

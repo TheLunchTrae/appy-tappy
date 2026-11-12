@@ -1,7 +1,8 @@
-import { type PointerEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type PointerEvent, type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import {
   addClickPicture,
+  clickNow,
   clickPicture,
   errorText,
   findClick,
@@ -14,7 +15,7 @@ import {
   type AppSummary,
   type ClickAtDef,
   type ClickButtonDef,
-  type FoundClick,
+  type ClickDeliveryDef,
   LIMITS,
   type SelectionSpec,
 } from '../lib/bindings.ts';
@@ -22,25 +23,33 @@ import {
   BUTTONS,
   BUTTON_NAMES,
   DEFAULT_TOLERANCE,
+  DELIVERIES,
+  DELIVERY_NAMES,
+  DELIVERY_NOTES,
+  DELIVERY_WORDS,
   SEARCH_MARGIN,
   SEARCH_SIDE,
   clickApps,
+  clickBlocked,
   middle,
   placeSpot,
+  returnsFocus,
   searchArea,
+  sentText,
   spotAt,
 } from '../lib/click.ts';
+import { IDLE, tryStep } from '../lib/clickTry.ts';
 import type { Picture } from '../lib/pixels.ts';
-import { type Point, type Rect, type Size, contains, fit, toPicture } from '../lib/region.ts';
+import { type Point, type Rect, type Size, contains, pixelAt, toPicture } from '../lib/region.ts';
 import { background } from '../lib/repeat.ts';
 import { DEFAULT_COLOR_MATCH, type SelectTool } from '../lib/selection.ts';
-import { useSize } from '../lib/size.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
 import { useScreenshots } from '../lib/useScreenshots.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import { SelectFields } from './CheckFields.tsx';
 import { Hint } from './Hint.tsx';
-import { RegionSurface } from './RegionSurface.tsx';
+import { Marquee, RegionSurface } from './RegionSurface.tsx';
+import { ZoomView } from './ZoomView.tsx';
 
 /** The widest live frame asked for, which keeps a large window's preview cheap. */
 const LIVE_MAX_WIDTH = 1600;
@@ -52,6 +61,7 @@ const THUMB_WIDTH = 220;
 interface ClickTargetValue {
   readonly app: string;
   readonly button: ClickButtonDef;
+  readonly delivery: ClickDeliveryDef;
   readonly at: ClickAtDef;
 }
 
@@ -101,13 +111,8 @@ type PictureStep = 'picture' | 'press';
 /** Finding the picked window of the application the click is for. */
 type Window =
   | { readonly kind: 'looking' }
-  | { readonly kind: 'picked' }
+  | { readonly kind: 'picked'; readonly handle: number }
   | { readonly kind: 'missing'; readonly message: string };
-
-/** What Find it now found: where the click lands, or why it lands nowhere. */
-type Found =
-  | { readonly kind: 'found'; readonly at: FoundClick }
-  | { readonly kind: 'missed'; readonly message: string };
 
 function hintText(
   window: Window,
@@ -149,12 +154,18 @@ interface StageProps {
   /** The target's place before this screen opened, kept until a new one is set up. */
   readonly initial: ClickAtDef | null;
   readonly button: ClickButtonDef;
+  readonly delivery: ClickDeliveryDef;
+  /** Whether a click with the cursor gives the focus back after, for Click it now. */
+  readonly returnFocus: boolean;
+  /** The ID of the application whose value the automation watches, or null before it watches one. */
+  readonly watched: string | null;
   readonly tolerance: number;
   /** The application field, disabled while a picture is kept or looked for. */
   readonly appField: (busy: boolean) => ReactNode;
   /** Opens the screen again on the application, to find its window anew. */
   readonly onLookAgain: () => void;
   readonly onButton: (button: ClickButtonDef) => void;
+  readonly onDelivery: (delivery: ClickDeliveryDef) => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onCancel: () => void;
   readonly onUse: (target: ClickTargetValue) => void;
@@ -167,10 +178,14 @@ function TargetStage({
   automation,
   initial,
   button,
+  delivery,
+  returnFocus,
+  watched,
   tolerance,
   appField,
   onLookAgain,
   onButton,
+  onDelivery,
   onTolerance,
   onCancel,
   onUse,
@@ -182,7 +197,9 @@ function TargetStage({
   const [step, setStep] = useState<PictureStep>('picture');
   const [tool, setTool] = useState<SelectTool>('box');
   const [colorMatch, setColorMatch] = useState(DEFAULT_COLOR_MATCH);
-  const [found, setFound] = useState<Found | null>(null);
+  // What Find it now and Click it now are doing or answered. Each try has a number, so a late answer is dropped.
+  const [tried, tryNext] = useReducer(tryStep, IDLE);
+  const attempts = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The picture kept for a drawn region, so finding and using it keep it once.
@@ -195,6 +212,14 @@ function TargetStage({
       mounted.current = false;
     };
   }, []);
+
+  // What trying the target answered shows below the buttons, which may be past the end of a short window.
+  const answer = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (tried.kind === 'answered' || tried.kind === 'failed') {
+      answer.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [tried]);
 
   const screenshots = useScreenshots();
   const { shots, full, selected, setSelected, position } = screenshots;
@@ -237,7 +262,7 @@ function TargetStage({
           }
           await pickWindow(read);
           if (isCurrent()) {
-            setWindow({ kind: 'picked' });
+            setWindow({ kind: 'picked', handle: read });
           }
         } catch (caught: unknown) {
           if (isCurrent()) {
@@ -248,13 +273,14 @@ function TargetStage({
     );
     return () => {
       current = false;
+      // The stage's capture ends with it, whether the screen closes, so the editor's live reading can watch again,
+      // or another stage opens, which may find no window to pick in its place. Its screenshots go with it.
+      background(stopCapture());
     };
     // The window rules are read when the stage opens, and looking again opens a new one, not each time the lists
     // are read again.
   }, []);
 
-  const view = useRef<HTMLDivElement>(null);
-  const space = useSize(view);
   const [liveSize, setLiveSize] = useState<Size | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const onFrame = useCallback((width: number, height: number): void => {
@@ -271,33 +297,21 @@ function TargetStage({
   const native = shownPicture ?? (newest === undefined ? null : (full.get(newest.index) ?? null));
   const nativeSize: Size | null = native === null ? null : { width: native.width, height: native.height };
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
-  const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
-  const frameStyle = {
-    left: (space.width - shown.width) / 2,
-    top: (space.height - shown.height) / 2,
-    width: shown.width,
-    height: shown.height,
-  };
-  const scale = nativeSize === null || nativeSize.width === 0 ? 0 : shown.width / nativeSize.width;
-  const marker = (point: Point) => ({ left: (point.x + 0.5) * scale, top: (point.y + 0.5) * scale });
-  const box = (rect: Rect) => ({
-    left: rect.x * scale,
-    top: rect.y * scale,
-    width: rect.width * scale,
-    height: rect.height * scale,
-  });
 
   const drawnHere = drawn?.screenshot === selected ? drawn : null;
   const pictureSize = shownPicture === null ? null : { width: shownPicture.width, height: shownPicture.height };
   const area = drawnHere === null || pictureSize === null ? null : searchArea(drawnHere.region, pictureSize);
 
+  // A click that is being sent is a real click, so the target stays as it is until the click's answer shows.
+  const sending = tried.kind === 'clicking';
+
   const changed = (): void => {
-    setFound(null);
+    tryNext({ kind: 'changed', what: 'place' });
     setError(null);
   };
 
   const setRegion = (region: Rect, selection: SelectionSpec | null): void => {
-    if (selected === null) {
+    if (selected === null || sending) {
       return;
     }
     changed();
@@ -305,7 +319,7 @@ function TargetStage({
   };
 
   const selectWith = (steps: SelectionSpec['steps']): void => {
-    if (selected === null) {
+    if (selected === null || sending) {
       return;
     }
     const on = selected;
@@ -337,14 +351,11 @@ function TargetStage({
       { width: bounds.width, height: bounds.height },
       pictureSize,
     );
-    return {
-      x: Math.min(Math.floor(point.x), pictureSize.width - 1),
-      y: Math.min(Math.floor(point.y), pictureSize.height - 1),
-    };
+    return pixelAt(point, pictureSize);
   };
   const onPoint = (event: PointerEvent<HTMLDivElement>): void => {
     const point = pointAt(event);
-    if (point === null || pictureSize === null) {
+    if (point === null || pictureSize === null || sending) {
       return;
     }
     if (mode === 'spot') {
@@ -395,7 +406,8 @@ function TargetStage({
     return base.kind === 'picture' ? { ...base, search, press: drawn.press, tolerance } : base;
   };
 
-  const run = (task: (at: ClickAtDef) => Promise<void>): void => {
+  /** Runs `task` on the target as set up now, and hands `problem` why when there is no target to run it on. */
+  const run = (task: (at: ClickAtDef) => Promise<void>, problem: (message: string) => void = setError): void => {
     setBusy(true);
     setError(null);
     background(
@@ -403,14 +415,14 @@ function TargetStage({
         try {
           const at = await target();
           if (at === null) {
-            setError(
+            problem(
               mode === 'spot' ? 'Click where the click should land first.' : 'Draw the picture to click on first.',
             );
             return;
           }
           await task(at);
         } catch (caught: unknown) {
-          setError(caught instanceof Error ? caught.message : errorText(caught));
+          problem(caught instanceof Error ? caught.message : errorText(caught));
         } finally {
           setBusy(false);
         }
@@ -418,26 +430,75 @@ function TargetStage({
     );
   };
 
+  const nextAttempt = (): number => {
+    attempts.current += 1;
+    return attempts.current;
+  };
+
+  // A try starts with the press, and every way it can end answers it, so none stays under way.
   const findNow = (): void => {
+    const attempt = nextAttempt();
+    const failed = (message: string): void => {
+      tryNext({ kind: 'failed', attempt, message });
+    };
+    tryNext({ kind: 'find', attempt });
     run(async (at) => {
       try {
-        setFound({ kind: 'found', at: await findClick(at) });
+        tryNext({ kind: 'answered', attempt, answer: { kind: 'found', at: await findClick(at) } });
       } catch (caught: unknown) {
-        setFound({ kind: 'missed', message: errorText(caught) });
+        failed(errorText(caught));
       }
       // The result shows on the live window.
       setSelected(null);
-    });
+    }, failed);
   };
 
   const use = (): void => {
     run(async (at) => {
       if (mounted.current) {
-        onUse({ app, button, at });
+        onUse({ app, button, delivery, at });
       }
       await Promise.resolve();
     });
   };
+
+  // Anti-cheat can see a click however it is sent, so a test click needs what the automation's click needs.
+  const named = (id: string) => {
+    const file = apps.find((candidate) => candidate.id === id)?.file ?? null;
+    return file === null ? null : { name: file.name, antiCheat: file.antiCheat };
+  };
+  const clickedIn = named(app);
+  const blocked =
+    clickedIn === null ? null : clickBlocked(watched === null ? clickedIn : (named(watched) ?? clickedIn), clickedIn);
+
+  // Sends one real click. Only the Click it now button calls it, and not while anti-cheat blocks the click.
+  const clickItNow = (): void => {
+    if (blocked !== null || window.kind !== 'picked') {
+      return;
+    }
+    const shown = window.handle;
+    const attempt = nextAttempt();
+    const failed = (message: string): void => {
+      tryNext({ kind: 'failed', attempt, message });
+    };
+    // From here until its answer, the button, the way to click, and the place cannot change.
+    tryNext({ kind: 'click', attempt });
+    run(async (at) => {
+      try {
+        const sent = await clickNow({ watched, app, button, delivery, returnFocus, at });
+        const elsewhere = sent.window !== shown;
+        tryNext({
+          kind: 'answered',
+          attempt,
+          answer: { kind: 'sent', message: sentText(delivery, appName, sent.title, elsewhere), elsewhere },
+        });
+      } catch (caught: unknown) {
+        failed(errorText(caught));
+      }
+    }, failed);
+  };
+  const landed = tried.kind === 'answered' && tried.answer.kind === 'found' ? tried.answer.at : null;
+  const elsewhere = tried.kind === 'answered' && tried.answer.kind === 'sent' && tried.answer.elsewhere;
 
   const spotHere = spot?.kind === 'spot' && pictureSize !== null ? placeSpot(spot, pictureSize) : null;
   const ready = mode === 'spot' ? spot !== null : drawn !== null || initial?.kind === 'picture';
@@ -460,7 +521,7 @@ function TargetStage({
             </span>
           )}
           <div className="end">
-            {window.kind === 'missing' || (window.kind === 'picked' && liveError !== null) ? (
+            {window.kind === 'missing' || (window.kind === 'picked' && liveError !== null) || elsewhere ? (
               <button
                 type="button"
                 className="btn"
@@ -498,78 +559,95 @@ function TargetStage({
         </p>
         {shortcut.error === null ? null : <p className="warn">{shortcut.error}</p>}
         {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
-        <div className="view" ref={view}>
-          <div className="frame" style={frameStyle}>
-            {window.kind !== 'picked' ? null : selected === null ? (
-              <LiveCanvas
-                maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
-                onFrame={onFrame}
-                onError={onLiveError}
-              />
-            ) : shownPicture === null ? null : (
-              <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
-            )}
-            {mode === 'picture' && area !== null ? (
-              <div className="search-area" style={box(area)}>
-                <span className="tag">
-                  Search area · {area.width} × {area.height}
-                </span>
-              </div>
-            ) : null}
-            {mode === 'picture' && shownPicture !== null && !pointing ? (
-              <RegionSurface
-                size={shownPicture}
-                shown={shown}
-                region={drawnHere?.region ?? null}
-                label="Picture"
-                editable
-                picking={false}
-                tool={tool}
-                onRegion={(region) => {
-                  setRegion(region, null);
-                }}
-                onPick={() => {
-                  // Clicks pick no colors.
-                }}
-                onSnap={(rough) => {
-                  selectWith([{ kind: 'snap', region: rough, combine: 'replace' }]);
-                }}
-                onSelectAt={(point) => {
-                  selectWith([{ kind: 'click', x: point.x, y: point.y, combine: 'replace' }]);
-                }}
-              />
-            ) : null}
-            {pointing ? (
-              <div className="surface clicking" onPointerDown={onPoint}>
-                {mode === 'picture' && drawnHere !== null ? (
-                  <div className="marquee" style={box(drawnHere.region)}>
+        <ZoomView
+          picture={layoutSize}
+          zoomable={shownPicture !== null}
+          hint={
+            selected === null && liveError !== null
+              ? liveError
+              : hintText(window, mode, step, selected, shortcut.label, tool)
+          }
+        >
+          {({ space, shown }) => {
+            const scale = nativeSize === null || nativeSize.width === 0 ? 0 : shown.width / nativeSize.width;
+            const marker = (point: Point) => ({ left: (point.x + 0.5) * scale, top: (point.y + 0.5) * scale });
+            return (
+              <>
+                {window.kind !== 'picked' ? null : selected === null ? (
+                  <LiveCanvas
+                    maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
+                    onFrame={onFrame}
+                    onError={onLiveError}
+                  />
+                ) : shownPicture === null ? null : (
+                  <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
+                )}
+                {mode === 'picture' && area !== null ? (
+                  <div
+                    className="search-area"
+                    style={{
+                      left: area.x * scale,
+                      top: area.y * scale,
+                      width: area.width * scale,
+                      height: area.height * scale,
+                    }}
+                  >
                     <span className="tag">
-                      Picture · {drawnHere.region.width} × {drawnHere.region.height}
+                      Search area · {area.width} × {area.height}
                     </span>
                   </div>
                 ) : null}
-              </div>
-            ) : null}
-            {mode === 'picture' && drawnHere !== null ? (
-              <span
-                className="click-spot"
-                style={marker({ x: drawnHere.region.x + drawnHere.press.x, y: drawnHere.region.y + drawnHere.press.y })}
-                aria-hidden="true"
-              />
-            ) : null}
-            {mode === 'spot' && spotHere !== null ? (
-              <span className="click-spot" style={marker(spotHere)} aria-hidden="true" />
-            ) : null}
-            {selected === null && found?.kind === 'found' && nativeSize !== null ? (
-              <span className="click-spot found" style={marker(found.at)} aria-hidden="true" />
-            ) : null}
-          </div>
-          <p className="hint">
-            {selected === null && liveError !== null
-              ? liveError
-              : hintText(window, mode, step, selected, shortcut.label, tool)}
-          </p>
-        </div>
+                {mode === 'picture' && shownPicture !== null && !pointing ? (
+                  <RegionSurface
+                    size={shownPicture}
+                    shown={shown}
+                    screenshot={selected}
+                    region={drawnHere?.region ?? null}
+                    label="Picture"
+                    editable={!sending}
+                    picking={false}
+                    tool={tool}
+                    onRegion={(region) => {
+                      setRegion(region, null);
+                    }}
+                    onPick={() => {
+                      // Clicks pick no colors.
+                    }}
+                    onSnap={(rough) => {
+                      selectWith([{ kind: 'snap', region: rough, combine: 'replace' }]);
+                    }}
+                    onSelectAt={(point) => {
+                      selectWith([{ kind: 'click', x: point.x, y: point.y, combine: 'replace' }]);
+                    }}
+                  />
+                ) : null}
+                {pointing ? (
+                  <div className="surface clicking" onPointerDown={onPoint}>
+                    {mode === 'picture' && drawnHere !== null && pictureSize !== null ? (
+                      <Marquee rect={drawnHere.region} picture={pictureSize} scale={scale} label="Picture" />
+                    ) : null}
+                  </div>
+                ) : null}
+                {mode === 'picture' && drawnHere !== null ? (
+                  <span
+                    className="click-spot"
+                    style={marker({
+                      x: drawnHere.region.x + drawnHere.press.x,
+                      y: drawnHere.region.y + drawnHere.press.y,
+                    })}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                {mode === 'spot' && spotHere !== null ? (
+                  <span className="click-spot" style={marker(spotHere)} aria-hidden="true" />
+                ) : null}
+                {selected === null && landed !== null && nativeSize !== null ? (
+                  <span className="click-spot found" style={marker(landed)} aria-hidden="true" />
+                ) : null}
+              </>
+            );
+          }}
+        </ZoomView>
         <div className="strip">
           <button
             type="button"
@@ -619,6 +697,7 @@ function TargetStage({
                 key={option}
                 type="button"
                 aria-pressed={mode === option}
+                disabled={sending}
                 onClick={() => {
                   changed();
                   setMode(option);
@@ -698,6 +777,7 @@ function TargetStage({
                   min={0}
                   max={LIMITS.maxTolerance}
                   value={tolerance}
+                  disabled={sending}
                   aria-label="How alike it must look"
                   onChange={(event) => {
                     changed();
@@ -712,6 +792,7 @@ function TargetStage({
                   max={LIMITS.maxTolerance}
                   aria-describedby="hint-click-tolerance"
                   value={tolerance}
+                  disabled={sending}
                   onChange={(event) => {
                     const value = Number.parseInt(event.target.value, 10);
                     if (Number.isInteger(value) && value >= 0 && value <= LIMITS.maxTolerance) {
@@ -754,7 +835,9 @@ function TargetStage({
                 key={option}
                 type="button"
                 aria-pressed={button === option}
+                disabled={sending}
                 onClick={() => {
+                  tryNext({ kind: 'changed', what: 'press' });
                   onButton(option);
                 }}
               >
@@ -763,30 +846,91 @@ function TargetStage({
             ))}
           </div>
         </div>
-        <div role="status">
-          {found === null ? null : found.kind === 'found' ? (
-            <p className="result">
-              {found.at.likeness === null
-                ? `It would click ${found.at.x} px across and ${found.at.y} px down the window.`
-                : `Found it, ${found.at.likeness}% alike. It would click ${found.at.x} px across and ${found.at.y} px down the window.`}
-            </p>
-          ) : (
-            <p className="warn">{found.message}</p>
+        <div className="field">
+          <span className="name">
+            <span id="click-delivery">How to click</span>
+            <Hint topic="How to click" id="hint-click-delivery">
+              {DELIVERY_NAMES.cursor} presses the way a real mouse does, and the window comes to the front for a moment.{' '}
+              {DELIVERY_NAMES.message} does not move the cursor or bring the window to the front, but some applications
+              ignore it.
+            </Hint>
+          </span>
+          <div className="seg" role="group" aria-labelledby="click-delivery" aria-describedby="hint-click-delivery">
+            {DELIVERIES.map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={delivery === option}
+                disabled={sending}
+                onClick={() => {
+                  tryNext({ kind: 'changed', what: 'press' });
+                  onDelivery(option);
+                }}
+              >
+                {DELIVERY_NAMES[option]}
+                <small>{DELIVERY_WORDS[option]}</small>
+              </button>
+            ))}
+          </div>
+          <span className="note">{DELIVERY_NOTES[delivery]}</span>
+        </div>
+        <div className="field">
+          <span className="name">
+            <span id="click-try">Try it</span>
+            <Hint topic="Try it" id="hint-click-try">
+              Find it now shows where the click would land, without clicking. Click it now sends one real click to the
+              window, the way the automation would, so you can see whether the application takes it. With several of the
+              application&apos;s windows open, it clicks the one the automation would click, which may be another one
+              than this screen shows.
+            </Hint>
+          </span>
+          <div className="click-tries" role="group" aria-labelledby="click-try" aria-describedby="hint-click-try">
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !ready || window.kind !== 'picked'}
+              title="Looks for the target on the live window now, without clicking."
+              onClick={findNow}
+            >
+              Find it now
+            </button>
+            <button
+              type="button"
+              className="btn"
+              // While anti-cheat blocks the click, the button stays in the tab order, so its note is read out.
+              disabled={blocked === null && (busy || !ready || window.kind !== 'picked')}
+              aria-disabled={blocked !== null}
+              aria-describedby={blocked === null ? undefined : 'click-blocked'}
+              title="Sends one real click to the window now, the way the automation would."
+              onClick={clickItNow}
+            >
+              Click it now
+            </button>
+          </div>
+          {blocked === null ? null : (
+            <span className="note" id="click-blocked">
+              {blocked}
+            </span>
           )}
+          <div role="status" ref={answer}>
+            {tried.kind === 'finding' ? <p className="note">Looking for it…</p> : null}
+            {tried.kind === 'clicking' ? <p className="note">Clicking…</p> : null}
+            {tried.kind === 'failed' ? <p className="warn">{tried.message}</p> : null}
+            {tried.kind !== 'answered' ? null : tried.answer.kind === 'sent' ? (
+              <p className="result">{tried.answer.message}</p>
+            ) : (
+              <p className="result">
+                {tried.answer.at.likeness === null
+                  ? `It would click ${tried.answer.at.x} px across and ${tried.answer.at.y} px down the window.`
+                  : `Found it, ${tried.answer.at.likeness}% alike. It would click ${tried.answer.at.x} px across and ${tried.answer.at.y} px down the window.`}
+              </p>
+            )}
+          </div>
         </div>
         <span className="warn" role="alert">
           {error ?? ''}
         </span>
         <div className="actions">
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || !ready || window.kind !== 'picked'}
-            title="Looks for the target on the live window now, without clicking."
-            onClick={findNow}
-          >
-            Find it now
-          </button>
           <button type="button" className="btn" disabled={busy} onClick={onCancel}>
             Cancel
           </button>
@@ -803,31 +947,32 @@ interface Props {
   readonly apps: readonly AppSummary[];
   /** The automation's name, for the breadcrumb. */
   readonly automation: string;
+  /** The ID of the application whose value the automation watches, or null before it watches one. */
+  readonly watched: string | null;
   /** The target the click has, or null before it has one. */
-  readonly initial: { readonly app: string; readonly button: ClickButtonDef; readonly at: ClickAtDef | null };
+  readonly initial: {
+    readonly app: string;
+    readonly button: ClickButtonDef;
+    readonly delivery: ClickDeliveryDef;
+    readonly returnFocus: boolean;
+    readonly at: ClickAtDef | null;
+  };
   readonly onCancel: () => void;
   readonly onUse: (target: ClickTargetValue) => void;
 }
 
 /** Setting up where a click lands: on a spot, or on a picture wherever it shows near where it was. */
-export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Props) {
+export function ClickTarget({ apps, automation, watched, initial, onCancel, onUse }: Props) {
   const choices = clickApps(apps);
   const [app, setApp] = useState(() => (initial.app === '' ? (choices[0]?.id ?? '') : initial.app));
   const [button, setButton] = useState<ClickButtonDef>(initial.button);
+  const [delivery, setDelivery] = useState<ClickDeliveryDef>(initial.delivery);
   const [tolerance, setTolerance] = useState(() =>
     initial.at?.kind === 'picture' ? initial.at.tolerance : DEFAULT_TOLERANCE,
   );
   const chosen = choices.find((choice) => choice.id === app) ?? null;
   // Each look again opens a new stage, which picks the window afresh and forgets the screenshots.
   const [round, setRound] = useState(0);
-
-  // Capture stops when the screen closes, so the editor's live reading can watch again.
-  useEffect(
-    () => () => {
-      background(stopCapture());
-    },
-    [],
-  );
 
   return (
     <TargetStage
@@ -839,8 +984,12 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
       automation={automation}
       initial={initial.app === app ? initial.at : null}
       button={button}
+      delivery={delivery}
+      returnFocus={returnsFocus(button, initial)}
+      watched={watched}
       tolerance={tolerance}
       onButton={setButton}
+      onDelivery={setDelivery}
       onTolerance={setTolerance}
       onCancel={onCancel}
       onUse={onUse}

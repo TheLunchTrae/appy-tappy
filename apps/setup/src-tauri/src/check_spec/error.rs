@@ -7,6 +7,8 @@ use appytappy_config::app_file::{CheckDefError, MAX_STATES};
 use appytappy_sources::screen::Size;
 use appytappy_sources::screen::digits::LearnError;
 
+use super::MAX_EXPECTED_CHARACTERS;
+
 /// `text` as a sentence: capitalized, with a full stop.
 pub(crate) fn sentence(text: &str) -> String {
     let mut characters = text.chars();
@@ -71,6 +73,9 @@ pub(crate) enum SpecError {
     /// Characters still being taught were saved as a value, or something
     /// other than characters as a reference.
     NotAValue,
+    /// A reference is to expect more than [`MAX_EXPECTED_CHARACTERS`]
+    /// characters.
+    TooManyExpected,
     /// A reference could not learn from a label.
     Learn {
         /// The text the user typed.
@@ -153,6 +158,10 @@ impl fmt::Display for SpecError {
                 "That reference belongs to another application. Pick one of this application's.",
             ),
             Self::NotAValue => formatter.write_str("Pick a reference to read the number with."),
+            Self::TooManyExpected => write!(
+                formatter,
+                "A reference needs at most {MAX_EXPECTED_CHARACTERS} characters. Remove some."
+            ),
             Self::Learn { text, source } => {
                 write!(formatter, "Could not learn from \"{text}\": {source}")
             },

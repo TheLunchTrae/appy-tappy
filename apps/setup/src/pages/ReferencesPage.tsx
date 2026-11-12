@@ -2,10 +2,11 @@ import { useRef, useState } from 'react';
 
 import type { AppSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
+import { referenceCoverage } from '../lib/expected.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
-import { CharacterChips } from '../components/CharacterChips.tsx';
-import type { SavedRef } from './ReferenceFlow.tsx';
+import { CharacterChips, MissingNote } from '../components/CharacterChips.tsx';
+import type { SavedRef } from '../lib/flow.ts';
 import { type Resumed, draftOfSaved, draftProblem, draftsOf } from '../lib/drafts.ts';
 import { labeledCharacters } from '../lib/captureDraft.ts';
 import { CaptureDraftRow, DraftPill } from '../components/Drafts.tsx';
@@ -162,6 +163,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, draf
                       </td>
                       <td>
                         <CharacterChips characters={referenceCharacters(reference)} ink={reference.ink} />
+                        <MissingNote characters={referenceCoverage(reference).missing} />
                       </td>
                       <td className="note">{used.length === 0 ? 'No values yet' : andList(used)}</td>
                       <td className="end">

@@ -641,6 +641,7 @@ mod tests {
     use appytappy_config::signal::{Number, Value};
 
     use super::*;
+    use crate::screen::digits::drawn::{Pen, Percent, draw};
 
     const OFTEN: SizeChangesDef = SizeChangesDef::Often;
 
@@ -676,6 +677,7 @@ mod tests {
             },
             check,
             pin: None,
+            reading_area: false,
             fixes: Vec::new(),
         }
     }
@@ -886,6 +888,163 @@ mod tests {
                 image: sample_name("counter", 1),
                 text: text.to_owned(),
             }],
+            expects: None,
+        }
+    }
+
+    #[test]
+    fn what_a_reference_expects_changes_nothing_it_learns_or_reads() {
+        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
+        let number = CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+        };
+        let plain = build(
+            &screen(number.clone()),
+            &[counter("11")],
+            OFTEN,
+            from(&files),
+        )
+        .expect("builds");
+        // The same glyphs and the same number rules, whatever it expects,
+        // even a list no setup app would save.
+        for expected in ["0123456789,.%", "11 ", "", &"x".repeat(5000)] {
+            let mut expecting = counter("11");
+            expecting.expects = Some(expected.to_owned());
+            let guided =
+                build(&screen(number.clone()), &[expecting], OFTEN, from(&files)).expect("builds");
+            assert_eq!(guided.drawn.check, plain.drawn.check, "{expected:?}");
+        }
+    }
+
+    /// A window of `size` that draws `text` near the middle of its top
+    /// edge, as large as the window is tall: digits 20 pixels tall in a
+    /// window 300 tall.
+    fn window_showing(text: &str, size: Size) -> Image {
+        let height = f64::from(size.height) / 15.0;
+        let pen = Pen {
+            height,
+            at: (f64::from(size.width) * 0.376, height * 0.25),
+            percent: Percent::Joined,
+        };
+        draw(text, pen, size)
+    }
+
+    #[test]
+    fn a_saved_number_reads_in_a_larger_window_that_draws_it_larger() {
+        let drawn_at = Size {
+            width: 400,
+            height: 300,
+        };
+        let region = Region::new(140, 0, 180, 36).expect("not empty");
+        // The reference as the setup app saves it: the region of each
+        // labeled screenshot, as a PNG file.
+        let labels = ["12.34%", "56.78%", "90%"];
+        let mut files = BTreeMap::new();
+        let samples = labels
+            .iter()
+            .zip(1_usize..)
+            .map(|(text, number)| {
+                let sample = window_showing(text, drawn_at)
+                    .crop(region)
+                    .expect("inside the window");
+                let image = sample_name("percent", number);
+                files.insert(image.clone(), sample.encode_png().expect("encodes"));
+                SampleDef {
+                    image,
+                    text: (*text).to_owned(),
+                }
+            })
+            .collect();
+        let reference = ReferenceDef {
+            id: "percent".to_owned(),
+            name: "Percent".to_owned(),
+            ink: ColorDef {
+                red: 255,
+                green: 255,
+                blue: 255,
+            },
+            tolerance: 40,
+            samples,
+            expects: None,
+        };
+        let value = ScreenDef {
+            window_size: SizeDef {
+                width: drawn_at.width,
+                height: drawn_at.height,
+            },
+            region: RegionDef {
+                x: region.x(),
+                y: region.y(),
+                width: region.size().width,
+                height: region.size().height,
+            },
+            check: CheckDef::Number {
+                reference: "percent".to_owned(),
+                whole: false,
+            },
+            pin: None,
+            fixes: Vec::new(),
+            reading_area: false,
+        };
+        let built = build(&value, &[reference], OFTEN, from(&files)).expect("builds");
+        // The runtime's read: the value placed at the window's size, and
+        // its check on that region of the frame.
+        for (size, text, shown) in [
+            (drawn_at, "74.05%", 74.05),
+            (
+                Size {
+                    width: 600,
+                    height: 450,
+                },
+                "74.05%",
+                74.05,
+            ),
+            (
+                Size {
+                    width: 500,
+                    height: 375,
+                },
+                "100%",
+                100.0,
+            ),
+        ] {
+            let at = built.at(size).expect("reads at this size");
+            let frame = window_showing(text, size);
+            assert_eq!(
+                built
+                    .check(&at)
+                    .read(&frame.crop(at.region).expect("inside the window")),
+                Ok(Value::Number(Number::new(shown).expect("finite"))),
+                "{text} in a {size} window"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reading_area_changes_nothing_a_value_reads() {
+        let files = pictures(&[(&sample_name("counter", 1), &elevens(3))]);
+        let number = CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+        };
+        let bar = CheckDef::BarFill {
+            filled: RED,
+            empty: GRAY,
+        };
+        for check in [number, bar] {
+            let plain = build(
+                &screen(check.clone()),
+                &[counter("11")],
+                OFTEN,
+                from(&files),
+            )
+            .expect("builds");
+            let mut area = screen(check);
+            area.reading_area = true;
+            let guided = build(&area, &[counter("11")], OFTEN, from(&files)).expect("builds");
+            // The same region, check, pin and sizes, whatever the flag says.
+            assert_eq!(guided, plain);
         }
     }
 
@@ -927,15 +1086,15 @@ mod tests {
                 reference: "counter".to_owned(),
                 whole: false,
             }),
-            &[counter("1")],
+            &[counter("111")],
             OFTEN,
             from(&files),
         )
-        .expect_err("two characters, not one");
+        .expect_err("two characters, not three");
         assert_eq!(
             error.to_string(),
             "its reference cannot learn from the picture ref-counter-1.png: the region shows 2 \
-             characters but the text has 1; characters that touch count as one"
+             characters but the text has 3; characters that touch count as one"
         );
         assert!(error.source().is_some());
         let error = build(
