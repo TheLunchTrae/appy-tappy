@@ -45,6 +45,9 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
   // The pixel a zoom keeps in place, until the next render gives the picture its new size.
   const anchor = useRef<Anchor | null>(null);
   const zoomTo = (next: (zoom: number) => number, at: Point | null): void => {
+    if (!zoomable) {
+      return;
+    }
     const box = frame.current?.getBoundingClientRect();
     anchor.current =
       at === null || box === undefined
@@ -74,7 +77,7 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
 
   // Ctrl and the wheel zoom around the pointer. React listens to the wheel passively, so this listener is its own.
   const onWheel = (event: WheelEvent): void => {
-    if (!event.ctrlKey || !zoomable) {
+    if (!event.ctrlKey) {
       return;
     }
     event.preventDefault();
@@ -98,6 +101,9 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
     };
   }, []);
 
+  // The most this picture zooms, which is 1 for the live view. A control that can do nothing more says so and keeps
+  // the focus: a press on it changes nothing.
+  const most = zoomable ? clampZoom(Infinity, size, space) : 1;
   // Past two view pixels to one of the picture, each pixel shows as a square, so its edges are exact.
   const crisp = size.width > 0 && shown.width >= size.width * 2;
   return (
@@ -126,20 +132,22 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
             className="btn small"
             aria-label="Zoom out"
             title="Zoom out"
-            disabled={!zoomable}
+            aria-disabled={zoom <= 1}
             onClick={() => {
               zoomBy(1 / ZOOM_STEP);
             }}
           >
             −
           </button>
-          <span className="zoom-level">{zoomable ? percent(shown, size) : ''}</span>
+          <span className="zoom-level" role="status">
+            {zoomable ? percent(shown, size) : ''}
+          </span>
           <button
             type="button"
             className="btn small"
             aria-label="Zoom in"
             title="Zoom in"
-            disabled={!zoomable}
+            aria-disabled={zoom >= most}
             onClick={() => {
               zoomBy(ZOOM_STEP);
             }}
@@ -150,7 +158,7 @@ export function ZoomView({ picture, zoomable, hidden = false, hint, children }: 
             type="button"
             className="btn small"
             title="Shows the whole screenshot"
-            disabled={!zoomable}
+            aria-disabled={zoom <= 1}
             onClick={() => {
               zoomTo(() => 1, null);
             }}

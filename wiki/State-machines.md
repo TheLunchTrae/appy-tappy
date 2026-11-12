@@ -34,8 +34,9 @@ it was about has gone. Five guards drop such stale messages:
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
-  (`apps/setup/src/lib/drag.ts`). A move, a release, or a cancel of any other
-  pointer is dropped, and so is every event but a press once the drag is over.
+  (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
+  capture of any other pointer is dropped, and so is every event but a press
+  once the drag is over.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -821,23 +822,30 @@ stateDiagram-v2
     Idle --> Drawing: press off the region, or with the snap tool
     Idle --> Moving: press inside the region with the box tool
     Idle --> Resizing: press on a corner's handle with the box tool
-    Drawing --> Idle: release, which hands over the box drawn
-    Moving --> Idle: release, which hands over the moved region
-    Resizing --> Idle: release, which hands over the resized region
-    Drawing --> Idle: cancel, lost capture, or the surface changes
-    Moving --> Idle: cancel, lost capture, or the surface changes
-    Resizing --> Idle: cancel, lost capture, or the surface changes
+    Drawing --> Drawing: move, or the screenshot shifts under the pointer
+    Moving --> Moving: move, or the screenshot shifts under the pointer
+    Resizing --> Resizing: move, or the screenshot shifts under the pointer
+    Drawing --> Idle: release, or a move with the button up, hands over the box drawn
+    Moving --> Idle: release, or a move with the button up, hands over the moved region
+    Resizing --> Idle: release, or a move with the button up, hands over the resized region
+    Drawing --> Idle: cancel, lost or failed capture, or the surface changes
+    Moving --> Idle: cancel, lost or failed capture, or the surface changes
+    Resizing --> Idle: cancel, lost or failed capture, or the surface changes
 ```
 
 - **Idle.** Only a press of the main button with the box or the snap tool
   starts a drag, and it captures the pointer. A click that picks a color or
   selects with the click tool never enters the machine.
+- **Slop.** In every state, nothing changes until the pointer has traveled 3
+  pixels of the view from the press. A click therefore draws, moves, and
+  resizes nothing, so it leaves a region typed to the exact pixel as it is.
+  Past the slop the drag follows the pointer's whole travel, also back to the
+  press.
 - **Drawing.** The box is the part of the screenshot between the press and the
   pointer. The press can be in the empty space around the screenshot, and a
-  box that holds none of the screenshot is no box. Until the pointer has
-  traveled 3 pixels of the view, nothing is drawn, so a click draws nothing.
-  With the box tool the box becomes the region. With the snap tool it is the
-  rough box, and the region stays as it is.
+  box that holds none of the screenshot is no box. With the box tool the box
+  becomes the region. With the snap tool it is the rough box, and the region
+  stays as it is.
 - **Moving.** The region as it was at the press moves by the pointer's travel
   and stops at the screenshot's edges.
 - **Resizing.** The pressed corner moves by the pointer's travel from where it
@@ -845,18 +853,25 @@ stateDiagram-v2
   jump. The corner across from it stays where it was at the press, also after
   the dragged corner passes it. A drag that would leave no box keeps the last
   one.
-- **Release** ends the drag, frees the pointer, and hands over what the drag
-  made: the region, or the rough box. A drag that drew no box, or left the
-  region where it was, hands over nothing. A move that arrives with the main
-  button up counts as a release, because no release event follows a button
-  that comes up while another is held.
+- **Shift.** A scroll or a zoom moves the screenshot under a pointer that
+  stays still, and no pointer event tells of it. The surface then says where
+  on the screenshot the pointer is, and the drag follows as for a move.
+- **Release** carries where the pointer was let go, which the last move may
+  not have reached. The drag follows to there, ends, frees the pointer, and
+  hands over what it made: the region, or the rough box. A drag that drew no
+  box, or left the region where it was, hands over nothing.
+- **A move with the main button up** ends the drag the same way, but with the
+  box as it last was. No release event follows a button that comes up while
+  another is held, and where it came up is not known.
 - **Failures.** A drag is interrupted when the browser cancels the pointer,
-  when the surface loses the pointer's capture, when the capture cannot be
-  taken because the pointer is gone, or when the surface changes: another
-  screenshot or another size shows, the tool changes, or a click starts to
-  pick a color. Each ends the drag in **Idle** with the pointer freed and
-  hands over nothing. Only a release changes the region, so the region is as
-  it was before the drag, and the next press starts a new one.
+  when the surface loses the pointer's capture, or when the surface changes:
+  another screenshot or another size shows, the tool changes, or a click
+  starts to pick a color. Each ends the drag in **Idle** with the pointer
+  freed and hands over nothing. A capture that cannot be taken, because the
+  pointer is gone already, ends the drag the same way with nothing to free:
+  without it no release would reach the surface. Only letting go changes the
+  region, so the region is as it was before the drag, and the next press
+  starts a new one.
 - A press of the pointer that already drags means its release never arrived:
   the old drag is dropped without handing anything over, and a new one
   starts. Events of any other pointer change nothing.

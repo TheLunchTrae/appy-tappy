@@ -23,8 +23,20 @@ function press(point: Point, more: Partial<DragInput & { readonly type: 'press' 
   };
 }
 
-const moveTo = (x: number, y: number, pointer = MOUSE): DragInput => ({ type: 'move', pointer, point: { x, y } });
-const release: DragInput = { type: 'release', pointer: MOUSE };
+const moveTo = (x: number, y: number, pointer = MOUSE): DragInput => ({
+  type: 'move',
+  pointer,
+  point: { x, y },
+  held: true,
+});
+/** A move that arrives with the main button up. */
+const upAt = (x: number, y: number, pointer = MOUSE): DragInput => ({
+  type: 'move',
+  pointer,
+  point: { x, y },
+  held: false,
+});
+const releaseAt = (x: number, y: number, pointer = MOUSE): DragInput => ({ type: 'release', pointer, point: { x, y } });
 
 /** The drag after `inputs`, and every effect they asked for. */
 function run(inputs: readonly DragInput[], from: Drag = IDLE): { state: Drag; effects: DragEffect[] } {
@@ -68,7 +80,7 @@ describe('drawing', () => {
   });
 
   test('letting go hands over the box drawn and frees the pointer', () => {
-    const drawn = run([press({ x: 50, y: 20 }), moveTo(60, 30), release]);
+    const drawn = run([press({ x: 50, y: 20 }), moveTo(60, 30), releaseAt(60, 30)]);
     expect(drawn.state).toEqual(IDLE);
     expect(drawn.effects).toEqual([
       { type: 'capture', pointer: MOUSE },
@@ -78,18 +90,18 @@ describe('drawing', () => {
   });
 
   test('a click, which stays inside the slop, changes nothing', () => {
-    const clicked = run([press({ x: 50.4, y: 20.6 }), moveTo(51, 21.5), release]);
+    const clicked = run([press({ x: 50.4, y: 20.6 }), moveTo(51, 21.5), releaseAt(51, 21.5)]);
     expect(clicked.state).toEqual(IDLE);
     expect(made(clicked.effects)).toEqual([]);
   });
 
   test('the box stays drawn when the pointer comes back inside the slop', () => {
-    const back = run([press({ x: 50.4, y: 20.6 }), moveTo(60, 30), moveTo(50.6, 20.8), release]);
+    const back = run([press({ x: 50.4, y: 20.6 }), moveTo(60, 30), moveTo(50.6, 20.8), releaseAt(50.6, 20.8)]);
     expect(made(back.effects)).toEqual([{ type: 'region', region: { x: 50, y: 20, width: 1, height: 1 } }]);
   });
 
   test('with no region, a press where one would be draws', () => {
-    const drawn = run([press({ x: 15, y: 15 }, { region: null }), moveTo(25, 25), release]);
+    const drawn = run([press({ x: 15, y: 15 }, { region: null }), moveTo(25, 25), releaseAt(25, 25)]);
     expect(made(drawn.effects)).toEqual([{ type: 'region', region: { x: 15, y: 15, width: 10, height: 10 } }]);
   });
 });
@@ -131,7 +143,7 @@ describe('a press outside the picture', () => {
       ],
     ];
     for (const [from, to, expected] of cases) {
-      const drawn = run([press(from), moveTo(to.x, to.y), release]);
+      const drawn = run([press(from), moveTo(to.x, to.y), releaseAt(to.x, to.y)]);
       expect(made(drawn.effects)).toEqual([{ type: 'region', region: expected }]);
     }
   });
@@ -159,7 +171,7 @@ describe('a press outside the picture', () => {
     for (const [from, to] of cases) {
       const outside = run([press(from), moveTo(to.x, to.y)]);
       expect(shownBoxes(outside.state, region)).toEqual({ region, rough: null });
-      expect(made(run([release], outside.state).effects)).toEqual([]);
+      expect(made(run([releaseAt(to.x, to.y)], outside.state).effects)).toEqual([]);
     }
   });
 
@@ -174,7 +186,7 @@ describe('moving', () => {
     const moved = run([press({ x: 15.5, y: 12.5 }), moveTo(20.9, 9.9)]);
     expect(moved.state.kind).toBe('moving');
     expect(shownBoxes(moved.state, region).region).toEqual({ x: 15, y: 7, width: 20, height: 10 });
-    expect(made(run([release], moved.state).effects)).toEqual([
+    expect(made(run([releaseAt(20.9, 9.9)], moved.state).effects)).toEqual([
       { type: 'region', region: { x: 15, y: 7, width: 20, height: 10 } },
     ]);
   });
@@ -185,7 +197,7 @@ describe('moving', () => {
   });
 
   test('a press and release in place hands nothing over', () => {
-    expect(made(run([press({ x: 15, y: 12 }), moveTo(15.2, 12.1), release]).effects)).toEqual([]);
+    expect(made(run([press({ x: 15, y: 12 }), moveTo(15.2, 12.1), releaseAt(15.2, 12.1)]).effects)).toEqual([]);
   });
 });
 
@@ -200,7 +212,7 @@ describe('resizing', () => {
       ['sw', { x: 10, y: 20 }, { x: 0, y: 30 }, { x: 0, y: 10, width: 30, height: 20 }],
     ];
     for (const [corner, from, to, expected] of cases) {
-      const resized = run([moveTo(to.x, to.y), release], grab(corner, from));
+      const resized = run([moveTo(to.x, to.y), releaseAt(to.x, to.y)], grab(corner, from));
       expect(made(resized.effects)).toEqual([{ type: 'region', region: expected }]);
     }
   });
@@ -209,11 +221,11 @@ describe('resizing', () => {
     // The handle reaches past the corner, so the press is a few pixels off it.
     const held = grab('se', { x: 32.6, y: 21.7 });
     expect(shownBoxes(held, region).region).toEqual(region);
-    expect(made(run([moveTo(32.9, 21.9), release], held).effects)).toEqual([]);
-    expect(shownBoxes(run([moveTo(35.6, 21.7)], held).state, region).region).toEqual({
+    expect(made(run([moveTo(32.9, 21.9), releaseAt(32.9, 21.9)], held).effects)).toEqual([]);
+    expect(shownBoxes(run([moveTo(36.6, 21.7)], held).state, region).region).toEqual({
       x: 10,
       y: 10,
-      width: 23,
+      width: 24,
       height: 10,
     });
   });
@@ -237,6 +249,124 @@ describe('resizing', () => {
   });
 });
 
+describe('a click on the region', () => {
+  // One pixel of the view is this many of the picture: a 4K screenshot fitted to the view, a 1280 wide one, the
+  // picture at its own size, and two zooms. The slop is three pixels of the view at each.
+  const scales = [3, 2.2, 1.47, 1, 0.33, 0.125];
+  const typed: Rect = { x: 37, y: 13, width: 21, height: 9 };
+  const jitters: readonly Point[] = [
+    { x: 1, y: 0 },
+    { x: 0, y: -1 },
+    { x: -1, y: 1 },
+    { x: 2, y: 2 },
+  ];
+
+  test('leaves it exactly as it was when the pointer jitters by a pixel or two of the view', () => {
+    const places: readonly (readonly [Corner | null, Point])[] = [
+      [null, { x: 47.5, y: 17.5 }],
+      ['nw', { x: 36.2, y: 12.4 }],
+      ['ne', { x: 58.9, y: 12.4 }],
+      ['sw', { x: 36.2, y: 22.8 }],
+      ['se', { x: 58.9, y: 22.8 }],
+    ];
+    for (const one of scales) {
+      for (const [corner, at] of places) {
+        for (const jitter of jitters) {
+          const to = { x: at.x + jitter.x * one, y: at.y + jitter.y * one };
+          const pressed = run([press(at, { corner, region: typed, slop: 3 * one }), moveTo(to.x, to.y)]);
+          expect(shownBoxes(pressed.state, typed)).toEqual({ region: typed, rough: null });
+          expect(made(run([releaseAt(to.x, to.y)], pressed.state).effects)).toEqual([]);
+        }
+      }
+    }
+  });
+
+  test('moves and resizes by the whole travel once the pointer has left the slop', () => {
+    for (const one of scales) {
+      const travel = Math.ceil(3 * one) + 2;
+      const moved = run([
+        press({ x: 47.5, y: 17.5 }, { region: typed, slop: 3 * one }),
+        moveTo(47.5 + travel, 17.5),
+        releaseAt(47.5 + travel, 17.5),
+      ]);
+      expect(made(moved.effects)).toEqual([{ type: 'region', region: { ...typed, x: typed.x + travel } }]);
+      const resized = run([
+        press({ x: 58.9, y: 22.8 }, { corner: 'se', region: typed, slop: 3 * one }),
+        moveTo(58.9, 22.8 + travel),
+        releaseAt(58.9, 22.8 + travel),
+      ]);
+      expect(made(resized.effects)).toEqual([{ type: 'region', region: { ...typed, height: typed.height + travel } }]);
+    }
+  });
+  test('follows the pointer back to the press once the drag is under way', () => {
+    const moved = run([press({ x: 15, y: 12 }), moveTo(40, 30), moveTo(16, 12)]);
+    expect(shownBoxes(moved.state, region).region).toEqual({ x: 11, y: 10, width: 20, height: 10 });
+    const resized = run([press({ x: 30, y: 20 }, { corner: 'se' }), moveTo(60, 40), moveTo(31, 20)]);
+    expect(shownBoxes(resized.state, region).region).toEqual({ x: 10, y: 10, width: 21, height: 10 });
+  });
+});
+
+describe('letting go', () => {
+  test('ends the box where the pointer is let go, which no move reached', () => {
+    const drawn = run([press({ x: 50, y: 20 }), releaseAt(60, 30)]);
+    expect(drawn.state).toEqual(IDLE);
+    expect(made(drawn.effects)).toEqual([{ type: 'region', region: { x: 50, y: 20, width: 10, height: 10 } }]);
+    const moved = run([press({ x: 15, y: 12 }), moveTo(20, 12), releaseAt(25, 16)]);
+    expect(made(moved.effects)).toEqual([{ type: 'region', region: { x: 20, y: 14, width: 20, height: 10 } }]);
+    const resized = run([press({ x: 30, y: 20 }, { corner: 'se' }), releaseAt(40, 25)]);
+    expect(made(resized.effects)).toEqual([{ type: 'region', region: { x: 10, y: 10, width: 30, height: 15 } }]);
+  });
+
+  test('a move with the main button up ends the drag with the box as it last was', () => {
+    // The button came up somewhere before this move, so the place the move names is not where the box ends.
+    const up = upAt(90, 45);
+    const drawn = run([press({ x: 50, y: 20 }), moveTo(60, 30), up]);
+    expect(drawn.state).toEqual(IDLE);
+    expect(drawn.effects).toEqual([
+      { type: 'capture', pointer: MOUSE },
+      { type: 'uncapture', pointer: MOUSE },
+      { type: 'region', region: { x: 50, y: 20, width: 10, height: 10 } },
+    ]);
+    const moved = run([press({ x: 15, y: 12 }), moveTo(20, 12), up]);
+    expect(made(moved.effects)).toEqual([{ type: 'region', region: { x: 15, y: 10, width: 20, height: 10 } }]);
+    // With nothing dragged yet it hands nothing over, and the next press starts a new drag.
+    const clicked = run([press({ x: 50, y: 20 }), up]);
+    expect(clicked.state).toEqual(IDLE);
+    expect(made(clicked.effects)).toEqual([]);
+  });
+});
+
+describe('a capture that cannot be taken', () => {
+  test('ends the drag at once, with nothing to free and nothing handed over', () => {
+    const pressed = run([press({ x: 15, y: 12 })]).state;
+    expect(step(pressed, { type: 'capture-failed', pointer: MOUSE })).toEqual({ state: IDLE, effects: [] });
+    const after = run([
+      press({ x: 50, y: 20 }),
+      { type: 'capture-failed', pointer: MOUSE },
+      moveTo(70, 40),
+      releaseAt(70, 40),
+    ]);
+    expect(after.state).toEqual(IDLE);
+    expect(after.effects).toEqual([{ type: 'capture', pointer: MOUSE }]);
+  });
+});
+
+describe('a picture that moves under the pointer', () => {
+  test('carries the box to where the pointer now is, as a move would', () => {
+    const shifted = (x: number, y: number): DragInput => ({ type: 'shifted', point: { x, y } });
+    const drawn = run([press({ x: 50, y: 20 }), moveTo(60, 30), shifted(60, 45)]);
+    expect(shownBoxes(drawn.state, region).region).toEqual({ x: 50, y: 20, width: 10, height: 25 });
+    const moved = run([press({ x: 15, y: 12 }), moveTo(20, 12), shifted(20, 30)]);
+    expect(shownBoxes(moved.state, region).region).toEqual({ x: 15, y: 28, width: 20, height: 10 });
+    const resized = run([press({ x: 30, y: 20 }, { corner: 'se' }), moveTo(36, 20), shifted(36, 40)]);
+    expect(shownBoxes(resized.state, region).region).toEqual({ x: 10, y: 10, width: 26, height: 30 });
+    // The drag goes on: letting go hands over the box from there.
+    expect(made(run([releaseAt(60, 45)], drawn.state).effects)).toEqual([
+      { type: 'region', region: { x: 50, y: 20, width: 10, height: 25 } },
+    ]);
+  });
+});
+
 describe('the snap tool', () => {
   const snap = (point: Point): DragInput => press(point, { tool: 'snap', combine: 'add' });
 
@@ -250,14 +380,14 @@ describe('the snap tool', () => {
   });
 
   test('hands the rough box over with how it combines, and never the region', () => {
-    const snapped = run([snap({ x: 15, y: 12 }), moveTo(40, 30), release]);
+    const snapped = run([snap({ x: 15, y: 12 }), moveTo(40, 30), releaseAt(40, 30)]);
     expect(made(snapped.effects)).toEqual([
       { type: 'snap', rough: { x: 15, y: 12, width: 25, height: 18 }, combine: 'add' },
     ]);
   });
 
   test('a click hands nothing over', () => {
-    expect(made(run([snap({ x: 15.5, y: 12.5 }), moveTo(16, 13), release]).effects)).toEqual([]);
+    expect(made(run([snap({ x: 15.5, y: 12.5 }), moveTo(16, 13), releaseAt(16, 13)]).effects)).toEqual([]);
   });
 });
 
@@ -282,13 +412,21 @@ describe('an interrupted drag', () => {
         expect(after.effects).toEqual([{ type: 'uncapture', pointer: MOUSE }]);
         expect(shownBoxes(after.state, region)).toEqual({ region, rough: null });
         // A release that arrives late hands nothing over either.
-        expect(step(after.state, release).effects).toEqual([]);
+        expect(step(after.state, releaseAt(90, 45)).effects).toEqual([]);
       }
     }
   });
 
   test('an idle surface ignores every event but a press', () => {
-    for (const input of [moveTo(5, 5), release, ...interruptions]) {
+    const late: readonly DragInput[] = [
+      moveTo(5, 5),
+      upAt(5, 5),
+      releaseAt(5, 5),
+      { type: 'shifted', point: { x: 5, y: 5 } },
+      { type: 'capture-failed', pointer: MOUSE },
+      ...interruptions,
+    ];
+    for (const input of late) {
       expect(step(IDLE, input)).toEqual({ state: IDLE, effects: [] });
     }
   });
@@ -301,8 +439,10 @@ describe('another pointer', () => {
   test('neither moves, ends, nor restarts a drag', () => {
     const others: readonly DragInput[] = [
       moveTo(90, 45, TOUCH),
-      { type: 'release', pointer: TOUCH },
+      upAt(90, 45, TOUCH),
+      releaseAt(90, 45, TOUCH),
       { type: 'cancel', pointer: TOUCH },
+      { type: 'capture-failed', pointer: TOUCH },
       press({ x: 5, y: 5 }, { pointer: TOUCH }),
     ];
     for (const other of others) {
@@ -345,7 +485,7 @@ test('whatever the pointer does, the box stays inside the picture', () => {
     for (const how of presses) {
       for (const from of [...far, { x: rect.x + 1, y: rect.y + 1 }]) {
         for (const to of far) {
-          const dragged = run([press(from, { ...how, region: rect }), moveTo(to.x, to.y), release]);
+          const dragged = run([press(from, { ...how, region: rect }), moveTo(to.x, to.y), releaseAt(to.x, to.y)]);
           for (const effect of dragged.effects) {
             if (effect.type === 'region') {
               expect(inside(effect.region)).toBe(true);

@@ -26,6 +26,11 @@ interface Held {
   readonly bounds: Size;
   /** Where the pointer went down, which may be outside the picture. */
   readonly pressed: Point;
+  /**
+   * How far the pointer must still leave `pressed` before the drag changes anything, or 0 once it has. A press that
+   * stays inside it is a click, which draws, moves, and resizes nothing.
+   */
+  readonly slop: number;
 }
 
 /** Where a drag is. The region changes only when a drag is let go, so one that is interrupted leaves it alone. */
@@ -33,8 +38,6 @@ export type Drag =
   | { readonly kind: 'idle' }
   | (Held & {
       readonly kind: 'drawing';
-      /** How far the pointer must still leave `pressed` before a box is drawn, or 0 once it has. */
-      readonly slop: number;
       readonly draws: Draws;
       /** The part of the picture between `pressed` and the pointer, or null while that covers none of its pixels. */
       readonly box: Rect | null;
@@ -70,13 +73,27 @@ export type DragInput =
       /** The region as it is. */
       readonly region: Rect | null;
       readonly bounds: Size;
-      /** How far the pointer must travel before a press draws, so a click draws nothing. */
+      /** How far the pointer must travel before the press becomes a drag, so a click changes nothing. */
       readonly slop: number;
     }
-  | { readonly type: 'move'; readonly pointer: number; readonly point: Point }
-  | { readonly type: 'release'; readonly pointer: number }
+  | {
+      readonly type: 'move';
+      readonly pointer: number;
+      readonly point: Point;
+      /**
+       * Whether the main button is still down. It comes up without a release while another button is held, and then
+       * the drag ends with the box as it last was, since where the button came up is not known.
+       */
+      readonly held: boolean;
+    }
+  /** The pointer was let go at `point`, which the last move may not have reached. */
+  | { readonly type: 'release'; readonly pointer: number; readonly point: Point }
   /** The pointer was cancelled or its capture was lost. */
   | { readonly type: 'cancel'; readonly pointer: number }
+  /** The capture a press asked for could not be taken, so no release would reach the surface. */
+  | { readonly type: 'capture-failed'; readonly pointer: number }
+  /** The picture moved under the pointer, by a scroll or a zoom, and the pointer is now over `point`. */
+  | { readonly type: 'shifted'; readonly point: Point }
   /** The surface shows another picture, or takes presses another way. */
   | { readonly type: 'changed' };
 
@@ -98,7 +115,7 @@ function stay(state: Drag): Step {
 
 function press(event: DragInput & { readonly type: 'press' }): Step {
   const { pointer, point, bounds, region } = event;
-  const held: Held = { pointer, bounds, pressed: point };
+  const held: Held = { pointer, bounds, pressed: point, slop: event.slop };
   const effects: readonly DragEffect[] = [{ type: 'capture', pointer }];
   if (event.tool === 'box' && region !== null) {
     if (event.corner !== null) {
@@ -110,35 +127,38 @@ function press(event: DragInput & { readonly type: 'press' }): Step {
   }
   const draws: Draws = event.tool === 'box' ? { as: 'region' } : { as: 'rough', combine: event.combine };
   return {
-    state: { ...held, kind: 'drawing', slop: event.slop, draws, box: null },
+    state: { ...held, kind: 'drawing', draws, box: null },
     effects,
   };
 }
 
-function move(state: Exclude<Drag, { readonly kind: 'idle' }>, point: Point): Drag {
+/** A drag that is under way. */
+type Dragging = Exclude<Drag, { readonly kind: 'idle' }>;
+
+/** `state` with the pointer at `point`. */
+function move(state: Dragging, point: Point): Dragging {
   const dx = point.x - state.pressed.x;
   const dy = point.y - state.pressed.y;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < state.slop) {
+    return state;
+  }
   switch (state.kind) {
-    case 'drawing': {
-      if (Math.max(Math.abs(dx), Math.abs(dy)) < state.slop) {
-        return state;
-      }
+    case 'drawing':
       return { ...state, slop: 0, box: fromCorners(state.pressed, point, state.bounds) };
-    }
     case 'moving':
-      return { ...state, box: moveRect(state.rect, dx, dy, state.bounds) };
+      return { ...state, slop: 0, box: moveRect(state.rect, dx, dy, state.bounds) };
     case 'resizing': {
       // The corner moves as far as the pointer has, so a press that is off its tip does not make it jump.
       const tip = cornerAt(state.rect, state.corner);
       const to = { x: Math.round(tip.x + dx), y: Math.round(tip.y + dy) };
       const anchor = cornerAt(state.rect, across(state.corner));
-      return { ...state, box: fromCorners(anchor, to, state.bounds) ?? state.box };
+      return { ...state, slop: 0, box: fromCorners(anchor, to, state.bounds) ?? state.box };
     }
   }
 }
 
-/** What letting go of `state` changes. */
-function finish(state: Exclude<Drag, { readonly kind: 'idle' }>): readonly DragEffect[] {
+/** What `state` hands over when it is let go. */
+function made(state: Dragging): readonly DragEffect[] {
   if (state.kind !== 'drawing') {
     return sameRect(state.box, state.rect) ? [] : [{ type: 'region', region: state.box }];
   }
@@ -148,6 +168,12 @@ function finish(state: Exclude<Drag, { readonly kind: 'idle' }>): readonly DragE
   return state.draws.as === 'region'
     ? [{ type: 'region', region: state.box }]
     : [{ type: 'snap', rough: state.box, combine: state.draws.combine }];
+}
+
+/** The end of `state`: the pointer is freed, and with `hands` what the drag made is handed over. */
+function end(state: Dragging, hands: 'made' | 'nothing'): Step {
+  const freed: DragEffect = { type: 'uncapture', pointer: state.pointer };
+  return { state: IDLE, effects: hands === 'made' ? [freed, ...made(state)] : [freed] };
 }
 
 /**
@@ -170,18 +196,24 @@ export function step(state: Drag, event: DragInput): Step {
     return stay(state);
   }
   if (event.type === 'changed') {
-    return { state: IDLE, effects: [{ type: 'uncapture', pointer: state.pointer }] };
+    return end(state, 'nothing');
+  }
+  if (event.type === 'shifted') {
+    return stay(move(state, event.point));
   }
   if (event.pointer !== state.pointer) {
     return stay(state);
   }
   switch (event.type) {
     case 'move':
-      return stay(move(state, event.point));
+      return event.held ? stay(move(state, event.point)) : end(state, 'made');
     case 'release':
-      return { state: IDLE, effects: [{ type: 'uncapture', pointer: state.pointer }, ...finish(state)] };
+      return end(move(state, event.point), 'made');
     case 'cancel':
-      return { state: IDLE, effects: [{ type: 'uncapture', pointer: state.pointer }] };
+      return end(state, 'nothing');
+    case 'capture-failed':
+      // Nothing holds the pointer, so there is nothing to free.
+      return stay(IDLE);
   }
 }
 

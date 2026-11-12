@@ -16,7 +16,7 @@ import { type SelectTool, combineOf, shade } from '../lib/selection.ts';
 
 const CORNERS: readonly Corner[] = ['nw', 'ne', 'sw', 'se'];
 
-/** How far the pointer travels, in drawn pixels, before a press draws a box, so a click draws nothing. */
+/** How far the pointer travels, in drawn pixels, before a press becomes a drag, so a click changes nothing. */
 const DRAG_SLOP = 3;
 
 /** The room a region's label needs beside its box, in drawn pixels. */
@@ -61,8 +61,9 @@ function placed(rect: Rect, scale: number) {
 }
 
 /**
- * A region's outline over a picture drawn at `scale`, with its label. The outline and the label lie outside the box
- * wherever the picture has room, so they cover nothing of what the region holds.
+ * A region's outline over a picture drawn at `scale`, with its label, inside an element that covers the picture. The
+ * outline and the label lie outside the box wherever the picture has room, and the rest of the picture is dimmed, so
+ * nothing covers what the region holds.
  */
 export function Marquee({
   rect,
@@ -80,13 +81,22 @@ export function Marquee({
   readonly children?: ReactNode;
 }) {
   const tag = tagPlace(rect, picture, scale, TAG_ROOM);
+  const box = placed(rect, scale);
+  const [left, top, right, bottom] = [box.left, box.top, box.left + box.width, box.top + box.height];
+  // The whole picture but the box, as one shape with a hole.
+  const rest =
+    `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ` +
+    `${left}px ${top}px, ${left}px ${bottom}px, ${right}px ${bottom}px, ${right}px ${top}px, ${left}px ${top}px)`;
   return (
-    <div className={recording ? 'marquee recording' : 'marquee'} style={placed(rect, scale)}>
-      {children}
-      <span className={`tag ${tag.side} ${tag.align}`}>
-        {label} · {rect.width} × {rect.height}
-      </span>
-    </div>
+    <>
+      <div className="dim" style={{ clipPath: rest }} />
+      <div className={recording ? 'marquee recording' : 'marquee'} style={box}>
+        {children}
+        <span className={`tag ${tag.side} ${tag.align}`}>
+          {label} · {rect.width} × {rect.height}
+        </span>
+      </div>
+    </>
   );
 }
 
@@ -126,6 +136,9 @@ export function RegionSurface({
   const latest = useRef<Drag>(IDLE);
   const [drag, setDrag] = useState<Drag>(IDLE);
 
+  // Where the pointer last was in the window, to find what it is over once the picture moves under it.
+  const pointer = useRef<Point | null>(null);
+
   const send = (input: DragInput): void => {
     const next = step(latest.current, input);
     latest.current = next.state;
@@ -137,8 +150,7 @@ export function RegionSurface({
           try {
             element?.setPointerCapture(effect.pointer);
           } catch {
-            // The pointer is gone already, so no release would end its drag.
-            send({ type: 'cancel', pointer: effect.pointer });
+            send({ type: 'capture-failed', pointer: effect.pointer });
           }
           break;
         case 'uncapture':
@@ -155,19 +167,43 @@ export function RegionSurface({
       }
     }
   };
-  const latestSend = useRef(send);
+
+  /** The place in the picture under `client`, a place in the window, when the surface is at `bounds`. */
+  const under = (client: Point, bounds: DOMRect): Point =>
+    toPicture({ x: client.x - bounds.left, y: client.y - bounds.top }, bounds, size);
+  /** The place in the picture under the pointer of `event`, which is remembered. */
+  const at = (event: PointerEvent<HTMLDivElement>): Point => {
+    pointer.current = { x: event.clientX, y: event.clientY };
+    return under(pointer.current, event.currentTarget.getBoundingClientRect());
+  };
+  const shifted = (): void => {
+    const bounds = surface.current?.getBoundingClientRect();
+    if (pointer.current !== null && bounds !== undefined) {
+      send({ type: 'shifted', point: under(pointer.current, bounds) });
+    }
+  };
+
+  const latestly = useRef({ send, shifted });
   useEffect(() => {
-    latestSend.current = send;
+    latestly.current = { send, shifted };
   });
   // A drag belongs to one picture and one way of taking presses, so a change to either ends it.
   useEffect(() => {
-    latestSend.current({ type: 'changed' });
+    latestly.current.send({ type: 'changed' });
   }, [screenshot, size.width, size.height, editable, picking, tool]);
-
-  const at = (event: PointerEvent<HTMLDivElement>): Point => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return toPicture({ x: event.clientX - bounds.left, y: event.clientY - bounds.top }, bounds, size);
-  };
+  // A scroll or a zoom moves the picture under a pointer that stays still, and no pointer event tells of it.
+  useEffect(() => {
+    const scrolled = (): void => {
+      latestly.current.shifted();
+    };
+    document.addEventListener('scroll', scrolled, true);
+    return () => {
+      document.removeEventListener('scroll', scrolled, true);
+    };
+  }, []);
+  useEffect(() => {
+    latestly.current.shifted();
+  }, [shown.width, shown.height]);
 
   const start = (event: PointerEvent<HTMLDivElement>): void => {
     if (!editable || event.button !== 0) {
@@ -197,21 +233,11 @@ export function RegionSurface({
   };
 
   const move = (event: PointerEvent<HTMLDivElement>): void => {
-    if (latest.current.kind === 'idle') {
-      return;
-    }
-    if ((event.buttons & 1) === 0) {
-      // The button came up without a release, as it does while another button is held.
-      send({ type: 'release', pointer: event.pointerId });
-      return;
-    }
-    send({ type: 'move', pointer: event.pointerId, point: at(event) });
+    send({ type: 'move', pointer: event.pointerId, point: at(event), held: (event.buttons & 1) !== 0 });
   };
 
   const end = (event: PointerEvent<HTMLDivElement>): void => {
-    // The box ends where the pointer was let go, which the last move may not have reached.
-    send({ type: 'move', pointer: event.pointerId, point: at(event) });
-    send({ type: 'release', pointer: event.pointerId });
+    send({ type: 'release', pointer: event.pointerId, point: at(event) });
   };
 
   const cancel = (event: PointerEvent<HTMLDivElement>): void => {
