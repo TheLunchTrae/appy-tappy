@@ -40,6 +40,31 @@ const LOGS: [&str; 4] = [
     "setup.old.log",
 ];
 
+/// A bundle to make away from the owner thread, since packing a large trace
+/// takes a while and the page's other commands wait for that thread.
+#[derive(Debug)]
+pub(crate) struct BundleJob {
+    stores: Stores,
+    spec: BundleSpec,
+}
+
+impl BundleJob {
+    /// A bundle of the files `stores` names, holding what `spec` asks for.
+    pub(crate) const fn new(stores: Stores, spec: BundleSpec) -> Self {
+        Self { stores, spec }
+    }
+
+    /// Makes the bundle, as the bytes of a zip file.
+    ///
+    /// # Errors
+    ///
+    /// Returns why it could not be made, as the user reads it.
+    pub(crate) fn make(self) -> Result<Vec<u8>, String> {
+        build(&self.stores, self.spec)
+            .map_err(|error| format!("AppyTappy cannot make the debug bundle: {error}."))
+    }
+}
+
 /// The bundle, as the bytes of a zip file.
 ///
 /// # Errors
@@ -63,7 +88,7 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
         bundle.folder(
             "automation pictures",
             &stores.automations.pictures(),
-            |_name| true,
+            is_picture,
         )?;
     }
     for app in folders(&locations.apps())? {
@@ -71,7 +96,7 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         bundle.folder(&format!("apps/{name}"), &app, |file| {
-            spec.pictures || file == "app.json"
+            file == "app.json" || (spec.pictures && is_picture(file))
         })?;
     }
     for log in LOGS {
@@ -85,6 +110,13 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
         bundle.file_if_there(&format!("traces/{name}"), &stores.traces.join(name))?;
     }
     bundle.finish()
+}
+
+/// Whether `name` names a picture, which the bundle holds only when asked.
+fn is_picture(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
 }
 
 /// The folders in `parent`, or none when it is not there.
@@ -224,21 +256,21 @@ mod tests {
         let _ = fs::remove_dir_all(&scratch);
         fs::create_dir_all(&scratch).expect("folder");
         let missing = scratch.join("missing");
-        // A path inside a file cannot be read, and is not simply missing.
-        let unreadable = scratch.join("file.txt");
-        fs::write(&unreadable, "x").expect("write");
-        let unreadable = unreadable.join("inside");
+        // A file cannot be listed as a folder, nor a folder copied as a
+        // file, and neither is simply missing.
+        let file = scratch.join("file.txt");
+        fs::write(&file, "x").expect("write");
         assert_eq!(folders(&missing).expect("missing is fine").len(), 0);
-        assert!(folders(&unreadable).is_err());
+        assert!(folders(&file).is_err());
         let mut bundle = Bundle::new();
         bundle
             .file_if_there("a", &missing)
             .expect("missing is fine");
-        assert!(bundle.file_if_there("b", &unreadable).is_err());
+        assert!(bundle.file_if_there("b", &scratch).is_err());
         bundle
             .folder("c", &missing, |_name| true)
             .expect("missing is fine");
-        assert!(bundle.folder("d", &unreadable, |_name| true).is_err());
+        assert!(bundle.folder("d", &file, |_name| true).is_err());
         fs::remove_dir_all(&scratch).expect("clean up");
     }
 }

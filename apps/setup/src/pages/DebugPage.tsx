@@ -82,6 +82,10 @@ function TraceCard({ trace, problem }: { readonly trace: TraceSummary | null; re
           value={trace.actionRun === null ? null : durationText(trace.actionRun.medianNs)}
           label="Running actions, median"
         />
+        <Stat
+          value={trace.actionRun === null ? null : durationText(trace.actionRun.p95Ns)}
+          label="Running actions, 95th percentile"
+        />
         <Stat value={String(trace.dropped)} label="Rows dropped" />
       </div>
       <p className="note">
@@ -110,8 +114,9 @@ function TraceCard({ trace, problem }: { readonly trace: TraceSummary | null; re
             </tr>
           </thead>
           <tbody>
-            {trace.newest.map((row) => (
-              <tr key={`${row.timeNs}-${row.thread}-${row.event}-${row.item}`}>
+            {trace.newest.map((row, index) => (
+              // Rows only ever change as a whole list, and two can share every field, so their place is their key.
+              <tr key={index}>
                 <td>{elapsedText(row.timeNs)}</td>
                 <td>{row.thread}</td>
                 <td>{row.event}</td>
@@ -143,10 +148,12 @@ function LogText({ log }: { readonly log: LogName }) {
   }, [log]);
   useRepeat(read, REFRESH_MS, true);
   const box = useRef<HTMLPreElement>(null);
-  // The newest lines are at the bottom, so the box shows them each time it reads the log.
+  // The newest lines are at the bottom, so the box follows them while it shows the bottom, and stays put while the
+  // user reads further up.
+  const atBottom = useRef(true);
   useEffect(() => {
     const element = box.current;
-    if (element !== null) {
+    if (element !== null && atBottom.current) {
       element.scrollTop = element.scrollHeight;
     }
   }, [text]);
@@ -157,7 +164,16 @@ function LogText({ log }: { readonly log: LogName }) {
           {error}
         </p>
       )}
-      <pre ref={box} className="logbox" role="log" aria-label={LOGS.find((each) => each.log === log)?.name}>
+      <pre
+        ref={box}
+        className="logbox"
+        role="log"
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 4;
+        }}
+        aria-label={LOGS.find((each) => each.log === log)?.name}
+      >
         {text === null ? '' : text === '' ? 'Nothing logged yet.' : text}
       </pre>
     </>

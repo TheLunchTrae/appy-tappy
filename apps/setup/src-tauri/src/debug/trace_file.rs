@@ -18,7 +18,7 @@ use std::time::SystemTime;
 use serde::Serialize;
 
 /// The first line of every trace file this version writes.
-pub(crate) const HEADER: &str = "time_ns,thread,event,app,item,value,took_ns,cause,detail";
+pub(crate) const HEADER: &str = appytappy_config::settings_file::TRACE_HEADER;
 
 /// How many of the newest rows the overview shows.
 const NEWEST: usize = 8;
@@ -131,7 +131,7 @@ pub(crate) fn newest(folder: &Path) -> io::Result<Option<PathBuf>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let mut newest: Option<(SystemTime, PathBuf)> = None;
+    let mut traces: Vec<(SystemTime, PathBuf)> = Vec::new();
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
@@ -142,12 +142,11 @@ pub(crate) fn newest(folder: &Path) -> io::Result<Option<PathBuf>> {
         if !is_trace {
             continue;
         }
-        let modified = entry.metadata()?.modified()?;
-        if newest.as_ref().is_none_or(|(time, _path)| modified > *time) {
-            newest = Some((modified, path));
-        }
+        traces.push((entry.metadata()?.modified()?, path));
     }
-    Ok(newest.map(|(_time, path)| path))
+    // Files written in the same moment go by name, so the answer does not
+    // hang on the order the folder lists them in.
+    Ok(traces.into_iter().max().map(|(_time, path)| path))
 }
 
 /// A trace file read so far: where the next read starts, and what the rows
@@ -268,6 +267,14 @@ impl TraceTail {
             }
         }
         self.partial.drain(..start.min(self.partial.len()));
+        if u64::try_from(self.partial.len()).unwrap_or(u64::MAX) > WINDOW {
+            // No row ends in a whole window: the quotes were misread, as when
+            // a cut landed inside a quoted line break. Start again at the next
+            // line break, as after a cut.
+            self.partial.clear();
+            self.mid_row = true;
+            self.skipped = true;
+        }
     }
 
     /// Adds `row` to the timings and the newest rows.
@@ -514,6 +521,22 @@ mod tests {
             newest(&folder).expect("listed"),
             Some(folder.join("trace-new.CSV"))
         );
+        fs::write(folder.join("trace-tie.csv"), "").expect("write");
+        File::options()
+            .write(true)
+            .open(folder.join("trace-tie.csv"))
+            .expect("open")
+            .set_modified(
+                SystemTime::UNIX_EPOCH
+                    .checked_add(Duration::from_secs(10_800))
+                    .expect("fits"),
+            )
+            .expect("set its time");
+        assert_eq!(
+            newest(&folder).expect("listed"),
+            Some(folder.join("trace-tie.csv")),
+            "a tie goes by name"
+        );
         fs::remove_dir_all(&folder).expect("clean up");
     }
 
@@ -556,6 +579,50 @@ mod tests {
         let _ = fs::remove_dir_all(&folder);
         fs::create_dir_all(&folder).expect("folder");
         folder
+    }
+
+    #[test]
+    fn a_file_that_has_not_grown_is_not_read_again() {
+        let folder = scratch("tail-same");
+        let path = folder.join("trace-a.csv");
+        fs::write(&path, format!("{HEADER}\n1,a,b,c,d,e,,,\n")).expect("write");
+        let mut tail = TraceTail::new(path.clone());
+        assert_eq!(tail.update().expect("read").newest.len(), 1);
+        // Rewritten at the same length: a tail that read again from the start
+        // would show row 2.
+        fs::write(&path, format!("{HEADER}\n2,a,b,c,d,e,,,\n")).expect("write");
+        let summary = tail.update().expect("read");
+        assert_eq!(
+            summary
+                .newest
+                .iter()
+                .map(|row| row.time_ns)
+                .collect::<Vec<_>>(),
+            [1]
+        );
+        fs::remove_dir_all(&folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_row_that_never_ends_is_given_up_after_a_window() {
+        let mut tail = TraceTail::new(PathBuf::from("trace-a.csv"));
+        tail.header = Some(true);
+        // A cut inside a quoted line break leaves a quote open.
+        tail.take(b"lines\",Pause,,40,,ok\n");
+        let filler = b"1,a,b,c,d,e,,,\n".repeat(usize::try_from(WINDOW).expect("fits") / 15 + 1);
+        tail.take(&filler);
+        assert!(tail.partial.is_empty(), "the buffer stays bounded");
+        assert!(tail.skipped);
+        tail.take(b"tail of a row\n2,a,b,c,d,e,,,\n");
+        assert_eq!(
+            tail.summary(0)
+                .newest
+                .iter()
+                .map(|row| row.time_ns)
+                .collect::<Vec<_>>(),
+            [2],
+            "rows read again after the next line break"
+        );
     }
 
     #[test]
@@ -606,7 +673,7 @@ mod tests {
         let folder = scratch("newest-unreadable");
         let file = folder.join("file.txt");
         fs::write(&file, "x").expect("write");
-        assert!(newest(&file.join("inside")).is_err());
+        assert!(newest(&file).is_err());
         fs::remove_dir_all(&folder).expect("clean up");
     }
 

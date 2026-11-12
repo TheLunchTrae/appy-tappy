@@ -41,7 +41,7 @@ export function ExportBundle({ trace, onClose }: Props) {
       await write(await debugBundle({ pictures, trace: withTrace && trace !== null ? trace.file : null }));
       onClose();
     } catch (failure: unknown) {
-      setError(errorText(failure));
+      setError(`${errorText(failure)} The bundle was not saved.`);
     } finally {
       setBusy(false);
     }
@@ -60,8 +60,13 @@ export function ExportBundle({ trace, onClose }: Props) {
         }
       }}
       onClose={() => {
-        // The window can close a dialog without asking, as on some other page's request; the page follows.
-        onClose();
+        // The window can close a dialog without asking, such as on a second Escape. While the bundle is being made
+        // it opens again, so the save's outcome still shows; otherwise the page follows.
+        if (busy) {
+          dialog.current?.showModal();
+        } else {
+          onClose();
+        }
       }}
     >
       <h2 id="bundle-title">Export debug bundle</h2>

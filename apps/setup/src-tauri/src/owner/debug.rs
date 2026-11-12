@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::debug::bundle::{self, BundleSpec};
+use crate::debug::bundle::{BundleJob, BundleSpec};
 use crate::debug::trace_file::{self, TraceTail};
 use crate::debug::{DebugOverview, LogName, log_tail};
 use crate::settings;
@@ -19,14 +19,17 @@ impl<H: Host> Owner<H> {
     pub(crate) fn debug_overview(&mut self) -> Result<DebugOverview, String> {
         let runtime = self.host.runtime_runs().ok();
         let traces = self.debug_stores()?.traces.clone();
-        let newest = trace_file::newest(&traces)
-            .map_err(|error| format!("AppyTappy cannot list the trace files: {error}."))?;
-        let Some(path) = newest else {
+        // A trace folder that cannot be listed still leaves the runtime's state
+        // to show.
+        let newest = trace_file::newest(&traces);
+        let Ok(Some(path)) = newest else {
             self.trace_tail = None;
             return Ok(DebugOverview {
                 runtime,
                 trace: None,
-                trace_problem: None,
+                trace_problem: newest
+                    .err()
+                    .map(|error| format!("AppyTappy cannot list the trace files: {error}.")),
             });
         };
         let tail = match self.trace_tail.take() {
@@ -63,10 +66,9 @@ impl<H: Host> Owner<H> {
             .map_err(|error| format!("AppyTappy cannot open the logs folder: {error}."))
     }
 
-    /// The debug bundle, as the bytes of a zip file.
-    pub(crate) fn debug_bundle(&self, spec: BundleSpec) -> Result<Vec<u8>, String> {
-        bundle::build(self.debug_stores()?, spec)
-            .map_err(|error| format!("AppyTappy cannot make the debug bundle: {error}."))
+    /// The debug bundle `spec` asks for, to make away from this thread.
+    pub(crate) fn debug_bundle(&self, spec: BundleSpec) -> Result<BundleJob, String> {
+        Ok(BundleJob::new(self.debug_stores()?.clone(), spec))
     }
 
     /// Records in `setup.log` that `command` took `took`, and why it failed,
@@ -170,6 +172,82 @@ mod tests {
     }
 
     #[test]
+    fn the_overview_keeps_what_it_read_and_moves_to_a_newer_trace() {
+        let (stores, root) = scratch_store("owner-debug-keep");
+        let traces = stores.traces.clone();
+        fs::create_dir_all(&traces).expect("folder");
+        let mut harness = harness_with(false, Ok(stores));
+        // A file larger than one read, with a dropped row just inside the
+        // part the first read takes.
+        let filler = "1000,owner,handled,Example,,,300,,changed\n";
+        let mib = 1024 * 1024 / filler.len();
+        let first = traces.join("trace-2026-11-12-100000.csv");
+        fs::write(
+            &first,
+            format!(
+                "{HEADER}\n{}500,trace,dropped,,,5,,,\n{}",
+                filler.repeat(4 * mib),
+                filler.repeat(2 * mib)
+            ),
+        )
+        .expect("write");
+        let dropped = |harness: &mut crate::owner::test_support::Harness| {
+            harness
+                .ask(Owner::debug_overview)
+                .expect("overview")
+                .trace
+                .map(|trace| (trace.file, trace.dropped))
+        };
+        assert_eq!(
+            dropped(&mut harness),
+            Some(("trace-2026-11-12-100000.csv".to_owned(), 5))
+        );
+        // It grows past the dropped row's reach of one read from the end; what
+        // was read already is kept.
+        let mut grown = fs::OpenOptions::new()
+            .append(true)
+            .open(&first)
+            .expect("open");
+        std::io::Write::write_all(&mut grown, filler.repeat(3 * mib).as_bytes()).expect("append");
+        drop(grown);
+        assert_eq!(
+            dropped(&mut harness),
+            Some(("trace-2026-11-12-100000.csv".to_owned(), 5))
+        );
+        let second = traces.join("trace-2026-11-12-110000.csv");
+        fs::write(&second, format!("{HEADER}\n{filler}")).expect("write");
+        fs::File::options()
+            .write(true)
+            .open(&first)
+            .expect("open")
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .expect("age it");
+        assert_eq!(
+            dropped(&mut harness),
+            Some(("trace-2026-11-12-110000.csv".to_owned(), 0)),
+            "a newer trace is read from its start"
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_trace_folder_that_cannot_be_listed_still_shows_the_runtime() {
+        let (stores, root) = scratch_store("owner-debug-unlisted");
+        fs::create_dir_all(stores.traces.parent().expect("a parent")).expect("folder");
+        fs::write(&stores.traces, "not a folder").expect("write");
+        let mut harness = harness_with(false, Ok(stores));
+        harness.owner.host.runtime = Ok(true);
+        let overview = harness.ask(Owner::debug_overview).expect("overview");
+        assert_eq!(overview.runtime, Some(true));
+        assert!(
+            overview
+                .trace_problem
+                .is_some_and(|problem| problem.starts_with("AppyTappy cannot list the trace files"))
+        );
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn a_trace_from_another_version_says_so() {
         let (stores, root) = scratch_store("owner-debug-version");
         fs::create_dir_all(&stores.traces).expect("folder");
@@ -224,6 +302,11 @@ mod tests {
         fs::write(locations.settings(), "{\"format\": 1}").expect("settings");
         fs::write(app.join("app.json"), "{}").expect("app file");
         fs::write(app.join("shown-1.png"), [1, 2]).expect("picture");
+        fs::write(app.join("notes.txt"), "mine").expect("another file");
+        let pictures = stores.automations.pictures();
+        fs::create_dir_all(&pictures).expect("pictures folder");
+        fs::write(pictures.join("click-1.png"), [3]).expect("picture");
+        fs::write(pictures.join("click-1.png.tmp"), [3]).expect("half-written picture");
         fs::create_dir_all(&stores.logs).expect("logs");
         fs::write(stores.logs.join("setup.log"), "pick_window took 1.0 ms\n").expect("log");
         fs::create_dir_all(&stores.traces).expect("traces");
@@ -237,6 +320,7 @@ mod tests {
                     trace: None,
                 })
             })
+            .and_then(BundleJob::make)
             .expect("bundle");
         let (names, settings) = unzip(plain, "settings.json");
         assert_eq!(settings, "{\"format\": 1}", "files go in as they are");
@@ -257,12 +341,23 @@ mod tests {
                     trace: Some("trace-2026-11-12-100000.csv".to_owned()),
                 })
             })
+            .and_then(BundleJob::make)
             .expect("bundle");
         let (names, log) = unzip(full, "logs/setup.log");
         assert_eq!(log, "pick_window took 1.0 ms\n");
         assert!(
             names.contains(&"apps/example/shown-1.png".to_owned()),
             "{names:?}"
+        );
+        assert!(
+            names.contains(&"automation pictures/click-1.png".to_owned()),
+            "{names:?}"
+        );
+        assert!(
+            names
+                .iter()
+                .all(|name| !name.contains("notes") && !name.contains("png.tmp")),
+            "only pictures: {names:?}"
         );
         assert!(
             names.contains(&"traces/trace-2026-11-12-100000.csv".to_owned()),
@@ -275,6 +370,7 @@ mod tests {
                     trace: Some("../settings.json".to_owned()),
                 })
             })
+            .and_then(BundleJob::make)
             .expect("bundle");
         assert_eq!(
             unzip(outside, "about.txt").0.len(),

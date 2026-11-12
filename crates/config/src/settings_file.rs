@@ -53,9 +53,8 @@ pub struct SettingsFile {
     /// Whether the runtime starts with automations enabled or disabled as
     /// the tray last left them. Off, it starts with them enabled.
     pub remember_enabled: bool,
-    /// Whether the setup app shows its debug details: the Debug page, and
-    /// the working behind each reading. On, it also writes `setup.log`. The
-    /// runtime ignores it.
+    /// Whether the setup app shows its debug details, such as the Debug
+    /// page. On, it also writes `setup.log`. The runtime ignores it.
     pub show_debug: bool,
 }
 
@@ -71,6 +70,10 @@ impl Default for SettingsFile {
         }
     }
 }
+
+/// The first line of every trace file the runtime writes, which the setup
+/// app's Debug page checks before it reads a trace.
+pub const TRACE_HEADER: &str = "time_ns,thread,event,app,item,value,took_ns,cause,detail";
 
 /// The runtime trace: whether the runtime records what it reads and does to
 /// a file, what it records, and how much disk the files may take.

@@ -615,9 +615,10 @@ stateDiagram-v2
 
 ### Log rotation
 
-`Log` in `apps/runtime/src/log.rs` appends to `runtime.log`. A line that would
-take it past 512 KiB (`LIMIT`) first renames it to `runtime.old.log` and opens a new
-file. Rotating never fails a write (`rotate`).
+`Log` in `crates/platform/src/log.rs` appends to `runtime.log`, and in the setup
+app to `setup.log`. A line that would take it past 512 KiB (`LOG_LIMIT`) first
+renames it to `runtime.old.log` (or `setup.old.log`) and opens a new file.
+Rotating never fails a write (`rotate`).
 
 ```mermaid
 stateDiagram-v2
@@ -630,7 +631,7 @@ stateDiagram-v2
 
 In **Overflowing** the line goes to the file the log has, past the limit, so
 no line is lost. After a rename whose open failed, that file is
-`runtime.old.log`. The next try finds no `runtime.log` to rename, so it only
+the `.old.log`. The next try finds no log to rename, so it only
 opens one, and nothing is renamed twice. The new file replaces the old one
 only once it opens.
 
@@ -891,3 +892,52 @@ A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 run left and that have not changed for ten minutes, such as one a crash left
 between the write and the rename. A failed delete does not fail the save, and
 the next save tries again.
+
+### Setup log
+
+`SetupLog` in `apps/setup/src-tauri/src/debug/log.rs` writes `setup.log` while
+debug details show. The owner thread holds it and sets it from **Show debug
+details** each time it loads or saves the settings.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Off
+    Off --> Open: debug details show and the log opens
+    Off --> Off: debug details show but the log cannot open, or no files folder is known
+    Open --> Off: debug details hide
+    Open --> Open: a command ends and its line is written
+```
+
+A log that cannot open stays **Off** until the next settings load or save
+tries again; the page works the same without it. A line the log cannot take is
+lost, and the command's answer reaches the page either way. While open, it
+rotates as **Log rotation** says.
+
+### Trace tail
+
+`TraceTail` in `apps/setup/src-tauri/src/debug/trace_file.rs` keeps the Debug
+page's place in the newest trace file. The owner thread holds one and keeps it
+while the newest file stays the same; a newer file gets a new tail.
+
+```mermaid
+stateDiagram-v2
+    [*] --> HeaderUnknown
+    HeaderUnknown --> HeaderUnknown: the header is not all written yet
+    HeaderUnknown --> Reading: the header matches this version
+    HeaderUnknown --> OtherVersion: the header is another version's
+    Reading --> Reading: a poll reads the rows added since the last one
+    Reading --> Cut: more was added than one read takes
+    Cut --> Reading: the next line break
+    Reading --> Cut: no row ends within one read's worth
+    Reading --> HeaderUnknown: the file shrank, so it was replaced
+    OtherVersion --> HeaderUnknown: the file shrank, so it was replaced
+```
+
+A read takes at most 4 MiB. In **Cut**, the tail drops everything up to the
+next line break, so it never reads half a row, and the summary says it read
+only the newest rows. A row ends at a line break outside quotes; a cut that
+lands inside a quoted line break can read the quotes the wrong way round, and
+the next whole read's worth with no row end puts it back in **Cut**, so the
+buffer stays bounded. **OtherVersion** reads no rows and shows why. The
+timings keep the newest 10,000 of each kind, so memory stays fixed however
+long the trace runs.

@@ -644,9 +644,12 @@ pub(crate) async fn open_logs_folder(app: AppHandle) -> Result<(), String> {
 /// The debug bundle, as the bytes of a zip file.
 #[tauri::command]
 pub(crate) async fn debug_bundle(app: AppHandle, contents: BundleSpec) -> Result<Response, String> {
-    try_ask(&app, "debug_bundle", move |owner| {
+    let job = try_ask(&app, "debug_bundle", move |owner| {
         owner.debug_bundle(contents)
     })
-    .await
-    .map(Response::new)
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || job.make())
+        .await
+        .map_err(|error| format!("AppyTappy cannot make the debug bundle: {error}."))?
+        .map(Response::new)
 }

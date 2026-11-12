@@ -374,12 +374,18 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   its place in that file, so each poll reads only the rows added since the last
   one, and starts over when a newer file appears or the file shrinks. A header
   other than the one this build writes is reported as a trace from another
-  version, not parsed. Frame to action is each `started` row's time minus its
-  `cause`, rule handling is each `handled` row's `took_ns`, and both are
-  summarized as a median and 95th percentile of the newest 10,000, so a long
-  trace keeps a fixed amount in memory. The summary covers the newest
-  file only, so a trace that has moved to its next file starts its numbers
-  again.
+  version, not parsed; the header is `TRACE_HEADER` in `appytappy-config`,
+  which the runtime writes too. Frame to action is each `started` row's time
+  minus its `cause`, rule handling is each `handled` row's `took_ns`, running
+  actions is each `done` row's `took_ns`, and each is summarized as a median
+  and 95th percentile of the newest 10,000, so a long trace keeps a fixed
+  amount in memory. A poll reads at most 4 MiB, from near the end when more
+  was added, and a row that no line break ends within that much is given up
+  at the next line break. The summary covers the newest file only, so a trace
+  that has moved to its next file starts its numbers again.
+- `debug_bundle` hands the owner's file locations to a blocking task, which
+  packs the zip away from the owner thread, so the page's other commands do
+  not wait for a large trace to be packed.
 - `read_log` returns the last 64 KB of `runtime.log` or `setup.log`, as whole
   lines.
 - `debug_bundle` builds the zip in memory and returns its bytes, which the page

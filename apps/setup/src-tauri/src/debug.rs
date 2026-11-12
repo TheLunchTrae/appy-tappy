@@ -65,7 +65,10 @@ pub(crate) fn log_tail(path: &Path) -> io::Result<String> {
     };
     let length = file.metadata()?.len();
     let start = length.saturating_sub(LOG_TAIL_BYTES);
-    file.seek(SeekFrom::Start(start))?;
+    // One byte before the tail too, so a tail that starts right after a line
+    // break keeps its first line whole.
+    let from = start.saturating_sub(1);
+    file.seek(SeekFrom::Start(from))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     let text = String::from_utf8_lossy(&bytes);
@@ -95,6 +98,13 @@ mod tests {
         let long = format!("{}\nlast\n", "x".repeat(70 * 1024));
         fs::write(&path, long).expect("write");
         assert_eq!(log_tail(&path).expect("long"), "last\n");
+        // A tail that starts right at a line keeps that line.
+        let whole_line = "y".repeat(usize::try_from(LOG_TAIL_BYTES).expect("fits") - 1);
+        fs::write(&path, format!("first\n{whole_line}\n")).expect("write");
+        assert_eq!(
+            log_tail(&path).expect("at a line"),
+            format!("{whole_line}\n")
+        );
         fs::remove_dir_all(&folder).expect("clean up");
     }
 
