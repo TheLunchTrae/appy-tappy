@@ -789,7 +789,7 @@ mod tests {
         assert!(reader.skipped());
         assert!(times.is_empty(), "no row ended outside the open quote");
         reader.take(b"tail of a row\n2,a,b,c,d,e,,,\n", |row| {
-            times.push(row.time_ns)
+            times.push(row.time_ns);
         });
         assert_eq!(times, [2]);
     }
