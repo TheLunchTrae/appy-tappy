@@ -28,10 +28,12 @@ export const SIZE_CHANGES_HINT =
   'Windowed applications are often resized, and their interface grows with the window. Pick Rarely for one that ' +
   'always runs full screen at one size.';
 
-/** The hint beside the Stays at picker. */
+/** The hint beside Stays at. */
 export const PIN_HINT =
-  'The side of the window this value keeps its distance from as the window changes size. A health bar in the ' +
-  'bottom left stays at the bottom left.';
+  'The side of the window this value keeps its distance from as the window changes size. AppyTappy picks it from ' +
+  'where the region is, the third of the window its center is in, so a health bar in the bottom left stays at the ' +
+  'bottom left. Choose it yourself when the value belongs to another side, such as a wide panel that hangs from ' +
+  'the right edge.';
 
 /** The hint beside Fix at this size. */
 export const FIX_HINT =

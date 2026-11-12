@@ -145,6 +145,32 @@ never clash. A fix saved again at its size takes a number no saved fix
 uses, so its new pictures never overwrite the ones it replaces, and the
 setup app deletes the old ones once the file is saved.
 
+## Content that moves
+
+A check reads one fixed region. Nothing in the runtime looks for a value or
+follows it, so content that moves around inside the window, such as a number
+that shifts as it gains digits, is read only where the region covers it. A
+pin is no help with that: it places the region when the window changes size.
+
+Two checks read their content wherever it is inside the region, so a region
+drawn larger than the content, a reading area, covers every place it shows:
+
+- **Number** finds the ink anywhere in the region, so blank margin on any
+  side changes nothing. All ink on the text's rows is read as characters,
+  left to right, so other ink of the text's color beside the number is read
+  with it, and a shape the reference has not learned there fails the read.
+  The line read is the run of inked rows that holds the most ink, so ink
+  above or below the number, with a blank row between, is skipped unless it
+  holds more.
+- **Bar fill** counts the pixels near its two colors wherever they are, and
+  any other pixel near either color counts with the bar's.
+
+**Color** averages the whole region, and **State** compares it pixel by
+pixel, so both need their content to stay put in the region. The setup app's
+**This content may move** option says this where the region is drawn. It
+changes what the user is asked to draw and saves nothing, since the region
+is read the same way either way.
+
 ## Selection
 
 `screen::select` finds the thing to compare on a screenshot, without a model:

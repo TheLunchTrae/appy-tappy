@@ -63,8 +63,14 @@ This page covers what the user guide leaves out.
   automation editor reads about twice a second and shows numbers as read, to
   four decimals unless more are needed to compare them with the target.
 - **Window sizes.** A new value saves the side of the window it stays at
-  as `pin`, the guess from where its region is unless the user picks
-  another. The Values page reads each running application's values about
+  as `pin`. The pin follows where the region is, the same guess the runtime
+  makes for a value saved without one, until the user picks a side by hand
+  ([Pin choice](State-machines.md#pin-choice)); either way the file names
+  it. Guide lines over the screenshot run from the region to the edges or
+  the middle of the window that the pin measures from (`PinGuides.tsx`).
+  **This content may move** asks for a reading area where the check can
+  read one ([Content that moves](Screen-regions.md#content-that-moves)).
+  The Values page reads each running application's values about
   once a second at the window's size now, with a capture of its own like an
   overlay's, whether the overlay is on or not, and stops when the page
   closes (`live_values`, `stop_live_values`). The automation editor's

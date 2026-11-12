@@ -31,9 +31,12 @@ On the Values page, select **New value**.
    drag to draw a box around what to read. Drag inside the box to move it, or
    drag a corner to resize it. The **X**, **Y**, **Width**, and **Height**
    fields set it to the exact pixel, counted in the window's own pixels from
-   its top-left corner. **Stays at** picks the side of the window the value
-   keeps to as the window changes size, as [Window size](#window-size)
-   describes. Then select **Next: how to read it**.
+   its top-left corner. Turn on **This content may move** if the value shows
+   in different places inside the window, as
+   [Content that moves](#content-that-moves) describes. **Stays at** says
+   which side of the window the region keeps to as the window changes size,
+   as [Window size](#window-size) describes; it follows the region, so you
+   can leave it alone. Then select **Next: how to read it**.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
    box under it then shows what AppyTappy reads on the live window, a few
    times a second. If the check cannot work, such as a bar whose filled and
@@ -116,6 +119,30 @@ The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
 **State** check on the part that matters often works instead.
 
+## Content that moves
+
+AppyTappy reads the same part of the window every time. It doesn't look for a
+value or follow it. If what you want to read shows in different places inside
+the window, such as a number that shifts sideways as it gains digits, turn on
+**This content may move** under **Where to read**. What it can do depends on
+the check:
+
+- For a **Number** or a **Bar fill** check, draw the box around everywhere
+  the value can show. The box is then a reading area, drawn with a dashed
+  outline, and AppyTappy reads the number or the bar wherever it is inside
+  it. A **Number** check reads everything in the area that has the
+  characters' color, so keep other text and shapes of that color out. A
+  **Bar fill** check counts everything in the area that has the bar's filled
+  or empty color, so keep anything else of those colors out. Neither looks
+  outside the area.
+- A **Color** check averages its whole region, and a **State** check
+  compares its region pixel by pixel with each state's screenshot. Both need
+  what they read to stay in the same place, so the option only says so. Make
+  a value for each place it can show instead.
+
+This is separate from the window changing size, which
+[Window size](#window-size) covers.
+
 ## Window size
 
 A value is drawn at the size the window was on the screenshot you drew its
@@ -133,12 +160,29 @@ what AppyTappy reads depends on how often the application's window
 - While it changes size **rarely**, the value is read only at the sizes it
   was drawn at.
 
-**Stays at** picks one of nine sides and corners of the window, on a 3 by 3
-grid. At first it is the third of the window the region's center is in, so a
-health bar in the bottom left stays at the bottom left. A value pinned to the
-right keeps its distance from the right edge as the window gets wider, and
-one pinned to the center keeps its distance from the middle. The Values page
-shows each value's size and side under **Region**, such as
+**Stays at** is the side or corner of the window, or its center, that the
+region keeps its scaled distance from. A value that stays at the right keeps
+its distance from the right edge as the window gets wider, and one that stays
+at the center keeps its distance from the middle. Under the control, a
+sentence says what the region keeps its distance from, and dashed lines on
+the screenshot run from the region to those edges, or to the middle of the
+window.
+
+AppyTappy picks the side for you: the third of the window the region's center
+is in, so a health bar in the bottom left stays at the bottom left. The
+control shows it, such as **Top right (automatic)**, and it follows the
+region each time you draw, move, or resize it, or type its pixels.
+
+To choose the side yourself, select **Change** and pick one of the nine
+positions on the grid. The control then shows it as chosen, such as
+**Top right (chosen by hand)**, and keeps it while you move or resize the
+region. If the region ends up nearest another side, the control says so, such
+as **Chosen by hand: top right. The region is now nearest the bottom left.**
+Select **Back to automatic** to follow the region again. Drawing a new region
+goes back to automatic too.
+
+While the application's window changes size **rarely**, the side isn't used.
+The Values page shows each value's size and side under **Region**, such as
 **Drawn at 1920 × 1080, pinned bottom left**.
 
 ### Fix a value at one size

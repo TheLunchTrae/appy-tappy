@@ -801,6 +801,64 @@ stateDiagram-v2
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
 
+### Pin choice
+
+A new value's pin is picked in the capture screen's first step
+(`apps/setup/src/components/Capture.tsx`, shown by `PinPicker.tsx`). The
+choice is one `PinChoice`, automatic or by hand with a pin
+(`apps/setup/src/lib/pin.ts`). What the control shows, `PinView`, follows from
+the choice and the region, so no pin is kept beside the region it came from.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Automatic
+    Automatic --> Automatic: the region is drawn, moved, resized, or typed, and the pin follows it
+    Automatic --> ByHand: a side is picked on the grid
+    ByHand --> ByHand: another side is picked
+    ByHand --> ByHand: the region is moved, resized, or typed, and the pin stays
+    ByHand --> Automatic: Back to automatic
+    ByHand --> Automatic: a new region is drawn
+```
+
+- **Automatic** shows as `waiting` until a region is drawn on a screenshot,
+  and nothing can be picked by hand before then. After that, the pin is the
+  third of the window the region's center is in (`guessPin`), worked out
+  again each time the control draws. **Change** opens the grid without
+  leaving **Automatic**.
+- **ByHand** keeps its pin wherever the region goes. While the region is
+  nearest another side, the control says so and names both
+  (`pinNotice`), next to **Back to automatic**, so a pin chosen for one place
+  never governs another unseen.
+- A region set on the screenshot is new when it keeps neither the size nor a
+  corner of the one before (`pinChoiceAfterRegion`): a move keeps the size
+  and a corner drag keeps a corner, even when it flips the region over. The
+  typed fields only move or resize. A State check's selection fits the
+  region without this check, so it keeps a pin chosen by hand and the
+  control says when the two disagree.
+- The reference editor draws on the same screenshot for its own characters,
+  so a region drawn there leaves the choice alone.
+- A fix has no choice: it reads at its own region, and its value keeps its
+  pin.
+- `pinChoiceOf` is the choice a saved pin makes for its region: automatic
+  when it is the side the region is nearest, and by hand otherwise.
+
+### Reading area
+
+**This content may move**, in the same step, is one flag, `mayMove`. With the
+check's kind it comes to one of three (`movingContent` in
+`apps/setup/src/lib/moving.ts`):
+
+- **Fixed**, while the flag is off: the region is drawn around the value.
+- **Area**, for a Number or a Bar fill check: the region is a reading area,
+  drawn dashed and named so on the screenshot, with what else it would read.
+- **Unsupported**, for a Color or a State check: the region stays a plain
+  region, and the step says why and what to do instead.
+
+Changing the check's kind moves between **Area** and **Unsupported**, and the
+flag moves to and from **Fixed**. The flag is not saved: a check reads its
+region the same way whatever it says, as
+[Content that moves](Screen-regions.md#content-that-moves) describes.
+
 ### Text reader
 
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
