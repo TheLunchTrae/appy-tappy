@@ -398,6 +398,7 @@ pub(super) fn spec(app: &str, value_name: &str, check: &str) -> SaveSpec {
         check: serde_json::from_str(check).expect("valid JSON"),
         screenshot: 0,
         pin: appytappy_config::app_file::PinDef::TopLeft,
+        reading_area: false,
     }
 }
 

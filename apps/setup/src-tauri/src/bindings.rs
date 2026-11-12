@@ -39,7 +39,7 @@ use appytappy_config::action::{
     OpenTarget, SoundFile,
 };
 use appytappy_config::app_file::{
-    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
+    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef,
 };
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
@@ -64,8 +64,8 @@ use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
-    AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, FixSpec, FoundClick, Live,
-    Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
+    FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
