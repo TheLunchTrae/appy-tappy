@@ -27,7 +27,8 @@ impl InstanceGuard {
     }
 
     /// Whether another program holds the guard called `name`, without taking
-    /// it, so a check never stops that program from starting.
+    /// it. The check keeps the guard open only for the moment it takes, so
+    /// a copy starting in that moment would find it held and exit.
     ///
     /// # Errors
     ///

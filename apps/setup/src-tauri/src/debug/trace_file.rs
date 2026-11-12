@@ -3,7 +3,10 @@
 //!
 //! The page asks again every few seconds while the trace grows, so a
 //! [`TraceTail`] keeps its place in the file and reads only the rows added
-//! since. `wiki/Trace.md` describes the file.
+//! since. It reads at most [`WINDOW`] bytes at a time: a larger file, or a
+//! larger growth between two reads, is read from that far before its end,
+//! so a trace of any size costs the owner thread the same.
+//! `wiki/Trace.md` describes the file.
 
 use std::collections::VecDeque;
 use std::fs::{self, File};
@@ -24,6 +27,9 @@ const NEWEST: usize = 8;
 /// a long trace keeps a fixed amount in memory and its numbers follow what
 /// happens now.
 const SAMPLES: usize = 10_000;
+
+/// The most a tail reads at a time, from the end of the file.
+const WINDOW: u64 = 4 * 1024 * 1024;
 
 /// One row of a trace file, as the page shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -65,8 +71,13 @@ impl Spread {
     fn of(samples: &VecDeque<u64>) -> Option<Self> {
         let mut samples: Vec<u64> = samples.iter().copied().collect();
         samples.sort_unstable();
-        let last = samples.len().checked_sub(1)?;
-        let at = |part: usize| samples.get(last.saturating_mul(part) / 100).copied();
+        // The nearest rank: the smallest sample that at least `part`
+        // percent of the samples are no larger than.
+        let count = samples.len();
+        let at = |part: usize| {
+            let rank = count.saturating_mul(part).div_ceil(100);
+            samples.get(rank.saturating_sub(1)).copied()
+        };
         Some(Self {
             median_ns: at(50)?,
             p95_ns: at(95)?,
@@ -93,9 +104,17 @@ pub(crate) struct TraceSummary {
     /// How long the runtime took to handle each event, or `None` when no
     /// event was recorded, as with `rules` not recorded.
     pub(crate) rule_handling: Option<Spread>,
-    /// How many records the trace dropped, because its buffer was full.
+    /// How long the runtime took to run each automation's actions, or
+    /// `None` when none ran, as with `actions` not recorded.
+    pub(crate) action_run: Option<Spread>,
+    /// How many records the trace dropped, because its buffer was full, in
+    /// the part of the file read.
     #[cfg_attr(test, ts(type = "number"))]
     pub(crate) dropped: u64,
+    /// Whether the part read starts after the file's first row, because
+    /// the file, or its growth since the last read, was larger than a read
+    /// takes. The numbers then cover only the newer rows.
+    pub(crate) partial: bool,
     /// The newest rows, oldest first.
     pub(crate) newest: Vec<TraceRow>,
 }
@@ -119,10 +138,7 @@ pub(crate) fn newest(folder: &Path) -> io::Result<Option<PathBuf>> {
         let is_trace = path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("trace-"))
-            && path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"));
+            .is_some_and(is_trace_name);
         if !is_trace {
             continue;
         }
@@ -145,8 +161,14 @@ pub(crate) struct TraceTail {
     partial: Vec<u8>,
     /// Whether the first line was this version's header, once read.
     header: Option<bool>,
+    /// Whether the bytes up to the next line break are the end of a row
+    /// whose start was skipped.
+    mid_row: bool,
+    /// Whether rows were skipped.
+    skipped: bool,
     frame_to_action: VecDeque<u64>,
     rule_handling: VecDeque<u64>,
+    action_run: VecDeque<u64>,
     dropped: u64,
     newest: VecDeque<TraceRow>,
 }
@@ -159,8 +181,11 @@ impl TraceTail {
             read: 0,
             partial: Vec::new(),
             header: None,
+            mid_row: false,
+            skipped: false,
             frame_to_action: VecDeque::new(),
             rule_handling: VecDeque::new(),
+            action_run: VecDeque::new(),
             dropped: 0,
             newest: VecDeque::new(),
         }
@@ -171,7 +196,8 @@ impl TraceTail {
         &self.path
     }
 
-    /// Reads the rows added since the last read, and sums up the file.
+    /// Reads the rows added since the last read, at most [`WINDOW`] bytes
+    /// of them, and sums up what it read.
     ///
     /// # Errors
     ///
@@ -183,9 +209,25 @@ impl TraceTail {
             // The file was replaced by a shorter one: read it again.
             *self = Self::new(self.path.clone());
         }
+        if self.header.is_none() {
+            match first_line(&mut file)? {
+                Some(line) => self.header = Some(line == HEADER),
+                // The header is not all written yet.
+                None => return Ok(self.summary(bytes)),
+            }
+        }
+        let skip_to = bytes.saturating_sub(WINDOW);
+        if skip_to > self.read {
+            // Too much to read: start a window before the end, after the next
+            // line break, and drop the start of a row cut in two.
+            self.read = skip_to;
+            self.partial.clear();
+            self.mid_row = true;
+            self.skipped = true;
+        }
         file.seek(SeekFrom::Start(self.read))?;
         let mut added = Vec::new();
-        let count = file.read_to_end(&mut added)?;
+        let count = (&mut file).take(WINDOW).read_to_end(&mut added)?;
         self.read = self
             .read
             .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
@@ -193,26 +235,39 @@ impl TraceTail {
         Ok(self.summary(bytes))
     }
 
-    /// Takes `added`, the bytes the file gained, a whole row at a time.
+    /// Takes `added`, the bytes the file gained, a whole row at a time. A
+    /// row ends at a line break outside quotes, since a quoted field can
+    /// hold one.
     fn take(&mut self, added: &[u8]) {
         self.partial.extend_from_slice(added);
-        let Some(end) = self.partial.iter().rposition(|byte| *byte == b'\n') else {
-            return;
-        };
-        let rest = self.partial.split_off(end.saturating_add(1));
-        let whole = mem::replace(&mut self.partial, rest);
-        for line in String::from_utf8_lossy(&whole).lines() {
-            let line = line.trim_end_matches('\r');
-            if self.header.is_none() {
-                self.header = Some(line == HEADER);
+        let mut start = 0_usize;
+        let mut quoted = false;
+        let mut rows = Vec::new();
+        for (at, byte) in self.partial.iter().enumerate() {
+            match byte {
+                b'"' if !self.mid_row => quoted = !quoted,
+                b'\n' if self.mid_row => {
+                    self.mid_row = false;
+                    start = at.saturating_add(1);
+                },
+                b'\n' if !quoted => {
+                    rows.push(start..at);
+                    start = at.saturating_add(1);
+                },
+                _ => {},
+            }
+        }
+        for range in rows {
+            let line = String::from_utf8_lossy(self.partial.get(range).unwrap_or_default());
+            let line = line.strip_suffix('\r').unwrap_or(&line);
+            if line == HEADER || self.header != Some(true) {
                 continue;
             }
-            if self.header == Some(true)
-                && let Some(row) = parse_row(line)
-            {
+            if let Some(row) = parse_row(line) {
                 self.count(row);
             }
         }
+        self.partial.drain(..start.min(self.partial.len()));
     }
 
     /// Adds `row` to the timings and the newest rows.
@@ -226,6 +281,11 @@ impl TraceTail {
             "handled" => {
                 if let Some(took) = row.took_ns {
                     keep(&mut self.rule_handling, took);
+                }
+            },
+            "done" => {
+                if let Some(took) = row.took_ns {
+                    keep(&mut self.action_run, took);
                 }
             },
             "dropped" => {
@@ -256,10 +316,41 @@ impl TraceTail {
             problem,
             frame_to_action: Spread::of(&self.frame_to_action),
             rule_handling: Spread::of(&self.rule_handling),
+            action_run: Spread::of(&self.action_run),
             dropped: self.dropped,
+            partial: self.skipped,
             newest: self.newest.iter().cloned().collect(),
         }
     }
+}
+
+/// Whether `name` names a trace file: a bare file name, with no folder,
+/// that starts `trace-` and ends `.csv`.
+pub(crate) fn is_trace_name(name: &str) -> bool {
+    let path = Path::new(name);
+    path.file_name().is_some_and(|file| file == name)
+        && name.starts_with("trace-")
+        && path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"))
+}
+
+/// The first line of `file`, without its line break, or `None` before a
+/// whole line is written. A first line longer than a header is never one,
+/// so it reads as an empty line.
+fn first_line(file: &mut File) -> io::Result<Option<String>> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut start = Vec::new();
+    let longest = u64::try_from(HEADER.len())
+        .unwrap_or(u64::MAX)
+        .saturating_add(2);
+    file.take(longest).read_to_end(&mut start)?;
+    let Some(end) = start.iter().position(|byte| *byte == b'\n') else {
+        return Ok((start.len() >= HEADER.len().saturating_add(2)).then(String::new));
+    };
+    start.truncate(end);
+    let line = String::from_utf8_lossy(&start);
+    Ok(Some(line.strip_suffix('\r').unwrap_or(&line).to_owned()))
 }
 
 /// Adds `sample` to `samples`, dropping the oldest once there are
@@ -317,6 +408,7 @@ fn split(line: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use std::{env, process};
 
     use super::*;
@@ -338,6 +430,21 @@ mod tests {
                 median_ns: 7,
                 p95_ns: 7
             })
+        );
+    }
+
+    #[test]
+    fn a_small_sample_does_not_hide_its_slowest() {
+        assert_eq!(
+            Spread::of(&VecDeque::from([100, 1])),
+            Some(Spread {
+                median_ns: 1,
+                p95_ns: 100
+            })
+        );
+        assert_eq!(
+            Spread::of(&VecDeque::from([1, 2, 3, 100])).map(|spread| spread.p95_ns),
+            Some(100)
         );
     }
 
@@ -383,9 +490,25 @@ mod tests {
         fs::create_dir_all(&folder).expect("folder");
         fs::write(folder.join("notes.csv"), "").expect("write");
         fs::write(folder.join("trace-old.csv"), "").expect("write");
-        let old = File::open(folder.join("trace-old.csv")).expect("open");
-        old.set_modified(SystemTime::UNIX_EPOCH).expect("age it");
         fs::write(folder.join("trace-new.CSV"), "").expect("write");
+        fs::write(folder.join("trace-mid.csv"), "").expect("write");
+        // Each gets its own time, so the order the folder lists them in does
+        // not matter.
+        for (name, seconds) in [
+            ("trace-old.csv", 3_600),
+            ("trace-new.CSV", 10_800),
+            ("trace-mid.csv", 7_200),
+        ] {
+            let when = SystemTime::UNIX_EPOCH
+                .checked_add(Duration::from_secs(seconds))
+                .expect("fits");
+            File::options()
+                .write(true)
+                .open(folder.join(name))
+                .expect("open")
+                .set_modified(when)
+                .expect("set its time");
+        }
         fs::write(folder.join("trace-text.txt"), "").expect("write");
         assert_eq!(
             newest(&folder).expect("listed"),
@@ -419,6 +542,137 @@ mod tests {
                 .map(|row| row.time_ns)
                 .collect::<Vec<_>>(),
             [3]
+        );
+        fs::remove_dir_all(&folder).expect("clean up");
+    }
+
+    /// A scratch folder for one test, empty.
+    fn scratch(name: &str) -> PathBuf {
+        let folder = env::temp_dir().join(format!("appytappy-{name}-{}", process::id()));
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a folder left by an earlier run may or may not exist"
+        )]
+        let _ = fs::remove_dir_all(&folder);
+        fs::create_dir_all(&folder).expect("folder");
+        folder
+    }
+
+    #[test]
+    fn a_line_break_in_quotes_stays_in_its_row() {
+        let folder = scratch("tail-quotes");
+        let path = folder.join("trace-a.csv");
+        fs::write(
+            &path,
+            format!("{HEADER}\n1,action,done,\"Two\nlines\",Pause,,40,,ok\n2,a,b,c,d,e,,,\n"),
+        )
+        .expect("write");
+        let summary = TraceTail::new(path).update().expect("read");
+        assert_eq!(summary.newest.len(), 2);
+        assert_eq!(
+            summary.newest.first().map(|row| row.app.as_str()),
+            Some("Two\nlines")
+        );
+        assert_eq!(summary.action_run.map(|spread| spread.median_ns), Some(40));
+        assert!(!summary.partial);
+        fs::remove_dir_all(&folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_header_still_being_written_waits() {
+        let folder = scratch("tail-header");
+        let path = folder.join("trace-a.csv");
+        fs::write(&path, "time_ns,thr").expect("write");
+        let mut tail = TraceTail::new(path.clone());
+        let early = tail.update().expect("read");
+        assert_eq!(early.problem, None, "not another version yet");
+        fs::write(&path, format!("{HEADER}\n1,a,b,c,d,e,,,\n")).expect("write");
+        assert_eq!(tail.update().expect("read").newest.len(), 1);
+        fs::remove_dir_all(&folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_trace_name_is_a_bare_csv_file_that_starts_trace() {
+        assert!(is_trace_name("trace-2026-11-12-100000.csv"));
+        assert!(is_trace_name("trace-a.CSV"));
+        assert!(!is_trace_name("notes.csv"), "another csv");
+        assert!(!is_trace_name("trace-a.txt"), "not a csv");
+        assert!(!is_trace_name("../trace-a.csv"), "in another folder");
+        assert!(!is_trace_name("logs/trace-a.csv"), "in a folder");
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_listed_is_an_error() {
+        let folder = scratch("newest-unreadable");
+        let file = folder.join("file.txt");
+        fs::write(&file, "x").expect("write");
+        assert!(newest(&file.join("inside")).is_err());
+        fs::remove_dir_all(&folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_trace_with_another_header_shows_no_rows() {
+        let folder = scratch("tail-other");
+        let path = folder.join("trace-a.csv");
+        fs::write(
+            &path,
+            "time,what
+1,a,b,c,d,e,,,
+",
+        )
+        .expect("write");
+        let summary = TraceTail::new(path).update().expect("read");
+        assert!(summary.problem.is_some());
+        assert_eq!(summary.newest.len(), 0);
+        fs::remove_dir_all(&folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_row_cut_in_two_is_dropped_up_to_its_line_break() {
+        let times = |added: &[u8]| {
+            let mut tail = TraceTail::new(PathBuf::from("trace-a.csv"));
+            tail.header = Some(true);
+            tail.mid_row = true;
+            tail.take(added);
+            tail.summary(0)
+                .newest
+                .iter()
+                .map(|row| row.time_ns)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            times(b"1,a,b,c,d,e,,,\n2,a,b,c,d,e,,,\n"),
+            [2],
+            "even a cut that looks like a whole row"
+        );
+        assert_eq!(
+            times(b"x\",1\n2,a,b,c,d,e,,,\n"),
+            [2],
+            "a quote in the cut part opens nothing"
+        );
+    }
+
+    #[test]
+    fn a_large_file_is_read_from_near_its_end() {
+        let folder = scratch("tail-window");
+        let path = folder.join("trace-a.csv");
+        let row = "1,owner,handled,App,,,500,,changed\n";
+        let rows = usize::try_from(WINDOW).expect("fits") / row.len() + 100;
+        let mut text = format!("{HEADER}\n");
+        text.push_str(&row.repeat(rows));
+        text.push_str("9,action,done,App,,,700,,ok\n");
+        fs::write(&path, &text).expect("write");
+        let summary = TraceTail::new(path).update().expect("read");
+        assert!(summary.partial, "the start was skipped");
+        assert_eq!(summary.problem, None, "the header is still checked");
+        assert_eq!(summary.newest.last().map(|row| row.time_ns), Some(9));
+        assert_eq!(
+            summary.rule_handling.map(|spread| spread.median_ns),
+            Some(500)
+        );
+        assert!(
+            summary.newest.iter().all(|row| row.event != "ndled"),
+            "the row cut in two is dropped"
         );
         fs::remove_dir_all(&folder).expect("clean up");
     }

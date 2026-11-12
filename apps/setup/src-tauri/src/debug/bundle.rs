@@ -8,7 +8,7 @@
 //! request it also holds the pictures, which can show the applications'
 //! windows, and the newest trace file.
 
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Cursor, Write as _};
 use std::path::Path;
 
@@ -21,14 +21,15 @@ use crate::debug::trace_file;
 use crate::stores::Stores;
 
 /// What goes in the bundle beyond the files it always holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BundleSpec {
     /// The pictures the values, references and click actions learned from.
     pub(crate) pictures: bool,
-    /// The newest trace file.
-    pub(crate) trace: bool,
+    /// The name of the trace file to add, the one the dialog showed, or
+    /// `None` for no trace. Only a trace file in the trace folder is added.
+    pub(crate) trace: Option<String>,
 }
 
 /// The four log files, as the runtime and the setup app write them.
@@ -76,12 +77,12 @@ pub(crate) fn build(stores: &Stores, spec: BundleSpec) -> io::Result<Vec<u8>> {
     for log in LOGS {
         bundle.file_if_there(&format!("logs/{log}"), &stores.logs.join(log))?;
     }
-    if spec.trace
-        && let Some(trace) = trace_file::newest(&stores.traces)?
-        && let Some(name) = trace.file_name()
+    if let Some(name) = spec
+        .trace
+        .as_deref()
+        .filter(|name| trace_file::is_trace_name(name))
     {
-        let name = name.to_string_lossy();
-        bundle.file_if_there(&format!("traces/{name}"), &trace)?;
+        bundle.file_if_there(&format!("traces/{name}"), &stores.traces.join(name))?;
     }
     bundle.finish()
 }
@@ -133,9 +134,15 @@ impl Bundle {
         }
     }
 
-    /// Adds `bytes` as `name`. A picture is already compressed, so it is
-    /// stored as it is.
+    /// Adds `bytes` as `name`.
     fn add(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        self.start(name)?;
+        self.zip.write_all(bytes)
+    }
+
+    /// Starts the entry `name`. A picture is already compressed, so it is
+    /// stored as it is.
+    fn start(&mut self, name: &str) -> io::Result<()> {
         let picture = Path::new(name)
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("png"));
@@ -147,23 +154,23 @@ impl Bundle {
         let options = SimpleFileOptions::default()
             .compression_method(method)
             .last_modified_time(self.made);
-        self.zip
-            .start_file(name, options)
-            .map_err(io::Error::other)?;
-        self.zip.write_all(bytes)
+        self.zip.start_file(name, options).map_err(io::Error::other)
     }
 
     fn text(&mut self, name: &str, text: &str) -> io::Result<()> {
         self.add(name, text.as_bytes())
     }
 
-    /// Adds the file at `path` as `name`, when there is one.
+    /// Adds the file at `path` as `name`, when there is one. It is copied
+    /// into the zip a piece at a time, so only its packed bytes are held.
     fn file_if_there(&mut self, name: &str, path: &Path) -> io::Result<()> {
-        match fs::read(path) {
-            Ok(bytes) => self.add(name, &bytes),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        self.start(name)?;
+        io::copy(&mut file, &mut self.zip).map(drop)
     }
 
     /// Adds each file in `folder` whose name `wanted` takes, under `name`.
@@ -198,5 +205,40 @@ impl Bundle {
             .finish()
             .map(Cursor::into_inner)
             .map_err(io::Error::other)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{env, process};
+
+    use super::*;
+
+    #[test]
+    fn only_a_missing_file_or_folder_is_left_out() {
+        let scratch = env::temp_dir().join(format!("appytappy-bundle-reads-{}", process::id()));
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a folder left by an earlier run may or may not exist"
+        )]
+        let _ = fs::remove_dir_all(&scratch);
+        fs::create_dir_all(&scratch).expect("folder");
+        let missing = scratch.join("missing");
+        // A path inside a file cannot be read, and is not simply missing.
+        let unreadable = scratch.join("file.txt");
+        fs::write(&unreadable, "x").expect("write");
+        let unreadable = unreadable.join("inside");
+        assert_eq!(folders(&missing).expect("missing is fine").len(), 0);
+        assert!(folders(&unreadable).is_err());
+        let mut bundle = Bundle::new();
+        bundle
+            .file_if_there("a", &missing)
+            .expect("missing is fine");
+        assert!(bundle.file_if_there("b", &unreadable).is_err());
+        bundle
+            .folder("c", &missing, |_name| true)
+            .expect("missing is fine");
+        assert!(bundle.folder("d", &unreadable, |_name| true).is_err());
+        fs::remove_dir_all(&scratch).expect("clean up");
     }
 }

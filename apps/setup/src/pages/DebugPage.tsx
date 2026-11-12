@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { DebugOverview, LogName, TraceSummary } from '../lib/bindings.ts';
 import { debugOverview, errorText, openLogsFolder, readLog } from '../lib/api.ts';
@@ -74,9 +74,21 @@ function TraceCard({ trace, problem }: { readonly trace: TraceSummary | null; re
           value={trace.ruleHandling === null ? null : durationText(trace.ruleHandling.medianNs)}
           label="Rule handling, median"
         />
+        <Stat
+          value={trace.ruleHandling === null ? null : durationText(trace.ruleHandling.p95Ns)}
+          label="Rule handling, 95th percentile"
+        />
+        <Stat
+          value={trace.actionRun === null ? null : durationText(trace.actionRun.medianNs)}
+          label="Running actions, median"
+        />
         <Stat value={String(trace.dropped)} label="Rows dropped" />
       </div>
-      <p className="note">From {trace.file}. A dash is a number this trace did not record.</p>
+      <p className="note">
+        From {trace.file}
+        {trace.partial ? ', its newest rows only, as the file is large' : ''}. A dash is a number this trace did not
+        record.
+      </p>
       {trace.problem === null ? null : (
         <p className="warn" role="alert">
           {trace.problem}
@@ -130,6 +142,14 @@ function LogText({ log }: { readonly log: LogName }) {
     }
   }, [log]);
   useRepeat(read, REFRESH_MS, true);
+  const box = useRef<HTMLPreElement>(null);
+  // The newest lines are at the bottom, so the box shows them each time it reads the log.
+  useEffect(() => {
+    const element = box.current;
+    if (element !== null) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [text]);
   return (
     <>
       {error === null ? null : (
@@ -137,7 +157,7 @@ function LogText({ log }: { readonly log: LogName }) {
           {error}
         </p>
       )}
-      <pre className="logbox" aria-label={LOGS.find((each) => each.log === log)?.name}>
+      <pre ref={box} className="logbox" role="log" aria-label={LOGS.find((each) => each.log === log)?.name}>
         {text === null ? '' : text === '' ? 'Nothing logged yet.' : text}
       </pre>
     </>

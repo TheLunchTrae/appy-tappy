@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { TraceSummary } from '../lib/bindings.ts';
 import { debugBundle, errorText } from '../lib/api.ts';
-import { bundleName, saveZip, sizeText } from '../lib/debug.ts';
+import { bundleName, pickZipFile, sizeText } from '../lib/debug.ts';
 import { background } from '../lib/repeat.ts';
 
 interface Props {
@@ -22,15 +22,24 @@ export function ExportBundle({ trace, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    dialog.current?.showModal();
+    const element = dialog.current;
+    // Focus goes back to whatever opened the dialog, such as its button, once it closes.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    element?.showModal();
+    return () => {
+      element?.close();
+      opener?.focus();
+    };
   }, []);
   const save = async (): Promise<void> => {
     setBusy(true);
     try {
-      const zip = await debugBundle({ pictures, trace: withTrace && trace !== null });
-      if (await saveZip(zip, bundleName(new Date()))) {
-        onClose();
+      const write = await pickZipFile(bundleName(new Date()));
+      if (write === null) {
+        return;
       }
+      await write(await debugBundle({ pictures, trace: withTrace && trace !== null ? trace.file : null }));
+      onClose();
     } catch (failure: unknown) {
       setError(errorText(failure));
     } finally {
@@ -49,6 +58,10 @@ export function ExportBundle({ trace, onClose }: Props) {
         if (!busy) {
           onClose();
         }
+      }}
+      onClose={() => {
+        // The window can close a dialog without asking, as on some other page's request; the page follows.
+        onClose();
       }}
     >
       <h2 id="bundle-title">Export debug bundle</h2>

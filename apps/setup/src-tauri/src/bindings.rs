@@ -1018,6 +1018,17 @@ fn the_command_table_names_each_argument_as_its_command_does() {
 }
 
 #[test]
+fn the_log_leaves_out_only_commands_the_table_has() {
+    let names: BTreeSet<&str> = commands(&Config::new())
+        .iter()
+        .map(|command| command.name)
+        .collect();
+    for repeated in crate::debug::log::REPEATED {
+        assert!(names.contains(repeated), "{repeated} is not a command");
+    }
+}
+
+#[test]
 fn camel_case_joins_words_as_tauri_reads_keys() {
     assert_eq!(camel("max_width"), "maxWidth");
     assert_eq!(camel("set_starts_with_windows"), "setStartsWithWindows");
