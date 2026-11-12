@@ -56,7 +56,8 @@ This page covers what the user guide leaves out.
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
 - **Screenshots.** The owner thread keeps the session's screenshots until
-  another window is picked or the user leaves the new value. The draft keeps
+  its capture stops: on **Change window**, when another window is picked, or
+  when the flow closes ([Pictures kept](#pictures-kept)). The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
   a labeled screenshot, a recording, or a compared screenshot of another
@@ -73,11 +74,16 @@ This page covers what the user guide leaves out.
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
   capture counts its screenshots and recording too, since only the session
-  has them. The page tabs, the page already shown included, ask before they
+  has them. A fix and an edit open on a screenshot the capture takes
+  itself, and start from what they show once the region is placed on it
+  (`withFixRegion`, `placedOn`), so leaving one that nobody touched asks
+  nothing. The page tabs, the page already shown included, ask before they
   drop unsaved work, and **Change window** asks the same. While a save runs,
   the tabs, **Change window**, the questions' answers, and **Discard** or
   **Cancel** wait. A save closes its flow only while that flow is still open,
-  so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
+  so one that finishes after the user moved on leaves the next flow alone.
+  Leaving a capture, as **Change window** also does, stops it, which drops
+  its screenshots and recording.
   A flow opened for another unmounts that one, so what a waiting flow would
   lose has to travel in its `Flow` value. Only the automation editor opens a
   flow while it holds work, so it hands over its draft, and the window counts
@@ -109,22 +115,65 @@ This page covers what the user guide leaves out.
   part of the region, and how many older ones it left out; or a sentence
   that says why none are proposed and names the screenshots concerned.
   `measure_bar` reads the same screenshots with two colors through the bar
-  reader itself, and answers the pixels that count as filled and as empty on
-  the screenshot shown, which the UI tints. Each part's pixels are a count
-  and its runs; past `MAX_RUNS` runs a part carries only the count, and the
-  UI says that it marks none. The UI measures the draft's colors, or the
-  detected ones while it asks whether they replace colors picked by hand, so
-  the list and the tints describe hand-picked colors as well. Colors found
-  go into a draft with no color at once. A fix keeps its value's colors and
-  offers neither. [Bar detection](State-machines.md#bar-detection) covers
-  the request and its stale answers.
+  reader itself, and answers what each one reads. The UI measures the
+  draft's colors, or the detected ones while it asks whether they replace
+  colors picked by hand, so the list describes hand-picked colors as well.
+  Which pixels count is the matching pixels preview's to show. Colors found
+  go into a draft with no color at once. An edit's region sits on the
+  newest screenshot of the size its value was drawn at, so both commands
+  look at the screenshots of that size whichever one shows, and the UI asks
+  for one while there is none. A fix keeps its value's colors and offers
+  neither. [Bar detection](State-machines.md#bar-detection) covers the
+  request and its stale answers.
+- **Matching pixels.** The preview's tint comes from the owner, never from
+  the page: `match_pixels` takes a screenshot's index, a rectangle of it, and
+  the rule, and answers the pixels the rule takes (`match_preview.rs`). Each
+  rule asks the function its reader asks, so the tint and the reading agree
+  at the tolerance's edge: `DigitReader::is_ink` for a reference's
+  characters, `BarFill::classify` for a bar, and `ColorMatch::near` for a
+  color check, which the check itself asks about the region's average color.
+  A color check's answer carries that average, its distance from the color,
+  and what the check reads on the rectangle. The answer holds each kind of
+  pixel as a count and as runs in the rectangle, spelled as a selection's
+  are. The runs cross to the page as JSON, so the answer caps them: a kind
+  with more than 500,000 runs carries only its count, and the page says that
+  it tints none of them. The page draws the runs
+  (`lib/matchPreview.ts`) on a canvas of the rectangle's own pixels inside
+  the frame that holds the screenshot, placed in fractions of the frame, so
+  the tint stays on its pixels at any size the frame shows at, and under the
+  surface that takes the pointer. The page asks for a reference's characters
+  on the whole screenshot and counts those in the region itself, so moving
+  the region asks nothing. It awaits one request at a time and sends the
+  newest settings when that one is answered, so the tint follows a dragged
+  slider as fast as the owner answers. A request the page stopped awaiting,
+  as when the switch is turned off, may still be with the owner, and its
+  answer is dropped.
+  [State machines](State-machines.md#matching-pixels-preview) maps its
+  requests and answers. **Show selected pixels** asks the owner nothing of
+  its own: it draws the runs the `select` answer for the screenshot shown
+  already carries, on the same canvas. That selection is remade once
+  **Color match** rests (`SELECT_DELAY_MS`), so until then the tint is the
+  last selection's and its count says that it is updating; a `select` that
+  fails drops the tint. The tint is the selection, not what the state check
+  compares: that is the selected pixels that lie in the region while
+  **Ignore the background** is on, and the whole region otherwise, and the
+  switch's help says which.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to
   four decimals unless more are needed to compare them with the target.
 - **Window sizes.** A new value saves the side of the window it stays at
-  as `pin`, the guess from where its region is unless the user picks
-  another. The Values page reads each running application's values about
+  as `pin`. The pin follows where the region is, the same guess the runtime
+  makes for a value saved without one, until the user picks a side by hand
+  ([Pin choice](State-machines.md#pin-choice)); either way the file names
+  it. Guide lines over the screenshot run from the region to the edges or
+  the middle of the window that the pin measures from (`PinGuides.tsx`).
+  **This content may move** asks for a reading area where the check can
+  read one, and the value saves it as `readingArea`
+  ([Content that moves](Screen-regions.md#content-that-moves)). A fix of
+  such a value asks for a reading area at its size too, and has no flag of
+  its own.
+  The Values page reads each running application's values about
   once a second at the window's size now, with a capture of its own like an
   overlay's, whether the overlay is on or not, and stops when the page
   closes (`live_values`, `stop_live_values`). The automation editor's
@@ -137,6 +186,53 @@ This page covers what the user guide leaves out.
   other states than the value's, and saves it over any fix at the same size
   (`save_fix`, `remove_fix`). A fix of a number names its own reference only
   when it differs from the value's.
+- **Editing a value.** **Edit** opens the capture locked to the value's
+  application, on a first screenshot like a fix's. The draft starts as the
+  saved value (`lib/edit.ts`), with its region on no screenshot. Once a
+  screenshot of the window size the value was drawn at exists, the region
+  sits on the newest one (`useValueEdit`); on a screenshot of any other
+  size the region does not show and cannot be drawn. The page sends an
+  `EditSpec`: the value's ID, its name, its pin, whether its region is a
+  reading area, and a drawing. The pin and the reading area are picked as
+  for a new value, on the capture's draft and with **This content may
+  move**, and open as the saved value has them: the pin by hand only when
+  it is saved and is not the side the region is nearest (`pickedPin`). The
+  owner refuses a reading area on a check that does not read anywhere in
+  its region, tried or saved, so an edit that makes a number a color has to
+  turn it off; the page sends it only for a check that reads one. The flag
+  is setup guidance, so the value's fixes stay whatever it says. A `kept`
+  drawing keeps the saved region and spells the check as the file does, so
+  it needs no screenshot and the window may have any size; a state check in
+  it names the value's saved pictures in their order, under the names the
+  states have now. A `drawn` drawing is a check on a screenshot, which must
+  have the window size the value was drawn at, and a state check in it
+  takes every state's picture again. The owner builds the value as edited
+  once (`owner/edits.rs`) for both commands. `try_edit` reads it back with
+  `saved::build` and makes it the live check where `SavedValue::at` places
+  it at the newest frame's size, so the editor's reading is the runtime's at
+  the window's size now, and answers an `EditPreview`: why the value is not
+  read at that size, the fixes the edit removes, and the automations that
+  refuse it. An edit that cannot be tried clears the live check, so nothing
+  reads with the edit before it. The page asks the owner for the window's
+  size twice a second (`window_size`, the newest frame's own size, not the
+  scaled live view's) and tries the edit again when it changes, and after a
+  save the owner refused. `edit_value` saves the same value over the saved
+  one, under its ID, and leaves the application's `checked` build alone. It
+  refuses an edit when an automation's condition suits the saved value but
+  not the edited one (`TargetDef::suits`). The page sends the window sizes
+  of the fixes the user agreed to lose as `dropFixes`, and the owner
+  refuses the save, listing the fixes it would remove, unless those are
+  exactly the ones the edit removes. An edit removes a value's fixes when
+  the check's kind changes or a state check's states no longer line up with
+  the fixes' pictures: each state has to keep its picture or its name, in
+  the same place. A fix that stays keeps the reference it reads with: when a number value's
+  reference changes, a fix that read with the old one names it, and a fix
+  that named the new one names none, so a fix still names a reference only
+  when it differs from the value's. A fix has no `whole` of its own and
+  follows the value's. A value saved without a `pin` keeps none while the
+  edit names the side guessed from its region, so an edit that changes
+  nothing writes nothing. A value keeps its ID when renamed, and a new
+  value named like a renamed one's old name gets that ID with a number.
 - **References.** A number value names a reference of its own application
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
@@ -151,8 +247,23 @@ This page covers what the user guide leaves out.
   target is the kind the condition compares. A key press action also needs the
   application's anti-cheat class to be `none`
   ([Key presses](Actions.md#key-presses)).
-- **Reload.** Saving or removing an application, saving or deleting a value,
-  a reference or an automation, switching an automation on or off, changing
+- **Click it now.** The click target screen sends a click only from that
+  button's press: `click_now` in the owner checks the anti-cheat classes,
+  reads the click's picture from its file, and has the host place and send it
+  as the runtime does ([Trying a click](Actions.md#trying-a-click)). The
+  owner thread waits for it, up to a second for a picture's frame and half a
+  second more for the answers of the windows a click sent to the window asks,
+  so other commands wait meanwhile. It answers the window the click went to, and the
+  screen says when that is not the window it picked. While anti-cheat blocks
+  the click, the button stays in the tab order with `aria-disabled`, is
+  described by the note that says why, and sends nothing. The click's return
+  of the focus follows the same
+  rule as **Use this target**: what the action had while its button is the
+  same, and otherwise on unless it is a right click (`returnsFocus` in
+  `lib/click.ts`). [Click target tries](State-machines.md#click-target-tries)
+  maps the screen's states.
+- **Reload.** Saving or removing an application, saving, editing or deleting
+  a value, saving or deleting a reference or an automation, switching an automation on or off, changing
   an anti-cheat class, and changing a setting set the reload event, so the
   runtime reads the files again at once. Overlay changes do not, since
   the runtime does not read them. [The runtime](Architecture.md#the-runtime)
@@ -191,8 +302,8 @@ UI then offers **Use its settings**, which puts the recording's region, color,
 and tolerance back on the draft. The region stays on the screenshot it was
 drawn on when that one has the recording's window size, and otherwise moves to
 the newest screenshot of that size. Kept readings are lost only on a discard,
-when another window is picked, or when the flow is left, such as on **Change
-window**; a closed window keeps them for review. **Back** and Escape leave
+on **Change window**, or when the flow is left; a closed window keeps them
+for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
 
 ### The text reader
@@ -262,7 +373,10 @@ and each state check's pictures, named after its value and the state's
 place, such as `status-1.png`, and transparent where the state's selection
 leaves the background out
 ([Saved pictures](Screen-regions.md#saved-pictures)). A fix's pictures add
-the fix's number, such as `status-2-1.png`.
+a number, such as `status-2-1.png`, and so do the pictures of a drawing
+whose states an edit took again. Each new set takes the smallest number no
+saved picture of the value has, so a save never overwrites a picture the
+saved file still names.
 
 ```json
 {
@@ -295,6 +409,7 @@ the fix's number, such as `status-2-1.png`.
           "whole": true
         },
         "pin": "topRight",
+        "readingArea": true,
         "fixes": [
           {
             "windowSize": { "width": 3440, "height": 1440 },
@@ -369,7 +484,9 @@ An application's `sizeChanges` is `often` or `rarely`, and `often` when the
 file leaves it out. A value's `pin` is one of `topLeft`, `topCenter`,
 `topRight`, `middleLeft`, `center`, `middleRight`, `bottomLeft`,
 `bottomCenter`, and `bottomRight`, and is guessed from where the region is
-when the file leaves it out. Each of its `fixes` has its own window size and
+when the file leaves it out. Its `readingArea` is `true` when the region was
+drawn as a reading area and left out otherwise; only a number or bar fill
+check may have it, and it changes nothing the value reads. Each of its `fixes` has its own window size and
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 
@@ -396,6 +513,11 @@ or `"none"`, as its target. A state check is saved with its states in order:
 An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
+A click that looks for a picture names it by file name, and the picture is in
+the `clicks` folder beside `automations.json`, named `click-{n}.png`.
+[Pictures kept](#pictures-kept) says what each picture holds and when it is
+removed.
+
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
 `settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
 file and renames it over the old one, so a crash never leaves half a file; a
@@ -403,9 +525,9 @@ later save in that folder removes a temporary file that a crash left between the
 two steps, once it is ten minutes old. A file that cannot be read is listed with
 the reason and left alone; an automations file that cannot be read as a whole,
 such as one with another format version, is not replaced: until it is fixed, the
-setup app saves no automations, removes no application, and deletes no value,
-because it checks that file to see whether an automation still uses the
-application or value. One automation that breaks a rule on its own, such as
+setup app saves no automations, removes no application, and edits or deletes
+no value, because it checks that file to see whether an automation still uses
+the application or value. One automation that breaks a rule on its own, such as
 after a hand edit, is kept in the file and listed with its problem, and nothing
 runs it; the user can turn it off or delete it, and the others keep working.
 Saving an automation, turning one on, and listing them all ask
@@ -422,6 +544,89 @@ runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
 actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+
+## Pictures kept
+
+AppyTappy keeps a picture only where reading or clicking needs one, cut to
+the region the user drew, and never the rest of the window. A window's whole
+frame exists only in memory while its capture is open. A file holds a region
+alone, which is as much of the window as the user drew. The user guide says
+so in [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
+
+### In memory
+
+The owner thread and the page hold these for the picked window. All of them
+go when its capture stops (`Owner::stop`): the user selects **Change window**,
+another window is picked, or the flow closes: on **Discard**, **Cancel**, a
+page tab, or the save of what the flow makes. A reference saved from inside a
+value flow leaves the flow, and so its capture, open. Closing AppyTappy Setup
+ends the process.
+
+| What                               | Held by            | How much of the window                                    |
+| ---------------------------------- | ------------------ | --------------------------------------------------------- |
+| The newest frame                   | Owner              | All of it; each frame replaces the one before             |
+| The live view                      | Page               | All of it, scaled down to `LIVE_MAX_WIDTH` at most        |
+| Each screenshot                    | Owner and page     | All of it, and a thumbnail `THUMB_WIDTH` wide on the page |
+| Each recorded reading              | Owner and page     | The region; a recording keeps at most `MAX_READINGS`      |
+| The check being tried              | Owner              | The region, once for each state                           |
+| A new reading, for the text reader | Text reader thread | The region's ink, until it is read                        |
+
+A capture holds as many screenshots as the user takes. Setting up a click's
+target is a capture like a value's, and its screen stops the capture when it
+closes and each time it looks for the window again. A recording's readings
+also go when it is discarded or another replaces it.
+
+The automation editor's live reading, the overlays, and the Values page
+capture only the regions of the values they read, as the runtime does. The
+overlays and the Values page keep the readings alone, and the live reading
+keeps its value's region of the newest frame.
+
+### On disk
+
+| File                                 | What it holds                                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot, or of a kept recorded reading   |
+| `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out  |
+| `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                |
+| `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out |
+
+A number, bar fill, or color value saves no picture of its own. Nothing else
+AppyTappy writes holds pixels: the runtime's log and its [trace](Trace.md)
+hold names, readings, and timings as text, and the
+[MCP server](Development.md#tools)'s `screen_sample` answers the colors of
+single points of the screen, at most `SCREEN_POINTS_LIMIT` a call.
+
+A sample keeps the whole region, not only the box around its characters. A
+reference that is edited learns its saved samples again with the color and
+tolerance the editor has then, and another color or a higher tolerance counts
+pixels as ink that a box cut for the saved settings would have dropped. A
+state's picture is the whole region because that is what the check compares.
+
+### Removal
+
+- After each save of an application's file, `Owner::write_app` removes the
+  pictures in its folder that the file as saved does not name
+  (`AppStore::prune`). So the pictures of a deleted value, fix, or reference
+  go with it; a save that fails takes back the pictures it wrote, since the
+  file still saved does not name them; and pictures left by a save that the
+  program ended in the middle of go with the application's next save.
+- A click's picture is written when its target is set up, before its
+  automation is saved. Each save of the automations removes the click
+  pictures none of them names, and so does the end of the automation's flow
+  (`forget_unsaved_click_pictures`), which covers a target set up for an
+  automation the user then did not save. While the editor waits under a
+  value or application flow it opened, its draft still names its pictures,
+  so they stay until the automation is saved or left (`holdsAutomation`).
+- Both remove only files named as the table above names them. Any other file
+  in those folders stays, such as one the user put there, and so does a
+  picture that a file edited by hand names. Removing an application removes
+  its folder with everything in it.
+- A temporary file that a crash left goes at the next save in its folder, as
+  [Saved files](#saved-files) describes, and one in `clicks` goes with the
+  click pictures.
+- Nothing is removed when AppyTappy Setup starts. An application whose file
+  cannot be read keeps every picture, and so do the click pictures while the
+  automations file cannot be read, since nothing says which they name.
 
 ## Page types
 

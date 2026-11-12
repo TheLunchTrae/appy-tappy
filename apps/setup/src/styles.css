@@ -164,7 +164,8 @@ select {
   cursor: pointer;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.45;
   cursor: default;
 }
@@ -618,14 +619,63 @@ select {
   image-rendering: pixelated;
 }
 
-/* What a bar's two colors count, marked over its region on the screenshot. */
-.bar-marks {
+/* The matching pixels preview: its tint lies on the screenshot's own pixels, under the region. */
+.match-box {
   position: absolute;
   pointer-events: none;
 }
 
-.bar-marks canvas {
+.match-box canvas {
   image-rendering: pixelated;
+}
+
+.match-found,
+div.match-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* What shows is for earlier settings until the answer for these arrives. */
+.match-found.updating .match-answer {
+  opacity: 0.55;
+}
+
+.match-status {
+  min-height: 1lh;
+}
+
+.match-key {
+  background: currentcolor;
+}
+
+.match-key.striped {
+  background: repeating-linear-gradient(135deg, currentcolor 0 2px, transparent 2px 4px);
+}
+
+.match-key.clear {
+  background: none;
+}
+
+.match-legend {
+  list-style: none;
+  padding: 0;
+  font-size: 12px;
+}
+
+.match-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 10px;
+  font-size: 12px;
+}
+
+.match-facts dt {
+  color: var(--muted);
+}
+
+.match-facts dd {
+  text-align: right;
 }
 
 .rough {
@@ -1647,6 +1697,11 @@ select {
   background: var(--base);
 }
 
+/* A state that keeps its saved picture, which the editor has no screenshot of */
+.state.saved {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .state[aria-current='true'] {
   border-color: var(--capture);
 }
@@ -1932,6 +1987,58 @@ select {
   background: var(--capture);
 }
 
+/* What a region keeps its distance from as the window changes size, over the screenshot. */
+.pin-guides {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pin-guides line {
+  stroke: var(--capture);
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 80%));
+}
+
+.pin-guides .guide {
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.pin-guides .mark {
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.pin-guides .mark.middle {
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+  stroke-linecap: butt;
+}
+
+/* A region drawn as a reading area: larger than what it reads, which may be anywhere inside. */
+.frame.reading-area .marquee {
+  border-style: dashed;
+  background: rgb(242 179 61 / 10%);
+}
+
+.name > .toggle {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* The notice under a side chosen by hand stays in the page while it has nothing to say, and takes no room then. */
+.pin-notice:not(:empty) {
+  margin-top: 5px;
+}
+
+/* What This content may move comes to, as paragraphs spaced like the field's own parts. */
+.moving-says {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 /* A value's reading at the window's size now, or why it has none. */
 .now {
   display: flex;
@@ -2055,6 +2162,11 @@ select {
 .click-app {
   grid-column: span 2;
   min-width: 0;
+}
+
+.click-tries {
+  display: flex;
+  gap: 8px;
 }
 
 .click-options {

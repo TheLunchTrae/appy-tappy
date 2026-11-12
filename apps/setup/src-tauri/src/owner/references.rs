@@ -158,7 +158,7 @@ impl<H: Host> Owner<H> {
 }
 
 /// `names` as a list in a sentence, such as `A, B and C`.
-fn and_list(names: &[&str]) -> String {
+pub(super) fn and_list(names: &[&str]) -> String {
     match names.split_last() {
         None => String::new(),
         Some((last, [])) => (*last).to_owned(),

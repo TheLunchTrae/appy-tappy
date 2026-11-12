@@ -39,11 +39,11 @@ use appytappy_config::action::{
     OpenTarget, SoundFile,
 };
 use appytappy_config::app_file::{
-    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
+    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef,
 };
 use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, CornerDef, MAX_COOLDOWN_MS,
-    MediaCommandDef, WhenDef,
+    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
+    MAX_COOLDOWN_MS, MediaCommandDef, WhenDef,
 };
 use appytappy_config::click::{MAX_SEARCH_PIXELS, Spot};
 use appytappy_config::settings_file::{
@@ -62,11 +62,12 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
-    AppSummary, AppWindows, ClickPictureView, FixSpec, FoundClick, Live, Reading,
-    ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
+    FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
@@ -465,6 +466,7 @@ fn sample_actions() -> Vec<ActionDef> {
         ActionDef::Click {
             app: "app".to_owned(),
             button: ClickButtonDef::Left,
+            delivery: ClickDeliveryDef::Cursor,
             return_focus: true,
             at: ClickAtDef::Spot {
                 corner: CornerDef::TopLeft,

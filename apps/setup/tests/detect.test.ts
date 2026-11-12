@@ -7,13 +7,9 @@ import {
   detectingText,
   detectStep,
   leftOutText,
-  MARK_TONES,
   measuredFor,
   measureKey,
-  paintMarks,
   readingLine,
-  toneCss,
-  unmarkedText,
 } from '../src/lib/detect.ts';
 
 const green = { red: 40, green: 210, blue: 60 };
@@ -172,7 +168,7 @@ describe('detectingText', () => {
       `${start} On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
     );
     expect(detectingText(found({ ...proposed, around: true, rough: true }), held, position)).toBe(
-      `${start} Only some strips of the region show the bar from end to end, so AppyTappy went by those. What lies in the rest, such as a label, an icon, or the background, is left out of the marks unless it has one of the two colors. On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
+      `${start} Only some strips of the region show the bar from end to end, so AppyTappy went by those. What lies in the rest, such as a label, an icon, or the background, counts only where it has one of the two colors. On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
     );
     expect(detectingText(found({ ...proposed, leftOut: 1 }), held, position)).toBe(
       `${start} One older screenshot of this size was not looked at. ${side}`,
@@ -210,13 +206,12 @@ test('a reading shows its screenshot and its fill to a tenth', () => {
 
 test('a measure shows only for the colors, region, and screenshots it was made for', () => {
   const colors = { filled: green, empty: gray };
-  const made = { key: measureKey(key, colors, 1), measure: { readings: [], marks: null, leftOut: 0 }, error: null };
-  expect(measuredFor(made, measureKey({ ...key }, { ...colors }, 1))).toBe(made);
-  expect(measuredFor(made, measureKey(key, { filled: gray, empty: green }, 1))).toBeNull();
-  expect(measuredFor(made, measureKey(key, colors, null))).toBeNull();
-  expect(measuredFor(made, measureKey({ ...key, shots: 3 }, colors, 1))).toBeNull();
-  expect(measuredFor(made, measureKey({ ...key, drawnOn: 1 }, colors, 1))).toBeNull();
-  expect(measuredFor(made, measureKey({ ...key, region: { ...key.region, width: 31 } }, colors, 1))).toBeNull();
+  const made = { key: measureKey(key, colors), measure: { readings: [], leftOut: 0 }, error: null };
+  expect(measuredFor(made, measureKey({ ...key }, { ...colors }))).toBe(made);
+  expect(measuredFor(made, measureKey(key, { filled: gray, empty: green }))).toBeNull();
+  expect(measuredFor(made, measureKey({ ...key, shots: 3 }, colors))).toBeNull();
+  expect(measuredFor(made, measureKey({ ...key, drawnOn: 1 }, colors))).toBeNull();
+  expect(measuredFor(made, measureKey({ ...key, region: { ...key.region, width: 31 } }, colors))).toBeNull();
   expect(measuredFor(made, null)).toBeNull();
   expect(measuredFor(null, made.key)).toBeNull();
 });
@@ -225,28 +220,4 @@ test('older screenshots that were not looked at are counted in words', () => {
   expect(leftOutText(0)).toBeNull();
   expect(leftOutText(1)).toBe('One older screenshot of this size was not looked at.');
   expect(leftOutText(2)).toBe('2 older screenshots of this size were not looked at.');
-});
-
-test('marks paint a tone over each counted pixel and leave the rest clear', () => {
-  const marks = { filled: { count: 2, spans: [[0, 2]] }, empty: { count: 1, spans: [[3, 4]] } } as const;
-  expect(unmarkedText(marks)).toBeNull();
-  expect([...paintMarks(marks, 5)]).toEqual([
-    ...MARK_TONES.filled,
-    ...MARK_TONES.filled,
-    ...[0, 0, 0, 0],
-    ...MARK_TONES.empty,
-    ...[0, 0, 0, 0],
-  ]);
-  // A run past the region, as after the region shrank, stops at its end.
-  const past = { filled: { count: 8, spans: [[1, 9]] }, empty: { count: 0, spans: [] } } as const;
-  expect([...paintMarks(past, 2)]).toEqual([0, 0, 0, 0, ...MARK_TONES.filled]);
-  expect(toneCss(MARK_TONES.empty)).toBe('rgb(74 163 255)');
-});
-
-test('a part with too many patches to send is not marked, and the page says so', () => {
-  const said =
-    'Too many separate patches of pixels to mark on the screenshot: 9 pixels count as filled and 4 as empty.';
-  const some = [[0, 1]] as const;
-  expect(unmarkedText({ filled: { count: 9, spans: null }, empty: { count: 4, spans: some } })).toBe(said);
-  expect(unmarkedText({ filled: { count: 9, spans: some }, empty: { count: 4, spans: null } })).toBe(said);
 });

@@ -1,7 +1,7 @@
-// Finding a bar's colors for the user: the request and its answer, what the colors measure, and the words that
+// Finding a bar's colors for the user: the request and its answer, what the colors read, and the words that
 // say how far to trust them.
 
-import type { BarDetection, BarMarks, BarMeasure, BarReading } from './bindings.ts';
+import type { BarDetection, BarMeasure, BarReading } from './bindings.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, sameRect } from './region.ts';
 
@@ -171,7 +171,7 @@ function foundText(proposal: Proposal, position: (index: number) => number): str
   }
   if (proposal.around) {
     said.push(
-      'Only some strips of the region show the bar from end to end, so AppyTappy went by those. What lies in the rest, such as a label, an icon, or the background, is left out of the marks unless it has one of the two colors.',
+      'Only some strips of the region show the bar from end to end, so AppyTappy went by those. What lies in the rest, such as a label, an icon, or the background, counts only where it has one of the two colors.',
     );
   }
   if (proposal.rough) {
@@ -219,9 +219,9 @@ export function readingLine(reading: BarReading, position: (index: number) => nu
   return `Screenshot ${position(reading.screenshot)}: ${shown}`;
 }
 
-/** What a measure answers for: the detection's inputs, the two colors, and the screenshot shown. */
-export function measureKey(key: DetectKey, colors: BarColors, shown: number | null): string {
-  return JSON.stringify([key.region, key.drawnOn, key.shots, colors.filled, colors.empty, shown]);
+/** What a measure answers for: the detection's inputs and the two colors. */
+export function measureKey(key: DetectKey, colors: BarColors): string {
+  return JSON.stringify([key.region, key.drawnOn, key.shots, colors.filled, colors.empty]);
 }
 
 /** A measure and what it was made for. */
@@ -234,41 +234,4 @@ export interface Measured {
 /** `made` when it was made for `key`, or else null: an answer for other colors, region, or screenshots never shows. */
 export function measuredFor(made: Measured | null, key: string | null): Measured | null {
   return made?.key === key ? made : null;
-}
-
-/** The overlay's color over a pixel that counts as each part, as red, green, blue, and alpha. */
-export const MARK_TONES = {
-  filled: [242, 179, 61, 170],
-  empty: [74, 163, 255, 170],
-} as const;
-
-/** A tone as CSS, for the legend. */
-export function toneCss([red, green, blue]: readonly [number, number, number, number]): string {
-  return `rgb(${red} ${green} ${blue})`;
-}
-
-/**
- * Why `marks` are not drawn, or null when they are: a part with too many separate runs of pixels to send carries
- * only how many pixels it counts, and then neither part is marked.
- */
-export function unmarkedText(marks: BarMarks): string | null {
-  return marks.filled.spans === null || marks.empty.spans === null
-    ? `Too many separate patches of pixels to mark on the screenshot: ${marks.filled.count} pixels count as filled and ${marks.empty.count} as empty.`
-    : null;
-}
-
-/**
- * The RGBA pixels that mark what a bar's two colors count in a region of `pixels` pixels: a tone over each pixel of
- * `marks`' runs, and clear elsewhere. A run that reaches past the region is cut off at its end.
- */
-export function paintMarks(marks: BarMarks, pixels: number): Uint8ClampedArray<ArrayBuffer> {
-  const painted = new Uint8ClampedArray(pixels * 4);
-  for (const part of ['filled', 'empty'] as const) {
-    for (const [start, end] of marks[part].spans ?? []) {
-      for (let index = Math.max(0, start); index < Math.min(end, pixels); index += 1) {
-        painted.set(MARK_TONES[part], index * 4);
-      }
-    }
-  }
-  return painted;
 }

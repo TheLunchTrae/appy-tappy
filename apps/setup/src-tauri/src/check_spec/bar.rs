@@ -1,9 +1,8 @@
 //! Finding a bar fill check's colors on the session's screenshots, and
-//! showing what two colors measure on them.
+//! what two colors read on them.
 //!
 //! [`detect`] proposes the colors, or says why it proposes none, and
-//! [`measure`] reads each screenshot with two colors and marks the pixels
-//! each counts. Both look at screenshots with the window size of the one
+//! [`measure`] reads each screenshot with two colors. Both look at screenshots with the window size of the one
 //! the region was drawn on, since the region means another spot on a window
 //! of another size: that one and the newest [`MAX_OTHERS`] others, which
 //! bounds what a call costs the owner thread. Both go through the bar reader
@@ -13,7 +12,7 @@ use std::iter;
 
 use appytappy_config::app_file::CheckDefError;
 use appytappy_config::signal::Number;
-use appytappy_sources::screen::check::{BarFill, BarPart};
+use appytappy_sources::screen::check::BarFill;
 use appytappy_sources::screen::detect::{MIN_LENGTH, NoBar, detect_bar};
 use appytappy_sources::screen::{Image, Region};
 use serde::Serialize;
@@ -23,12 +22,6 @@ use super::{ColorSpec, RegionSpec, SpecError, to_region};
 /// The most screenshots looked at besides the one the region was drawn on.
 /// Each one costs a copy of the region and a few passes over it.
 const MAX_OTHERS: usize = 5;
-
-/// The most runs a layer of marks carries. Runs go to the UI as JSON, and a
-/// dithered region has a run for every other pixel, so the cap bounds what
-/// one answer costs to send and to read. A layer with more carries only its
-/// count, and the UI says that it marks none of them.
-const MAX_RUNS: usize = 500_000;
 
 /// What looking for a bar in a region found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -75,50 +68,6 @@ pub(crate) struct BarReading {
     fill: Option<f64>,
 }
 
-/// The pixels of one part in a region.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub(crate) struct Layer {
-    /// How many pixels count as this part.
-    count: usize,
-    /// The runs of them in the region, each as the index of its first pixel
-    /// and of the pixel after its last, row by row from the top, as a
-    /// selection's are. Missing when there are too many runs to draw.
-    spans: Option<Vec<[usize; 2]>>,
-}
-
-impl Layer {
-    /// A layer with no pixel yet.
-    const fn new() -> Self {
-        Self {
-            count: 0,
-            spans: Some(Vec::new()),
-        }
-    }
-
-    /// Adds the run of pixels from `start` up to `end`, which fills the
-    /// layer once it holds `most` runs.
-    fn push(&mut self, start: usize, end: usize, most: usize) {
-        self.count = self.count.saturating_add(end.saturating_sub(start));
-        if self.spans.as_ref().is_some_and(|spans| spans.len() >= most) {
-            self.spans = None;
-        }
-        if let Some(spans) = &mut self.spans {
-            spans.push([start, end]);
-        }
-    }
-}
-
-/// The pixels of a region that two colors count.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub(crate) struct BarMarks {
-    /// The pixels that count as filled.
-    filled: Layer,
-    /// The pixels that count as empty.
-    empty: Layer,
-}
-
 /// What two colors measure on the session's screenshots.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -126,9 +75,6 @@ pub(crate) struct BarMarks {
 pub(crate) struct BarMeasure {
     /// What each screenshot looked at reads, in the order they were taken.
     readings: Vec<BarReading>,
-    /// The pixels counted on the screenshot shown, or `None` when none is
-    /// shown or it is not one of those looked at.
-    marks: Option<BarMarks>,
     /// How many older screenshots of the window size were not looked at.
     left_out: usize,
 }
@@ -270,7 +216,7 @@ pub(crate) fn detect(
 }
 
 /// What a bar of the colors `filled` and `empty` reads in `region` on each
-/// screenshot looked at, and which pixels it counts on screenshot `shown`.
+/// screenshot looked at.
 ///
 /// # Errors
 ///
@@ -282,7 +228,6 @@ pub(crate) fn measure(
     drawn_on: usize,
     filled: ColorSpec,
     empty: ColorSpec,
-    shown: Option<usize>,
 ) -> Result<BarMeasure, SpecError> {
     let bar = BarFill::new(filled.into(), empty.into())
         .map_err(|_same| SpecError::Check(CheckDefError::SameColors))?;
@@ -294,39 +239,7 @@ pub(crate) fn measure(
             fill: bar.percent(image).ok().map(Number::raw),
         })
         .collect();
-    let shown = frames.iter().find(|&&(index, _)| Some(index) == shown);
-    Ok(BarMeasure {
-        readings,
-        marks: shown.map(|(_, image)| marks(bar, image, MAX_RUNS)),
-        left_out,
-    })
-}
-
-/// The pixels of `image` that `bar` counts as each part, in layers of at
-/// most `most` runs.
-fn marks(bar: BarFill, image: &Image, most: usize) -> BarMarks {
-    let mut marks = BarMarks {
-        filled: Layer::new(),
-        empty: Layer::new(),
-    };
-    // The run that is open: its part and the index of its first pixel.
-    let mut open: Option<(BarPart, usize)> = None;
-    // A pixel of no part after the last one closes the last run.
-    let parts = bar.parts(image).chain(iter::once(None));
-    for (index, part) in parts.enumerate() {
-        if open.map(|(part, _)| part) == part {
-            continue;
-        }
-        if let Some((part, start)) = open {
-            let layer = match part {
-                BarPart::Filled => &mut marks.filled,
-                BarPart::Empty => &mut marks.empty,
-            };
-            layer.push(start, index, most);
-        }
-        open = part.map(|part| (part, index));
-    }
-    marks
+    Ok(BarMeasure { readings, left_out })
 }
 
 #[cfg(test)]
@@ -576,11 +489,11 @@ mod tests {
         assert_eq!(detect(&screenshots, wide, 0), Err(SpecError::Outside));
         let green = ColorSpec::from(GREEN);
         assert_eq!(
-            measure(&screenshots, BAR, 0, green, green, None),
+            measure(&screenshots, BAR, 0, green, green),
             Err(SpecError::Check(CheckDefError::SameColors))
         );
         assert_eq!(
-            measure(&screenshots, wide, 0, green, GRAY.into(), None),
+            measure(&screenshots, wide, 0, green, GRAY.into()),
             Err(SpecError::Outside)
         );
     }
@@ -604,8 +517,7 @@ mod tests {
         let detection = found(detect(&screenshots, BAR, 1));
         assert_eq!(detection["shownOn"], json!([1, 6, 7, 8, 9, 10]));
         assert_eq!(detection["leftOut"], 4);
-        let measured =
-            measure(&screenshots, BAR, 1, GREEN.into(), GRAY.into(), Some(0)).expect("a region");
+        let measured = measure(&screenshots, BAR, 1, GREEN.into(), GRAY.into()).expect("a region");
         let measured = serde_json::to_value(measured).expect("plain data");
         assert_eq!(measured["leftOut"], 4);
         assert_eq!(
@@ -613,7 +525,6 @@ mod tests {
             json!({"screenshot": 1, "fill": 30.0})
         );
         assert_eq!(measured["readings"].as_array().map(Vec::len), Some(6));
-        assert_eq!(measured["marks"], json!(null), "screenshot 0 is left out");
         // A refusal says so too.
         let full: Vec<Image> = (0..8).map(|_| screenshot(30, 20)).collect();
         assert!(
@@ -628,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn two_colors_are_read_on_each_screenshot_and_marked_on_the_one_shown() {
+    fn two_colors_are_read_on_each_screenshot_of_the_regions_window_size() {
         let screenshots = [screenshot(30, 5), screenshot(40, 10), screenshot(30, 15)];
         // One pixel wider and taller than the bar, so it holds white too.
         let region = RegionSpec {
@@ -637,95 +548,42 @@ mod tests {
             width: 21,
             height: 3,
         };
-        let measured =
-            measure(&screenshots, region, 0, GREEN.into(), GRAY.into(), Some(2)).expect("a region");
+        let read = |filled: Rgb, empty: Rgb, region| {
+            let measured =
+                measure(&screenshots, region, 0, filled.into(), empty.into()).expect("a region");
+            serde_json::to_value(measured).expect("plain data")
+        };
         assert_eq!(
-            serde_json::to_value(measured).expect("plain data"),
+            read(GREEN, GRAY, region),
             json!({
                 "readings": [
                     {"screenshot": 0, "fill": 25.0},
                     {"screenshot": 2, "fill": 75.0},
                 ],
-                // Rows of 21: 15 filled, 5 empty, one white; the last row is white.
-                "marks": {
-                    "filled": {"count": 30, "spans": [[0, 15], [21, 36]]},
-                    "empty": {"count": 10, "spans": [[15, 20], [36, 41]]},
-                },
                 "leftOut": 0,
             })
         );
-        // The colors the other way around read the rest, and a screenshot
-        // of another size is not marked.
-        let measured =
-            measure(&screenshots, region, 0, GRAY.into(), GREEN.into(), Some(1)).expect("a region");
+        // The colors the other way around read the rest.
         assert_eq!(
-            serde_json::to_value(measured).expect("plain data"),
-            json!({
-                "readings": [
-                    {"screenshot": 0, "fill": 75.0},
-                    {"screenshot": 2, "fill": 25.0},
-                ],
-                "marks": null,
-                "leftOut": 0,
-            })
+            read(GRAY, GREEN, region)["readings"],
+            json!([
+                {"screenshot": 0, "fill": 75.0},
+                {"screenshot": 2, "fill": 25.0},
+            ])
         );
-    }
-
-    #[test]
-    fn a_region_with_neither_color_reads_nothing_and_marks_run_to_its_end() {
-        let screenshots = [screenshot(30, 5)];
+        // A region with neither color reads nothing.
         let corner = RegionSpec {
             x: 0,
             y: 0,
             width: 2,
             height: 1,
         };
-        let measured =
-            measure(&screenshots, corner, 0, GREEN.into(), GRAY.into(), Some(0)).expect("a region");
         assert_eq!(
-            serde_json::to_value(measured).expect("plain data"),
-            json!({
-                "readings": [{"screenshot": 0, "fill": null}],
-                "marks": {
-                    "filled": {"count": 0, "spans": []},
-                    "empty": {"count": 0, "spans": []},
-                },
-                "leftOut": 0,
-            })
-        );
-        // The last pixel of the region ends a run.
-        let measured =
-            measure(&screenshots, BAR, 0, GREEN.into(), GRAY.into(), Some(0)).expect("a region");
-        assert_eq!(
-            serde_json::to_value(measured).expect("plain data")["marks"],
-            json!({
-                "filled": {"count": 10, "spans": [[0, 5], [20, 25]]},
-                "empty": {"count": 30, "spans": [[5, 20], [25, 40]]},
-            })
-        );
-    }
-
-    #[test]
-    fn a_layer_with_too_many_runs_carries_only_its_count() {
-        let bar = BarFill::new(GREEN, GRAY).expect("two colors");
-        let image = screenshot(30, 5)
-            .crop(to_region(BAR).expect("a region"))
-            .expect("inside the screenshot");
-        let layers = |most| serde_json::to_value(marks(bar, &image, most)).expect("plain data");
-        // Each part has two runs, one in each row.
-        assert_eq!(
-            layers(2),
-            json!({
-                "filled": {"count": 10, "spans": [[0, 5], [20, 25]]},
-                "empty": {"count": 30, "spans": [[5, 20], [25, 40]]},
-            })
-        );
-        assert_eq!(
-            layers(1),
-            json!({
-                "filled": {"count": 10, "spans": null},
-                "empty": {"count": 30, "spans": null},
-            })
+            read(GREEN, GRAY, corner)["readings"],
+            json!([
+                {"screenshot": 0, "fill": null},
+                {"screenshot": 2, "fill": null},
+            ])
         );
     }
 }

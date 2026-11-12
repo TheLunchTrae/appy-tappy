@@ -6,6 +6,7 @@ import {
   type AppSummary,
   type ClickAtDef,
   type ClickButtonDef,
+  type ClickDeliveryDef,
   type CornerDef,
   LIMITS,
 } from './bindings.ts';
@@ -20,6 +21,58 @@ export const BUTTON_NAMES: Readonly<Record<ClickButtonDef, string>> = {
 
 /** The button choices, in the order the target screen offers them. */
 export const BUTTONS: readonly ClickButtonDef[] = ['left', 'right', 'double'];
+
+/** The ways a click reaches its window, in the order the target screen offers them. */
+export const DELIVERIES: readonly ClickDeliveryDef[] = ['cursor', 'message'];
+
+/** What each way a click reaches its window is called on screen. */
+export const DELIVERY_NAMES: Readonly<Record<ClickDeliveryDef, string>> = {
+  cursor: 'Move the cursor',
+  message: 'Send to the window',
+};
+
+/** Each way in a few words, under its name. */
+export const DELIVERY_WORDS: Readonly<Record<ClickDeliveryDef, string>> = {
+  cursor: 'Presses like a real mouse',
+  message: 'Leaves the cursor alone',
+};
+
+/** What each way does and what it cannot promise, where the user chooses between them. */
+export const DELIVERY_NOTES: Readonly<Record<ClickDeliveryDef, string>> = {
+  cursor:
+    'AppyTappy brings the window to the front for a moment, moves the cursor there, clicks, and puts the cursor back.',
+  message:
+    'AppyTappy does not move the cursor or bring the window to the front. What the application does with the click is up to it: some ignore a click sent this way, and nothing tells AppyTappy whether it worked. Test it with Click it now.',
+};
+
+/**
+ * Whether a click gives the focus back to the window that was in front, after its target was set up with `button`:
+ * what it did before while the button is the same, and otherwise yes unless it is a right click, which usually opens a
+ * menu that going back would close.
+ */
+export function returnsFocus(
+  button: ClickButtonDef,
+  before: { readonly button: ClickButtonDef; readonly returnFocus: boolean },
+): boolean {
+  return button === before.button ? before.returnFocus : button !== 'right';
+}
+
+/**
+ * What the target screen says once Click it now sent a click in `app`: that it was sent, never that it worked, since
+ * nothing reports whether the application acted on it. It names the window by `title`, which tells the application's
+ * windows apart, and says so when that is another window than the one the screen shows (`elsewhere`): the click goes
+ * to the window the application's window rules find at that moment, as the automation's will.
+ */
+export function sentText(delivery: ClickDeliveryDef, app: string, title: string, elsewhere: boolean): string {
+  const window = title === '' ? `${app}'s window` : `${app}'s window “${title}”`;
+  const sent =
+    delivery === 'cursor'
+      ? `AppyTappy clicked in ${window}. Check that ${app} did what you wanted.`
+      : `AppyTappy sent the click to ${window}. Nothing tells it whether ${app} acted on it, so check that it did. If it did nothing, choose ${DELIVERY_NAMES.cursor} instead.`;
+  return elsewhere
+    ? `${sent} That is not the window shown here: with several open, AppyTappy clicks the one that ${app}'s window rules find first, as the automation will. Select Look again to see that window.`
+    : sent;
+}
 
 /** How alike a picture must look, as a new target starts: a little room for a highlighted button. */
 export const DEFAULT_TOLERANCE = 20;
@@ -91,14 +144,16 @@ function spotWords(at: Extract<ClickAtDef, { kind: 'spot' }>): string {
   return `${at.x} px from the ${across}, ${at.y} px from the ${down}`;
 }
 
-/** A target in a few words, after its picture if it has one, such as `Left click on this picture, when it's found near where it was`. */
-export function targetSummary(button: ClickButtonDef, at: ClickAtDef | null): string {
+/**
+ * A target in a few words, after its picture if it has one, such as `Left click on this picture, when it's found near
+ * where it was`. A click sent to the window says so first, since it may do nothing in some applications.
+ */
+export function targetSummary(button: ClickButtonDef, at: ClickAtDef | null, delivery: ClickDeliveryDef): string {
   if (at === null) {
     return 'No target yet. Set up where it clicks.';
   }
-  return at.kind === 'spot'
-    ? `${clickName(button)} ${spotWords(at)}`
-    : `${clickName(button)} on this picture, when it's found near where it was`;
+  const where = at.kind === 'spot' ? spotWords(at) : "on this picture, when it's found near where it was";
+  return delivery === 'cursor' ? `${clickName(button)} ${where}` : `${clickName(button)}, sent to the window, ${where}`;
 }
 
 /** The saved applications a click can click in: those whose files read fine. */

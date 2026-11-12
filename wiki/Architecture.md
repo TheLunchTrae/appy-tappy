@@ -74,16 +74,16 @@ crates/
   platform/      appytappy-platform: the runtime's Windows host services
 ```
 
-| Crate                | Platform | Depends on                                           | Used by        |
-| -------------------- | -------- | ---------------------------------------------------- | -------------- |
-| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)        | setup, runtime |
-| `appytappy-engine`   | any      | `config`                                             | setup, runtime |
-| `appytappy-sources`  | Windows  | `config`, `windows`                                  | setup, runtime |
-| `appytappy-actions`  | Windows  | `config`, `windows`                                  | runtime        |
-| `appytappy-platform` | Windows  | `windows`                                            | runtime        |
-| `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`           | —              |
-| `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform` | —              |
-| setup app            | Windows  | `config`, `sources`, `tauri`, `tokio`, `serde`       | —              |
+| Crate                | Platform | Depends on                                                | Used by        |
+| -------------------- | -------- | --------------------------------------------------------- | -------------- |
+| `appytappy-config`   | any      | `serde`, `serde_json`, `ts-rs` (`ts` feature)             | setup, runtime |
+| `appytappy-engine`   | any      | `config`                                                  | setup, runtime |
+| `appytappy-sources`  | Windows  | `config`, `windows`                                       | setup, runtime |
+| `appytappy-actions`  | Windows  | `config`, `windows`                                       | setup, runtime |
+| `appytappy-platform` | Windows  | `windows`                                                 | runtime        |
+| `appytappy-mcp`      | Windows  | `config`, `sources`, `serde`, `serde_json`                | —              |
+| `appytappy-runtime`  | Windows  | `config`, `engine`, `sources`, `actions`, `platform`      | —              |
+| setup app            | Windows  | `config`, `sources`, `actions`, `tauri`, `tokio`, `serde` | —              |
 
 The table leaves out dev-dependencies, such as `sources` for the actions
 crate's manual media player test. Each crate's owning issue adds its code and
@@ -582,7 +582,9 @@ changing.
     learned from and its state checks compare against. Every automation is in
     one file, `automations.json`, with the pictures its clicks look for in
     `clicks\` beside it, and the settings in `settings.json`.
-    [Setup app](Setup-app.md#saved-files) describes each file.
+    [Setup app](Setup-app.md#saved-files) describes each file, and
+    [Pictures kept](Setup-app.md#pictures-kept) what each picture holds, when
+    it is removed, and that a file holds only the region the user drew.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
     describes, the runtime's log in `logs\`, the
@@ -692,6 +694,11 @@ design enforces the block in three places:
    `saved::build` checks itself, such as a region that fits or a picture of
    the region's size, stops only itself.
 
+The setup app can also send one click itself, when the user asks for it on
+the click target screen. No automation is compiled for that click, so the
+setup app's owner checks the classes of the application it clicks in and of
+the watched one before it sends it ([Actions](Actions.md#trying-a-click)).
+
 Nothing in AppyTappy opens another application's process. [Build
 detection](#build-detection) reads only the executable file, and process and
 window discovery read system-wide snapshots.
@@ -703,7 +710,8 @@ The setup app is a Tauri v2 app with a React and TypeScript frontend, in
 [#16](https://github.com/TheLunchTrae/appy-tappy/issues/16).
 
 Its Rust side exposes Tauri commands and holds no logic of its own: discovery,
-capture, preview, and saving come from the shared crates. It follows the
+capture, preview, saving, and the click it sends on request come from the
+shared crates. It follows the
 same ownership rule as the runtime. One owner thread holds the setup app's
 state, and Tauri keeps only that thread's `Sender`, never state behind a
 `Mutex`. Each command is `async`: it sends the owner thread a `Run`, a

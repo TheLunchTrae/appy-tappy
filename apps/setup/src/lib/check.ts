@@ -12,10 +12,10 @@ import {
   type SelectStep,
   type StateSpec,
 } from './bindings.ts';
+import { AUTOMATIC, type PinChoice } from './pin.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
-import { sameContent } from './unsaved.ts';
 
 /** The characters a reference is taught, which the capture screen tries and the reference editor saves. */
 type CharactersSpec = Extract<CheckSpec, { readonly kind: 'characters' }>;
@@ -57,6 +57,8 @@ export interface Draft {
   readonly region: Rect | null;
   /** The screenshot the region was drawn on, whose window size the region's pixels refer to. */
   readonly drawnOn: number | null;
+  /** How a new value's pin is picked. It lives beside the region, since a region drawn anew changes both. */
+  readonly pin: PinChoice;
   readonly tolerance: number;
   /** The reference's characters' color. */
   readonly ink: Color | null;
@@ -85,6 +87,7 @@ export const EMPTY_DRAFT: Draft = {
   kind: 'number',
   region: null,
   drawnOn: null,
+  pin: AUTOMATIC,
   tolerance: DEFAULT_TOLERANCE.number,
   ink: null,
   labels: new Map(),
@@ -163,19 +166,18 @@ export type CheckState =
   | { readonly kind: 'set' }
   | { readonly kind: 'error'; readonly message: string };
 
-/** What a check read on the live window, and the check that read it. */
-export interface LiveReading {
-  readonly of: Built;
+/** What the live window read, and what the capture tried on it to read that. */
+export interface LiveReading<Tried> {
+  readonly of: Tried;
   readonly reading: Reading | null;
 }
 
 /**
- * The reading `read` holds when `built`, the check as it stands, has the content of the check that read it, and
- * else null: a reading never outlives its check, so a check being tried shows no reading of another one before it.
- * A draft change that leaves the check as it was, such as a new name, keeps the reading.
+ * The reading `read` holds when `tried`, what the capture tries now, is what read it, and else null: a reading never
+ * outlives what read it, so a check or an edit being tried shows no reading of the one before it.
  */
-export function readingOf(read: LiveReading | null, built: Built): Reading | null {
-  return read !== null && sameContent(read.of, built) ? read.reading : null;
+export function readingOf<Tried>(read: LiveReading<Tried> | null, tried: Tried): Reading | null {
+  return read?.of === tried ? read.reading : null;
 }
 
 /** The draft's check, or what the user still has to do. */
@@ -396,6 +398,15 @@ export function fixDraft(check: CheckDef): Draft {
     case 'state':
       return { ...start, tolerance: check.tolerance, stateNames: check.states.map((state) => state.name) };
   }
+}
+
+/**
+ * `draft`, a fix's, with its region at `region` on the screenshot `shot`, where the value reads at that screenshot's
+ * size; unchanged when it reads nowhere there, or a region is drawn already. The capture opens a fix on a
+ * screenshot it takes itself, so what this makes of the opening draft is what leaving the fix loses nothing of.
+ */
+export function withFixRegion(draft: Draft, region: Rect | null, shot: number): Draft {
+  return region === null || draft.region !== null ? draft : { ...draft, region, drawnOn: shot };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

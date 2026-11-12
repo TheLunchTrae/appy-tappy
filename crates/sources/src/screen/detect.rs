@@ -31,7 +31,7 @@ use std::iter;
 use std::ops::Range;
 
 use super::Image;
-use super::check::{BarFill, BarPart, distance};
+use super::check::{BarFill, BarPixel, distance};
 use crate::system::Rgb;
 
 /// The shortest long side, in pixels, that a bar is looked for on.
@@ -414,14 +414,14 @@ impl Shown {
 /// alone is a full or an empty bar. The columns before and after belong to
 /// neither part, and are no more of the region than a border is.
 fn laid_out(columns: &[Rgb], bar: BarFill) -> Option<(Shown, Range<usize>)> {
-    let parts: Vec<Option<BarPart>> = columns.iter().map(|&column| belongs(bar, column)).collect();
-    let start = parts.iter().position(Option::is_some)?;
-    let end = parts.iter().rposition(Option::is_some)?;
+    let parts: Vec<BarPixel> = columns.iter().map(|&column| belongs(bar, column)).collect();
+    let start = parts.iter().position(|&part| part != BarPixel::Neither)?;
+    let end = parts.iter().rposition(|&part| part != BarPixel::Neither)?;
     let inner = parts.get(start..=end)?;
     if !covers(inner.len(), parts.len(), COVER) {
         return None;
     }
-    let mut runs: Vec<(Option<BarPart>, usize)> = Vec::new();
+    let mut runs: Vec<(BarPixel, usize)> = Vec::new();
     for &part in inner {
         match runs.last_mut() {
             Some((last, count)) if *last == part => *count = count.saturating_add(1),
@@ -429,16 +429,13 @@ fn laid_out(columns: &[Rgb], bar: BarFill) -> Option<(Shown, Range<usize>)> {
         }
     }
     let shown = match *runs.as_slice() {
-        [(Some(BarPart::Filled), _)] => Shown::Filled,
-        [(Some(BarPart::Empty), _)] => Shown::Empty,
+        [(BarPixel::Filled, _)] => Shown::Filled,
+        [(BarPixel::Empty, _)] => Shown::Empty,
+        [(BarPixel::Filled, filled), (BarPixel::Empty, empty)] => Shown::Both { filled, empty },
         [
-            (Some(BarPart::Filled), filled),
-            (Some(BarPart::Empty), empty),
-        ] => Shown::Both { filled, empty },
-        [
-            (Some(BarPart::Filled), filled),
-            (None, edge),
-            (Some(BarPart::Empty), empty),
+            (BarPixel::Filled, filled),
+            (BarPixel::Neither, edge),
+            (BarPixel::Empty, empty),
         ] if edge <= EDGE => Shown::Both { filled, empty },
         _ => return None,
     };
@@ -529,7 +526,7 @@ fn verdict(image: &Image, columns: &[Rgb], bar: BarFill) -> Verdict {
     let Some((shown, extent)) = laid_out(columns, bar) else {
         let either = columns
             .iter()
-            .filter(|&&column| belongs(bar, column).is_some());
+            .filter(|&&column| belongs(bar, column) != BarPixel::Neither);
         return if either.count() >= part(columns.len()) {
             Verdict::Differs
         } else {
@@ -558,13 +555,18 @@ fn verdict(image: &Image, columns: &[Rgb], bar: BarFill) -> Verdict {
 /// reader counts it as, when it is as near that part's color as one plain
 /// color stays. A fill that fades, or a second shade in it, belongs to
 /// neither.
-fn belongs(bar: BarFill, color: Rgb) -> Option<BarPart> {
-    let part = bar.part(color)?;
+fn belongs(bar: BarFill, color: Rgb) -> BarPixel {
+    let part = bar.classify([color.blue, color.green, color.red, 0]);
     let own = match part {
-        BarPart::Filled => bar.filled(),
-        BarPart::Empty => bar.empty(),
+        BarPixel::Filled => bar.filled(),
+        BarPixel::Empty => bar.empty(),
+        BarPixel::Neither => return BarPixel::Neither,
     };
-    (distance(color, own) <= SAME).then_some(part)
+    if distance(color, own) <= SAME {
+        part
+    } else {
+        BarPixel::Neither
+    }
 }
 
 /// The fewest columns of a region `length` long that make a part of a bar.
@@ -651,7 +653,7 @@ impl<'a> Strip<'a> {
         for (row, pixels) in self.image.rows().enumerate() {
             let counts = pixels
                 .iter()
-                .map(|&pixel| usize::from(bar.part(color(pixel)).is_some()));
+                .map(|&pixel| usize::from(bar.classify(pixel) != BarPixel::Neither));
             if self.tall {
                 // A row of a tall region is one column, counted from the
                 // bottom.
@@ -2132,10 +2134,10 @@ mod tests {
     #[test]
     fn a_column_belongs_to_a_part_within_sixteen_of_its_color() {
         let bar = BarFill::new(red(0), red(100)).unwrap();
-        assert_eq!(belongs(bar, red(16)), Some(BarPart::Filled));
-        assert_eq!(belongs(bar, red(17)), None);
-        assert_eq!(belongs(bar, red(84)), Some(BarPart::Empty));
-        assert_eq!(belongs(bar, red(83)), None);
+        assert_eq!(belongs(bar, red(16)), BarPixel::Filled);
+        assert_eq!(belongs(bar, red(17)), BarPixel::Neither);
+        assert_eq!(belongs(bar, red(84)), BarPixel::Empty);
+        assert_eq!(belongs(bar, red(83)), BarPixel::Neither);
     }
 
     #[test]

@@ -385,6 +385,9 @@ mod tests {
     };
 
     fn value(id: &str, check: CheckDef) -> ValueDef {
+        // Setup guidance the plan never reads: each check that may have a
+        // reading area has one here, and plans as it does without.
+        let reading_area = check.reads_anywhere();
         ValueDef {
             id: id.to_owned(),
             name: format!("The {id}"),
@@ -401,6 +404,7 @@ mod tests {
                 },
                 check,
                 pin: None,
+                reading_area,
                 fixes: Vec::new(),
             },
         }
@@ -658,7 +662,9 @@ mod tests {
 
     #[test]
     fn clicks_keep_their_targets_and_pictures() {
-        use appytappy_config::automation_file::{ClickAtDef, ClickButtonDef, CornerDef, PointDef};
+        use appytappy_config::automation_file::{
+            ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef, PointDef,
+        };
         use appytappy_config::click::ClickAt;
         use appytappy_sources::screen::click::ClickSearch;
 
@@ -674,6 +680,7 @@ mod tests {
             automation.actions = vec![ActionDef::Click {
                 app: "target".to_owned(),
                 button: ClickButtonDef::Left,
+                delivery: ClickDeliveryDef::Cursor,
                 return_focus: true,
                 at,
             }];

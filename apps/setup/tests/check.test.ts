@@ -16,6 +16,7 @@ import {
   settingsDiffer,
   stateOn,
   toReference,
+  withFixRegion,
   withKind,
   withoutState,
   withState,
@@ -381,6 +382,15 @@ describe('fixDraft', () => {
     });
   });
 
+  test('starts its region where the value reads on its first screenshot, unless one is drawn', () => {
+    const draft = fixDraft({ kind: 'barFill', filled: red, empty: gray });
+    expect(withFixRegion(draft, region, 2)).toEqual({ ...draft, region, drawnOn: 2 });
+    // Scaled past the window, the value reads nowhere there.
+    expect(withFixRegion(draft, null, 2)).toBe(draft);
+    const drawn = { ...draft, region: { ...region, x: 9 }, drawnOn: 5 };
+    expect(withFixRegion(drawn, region, 2)).toBe(drawn);
+  });
+
   test('names the states taken at the new size after the saved ones, in order', () => {
     const draft = fixDraft({
       kind: 'state',
@@ -406,12 +416,9 @@ test('a reading shows only for the check that read it', () => {
   const built = buildSpec(bar, 'example');
   const read = { of: built, reading: { kind: 'number', value: 62 } } as const;
   expect(readingOf(read, built)).toEqual({ kind: 'number', value: 62 });
-  // The same check built again, as after a change to the draft that leaves it as it was, keeps its reading.
-  expect(readingOf(read, buildSpec({ ...bar, labels: new Map([[0, '5']]) }, 'example'))).toEqual(read.reading);
-  // Any other check shows none: another color, another region, or one that cannot be built yet.
+  // A check tried since shows none, whatever it reads: its own reading has yet to arrive.
   expect(readingOf(read, buildSpec({ ...bar, empty: red }, 'example'))).toBeNull();
-  expect(readingOf(read, buildSpec({ ...bar, region: { ...region, x: 2 } }, 'example'))).toBeNull();
-  expect(readingOf(read, buildSpec({ ...bar, empty: null }, 'example'))).toBeNull();
+  expect(readingOf(read, buildSpec(bar, 'example'))).toBeNull();
   expect(readingOf({ of: built, reading: null }, built)).toBeNull();
   expect(readingOf(null, built)).toBeNull();
 });

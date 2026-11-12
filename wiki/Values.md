@@ -6,7 +6,8 @@ watch values and act on them.
 
 The **Values** page lists each saved value under its application, with how
 it reads and the automations that use it. A green dot marks an application
-whose window is open now.
+whose window is open now. **Edit** and **Delete** sit at the end of each
+value's row.
 
 ## Make a value
 
@@ -36,9 +37,12 @@ back to the automation with the value picked.
    drag to draw a box around what to read. Drag inside the box to move it, or
    drag a corner to resize it. The **X**, **Y**, **Width**, and **Height**
    fields set it to the exact pixel, counted in the window's own pixels from
-   its top-left corner. **Stays at** picks the side of the window the value
-   keeps to as the window changes size, as [Window size](#window-size)
-   describes. Then select **Next: how to read it**.
+   its top-left corner. Turn on **This content may move** if the value shows
+   in different places inside the window, as
+   [Content that moves](#content-that-moves) describes. **Stays at** says
+   which side of the window the region keeps to as the window changes size,
+   as [Window size](#window-size) describes; it follows the region, so you
+   can leave it alone. Then select **Next: how to read it**.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
    box under it then shows what AppyTappy reads on the live window, a few
    times a second. If the check cannot work, such as a bar whose filled and
@@ -46,7 +50,9 @@ back to the automation with the value picked.
 5. **Save.** Select **Save value**. **Back** returns to the first step.
 
 AppyTappy keeps the screenshots until you select **Change window** or leave
-the new value. Before either drops work you have not saved, it asks first:
+the new value, and saves only the part inside the box you drew, as
+[What AppyTappy keeps](Getting-started.md#what-appytappy-keeps) describes.
+Before either drops work you have not saved, it asks first:
 select **Keep this window** or **Stay** to carry on, as
 [Leave before you save](Getting-started.md#leave-before-you-save) describes.
 **Change window** returns to the first step with the same application chosen.
@@ -117,6 +123,41 @@ draw is what your automations see.
 State names are up to 32 characters, with no space at either end. Two states
 cannot share a name, ignoring case, and none can be named `none`.
 
+### Show matching pixels
+
+A **Bar fill** and a **Color** check each have a switch under their colors
+that tints the pixels the colors match on the screenshot shown, so you can
+see what a color or a tolerance takes in instead of guessing. The tint
+follows while you drag **Tolerance**, and when you pick another color or
+move the region. While it catches up, the counts under the switch dim and
+say **Updating…**. The tint is magenta or green, whichever stands out more
+against the color you picked, and the screenshot shows through it. It is
+only a guide: it changes neither the screenshot nor the value, and turning
+the switch off shows the plain screenshot again. Each switch stays as you
+left it until you save or leave the value, so it is still on when you come
+back to its step. It needs a screenshot, so while the live view shows, it
+asks you to select one. While you edit a saved value, it needs a screenshot
+at the size the value was drawn at, as the region does.
+
+- **Show matching pixels**, for a bar fill, tints the region's filled pixels
+  in one color and its empty pixels in stripes of the other. Under the
+  switch, AppyTappy counts the filled pixels, the empty ones, and those that
+  are neither. A pixel is neither when it is too far from both colors, such
+  as a border or a label, and the reading leaves it out. If parts of the bar
+  stay untinted, pick the color again on that part.
+- **Show pixels within the tolerance**, for a color check, tints each pixel of
+  the region that is within the tolerance on its own, and counts them. The
+  value itself does not go by single pixels: it compares the region's average
+  color. So under the switch AppyTappy also shows what the value goes by on
+  this screenshot: the region's average color, its distance from the
+  **Color to look for**, and whether the value is yes. The distance is the
+  largest difference in red, green, or blue between the two colors, and the
+  value is yes while the distance is at most the tolerance. A region can read
+  yes with few pixels tinted, or no with many, when its colors average out.
+
+A [reference](References.md#make-a-reference) has the same switch for its
+characters' color.
+
 ## Detect a bar's colors
 
 **Detect the bar** looks for a bar of two plain colors: one color from the
@@ -141,26 +182,27 @@ bar, and proposes them only when they read every screenshot it looked at:
   menu, is named and not compared.
 - When only some strips of the region show the bar from end to end, because
   a label or an icon lies over it or background beside it, it goes by those
-  strips and says so. The tints then leave the rest out, unless it has one
-  of the two colors.
+  strips and says so. The rest counts only where it has one of the two
+  colors.
 - When the colors read a screenshot a few points off where the bar ends on
   it, as a label or a soft edge on the bar causes, it says so.
 
 Under the colors, **These colors read** lists what each screenshot it looked
 at reads with them, such as **Screenshot 1: 72**. Compare each number with
-how full the bar looks on that screenshot. While **Mark what counts on the
-screenshot** is on, the screenshot shown has one tint over the pixels that
-count as filled and another over those that count as empty. Pixels with no
-tint, such as a border or a label, are left out. The tints show what counts:
-if anything beside the bar is tinted as filled or empty, such as a second
-bar or a background in the same colors, draw the region more tightly around
-the bar. A region with too many separate patches of the two colors to mark
-says so instead. The list and the tints follow the colors, so they show for
-colors you pick by hand too.
+how full the bar looks on that screenshot. The list follows the colors, so
+it shows for colors you pick by hand too. To see which pixels count, turn on
+[**Show matching pixels**](#show-matching-pixels): if anything beside the
+bar is tinted as filled or empty, such as a second bar or a background in
+the same colors, draw the region more tightly around the bar.
 
 If you already picked a color by hand, **Detect the bar** asks before it
-replaces it, and the list and the tints show the detected colors meanwhile:
+replaces it, and the list shows what the detected colors read meanwhile:
 select **Use detected colors** or **Keep my colors**.
+
+While you [edit a value](#edit-a-value), **Detect the bar** looks at the
+screenshots at the size the value was drawn at, whichever screenshot shows.
+Until there is one, it asks you to take a screenshot with the window at that
+size.
 
 It proposes no colors, and says why and what to do, when:
 
@@ -217,19 +259,59 @@ thing on the screenshot shown instead:
 Hold **Shift** while you drag or click to add a part, or **Alt** to take one
 away. **Color match** says how close a color must be to count as the same:
 raise it if the selection stops short, and lower it if it spills over.
+To see what it selects, turn on **Show selected pixels** under
+**Color match**. It tints the selected pixels on the screenshot shown and
+counts them. The selection is made again each time the slider rests, and the
+tint and the count follow then; until they do, the count says **Updating…**.
+The tint shows the selection, not what the value compares. While
+**Ignore the background** is on, the value compares the tinted pixels that
+lie in the region, so if you make the region smaller by hand, the tinted
+pixels outside it are not compared. While it is off, the value compares its
+whole region, tinted or not, and the selection only fits the region around
+the thing.
 Selecting on a screenshot with no state yet adds one for it, so you can name
 it under **How to read it**. Each state keeps its own selection, made on its
 own screenshot, and the region fits around what every state selects.
 **Clear selection** on a state compares its whole region again.
 
 While **Ignore the background** is on, the pixels a state's selection leaves
-out are shaded over its screenshot, and the check skips them. Turn it off to
+out are shaded over its screenshot, once **Color match** rests, and the
+check skips them. Turn it off to
 compare the whole region again. You can still adjust the region by hand with
 **Box**; anything you add to it counts as background.
 
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
 **State** check on the part that matters often works instead.
+
+## Content that moves
+
+AppyTappy reads the same part of the window every time. It doesn't look for a
+value or follow it. If what you want to read shows in different places inside
+the window, such as a number that shifts sideways as it gains digits, turn on
+**This content may move** under **Where to read**. What it can do depends on
+the check:
+
+- For a **Number** or a **Bar fill** check, draw the box around everywhere
+  the value can show. The box is then a reading area, drawn with a dashed
+  outline, and AppyTappy reads the number or the bar wherever it is inside
+  it. A **Number** check reads everything in the area that has the
+  characters' color, so keep other text and shapes of that color out. A
+  **Bar fill** check counts everything in the area with a color near the
+  bar's filled or empty color, so keep anything else of those colors out.
+  Neither looks outside the area. The value keeps that its region is a
+  reading area: the Values page shows it under **Region**, such as
+  **Reading area drawn at 1920 × 1080, pinned top right**, and a
+  [fix](#fix-a-value-at-one-size) of the value asks for a reading area
+  again.
+- A **Color** check averages its whole region, and a **State** check
+  compares its region pixel by pixel with each state's screenshot. Both need
+  what they read to stay in the same place, so the option only says so, and
+  the value is saved with a plain region. Make a value for each place it can
+  show instead.
+
+This is separate from the window changing size, which
+[Window size](#window-size) covers.
 
 ## Window size
 
@@ -248,12 +330,30 @@ what AppyTappy reads depends on how often the application's window
 - While it changes size **rarely**, the value is read only at the sizes it
   was drawn at.
 
-**Stays at** picks one of nine sides and corners of the window, on a 3 by 3
-grid. At first it is the third of the window the region's center is in, so a
-health bar in the bottom left stays at the bottom left. A value pinned to the
-right keeps its distance from the right edge as the window gets wider, and
-one pinned to the center keeps its distance from the middle. The Values page
-shows each value's size and side under **Region**, such as
+**Stays at** is the side or corner of the window, or its center, that the
+region keeps its scaled distance from. A value that stays at the right keeps
+its distance from the right edge as the window gets wider, and one that stays
+at the center keeps its distance from the middle. Under the control, a
+sentence says what the region keeps its distance from, and dashed lines on
+the screenshot run from the region to those edges, or to the middle of the
+window. The lines show which edges the region is measured from. They don't
+show where the region lands at another window size.
+
+AppyTappy picks the side for you: the third of the window the region's center
+is in, so a health bar in the bottom left stays at the bottom left. The
+control shows it, such as **Top right (automatic)**, and it follows the
+region each time you draw, move, or resize it, or type its pixels.
+
+To choose the side yourself, select **Change** and pick one of the nine
+positions on the grid. The control then shows it as chosen, such as
+**Top right (chosen by hand)**, and keeps it while you move or resize the
+region. If the region ends up nearest another side, the control says so, such
+as **Chosen by hand: top right. The region is now nearest the bottom left.**
+Select **Back to automatic** to follow the region again. Drawing a new region
+goes back to automatic too.
+
+While the application's window changes size **rarely**, the side isn't used.
+The Values page shows each value's size and side under **Region**, such as
 **Drawn at 1920 × 1080, pinned bottom left**.
 
 ### Fix a value at one size
@@ -261,8 +361,8 @@ shows each value's size and side under **Region**, such as
 While the application runs, the Values page adds a column for the window's
 size now, such as **At 3440 × 1440 now**, with what each value reads there.
 Each value has **Fix at this size** beside it there, unless the window is at
-the size the value was first drawn at. At that size, a value that reads wrong
-is deleted and made again. **Matches no state** isn't always wrong: the
+the size the value was first drawn at. At that size, [edit the
+value](#edit-a-value) instead. **Matches no state** isn't always wrong: the
 region may show none of the states right now.
 
 1. AppyTappy finds the application's window and names it; select
@@ -271,6 +371,10 @@ region may show none of the states right now.
    takes a screenshot of the window at its size now, with the region where
    the value would be read there: it **Starts from the scaled region**.
 2. Move the region onto the value, then select **Next: how to read it**.
+   For a value drawn as a [reading area](#content-that-moves), the region
+   **Starts from the scaled reading area**, with a dashed outline: move or
+   resize it so it covers everywhere the value can show at this size,
+   rather than fitting it to the value.
 3. For a **State** check, take a screenshot of each of its states at this
    size and add them in the same order; each takes the next state's name.
    The fix compares with the first drawing's tolerance.
@@ -293,6 +397,98 @@ read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once
 which values it doesn't read at the window's size and why, and says it again
 only when the reason changes.
 
+## Edit a value
+
+Select **Edit** next to a value to change it without making it again. The
+value stays the same value, whatever you change, its name included, so the
+automations that use it keep using it.
+
+An edit changes the value as it was first drawn, which every window size
+reads or scales from. A [fix](#fix-a-value-at-one-size) leaves that alone
+and draws the value again at one other size. The editor is headed
+**Edit** with the value's name and saves with **Save changes**; a fix is
+headed **Fix** and saves with **Save fix**.
+
+1. AppyTappy finds the application's window and names it; select
+   **Capture this window**. If it has none to capture, see
+   [When the window isn't found](#when-the-window-isnt-found). AppyTappy
+   takes a screenshot of the window and opens the value as it is saved. The
+   application has to be running, as for a fix, whatever you change.
+2. **Where to read.** Change the **Value name**, the **Check**,
+   **This content may move**, or **Stays at**, or move the region.
+   **Stays at** opens as automatic unless the value was saved with another
+   side than the one its region is nearest, and
+   **This content may move** opens on for a value drawn as a reading area.
+   A **Color** or **State** check cannot have a reading area, so changing
+   the check to one of them turns it off.
+3. **How to read it.** Change the reference, **Whole number only**, the
+   colors, the states' names, or the **Tolerance**. The box under them shows
+   what the value would read on the live window once saved.
+4. Select **Save changes**. **Discard**, or leaving the editor, keeps the
+   value as it was saved. Leaving asks first only once you changed
+   something.
+
+### The window's size while you edit
+
+A value's region is in the pixels of the window size it was drawn at. While
+the window has that size, the region starts exactly where it was saved, and
+you can move it.
+
+At any other size, the editor says so, such as **Progress was drawn at
+1920 × 1080, and the window is 2560 × 1440 on this screenshot**, and shows no
+region on that screenshot. The region and a **State** check's pictures stay
+as they are saved; everything else can still change. To change them, do one
+of these:
+
+- Resize the window to the size the value was drawn at and take a
+  screenshot. The region then shows on it.
+- Select **Discard**, then **Fix at this size** on the Values page, to
+  change how the value reads at the window's size now only.
+
+The box under **How to read it** shows what the edited value reads at the
+window's size now: scaled, at its fix, or
+**Not read at 2560 × 1440, the window's size now**, as
+[Window size](#window-size) describes.
+
+### States in an edit
+
+A **State** check keeps the picture saved for each state while the region
+stays where it was. **States** then lists each state with
+**Saved picture**: rename a state there, or change the **Tolerance**.
+
+To change a state's picture, or to add or remove a state, take every state
+again. Select a screenshot that shows the first state and select
+**Take the states again**, then add the others as for a new value; each
+takes the next state's name. Every screenshot has to be at the size the
+value was drawn at. Moving the region needs the same, since the saved
+pictures no longer fit it: the editor says
+**The region changed, so each state needs a new screenshot**, and saves once
+each state has one. Removing every state you took brings the saved pictures
+back, while the region is where it was saved.
+
+### What an edit will not do silently
+
+- **Automations.** An edit that would stop an automation is not saved: one
+  that makes the value read another kind of thing, such as yes or no instead
+  of a number, or that renames or removes a state an automation's condition
+  names. The editor names those automations as soon as the change is made.
+  Change or delete them first, then edit the value.
+- **Fixes.** A fix reads the value the way it was first drawn, so the value's
+  fixes stay while the check keeps its kind and a **State** check keeps its
+  states in order: renamed with their saved pictures, or taken again under
+  the names they had. Any other change leaves the fixes unusable. The editor
+  then lists them, such as
+  **Saving this removes its fix at 3440 × 1440**, and saves only once you
+  turn on **Remove its fix**. If the fixes it would remove are not the ones
+  you agreed to lose, the save is refused and lists them again.
+- **What a fix reads with.** A fix that stays keeps its region, its
+  pictures, and the reference it reads with. When you pick another reference
+  for a **Number** value, a fix that read with the old reference keeps
+  reading with it, so the old reference still cannot be deleted while that
+  fix uses it. One thing does follow the edit: **Whole number only** is the
+  value's setting at every size, so changing it changes how its fixes read
+  too.
+
 ## When an application updates
 
 An update can move what a value reads, so AppyTappy remembers which build of
@@ -306,7 +502,7 @@ When the application runs a different build, the Values page says so under the
 application's name, such as **Changed since its values were checked (1.4.2.0
 then, 1.5.0.0 now)**. AppyTappy still reads the values. Check what each one
 reads now, such as with the application's [overlay](Applications.md#overlay),
-and make any that read wrong again. Then select **Mark as checked**, which
+and [edit](#edit-a-value) any that read wrong. Then select **Mark as checked**, which
 records the build that runs now. The application has to be running for that.
 While it runs and no build is recorded, such as for values made before AppyTappy
 recorded builds, the Values page offers **Mark as checked** too.

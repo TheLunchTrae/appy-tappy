@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Reading } from './bindings.ts';
-import { errorText, readValue, setCheck } from './api.ts';
+import type { EditPreview, EditSpec, Reading } from './bindings.ts';
+import { errorText, readValue, setCheck, tryEdit } from './api.ts';
 import { type Built, type CheckState, type LiveReading, readingOf } from './check.ts';
 import { useRepeat } from './repeat.ts';
 
@@ -13,31 +13,69 @@ const CHECK_DELAY_MS = 250;
 const READING_PAUSE_MS = 120;
 
 /**
- * Tries `built`'s check on the live window once it has not changed for a moment, and reads the window with it while
- * it is set.
+ * What the capture screen tries on the live window, or what it still needs. Trying a saved value's edit answers
+ * what saving it would do; trying a check that is being set up answers null.
  */
-export function useLiveCheck(built: Built): { readonly state: CheckState; readonly reading: Reading | null } {
+export type Trial = Built<() => Promise<EditPreview | null>>;
+
+/** The trial of `edit`, a saved value's edit, or of `check` while the capture edits no saved value. */
+export function trialOf(check: Built, edit: Built<EditSpec> | null): Trial {
+  if (edit !== null) {
+    const { ok } = edit;
+    return ok ? { ok, spec: async () => tryEdit(edit.spec) } : edit;
+  }
+  if (!check.ok) {
+    return check;
+  }
+  return {
+    ok: true,
+    spec: async () => {
+      await setCheck(check.spec);
+      return null;
+    },
+  };
+}
+
+/**
+ * Tries `trial` on the live window once it has not changed for a moment, and reads the window with it while it is
+ * set. It is tried again when `again` changes, which says that the same trial may answer otherwise now, as an edit
+ * does once the window has another size.
+ */
+export function useLiveCheck(
+  trial: Trial,
+  again: string | null,
+): {
+  readonly state: CheckState;
+  readonly reading: Reading | null;
+  /** What saving the edit that is set would do; null for any other check and until one is set. */
+  readonly preview: EditPreview | null;
+} {
   const [state, setState] = useState<CheckState>({ kind: 'idle' });
-  const [read, setRead] = useState<LiveReading | null>(null);
-  // The check the owner reads with: the one whose set-up last went through.
-  const checked = useRef<Built | null>(null);
+  const [read, setRead] = useState<LiveReading<Trial> | null>(null);
+  const [preview, setPreview] = useState<EditPreview | null>(null);
+  // The trial the owner reads with: the one whose set-up last went through.
+  const tried = useRef<Trial | null>(null);
   useEffect(() => {
-    if (!built.ok) {
+    if (!trial.ok) {
       setState({ kind: 'idle' });
+      setPreview(null);
       return undefined;
     }
     setState({ kind: 'pending' });
     let current = true;
     const timer = setTimeout(() => {
-      setCheck(built.spec)
-        .then(() => {
+      trial
+        .spec()
+        .then((answer) => {
           if (current) {
-            checked.current = built;
+            tried.current = trial;
+            setPreview(answer);
             setState({ kind: 'set' });
           }
         })
         .catch((error: unknown) => {
           if (current) {
+            setPreview(null);
             setState({ kind: 'error', message: errorText(error) });
           }
         });
@@ -46,12 +84,12 @@ export function useLiveCheck(built: Built): { readonly state: CheckState; readon
       current = false;
       clearTimeout(timer);
     };
-  }, [built]);
+  }, [trial, again]);
 
-  // Each reading is kept with the check the owner read it with, so one that arrives after the check changed is
-  // not shown as the new check's.
+  // Each reading is kept with the trial the owner read it with, so one of an earlier trial, or one that arrives
+  // after the trial changed, is not shown as the new trial's.
   const readNow = useCallback(async (): Promise<void> => {
-    const of = checked.current;
+    const of = tried.current;
     if (of === null) {
       return;
     }
@@ -62,5 +100,5 @@ export function useLiveCheck(built: Built): { readonly state: CheckState; readon
     }
   }, []);
   useRepeat(readNow, READING_PAUSE_MS, state.kind === 'set');
-  return { state, reading: readingOf(read, built) };
+  return { state, reading: readingOf(read, trial), preview };
 }

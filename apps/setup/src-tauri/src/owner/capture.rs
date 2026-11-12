@@ -11,6 +11,7 @@ use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::check_spec::bar::{self, BarDetection, BarMeasure};
 use crate::check_spec::{self, CheckSpec, ColorSpec, RegionCheck, RegionSpec};
+use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
 use crate::selection::{self, SelectionSpec, SelectionView};
 use crate::window_list::{self, WindowFit, WindowList};
@@ -221,16 +222,29 @@ impl<H: Host> Owner<H> {
 
     /// What a bar of the colors `filled` and `empty` reads in `region`,
     /// drawn on screenshot `screenshot`, on each screenshot of that one's
-    /// window size, and which pixels it counts on screenshot `shown`.
+    /// window size.
     pub(crate) fn measure_bar(
         &self,
         region: RegionSpec,
         screenshot: usize,
         filled: ColorSpec,
         empty: ColorSpec,
-        shown: Option<usize>,
     ) -> Result<BarMeasure, String> {
-        bar::measure(&self.screenshots, region, screenshot, filled, empty, shown)
+        bar::measure(&self.screenshots, region, screenshot, filled, empty)
+            .map_err(|error| error.to_string())
+    }
+
+    /// The pixels of `area` on screenshot `screenshot` that `rule` takes.
+    pub(crate) fn match_pixels(
+        &self,
+        screenshot: usize,
+        area: RegionSpec,
+        rule: MatchRule,
+    ) -> Result<MatchView, String> {
+        self.screenshots
+            .get(screenshot)
+            .ok_or(check_spec::SpecError::NoScreenshot)
+            .and_then(|image| match_preview::find(image, area, rule))
             .map_err(|error| error.to_string())
     }
 
@@ -270,10 +284,12 @@ impl<H: Host> Owner<H> {
 mod tests {
     use appytappy_config::app_file::WindowDef;
     use appytappy_sources::screen::Size;
+    use tokio::sync::oneshot;
 
-    use crate::check_spec::CheckSpec;
+    use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+    use crate::owner::messages::Run;
     use crate::owner::run;
-    use crate::owner::test_support::{FakeHost, Harness, frame_image, harness};
+    use crate::owner::test_support::{FakeHost, Harness, STATE, frame_image, harness};
     use crate::pixels;
     use crate::window_list::WindowFit;
 
@@ -465,7 +481,7 @@ mod tests {
         let measure = |screenshot| {
             move |owner: &mut Owner<FakeHost>| {
                 owner
-                    .measure_bar(region, screenshot, red, gray, Some(0))
+                    .measure_bar(region, screenshot, red, gray)
                     .map(|measure| serde_json::to_value(measure).expect("plain data"))
             }
         };
@@ -473,10 +489,6 @@ mod tests {
             harness.ask(measure(0)),
             Ok(serde_json::json!({
                 "readings": [{"screenshot": 0, "fill": 50.0}],
-                "marks": {
-                    "filled": {"count": 4, "spans": [[0, 2], [4, 6]]},
-                    "empty": {"count": 4, "spans": [[2, 4], [6, 8]]},
-                },
                 "leftOut": 0,
             }))
         );
@@ -485,6 +497,52 @@ mod tests {
         assert_eq!(
             harness.ask(move |owner| owner.detect_bar(region, 1)),
             Err(gone)
+        );
+    }
+
+    #[test]
+    fn matching_pixels_are_found_on_the_named_screenshot() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let matching = |screenshot, width| {
+            move |owner: &mut Owner<FakeHost>| {
+                owner
+                    .match_pixels(
+                        screenshot,
+                        serde_json::from_value(serde_json::json!(
+                            {"x": 0, "y": 0, "width": width, "height": 2}
+                        ))
+                        .expect("the UI's spelling"),
+                        serde_json::from_value(serde_json::json!({
+                            "kind": "ink",
+                            "ink": {"red": 255, "green": 0, "blue": 0},
+                            "tolerance": 0
+                        }))
+                        .expect("the UI's spelling"),
+                    )
+                    .map(|view| serde_json::to_value(view).expect("plain data"))
+            }
+        };
+        assert_eq!(
+            harness.ask(matching(0, 4)),
+            Ok(serde_json::json!({
+                "kind": "ink",
+                "ink": {"count": 4, "spans": [[0, 2], [4, 6]]}
+            })),
+            "the red half of each row"
+        );
+        assert_eq!(
+            harness.ask(matching(0, 5)),
+            Err(
+                "The region reaches past the edge of the window. Draw it inside the window."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            harness.ask(matching(1, 4)),
+            Err("That screenshot is gone. Take a new one and try again.".to_owned())
         );
     }
 
@@ -612,14 +670,47 @@ mod tests {
     }
 
     #[test]
-    fn stopping_closes_the_capture_and_forgets_the_screenshots() {
+    fn stopping_closes_the_capture_and_releases_every_picture_it_held() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(Owner::stop);
+        let left: RegionSpec =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":2,"height":2}"#).expect("valid JSON");
+        let red: ColorSpec =
+            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+        harness
+            .ask(|owner| owner.start_recording(left, red, 0, 0, false))
+            .expect("records");
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness
+            .ask(|owner| owner.set_check(&serde_json::from_str(STATE).expect("valid JSON")))
+            .expect("a valid check");
+        // What the page can ask for of the picked window: the newest frame,
+        // a screenshot, a recorded reading, the recording, and what the
+        // check, which holds a state's picture, reads.
+        let held = |owner: &mut Owner<FakeHost>| {
+            [
+                owner.preview(4).expect("no failure").is_some(),
+                owner.screenshot_pixels(0, 4).is_some(),
+                owner.recorded_pixels(0, 4).is_some(),
+                owner.recording_state().is_some(),
+                owner.reading().expect("reads").is_some(),
+            ]
+        };
+        assert_eq!(harness.ask(held), [true; 5]);
+
+        // The page's `stop_capture`, as it reaches the owner when a flow
+        // closes or the user selects Change window.
+        let (reply, mut answer) = oneshot::channel();
+        let stop = Message::Run(Run::new(reply, Owner::stop));
+        assert!(harness.owner.handle(stop).is_continue());
+        assert_eq!(answer.try_recv(), Ok(()));
         assert_eq!(harness.closed.try_recv(), Ok(7));
-        assert_eq!(harness.ask(|owner| owner.screenshot_pixels(0, 100)), None);
+        assert_eq!(harness.ask(held), [false; 5]);
+        // A frame the stopped capture sends late is not kept either.
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(held), [false; 5]);
         assert_eq!(
             harness.ask(Owner::screenshot),
             Err("No frame has arrived from the window yet.".to_owned())

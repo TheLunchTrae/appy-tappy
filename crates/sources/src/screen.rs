@@ -14,6 +14,7 @@ pub mod detect;
 pub mod digits;
 pub mod find;
 pub mod mask;
+pub mod place;
 pub mod saved;
 pub mod scale;
 pub mod select;
