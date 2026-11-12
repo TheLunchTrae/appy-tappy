@@ -1053,6 +1053,32 @@ pub fn state_image_name(value: &str, fix: Option<usize>, state: usize) -> String
     }
 }
 
+/// Whether `name` is a file name AppyTappy itself gives a picture in an
+/// application's folder.
+///
+/// That is a reference's sample as [`sample_name`] names it, or a state's
+/// picture as [`state_image_name`] names it, for a first drawing or a fix.
+/// A file with any other name, such as one the user put in the folder, is
+/// not AppyTappy's to remove.
+#[must_use]
+pub fn is_own_image_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".png").filter(|_| is_image_name(name)) else {
+        return false;
+    };
+    let id = |part: &str| SignalName::new(part).is_ok();
+    let number = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    let mut parts = stem.split('-');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(value), Some(state), None, None) => id(value) && number(state),
+        // A sample's middle part is an ID, which starts with a letter, and a
+        // fix's is a number, so a name is one or the other.
+        (Some(first), Some(middle), Some(last), None) => {
+            number(last) && ((first == "ref" && id(middle)) || (id(first) && number(middle)))
+        },
+        _ => false,
+    }
+}
+
 /// An ID made from a name the user typed, as [`value_id`] describes, with
 /// `prefix` in front when the name does not start with a letter, and at most
 /// `max_len` bytes long.
@@ -1712,6 +1738,42 @@ mod tests {
             long.as_str(),
         ] {
             assert!(!is_image_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn only_the_names_appytappy_gives_pictures_are_its_own() {
+        for name in [
+            "ref-percent_font-3.png",
+            "status-1.png",
+            "status-2-1.png",
+            // A value named `ref`, and a fix of it.
+            "ref-1.png",
+            "ref-1-2.png",
+        ] {
+            assert!(is_own_image_name(name), "{name}");
+        }
+        let long = format!("a-{}.png", "1".repeat(61));
+        for name in [
+            "photo.png",
+            "icon_visible.png",
+            "holiday-snap.png",
+            "holiday-snap-1.png",
+            "status-2-x.png",
+            "status-1-2-3.png",
+            "ref-9x-1.png",
+            "1-2.png",
+            "9-1-1.png",
+            "status-.png",
+            "-1.png",
+            "Status-1.png",
+            "status-1.PNG",
+            "status-1.jpg",
+            "status-1",
+            "status-1.png.bak",
+            long.as_str(),
+        ] {
+            assert!(!is_own_image_name(name), "{name}");
         }
     }
 

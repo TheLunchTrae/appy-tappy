@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { type AppSummary, type AutomationDef, type MediaCommandDef, NO_STATE, type WhenDef } from '../lib/bindings.ts';
-import { errorText, listWindows, saveAutomation, stopWatching, watchValue, watchedReading } from '../lib/api.ts';
+import {
+  errorText,
+  forgetUnsavedClickPictures,
+  listWindows,
+  saveAutomation,
+  stopWatching,
+  watchValue,
+  watchedReading,
+} from '../lib/api.ts';
 import {
   type ActionDraft,
   type Draft,
@@ -481,6 +489,15 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
   const [executables, setExecutables] = useState<readonly string[]>([]);
   // The click action whose target is being set up, by its key, or null while the editor shows.
   const [targeting, setTargeting] = useState<number | null>(null);
+
+  // A click picture is kept as a file while its target is set up. Once the editor closes, those that the saved
+  // automations do not name go, such as after Cancel.
+  useEffect(
+    () => () => {
+      background(forgetUnsavedClickPictures());
+    },
+    [],
+  );
 
   // The running applications' executables, offered as the applications an action can target.
   useEffect(() => {

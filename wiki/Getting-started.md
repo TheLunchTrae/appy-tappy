@@ -63,6 +63,33 @@ A **?** beside a field, heading, or column header in AppyTappy Setup explains
 it. Hold the pointer over it, or move to it with Tab, to read the explanation,
 and press Esc to hide it.
 
+## What AppyTappy keeps
+
+AppyTappy never saves a picture of a whole window. A screenshot you take in
+AppyTappy Setup stays in memory only while you work with it. It is gone once
+you select **Change window**, once the value, reference, or click target it
+was taken for is saved or left, and when AppyTappy Setup closes.
+
+What AppyTappy saves is the part inside the box you drew, and only where it
+needs a picture to read or to click:
+
+- A [reference](References.md) keeps the box from each screenshot you
+  labeled and from each recorded reading you kept.
+- A **State** value keeps the box for each of its states, and again for each
+  size you [fixed it at](Values.md#fix-a-value-at-one-size).
+- A click on **A picture** keeps the picture you marked.
+
+A **Bar fill** or **Color** value keeps only its colors, and a **Number**
+value only which reference it reads with. Deleting a value, a reference, or
+an automation, removing a fix, or removing an application deletes its
+pictures with it.
+
+While it watches a window, the background part looks only at the boxes of
+your values and keeps nothing it sees. Its
+[log](Troubleshooting.md#appytappys-log) and the
+[runtime trace](Settings.md#runtime-trace) hold text, such as a value's name
+and what it read, and never a picture.
+
 ## Update
 
 When a newer version is out, AppyTappy Setup says so when it opens, at the end

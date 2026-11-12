@@ -189,6 +189,12 @@ pub(crate) async fn add_click_picture(
     .await?
 }
 
+/// Removes the click pictures no saved automation names.
+#[tauri::command]
+pub(crate) async fn forget_unsaved_click_pictures(app: AppHandle) -> Result<(), String> {
+    ask(&app, |owner| owner.forget_unsaved_click_pictures()).await?
+}
+
 /// The click picture `image`, at most `max_width` wide.
 #[tauri::command]
 pub(crate) async fn click_picture(

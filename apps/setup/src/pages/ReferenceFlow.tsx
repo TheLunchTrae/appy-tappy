@@ -30,7 +30,7 @@ export function ReferenceFlow({ apps, existing, onCancel, onSaved, onAddApplicat
   const [choice, setChoice] = useState<Choice | null>(null);
   const [picking, setPicking] = useState(true);
   const [mode] = useState<CaptureMode>({ kind: 'reference', existing: existing?.reference ?? null });
-  // Leaving the flow stops the window's capture.
+  // Leaving the flow stops the window's capture, and its screenshots and recording go with it.
   useEffect(
     () => () => {
       background(stopCapture());
@@ -59,6 +59,8 @@ export function ReferenceFlow({ apps, existing, onCancel, onSaved, onAddApplicat
       mode={mode}
       onCancel={onCancel}
       onChangeWindow={() => {
+        // The capture ends here, not when another window is picked, so nothing keeps its screenshots meanwhile.
+        background(stopCapture());
         setPicking(true);
       }}
       onSaved={onSaved}

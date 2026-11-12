@@ -664,8 +664,11 @@ would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
 ask before they drop unsaved work. While a save runs, both are disabled. A save closes
 its flow only while that flow is still open (`saved` in `App.tsx`), so a save
 that finishes after the user moved on leaves the next flow alone. Leaving the
-value or reference flow unmounts it and stops its capture, which clears its screenshots and
-recording.
+value or reference flow unmounts it and stops its capture, which clears its
+screenshots and recording. **Change window** stops the capture too, before
+the picker shows, so nothing holds them while the user picks. Closing the
+automation editor removes the click pictures that no saved automation names
+([Pictures kept](Setup-app.md#pictures-kept)).
 
 ### Update notice
 
@@ -734,7 +737,10 @@ stateDiagram-v2
 ```
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
-  above.
+  above, so no frame, screenshot, or recorded reading outlives the capture.
+  The page stops it when a value or reference flow closes, on **Change
+  window**, and when a click's target screen closes or looks for its window
+  again.
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
@@ -774,9 +780,9 @@ stateDiagram-v2
     Stopped --> Recording: Record with other settings starts a new recording
     Recording --> Ended: the window closes
     Stopped --> Ended: the window closes
-    Recording --> None: Discard, a window is picked, or the flow closes
-    Stopped --> None: Discard, a window is picked, or the flow closes
-    Ended --> None: Discard, a window is picked, or the flow closes
+    Recording --> None: Discard, Change window, a window is picked, or the flow closes
+    Stopped --> None: Discard, Change window, a window is picked, or the flow closes
+    Ended --> None: Discard, Change window, a window is picked, or the flow closes
 ```
 
 - Each frame is cropped to the region. A crop of another window size, or one
@@ -876,18 +882,29 @@ they tell who reads what it changed, as its `Changed` kind says:
   changing its mode.
 - **The runtime, the overlays and their windows:** removing an application.
 
-A save that failed before it wrote anything changed nothing, so it tells
-neither, and an overlay that was reading goes on reading. A delete tells them
-once it has written the application's file, and removing an application tells
-them even when the removal fails partway. After each save of an application's
-file, the setup app removes the pictures the file no longer names. That
-removal is best effort: one that fails does not fail the save, and the next
-save tries again. Deleting a reference that is already gone saves nothing and
-tells no one, but still removes the pictures an earlier delete left behind.
-Moving a panel writes the application's file without telling anyone.
+A save that failed changed nothing anyone reads, so it tells neither, and an
+overlay that was reading goes on reading. A delete tells them once it has
+written the application's file, and removing an application tells them even
+when the removal fails partway. After each save of an application's file,
+whether it worked or failed, the setup app removes the pictures in its folder
+that the file as saved does not name, of those AppyTappy named. So a save that
+fails after it wrote some pictures takes them back, and pictures that a save
+left when the program ended in the middle of it go with the application's
+next save. That removal is best effort: one that fails does not fail the
+save, and the next save tries again. Deleting a reference that is already
+gone saves nothing and tells no one, but still removes the pictures an
+earlier delete left behind. Moving a panel writes the application's file
+without telling anyone.
+
+A click's picture is written to the `clicks` folder when its target is set
+up, before its automation is saved. Each save of the automations removes the
+click pictures none of them names, and so does closing the automation editor,
+so a target set up for an automation that was not saved leaves no file.
+[Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another
 run left and that have not changed for ten minutes, such as one a crash left
-between the write and the rename. A failed delete does not fail the save, and
+between the write and the rename. Those in the `clicks` folder go when the
+click pictures are removed. A failed delete does not fail the save, and
 the next save tries again.

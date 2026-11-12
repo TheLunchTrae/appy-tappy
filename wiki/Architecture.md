@@ -582,7 +582,9 @@ changing.
     learned from and its state checks compare against. Every automation is in
     one file, `automations.json`, with the pictures its clicks look for in
     `clicks\` beside it, and the settings in `settings.json`.
-    [Setup app](Setup-app.md#saved-files) describes each file.
+    [Setup app](Setup-app.md#saved-files) describes each file, and
+    [Pictures kept](Setup-app.md#pictures-kept) what each picture holds, when
+    it is removed, and that no file holds a picture of a whole window.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
     describes, the runtime's log in `logs\`, the

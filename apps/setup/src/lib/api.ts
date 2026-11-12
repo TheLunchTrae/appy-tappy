@@ -153,10 +153,16 @@ export async function readWindow(window: WindowDef): Promise<number | null> {
 
 /**
  * Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
- * when it is given. One that no saved automation names goes the next time automations are saved.
+ * when it is given. One that no saved automation names goes the next time automations are saved, or with
+ * {@link forgetUnsavedClickPictures}.
  */
 export async function addClickPicture(screenshot: number, region: RegionSpec, selection: SelectionSpec | null): Promise<ClickPictureView> {
   return invoke<ClickPictureView>('add_click_picture', { screenshot, region, selection });
+}
+
+/** Removes the click pictures no saved automation names, for when the automation editor closes. */
+export async function forgetUnsavedClickPictures(): Promise<void> {
+  await invoke('forget_unsaved_click_pictures');
 }
 
 /** The click picture `image`, at most `maxWidth` wide. */

@@ -67,12 +67,15 @@ macro_rules! with_commands {
             /// The window a new session would read for `window`, or null while none fits.
             commands::read_window(window: WindowDef) -> OptionalU64AsNumber;
             /// Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
-            /// when it is given. One that no saved automation names goes the next time automations are saved.
+            /// when it is given. One that no saved automation names goes the next time automations are saved, or with
+            /// {@link forgetUnsavedClickPictures}.
             commands::add_click_picture(
                 screenshot: usize,
                 region: RegionSpec,
                 selection: Option<SelectionSpec>
             ) -> ClickPictureView;
+            /// Removes the click pictures no saved automation names, for when the automation editor closes.
+            commands::forget_unsaved_click_pictures() -> ();
             /// The click picture `image`, at most `maxWidth` wide.
             commands::click_picture(image: String, max_width: u32) -> Pixels;
             /// Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere.

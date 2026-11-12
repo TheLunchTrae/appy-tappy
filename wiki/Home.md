@@ -7,7 +7,7 @@ fills up. New to it? Start with [Getting started](Getting-started.md).
 ## User guide
 
 - [Getting started](Getting-started.md): install AppyTappy, make your first
-  automation, update, and uninstall.
+  automation, what AppyTappy keeps, update, and uninstall.
 - [Applications](Applications.md): how AppyTappy recognizes a program's
   window, the anti-cheat setting, and the overlay that shows your values as
   AppyTappy reads them.
@@ -29,8 +29,9 @@ These pages explain how AppyTappy works and why it is built this way.
 - [Architecture](Architecture.md): the two programs, the crates, the runtime's
   threads and lifecycle, the tray, files, anti-cheat enforcement, why the
   setup app uses Tauri, and unsafe code.
-- [Setup app](Setup-app.md): window matching, saved file formats, the page's
-  generated types, and running the setup app from source.
+- [Setup app](Setup-app.md): window matching, saved file formats, the
+  pictures it keeps, the page's generated types, and running the setup app
+  from source.
 - [Screen regions](Screen-regions.md): the checks, read intervals, capture, and
   why AppyTappy does not use OCR.
 - [Rules](Rules.md): conditions, firing and re-arming, cooldowns, restoring,

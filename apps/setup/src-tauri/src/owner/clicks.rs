@@ -48,7 +48,8 @@ impl<H: Host> Owner<H> {
     /// answers its name with the window's size. With `selection`, only the
     /// pixels it picks are compared; the rest of the picture is kept
     /// transparent. A picture that no saved automation names goes the next
-    /// time the automations are saved.
+    /// time the automations are saved, or when the automation editor closes
+    /// ([`Owner::forget_unsaved_click_pictures`]).
     pub(crate) fn add_click_picture(
         &self,
         screenshot: usize,

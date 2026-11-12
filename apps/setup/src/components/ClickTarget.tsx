@@ -248,6 +248,9 @@ function TargetStage({
     );
     return () => {
       current = false;
+      // The stage's capture ends with it, whether the screen closes, so the editor's live reading can watch again,
+      // or another stage opens, which may find no window to pick in its place. Its screenshots go with it.
+      background(stopCapture());
     };
     // The window rules are read when the stage opens, and looking again opens a new one, not each time the lists
     // are read again.
@@ -820,14 +823,6 @@ export function ClickTarget({ apps, automation, initial, onCancel, onUse }: Prop
   const chosen = choices.find((choice) => choice.id === app) ?? null;
   // Each look again opens a new stage, which picks the window afresh and forgets the screenshots.
   const [round, setRound] = useState(0);
-
-  // Capture stops when the screen closes, so the editor's live reading can watch again.
-  useEffect(
-    () => () => {
-      background(stopCapture());
-    },
-    [],
-  );
 
   return (
     <TargetStage

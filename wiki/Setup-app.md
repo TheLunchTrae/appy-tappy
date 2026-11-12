@@ -24,7 +24,8 @@ This page covers what the user guide leaves out.
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
 - **Screenshots.** The owner thread keeps the session's screenshots until
-  another window is picked or the user leaves the new value. The draft keeps
+  its capture stops: on **Change window**, when another window is picked, or
+  when the flow closes ([Pictures kept](#pictures-kept)). The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
   a labeled screenshot, a recording, or a compared screenshot of another
@@ -45,7 +46,9 @@ This page covers what the user guide leaves out.
   drop unsaved work, and **Change window** asks the same. While a save runs,
   the tabs, **Change window**, the questions' answers, and **Discard** or
   **Cancel** wait. A save closes its flow only while that flow is still open,
-  so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
+  so one that finishes after the user moved on leaves the next flow alone.
+  Leaving a capture, as **Change window** also does, stops it, which drops
+  its screenshots and recording.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner
@@ -131,8 +134,8 @@ UI then offers **Use its settings**, which puts the recording's region, color,
 and tolerance back on the draft. The region stays on the screenshot it was
 drawn on when that one has the recording's window size, and otherwise moves to
 the newest screenshot of that size. Kept readings are lost only on a discard,
-when another window is picked, or when the flow is left, such as on **Change
-window**; a closed window keeps them for review. **Back** and Escape leave
+on **Change window**, or when the flow is left; a closed window keeps them
+for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
 
 ### The text reader
@@ -336,6 +339,11 @@ or `"none"`, as its target. A state check is saved with its states in order:
 An action's `app` is `null` for whatever is playing, or for the whole system's
 volume.
 
+A click that looks for a picture names it by file name, and the picture is in
+the `clicks` folder beside `automations.json`, named `click-{n}.png`.
+[Pictures kept](#pictures-kept) says what each picture holds and when it is
+removed.
+
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
 `settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
 file and renames it over the old one, so a crash never leaves half a file; a
@@ -362,6 +370,84 @@ runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
 actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+
+## Pictures kept
+
+AppyTappy keeps a picture only where reading or clicking needs one, cut to
+the region the user drew. A picture of a whole window exists only in memory
+while its capture is open, and no file ever holds one. The user guide says so
+in [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
+
+### In memory
+
+The owner thread and the page hold these for the picked window. All of them
+go when its capture stops (`Owner::stop`): the user selects **Change window**,
+another window is picked, or the flow closes, as a save, **Discard**,
+**Cancel**, and a page tab close it. Closing AppyTappy Setup ends the process.
+
+| What                               | Held by            | How much of the window                                 |
+| ---------------------------------- | ------------------ | ------------------------------------------------------ |
+| The newest frame                   | Owner              | All of it; each frame replaces the one before          |
+| The live view                      | Page               | All of it, at most 1600 pixels wide                    |
+| Each screenshot                    | Owner and page     | All of it, and a thumbnail 224 pixels wide on the page |
+| Each recorded reading              | Owner and page     | The region; a recording keeps at most 200              |
+| The check being tried              | Owner              | The region, once for each state                        |
+| A new reading, for the text reader | Text reader thread | The region's ink, until it is read                     |
+
+A capture holds as many screenshots as the user takes. Setting up a click's
+target is a capture like a value's, and its screen stops the capture when it
+closes and each time it looks for the window again. A recording's readings
+also go when it is discarded or another replaces it.
+
+The automation editor's live reading, the overlays, and the Values page
+capture only the regions of the values they read, as the runtime does. The
+overlays and the Values page keep the readings alone, and the live reading
+keeps its value's region of the newest frame.
+
+### On disk
+
+| File                                 | What it holds                                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot, or of a kept recorded reading   |
+| `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out  |
+| `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                |
+| `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out |
+
+A number, bar fill, or color value saves no picture of its own. Nothing else
+AppyTappy writes holds pixels: the runtime's log and its [trace](Trace.md)
+hold names, readings, and timings as text, and the
+[MCP server](Development.md#tools)'s `screen_sample` answers the colors of at
+most 64 points of the screen.
+
+A sample keeps the whole region, not only the box around its characters. A
+reference that is edited learns its saved samples again with the color and
+tolerance the editor has then, and another color or a higher tolerance counts
+pixels as ink that a box cut for the saved settings would have dropped. A
+state's picture is the whole region because that is what the check compares.
+
+### Removal
+
+- After each save of an application's file, `Owner::write_app` removes the
+  pictures in its folder that the file as saved does not name
+  (`AppStore::prune`). So the pictures of a deleted value, fix, or reference
+  go with it; a save that fails takes back the pictures it wrote, since the
+  file still saved does not name them; and pictures left by a save that the
+  program ended in the middle of go with the application's next save.
+- A click's picture is written when its target is set up, before its
+  automation is saved. Each save of the automations removes the click
+  pictures none of them names, and so does closing the automation editor
+  (`forget_unsaved_click_pictures`), which covers a target set up for an
+  automation the user then did not save.
+- Both remove only files named as the table above names them. Any other file
+  in those folders stays, such as one the user put there, and so does a
+  picture that a file edited by hand names. Removing an application removes
+  its folder with everything in it.
+- A temporary file that a crash left goes at the next save in its folder, as
+  [Saved files](#saved-files) describes, and one in `clicks` goes with the
+  click pictures.
+- Nothing is removed when AppyTappy Setup starts. An application whose file
+  cannot be read keeps every picture, and so do the click pictures while the
+  automations file cannot be read, since nothing says which they name.
 
 ## Page types
 
