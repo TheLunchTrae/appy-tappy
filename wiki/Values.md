@@ -165,7 +165,9 @@ fills.
 
 Text or marks drawn over the bar in one of its own two colors cannot be told
 from the bar on a screenshot where they blend into it, whoever picks the
-colors. So check the list of readings at more than one fill.
+colors. A shine or pattern in another shade over less than half of a part's
+length can also be proposed, and then reads some points off at other fills.
+So check the list of readings at more than one fill.
 
 ## Select the thing in a state
 
