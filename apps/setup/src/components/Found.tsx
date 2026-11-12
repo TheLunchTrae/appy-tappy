@@ -1,0 +1,199 @@
+import type { FoundView } from '../lib/bindings.ts';
+import type { FoundEntry, FoundRow } from '../lib/found.ts';
+import { FIND_LIKE_HINT } from '../lib/hints.ts';
+import type { Picture } from '../lib/pixels.ts';
+import type { Size } from '../lib/region.ts';
+import { PictureCanvas } from './canvas.tsx';
+import { Hint } from './Hint.tsx';
+
+interface PanelProps {
+  readonly view: FoundView | null;
+  readonly rows: readonly FoundRow[];
+  /** How many of the search's finds were added already. */
+  readonly added: number;
+  readonly flags: ReadonlyMap<number, string>;
+  readonly crops: ReadonlyMap<number, Picture>;
+  /** Why the search cannot start, or null when it can. */
+  readonly findBlocked: string | null;
+  /** Why Add waits, or null. */
+  readonly addBlocked: string | null;
+  readonly error: string | null;
+  readonly searching: boolean;
+  readonly onFind: () => void;
+  readonly onEntry: (index: number, entry: FoundEntry) => void;
+  readonly onAdd: () => void;
+  readonly onDismiss: () => void;
+}
+
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/** A find's pixels, or an empty box until they arrive. */
+function Crop({ picture, label }: { readonly picture: Picture | undefined; readonly label: string }) {
+  return (
+    <span className="crop">{picture === undefined ? null : <PictureCanvas picture={picture} label={label} />}</span>
+  );
+}
+
+/** What a row's text field shows while it has no text. */
+function placeholder(row: FoundRow): string {
+  return row.reading ? 'Reading…' : 'Type what it shows';
+}
+
+/** The inspector's part for finding more text like the first sample, and adding what the user confirms. */
+export function FoundPanel(props: PanelProps) {
+  const { view, rows, added, flags, crops, findBlocked, addBlocked, error, searching } = props;
+  if (view === null) {
+    return (
+      <div className="field">
+        <div className="row">
+          <button
+            type="button"
+            className="btn"
+            disabled={findBlocked !== null || searching}
+            aria-describedby="hint-find-like"
+            onClick={props.onFind}
+          >
+            {searching ? 'Finding…' : 'Find more like it'}
+          </button>
+          <Hint topic="Find more like it" id="hint-find-like">
+            {FIND_LIKE_HINT}
+          </Hint>
+        </div>
+        {findBlocked === null ? null : <p className="note">{findBlocked}</p>}
+        {error === null ? null : <p className="warn">{error}</p>}
+      </div>
+    );
+  }
+  const kept = rows.filter((row) => row.keep).length;
+  const skipped = [
+    view.otherSizes === 0 ? null : `Skipped ${plural(view.otherSizes, 'run', 'runs')} of other sizes.`,
+    view.more === 0 ? null : `${plural(view.more, 'more was', 'more were')} left out; add these, then find again.`,
+  ].filter((part) => part !== null);
+  return (
+    <section className="autofill" aria-labelledby="found-title">
+      <h3 id="found-title" tabIndex={-1}>
+        {rows.length === 0 && added === 0 ? 'Found nothing more like it' : `Found ${rows.length + added} more like it`}
+      </h3>
+      {rows.length === 0 ? (
+        <p className="note">
+          {added === 0
+            ? 'No other text on this screenshot has the same color and size.'
+            : 'Each one was added already.'}
+        </p>
+      ) : (
+        <>
+          <p className="note">
+            Text in the same color and size on this screenshot, read as text. Check each one; kept ones teach the
+            reference too.
+          </p>
+          <ul aria-label="Found text">
+            {rows.map((row) => {
+              const number = row.index + 1;
+              const flag = flags.get(row.index);
+              const flagId = `found-${row.index}-flag`;
+              return (
+                <li key={row.index} className={row.keep ? undefined : 'off'}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Keep find ${number}`}
+                    checked={row.keep}
+                    onChange={(event) => {
+                      props.onEntry(row.index, { keep: event.target.checked, text: row.text });
+                    }}
+                  />
+                  <span className={flag === undefined ? 'n' : 'n flagged'} aria-hidden="true">
+                    {number}
+                  </span>
+                  <Crop picture={crops.get(row.index)} label={`Find ${number}`} />
+                  <input
+                    className={flag === undefined ? 'input' : 'input bad'}
+                    placeholder={placeholder(row)}
+                    aria-label={`Text of find ${number}`}
+                    aria-invalid={flag !== undefined}
+                    aria-describedby={flag === undefined ? undefined : flagId}
+                    value={row.text}
+                    onChange={(event) => {
+                      props.onEntry(row.index, {
+                        keep: row.keep || event.target.value.trim() !== '',
+                        text: event.target.value,
+                      });
+                    }}
+                  />
+                  {flag === undefined ? null : (
+                    <span id={flagId} className="flag">
+                      {flag}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {skipped.length === 0 ? null : <p className="note">{skipped.join(' ')}</p>}
+      {error === null ? null : <p className="warn">{error}</p>}
+      <div className="row">
+        {rows.length === 0 ? null : (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={addBlocked !== null}
+            aria-describedby={addBlocked === null ? undefined : 'found-blocked'}
+            onClick={props.onAdd}
+          >
+            {kept === 1 ? 'Add 1 to the reference' : `Add ${kept} to the reference`}
+          </button>
+        )}
+        <button type="button" className="btn" onClick={props.onDismiss}>
+          {rows.length === 0 ? 'Close' : 'Not these'}
+        </button>
+      </div>
+      {addBlocked === null || rows.length === 0 ? null : (
+        <p id="found-blocked" className="note pending" aria-live="polite">
+          {addBlocked}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Numbered outlines over the finds on the screenshot they were found on, scaled from `native` to `shown`. */
+export function FoundMarks({
+  rows,
+  flags,
+  native,
+  shown,
+}: {
+  readonly rows: readonly FoundRow[];
+  readonly flags: ReadonlyMap<number, string>;
+  readonly native: Size;
+  readonly shown: Size;
+}) {
+  if (rows.length === 0 || native.width === 0 || native.height === 0) {
+    return null;
+  }
+  const x = shown.width / native.width;
+  const y = shown.height / native.height;
+  return (
+    <div className="found-marks" aria-hidden="true">
+      {rows.map((row) => (
+        <span
+          key={row.index}
+          className={['mark', row.keep ? null : 'off', flags.has(row.index) ? 'flagged' : null]
+            .filter((name) => name !== null)
+            .join(' ')}
+          style={{
+            left: row.region.x * x,
+            top: row.region.y * y,
+            width: row.region.width * x,
+            height: row.region.height * y,
+          }}
+        >
+          <span>{row.index + 1}</span>
+        </span>
+      ))}
+    </div>
+  );
+}

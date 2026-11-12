@@ -24,6 +24,7 @@ import {
 import { readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
+import { FoundMarks, FoundPanel } from './Found.tsx';
 import { Question, useQuestion } from './Question.tsx';
 import { ReferenceEditor } from './ReferenceEditor.tsx';
 import { ReferencePicker } from './ReferencePicker.tsx';
@@ -43,6 +44,7 @@ import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
+import { useFound } from '../lib/useFound.ts';
 import { useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
@@ -185,6 +187,18 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const selection = useStateSelections(draft, setDraft, selected);
   const selecting = draft.kind === 'state' ? tool : 'box';
   const review = useReview(recording, draft, setDraft, editingRef);
+  // Every text the reference being edited learns from already, which tells a find's letters apart from a misread.
+  const savedSamples = editing?.existing?.samples;
+  const learnedTexts = useMemo(
+    () => [
+      ...(savedSamples ?? []).map((sample) => sample.text),
+      ...[...draft.labels.values()].filter((text) => text.trim() !== ''),
+      ...draft.recorded.values(),
+      ...draft.found.map((label) => label.text),
+    ],
+    [savedSamples, draft.labels, draft.recorded, draft.found],
+  );
+  const finder = useFound(draft, setDraft, editingRef, learnedTexts);
   const { reviewing } = review;
   const recordError = recorder.commandError ?? review.error ?? recorder.pollError;
 
@@ -283,6 +297,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   };
 
   const recordingBlocked = editing === null ? null : recordBlocked(draft);
+  const findBlocked =
+    draft.region === null
+      ? 'Draw the region around one sample first.'
+      : draft.ink === null
+        ? "Pick the characters' color first."
+        : null;
 
   // Starts a new recording, or with `more` goes on with the stopped one.
   const record = async (more: boolean): Promise<void> => {
@@ -359,6 +379,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     const valueRegion = editing?.valueRegion ?? { region: null, drawnOn: null };
     setEditing(null);
     setPicking(null);
+    finder.dismiss();
     setDraft((current) => fromReference(current, valueRegion));
   };
 
@@ -583,6 +604,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   selection.addStep({ kind: 'click', x: point.x, y: point.y, combine });
                 }}
               />
+            )}
+            {native === undefined ||
+            editing === null ||
+            finder.view === null ||
+            selected !== finder.view.screenshot ? null : (
+              <FoundMarks rows={finder.rows} flags={finder.flags} native={native} shown={shown} />
             )}
           </div>
           <p className="hint">
@@ -925,6 +952,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             saved={editing.existing?.samples.map((sample) => sample.text) ?? []}
             labeled={[...draft.labels.values()].filter((text) => text.trim() !== '')}
             recorded={[...draft.recorded.values()]}
+            found={draft.found.map((label) => label.text)}
+            finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
             readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
             onName={(name) => {
               setEditing((current) => (current === null ? null : { ...current, name }));
@@ -940,6 +969,30 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
               }
             }}
+            findPanel={
+              selected === null && finder.view === null ? null : (
+                <FoundPanel
+                  view={finder.view}
+                  rows={finder.rows}
+                  added={finder.added}
+                  flags={finder.flags}
+                  crops={finder.crops}
+                  findBlocked={findBlocked}
+                  addBlocked={finder.blocked}
+                  error={finder.error}
+                  searching={finder.searching}
+                  onFind={() => {
+                    if (selected !== null) {
+                      setPicking(null);
+                      background(finder.search(selected));
+                    }
+                  }}
+                  onEntry={finder.edit}
+                  onAdd={finder.add}
+                  onDismiss={finder.dismiss}
+                />
+              )
+            }
             record={
               <RecordPanel
                 view={recording}

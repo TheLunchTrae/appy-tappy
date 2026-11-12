@@ -3,6 +3,7 @@
 import {
   type CheckDef,
   type CheckSpec,
+  type Label,
   LIMITS,
   type RecordedLabel,
   type RecordingSettings,
@@ -11,6 +12,7 @@ import {
   type SelectStep,
   type StateSpec,
 } from './bindings.ts';
+import type { FoundLabel } from './found.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
@@ -62,6 +64,8 @@ export interface Draft {
   readonly labels: ReadonlyMap<number, string>;
   /** What each reading kept from the recording shows, by reading index. */
   readonly recorded: ReadonlyMap<number, string>;
+  /** Text found like the first sample and added, each at its own region of a screenshot. */
+  readonly found: readonly FoundLabel[];
   readonly filled: Color | null;
   readonly empty: Color | null;
   readonly color: Color | null;
@@ -87,6 +91,7 @@ export const EMPTY_DRAFT: Draft = {
   ink: null,
   labels: new Map(),
   recorded: new Map(),
+  found: [],
   filled: null,
   empty: null,
   color: null,
@@ -170,11 +175,13 @@ function missing(next: string): { readonly ok: false; readonly next: string } {
   return { ok: false, next };
 }
 
-function labelsOf(draft: Draft): readonly { readonly screenshot: number; readonly text: string }[] {
-  return [...draft.labels]
+/** The labeled screenshots, by screenshot, then the text found and added, in the order it was added. */
+function labelsOf(draft: Draft): readonly Label[] {
+  const typed = [...draft.labels]
     .map(([screenshot, text]) => ({ screenshot, text: text.trim() }))
     .filter((label) => label.text.length > 0)
     .toSorted((left, right) => left.screenshot - right.screenshot);
+  return [...typed, ...draft.found];
 }
 
 function recordedOf(draft: Draft): readonly RecordedLabel[] {
@@ -208,6 +215,14 @@ export function reviewSpec(
     labels: labelsOf(draft),
     recorded: kept,
   };
+}
+
+/**
+ * The characters `draft` teaches so far, its kept recorded readings included, added to `reference` when it names a
+ * saved one; null until the draft has a region and the characters' color.
+ */
+export function taughtSpec(draft: Draft, reference: ReferenceRef | null): CharactersSpec | null {
+  return reviewSpec(draft, recordedOf(draft), reference);
 }
 
 /** The characters `draft` teaches the reference `reference`, or a new one when null; or what it still needs. */
@@ -351,15 +366,17 @@ export function toReference(draft: Draft, existing: ReferenceDef | null): Draft 
     tolerance: existing?.tolerance ?? DEFAULT_TOLERANCE.number,
     labels: new Map(),
     recorded: new Map(),
+    found: [],
   };
 }
 
 /**
  * `draft` leaving the reference editor for the value it was opened from: the value's region, and the screenshot it
- * was drawn on, come back, whatever region the reference was taught on, and the editor's labels and recorded readings are dropped.
+ * was drawn on, come back, whatever region the reference was taught on, and the editor's labels, recorded readings and
+ * found text are dropped.
  */
 export function fromReference(draft: Draft, value: Drawn): Draft {
-  return { ...draft, region: value.region, drawnOn: value.drawnOn, labels: new Map(), recorded: new Map() };
+  return { ...draft, region: value.region, drawnOn: value.drawnOn, labels: new Map(), recorded: new Map(), found: [] };
 }
 
 /**

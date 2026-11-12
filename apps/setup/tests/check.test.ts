@@ -197,6 +197,24 @@ describe('buildCharacters', () => {
     });
   });
 
+  test('teaches found text after the labeled screenshots, each at its own region', () => {
+    const found = { x: 40, y: 50, width: 30, height: 12 };
+    const draft = {
+      ...EMPTY_DRAFT,
+      region,
+      drawnOn: 0,
+      ink: red,
+      labels: new Map([[0, '87%']]),
+      found: [{ screenshot: 0, region: found, text: '93.4%' }],
+    };
+    const built = buildCharacters(draft, null);
+    expect(built.ok && built.spec.labels).toEqual([
+      { screenshot: 0, text: '87%' },
+      { screenshot: 0, region: found, text: '93.4%' },
+    ]);
+    expect(buildCharacters({ ...draft, labels: new Map() }, null).ok).toBe(true);
+  });
+
   test('teaches kept recorded readings alone, in reading order', () => {
     const draft = {
       ...EMPTY_DRAFT,
@@ -295,6 +313,7 @@ describe('the reference editor', () => {
       region: taught,
       drawnOn: 3,
       labels: new Map([[0, '100%']]),
+      found: [{ screenshot: 0, region: taught, text: '99%' }],
     };
     expect(fromReference(editor, { region, drawnOn: 0 })).toEqual({
       ...editor,
@@ -302,6 +321,7 @@ describe('the reference editor', () => {
       drawnOn: 0,
       labels: new Map(),
       recorded: new Map(),
+      found: [],
     });
   });
 });

@@ -61,6 +61,10 @@ export const INK_HINT =
 export const LABEL_HINT =
   'Type exactly what the region shows, such as 87% or 1,250. Each labeled screenshot teaches the reference the characters in it.';
 
+/** Finding more text like the first sample. */
+export const FIND_LIKE_HINT =
+  "Looks on this screenshot for other text in the characters' color and as tall as the text in the region, and reads each as text. Check what it read; each one you add teaches the reference like a labeled screenshot. Draw the region tightly around the text and type what it shows first, so the size is right.";
+
 /** The read interval's two waits. */
 export const READING_HINT = `AppyTappy reads a value only when its window draws something new. It waits the fastest read while a value changes, and up to the slowest read while it holds still. Each is ${LIMITS.fastestReadMs} to ${LIMITS.slowestReadMs} ms.`;
 
