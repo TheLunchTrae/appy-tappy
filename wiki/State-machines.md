@@ -29,8 +29,9 @@ it was about has gone. Ten guards drop such stale messages:
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
   generation is dropped.
-- **Recording IDs.** Each recording gets a new `id`, so text that the text
-  reader sends back for a discarded recording is dropped.
+- **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
+  from one counter, so text that the text reader sends back for a recording
+  that was discarded, or replaced by one of either kind, is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
 - **Pointer IDs.** A region drag keeps the ID of the pointer that started it
@@ -1034,8 +1035,8 @@ state, such as a late check during the download, changes nothing.
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
 capture slot, `session`, shared by the value preview and the automation
 editor's watch. Starting one stops the other. Its other state is `generation`,
-`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`,
-and `watched`.
+`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`
+(what the capture records, if anything: readings or looks), and `watched`.
 
 ```mermaid
 stateDiagram-v2
@@ -1219,10 +1220,16 @@ the tint goes, and the line under the switch says so beside the error.
 
 ### Recording
 
-A recording (`apps/setup/src-tauri/src/recording.rs`) keeps each reading a
-region shows once, for the user to review. It is `None` or a `Recording` whose
-`stopped` field says whether it still records, and whose `problem` says why
-it skips frames or why it stopped by itself.
+The owner's `recording` field is `None` or one `Recorder`
+(`apps/setup/src-tauri/src/recording.rs`): a recording of readings or
+[a recording of looks](#recording-looks). The type holds one of them, so the
+two never run together, and starting one replaces the other. Both hold a
+`Lifecycle` (`recording/lifecycle.rs`), whose `stopped` field says whether it
+still records, and whose `problem` says why it skips frames or why it stopped
+by itself.
+
+A recording of readings keeps each reading a region shows once, for the user
+to review.
 
 ```mermaid
 stateDiagram-v2
@@ -1254,6 +1261,9 @@ stateDiagram-v2
   (`Recording::end`). Its problem says to change window, and **Record more**
   and a new **Record** are refused. Its readings stay for review, so a
   reference can still be saved from them.
+- Starting a recording of looks replaces a recording of readings, as a
+  discard would. The UI offers it only in the value flow, which discards the
+  readings when the reference editor closes.
 - A value saves the window size of the screenshot its region was drawn on
   (`drawnOn` in the UI). A number value reads with one of the application's
   references, and saving a reference teaches it from its labeled screenshots
@@ -1338,6 +1348,76 @@ The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
 kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
 the live view shows or a screenshot of another size does. It changes only the
 size the screenshot shows at, so a drag goes on through a zoom or a scroll.
+
+### Recording looks
+
+A recording of looks (`apps/setup/src-tauri/src/recording/looks.rs`, started in
+`owner/looks.rs`) keeps a screenshot each time a value's region shows a look
+that no screenshot shows yet. It has no review and nothing to go on with: a
+stopped one only says what it kept and why it stopped, and **Start recording**
+always starts a new one.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Recording: Start recording
+    Recording --> Resting: a frame is compared, whether or not it is kept
+    Resting --> Recording: four times as long as that frame took has passed
+    Recording --> Paused: a frame of another window size
+    Paused --> Recording: a frame of the size the region was drawn at
+    Recording --> Stopped: Stop recording
+    Paused --> Stopped: Stop recording
+    Recording --> Stopped: the capture fails, with the failure as its problem
+    Paused --> Stopped: the capture fails, with the failure as its problem
+    Recording --> Stopped: it kept 16 screenshots, with the limit as its problem
+    Stopped --> Recording: Start recording starts a new recording
+    Recording --> Ended: the window closes
+    Paused --> Ended: the window closes
+    Stopped --> Ended: the window closes
+    Recording --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Paused --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Stopped --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Ended --> None: the reference editor opens, a window is picked, or the flow closes
+```
+
+- **Recording** crops each frame to the region and compares the crop with
+  every look it knows: the region on each screenshot of the same window size
+  that the session held when it started, and on each frame it kept. A crop
+  within the tolerance of one of them changes nothing. Any other is a new look:
+  the whole frame goes to the screenshot store, and the recording's `kept` list
+  gets its index.
+- **Resting** is a recording whose `rests_until` is still to come. After each
+  comparison it is set to four times as long as the frame took from arriving
+  to compared (`REST`), counted from the end of the comparison. A frame that
+  the owner handles before then is not compared: it changes nothing in the
+  recording, and a look it shows is kept when a later frame shows it.
+  Comparing so takes at most a fifth of the owner thread's time, whatever the
+  region's size. The time a frame waited for the owner counts toward what it
+  took, so a recording rests longer after the owner was busy, and the UI
+  shows it as recording all the while. **Resting** leaves by every arrow that
+  leaves **Recording**.
+- **Paused** is a recording whose `problem` says the window has another size
+  than the screenshot the region was drawn on. It keeps nothing, and the next
+  frame of the right size clears the problem and records.
+- **Stopped** keeps its `kept` list and its problem for the UI to show. A
+  capture failure stops it as it stops a recording of readings, and its
+  problem names **Start recording** as the way on, where a recording of
+  readings names **Record more** (`Recorder::after_failure`); frames that come
+  again do not restart it. The limit, `MAX_LOOKS`, stops it when it keeps
+  its 16th screenshot. The user recovers from either with **Start recording**,
+  which starts a new recording with a new ID that knows the looks of every
+  screenshot still held.
+- **Ended** is a stopped recording whose capture slot is **Ended**. Its
+  problem says to change window, and a new recording is refused. The
+  screenshots stay until the capture stops.
+- Leaving a recording, by any arrow to **None**, keeps the screenshots it
+  kept: they belong to the capture slot's `screenshots`, which only a removal
+  or a stop of the capture releases. While it records, rests, or is paused,
+  the owner refuses to remove any screenshot, so the looks it knows and the
+  screenshots that show them stay in step.
+- The reference editor records readings, so opening it discards a recording of
+  looks first (`openEditor` in `Capture.tsx`), and the owner replaces one when
+  a recording of readings starts.
 
 ### Value edit
 

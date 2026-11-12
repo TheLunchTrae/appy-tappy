@@ -12,6 +12,13 @@ use proptest::prelude::*;
 
 use super::*;
 
+/// The property's screenshots are a list, each named by its place in it.
+impl Shots for Vec<Image> {
+    fn get(&self, index: usize) -> Option<&Image> {
+        self.as_slice().get(index)
+    }
+}
+
 /// A font of 3 by 5 pixels.
 const GLYPHS: [(char, [&str; 5]); 13] = [
     ('0', ["###", "#.#", "#.#", "#.#", "###"]),

@@ -102,6 +102,13 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
     })
 }
 
+/// A test's screenshots are an array, each named by its place in it.
+impl<const N: usize> Shots for [Image; N] {
+    fn get(&self, index: usize) -> Option<&Image> {
+        self.as_slice().get(index)
+    }
+}
+
 fn digits_ref() -> ReferenceRef {
     ReferenceRef {
         app: "app".to_owned(),
@@ -109,7 +116,7 @@ fn digits_ref() -> ReferenceRef {
     }
 }
 
-fn session<'a>(screenshots: &'a [Image], recording: Option<&'a Recording>) -> Session<'a> {
+fn session<'a>(screenshots: &'a dyn Shots, recording: Option<&'a Recording>) -> Session<'a> {
     Session {
         screenshots,
         recording,
