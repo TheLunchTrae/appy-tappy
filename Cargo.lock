@@ -126,6 +126,7 @@ dependencies = [
  "appytappy-sources",
  "mutants",
  "ocrs",
+ "proptest",
  "rten",
  "rten-imageproc",
  "serde",

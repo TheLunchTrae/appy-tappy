@@ -31,14 +31,19 @@ the same answer on every system, and allocate nothing per read.
   other character ends the number, so `12/50` reads as 12, and so does a `,`
   that is not followed by exactly three digits, so `12,5` reads as 12 rather
   than guessing that the `,` is a decimal point. A read finds the ink (pixels
-  near the text color), splits it into characters at blank columns, scales
-  each one to a fixed grid, and picks the closest learned shape. The text line
-  is the band of rows with the most ink, so a stray speck elsewhere in the
-  region does not throw it off. A character it has not learned fails the read
-  rather than being guessed, unless the number has already ended, as in the
-  "HP" of "37% HP". It does not read rotated text, characters that touch, or
-  text on a background that shares the text's color; those need a different
-  check.
+  near the text color), splits it into characters at blank columns, and
+  scales each one to a fixed grid by the height of the text line. The text
+  line is the band of rows with the most ink, so a stray speck elsewhere in
+  the region does not throw it off. Each character takes the closest learned
+  shape, if the two are the same but for their edges, as
+  [Matching](#matching) describes. A character it has not learned fails the
+  read rather than being guessed, unless the number has already ended, as in
+  the "HP" of "37% HP", and a read that fails
+  [says at which stage](#why-a-number-is-not-read). It does not read rotated
+  text, characters that touch, or text on a background that shares the
+  text's color; those need a different check. A character drawn as marks
+  with blank columns between them, as some fonts draw `%`, is one character
+  for each mark.
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one
   filled spot and one empty spot. The check counts the region's pixels closer
   to each color and ignores pixels near neither, such as a border or a label:
@@ -54,6 +59,57 @@ the same answer on every system, and allocate nothing per read.
   changing background behind the thing does not count. Each mask becomes runs
   of kept pixel indexes once, when the check loads, so a read walks the runs
   without testing each pixel.
+
+### Matching
+
+An application that scales its interface, or centers a number whose width
+changes, draws the same character at another fraction of a pixel each time,
+so its edge pixels differ from the ones the reference learned. Counting the
+grid cells that differ cannot tell that from another character: an edge that
+moves by a fraction of a pixel changes many cells without moving any of
+them far, while a different character has cells far from any of the
+other's.
+
+So a match looks at where the cells differ. A cell that one shape sets is
+apart when the other sets neither that cell nor one beside it, left, right,
+above, or below. A moved or thicker edge sets cells beside the other
+shape's, so none is apart; a stroke that one character has and the other
+lacks is. The closest learned shape has the fewest cells apart, then the
+fewest that differ at all, and it matches when at most 1 in 32 of the cells
+either shape sets are apart (`CELLS_PER_APART` in `screen/digits.rs`). The
+tests draw text as a game does, bold with an outline and anti-aliased at any
+fraction of a pixel (`screen/digits/drawn.rs`), and read it at any
+fraction and at other sizes from three labeled pictures.
+
+Two limits follow from the grid. Where the text line is less than 16 pixels tall, a
+cell is smaller than a pixel, so a moved edge is more than a cell and the
+reference needs more labeled pictures. And the grid is scaled by the text
+line's height, which is that of the characters the region shows: a
+character that reaches above or below the digits, such as a `,`, makes the
+line taller and every shape beside it another, so the reference learns the
+digits again from pictures that show it.
+
+### Why a number is not read
+
+A read fails at one of four stages, `ReadError` in `screen/digits.rs`, and
+its message says which, in the same words in the setup app and in the
+runtime's log:
+
+- **No ink.** No pixel in the region has the characters' color.
+- **Too many characters.** The region holds more than 24.
+- **An unlearned shape.** A character matched no learned shape. The message
+  shows every character the read made out, with a `?` for each unlearned
+  one, such as `8 7 ?`, and names the learned character the first of them is
+  closest to. No number is made of the characters that did match.
+- **No number.** Every character matched, and they hold no digits, such as
+  `%` alone. The message shows them.
+
+The runtime logs each stage a value fails at (`ReadError::stage`) once
+until the value reads again, so a counter that stays unreadable while it
+counts is one line, with what its first failed read showed, and a region
+that flickers between two stages is two.
+[Troubleshooting](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
+says what the user does about each.
 
 On the fixture screenshots, each check takes 2 to 10 microseconds per read on
 one CPU core, and a state check about that much for each of its states;
@@ -99,7 +155,12 @@ its values read at a size they were not drawn at.
   half away from zero, and its width and height are the distance between
   them, at least 1 pixel, so a region that touches the side it is pinned to
   still touches it. A region that scales outside the window does not read
-  there.
+  there. A frame is the whole window, title bar and borders included, and
+  those do not grow with the window: a value drawn in a window with a title
+  bar scales to a spot lower than its place in the same application in
+  fullscreen, by about the title bar's height, so it needs a fix there. The
+  runtime's log says when a value could not be read where its region scales
+  to, and to fix it at that size if the region is off.
 - **Rarely** reads each value only at the sizes it was drawn at, so nothing
   is guessed.
 
@@ -116,7 +177,9 @@ setup app and the runtime refuse such a file with the same checks
 `SavedValue::at` resolves where a value reads at a size: its drawing made
 there, the first or a fix, or its first drawing scaled, or why it does not
 read (`Unread`). A number reads at any size, since a character's shape is
-scaled to a fixed grid before it is compared; a bar or color check counts
+scaled to a fixed grid before it is compared and a match lets its edges
+land a cell away; at a size so small that its strokes merge, a fix with a
+reference learned at that size reads it. A bar or color check counts
 colors, which do not change with size. A state check compares pixel by
 pixel, so a scaled region needs its pictures and masks redrawn at its size.
 `resample` redraws each axis on its own: shrinking averages the pixels each

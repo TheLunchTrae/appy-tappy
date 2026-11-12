@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Eight guards drop such stale messages:
+it was about has gone. Nine guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -33,6 +33,11 @@ it was about has gone. Eight guards drop such stale messages:
   reader sends back for a discarded recording is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Check numbers.** The capture screen gives each check or saved value's
+  edit it tries on the live window a number, which is in force from when the
+  owner took it until the draft changes or it is tried again. An answer to a
+  read asked under another number, or under none, is dropped (`afterRead`
+  in `apps/setup/src/lib/liveCheck.ts`).
 - **Request numbers.** The capture screen numbers each request of its
   matching pixels preview (`apps/setup/src/lib/matchPreview.ts`). An answer
   or a failure that carries another number than the request in flight's, such
@@ -273,10 +278,11 @@ stateDiagram-v2
   and starts again at those regions, once for each settled size. When none
   does, the capture goes on and this thread says why each value is not read
   there (`say_unread`), at once, even when the window draws no more frames.
-  Each value's last problem moves between the two threads over channels:
-  the handler keeps it while frames show the capture's size, hands it to this
-  thread in its first `Resizing` for another size, and takes it back, as this
-  thread said it, on the first frame of its own size again. Nothing moves for
+  The problems said for each value since it was last read move between the
+  two threads over channels: the handler keeps them while frames show the
+  capture's size, hands them to this thread in its first `Resizing` for
+  another size, and takes them back, with what this thread said, on the
+  first frame of its own size again. Nothing moves for
   each frame. A capture started for a new size starts from those problems,
   and one started after a capture ended any other way starts from none. A
   size that settles back at the capture's own size changes nothing. Windows
@@ -305,7 +311,7 @@ stateDiagram-v2
 Its state is `placed` (the window size whose values it reads, and where
 each value reads at it, resolved once), `told` (the other size it last told
 the reader frames show), `last` (each value's last reading), `problems`
-(each value's last problem, handed to the reader while frames show
+(the problems said for each value since it was last read, handed to the reader while frames show
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restarted` (whether the reader started this capture
@@ -349,7 +355,19 @@ stateDiagram-v2
 - A value that does not read at the capture's own size, such as one whose
   scaled region reaches outside the window, says why once and is not
   copied.
-- Each value's problem leaves the window size out and is carried into the
+- A value whose check fails on a frame keeps its last reading and says why.
+  The handler keeps every problem it said for the value since the value was
+  last read, and says each once: a good read forgets them. A number's check
+  fails one way for each stage of its read, such as a character its
+  reference has not learned, whatever the characters are, so a counter that
+  stays unreadable while it counts is said once, with what its first failed
+  read showed, and a region that flickers between two stages is said twice,
+  not once for each frame
+  ([Why a number is not read](Screen-regions.md#why-a-number-is-not-read)).
+  At a size the value was not drawn at, the problem says its region is
+  scaled there and to fix the value at that size if the region is off,
+  which makes it another problem than the same stage at a drawn size.
+- Each value's problems leave the window size out and are carried into the
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.
 
@@ -1066,6 +1084,55 @@ stateDiagram-v2
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
+
+### Live check
+
+The capture screen tries a trial on the live window (`useLiveCheck` in
+`apps/setup/src/lib/useLiveCheck.ts`): the check being set up, with
+`set_check`, or a saved value's edit, with `try_edit`, as
+[Value edit](#value-edit) describes. Either way the owner reads the window
+with what it took, so the two share this machine and its one guard. Its
+state is `state`, a `CheckState`; `read`, the reading or the problem shown;
+`preview`, what saving an edit would do; `tried`, the number of the newest
+trial; and `inForce`, the number of the trial the owner reads with, or none.
+Below, a check stands for either.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Setting: the draft makes a check
+    Setting --> Set: the owner took the check
+    Setting --> Failed: the owner refused the check
+    Set --> Set: a read answers
+    Setting --> Setting: the check changes
+    Set --> Setting: the check changes
+    Failed --> Setting: the check changes
+    Setting --> Idle: the draft no longer makes a check
+    Set --> Idle: the draft no longer makes a check
+    Failed --> Idle: the draft no longer makes a check
+```
+
+- **Idle.** The draft lacks something, and the box says what. Nothing is
+  shown as read.
+- **Setting** (`pending`). The check waits 250 ms for the draft to hold
+  still, then goes to the owner. Each change of the check, and each time the
+  same edit is tried again, as when the window's size changes,
+  takes the next number, starts the wait again, and leaves no number in
+  force, and the owner's answer for a check the draft has left is ignored.
+  The box says it is trying the check. The last reading is kept, to show
+  until the first read with the new check answers, and a problem is cleared.
+- **Set.** The owner took the check, and its number is in force. The window
+  is read every 120 ms with `read_value`, each read after the last answered.
+  An answer replaces what the box shows: a reading, or why the frame cannot
+  be read.
+- **Failed** (`error`). The owner refused the check, such as a label its
+  reference cannot learn, and the box says why. The owner keeps the check it
+  had, and nothing is read until the check changes.
+- A read notes the number in force when it is asked, and its answer is taken
+  only while that number is still in force. So an answer under an older
+  check is dropped, reading or problem, and so is one asked between a change
+  of the check and the owner taking the new one, which the owner read with
+  the check before (`afterRead`).
 
 ### Matching pixels preview
 
