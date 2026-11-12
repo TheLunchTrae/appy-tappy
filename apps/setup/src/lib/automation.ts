@@ -10,6 +10,7 @@ import {
   type CheckDef,
   type ClickAtDef,
   type ClickButtonDef,
+  type ClickDeliveryDef,
   type ComparisonDef,
   LIMITS,
   type Live,
@@ -283,7 +284,9 @@ export interface ActionDraft {
   /** The ID of the saved application a click clicks in, or empty before one is picked. */
   readonly clickApp: string;
   readonly button: ClickButtonDef;
-  /** Whether a click gives the focus back to the window that was in front. */
+  /** How a click reaches its window. */
+  readonly delivery: ClickDeliveryDef;
+  /** Whether a click with the cursor gives the focus back to the window that was in front. */
   readonly returnFocus: boolean;
   /** Where a click lands, or null before its target is set up. */
   readonly at: ClickAtDef | null;
@@ -322,9 +325,15 @@ export function newAction(key: number, kind: ActionDraft['kind'] = 'media'): Act
     sound: '',
     clickApp: '',
     button: 'left',
+    delivery: 'cursor',
     returnFocus: true,
     at: null,
   };
+}
+
+/** A key no row of `actions` has, for a row added to them. */
+export function unusedKey(actions: readonly ActionDraft[]): number {
+  return actions.reduce((next, action) => Math.max(next, action.key + 1), 0);
 }
 
 /** A new automation: pause whatever is playing, and undo it afterwards. */
@@ -364,12 +373,18 @@ export function toDraft(automation: AutomationDef): Draft {
       sound: action.kind === 'sound' ? action.file : '',
       clickApp: action.kind === 'click' ? action.app : '',
       button: action.kind === 'click' ? action.button : 'left',
+      delivery: action.kind === 'click' ? action.delivery : 'cursor',
       returnFocus: action.kind === 'click' ? action.returnFocus : true,
       at: action.kind === 'click' ? action.at : null,
     })),
     undo: automation.undo,
     cooldown: String(automation.cooldownMs / 1000),
   };
+}
+
+/** The draft the editor starts with: the saved automation's, or a new one. */
+export function startingDraft(existing: AutomationDef | null): Draft {
+  return existing === null ? EMPTY_DRAFT : toDraft(existing);
 }
 
 /** Whether the state check `choice` reads the state `name`: one of its own, or none. */
@@ -487,7 +502,14 @@ function buildAction(draft: ActionDraft, position: number): ActionDef | string {
     if (draft.at === null) {
       return `Set up where action ${position} clicks.`;
     }
-    return { kind: 'click', app: draft.clickApp, button: draft.button, returnFocus: draft.returnFocus, at: draft.at };
+    return {
+      kind: 'click',
+      app: draft.clickApp,
+      button: draft.button,
+      delivery: draft.delivery,
+      returnFocus: draft.returnFocus,
+      at: draft.at,
+    };
   }
   if (draft.kind === 'open') {
     const target = typedPath(draft.opens);

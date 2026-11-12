@@ -28,7 +28,7 @@ import {
   sizeText,
 } from '../lib/sizes.ts';
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
-import type { Fixing } from './NewValue.tsx';
+import type { Changing } from '../lib/flow.ts';
 
 interface AppRowsProps {
   readonly app: AppSummary;
@@ -42,6 +42,7 @@ interface AppRowsProps {
   readonly onDelete: (value: string) => void;
   readonly onMarkChecked: () => void;
   readonly onFix: (value: ValueDef) => void;
+  readonly onEdit: (value: ValueDef) => void;
   readonly onRemoveFix: (value: string, size: SizeDef) => void;
 }
 
@@ -127,6 +128,7 @@ function AppRows({
   onDelete,
   onMarkChecked,
   onFix,
+  onEdit,
   onRemoveFix,
 }: AppRowsProps) {
   const running = app.windows.length > 0;
@@ -240,15 +242,26 @@ function AppRows({
                   </button>
                 </span>
               ) : (
-                <button
-                  type="button"
-                  className="btn small"
-                  onClick={() => {
-                    onConfirm(key);
-                  }}
-                >
-                  Delete
-                </button>
+                <span className="confirm">
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => {
+                      onEdit(value);
+                    }}
+                  >
+                    Edit<span className="visually-hidden"> {value.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => {
+                      onConfirm(key);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </span>
               )}
             </td>
           </tr>
@@ -264,8 +277,8 @@ interface Props {
   readonly loadError: string | null;
   readonly onChanged: () => Promise<void>;
   readonly onNew: () => void;
-  /** Opens the flow that draws a saved value again at its window's size now. */
-  readonly onFix: (fixing: Fixing) => void;
+  /** Opens the flow that fixes a saved value at its window's size now, or edits it. */
+  readonly onChange: (changing: Changing) => void;
 }
 
 /** The column's heading for what values read now: the window's size when every running window has the same. */
@@ -279,7 +292,7 @@ function nowHeading(live: ReadonlyMap<string, LiveApp>): string {
     : "At the window's size now";
 }
 
-export function ValuesPage({ apps, automations, loadError, onChanged, onNew, onFix }: Props) {
+export function ValuesPage({ apps, automations, loadError, onChanged, onNew, onChange }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const live = useLiveValues(apps);
@@ -388,7 +401,10 @@ export function ValuesPage({ apps, automations, loadError, onChanged, onNew, onF
                   background(markAsChecked(app.id));
                 }}
                 onFix={(value) => {
-                  onFix({ app: app.id, value });
+                  onChange({ app: app.id, value, how: 'fix' });
+                }}
+                onEdit={(value) => {
+                  onChange({ app: app.id, value, how: 'edit' });
                 }}
                 onRemoveFix={(value, size) => {
                   background(unfix(app.id, value, size));

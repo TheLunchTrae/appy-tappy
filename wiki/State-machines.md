@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Four guards drop such stale messages:
+it was about has gone. Seven guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -33,6 +33,17 @@ it was about has gone. Four guards drop such stale messages:
   reader sends back for a discarded recording is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Attempt numbers.** The click target screen numbers each **Find it now**
+  and **Click it now**, and drops an answer whose number is not that of the
+  try under way.
+- **The open flow.** A save's answer closes the setup app's flow only while
+  the flow that saved is still the one open (`afterFlow` in
+  `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
+  on leaves the next flow alone.
+- **List reads.** The setup app numbers each read of the saved applications
+  and automations as it starts. An answer older than the newest one taken is
+  dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
+  started before a save and answers late never puts older lists back.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -640,32 +651,324 @@ only once it opens.
 
 The React side (`apps/setup/src/App.tsx`) has two pieces of state: `page`, the
 tab shown, and `flow`, the value, reference, automation, or application being
-made or edited. A flow covers the page while it is open.
+made or edited. A flow covers the page while it is open. A flow can open
+another flow for itself; it then waits under that one as its `opener` and
+shows again when that one ends. `Flow` in `apps/setup/src/lib/flow.ts` names
+the flows, and the transitions between them are pure functions there.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Page
-    Page --> Flow: New or Edit
-    Flow --> Page: Cancel
-    Flow --> Saving: Save
-    Saving --> Page: saved, the page that lists it opens
-    Saving --> Flow: the save fails, the flow shows why
-    Flow --> Page: a tab is clicked with nothing unsaved
-    Flow --> Asking: a tab is clicked with unsaved work
-    Asking --> Page: the user agrees to lose the work
-    Asking --> Flow: the user stays
-    Saving --> Saving: the tabs are disabled until the save ends
-    Flow --> Flow: Add application in the value or reference flow opens the application flow
+    Page --> Open: New or Edit opens a flow with none waiting
+    Open --> Open: the open flow opens another and waits under it
+    Open --> Open: Cancel with a flow waiting shows that flow as it was left
+    Open --> Page: Cancel with none waiting
+    Open --> Saving: Save
+    Saving --> Open: the save fails, the flow shows why
+    Saving --> Open: saved with a flow waiting, which shows again with what was made
+    Saving --> Page: saved with none waiting, the page that lists it opens
+    Saving --> Saving: the tabs, Cancel, and Leave wait until the save ends
+    Open --> Page: a tab is pressed and no flow holds unsaved work
+    Open --> Asking: a tab is pressed and the open flow or a waiting one holds unsaved work
+    Asking --> Page: Leave drops every flow
+    Asking --> Open: Stay
 ```
 
-The unsaved work of a flow, such as its screenshots and recording, lives in the
-flow's components and in the owner thread. Each flow reports what leaving it
-would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
-ask before they drop unsaved work. While a save runs, both are disabled. A save closes
-its flow only while that flow is still open (`saved` in `App.tsx`), so a save
-that finishes after the user moved on leaves the next flow alone. Leaving the
-value or reference flow unmounts it and stops its capture, which clears its screenshots and
-recording.
+**Open** is one flow on screen with up to two waiting under it. The types
+allow only these stacks, the flow on screen last; a fix or an edit of a saved
+value is a value flow that no automation opens:
+
+| Stack                            | How it comes about                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| automation                       | **New automation** or **Edit**                                                                 |
+| automation, application          | **Add application** in the automation editor                                                   |
+| automation, value                | **New value** in the automation editor                                                         |
+| automation, value, application   | **Add application** or **Change how it's found** in that value's [picker](#picker)             |
+| value, application               | **Add application** or **Change how it's found** in the picker of a value from the Values page |
+| reference, application           | The same in a reference's picker                                                               |
+| value, reference, or application | **New** or **Edit** on its own page, with none waiting                                         |
+
+- **Opening.** `valueFor` and `applicationFor` make the flow to open, with
+  its opener in it. The opener keeps the application it showed chosen, so it
+  shows again as the user left it. The automation editor also hands over its
+  draft (`waiting`), because the opener unmounts while the other flow shows.
+  The value and reference flows open the application flow only from their
+  picker, before a capture holds anything, so they wait with nothing but that
+  application.
+- **Save and Cancel.** `afterFlow` decides what follows a flow that ended. A
+  save shows the opener with what the save answered: the application's ID to
+  a value or reference flow, whose picker starts with it, and the
+  application's ID with the value's ID from `save_value` to the automation
+  flow, with the number of the newest read of the saved lists started before
+  the save was heard. **Cancel** shows the opener as it was left. With none waiting, a save
+  opens the page that lists what was saved and **Cancel** the page under the
+  flow.
+- **Tab.** What leaving loses is what the open flow reports
+  (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
+  that waits (`heldInAll`). A fix and an edit start from the screenshot the
+  capture takes when they open, so that screenshot is not unsaved work. With nothing unsaved the tab's page opens. With
+  unsaved work the question asks first, and `lostText` names what the open
+  flow loses and the automation's unsaved changes. **Leave** drops every
+  flow, and **Stay** keeps the stack as it is. While a save runs, the tabs
+  and the question's answers wait.
+- **A save that finishes after the user moved on.** `App.tsx` tells
+  `afterFlow` whether the flow that saved is still the one open, by identity,
+  and `afterFlow` changes nothing when it is not. The tabs and **Cancel** are
+  disabled while a save runs, so this guards a save whose flow was replaced
+  some other way.
+
+- **Pictures.** Leaving a value or reference flow unmounts it and stops its
+  capture, which clears its screenshots and recording, and **Change window**
+  stops the capture too, before the picker shows, so nothing holds them
+  while the user picks. A click picture taken for an automation's draft
+  stays while the automation's flow is open or waits under a flow it opened,
+  since the draft that names it waits with it. Once no automation flow is
+  left, on a save, **Cancel**, or **Leave**, the window removes the click
+  pictures that no saved automation names (`holdsAutomation`,
+  [Pictures kept](Setup-app.md#pictures-kept)).
+
+No flow waits for the saved files to be read again before it closes. Each
+save starts that read, and whatever shows next copes with lists that lack
+what was just saved: a picker makes its own look, and the automation editor
+waits for it, as the next section describes. A save that fails leaves its
+flow open with the reason, and changes nothing that waits.
+
+### What an automation watches
+
+The **When** card of the automation editor
+(`apps/setup/src/pages/AutomationEditor.tsx`) chooses the application, then
+one of its values. Its state is the draft's watched value, the application
+chosen before a value is picked, what a flow just handed over (`Handed` in
+`apps/setup/src/lib/flow.ts`), and the saved applications and values as the
+newest read of the pages' lists has them, with that read's number.
+`watchStep` in `apps/setup/src/lib/watch.ts` names where those stand as one
+`WatchStep`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> NoApplications: no saved application reads
+    [*] --> Choosing: several are saved and none is chosen
+    [*] --> Value: the only or chosen application has no value
+    [*] --> Pick: it has values and none is picked
+    [*] --> Ready: a saved automation's value is saved
+    [*] --> Missing: a saved automation's application cannot be read
+    [*] --> Arriving: a flow the editor opened saved an application or a value
+    NoApplications --> [*]: Add application
+    Choosing --> Value: an application without values is chosen
+    Choosing --> Pick: an application with values is chosen
+    Value --> [*]: New value
+    Value --> Pick: another application, with values, is chosen
+    Pick --> Value: another application, without values, is chosen
+    Pick --> Ready: a value is picked
+    Pick --> [*]: New value
+    Ready --> Pick: another application is chosen
+    Ready --> Value: another application, without values, is chosen
+    Ready --> Missing: a read no longer lists the application
+    Ready --> [*]: New value, Add application, or Save automation
+    Missing --> Pick: another application is chosen, or a read lists the application again
+    Missing --> Value: another application, without values, is chosen
+    Missing --> [*]: Add application
+    Arriving --> Value: the lists show the saved application
+    Arriving --> Ready: the lists show the saved value, and the draft picks it
+    Arriving --> Missing: a read newer than the save answers without the application
+    Arriving --> Pick: a read newer than the save answers without the value, or another application is chosen
+    Arriving --> Value: a read newer than the save answers without the value, and the application has none
+    Arriving --> Arriving: a read fails, the card says why
+    Arriving --> [*]: Add application
+```
+
+- **NoApplications**, **Choosing**, **Value**, and **Pick** say which step
+  comes next, and **NoApplications** and **Value** make the flow that takes
+  it the main button. **NoApplications** says so when applications are saved
+  but none of their files reads. **Add application** is offered in every
+  state, and **New value** in each that has an application the lists know.
+- **Ready** has a value to compare, which the editor reads live.
+- **Arriving** is exactly this: a flow handed something over, and no read of
+  the saved lists that started after the hand-over has answered. `App.tsx`
+  numbers the reads, the hand-over carries the number of the newest read
+  started before it, and `watchStep` compares that with the number of the
+  read the lists are from. Each save starts a read, and the lists are read
+  again every three seconds while the editor is open, so a read that failed
+  is tried again; meanwhile the card says why it failed. A value handed over
+  takes the place of the draft's watched value at once (`returned`), so until
+  it is picked the draft has no value: **Save automation** is off, and the
+  foot of the editor says that what was saved is being read (`readiness`).
+  When the lists show the value, the draft picks it (`arrived`) in the same
+  render, with a comparison that suits it, and the card names it.
+- A read newer than the hand-over that answers without what was handed over
+  ends **Arriving**: nothing is on its way any more. A missing application
+  is **Missing**. A missing value is **Pick**, or **Value** when the
+  application has no other, and both say that the saved value is gone.
+- **Missing** is a chosen application that the saved lists do not have with a
+  readable file: the watched value's, one chosen by hand whose file broke
+  since, or one a flow just saved. It says which, and the draft stays while
+  the user chooses another application or adds it again.
+- Every state can be left with the draft kept: by a choice in the card, or by
+  **Add application**, which is offered in all of them.
+- Opening **Add application** or **New value** ends the editor, and a new
+  one opens when that flow ends, with the draft and what the flow saved, as
+  [Pages and flows](#pages-and-flows) describes. Opening one while
+  **Arriving** drops what the editor waited for. Nothing is lost by that,
+  since the draft holds no value meanwhile: the saved value is in the list to
+  pick once the editor shows again.
+
+When the editor shows again after a flow it opened, the focus moves to the
+control the step is taken with (`editorLanding` in
+`apps/setup/src/lib/landing.ts`): **Add application**, the application list,
+**New value**, the value list, or the comparison once a value is picked.
+While **Arriving** it waits for the step to be known. It lands only while
+nothing holds the focus, and it is dropped for good once the user puts the
+focus anywhere themselves, such as in **Name** while the lists are read, so
+it never takes the focus from what they are doing (`settle`). The card's
+guide is a status region that stays mounted and describes those controls, so
+a screen reader hears the step, that what was saved is being read, and the
+value once it is picked. The [picker](#picker) does the same when it shows
+after another flow (`pickerLanding`), by the same rule: the focus moves to
+**Capture this window** once there is a window, and otherwise to the way
+forward.
+
+### Picker
+
+The first step of the value and reference flows
+(`apps/setup/src/components/Picker.tsx`) chooses the application and finds
+the window to capture. Its state is the chosen application, the window picked
+among several, the capture it asked for (`Start`), and the newest look at the
+saved applications and the open windows (`Look`, from
+`apps/setup/src/lib/useAppWindows.ts`). `pickerStep` in
+`apps/setup/src/lib/picker.ts` names where those stand as one `PickerStep`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Looking: the picker opens and the first look starts
+    Looking --> NoApplications: the look finds no saved application
+    Looking --> Choosing: it finds several, and none is chosen
+    Looking --> Missing: the chosen application is not among them
+    Looking --> One: the chosen application, or the only one, has one window that fits best
+    Looking --> Several: it has several that fit equally well
+    Looking --> None: it has no window to capture
+    Looking --> LookFailed: the look fails
+    LookFailed --> Looking: Refresh, before any look answered
+    LookFailed --> Resolving: Refresh, after one answered
+    NoApplications --> [*]: Add application
+    Choosing --> [*]: Add application
+    Choosing --> Resolving: an application is chosen
+    Missing --> Missing: Refresh, until the look answers
+    Missing --> Resolving: the look finds the application again, or another application is chosen
+    Missing --> LookFailed: the look fails
+    Resolving --> One: the look finds one window that fits best
+    Resolving --> Several: the look finds several that fit equally well
+    Resolving --> None: the look finds no window to capture
+    Resolving --> LookFailed: the look fails
+    Resolving --> Missing: the look no longer finds the application
+    One --> Resolving: Refresh, or another application is chosen
+    Several --> Resolving: Refresh, or another application is chosen
+    None --> Resolving: Refresh, or another application is chosen
+    Several --> Several: a window is picked
+    Several --> [*]: Change how it's found
+    None --> [*]: Change how it's found
+    One --> Starting: Capture this window
+    Several --> Starting: Capture this window, with a window picked
+    Starting --> [*]: the capture starts, and the flow moves on with the application and the window
+    Starting --> One: the capture is refused, the picker shows why
+    Starting --> Several: the capture is refused, the picker shows why
+```
+
+- A look is one `list_app_windows` command, so its applications, windows,
+  and fits come from one listing of the desktop. One starts when the picker
+  opens and on **Refresh**. An answer is dropped once another look replaced
+  it. What the last look that answered found stays on show while the next
+  one is made.
+- **Looking** is before any look answered: not even the applications are
+  known.
+- **LookFailed** is a look that could not read the saved applications or list
+  the windows. It shows the reason, whatever application is chosen, and
+  **Refresh** looks again.
+- **NoApplications** and **Choosing** show the list of saved applications
+  with **Add application** in it. With one saved application there is no
+  choice, and the picker resolves that one. A flow that has its application,
+  **Fix at this size**, or **Edit** on a value or a reference, shows no list
+  and never reaches them.
+- **Missing** is a chosen application that the look does not find: the flow's
+  own, one handed over by the application flow, or the last choice. The
+  picker says so instead of asking for a choice as if none had been made.
+  **Refresh** keeps it until the new look answers, since the last answer
+  still lacks the application, and leaves it only if that look finds the
+  application again. Choosing another application or **Add application**
+  leaves it too; a flow with its own application has neither, so apart from
+  such a look only **Cancel** leaves it.
+- **Resolving** resolves the chosen application's window: at once from a
+  look that has answered, and otherwise when the look under way answers.
+  While a look is under way after one answered, a picker with no application
+  chosen stays in **Choosing** or **NoApplications**.
+- **One** has the window to capture. **Several** has one once the user picks
+  it among the windows that fit equally well; a look that no longer lists the
+  picked window leaves none picked. Both say when the windows are only the
+  application's fallback.
+- **None** is no window to capture: nothing fits, or a session reads a window
+  the list of open windows leaves out, such as one with no title. Only
+  **Refresh**, another application, or **Change how it's found** leaves it.
+- **Starting** disables every control but **Cancel** until `pick_window`
+  answers. A refusal, such as a window that closed since the look, shows in
+  the step it came from, and the next choice or look clears it.
+- **Add application** and **Change how it's found** end the picker: the
+  application flow opens for the picker's flow, and a new picker opens when
+  it ends, as [Pages and flows](#pages-and-flows) describes. **Change window**
+  in the capture opens a new picker with the same application, and with the
+  same window picked when several fit.
+
+### Click target tries
+
+The click target screen (`apps/setup/src/components/ClickTarget.tsx`) tries a
+target with **Find it now** and **Click it now**. `Try` in
+`apps/setup/src/lib/clickTry.ts` names the states, and `tryStep` there is the
+transition.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Finding: Find it now
+    Idle --> Clicking: Click it now
+    Answered --> Finding: Find it now
+    Answered --> Clicking: Click it now
+    Failed --> Finding: Find it now
+    Failed --> Clicking: Click it now
+    Finding --> Answered: where the click would land
+    Finding --> Failed: why it lands nowhere
+    Clicking --> Answered: the click was sent, and to which window
+    Clicking --> Failed: why it was not sent
+    Finding --> Idle: the target changes
+    Answered --> Idle: the target changes
+    Failed --> Idle: the target changes
+```
+
+- **Finding** and **Clicking.** The try starts with the press and keeps its
+  attempt number. A drawn picture is kept first, then the owner thread is
+  asked, and the screen's buttons wait meanwhile. Every way the try can end
+  answers it, a target that is not set up included, so none stays under way.
+  Both commands end by themselves. The owner waits at most a second for a
+  picture's frame. For a click sent to the window it then waits at most half
+  a second for the windows' answers to where the place is on them, and for a
+  click with the cursor about a tenth of a second while the buttons are held.
+- **Clicking locks the target.** A click that is being sent is a real click,
+  so from the press until its answer the button, **How to click**, where it
+  clicks, and the application cannot change. A click that was sent therefore
+  always shows its answer. `tryStep` also keeps **Clicking** through a change
+  that reaches it all the same.
+- **Answered.** **Find it now** answers where the click would land, which the
+  live view marks. **Click it now** answers that the click was sent and names
+  the window. When that is another window than the one the screen shows, the
+  screen offers **Look again**.
+- **Failed.** The screen shows why, such as a picture that is not found or a
+  window that refused the click. The next try or a change of the target
+  leaves the state.
+- **The target changes.** A change of where the click lands goes back to
+  **Idle** from every state but **Clicking**. A change of the button or of
+  **How to click** does too, except that it keeps where **Find it now** said
+  the click would land, since neither moves that place.
+- **A late answer.** The settings stay enabled while **Find it now** looks,
+  which clicks nothing. An answer whose attempt number is not that of the
+  try under way is dropped, so where an earlier target would land never
+  shows for the target as it is set up now.
 
 ### Update notice
 
@@ -734,7 +1037,10 @@ stateDiagram-v2
 ```
 
 - **Stop** closes the capture, adds 1 to `generation`, and clears every field
-  above.
+  above, so no frame, screenshot, or recorded reading outlives the capture.
+  The page stops it when a value or reference flow closes, on **Change
+  window**, and when a click's target screen closes or looks for its window
+  again.
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
@@ -774,9 +1080,9 @@ stateDiagram-v2
     Stopped --> Recording: Record with other settings starts a new recording
     Recording --> Ended: the window closes
     Stopped --> Ended: the window closes
-    Recording --> None: Discard, a window is picked, or the flow closes
-    Stopped --> None: Discard, a window is picked, or the flow closes
-    Ended --> None: Discard, a window is picked, or the flow closes
+    Recording --> None: Discard, Change window, a window is picked, or the flow closes
+    Stopped --> None: Discard, Change window, a window is picked, or the flow closes
+    Ended --> None: Discard, Change window, a window is picked, or the flow closes
 ```
 
 - Each frame is cropped to the region. A crop of another window size, or one
@@ -800,6 +1106,163 @@ stateDiagram-v2
   and the recording. A save or a try whose labeled screenshots, recording, or
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
+
+### Value edit
+
+**Edit** on the Values page opens the capture screen on a saved value
+(`apps/setup/src/components/Capture.tsx`, with the edit's own logic in
+`apps/setup/src/lib/edit.ts` and `useValueEdit.ts`). No type names the
+edit's states: they follow from the draft's region, the screenshot it was
+drawn on (`drawnOn`), and its states, compared with the saved value.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unplaced: Edit, and the window is captured
+    Unplaced --> Placed: a screenshot has the window size the value was drawn at
+    Placed --> Moved: the region is drawn, moved, or typed on a screenshot of that size
+    Moved --> Placed: the region is put back where it was saved
+    Unplaced --> [*]: Save changes, Discard, or the flow is left
+    Placed --> [*]: Save changes, Discard, or the flow is left
+    Moved --> [*]: Save changes, Discard, or the flow is left
+```
+
+- **Unplaced.** The region is where it was saved, on no screenshot, because
+  none has the window size the value was drawn at. The region shows on no
+  screenshot and cannot be drawn or typed, and the editor says which size
+  the value was drawn at and which the screenshot has. The edit is a `kept`
+  drawing, which needs no screenshot, so the name, the pin, the check's kind
+  and its settings still save. A window that never takes that size never
+  leaves this state; the editor points to **Fix at this size** for it.
+- **Placed.** `drawnOn` is the newest screenshot of that size, and the region
+  shows on every screenshot of that size. The edit is still a `kept` drawing
+  while the region equals the saved one.
+- **Moved.** The region differs from the saved one, so the edit is a `drawn`
+  drawing on `drawnOn`.
+
+A saved state check has a second machine beside it, which says where each
+state's picture comes from:
+
+```mermaid
+stateDiagram-v2
+    [*] --> SavedPictures: the saved check is a state check
+    SavedPictures --> NeedsScreenshots: the region moves
+    NeedsScreenshots --> SavedPictures: the region is put back where it was saved
+    SavedPictures --> TakenAgain: Take the states again, or a selection on a screenshot
+    NeedsScreenshots --> TakenAgain: a state is added from a screenshot
+    TakenAgain --> SavedPictures: every taken state is removed, with the region where it was saved
+    TakenAgain --> NeedsScreenshots: every taken state is removed, with the region moved
+```
+
+- **SavedPictures.** The draft has no state of its own and the region is the
+  saved one (`keepsStates`). The edit names the saved pictures in their
+  order, and the names in `stateNames` and the tolerance can change.
+- **NeedsScreenshots.** The saved pictures no longer fit the region, so the
+  edit is not built and **Save changes** waits; the editor says each state
+  needs a new screenshot.
+- **TakenAgain.** Every state comes from a screenshot of the size the value
+  was drawn at, as for a new value, and takes the next saved name.
+
+Each change to the edit is tried on the owner thread after a quarter of a
+second (`try_edit`, through `useLiveCheck`). The same edit is tried again
+when the window's size changes, which the page asks the owner for twice a
+second (`window_size`), and after a save the owner refused. The owner makes
+the edited value its `check`, placed where the value reads at the newest
+frame's size, or clears `check` when the value is not read at that size or
+the edit cannot be tried, and answers what a save would do. An answer for an
+edit that has changed since is dropped, as a late check's is.
+
+- **The edit cannot be built or read back.** The reading box says why, such
+  as a name another value has or a state's screenshot of another size, and
+  **Save changes** waits. The next change tries again.
+- **An automation refuses it.** The answer names the automations, the editor
+  shows them, and **Save changes** waits until a change no longer breaks
+  them. `edit_value` refuses the same edit, so a file that changed since the
+  answer cannot let one through.
+- **It removes fixes.** The answer lists their window sizes, and **Save
+  changes** waits until the user turns on **Remove its fix**. The agreement
+  holds the sizes agreed to, and counts only while the answer lists exactly
+  those, so an edit that later removes other fixes asks again. The save
+  carries those sizes, and `edit_value` refuses it unless they are exactly
+  the fixes the edit removes when it runs.
+- **The save fails.** The editor shows why and stays open with the draft, the
+  saved value is as it was, and the edit is tried again, so the answer shows
+  what the saved files say now.
+
+### Pin choice
+
+The pin of a new value, and of a saved value being edited, is picked in the
+capture screen's first step
+(`apps/setup/src/components/Capture.tsx`, shown by `PinPicker.tsx`). The
+choice is one `PinChoice`, automatic or by hand with a pin
+(`apps/setup/src/lib/pin.ts`). It lives on the capture's draft beside the
+region, so one update changes both. What the control shows, `PinView`,
+follows from the choice and the region, so no pin is kept beside the region
+it came from.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Automatic: a new value, or an edit of a value whose pin is the side its region is nearest
+    [*] --> ByHand: an edit of a value saved with another side
+    Automatic --> Automatic: the region is drawn, moved, resized, or typed, and the pin follows it
+    Automatic --> ByHand: a side is picked on the grid
+    ByHand --> ByHand: another side is picked
+    ByHand --> ByHand: the region is moved, resized, or typed, and the pin stays
+    ByHand --> Automatic: Back to automatic
+    ByHand --> Automatic: a new region is drawn
+```
+
+- **Automatic** shows as `waiting` until a region is drawn on a screenshot,
+  and nothing can be picked by hand before then. After that, the pin is the
+  third of the window the region's center is in (`guessPin`), worked out
+  again each time the control draws. **Change** opens the grid without
+  leaving **Automatic**.
+- **ByHand** keeps its pin wherever the region goes. While the region is
+  nearest another side, the control says so and names both
+  (`pinNotice`), next to **Back to automatic**, so a pin chosen for one place
+  never governs another unseen.
+- A region set on the screenshot is new when it keeps neither the size nor a
+  corner of the one before (`pinChoiceAfterRegion`): a move keeps the size
+  and a corner drag keeps a corner, even when it flips the region over. A
+  region drawn on a larger screenshot can reach past the one shown, where a
+  corner drag keeps its still corner inside the picture, so the corners of
+  the region before are compared as kept inside it. The typed fields only
+  move or resize. A State check's selection fits the region without this
+  check, so it keeps a pin chosen by hand and the control says when the two
+  disagree.
+- The reference editor draws on the same screenshot for its own characters,
+  so a region drawn there leaves the choice alone.
+- A fix has no choice: it reads at its own region, and its value keeps its
+  pin.
+- **Back to automatic** moves the focus to **Change**, which takes its
+  place. The notice is a live region that stays in the page while it has
+  nothing to say.
+
+### Reading area
+
+**This content may move**, in the same step, is one flag, `mayMove`. With the
+check's kind it comes to one of three (`movingContent` in
+`apps/setup/src/lib/moving.ts`):
+
+- **Fixed**, while the flag is off: the region is drawn around the value.
+- **Area**, for a Number or a Bar fill check: the region is a reading area,
+  drawn dashed and named so on the screenshot, with what else it would read.
+- **Unsupported**, for a Color or a State check: the region stays a plain
+  region, and the step says why and what to do instead.
+
+Changing the check's kind moves between **Area** and **Unsupported**, and the
+flag moves to and from **Fixed**. Saving sends `readingArea` only in
+**Area** (`isReadingArea`), so a value whose check cannot read a reading
+area saves without one while the switch stays on. The owner refuses a save
+that names one for such a check, with the rule of `AppFile::check`.
+
+A fix has no switch. It starts in **Area** when its value saved a reading
+area and in **Fixed** otherwise, and stays there, since a fix keeps its
+value's kind of check. [Content that moves](Screen-regions.md#content-that-moves)
+says what the saved flag is for.
+
+An edit has the switch. It starts in **Area** when its value saved a reading
+area and in **Fixed** otherwise, and moves as a new value does; the owner
+refuses an edit that names a reading area for a Color or a State check.
 
 ### Text reader
 
@@ -900,7 +1363,8 @@ second copy over to the first, which brings its window forward
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
 one. Each save reads the file, changes it, and writes it back. A save of an
-application's file goes through `Owner::update_app`, which loads the file,
+application's file, an edit of one of its values included, goes through
+`Owner::update_app`, which loads the file,
 changes it and hands it to `Owner::write_app`, and a save of the automations
 or the settings goes through `Owner::update_runtime`. After a save that works,
 they tell who reads what it changed, as its `Changed` kind says:
@@ -913,18 +1377,30 @@ they tell who reads what it changed, as its `Changed` kind says:
   changing its mode.
 - **The runtime, the overlays and their windows:** removing an application.
 
-A save that failed before it wrote anything changed nothing, so it tells
-neither, and an overlay that was reading goes on reading. A delete tells them
-once it has written the application's file, and removing an application tells
-them even when the removal fails partway. After each save of an application's
-file, the setup app removes the pictures the file no longer names. That
-removal is best effort: one that fails does not fail the save, and the next
-save tries again. Deleting a reference that is already gone saves nothing and
-tells no one, but still removes the pictures an earlier delete left behind.
-Moving a panel writes the application's file without telling anyone.
+A save that failed changed nothing anyone reads, so it tells neither, and an
+overlay that was reading goes on reading. A delete tells them once it has
+written the application's file, and removing an application tells them even
+when the removal fails partway. After each save of an application's file,
+whether it worked or failed, the setup app removes the pictures in its folder
+that the file as saved does not name, of those AppyTappy named. So a save that
+fails after it wrote some pictures takes them back, and pictures that a save
+left when the program ended in the middle of it go with the application's
+next save. That removal is best effort: one that fails does not fail the
+save, and the next save tries again. Deleting a reference that is already
+gone saves nothing and tells no one, but still removes the pictures an
+earlier delete left behind. An edit that leaves a value as it was saved
+writes nothing and tells no one. Moving a panel writes the application's
+file without telling anyone.
+
+A click's picture is written to the `clicks` folder when its target is set
+up, before its automation is saved. Each save of the automations removes the
+click pictures none of them names, and so does the end of the automation's
+flow, so a target set up for an automation that was not saved leaves no file.
+[Pictures kept](Setup-app.md#pictures-kept) lists what each folder holds.
 
 A temporary file is named `<file>.<process ID>-<time>.tmp`. After a save,
 `remove_leftovers` deletes the temporary files in the same folder that another
 run left and that have not changed for ten minutes, such as one a crash left
-between the write and the rename. A failed delete does not fail the save, and
+between the write and the rename. Those in the `clicks` folder go when the
+click pictures are removed. A failed delete does not fail the save, and
 the next save tries again.

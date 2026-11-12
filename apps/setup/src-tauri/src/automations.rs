@@ -14,9 +14,9 @@
 use std::fs;
 
 use appytappy_config::action::KeyChord;
-use appytappy_config::app_file::AppFile;
+use appytappy_config::app_file::{AppFile, ValueDef, ValueKind};
 use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, AutomationsFile, new_automation_id,
+    ActionDef, AutomationDef, AutomationsFile, TargetDef, new_automation_id,
 };
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::StoredApp;
@@ -226,23 +226,35 @@ pub(crate) fn save(
         file.automations.push(draft);
         id
     };
-    stores
-        .automations
-        .save(&file)
-        .map_err(|error| error.to_string())?;
-    prune_pictures(stores, &file);
+    write(stores, &file)?;
     Ok(id)
 }
 
-/// Removes the click pictures no automation in `file` names, such as those
-/// taken for a target the user did not keep.
-fn prune_pictures(stores: &Stores, file: &AutomationsFile) {
-    // A picture left behind costs a little disk until the next save.
+/// Saves `file` as the automations, then removes the click pictures none of
+/// them names, such as those of a target that was replaced or deleted.
+fn write(stores: &Stores, file: &AutomationsFile) -> Result<(), String> {
+    stores
+        .automations
+        .save(file)
+        .map_err(|error| error.to_string())?;
+    // No one reads a picture no automation names, so one that stays changes
+    // nothing, and the next save tries again.
     #[expect(
         clippy::let_underscore_must_use,
         reason = "the save worked; an unused picture that stays is harmless"
     )]
     let _ = stores.automations.prune_pictures(file);
+    Ok(())
+}
+
+/// Removes the click pictures no saved automation names: those taken for a
+/// target of an automation the user then did not save.
+pub(crate) fn forget_unsaved_pictures(stores: &Stores) -> Result<(), String> {
+    let file = load(stores)?;
+    stores
+        .automations
+        .prune_pictures(&file)
+        .map_err(|error| error.to_string())
 }
 
 /// Turns the automation `id` on or off. One that cannot run as saved stays
@@ -268,22 +280,14 @@ pub(crate) fn set_enabled(stores: &Stores, id: &str, enabled: bool) -> Result<()
         }
         file.automations[position].enabled = enabled;
     }
-    stores
-        .automations
-        .save(&file)
-        .map_err(|error| error.to_string())
+    write(stores, &file)
 }
 
 /// Removes the automation `id`. One that is already gone is fine.
 pub(crate) fn delete(stores: &Stores, id: &str) -> Result<(), String> {
     let mut file = load(stores)?;
     file.automations.retain(|automation| automation.id != id);
-    stores
-        .automations
-        .save(&file)
-        .map_err(|error| error.to_string())?;
-    prune_pictures(stores, &file);
-    Ok(())
+    write(stores, &file)
 }
 
 /// Fails, naming the automations that watch the value `value` of the
@@ -296,6 +300,65 @@ pub(crate) fn check_unused(
 ) -> Result<(), String> {
     let file = load(stores)?;
     unused(file.watching(app, value), name)
+}
+
+/// Fails, naming the automations that watch the value `saved` of the
+/// application `app` and whose condition suits it but would not suit it as
+/// `edited`: one that compares it with another kind of target than the edit
+/// makes it read, or with a state the edit renames or removes. An automation
+/// whose condition does not suit `saved` either is already listed with its
+/// problem, and the edit is not what breaks it.
+pub(crate) fn check_still_suits(
+    stores: &Stores,
+    app: &str,
+    saved: &ValueDef,
+    edited: &ValueDef,
+) -> Result<(), String> {
+    let file = load(stores)?;
+    let (was, now) = (saved.screen.check.reads(), edited.screen.check.reads());
+    // What each broken automation uses that the edit takes away, with the
+    // automations that use the same thing together.
+    let mut broken: Vec<(String, Vec<&AutomationDef>)> = Vec::new();
+    for automation in file.watching(app, &saved.id) {
+        let target = &automation.when.target;
+        if target.suits(saved).is_err() || target.suits(edited).is_ok() {
+            continue;
+        }
+        let what = match target {
+            TargetDef::State(state) if was == now => format!(
+                "the state {state:?} of {}, which this change renames or removes",
+                saved.name
+            ),
+            TargetDef::Number(_) | TargetDef::Flag(_) | TargetDef::State(_) => format!(
+                "{} as {}, and this change makes it read {}",
+                saved.name,
+                kind_text(was),
+                kind_text(now)
+            ),
+        };
+        match broken.iter_mut().find(|(used, _)| *used == what) {
+            Some((_, users)) => users.push(automation),
+            None => broken.push((what, vec![automation])),
+        }
+    }
+    let problems: Vec<String> = broken
+        .into_iter()
+        .filter_map(|(what, users)| unused(users.into_iter(), &what).err())
+        .collect();
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join(" "))
+    }
+}
+
+/// What a value of `kind` reads, in a sentence.
+const fn kind_text(kind: ValueKind) -> &'static str {
+    match kind {
+        ValueKind::Number => "a number",
+        ValueKind::Flag => "yes or no",
+        ValueKind::State => "a state",
+    }
 }
 
 /// Fails, naming the automations that watch any value of the application
@@ -345,8 +408,8 @@ mod tests {
         SizeDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
-        ActionDef, ClickAtDef, ClickButtonDef, ComparisonDef, FORMAT as AUTOMATIONS_FORMAT,
-        MediaCommandDef, PointDef, TargetDef, WhenDef,
+        ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef,
+        FORMAT as AUTOMATIONS_FORMAT, MediaCommandDef, PointDef, TargetDef, WhenDef,
     };
     use appytappy_config::click::InvalidClick;
     use appytappy_config::window_match::WindowFacts;
@@ -380,6 +443,7 @@ mod tests {
                 },
                 check,
                 pin: None,
+                reading_area: false,
                 fixes: Vec::new(),
             },
         };
@@ -780,6 +844,7 @@ mod tests {
         clicking.actions = vec![ActionDef::Click {
             app: "example".to_owned(),
             button: ClickButtonDef::Left,
+            delivery: ClickDeliveryDef::Cursor,
             return_focus: true,
             at: ClickAtDef::Picture {
                 image: image.to_owned(),
@@ -824,10 +889,31 @@ mod tests {
         let id = save(&stores, None, clicking(&stores, "Click", &kept)).expect("saves");
         assert!(stores.automations.picture(&kept).is_ok());
         assert!(stores.automations.picture(&dropped).is_err(), "pruned");
-        let another = stores.automations.add_picture(&png(3)).expect("adds");
+        // Turning one off is a save of the automations too.
+        let stray = stores.automations.add_picture(&png(3)).expect("adds");
+        set_enabled(&stores, &id, false).expect("turns off");
+        assert!(stores.automations.picture(&kept).is_ok());
+        assert!(stores.automations.picture(&stray).is_err(), "pruned");
+        // A target set up for an automation that was then not saved.
+        let unsaved = stores.automations.add_picture(&png(4)).expect("adds");
+        assert_eq!(forget_unsaved_pictures(&stores), Ok(()));
+        assert!(stores.automations.picture(&kept).is_ok());
+        assert!(stores.automations.picture(&unsaved).is_err(), "forgotten");
+        let another = stores.automations.add_picture(&png(5)).expect("adds");
         delete(&stores, &id).expect("deletes");
         assert!(stores.automations.picture(&kept).is_err(), "pruned");
         assert!(stores.automations.picture(&another).is_err(), "pruned");
+        // While the automations cannot be read, nothing says which pictures
+        // they name, so every picture stays.
+        let waiting = stores.automations.add_picture(&png(6)).expect("adds");
+        let saved = stores
+            .automations
+            .pictures()
+            .with_file_name("automations.json");
+        assert!(saved.exists(), "the file the automations are saved in");
+        fs::write(saved, b"{").expect("breaks");
+        assert!(forget_unsaved_pictures(&stores).is_err());
+        assert!(stores.automations.picture(&waiting).is_ok());
         fs::remove_dir_all(folder).expect("clean up");
     }
 

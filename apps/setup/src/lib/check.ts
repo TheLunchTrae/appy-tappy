@@ -13,6 +13,7 @@ import {
   type StateSpec,
 } from './bindings.ts';
 import type { FoundLabel } from './found.ts';
+import { AUTOMATIC, type PinChoice } from './pin.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
@@ -57,6 +58,8 @@ export interface Draft {
   readonly region: Rect | null;
   /** The screenshot the region was drawn on, whose window size the region's pixels refer to. */
   readonly drawnOn: number | null;
+  /** How a new value's pin is picked. It lives beside the region, since a region drawn anew changes both. */
+  readonly pin: PinChoice;
   readonly tolerance: number;
   /** The reference's characters' color. */
   readonly ink: Color | null;
@@ -87,6 +90,7 @@ export const EMPTY_DRAFT: Draft = {
   kind: 'number',
   region: null,
   drawnOn: null,
+  pin: AUTOMATIC,
   tolerance: DEFAULT_TOLERANCE.number,
   ink: null,
   labels: new Map(),
@@ -396,6 +400,15 @@ export function fixDraft(check: CheckDef): Draft {
     case 'state':
       return { ...start, tolerance: check.tolerance, stateNames: check.states.map((state) => state.name) };
   }
+}
+
+/**
+ * `draft`, a fix's, with its region at `region` on the screenshot `shot`, where the value reads at that screenshot's
+ * size; unchanged when it reads nowhere there, or a region is drawn already. The capture opens a fix on a
+ * screenshot it takes itself, so what this makes of the opening draft is what leaving the fix loses nothing of.
+ */
+export function withFixRegion(draft: Draft, region: Rect | null, shot: number): Draft {
+  return region === null || draft.region !== null ? draft : { ...draft, region, drawnOn: shot };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

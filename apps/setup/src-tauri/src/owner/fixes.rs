@@ -62,7 +62,7 @@ impl<H: Host> Owner<H> {
                 ));
             }
             same_kind(&value.screen.check, &spec.check)?;
-            let number = free_fix_number(&value.id, &value.screen.fixes);
+            let number = free_picture_number(&value.id, value.screen.images());
             let saved = owner
                 .with_session(|session| {
                     check_spec::to_saved_fix(
@@ -219,14 +219,16 @@ fn same_kind(check: &CheckDef, spec: &CheckSpec) -> Result<(), String> {
     }
 }
 
-/// The smallest number from 1 that no fix of the value `id` among `fixes`
-/// names its pictures with, so a new fix's pictures never overwrite those
-/// of a fix still saved, the one it replaces included.
-fn free_fix_number(id: &str, fixes: &[FixDef]) -> usize {
+/// The smallest number from 1 that none of `images`, the value `id`'s
+/// pictures, is named with, so the pictures of a new fix, or of a drawing
+/// whose states are taken again, never overwrite those still saved, the
+/// ones they replace included.
+pub(super) fn free_picture_number<'file>(
+    id: &str,
+    images: impl Iterator<Item = &'file str>,
+) -> usize {
     let prefix = format!("{id}-");
-    let taken: Vec<usize> = fixes
-        .iter()
-        .flat_map(|fix| &fix.images)
+    let taken: Vec<usize> = images
         .filter_map(|image| {
             let (number, _) = image.strip_prefix(&prefix)?.split_once('-')?;
             number.parse().ok()

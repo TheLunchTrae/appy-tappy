@@ -2,8 +2,9 @@
 
 An action is what a rule does when it fires. The types live in
 `appytappy-config` (`crates/config/src/action.rs`), and the Windows code that
-performs them lives in `appytappy-actions`. Only the runtime's action worker
-calls that crate; the engine only says which rule fired.
+performs them lives in `appytappy-actions`. The runtime's action worker calls
+that crate, and the engine only says which rule fired. The setup app calls it
+for one thing, a click the user asks for ([Trying a click](#trying-a-click)).
 
 ## The v1 set
 
@@ -21,7 +22,8 @@ calls that crate; the engine only says which rule fired.
 - **Play a sound:** a WAV file by its full path. See [Sounds](#sounds).
 - **Click in another application:** a left, right, or double click at a spot
   in a saved application's window, or on a picture wherever it shows in an
-  area of that window. See [Clicks](#clicks).
+  area of that window, with the cursor or sent to the window as messages. See
+  [Clicks](#clicks).
 
 An app is named the way Windows reports it, ignoring ASCII case. For media, that
 is the session's app ID: usually the executable name, such as `Player.exe`, for
@@ -150,6 +152,30 @@ in that application's window it lands:
   because saving that application removes the pictures its own `app.json`
   does not name.
 
+A click also says how it reaches the window, its delivery:
+
+- **With the cursor,** the default: the window comes to the front, and the
+  real cursor moves there and presses, as a real mouse does. See
+  [A click with the cursor](#a-click-with-the-cursor).
+- **As messages:** the click is posted to the window as mouse messages.
+  AppyTappy moves neither the cursor nor the focus for it, which is what a
+  game in front, such as one in exclusive full screen, needs to keep running
+  undisturbed. What the clicked application does then is its own: one that
+  brings itself to the front when it is clicked still takes the focus. Many
+  applications ignore such a click, and a click under a game in exclusive
+  full screen is not tested. See
+  [A click sent as messages](#a-click-sent-as-messages).
+
+The owner decided that the delivery is each click's own choice and that the
+cursor stays the default. `automations.json` keeps it on the click action as
+`delivery`, `cursor` or `message`, and a click that names none clicks with the
+cursor. Giving the focus back belongs to a click with the cursor alone:
+`ClickDelivery` in `appytappy-config` holds it only in its `Cursor` variant, so
+a click sent as messages cannot carry one, and the file's `returnFocus` is not
+read for it. The setup app calls the two **Move the cursor** and **Send to the
+window**, and shows **Go back to the window that was in front** only for the
+first.
+
 The runtime places a click just before it runs, on the action thread, because
 where it lands depends on where the window is now. It takes the target's
 window that a new session would read, as
@@ -166,7 +192,10 @@ at; the runtime then grabs one frame of the area, waits up to a second for
 it, and looks for the picture there (see
 [Screen regions](Screen-regions.md)). It reads the window's frame again after
 the search, and a window that moved since the grab is not clicked. Nothing is
-clicked when the picture is not found, and the log says why. `ClickSearch` in
+clicked when the picture is not found, and the log says why. Placing is the
+same for both deliveries. `place` in `appytappy-sources`
+(`crates/sources/src/screen/place.rs`) owns it, for the runtime and for the
+click the setup app sends on request. `ClickSearch` in
 `appytappy-sources` owns reading a click's picture, checking it against the
 click, and turning where it is found into where the click lands. The runtime
 places clicks with it, and the setup app's **Find it now** and its check
@@ -184,7 +213,15 @@ around where the picture shows rather than across the whole window. An area
 holds at most 160,000 pixels, such as 400 by 400, because other actions wait
 for the search.
 
-A click clicks only while the watched application or the application it
+`click` in `appytappy-actions` (`crates/actions/src/click.rs`) runs a placed
+click either way and makes every choice. It reaches Windows through the
+`Input` trait, whose adapter only makes the calls, so the setup app can send a
+click without the media and audio controls that the other actions need.
+
+### A click with the cursor
+
+A click with the cursor clicks only while the watched application or the
+application it
 clicks in has the keyboard focus, because anti-cheat was checked for those
 two, and only while no mouse button or modifier key is held, so it is never
 a drag or a Ctrl-click. It brings the click's window to the front first with
@@ -215,11 +252,147 @@ let a program send input to a program running as administrator, and
 `SendInput` does not say when it was blocked, so a click in such a window
 is logged as done although nothing happened.
 
+### A click sent as messages
+
+A click sent as messages is placed like any click: in the window a new
+session would read, never one taken only as the fallback, that is open and
+neither minimized nor hidden; at the same spot, or where the same picture
+search finds the picture, while the window has the size the picture was taken
+at; and not in a window that moved since the grab. What it needs after that
+differs:
+
+- **No focus.** A click with the cursor needs the watched application or the
+  one it clicks in to be in front because `SendInput` goes to whichever window
+  is in front. A posted message goes only to the window it names, so the
+  click is sent whichever window is in front. AppyTappy brings nothing to the
+  front, and has no focus to give back.
+- **No look at what shows at its place.** A message cannot land in a window
+  that covers the click's window, so a covered window is still clicked.
+- **No wait for held buttons or keys.** Its messages name the one button it
+  presses and no modifier key, so it is never a Ctrl-click by what the message
+  says. An application that asks Windows which keys are down while it handles
+  the message still sees the keys the user holds.
+
+One thing it needs that a click with the cursor does not: the click's window
+must not be disabled, as a window is while it shows a dialog of its own. The
+mouse reaches no part of a disabled window, so the click is not sent.
+
+The messages go to the window that a real click at the place would reach,
+among the click's window and its child windows. Windows finds that window by
+asking the windows themselves, and `click` asks them the same way. Inside a
+window's client area (`ScreenToClient`, `GetClientRect`) it goes through the
+child windows from the topmost down (`GetWindow`) and passes over one that is
+hidden or disabled (`GetWindowLongW`) or does not hold the place
+(`GetWindowRect`). The first child that takes the place, itself or through a
+window inside it, gets the click. When none does, the window itself answers
+where the place is on it (`WM_NCHITTEST`, sent with `SendMessageTimeoutW`):
+
+- **In its client area:** the window gets the click.
+- **Nowhere the mouse stops:** a label and a group box answer this
+  (`HTTRANSPARENT`), and the click goes on to the window behind, or to the
+  window around them.
+- **On another part,** such as a title bar, a border, or a scroll bar: the
+  click is not sent, because those parts get other messages, which a click
+  does not send.
+
+It goes at most 64 windows deep and through at most 4,096 children of one
+window, far more than Windows has. Unlike the mouse, it asks every child in
+turn whichever thread owns it; the mouse goes on behind a window it goes
+through only to windows of the same thread. While the adapter waits for a
+window's answer, its thread handles no message sent to it (`SMTO_BLOCK`), so
+nothing else runs on that thread in the middle of a click.
+
+A window that Windows stretches, because its program does not follow its
+monitor's scale, counts in its own pixels, and its mouse messages name places
+in them. The adapter does no scaling of its own for that. It converts the
+click's screen place with `PhysicalToLogicalPointForPerMonitorDPI`, which
+Microsoft documents for getting a place in another program's own pixels, and
+makes every call about a window while its thread has that window's DPI
+awareness context (`GetWindowDpiAwarenessContext`,
+`SetThreadDpiAwarenessContext`). Windows runs a window's procedure in that
+context, so each call answers what the window's own code would get.
+
+The click is then posted with `PostMessageW`: `WM_MOUSEMOVE`, the button's
+down message with its button flag (`MK_LBUTTON` or `MK_RBUTTON`), and its up
+message, each with the place in its `lParam`, 20 ms apart so an application
+that reads its messages once a frame sees each. A double click goes down, up,
+down again, and up. Its second press depends on the window's class
+(`GetClassLongPtrW`): Windows tells a window about double clicks only when its
+class has `CS_DBLCLKS`, so such a window gets `WM_LBUTTONDBLCLK`, and any other
+window gets a second `WM_LBUTTONDOWN`, as it would from the mouse. When
+Windows refuses a message after the button went down, the up message is
+posted once more. `PostMessageW` returns without waiting for the window.
+
+What a click sent as messages cannot promise:
+
+- **Many applications ignore it.** A game that reads the mouse through raw
+  input or DirectInput never sees window messages, and some applications that
+  draw their own controls, or that ask where the real cursor is, do not act on
+  them. Which kinds of applications take such a click is not tested yet: it is
+  an open question, and this page does not answer it.
+  [Checking on Windows](#checking-on-windows) says how to check an
+  application.
+- **Nothing reports whether it worked.** A posted message has no answer, so
+  AppyTappy knows only that Windows took the messages. Each click that is sent
+  gets a line in the log, which says that it was sent and that nothing tells
+  whether the application acted on it. The log never says that such a click
+  worked.
+- **A window that runs as administrator refuses it.** Windows blocks messages
+  from a program with fewer rights, and for a posted message, unlike
+  `SendInput`, it says so. The click fails, and the log says why.
+- **A window that Windows stretches is not checked.** The conversion to the
+  window's own pixels rests on what Microsoft documents, as above, and on no
+  check of a stretched window yet: the CI display is not scaled, so the
+  adapter's test of it shows only that the calls work.
+- **Busy windows hold the click up for a moment.** Each window that is asked
+  where the place is on it has up to 200 ms to answer, and all the windows a
+  click asks have 500 ms between them, however many they are. When a window
+  does not answer in time, or the 500 ms run out, the click is not sent, and
+  the log says so. The actions behind the click wait that long at most for
+  the answers, and so does the setup app during **Click it now**.
+- **The application may think the pointer stays.** The messages say that the
+  pointer came to the click's place, and nothing says that it left, so an
+  application that highlights what the pointer is over may keep the highlight
+  until the real pointer moves over its window.
+
+### Anti-cheat and clicks
+
 Both applications need the anti-cheat class `none`, the watched one and the
 one it clicks in, because a click is injected input too. Saving an
 automation checks this, and so does the runtime whenever it reads the
 automations. A click cannot be undone, so a rule that restores needs another
 action that can.
+
+The owner decided that a click sent as messages does not relax this rule. A
+posted message is not system-wide input, but it is still input that AppyTappy
+makes for another program, and anti-cheat can notice mouse messages that no
+mouse made and treat them as cheating. So `Action::input_sent` counts a click
+whatever its delivery, and both applications need the class `none` for either.
+Letting a click sent to another application run while a protected application
+is watched is a separate decision, which needs the owner.
+
+### Trying a click
+
+On the click target screen, **Click it now** sends one real click with the
+button and the delivery chosen there, when the user presses it and at no
+other time. The setup app's owner checks the anti-cheat class of the
+application it clicks in, and of the watched application once the automation
+watches a value. It then places the click with the same `place` and sends it
+with the same `click` and the same adapter as the runtime, which is what the
+setup app depends on `appytappy-actions` for. The setup app stands where the
+runtime has the watched application: a click with the cursor clicks only
+while the setup app's window or the click's window is in front, as it is when
+the user has just pressed the button, and the focus goes back to the setup
+app when the click asks for that. The screen says that the click was sent,
+not that it worked.
+
+Like the runtime, **Click it now** finds the window through the application's
+window rules at that moment. With several of the application's windows open,
+that can be another window than the one the screen shows and **Find it now**
+looked at, so the answer names the window by its title and says when it is
+another one, and **Look again** then shows it.
+[Click target tries](State-machines.md#click-target-tries) describes the
+screen's states.
 
 ## Restoring
 
@@ -291,10 +464,6 @@ release has nothing to undo.
 - **Sending keys to another application:** keys go only to the watched
   application while it is in front, so a hotkey meant for another application
   cannot be sent.
-- **Clicking without moving the cursor or the focus:** a click moves the real
-  cursor and may bring its window forward for a moment. Posting the click to
-  the window instead works only for some applications
-  ([#139](https://github.com/TheLunchTrae/appy-tappy/issues/139)).
 - **Arguments for a program, and links other than `http` and `https`:** see
   [Opening](#opening).
 - **HTTP and WebSocket calls** (to streaming or smart-home software): useful,
@@ -320,10 +489,30 @@ identifying the player's session the same way. The other lowers the player's
 volume and puts it back. Each puts the player back before checking anything,
 so a failed check leaves it as it was.
 
-A click is checked by hand. Save a click on a spot and one on a picture in
+A click with the cursor is checked by hand. Save a click on a spot and one on
+a picture in
 another application's window, with both applications' anti-cheat set to
 none, and check that each lands where the setup app showed it, on a window
 with and without a title bar, maximized, and on a second monitor with
 another scale; that a window covering the place stops the click; that a
 game that keeps the cursor inside its window gets no click; and that the
 focus goes back to the watched application.
+
+For a click sent as messages, the adapter's tests make hidden windows of
+classes of their own, with and without `CS_DBLCLKS`, and child windows: plain
+ones, a label and a group box over other controls, a hidden one, and a
+disabled one. They post each kind of click and read the messages, their
+button flags, and their places back from the thread's queue, which shows
+that a click reaches the window a real click would. One window, on a thread
+of its own, answers too late and gets no click. They run in the `windows` CI
+job. One test makes a window that does not follow the monitor's scale;
+on a display that is not scaled, as in CI, it shows only that the calls work.
+
+Whether a real application acts on such a click is checked by hand,
+one application at a time: set up a target in it with **Send to the window**,
+put another window in front, select **Click it now**, and see whether the
+application did what a click there does, and whether the cursor and the
+window in front stayed as they were. Check too a place inside a child
+control, a game in exclusive full screen in front, a window that Windows
+stretches on a monitor with another scale, and a window that runs as
+administrator, which the log says it cannot click.

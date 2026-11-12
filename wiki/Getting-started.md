@@ -49,19 +49,66 @@ Installing does three things:
 
 ## Make your first automation
 
-1. Open **AppyTappy** from the Start menu.
-2. [Add the application](Applications.md): pick the window of the program to
-   watch.
-3. [Make a value](Values.md): take a screenshot of that window and draw a box
-   around what AppyTappy should read, such as a number or a bar.
-4. [Make an automation](Automations.md): say when it runs, such as when the
-   value is at least 90, and what it does, such as pause the music.
+One flow takes you from nothing to an automation that runs. Each step brings
+you back to the automation with what you made chosen, and what you entered
+there stays as you left it.
+
+1. Open **AppyTappy** from the Start menu. It opens on the **Automations**
+   page.
+2. Select **New automation**. The automation says which step comes next.
+3. Select **Add application**, pick the window of the program to watch, and
+   select **Save application**. [Applications](Applications.md) describes the
+   choices.
+4. Select **New value** and capture the application's window. Take a
+   screenshot and draw a box around what AppyTappy should read, such as a
+   number or a bar. To read a number, select
+   **New reference from this region** there to teach AppyTappy the
+   application's characters. Then select **Save value**.
+   [Values](Values.md) describes each step.
+5. Back in the automation, say when it runs, such as when the value is at
+   least 90, and what it does, such as pause the music. Then select
+   **Save automation**. [Automations](Automations.md) describes the
+   conditions and the actions.
 
 That is all. The background part runs the automation from then on.
+
+You can also make each piece from its own page: an application on the
+**Applications** page, a value on the **Values** page, and a reference on the
+**References** page. An automation offers every saved application and value,
+so you only make what is missing.
 
 A **?** beside a field, heading, or column header in AppyTappy Setup explains
 it. Hold the pointer over it, or move to it with Tab, to read the explanation,
 and press Esc to hide it.
+
+## What AppyTappy keeps
+
+AppyTappy saves only the part of a window inside a box you drew, never the
+rest of the window, and only where it needs a picture to read or to click:
+
+- A [reference](References.md) keeps the box from each screenshot you
+  labeled and from each recorded reading you kept.
+- A **State** value keeps the box for each of its states, and again for each
+  size you [fixed it at](Values.md#fix-a-value-at-one-size).
+- A click on **A picture** keeps the picture you marked.
+
+A screenshot you take in AppyTappy Setup stays in memory only while you work
+with it. It is gone once you select **Change window**, once you save or leave
+the value, fix, or reference you opened the window for, once you close a
+click's target screen, and when AppyTappy Setup closes. A reference you make
+or change while you make a value is part of that value: saving the reference
+keeps the screenshots, and they go when the value is saved or left.
+
+A **Bar fill** or **Color** value keeps only its colors, and a **Number**
+value only which reference it reads with. Deleting a value, a reference, or
+an automation, removing a fix, or removing an application deletes its
+pictures with it.
+
+While it watches a window, the background part looks only at the boxes of
+your values and keeps nothing it sees. Its
+[log](Troubleshooting.md#appytappys-log) and the
+[runtime trace](Settings.md#runtime-trace) hold text, such as a value's name
+and what it read, and never a picture.
 
 ## Update
 
@@ -108,3 +155,8 @@ to leave without saving when you have changed something, because what you have
 not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
 save is still under way, the pages, **Leave**, **Change window**, and
 **Discard** or **Cancel** wait for it to finish.
+
+When you opened one from another, such as a value from a new automation,
+**Cancel** returns to the one you came from, as you left it. Selecting a page
+leaves all of them, so the question also names the unsaved changes to the
+automation.
