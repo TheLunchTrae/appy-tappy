@@ -503,8 +503,9 @@ classes of their own, with and without `CS_DBLCLKS`, and child windows: plain
 ones, a label and a group box over other controls, a hidden one, and a
 disabled one. They post each kind of click and read the messages, their
 button flags, and their places back from the thread's queue, which shows
-that a click reaches the window a real click would. They run in the `windows`
-CI job. One test makes a window that does not follow the monitor's scale;
+that a click reaches the window a real click would. One window, on a thread
+of its own, answers too late and gets no click. They run in the `windows` CI
+job. One test makes a window that does not follow the monitor's scale;
 on a display that is not scaled, as in CI, it shows only that the calls work.
 
 Whether a real application acts on such a click is checked by hand,

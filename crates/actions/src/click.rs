@@ -75,6 +75,10 @@ const WALK_TIME: Duration = Duration::from_millis(500);
 /// How long one window may take to answer where a place is on it.
 const ASK_TIME: Duration = Duration::from_millis(200);
 
+/// The shortest time a window is given to answer. Windows counts the wait
+/// in whole milliseconds, so less than one would be no wait at all.
+const SHORTEST_ASK: Duration = Duration::from_millis(1);
+
 /// The window style bit of a window that is not hidden: `WS_VISIBLE`.
 const STYLE_VISIBLE: u32 = 0x1000_0000;
 
@@ -430,10 +434,11 @@ struct Walk<'click> {
 }
 
 /// How long a window asked at `now` may take to answer, or `None` once
-/// `deadline` has come: [`ASK_TIME`], or what is left when that is less.
+/// `deadline` has come: [`ASK_TIME`], or what is left when that is less,
+/// and never less than [`SHORTEST_ASK`] while any time is left.
 fn ask_time(now: Instant, deadline: Instant) -> Option<Duration> {
     let left = deadline.saturating_duration_since(now);
-    (!left.is_zero()).then(|| left.min(ASK_TIME))
+    (!left.is_zero()).then(|| left.min(ASK_TIME).max(SHORTEST_ASK))
 }
 
 /// The window that the mouse reaches at `place` in `window` or the windows
@@ -1614,6 +1619,12 @@ mod tests {
         let (sent, waits, _) = asked(ms(249));
         assert_eq!(sent.ok().as_deref(), Some("post 9 Move 40,50"));
         assert_eq!(waits, [ms(200), ms(200), ms(2)]);
+        // Less than a millisecond left is still a wait, of a whole one.
+        let (sent, waits, _) = asked(Duration::from_micros(249_800));
+        assert_eq!(sent.ok().as_deref(), Some("post 9 Move 40,50"));
+        assert_eq!(waits, [ms(200), ms(200), ms(1)]);
+        let nearly = Duration::from_nanos(249_999_999);
+        assert_eq!(asked(nearly).1, [ms(200), ms(200), ms(1)]);
         // With nothing left, the last window is not asked, and nothing is
         // sent.
         let (sent, waits, log) = asked(ms(250));

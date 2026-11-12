@@ -52,8 +52,8 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
 use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, ERROR_SUCCESS, HWND, LPARAM, POINT, RECT, SetLastError,
-    WPARAM,
+    ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, ERROR_SUCCESS, ERROR_TIMEOUT, HWND, LPARAM, POINT, RECT,
+    SetLastError, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
@@ -1033,7 +1033,24 @@ impl std::error::Error for Failed {
 /// [`forget_last_error`] runs before such a call, so the error is its own.
 fn failed(doing: &'static str) -> io::Error {
     let cause = io::Error::last_os_error();
-    io::Error::new(cause.kind(), Failed { doing, cause })
+    io::Error::new(kind(&cause), Failed { doing, cause })
+}
+
+/// The kind of the system error `cause`. The two kinds that a click tells
+/// apart, a wait that ran out and a refused message, are read from the
+/// system's own codes, so they do not depend on what the standard library
+/// makes of those codes.
+fn kind(cause: &io::Error) -> io::ErrorKind {
+    let code = cause
+        .raw_os_error()
+        .and_then(|code| u32::try_from(code).ok());
+    if code == Some(ERROR_TIMEOUT.0) {
+        io::ErrorKind::TimedOut
+    } else if code == Some(ERROR_ACCESS_DENIED.0) {
+        io::ErrorKind::PermissionDenied
+    } else {
+        cause.kind()
+    }
 }
 
 /// Clears this thread's last error, before a call that does not always set
@@ -1223,13 +1240,19 @@ impl fmt::Debug for Lister {
 #[cfg(test)]
 mod tests {
     use std::env;
+    use std::io;
     use std::os::windows::ffi::OsStrExt;
-    use std::time::Duration;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use appytappy_config::action::OpenTarget;
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::click::{ClickButton, ClickDelivery};
-    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_INVALID_WINDOW_HANDLE, ERROR_TIMEOUT, HINSTANCE, HWND, LPARAM,
+        LRESULT, POINT, WIN32_ERROR, WPARAM,
+    };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::SystemServices::{MK_LBUTTON, MK_RBUTTON};
     use windows::Win32::UI::HiDpi::{
@@ -1237,16 +1260,17 @@ mod tests {
         LogicalToPhysicalPointForPerMonitorDPI, SetThreadDpiAwarenessContext,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        BS_GROUPBOX, CS_DBLCLKS, CreateWindowExW, DefWindowProcW, DestroyWindow, HTCLIENT,
-        HTTRANSPARENT, HWND_TOP, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WINDOW_EX_STYLE, WINDOW_STYLE, WM_LBUTTONDBLCLK,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEFIRST, WM_MOUSELAST, WM_MOUSEMOVE, WM_RBUTTONDOWN,
+        BS_GROUPBOX, CS_DBLCLKS, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+        GetMessageW, HTCLIENT, HTTRANSPARENT, HWND_TOP, MSG, PM_REMOVE, PeekMessageW, PostMessageW,
+        PostQuitMessage, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+        WM_LBUTTONUP, WM_MOUSEFIRST, WM_MOUSELAST, WM_MOUSEMOVE, WM_NCHITTEST, WM_RBUTTONDOWN,
         WM_RBUTTONUP, WNDCLASS_STYLES, WNDCLASSW, WS_CHILD, WS_DISABLED, WS_POPUP, WS_VISIBLE,
     };
     use windows::core::{PCWSTR, w};
 
-    use super::{Opener, WindowsInput, number, play_file, shell_open, wide};
-    use crate::{Input, MouseEvent, MouseMessage, PlacedClick, Watched, click};
+    use super::{Opener, WindowsInput, handle, kind, number, play_file, shell_open, wide};
+    use crate::{ActionError, Input, MouseEvent, MouseMessage, PlacedClick, Watched, click};
 
     #[test]
     fn a_missing_sound_file_does_not_play() {
@@ -1758,6 +1782,125 @@ mod tests {
         assert_ne!(refused.kind(), std::io::ErrorKind::PermissionDenied);
         // No window at all would mean this thread's own queue.
         assert!(input.post(0, message).is_err());
+        assert_eq!(thread_mouse_messages(), []);
+    }
+
+    #[test]
+    fn a_wait_that_ran_out_and_a_refused_message_keep_their_kinds() {
+        let of = |code: WIN32_ERROR| {
+            let code = i32::try_from(code.0).expect("a small code");
+            kind(&io::Error::from_raw_os_error(code))
+        };
+        assert_eq!(of(ERROR_TIMEOUT), io::ErrorKind::TimedOut);
+        assert_eq!(of(ERROR_ACCESS_DENIED), io::ErrorKind::PermissionDenied);
+        let other = of(ERROR_INVALID_WINDOW_HANDLE);
+        assert_ne!(other, io::ErrorKind::TimedOut);
+        assert_ne!(other, io::ErrorKind::PermissionDenied);
+    }
+
+    /// A window class whose windows take [`SLOW_ANSWER`] to say where a
+    /// place is on them.
+    const SLOW: PCWSTR = w!("AppyTappy.Test.Slow");
+
+    /// How long a [`SLOW`] window takes to answer: longer than a click
+    /// waits for all its windows.
+    const SLOW_ANSWER: Duration = Duration::from_millis(900);
+
+    /// The procedure of the [`SLOW`] class. It ends its thread's message
+    /// loop when its window goes.
+    extern "system" fn answer_slowly(
+        window: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if message == WM_NCHITTEST {
+            thread::sleep(SLOW_ANSWER);
+        }
+        if message == WM_DESTROY {
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: the call takes one integer and posts to this thread.
+            unsafe {
+                PostQuitMessage(0);
+            }
+        }
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the arguments are the ones Windows called this procedure
+        // with.
+        unsafe {
+            DefWindowProcW(window, message, wparam, lparam)
+        }
+    }
+
+    /// Makes a [`SLOW`] window on this thread, hands its number to `made`,
+    /// and handles its messages until it is closed, which destroys it.
+    fn keep_a_slow_window(made: &mpsc::Sender<u64>) {
+        set_up();
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(answer_slowly),
+            hInstance: module(),
+            lpszClassName: SLOW,
+            ..WNDCLASSW::default()
+        };
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `class` is a filled WNDCLASSW whose class name is a static
+        // wide string and whose procedure lives for the whole program.
+        let _atom = unsafe { RegisterClassW(&raw const class) };
+        let window = TestWindow::new(SLOW);
+        made.send(window.number()).expect("the test listens");
+        loop {
+            let mut message = MSG::default();
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: `message` is a live local the call writes.
+            let got = unsafe { GetMessageW(&raw mut message, None, 0, 0) };
+            // Zero ends the loop, and so does the call failing.
+            if got.0 <= 0 {
+                break;
+            }
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: `message` is the one the call above filled.
+            unsafe {
+                DispatchMessageW(&raw const message);
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_that_does_not_answer_in_time_gets_no_click() {
+        set_up();
+        let (made, windows) = mpsc::channel();
+        let owner = thread::spawn(move || keep_a_slow_window(&made));
+        let slow = windows.recv().expect("a window");
+        let placed = PlacedClick {
+            window: slow,
+            process: ProcessId::new(std::process::id()),
+            app: "Test".to_owned(),
+            at: on_screen(60, 50),
+            button: ClickButton::Left,
+            delivery: ClickDelivery::Message,
+        };
+        let started = Instant::now();
+        let sent = click(&mut WindowsInput, &placed, &watched());
+        let took = started.elapsed();
+        // Closing the window ends its thread once it has answered.
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call copies a number and two integers into the
+        // window's message queue.
+        unsafe {
+            PostMessageW(
+                Some(handle(slow).expect("a handle")),
+                WM_CLOSE,
+                WPARAM(0),
+                LPARAM(0),
+            )
+        }
+        .expect("asked the window to close");
+        owner.join().expect("the window's thread ended");
+        assert!(
+            matches!(&sent, Err(ActionError::TooSlow(app)) if app == "Test"),
+            "{sent:?}"
+        );
+        assert!(took < SLOW_ANSWER, "the click waited {took:?}");
         assert_eq!(thread_mouse_messages(), []);
     }
 }
