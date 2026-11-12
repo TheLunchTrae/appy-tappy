@@ -10,6 +10,7 @@ use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::check_spec::{self, CheckSpec, RegionCheck};
+use crate::debug::workings::{self, ReadingDetails};
 use crate::pixels;
 use crate::selection::{self, SelectionSpec, SelectionView};
 use crate::window_list::{self, WindowFit, WindowList};
@@ -72,6 +73,7 @@ impl<H: Host> Owner<H> {
         let _ = self.close();
         self.generation = self.generation.wrapping_add(1);
         self.latest = None;
+        self.latest_at = None;
         self.failure = None;
         self.screenshots.clear();
         self.check = None;
@@ -127,6 +129,7 @@ impl<H: Host> Owner<H> {
         self.failure = None;
         self.record(&image, received);
         self.latest = Some(image);
+        self.latest_at = Some(received);
     }
 
     /// Notes that the capture failed, and stops a recording, which records
@@ -174,6 +177,21 @@ impl<H: Host> Owner<H> {
             return Ok(None);
         };
         read(check, latest).map(|value| Some(value.into()))
+    }
+
+    /// How the check reads the newest frame, for the debug details: `None`
+    /// until a check is set up and a frame arrived.
+    pub(crate) fn explain_reading(&self) -> Result<Option<ReadingDetails>, String> {
+        let (Some(check), Some(latest), Some(arrived)) =
+            (&self.check, &self.latest, self.latest_at)
+        else {
+            return Ok(None);
+        };
+        let region = latest.crop(check.region).ok_or_else(|| {
+            "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
+        })?;
+        let age = self.host.now().saturating_duration_since(arrived);
+        Ok(Some(workings::details(&check.check, &region, age)))
     }
 
     /// The newest frame's pixels, at most `max_width` wide, or `None`

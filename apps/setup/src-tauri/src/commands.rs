@@ -25,6 +25,7 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::debug::bundle::BundleSpec;
+use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
@@ -165,6 +166,12 @@ pub(crate) async fn read_value(app: AppHandle) -> Result<Option<Reading>, String
     try_ask(&app, "read_value", |owner| owner.reading()).await
 }
 
+/// How the check reads the newest frame, for the debug details.
+#[tauri::command]
+pub(crate) async fn explain_reading(app: AppHandle) -> Result<Option<ReadingDetails>, String> {
+    try_ask(&app, "explain_reading", |owner| owner.explain_reading()).await
+}
+
 /// Captures the region of the saved value `value` of the application
 /// `application` on its window, for the automation editor, and returns the
 /// watch's number.
@@ -189,6 +196,18 @@ pub(crate) async fn watched_reading(
 ) -> Result<Live, String> {
     try_ask(&app, "watched_reading", move |owner| {
         owner.watched_reading(watch, when.as_ref())
+    })
+    .await
+}
+
+/// How the watch's value reads now, for the debug details.
+#[tauri::command]
+pub(crate) async fn explain_watched(
+    app: AppHandle,
+    watch: u64,
+) -> Result<Option<ReadingDetails>, String> {
+    try_ask(&app, "explain_watched", move |owner| {
+        owner.explain_watched(watch)
     })
     .await
 }

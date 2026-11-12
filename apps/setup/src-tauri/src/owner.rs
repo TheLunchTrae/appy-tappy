@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{AppFile, BuildDef};
@@ -80,6 +80,8 @@ pub(crate) struct Owner<H: Host> {
     generation: u64,
     session: Option<H::Session>,
     latest: Option<Image>,
+    /// When `latest` arrived.
+    latest_at: Option<Instant>,
     /// Why the picked window's capture failed, until a good frame arrives.
     failure: Option<CaptureFailure>,
     screenshots: Vec<Image>,
@@ -126,6 +128,7 @@ impl<H: Host> Owner<H> {
             generation: 0,
             session: None,
             latest: None,
+            latest_at: None,
             failure: None,
             screenshots: Vec::new(),
             check: None,

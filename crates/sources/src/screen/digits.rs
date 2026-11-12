@@ -325,6 +325,39 @@ impl DigitReader {
         shape
     }
 
+    /// How each character in `image` scores against the learned glyphs:
+    /// its closest glyph and the closest of another character, left to
+    /// right. A read decides with the same scores.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`DigitReader::shapes`].
+    pub fn explain(&self, image: &Image) -> Result<Vec<CharacterScore>, ReadError> {
+        let Shapes(shapes) = self.shapes(image)?;
+        Ok(shapes.iter().map(|shape| self.score(shape)).collect())
+    }
+
+    /// The closest glyph to `shape`, and the closest of another character.
+    /// A tie goes to the glyph learned first, as in [`DigitReader::read`].
+    fn score(&self, shape: &Shape) -> CharacterScore {
+        let mut ranked: Vec<GlyphScore> = self
+            .glyphs
+            .iter()
+            .map(|glyph| GlyphScore {
+                character: glyph.character,
+                differing: cells(shape, &glyph.shape, |a, b| a ^ b),
+                allowed: cells(shape, &glyph.shape, |a, b| a | b) / 4,
+            })
+            .collect();
+        ranked.sort_by_key(|score| score.differing);
+        let best = ranked.first().copied();
+        let runner_up = ranked
+            .iter()
+            .find(|score| best.is_some_and(|best| best.character != score.character))
+            .copied();
+        CharacterScore { best, runner_up }
+    }
+
     /// The character of the closest learned glyph, if it is close enough.
     fn best_match(&self, shape: &Shape) -> Option<char> {
         let (glyph, differing) = self
@@ -334,6 +367,36 @@ impl DigitReader {
             .min_by_key(|(_, differing)| *differing)?;
         let set = cells(shape, &glyph.shape, |a, b| a | b);
         (differing.saturating_mul(4) <= set).then_some(glyph.character)
+    }
+}
+
+/// How one character in a region scores, from [`DigitReader::explain`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharacterScore {
+    /// The closest learned glyph, or `None` when the reader knows none.
+    pub best: Option<GlyphScore>,
+    /// The closest glyph of another character, or `None` when the reader
+    /// knows no other character.
+    pub runner_up: Option<GlyphScore>,
+}
+
+/// How close a character is to one learned glyph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GlyphScore {
+    /// The glyph's character.
+    pub character: char,
+    /// How many of the 16 by 16 grid's cells differ from the glyph's.
+    pub differing: u32,
+    /// The most cells that may differ for the glyph to match: a quarter of
+    /// the cells either shape inks.
+    pub allowed: u32,
+}
+
+impl GlyphScore {
+    /// Whether the character is close enough to read as this glyph.
+    #[must_use]
+    pub const fn matches(self) -> bool {
+        self.differing <= self.allowed
     }
 }
 

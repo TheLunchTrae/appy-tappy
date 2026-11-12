@@ -5,6 +5,7 @@
 pub(crate) mod bundle;
 pub(crate) mod log;
 pub(crate) mod trace_file;
+pub(crate) mod workings;
 
 use std::fs::File;
 use std::io::{self, Read as _, Seek as _, SeekFrom};

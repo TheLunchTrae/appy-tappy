@@ -97,6 +97,16 @@ impl BarFill {
     ///
     /// Returns [`CheckError::NoBar`] when no pixel is near either color.
     pub fn percent(self, image: &Image) -> Result<Number, CheckError> {
+        let (filled, counted) = self.count(image);
+        if counted == 0 {
+            return Err(CheckError::NoBar);
+        }
+        Number::new(filled as f64 * 100.0 / counted as f64).ok_or(CheckError::NoBar)
+    }
+
+    /// How many of `image`'s pixels count as filled, and how many count at
+    /// all.
+    pub(super) fn count(self, image: &Image) -> (u64, u64) {
         let reach = distance(
             [self.empty.blue, self.empty.green, self.empty.red, 0],
             self.filled,
@@ -112,10 +122,7 @@ impl BarFill {
             filled = filled.wrapping_add(u64::from(near && to_filled < to_empty));
             counted = counted.wrapping_add(u64::from(near));
         }
-        if counted == 0 {
-            return Err(CheckError::NoBar);
-        }
-        Number::new(filled as f64 * 100.0 / counted as f64).ok_or(CheckError::NoBar)
+        (filled, counted)
     }
 }
 
@@ -146,6 +153,15 @@ impl ColorMatch {
     /// Whether the average color of `image` is within the tolerance.
     #[must_use]
     pub fn matches(self, image: &Image) -> bool {
+        let average = Self::average(image);
+        let near = |average: u8, target: u8| average.abs_diff(target) <= self.tolerance;
+        near(average.blue, self.color.blue)
+            && near(average.green, self.color.green)
+            && near(average.red, self.color.red)
+    }
+
+    /// The average color of `image`, or black when it has no pixels.
+    pub(super) fn average(image: &Image) -> Rgb {
         let mut sums = [0_u64; 3];
         let mut pixels = 0_u64;
         for pixel in image.pixels() {
@@ -155,11 +171,11 @@ impl ColorMatch {
             }
             pixels = pixels.wrapping_add(1);
         }
-        let [blue, green, red] = sums.map(|sum| sum.checked_div(pixels).unwrap_or_default());
-        let near = |average: u64, target: u8| {
-            average.abs_diff(u64::from(target)) <= u64::from(self.tolerance)
-        };
-        near(blue, self.color.blue) && near(green, self.color.green) && near(red, self.color.red)
+        // An average of bytes is at most 255, so it always fits a byte.
+        let [blue, green, red] = sums.map(|sum| {
+            u8::try_from(sum.checked_div(pixels).unwrap_or_default()).unwrap_or(u8::MAX)
+        });
+        Rgb { red, green, blue }
     }
 }
 
@@ -173,7 +189,7 @@ impl ColorMatch {
 pub struct ImageMatch {
     picture: Image,
     spans: Box<[Range<usize>]>,
-    tolerance: u8,
+    pub(super) tolerance: u8,
 }
 
 impl ImageMatch {
@@ -244,7 +260,7 @@ impl ImageMatch {
     /// # Errors
     ///
     /// Returns [`CheckError::SizeMismatch`] when the sizes differ.
-    fn difference(&self, image: &Image) -> Result<Difference, CheckError> {
+    pub(super) fn difference(&self, image: &Image) -> Result<Difference, CheckError> {
         if image.size() != self.picture.size() {
             return Err(CheckError::SizeMismatch {
                 expected: self.picture.size(),
@@ -274,14 +290,14 @@ impl ImageMatch {
 /// How far a region is from a picture: the summed difference of the
 /// compared red, green, and blue channels, and how many there were.
 #[derive(Debug, Clone, Copy)]
-struct Difference {
-    total: u64,
-    channels: u64,
+pub(super) struct Difference {
+    pub(super) total: u64,
+    pub(super) channels: u64,
 }
 
 impl Difference {
     /// Whether the average difference per channel is at most `tolerance`.
-    fn within(self, tolerance: u8) -> bool {
+    pub(super) fn within(self, tolerance: u8) -> bool {
         self.total <= self.channels.saturating_mul(u64::from(tolerance))
     }
 
@@ -302,7 +318,7 @@ impl Difference {
 /// them. A tie goes to the earlier state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateMatch {
-    states: Box<[(StateName, ImageMatch)]>,
+    pub(super) states: Box<[(StateName, ImageMatch)]>,
     none: StateName,
 }
 

@@ -62,6 +62,7 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::debug::bundle::BundleSpec;
+use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;

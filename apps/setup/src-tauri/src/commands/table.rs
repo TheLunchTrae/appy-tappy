@@ -34,6 +34,8 @@ macro_rules! with_commands {
             commands::set_check(spec: CheckSpec) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
+            /// How the check reads the newest frame, for the debug details, or null without a check or a frame.
+            commands::explain_reading() -> Option<ReadingDetails>;
             /// Records `region` of the picked window, drawn on `screenshot`. With `more`, goes on with the stopped
             /// recording, which needs the same region, ink and window size; otherwise starts a new one.
             commands::start_recording(
@@ -60,6 +62,9 @@ macro_rules! with_commands {
             /// What the watch's value reads now, and whether `when` holds for it. Fails once the watch was stopped or
             /// replaced.
             commands::watched_reading(watch: U64AsNumber, when: Option<WhenDef>) -> Live;
+            /// How the watch's value reads now, for the debug details, or null while it does not read. Fails once the
+            /// watch was stopped or replaced.
+            commands::explain_watched(watch: U64AsNumber) -> Option<ReadingDetails>;
             /// Stops the watch, unless another capture replaced it already.
             commands::stop_watching(watch: U64AsNumber) -> ();
             /// The running windows `window` takes, the one a new session would read first.

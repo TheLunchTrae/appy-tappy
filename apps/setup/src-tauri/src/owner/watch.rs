@@ -17,6 +17,8 @@ use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{Crop, Frame, Layout, OutsideWindow, Region, Size};
 
+use crate::debug::workings::{self, ReadingDetails};
+
 use super::host::Host;
 use super::messages::{Live, Message, Seen};
 use super::{Owner, WATCH_INTERVAL};
@@ -47,6 +49,8 @@ pub(super) struct Watched {
     settle: Settle,
     /// What the newest frame showed, or `None` before one arrived.
     pub(super) seen: Option<Seen>,
+    /// When the newest frame was seen.
+    seen_at: Option<Instant>,
     /// Why the capture stopped, once it has.
     pub(super) failure: Option<String>,
 }
@@ -111,6 +115,7 @@ impl<H: Host> Owner<H> {
             copying: region,
             settle: Settle::new(size),
             seen: None,
+            seen_at: None,
             failure: None,
         });
         Ok(watch)
@@ -130,6 +135,7 @@ impl<H: Host> Owner<H> {
         };
         watched.settle.saw(size, now);
         watched.seen = Some(seen);
+        watched.seen_at = Some(now);
         self.settle_watch(now);
     }
 
@@ -230,6 +236,29 @@ impl<H: Host> Owner<H> {
             reading: value.into(),
             holds,
         })
+    }
+
+    /// How the watched value's check reads the newest frame, for the debug
+    /// details: `None` while the watched value does not read, which
+    /// [`Owner::watched_reading`] explains; an error once the watch was
+    /// stopped or replaced.
+    pub(crate) fn explain_watched(&self, watch: u64) -> Result<Option<ReadingDetails>, String> {
+        let watched = self
+            .watched
+            .as_ref()
+            .filter(|watched| watched.id == watch)
+            .ok_or_else(|| "No value is watched.".to_owned())?;
+        let (placed_at, placed) = &watched.placed;
+        let (Some(Seen::Region { window_size, image }), Ok(at), Some(seen_at)) =
+            (&watched.seen, placed, watched.seen_at)
+        else {
+            return Ok(None);
+        };
+        if window_size != placed_at || watched.failure.is_some() {
+            return Ok(None);
+        }
+        let age = self.host.now().saturating_duration_since(seen_at);
+        Ok(Some(workings::details(watched.check.check(at), image, age)))
     }
 
     /// Stops watch `watch`, unless another capture took its place.

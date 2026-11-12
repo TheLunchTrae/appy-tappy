@@ -13,6 +13,8 @@ use appytappy_platform::{LOG_LIMIT, LocalTime, Log};
 /// the user did rather than the page's polling.
 const REPEATED: &[&str] = &[
     "debug_overview",
+    "explain_reading",
+    "explain_watched",
     "list_apps",
     "list_automations",
     "list_windows",
