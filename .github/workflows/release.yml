@@ -146,7 +146,9 @@ jobs:
   # key's private half, so nothing that builds the installer can read it. The
   # half lives in the release environment, which only main can deploy to, and
   # this job runs only when publishing. A repository without the update key
-  # skips it, and the release then carries no latest.json.
+  # skips it, and the release then carries no latest.json. No package code
+  # runs in this job before the step that holds the key, so no dependency can
+  # read the key or change the Tauri CLI that signs with it.
   sign:
     name: sign
     needs: [prepare, installer]
@@ -178,9 +180,11 @@ jobs:
         with:
           artifact-ids: ${{ needs.installer.outputs.artifact-id }}
           path: installer
-      # Apart from the signing step, so no install script sees the key.
-      - name: Install the setup app's tools
-        run: mise run ui:install
+      # With lifecycle scripts off, so the install runs no package code that
+      # could change the Tauri CLI before the next step runs it with the key.
+      - name: Install the setup app's packages without scripts
+        working-directory: apps/setup
+        run: bun install --frozen-lockfile --ignore-scripts
       - name: Sign the update
         env:
           INSTALLER_TAG: ${{ needs.prepare.outputs.tag }}
