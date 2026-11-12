@@ -1496,7 +1496,7 @@ stateDiagram-v2
   every look it knows: the region on each screenshot of the same window size
   that the session held when it started, and on each frame it kept. A crop
   within the tolerance of one of them changes nothing. Any other is a new look:
-  the whole frame goes to the screenshot store, and the recording's `kept` list
+  the window's whole content goes to the screenshot store, and the recording's `kept` list
   gets its index.
 - **Resting** is a recording whose `rests_until` is still to come. After each
   comparison it is set to four times as long as the frame took from arriving

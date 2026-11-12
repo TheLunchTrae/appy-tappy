@@ -49,9 +49,9 @@ pub struct Placed {
 /// application's processes, but never one taken only as the fallback: that
 /// may be another of the application's windows, where the spot or the
 /// picture means something else. The place is measured from the window's
-/// content on the screen, as a capture lends it. For a picture, the window must have the
-/// size the picture was taken at; one frame of its area is grabbed and
-/// searched, and a window that moved meanwhile is not clicked.
+/// content on the screen, as a capture lends it. For a picture, the window
+/// must have the size the picture was taken at; one frame of its area is
+/// grabbed and searched, and a window that moved meanwhile is not clicked.
 ///
 /// # Errors
 ///

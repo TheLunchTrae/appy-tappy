@@ -493,8 +493,9 @@ A click with the cursor is checked by hand. Save a click on a spot and one on
 a picture in
 another application's window, with both applications' anti-cheat set to
 none, and check that each lands where the setup app showed it, on a window
-with and without a title bar, maximized, and on a second monitor with
-another scale; that a window covering the place stops the click; that a
+with and without a title bar, maximized, on a second monitor with another
+scale, on an application that Windows stretches because it doesn't know the
+monitor's scale, and on one laid out right to left; that a window covering the place stops the click; that a
 game that keeps the cursor inside its window gets no click; and that the
 focus goes back to the watched application.
 

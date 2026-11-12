@@ -530,7 +530,8 @@ picture: two looks are the same when the average difference of their red,
 green, and blue is at most the tolerance. A frame that shows a look it does
 not know is kept whole in the screenshot store, like a screenshot the user
 takes, so every tool that works on a screenshot works on it. Only the crop of
-a frame is compared; the whole frame is copied only when it is kept.
+a frame is compared; the window's whole content is copied only when it is
+kept.
 
 - **The whole region.** A state check with **Ignore the background** compares
   only the pixels each state selects, and a recording does not: it has no
@@ -904,9 +905,9 @@ AppyTappy keeps a picture only while something saved needs it. A saved value,
 reference, or click needs one to read or to click, cut to the region the user
 drew or to the box around text it found that the user added, and never the
 rest of the window. A saved [draft](#drafts) needs the pictures its flow was
-working on, so that the flow can go on: a capture's screenshots, each a whole
-frame, and an automation's click pictures. Nothing else outlives its flow: a
-window's whole frame otherwise exists only in memory while its capture is
+working on, so that the flow can go on: a capture's screenshots, each the
+window's whole content, and an automation's click pictures. Nothing else outlives its flow: a
+window's whole content otherwise exists only in memory while its capture is
 open. The user guide says so in
 [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
 
@@ -948,13 +949,13 @@ keeps its value's region of the newest frame.
 
 ### On disk
 
-| File                                 | What it holds                                                                             |
-| ------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot or kept reading, or a find's box |
-| `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out  |
-| `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                |
-| `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out |
-| `drafts\{draft}\shot-{index}.png`    | A screenshot of a value, fix, or reference draft: the whole frame, as the capture held it |
+| File                                 | What it holds                                                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `apps\{app}\ref-{reference}-{n}.png` | A reference's sample: the region of a labeled screenshot or kept reading, or a find's box            |
+| `apps\{app}\{value}-{n}.png`         | A state's picture: the region, transparent where its selection leaves the background out             |
+| `apps\{app}\{value}-{fix}-{n}.png`   | A state's picture in a fix: the fix's region, the same way                                           |
+| `clicks\click-{n}.png`               | A click's picture: the region the user marked, transparent where its selection leaves out            |
+| `drafts\{draft}\shot-{index}.png`    | A screenshot of a value, fix, or reference draft: the window's whole content, as the capture held it |
 
 The first four are in `%APPDATA%\AppyTappy\`, and a draft's screenshots in
 `%LOCALAPPDATA%\AppyTappy\`, where the runtime never reads. A draft's
