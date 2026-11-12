@@ -16,6 +16,7 @@ describe('afterRead', () => {
   });
 
   test('drops an answer asked under an older check, reading or problem', () => {
+    // A check, a saved value's edit, and the same edit tried again each take the next number.
     expect(afterRead(shown, 1, 2, read)).toBe(shown);
     expect(afterRead(shown, 1, 2, failed)).toBe(shown);
     expect(afterRead(failing, 1, 2, read)).toBe(failing);

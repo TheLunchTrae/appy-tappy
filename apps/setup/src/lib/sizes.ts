@@ -28,10 +28,12 @@ export const SIZE_CHANGES_HINT =
   'Windowed applications are often resized, and their interface grows with the window. Pick Rarely for one that ' +
   'always runs full screen at one size.';
 
-/** The hint beside the Stays at picker. */
+/** The hint beside Stays at. */
 export const PIN_HINT =
-  'The side of the window this value keeps its distance from as the window changes size. A health bar in the ' +
-  'bottom left stays at the bottom left.';
+  'The side of the window this value keeps its distance from as the window changes size. AppyTappy picks it from ' +
+  'where the region is, the third of the window its center is in, so a health bar in the bottom left stays at the ' +
+  'bottom left. Choose it yourself when the value belongs to another side, such as a wide panel that hangs from ' +
+  'the right edge.';
 
 /** The hint beside Fix at this size. */
 export const FIX_HINT =
@@ -40,8 +42,8 @@ export const FIX_HINT =
 /** The hint beside the Values page's column for the window's size now. */
 export const NOW_HINT =
   "What each value reads at the window's size now, scaled from where it was drawn or read at its fix. A value " +
-  'that reads wrong here can be fixed at this size, unless it was first drawn at this size. Delete that one and ' +
-  'make it again.';
+  'that reads wrong here can be fixed at this size, unless it was first drawn at this size. Edit that one ' +
+  'instead.';
 
 /** The hint beside Remove fix. */
 export const REMOVE_FIX_HINT =
@@ -107,10 +109,11 @@ export function sizeText(size: SizeDef): string {
 }
 
 /** Where a value is drawn and stays, with each size it is fixed at, such as `Drawn at 1920 × 1080, pinned bottom
- * left · fixed at 3440 × 1440`. */
+ * left · fixed at 3440 × 1440`. A region drawn as a reading area says so: `Reading area drawn at …`. */
 export function regionText(screen: ScreenDef): string {
   const fixes = screen.fixes.map((fix) => ` · fixed at ${sizeText(fix.windowSize)}`).join('');
-  return `Drawn at ${sizeText(screen.windowSize)}, pinned ${PIN_NAMES[pinOf(screen)].toLowerCase()}${fixes}`;
+  const drawn = screen.readingArea === true ? 'Reading area drawn' : 'Drawn';
+  return `${drawn} at ${sizeText(screen.windowSize)}, pinned ${PIN_NAMES[pinOf(screen)].toLowerCase()}${fixes}`;
 }
 
 /** The two sizes are the same. */
@@ -178,7 +181,7 @@ export function nowCell(
 
 /** Whether the cell offers Fix at this size: for a value that is not drawn here, or that reads here, wrongly or not
  * at all, from a scaled drawing or a fix, which a new fix replaces. At the size it was first drawn at, a value that
- * reads wrong is deleted and made again instead. */
+ * reads wrong is edited instead. */
 export function offersFix(cell: NowCell): boolean {
   switch (cell.kind) {
     case 'waiting':

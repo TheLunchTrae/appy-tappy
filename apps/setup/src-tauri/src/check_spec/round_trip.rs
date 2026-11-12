@@ -166,6 +166,7 @@ fn runtime_check(
         },
         pin: None,
         fixes: Vec::new(),
+        reading_area: false,
     };
     saved::build(
         &value,

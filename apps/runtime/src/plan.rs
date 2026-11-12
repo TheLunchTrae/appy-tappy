@@ -385,6 +385,9 @@ mod tests {
     };
 
     fn value(id: &str, check: CheckDef) -> ValueDef {
+        // Setup guidance the plan never reads: each check that may have a
+        // reading area has one here, and plans as it does without.
+        let reading_area = check.reads_anywhere();
         ValueDef {
             id: id.to_owned(),
             name: format!("The {id}"),
@@ -401,6 +404,7 @@ mod tests {
                 },
                 check,
                 pin: None,
+                reading_area,
                 fixes: Vec::new(),
             },
         }

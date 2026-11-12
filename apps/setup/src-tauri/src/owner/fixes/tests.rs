@@ -338,31 +338,12 @@ fn a_number_fix_names_its_reference_only_when_it_is_not_the_first_drawing_s() {
 }
 
 #[test]
-fn a_new_fix_takes_the_smallest_number_no_saved_fix_uses() {
-    let fix = |images: &[&str]| FixDef {
-        window_size: LARGER,
-        region: RegionDef {
-            x: 0,
-            y: 0,
-            width: 1,
-            height: 1,
-        },
-        images: images.iter().map(|image| (*image).to_owned()).collect(),
-        reference: None,
-    };
-    assert_eq!(free_fix_number("icon", &[]), 1);
-    assert_eq!(
-        free_fix_number("icon", &[fix(&["icon-1-1.png", "icon-1-2.png"])]),
-        2
-    );
-    assert_eq!(
-        free_fix_number("icon", &[fix(&["icon-2-1.png"]), fix(&["icon-1-1.png"])]),
-        3
-    );
-    assert_eq!(free_fix_number("icon", &[fix(&["icon-2-1.png"])]), 1);
-    // A fix without pictures, or with pictures named otherwise, takes none.
-    assert_eq!(
-        free_fix_number("icon", &[fix(&[]), fix(&["other-1-1.png", "icon-1.png"])]),
-        1
-    );
+fn new_pictures_take_the_smallest_number_no_saved_picture_uses() {
+    let free = |images: &[&str]| free_picture_number("icon", images.iter().copied());
+    assert_eq!(free(&[]), 1);
+    assert_eq!(free(&["icon-1-1.png", "icon-1-2.png"]), 2);
+    assert_eq!(free(&["icon-2-1.png", "icon-1-1.png"]), 3);
+    assert_eq!(free(&["icon-2-1.png"]), 1);
+    // A new value's own pictures, and pictures named otherwise, take none.
+    assert_eq!(free(&["other-1-1.png", "icon-1.png"]), 1);
 }

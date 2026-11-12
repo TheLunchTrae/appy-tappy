@@ -11,9 +11,12 @@ import type { ReactNode } from 'react';
 
 export function RegionFields({
   region,
+  locked = false,
   onRegion,
 }: {
   readonly region: Rect | null;
+  /** Whether the region shows but cannot be typed over, as while no screenshot holds it. */
+  readonly locked?: boolean;
   readonly onRegion: (region: Rect) => void;
 }) {
   const parts = ['x', 'y', 'width', 'height'] as const;
@@ -33,7 +36,7 @@ export function RegionFields({
             min={part === 'width' || part === 'height' ? 1 : 0}
             aria-label={names[part]}
             title={names[part]}
-            disabled={region === null}
+            disabled={region === null || locked}
             value={region?.[part] ?? ''}
             onChange={(event) => {
               const value = Number.parseInt(event.target.value, 10);
