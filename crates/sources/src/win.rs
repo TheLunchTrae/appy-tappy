@@ -10,11 +10,9 @@ use std::ptr;
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_NO_MORE_FILES, HANDLE, HWND, LPARAM, POINT, RECT,
-};
+use windows::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, HANDLE, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
-use windows::Win32::Graphics::Gdi::{CLR_INVALID, ClientToScreen, GetDC, GetPixel, ReleaseDC};
+use windows::Win32::Graphics::Gdi::{CLR_INVALID, GetDC, GetPixel, ReleaseDC};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -22,8 +20,8 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, WINDOWINFO,
 };
 use windows::core::BOOL;
 
@@ -117,29 +115,20 @@ fn frame_on_screen(window: HWND) -> io::Result<Bounds> {
 }
 
 /// Where `window`'s client area lies on the screen, the part the
-/// application draws in.
+/// application draws in. The system gives it in screen pixels whole, so a
+/// window that the system stretches because it does not follow the
+/// monitor's scale, or that lays itself out right to left, still gets its
+/// whole client area.
 fn client_on_screen(window: HWND) -> io::Result<Bounds> {
-    let mut area = RECT::default();
-    let mut corner = POINT::default();
-    #[expect(unsafe_code, reason = "Win32 calls")]
-    // SAFETY: `area` and `corner` are live locals the calls write, and both
-    // calls fail without harm when the window is gone.
-    let moved = unsafe {
-        GetClientRect(window, &raw mut area)?;
-        ClientToScreen(window, &raw mut corner)
+    let mut info = WINDOWINFO {
+        cbSize: struct_size::<WINDOWINFO>()?,
+        ..WINDOWINFO::default()
     };
-    if !moved.as_bool() {
-        return Err(io::Error::other(
-            "the window's client area cannot be placed on the screen",
-        ));
-    }
-    // A client area starts at (0, 0), so its far corner is its size.
-    Ok(Bounds {
-        left: corner.x,
-        top: corner.y,
-        right: corner.x.saturating_add(area.right),
-        bottom: corner.y.saturating_add(area.bottom),
-    })
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: `info` is a live local whose `cbSize` gives its size, which
+    // the call writes; it fails without harm when the window is gone.
+    unsafe { GetWindowInfo(window, &raw mut info) }?;
+    Ok(bounds_of(info.rcClient))
 }
 
 /// `rect` as bounds.
@@ -267,9 +256,7 @@ impl System for WindowsSystem {
     }
 
     fn window_place(&self, window: u64) -> io::Result<Option<WindowPlace>> {
-        let handle = HWND(ptr::without_provenance_mut(
-            usize::try_from(window).map_err(io::Error::other)?,
-        ));
+        let handle = window_handle(window)?;
         let mut rect = RECT::default();
         #[expect(unsafe_code, reason = "Win32 calls")]
         // SAFETY: each call only reads the state of the window `handle` names,
@@ -288,12 +275,7 @@ impl System for WindowsSystem {
             return Ok(None);
         }
         Ok(Some(WindowPlace {
-            bounds: Bounds {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-            },
+            bounds: bounds_of(rect),
             shown: visible && !minimized,
             front,
         }))

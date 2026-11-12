@@ -222,7 +222,7 @@ pub(crate) type References<'a> = &'a dyn Fn(&ReferenceRef) -> Result<SavedRefere
 /// A check and the region it reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegionCheck {
-    /// The region of the window's frame the check reads.
+    /// The region of the window's content the check reads.
     pub(crate) region: Region,
     /// The check.
     pub(crate) check: Check,

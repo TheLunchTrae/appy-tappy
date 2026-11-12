@@ -34,7 +34,7 @@ pub struct SavedCheck {
     /// The window's size when the region was drawn. The region means
     /// something only at this size, or scaled from it.
     pub window_size: Size,
-    /// The region of the window's frame the check reads.
+    /// The region of the window's content the check reads.
     pub region: Region,
     /// The check.
     pub check: Check,
@@ -76,7 +76,7 @@ pub struct SavedValue {
 /// [`SavedValue::at`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtSize {
-    /// The region of the window's frame it reads.
+    /// The region of the window's content it reads.
     pub region: Region,
     /// Which check reads it.
     check: Drawing,

@@ -69,7 +69,7 @@ use super::{WindowsSystem, client_on_screen, frame_on_screen};
 use crate::schedule::{ReadClock, frame_interval};
 use crate::screen::{
     Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
-    Region, Size, content,
+    Region, Size, content, in_frame,
 };
 
 /// The frame pool's buffers: one the thread may hold until its next read,
@@ -518,26 +518,26 @@ impl Capturer {
     /// content's size, or `None` when the frame had to be dropped for a
     /// resize.
     fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: &Crop) -> io::Result<Option<Size>> {
-        let content = frame.ContentSize()?;
-        if content != self.pool_size {
+        let surface = frame.ContentSize()?;
+        if surface != self.pool_size {
             self.pool
                 .Recreate(
                     &self.winrt_device,
                     DirectXPixelFormat::B8G8R8A8UIntNormalized,
                     POOL_BUFFERS,
-                    content,
+                    surface,
                 )
                 .map_err(|error| {
                     ended(&format!(
                         "the capture cannot follow the window's new size: {error}"
                     ))
                 })?;
-            self.pool_size = content;
+            self.pool_size = surface;
             return Ok(None);
         }
         let captured = Size {
-            width: u32::try_from(content.Width).unwrap_or_default(),
-            height: u32::try_from(content.Height).unwrap_or_default(),
+            width: u32::try_from(surface.Width).unwrap_or_default(),
+            height: u32::try_from(surface.Height).unwrap_or_default(),
         };
         let area = self
             .content(captured)
@@ -563,22 +563,22 @@ impl Capturer {
         let source: ID3D11Texture2D = unsafe { access.GetInterface() }?;
         let staging = self.staging(size)?;
         for placement in placements {
-            // A placement is measured from the content's corner, `area`'s
-            // in the frame; it fits the content, so it ends inside the frame.
-            let from = placement.from;
+            let from = in_frame(placement.from, area).ok_or(outside)?;
             let copied = D3D11_BOX {
-                left: from.x().saturating_add(area.x()),
-                top: from.y().saturating_add(area.y()),
+                left: from.x(),
+                top: from.y(),
                 front: 0,
-                right: from.right().saturating_add(area.x()),
-                bottom: from.bottom().saturating_add(area.y()),
+                right: from.right(),
+                bottom: from.bottom(),
                 back: 1,
             };
             #[expect(unsafe_code, reason = "a Win32 call")]
             // SAFETY: both textures are live and BGRA; `copied` lies inside
-            // the window's content, which `fits` checked, and the content
-            // lies inside the source, which `content` makes sure of; the
-            // layout placed it inside the staging texture, which has the
+            // the window's content, which `in_frame` checked, and the content
+            // lies inside `captured`, which `content` makes sure of; the
+            // source has the size `captured`, since a frame of another size
+            // than the pool's recreated the pool above instead. The layout
+            // placed the copy inside the staging texture, which has the
             // layout's size.
             unsafe {
                 self.context.CopySubresourceRegion(

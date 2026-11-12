@@ -84,3 +84,7 @@ parts fit.
   the sizes it was drawn at.
 - **Source primitive.** One kind of state reader the runtime ships: screen
   region, log file, local API, or process and window events.
+- **Window content.** The part of a window's frame its client area covers:
+  what the application draws, without the title bar and borders Windows
+  draws around it. Captures, screenshots, window sizes, regions, and click
+  spots are all measured from its corner.

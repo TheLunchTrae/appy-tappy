@@ -152,8 +152,10 @@ the same place in fullscreen.
 
 `screen::content` finds the content in a frame from the frame's bounds on the
 screen, which a capture takes in (`DWMWA_EXTENDED_FRAME_BOUNDS`), and the
-client area's (`GetClientRect` and `ClientToScreen`), as the capture reads
-them for each frame it copies. `screen::content_on_screen` gives the same
+client area's (`GetWindowInfo`, which gives it in screen pixels whole, also
+for a window the system stretches or one laid out right to left), as the
+capture reads them for each frame it copies, and `screen::in_frame` places
+each region it copies in the frame. `screen::content_on_screen` gives the same
 area on the screen, which `System::content_size` and
 `System::content_bounds` return. Where the client area cannot be read or
 covers none of the frame, the whole frame is the content.
