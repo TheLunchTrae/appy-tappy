@@ -195,13 +195,25 @@ impl ImageMatch {
                 });
             },
             Some(mask) => mask.spans(),
-            None => std::iter::once(0..picture.pixels().len()).collect(),
+            None => return Ok(Self::whole(picture, tolerance)),
         };
         Ok(Self {
             picture,
             spans: spans.into_boxed_slice(),
             tolerance,
         })
+    }
+
+    /// A check that compares every pixel of a region with `picture`. It
+    /// takes no mask, so it cannot fail.
+    #[must_use]
+    pub fn whole(picture: Image, tolerance: u8) -> Self {
+        let spans = std::iter::once(0..picture.pixels().len()).collect();
+        Self {
+            picture,
+            spans,
+            tolerance,
+        }
     }
 
     /// The region as the setup screenshot showed it.

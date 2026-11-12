@@ -29,7 +29,8 @@ macro_rules! with_commands {
             commands::take_screenshot() -> usize;
             /// A screenshot at most `maxWidth` wide, or null for an unknown index.
             commands::screenshot(index: usize, max_width: u32) -> Pixels;
-            /// Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes.
+            /// Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. Rejects
+            /// while a recording of looks records.
             commands::remove_screenshots(indexes: Vec<usize>) -> ();
             /// What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected.
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;

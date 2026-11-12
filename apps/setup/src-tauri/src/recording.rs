@@ -86,6 +86,15 @@ pub(crate) enum Recorder {
 }
 
 impl Recorder {
+    /// What the user does to record again once the window shows, after a
+    /// capture failure stopped the recording.
+    pub(crate) const fn after_failure(&self) -> &'static str {
+        match self {
+            Self::Readings(_) => "Record more once the window shows again.",
+            Self::Looks(_) => "Start recording again once the window shows.",
+        }
+    }
+
     /// When it records and why it stops, which both kinds share.
     pub(crate) const fn life_mut(&mut self) -> &mut Lifecycle {
         match self {

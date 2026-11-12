@@ -71,7 +71,10 @@ export async function screenshot(index: number, maxWidth: number): Promise<Pictu
   return decodePicture(await invoke<ArrayBuffer>('screenshot', { index, maxWidth }));
 }
 
-/** Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. */
+/**
+ * Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. Rejects
+ * while a recording of looks records.
+ */
 export async function removeScreenshots(indexes: ReadonlyArray<number>): Promise<void> {
   await invoke('remove_screenshots', { indexes });
 }

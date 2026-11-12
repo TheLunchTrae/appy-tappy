@@ -104,10 +104,11 @@ pub(crate) async fn screenshot(
         .map(pixels)
 }
 
-/// Removes the screenshots `indexes` names and releases their pixels.
+/// Removes the screenshots `indexes` names and releases their pixels, or
+/// says why it cannot.
 #[tauri::command]
 pub(crate) async fn remove_screenshots(app: AppHandle, indexes: Vec<usize>) -> Result<(), String> {
-    ask(&app, move |owner| owner.remove_screenshots(&indexes)).await
+    ask(&app, move |owner| owner.remove_screenshots(&indexes)).await?
 }
 
 /// What the steps in `selection` select on the screenshot `screenshot`;

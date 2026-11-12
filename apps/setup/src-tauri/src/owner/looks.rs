@@ -48,6 +48,7 @@ impl<H: Host> Owner<H> {
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::time::Duration;
 
     use appytappy_sources::screen::{FrameHandler, Image, Size};
 
@@ -199,7 +200,7 @@ mod tests {
         );
         harness.ask(Owner::stop_recording);
         // A removed screenshot's look is not known any more.
-        harness.ask(|owner| owner.remove_screenshots(&[2]));
+        assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[2])), Ok(()));
         harness.ask(start_looks).expect("records once more");
         harness.deliver(&mut handler, Ok(&shade(100)));
         assert_eq!(harness.kept(), [4]);
@@ -268,6 +269,58 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_that_took_long_makes_the_recording_rest_and_compare_none_meanwhile() {
+        let (mut harness, mut handler) = Harness::with_screenshot();
+        harness.ask(start_looks).expect("records");
+        // The owner handles this frame ten seconds after it arrived, as if
+        // it were that far behind, so the recording rests four times that.
+        harness.wait(Duration::from_secs(10));
+        harness.deliver(&mut handler, Ok(&shade(100)));
+        assert_eq!(harness.kept(), [1]);
+        harness.wait(Duration::from_secs(30));
+        harness.deliver(&mut handler, Ok(&shade(150)));
+        assert_eq!(
+            harness.kept(),
+            [1],
+            "a frame that comes while it rests is not compared"
+        );
+        assert_eq!(
+            harness.ask(|owner| owner.preview(4)),
+            Ok(Some(pixels::rgba(&shade(150), 4))),
+            "the frame still shows in the preview"
+        );
+        harness.wait(Duration::from_secs(20));
+        harness.deliver(&mut handler, Ok(&shade(150)));
+        assert_eq!(harness.kept(), [1, 2], "it records again once rested");
+    }
+
+    #[test]
+    fn no_screenshot_is_removed_while_looks_are_recorded() {
+        let (mut harness, mut handler) = Harness::with_screenshot();
+        harness.ask(start_looks).expect("records");
+        harness.deliver(&mut handler, Ok(&shade(100)));
+        assert_eq!(
+            harness.ask(|owner| owner.remove_screenshots(&[1])),
+            Err("Stop recording to remove a screenshot.".to_owned())
+        );
+        assert!(
+            harness.ask(|owner| owner.screenshot_pixels(1, 4)).is_some(),
+            "the refused removal released nothing"
+        );
+        harness.deliver(&mut handler, Ok(&shade(100)));
+        assert_eq!(harness.kept(), [1], "so the look it kept is still known");
+        harness.ask(Owner::stop_recording);
+        assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[1])), Ok(()));
+        assert_eq!(harness.ask(|owner| owner.screenshot_pixels(1, 4)), None);
+
+        // A recording of readings holds no look, so it refuses nothing.
+        harness
+            .ask(start_readings(false))
+            .expect("records readings");
+        assert_eq!(harness.ask(|owner| owner.remove_screenshots(&[7])), Ok(()));
+    }
+
+    #[test]
     fn a_capture_failure_stops_the_recording_and_says_why() {
         let (mut harness, mut handler) = Harness::with_screenshot();
         harness.ask(start_looks).expect("records");
@@ -277,7 +330,9 @@ mod tests {
         assert!(!stopped.recording, "nothing records while frames fail");
         assert_eq!(
             stopped.problem.as_deref(),
-            Some("Recording stopped: A frame was lost. Record more once the window shows again.")
+            Some(
+                "Recording stopped: A frame was lost. Start recording again once the window shows."
+            )
         );
         assert_eq!(stopped.kept, [1], "what it kept stays");
         harness.deliver(&mut handler, Ok(&shade(150)));
@@ -444,7 +499,10 @@ mod tests {
         assert_eq!(harness.ask(Owner::screenshot), Ok(1));
         harness.deliver(&mut handler, Ok(&shade(150)));
         assert_eq!(harness.ask(Owner::screenshot), Ok(2));
-        harness.ask(|owner| owner.remove_screenshots(&[1, 7]));
+        assert_eq!(
+            harness.ask(|owner| owner.remove_screenshots(&[1, 7])),
+            Ok(())
+        );
         let pixels_of =
             |index| move |owner: &mut Owner<FakeHost>| owner.screenshot_pixels(index, 4);
         assert_eq!(

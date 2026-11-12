@@ -4,21 +4,33 @@
 //! A state check needs a screenshot of each look, a bar's colors are picked
 //! on screenshots that show it filled and empty, and a color on one that
 //! shows it. Catching those moments by hand while using another application
-//! is hard, so a recording watches the region instead. Each frame is cropped
-//! to the region and compared with every look known so far, not only the
+//! is hard, so a recording watches the region instead. A frame is cropped to
+//! the region and compared with every look known so far, not only the
 //! latest, so a look that comes back is not kept twice. The looks known
 //! when a recording starts are the region on each screenshot the session
 //! holds, so recording again keeps only what is new. A frame that shows a
 //! new look is kept whole, as a screenshot like the ones the user takes, so
-//! every tool that works on a screenshot works on it. Only the crop of each
+//! every tool that works on a screenshot works on it. Only the crop of a
 //! frame is compared; the whole frame is copied only when it is kept.
 //!
-//! Each comparison is one pass over the region for every look known, so a
-//! large region that shows many looks costs the owner thread the most.
+//! A look is the whole region: the comparison is [`ImageMatch`]'s, the one
+//! a state check makes with a state's whole picture. It knows nothing of
+//! the selections that let a state check ignore a background. So where the
+//! background behind the thing changes, most frames count as new looks and
+//! the recording soon stops at its limit, and a small change inside a large
+//! region may be within the tolerance and never be kept.
+//!
+//! A comparison is one pass over the region for every look known, on the
+//! owner thread, which also answers the UI. After each one the recording
+//! rests [`REST`] times as long as the frame took from arriving to compared,
+//! and compares no frame until then, so whatever the region's size and the
+//! number of looks, comparing takes a bounded share of the thread's time
+//! and frames cannot pile up behind it.
 
 use std::time::Instant;
 
 use appytappy_config::app_file::MAX_STATES;
+use appytappy_sources::screen::check::ImageMatch;
 use appytappy_sources::screen::{Image, Region, Size};
 use serde::Serialize;
 
@@ -32,27 +44,11 @@ use super::{Lifecycle, cut, millis};
 /// that never settles must not keep one for every frame.
 pub(crate) const MAX_LOOKS: usize = MAX_STATES;
 
-/// Whether `shown` is the look `kept` shows: the average difference of
-/// their red, green, and blue is at most `tolerance`. A state check compares
-/// a region with a state's whole picture by the same rule, so two looks are
-/// told apart here exactly when such a check with this tolerance would not
-/// read one as the other. Pictures of different sizes are different looks.
-pub(crate) fn same_look(kept: &Image, shown: &Image, tolerance: u8) -> bool {
-    if kept.size() != shown.size() {
-        return false;
-    }
-    let mut difference = 0_u64;
-    for (kept, shown) in kept.pixels().iter().zip(shown.pixels()) {
-        for (&kept, &shown) in kept.iter().zip(shown).take(3) {
-            // At most 3 * 8192² channels of 255 each, far below u64::MAX.
-            difference = difference.saturating_add(u64::from(kept.abs_diff(shown)));
-        }
-    }
-    let channels = u64::try_from(kept.pixels().len())
-        .unwrap_or(u64::MAX)
-        .saturating_mul(3);
-    difference <= channels.saturating_mul(u64::from(tolerance))
-}
+/// How many times as long as a frame took, from arriving to compared, a
+/// recording rests before it compares another. Comparing then takes at most
+/// one part in five of the owner thread's time, and less while the thread
+/// is behind, since a frame that waited took longer.
+pub(crate) const REST: u32 = 4;
 
 /// A recording of the looks one region shows.
 #[derive(Debug)]
@@ -70,11 +66,14 @@ pub(crate) struct LookRecording {
     /// When it records, and why the latest frame could not be recorded or
     /// why it stopped by itself.
     pub(crate) life: Lifecycle,
-    /// The region as each known look shows it: on the screenshots the
-    /// session held when it started, then on each frame it kept.
-    looks: Vec<Image>,
+    /// Each known look, as a comparison with the region as it shows it: on
+    /// the screenshots the session held when it started, then on each frame
+    /// it kept.
+    looks: Vec<ImageMatch>,
     /// The screenshots it kept, in the order their looks first showed.
     kept: Vec<usize>,
+    /// Until when it compares no frame, after its last comparison.
+    rests_until: Option<Instant>,
 }
 
 impl LookRecording {
@@ -93,6 +92,7 @@ impl LookRecording {
             .iter()
             .filter(|screenshot| screenshot.size() == window_size)
             .filter_map(|screenshot| screenshot.crop(region))
+            .map(|look| ImageMatch::whole(look, tolerance))
             .collect();
         Self {
             id,
@@ -102,14 +102,27 @@ impl LookRecording {
             life: Lifecycle::new(started),
             looks,
             kept: Vec::new(),
+            rests_until: None,
         }
     }
 
-    /// Records `frame`, a whole window's frame that arrived at `at`: when
-    /// its region shows a look it does not know, keeps the frame in
-    /// `screenshots`. Stops once it has kept [`MAX_LOOKS`].
-    pub(crate) fn offer(&mut self, frame: &Image, at: Instant, screenshots: &mut Screenshots) {
+    /// Records `frame`, a whole window's frame that arrived at `arrived`,
+    /// unless it rests: when the frame's region shows a look it does not
+    /// know, keeps the frame in `screenshots`, and stops once it has kept
+    /// [`MAX_LOOKS`]. `now` reads the time, before the comparison to tell
+    /// whether it rests and after it to tell how long the frame took, which
+    /// sets how long it rests next.
+    pub(crate) fn offer(
+        &mut self,
+        frame: &Image,
+        arrived: Instant,
+        now: impl Fn() -> Instant,
+        screenshots: &mut Screenshots,
+    ) {
         if !self.life.is_recording() {
+            return;
+        }
+        if self.rests_until.is_some_and(|until| now() < until) {
             return;
         }
         let crop = match cut(frame, self.region, self.window_size) {
@@ -120,25 +133,29 @@ impl LookRecording {
             },
         };
         self.life.set_problem(None);
-        if self
+        // Every crop is of the one region, so none differs in size from a
+        // look, which is the only way a comparison fails.
+        if !self
             .looks
             .iter()
-            .any(|look| same_look(look, &crop, self.tolerance))
+            .any(|look| look.matches(&crop) == Ok(true))
         {
-            return;
+            self.looks.push(ImageMatch::whole(crop, self.tolerance));
+            self.kept.push(screenshots.push(frame.clone()));
+            if self.kept.len() >= MAX_LOOKS {
+                self.life.fail(
+                    arrived,
+                    format!(
+                        "Recording stopped: it kept {MAX_LOOKS} screenshots, as many as one \
+                         recording keeps. Remove the ones you do not need, then start recording \
+                         again to keep more."
+                    ),
+                );
+            }
         }
-        self.looks.push(crop);
-        self.kept.push(screenshots.push(frame.clone()));
-        if self.kept.len() >= MAX_LOOKS {
-            self.life.fail(
-                at,
-                format!(
-                    "Recording stopped: it kept {MAX_LOOKS} screenshots, as many as one \
-                     recording keeps. Remove the ones you do not need, then start recording \
-                     again to keep more."
-                ),
-            );
-        }
+        let compared = now();
+        let took = compared.saturating_duration_since(arrived);
+        self.rests_until = compared.checked_add(took.saturating_mul(REST));
     }
 
     /// What the UI shows of it at `now`.
@@ -176,62 +193,83 @@ pub(crate) struct LookRecordingView {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::check::ImageMatch;
+    use std::time::Duration;
 
     use super::*;
 
-    /// A `width` by 1 picture of `pixels`, each its blue, green, red, and
-    /// unused fourth byte.
-    fn picture(pixels: &[[u8; 4]]) -> Image {
-        let width = u32::try_from(pixels.len()).expect("a short row");
-        Image::new(Size { width, height: 1 }, pixels.concat()).expect("matching length")
+    /// A 2 by 1 frame whose pixels have `shade` for red, green, and blue.
+    fn shade(shade: u8) -> Image {
+        Image::new(
+            Size {
+                width: 2,
+                height: 1,
+            },
+            [shade, shade, shade, 0].repeat(2),
+        )
+        .expect("matching length")
+    }
+
+    /// A recording of the whole 2 by 1 frame that knows no look, where
+    /// shades at most 10 apart are one look.
+    fn recording(started: Instant) -> LookRecording {
+        let region = Region::new(0, 0, 2, 1).expect("not empty");
+        let size = Size {
+            width: 2,
+            height: 1,
+        };
+        LookRecording::new(1, region, 10, size, &Screenshots::new(), started)
     }
 
     #[test]
-    fn a_look_is_the_same_within_the_average_difference_a_state_check_allows() {
-        let kept = picture(&[[100, 100, 100, 0], [100, 100, 100, 0]]);
-        // What it is compared with, the tolerance, and whether it is the
-        // same look. Two pixels are six channels, so a tolerance of 10
-        // allows a difference of 60 in all.
-        let cases = [
-            (picture(&[[100, 100, 100, 0], [100, 100, 100, 0]]), 0, true),
-            (picture(&[[101, 100, 100, 0], [100, 100, 100, 0]]), 0, false),
-            (picture(&[[160, 100, 100, 0], [100, 100, 100, 0]]), 10, true),
-            (picture(&[[120, 80, 110, 0], [90, 100, 100, 0]]), 10, true),
-            (
-                picture(&[[161, 100, 100, 0], [100, 100, 100, 0]]),
-                10,
-                false,
-            ),
-            (picture(&[[120, 80, 110, 0], [90, 100, 101, 0]]), 10, false),
-            // The fourth byte is not a color.
-            (
-                picture(&[[100, 100, 100, 255], [100, 100, 100, 255]]),
-                0,
-                true,
-            ),
-            (picture(&[[0, 0, 0, 0], [255, 255, 255, 0]]), 255, true),
-        ];
-        for (shown, tolerance, same) in cases {
-            assert_eq!(
-                same_look(&kept, &shown, tolerance),
-                same,
-                "{shown:?} within {tolerance}"
-            );
-            let state = ImageMatch::new(kept.clone(), None, tolerance).expect("no mask");
-            assert_eq!(
-                state.matches(&shown),
-                Ok(same),
-                "a state check agrees on {shown:?} within {tolerance}"
-            );
-        }
+    fn it_rests_four_times_as_long_as_a_frame_took_and_compares_none_until_then() {
+        let start = Instant::now();
+        let after = |millis: u64| start + Duration::from_millis(millis);
+        let mut screenshots = Screenshots::new();
+        let mut recording = recording(start);
+        // The frame arrived at 0 and was compared by 10, so it took 10 and
+        // the recording rests until 50.
+        recording.offer(&shade(0), start, || after(10), &mut screenshots);
+        assert_eq!(recording.view(start).kept, [0]);
+        recording.offer(&shade(100), after(20), || after(49), &mut screenshots);
+        assert_eq!(
+            recording.view(start).kept,
+            [0],
+            "a frame handled while it rests is not compared"
+        );
+        // Handled at 50, the same look is new. It arrived at 48, so it took
+        // 2 and the recording rests until 58.
+        recording.offer(&shade(100), after(48), || after(50), &mut screenshots);
+        assert_eq!(recording.view(start).kept, [0, 1]);
+        recording.offer(&shade(200), after(57), || after(57), &mut screenshots);
+        assert_eq!(recording.view(start).kept, [0, 1]);
+        // A frame that shows a known look is compared too, so it also sets
+        // the rest: this one took 30, until 180.
+        recording.offer(&shade(100), after(30), || after(60), &mut screenshots);
+        recording.offer(&shade(200), after(179), || after(179), &mut screenshots);
+        assert_eq!(recording.view(start).kept, [0, 1]);
+        recording.offer(&shade(200), after(180), || after(180), &mut screenshots);
+        assert_eq!(recording.view(start).kept, [0, 1, 2]);
     }
 
     #[test]
-    fn pictures_of_different_sizes_are_different_looks() {
-        let kept = picture(&[[100, 100, 100, 0], [100, 100, 100, 0]]);
-        let shorter = picture(&[[100, 100, 100, 0]]);
-        assert!(!same_look(&kept, &shorter, 255));
-        assert!(!same_look(&shorter, &kept, 255));
+    fn a_frame_of_another_size_costs_no_rest() {
+        let start = Instant::now();
+        let later = start + Duration::from_secs(1);
+        let mut screenshots = Screenshots::new();
+        let mut recording = recording(start);
+        let wider = Image::new(
+            Size {
+                width: 3,
+                height: 1,
+            },
+            [0, 0, 0, 0].repeat(3),
+        )
+        .expect("matching length");
+        // It arrived a second ago, but nothing was compared.
+        recording.offer(&wider, start, || later, &mut screenshots);
+        assert!(recording.view(later).problem.is_some());
+        recording.offer(&shade(0), later, || later, &mut screenshots);
+        assert_eq!(recording.view(later).kept, [0]);
+        assert_eq!(recording.view(later).problem, None);
     }
 }

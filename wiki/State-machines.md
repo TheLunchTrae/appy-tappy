@@ -823,6 +823,8 @@ always starts a new one.
 stateDiagram-v2
     [*] --> None
     None --> Recording: Start recording
+    Recording --> Resting: a frame is compared, whether or not it is kept
+    Resting --> Recording: four times as long as that frame took has passed
     Recording --> Paused: a frame of another window size
     Paused --> Recording: a frame of the size the region was drawn at
     Recording --> Stopped: Stop recording
@@ -846,12 +848,21 @@ stateDiagram-v2
   within the tolerance of one of them changes nothing. Any other is a new look:
   the whole frame goes to the screenshot store, and the recording's `kept` list
   gets its index.
+- **Resting** is a recording whose `rests_until` is still to come. After each
+  comparison it is set to four times as long as the frame took from arriving
+  to compared (`REST`), counted from the end of the comparison. A frame that
+  the owner handles before then is not compared: it changes nothing in the
+  recording, and a look it shows is kept when a later frame shows it.
+  Comparing so takes at most a fifth of the owner thread's time, whatever the
+  region's size. **Resting** leaves by every arrow that leaves **Recording**.
 - **Paused** is a recording whose `problem` says the window has another size
   than the screenshot the region was drawn on. It keeps nothing, and the next
   frame of the right size clears the problem and records.
 - **Stopped** keeps its `kept` list and its problem for the UI to show. A
-  capture failure stops it as it stops a recording of readings; frames that
-  come again do not restart it. The limit, `MAX_LOOKS`, stops it when it keeps
+  capture failure stops it as it stops a recording of readings, and its
+  problem names **Start recording** as the way on, where a recording of
+  readings names **Record more** (`Recorder::after_failure`); frames that come
+  again do not restart it. The limit, `MAX_LOOKS`, stops it when it keeps
   its 16th screenshot. The user recovers from either with **Start recording**,
   which starts a new recording with a new ID that knows the looks of every
   screenshot still held.
@@ -860,7 +871,9 @@ stateDiagram-v2
   screenshots stay until the capture stops.
 - Leaving a recording, by any arrow to **None**, keeps the screenshots it
   kept: they belong to the capture slot's `screenshots`, which only a removal
-  or a stop of the capture releases.
+  or a stop of the capture releases. While it records, rests, or is paused,
+  the owner refuses to remove any screenshot, so the looks it knows and the
+  screenshots that show them stay in step.
 - The reference editor records readings, so opening it discards a recording of
   looks first (`openEditor` in `Capture.tsx`), and the owner replaces one when
   a recording of readings starts.

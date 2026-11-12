@@ -21,7 +21,8 @@ impl<H: Host> Owner<H> {
         let recording = match &mut self.recording {
             Some(Recorder::Readings(recording)) => recording,
             Some(Recorder::Looks(recording)) => {
-                recording.offer(frame, received, &mut self.screenshots);
+                let host = &self.host;
+                recording.offer(frame, received, || host.now(), &mut self.screenshots);
                 return;
             },
             None => return,

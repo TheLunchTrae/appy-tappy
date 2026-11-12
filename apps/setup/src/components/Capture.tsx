@@ -31,7 +31,7 @@ import type { Choice } from './Picker.tsx';
 import { colorAt } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { LookPanel } from './LookRecording.tsx';
-import { lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
+import { listedKept, lookBlocked, lookTolerance, removableRecorded, removeBlocked } from '../lib/looks.ts';
 import { clock } from '../lib/review.ts';
 import { type Point, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
@@ -161,6 +161,15 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const recorder = useRecording();
   const recording = recorder.view;
   const looks = useLookRecording(screenshots.adopt);
+  // The screenshots the recording the user just stopped kept, until the first that the strip lists shows.
+  const [toReview, setToReview] = useState<readonly number[] | null>(null);
+  useEffect(() => {
+    const first = toReview === null ? undefined : listedKept(toReview, shots)[0];
+    if (first !== undefined) {
+      setSelected(first);
+      setToReview(null);
+    }
+  }, [toReview, shots, setSelected]);
   // The recording that runs now, of readings or of looks: the owner records one thing at a time.
   const recordingNow = recording?.recording === true ? recording : looks.view?.recording === true ? looks.view : null;
 
@@ -361,14 +370,15 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     await looks.start({ region, tolerance: lookTolerance(draft), drawnOn }, () => {
       setSelected(null);
       setPicking(null);
+      setToReview(null);
     });
   };
 
-  // Stops recording looks and shows the first screenshot it kept, to review them in the strip.
+  // Stops recording looks, to review what it kept in the strip.
   const stopLooks = async (): Promise<void> => {
-    const first = (await looks.stop())?.kept[0];
-    if (first !== undefined) {
-      setSelected(first);
+    const stopped = await looks.stop();
+    if (stopped !== null && stopped.kept.length > 0) {
+      setToReview(stopped.kept);
     }
   };
 
@@ -444,7 +454,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
 
   // Why the screenshot shown cannot be removed, or null when it can or the live view shows.
   const valueRegion = editing?.valueRegion ?? null;
-  const unremovable = selected === null ? null : removeBlocked(draft, valueRegion, selected);
+  const unremovable =
+    selected === null ? null : removeBlocked(draft, valueRegion, selected, looks.view?.recording === true);
   const removable = removableRecorded(shots, draft, valueRegion);
   // A bar's and a color's fix read with the colors of the first drawing, so they need no more screenshots.
   const offersLooks = draft.kind === 'state' || (fixing === null && draft.kind !== 'number');
@@ -452,6 +463,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     offersLooks || looks.view?.recording === true ? (
       <LookPanel
         view={looks.view}
+        listed={listedKept(looks.view?.kept ?? [], shots).length}
         recorded={shots.filter((shot) => shot.recorded).length}
         removable={removable.length}
         blocked={lookBlocked(draft)}
@@ -716,10 +728,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             <button
               type="button"
               className="btn small"
-              disabled={unremovable !== null}
+              aria-disabled={unremovable !== null}
               aria-describedby={unremovable === null ? undefined : 'remove-blocked'}
               onClick={() => {
-                background(screenshots.remove([selected]));
+                // A refused removal keeps the focus, so its reason is heard.
+                if (unremovable === null) {
+                  background(screenshots.remove([selected]));
+                }
               }}
             >
               Remove screenshot {position(selected)}

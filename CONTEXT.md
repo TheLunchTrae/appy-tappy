@@ -25,9 +25,10 @@ parts fit.
   hold time: a rule fires on the first value that makes its condition hold.
 - **Fix.** A screen region value drawn again at one more window size, which
   it reads there exactly instead of scaled from its first drawing.
-- **Look.** What a value's region shows at one moment. Two looks are the same
-  when their pixels differ by no more than a tolerance on average, the way a
-  state check compares a region with a state's picture.
+- **Look.** What the whole of a value's region shows at one moment. Two looks
+  are the same when the region's pixels differ by no more than a tolerance on
+  average, the way a state check compares a region with a state's whole
+  picture. A look takes no account of what a state selects in the region.
 - **Pin.** The side of the window, a corner, an edge's middle, or the center,
   that a region keeps its scaled distance from as the window changes size.
   The UI calls it **Stays at**.

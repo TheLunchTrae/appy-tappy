@@ -73,18 +73,36 @@ them itself.
    They work like any screenshot: add a state from one, pick a color on one,
    or draw the region on one. Remove the ones you do not need one by one, or
    select **Remove all recorded** to remove every recorded screenshot that
-   nothing uses.
+   nothing uses. While it records, no screenshot can be removed: stop
+   recording first.
+
+A recording compares the whole region. It keeps a screenshot when the region
+differs from every screenshot you have by more than a tolerance, on average
+over all its pixels. So draw the region close around what changes:
+
+- Where the background behind the thing changes, such as a scene behind an
+  icon, most moments count as new looks, and the recording soon stops at its
+  limit. A recording does not use what you
+  [select in a state](#select-the-thing-in-a-state).
+- Where only a small part of a large region changes, the average barely
+  moves, and the change may never give a screenshot.
+
+For those, take the screenshots by hand.
 
 What a recording gives each check:
 
-- **State.** A screenshot of each look, to add a state from. Looks are told
-  apart the way the check compares them, with the check's **Tolerance**: lower
-  it before you record to keep looks that differ less, or raise it to keep
-  fewer.
+- **State.** A screenshot of each look, to add a state from. The tolerance is
+  the check's **Tolerance** as it is when you start recording: lower it first
+  to keep looks that differ less, or raise it to keep fewer. Changing it while
+  a recording runs changes nothing until you record again.
 - **Bar fill.** The bar at different fills. Pick the **Filled color** and the
-  **Empty color** on one that shows both.
+  **Empty color** on one that shows both. The tolerance is fixed at 16, on
+  the scale of 0 to 255 that a color's red, green, and blue use, so a bar that
+  moves only a little may not give a new screenshot.
 - **Color.** The region with and without the color. Pick the
-  **Color to look for** on one that shows it.
+  **Color to look for** on one that shows it. The tolerance is the same fixed
+  16, so a small light in a large region may not give a new screenshot when
+  it turns on.
 - **Number.** A number learns characters, not looks, so it records readings
   instead. Under **How to read it**, select **Record readings**. The
   reference you picked opens with its
@@ -92,6 +110,11 @@ What a recording gives each check:
   region. With no reference picked, a new one opens: click the characters on
   the screenshot to pick their color, then select **Start recording**.
   **Save reference** brings you back to the value.
+
+When you [fix a value at one size](#fix-a-value-at-one-size), a **State**
+offers recording, with the tolerance of its first drawing. A **Bar fill** or a
+**Color** does not, because its fix reads with the colors of its first drawing
+and needs no other screenshot.
 
 One recording keeps at most 16 screenshots, then stops and says so: remove the
 ones you do not need and start again to keep more. Something that fades in or
@@ -101,10 +124,15 @@ never writes one to disk.
 
 Keep the window the size it was when you took the screenshot you drew the
 region on: at another size, recording pauses and says to resize the window. If
-the window's capture fails for a moment, recording stops and says why; start
-it again once the window shows. If the window closes, nothing more can be
+the window's capture fails for a moment, recording stops and says why; select
+**Start recording** again once the window shows. If the window closes, nothing more can be
 recorded from it, and the screenshots stay until you change window. Recording
-again keeps only looks that no screenshot shows, so nothing is kept twice.
+again keeps only looks that no screenshot shows, so nothing is kept twice. A
+look you removed the screenshot of is kept again if the region shows it.
+
+With a large region that shows many looks, AppyTappy compares fewer moments,
+so the rest of AppyTappy Setup stays quick. A look that shows only for an
+instant can then be missed.
 
 ## Checks
 

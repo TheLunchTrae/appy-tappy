@@ -1,6 +1,7 @@
 // Recording a value's region for its looks, and which of the session's screenshots can be removed.
 
 import { type Draft, type Drawn, DEFAULT_TOLERANCE, stateOn } from './check.ts';
+import { clock } from './review.ts';
 
 /** A screenshot in the strip: its index in the session, and whether a recording kept it. */
 interface Listed {
@@ -14,20 +15,26 @@ export function lookBlocked(draft: Draft): string | null {
 }
 
 /**
- * How far, on average, the region may be from a look and still show that look, while `draft`'s region is recorded.
- * A state check's own tolerance, so a recording keeps the looks that check can tell apart; for a bar or a color,
- * whose own tolerance compares colors, the tolerance a state check starts with.
+ * How far, on average, the whole region may be from a look and still show that look, while `draft`'s region is
+ * recorded. A state check's own tolerance as it is when the recording starts, the one that check compares a state's
+ * whole region with; for a bar or a color, whose own tolerance compares colors, the tolerance a state check starts
+ * with.
  */
 export function lookTolerance(draft: Draft): number {
   return draft.kind === 'state' ? draft.tolerance : DEFAULT_TOLERANCE.state;
 }
 
 /**
- * Why screenshot `index` cannot be removed, or null when nothing set up uses it: `draft`'s region is not drawn on
- * it, no state is taken from it, and it has no label. `value` is the value's region while the reference editor is
- * open over it, which comes back when the editor closes.
+ * Why screenshot `index` cannot be removed, or null when it can. None can while a recording of looks records, as
+ * `recording` says: the recording knows each look it kept and would not keep a removed one again. Otherwise one
+ * can when nothing set up uses it: `draft`'s region is not drawn on it, no state is taken from it, and it has no
+ * label. `value` is the value's region while the reference editor is open over it, which comes back when the editor
+ * closes.
  */
-export function removeBlocked(draft: Draft, value: Drawn | null, index: number): string | null {
+export function removeBlocked(draft: Draft, value: Drawn | null, index: number, recording: boolean): string | null {
+  if (recording) {
+    return 'Stop recording to remove a screenshot.';
+  }
   if (draft.drawnOn === index || value?.drawnOn === index) {
     return 'The region is drawn on this screenshot. Draw it on another one to remove this one.';
   }
@@ -40,11 +47,22 @@ export function removeBlocked(draft: Draft, value: Drawn | null, index: number):
   return null;
 }
 
-/** The recorded screenshots among `shots` that can be removed, which Remove all recorded removes. */
+/**
+ * The recorded screenshots among `shots` that nothing set up uses, which Remove all recorded removes once no
+ * recording runs.
+ */
 export function removableRecorded(shots: readonly Listed[], draft: Draft, value: Drawn | null): readonly number[] {
   return shots
-    .filter((shot) => shot.recorded && removeBlocked(draft, value, shot.index) === null)
+    .filter((shot) => shot.recorded && removeBlocked(draft, value, shot.index, false) === null)
     .map((shot) => shot.index);
+}
+
+/**
+ * The screenshots among `kept`, the ones a recording kept in the order it kept them, that `shots` still lists. One
+ * is missing once it is removed, and for a moment before the strip hears of it.
+ */
+export function listedKept(kept: readonly number[], shots: readonly Listed[]): readonly number[] {
+  return kept.filter((index) => shots.some((shot) => shot.index === index));
 }
 
 /**
@@ -61,4 +79,14 @@ export function withShot<Shot extends Listed>(shots: readonly Shot[], shot: Shot
 /** How many screenshots a recording kept, such as "1 screenshot". */
 export function keptText(count: number): string {
   return count === 1 ? '1 screenshot' : `${count} screenshots`;
+}
+
+/**
+ * What the stopped recording that kept `kept` screenshots in `elapsedMs` left: how many it kept, or once some are
+ * removed how many of them the strip still lists, `listed`.
+ */
+export function keptSummary(kept: number, listed: number, elapsedMs: number): string {
+  return listed === kept
+    ? `The last recording kept ${keptText(kept)} in ${clock(elapsedMs)}.`
+    : `${listed} of the last recording's ${keptText(kept)} ${listed === 1 ? 'is' : 'are'} still in the strip.`;
 }
