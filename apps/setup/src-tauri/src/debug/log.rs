@@ -11,7 +11,7 @@ use appytappy_platform::{LOG_LIMIT, LocalTime, Log};
 /// The commands the page calls again and again on a timer. A success of one
 /// of them that took less than [`SLOW`] is left out, so the log keeps what
 /// the user did rather than the page's polling.
-const REPEATED: &[&str] = &[
+pub(crate) const REPEATED: &[&str] = &[
     "debug_overview",
     "explain_reading",
     "explain_watched",

@@ -234,7 +234,7 @@ mod tests {
             .ask(|owner| {
                 owner.debug_bundle(BundleSpec {
                     pictures: false,
-                    trace: false,
+                    trace: None,
                 })
             })
             .expect("bundle");
@@ -254,7 +254,7 @@ mod tests {
             .ask(|owner| {
                 owner.debug_bundle(BundleSpec {
                     pictures: true,
-                    trace: true,
+                    trace: Some("trace-2026-11-12-100000.csv".to_owned()),
                 })
             })
             .expect("bundle");
@@ -267,6 +267,19 @@ mod tests {
         assert!(
             names.contains(&"traces/trace-2026-11-12-100000.csv".to_owned()),
             "{names:?}"
+        );
+        let outside = harness
+            .ask(|owner| {
+                owner.debug_bundle(BundleSpec {
+                    pictures: false,
+                    trace: Some("../settings.json".to_owned()),
+                })
+            })
+            .expect("bundle");
+        assert_eq!(
+            unzip(outside, "about.txt").0.len(),
+            4,
+            "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");
     }

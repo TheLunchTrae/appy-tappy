@@ -3,7 +3,8 @@
 use std::io;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError, HANDLE,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError,
+    HANDLE,
 };
 use windows::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
 use windows::core::HSTRING;
@@ -38,6 +39,9 @@ impl InstanceGuard {
                 Ok(true)
             },
             Err(error) if error.code() == ERROR_FILE_NOT_FOUND.to_hresult() => Ok(false),
+            // The mutex exists but is out of reach, as when its holder runs as
+            // administrator: it is still held.
+            Err(error) if error.code() == ERROR_ACCESS_DENIED.to_hresult() => Ok(true),
             Err(error) => Err(error.into()),
         }
     }

@@ -43,23 +43,29 @@ export function bundleName(when: Date): string {
   return `appytappy-debug-${day}-${two(when.getHours())}${two(when.getMinutes())}.zip`;
 }
 
+/** Writes a zip to the place the user picked. */
+export type ZipSaver = (zip: Blob) => Promise<void>;
+
 /**
- * Saves `zip` where the user chooses, with `name` offered. Says `false` when the user closed the picker without
- * saving. A window without the picker downloads the file instead.
+ * Asks where to save a zip, with `name` offered, before the zip is made, so the picker opens at once while the page
+ * still has the click that asked for it. Says `null` when the user closed the picker without picking. A window
+ * without the picker downloads the file instead, once it is written.
  */
-export async function saveZip(zip: Blob, name: string): Promise<boolean> {
+export async function pickZipFile(name: string): Promise<ZipSaver | null> {
   const picker = window.showSaveFilePicker;
   if (picker === undefined) {
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(zip);
-    link.href = url;
-    link.download = name;
-    link.click();
-    // The download reads the file after the click, so the link goes a little later.
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-    }, 10_000);
-    return true;
+    return async (zip) => {
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(zip);
+      link.href = url;
+      link.download = name;
+      link.click();
+      // The download reads the file after the click, so the link goes a little later.
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 10_000);
+      await Promise.resolve();
+    };
   }
   let file;
   try {
@@ -69,12 +75,13 @@ export async function saveZip(zip: Blob, name: string): Promise<boolean> {
     });
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      return false;
+      return null;
     }
     throw error;
   }
-  const writable = await file.createWritable();
-  await writable.write(zip);
-  await writable.close();
-  return true;
+  return async (zip) => {
+    const writable = await file.createWritable();
+    await writable.write(zip);
+    await writable.close();
+  };
 }

@@ -232,9 +232,10 @@ export type BundleSpec = DeepReadonly<{
  */
 pictures: boolean,
 /**
- * The newest trace file.
+ * The name of the trace file to add, the one the dialog showed, or
+ * `None` for no trace. Only a trace file in the trace folder is added.
  */
-trace: boolean, }>;
+trace: string | null, }>;
 
 /**
  * How a value is read from its region.
@@ -1186,9 +1187,21 @@ frameToAction: Spread | null,
  */
 ruleHandling: Spread | null,
 /**
- * How many records the trace dropped, because its buffer was full.
+ * How long the runtime took to run each automation's actions, or
+ * `None` when none ran, as with `actions` not recorded.
+ */
+actionRun: Spread | null,
+/**
+ * How many records the trace dropped, because its buffer was full, in
+ * the part of the file read.
  */
 dropped: number,
+/**
+ * Whether the part read starts after the file's first row, because
+ * the file, or its growth since the last read, was larger than a read
+ * takes. The numbers then cover only the newer rows.
+ */
+partial: boolean,
 /**
  * The newest rows, oldest first.
  */
