@@ -24,7 +24,10 @@ interface Editing {
   readonly setDraft: Dispatch<SetStateAction<Draft>>;
   /** The value's name as typed. */
   readonly name: string;
-  readonly pin: PinDef;
+  /** The side it stays at, or null while there is no region to follow. */
+  readonly pin: PinDef | null;
+  /** Whether its region is a reading area. */
+  readonly readingArea: boolean;
   /** Each screenshot's window size, by its index. */
   readonly sizes: ReadonlyMap<number, Size>;
 }
@@ -33,7 +36,7 @@ interface Editing {
  * Edits `value` with the capture screen's draft. Its region is in the pixels of the window size it was drawn at, so
  * the region sits on the newest screenshot of that size as soon as there is one, and on none until then.
  */
-export function useValueEdit({ value, open, app, draft, setDraft, name, pin, sizes }: Editing): {
+export function useValueEdit({ value, open, app, draft, setDraft, name, pin, readingArea, sizes }: Editing): {
   /** The edit, or what it still needs; null while no saved value's own fields show. */
   readonly built: Built<EditSpec> | null;
   /** The window sizes of the fixes the user agreed to lose. */
@@ -62,8 +65,8 @@ export function useValueEdit({ value, open, app, draft, setDraft, name, pin, siz
   }, [drawn, unplaced, sizes, setDraft]);
 
   const built = useMemo(
-    () => (value === null || !open ? null : buildEdit(draft, value, app, name, pin)),
-    [value, open, draft, app, name, pin],
+    () => (value === null || !open ? null : buildEdit(draft, value, app, name, pin, readingArea)),
+    [value, open, draft, app, name, pin, readingArea],
   );
   const [lost, agree] = useState<readonly SizeDef[]>([]);
 

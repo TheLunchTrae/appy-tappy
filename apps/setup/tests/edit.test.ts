@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ValueDef } from '../src/lib/bindings.ts';
-import { DEFAULT_TOLERANCE, EMPTY_DRAFT, withKind, withState, withStateAt } from '../src/lib/check.ts';
+import { DEFAULT_TOLERANCE, type Draft, EMPTY_DRAFT, withKind, withState, withStateAt } from '../src/lib/check.ts';
+import { AUTOMATIC } from '../src/lib/pin.ts';
 import { held } from '../src/lib/unsaved.ts';
 import {
   agreedFixes,
@@ -38,7 +39,7 @@ const number = value({ kind: 'number', reference: 'percent', whole: true });
 
 /** The edit `draft` makes of `saved`, under its own name. */
 function edit(draft: Parameters<typeof buildEdit>[0], saved: ValueDef, name = saved.name) {
-  return buildEdit(draft, saved, 'example', name, 'bottomRight');
+  return buildEdit(draft, saved, 'example', name, 'bottomRight', false);
 }
 
 describe('editDraft', () => {
@@ -67,27 +68,30 @@ test('the region sits on the first screenshot only when it has the size the valu
   expect(placedOn(placed, bar.screen, 4, windowSize)).toBe(placed);
 });
 
-test('an edit holds unsaved work once anything it opened with changed, the picked side included', () => {
-  const centered = { ...bar, screen: { ...bar.screen, pin: 'center' as const } };
+test('an edit holds unsaved work once anything it opened with changed, the side and the reading area included', () => {
+  const centered = { ...bar, screen: { ...bar.screen, pin: 'center' as const, readingArea: true } };
   const start = editStart(centered);
-  expect(start).toEqual({ valueName: 'Status', pinned: 'center', draft: editDraft(centered.screen) });
+  expect(start).toEqual({ valueName: 'Status', mayMove: true, draft: editDraft(centered.screen) });
+  expect(start.draft.pin).toEqual({ kind: 'byHand', pin: 'center' });
+  expect(editStart(bar).mayMove).toBe(false);
   expect(held(false, start, editStart(centered))).toBe('nothing');
-  // Another side, or back to the guess, is the only change.
-  expect(held(false, start, { ...start, pinned: 'topRight' })).toBe('unsaved');
-  expect(held(false, start, { ...start, pinned: null })).toBe('unsaved');
-  expect(held(false, editStart(bar), { ...editStart(bar), pinned: 'topLeft' })).toBe('unsaved');
+  // Another side, back to automatic, or the reading area turned off is the only change.
+  const picked = (pin: Draft['pin']) => ({ ...start, draft: { ...start.draft, pin } });
+  expect(held(false, start, picked({ kind: 'byHand', pin: 'topRight' }))).toBe('unsaved');
+  expect(held(false, start, picked(AUTOMATIC))).toBe('unsaved');
+  expect(held(false, start, { ...start, mayMove: false })).toBe('unsaved');
   // Once the capture's own screenshot holds the region, that is where the edit starts.
   const placed = { ...start, draft: placedOn(start.draft, centered.screen, 0, windowSize) };
-  expect(held(false, placed, { ...placed, pinned: 'center' })).toBe('nothing');
+  expect(held(false, placed, { ...placed })).toBe('nothing');
   expect(held(false, placed, { ...placed, valueName: 'Health' })).toBe('unsaved');
 });
 
-test('a pin shows as picked by hand only when it is not the guess', () => {
+test('a pin opens as picked by hand only when it is saved and is not the side the region is nearest', () => {
   // The region's center is in the window's top left third.
-  expect(pickedPin(bar.screen)).toBeNull();
-  expect(pickedPin({ ...bar.screen, pin: 'center' })).toBe('center');
+  expect(pickedPin(bar.screen)).toEqual(AUTOMATIC);
+  expect(pickedPin({ ...bar.screen, pin: 'center' })).toEqual({ kind: 'byHand', pin: 'center' });
   const { pin: _, ...unpinned } = bar.screen;
-  expect(pickedPin(unpinned)).toBeNull();
+  expect(pickedPin(unpinned)).toEqual(AUTOMATIC);
 });
 
 test('a value drawn at another size says both sizes', () => {
@@ -139,6 +143,7 @@ describe('buildEdit', () => {
         value: 'status',
         valueName: 'Health',
         pin: 'bottomRight',
+        readingArea: false,
         drawing: { kind: 'kept', check: { kind: 'barFill', filled: gray, empty: red } },
       },
     });
@@ -150,6 +155,17 @@ describe('buildEdit', () => {
     const color = { ...withKind(editDraft(bar.screen), 'color'), color: red };
     expect(edit(color, bar)).toMatchObject({
       spec: { drawing: { kind: 'kept', check: { kind: 'color', color: red, tolerance: DEFAULT_TOLERANCE.color } } },
+    });
+  });
+
+  test('carries whether the region is a reading area, and needs a side', () => {
+    const draft = editDraft(bar.screen);
+    expect(buildEdit(draft, bar, 'example', 'Status', 'topLeft', true)).toMatchObject({
+      spec: { pin: 'topLeft', readingArea: true },
+    });
+    expect(buildEdit(draft, bar, 'example', 'Status', null, false)).toEqual({
+      ok: false,
+      next: 'Draw a region on a screenshot.',
     });
   });
 

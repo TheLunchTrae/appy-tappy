@@ -407,6 +407,18 @@ pub struct ScreenDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub pin: Option<PinDef>,
+    /// Whether the user drew the region as a reading area: larger than what
+    /// it reads, to cover every place content that moves inside the window
+    /// can show. Left out of the file when it is not.
+    ///
+    /// Setup guidance only. The setup app shows the region as a reading
+    /// area when the value is listed or drawn again. Nothing that places
+    /// or reads the region looks at it, so the value reads the same with
+    /// and without it. Only a check that
+    /// [reads anywhere in its region](CheckDef::reads_anywhere) may have
+    /// one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reading_area: bool,
     /// The value drawn again at other window sizes, each read exactly at its
     /// own size. Always written, even when empty, since the setup app reads
     /// the file's JSON as is.
@@ -694,6 +706,19 @@ impl CheckDef {
         }
     }
 
+    /// Whether the check reads its content wherever it is in the region, so
+    /// that the region may be a reading area: a number check finds its
+    /// characters anywhere in it, and a bar fill check counts its colors
+    /// anywhere in it. A color check averages the whole region and a state
+    /// check compares it pixel by pixel, so their content has to stay put.
+    #[must_use]
+    pub const fn reads_anywhere(&self) -> bool {
+        match self {
+            Self::Number { .. } | Self::BarFill { .. } => true,
+            Self::Color { .. } | Self::State { .. } => false,
+        }
+    }
+
     /// The states this check tells apart; none for a check of another kind.
     #[must_use]
     pub fn states(&self) -> &[StateDef] {
@@ -853,8 +878,9 @@ impl AppFile {
     /// Checks the rules JSON alone cannot: the format version, a name for
     /// the application and each value and reference, a window match that
     /// passes [`WindowDef::check`], valid and unique IDs, picture file names,
-    /// at least one sample for a reference, and checks that pass
-    /// [`CheckDef::check`]. Whether a value's pictures and region can be
+    /// at least one sample for a reference, checks that pass
+    /// [`CheckDef::check`], and a reading area only for a check that reads
+    /// anywhere in its region. Whether a value's pictures and region can be
     /// read is up to `appytappy-sources`' `saved::build`, so a value that
     /// cannot be read stops only itself.
     ///
@@ -909,11 +935,19 @@ fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
 }
 
 /// Checks one value's part of the file's rules, answering the problem as a
-/// sentence: a name, a check that passes [`CheckDef::check`], and picture
+/// sentence: a name, a check that passes [`CheckDef::check`], a reading
+/// area only for a check that
+/// [reads anywhere in its region](CheckDef::reads_anywhere), and picture
 /// names the folder can hold.
 fn check_value(value: &ValueDef) -> Result<(), String> {
     if value.name.trim().is_empty() {
         return Err("it has no name".to_owned());
+    }
+    if value.screen.reading_area && !value.screen.check.reads_anywhere() {
+        return Err(
+            "its region is a reading area, which only a number or bar fill check can read"
+                .to_owned(),
+        );
     }
     value
         .screen
@@ -1153,6 +1187,7 @@ mod tests {
                         whole: true,
                     },
                     pin: Some(PinDef::TopCenter),
+                    reading_area: false,
                     fixes: Vec::new(),
                 },
             }],
@@ -1225,6 +1260,50 @@ mod tests {
         rarely.size_changes = SizeChangesDef::Rarely;
         assert!(rarely.to_json().contains("\"sizeChanges\": \"rarely\""));
         assert_eq!(AppFile::parse(&rarely.to_json()), Ok(rarely));
+    }
+
+    #[test]
+    fn a_reading_area_is_left_out_until_set_and_only_for_a_check_that_reads_anywhere() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(!json.contains("readingArea"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        let black = ColorDef {
+            red: 0,
+            green: 0,
+            blue: 0,
+        };
+        let bar = CheckDef::BarFill {
+            filled: RED,
+            empty: black,
+        };
+        let color = CheckDef::Color {
+            color: RED,
+            tolerance: 9,
+        };
+        let state = states(&[("Paused", "status-1.png")]);
+        // A number or a bar is read wherever it is in its region.
+        file.values[0].screen.reading_area = true;
+        let json = file.to_json();
+        assert!(json.contains("\"readingArea\": true"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        file.values[0].screen.check = bar;
+        assert_eq!(file.check(), Ok(()));
+        // A color or a state needs its content to stay put.
+        for check in [color, state] {
+            file.values[0].screen.check = check;
+            assert_eq!(
+                file.check(),
+                Err(AppFileError::Value(
+                    "progress".to_owned(),
+                    "its region is a reading area, which only a number or bar fill check can read"
+                        .to_owned()
+                ))
+            );
+            file.values[0].screen.reading_area = false;
+            assert_eq!(file.check(), Ok(()));
+            file.values[0].screen.reading_area = true;
+        }
     }
 
     fn fix(images: &[&str]) -> FixDef {

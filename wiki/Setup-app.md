@@ -105,8 +105,17 @@ This page covers what the user guide leaves out.
   automation editor reads about twice a second and shows numbers as read, to
   four decimals unless more are needed to compare them with the target.
 - **Window sizes.** A new value saves the side of the window it stays at
-  as `pin`, the guess from where its region is unless the user picks
-  another. The Values page reads each running application's values about
+  as `pin`. The pin follows where the region is, the same guess the runtime
+  makes for a value saved without one, until the user picks a side by hand
+  ([Pin choice](State-machines.md#pin-choice)); either way the file names
+  it. Guide lines over the screenshot run from the region to the edges or
+  the middle of the window that the pin measures from (`PinGuides.tsx`).
+  **This content may move** asks for a reading area where the check can
+  read one, and the value saves it as `readingArea`
+  ([Content that moves](Screen-regions.md#content-that-moves)). A fix of
+  such a value asks for a reading area at its size too, and has no flag of
+  its own.
+  The Values page reads each running application's values about
   once a second at the window's size now, with a capture of its own like an
   overlay's, whether the overlay is on or not, and stops when the page
   closes (`live_values`, `stop_live_values`). The automation editor's
@@ -125,7 +134,15 @@ This page covers what the user guide leaves out.
   screenshot of the window size the value was drawn at exists, the region
   sits on the newest one (`useValueEdit`); on a screenshot of any other
   size the region does not show and cannot be drawn. The page sends an
-  `EditSpec`: the value's ID, its name, its pin, and a drawing. A `kept`
+  `EditSpec`: the value's ID, its name, its pin, whether its region is a
+  reading area, and a drawing. The pin and the reading area are picked as
+  for a new value, on the capture's draft and with **This content may
+  move**, and open as the saved value has them: the pin by hand only when
+  it is saved and is not the side the region is nearest (`pickedPin`). The
+  owner refuses a reading area on a check that does not read anywhere in
+  its region, tried or saved, so an edit that makes a number a color has to
+  turn it off; the page sends it only for a check that reads one. The flag
+  is setup guidance, so the value's fixes stay whatever it says. A `kept`
   drawing keeps the saved region and spells the check as the file does, so
   it needs no screenshot and the window may have any size; a state check in
   it names the value's saved pictures in their order, under the names the
@@ -319,6 +336,7 @@ saved file still names.
           "whole": true
         },
         "pin": "topRight",
+        "readingArea": true,
         "fixes": [
           {
             "windowSize": { "width": 3440, "height": 1440 },
@@ -393,7 +411,9 @@ An application's `sizeChanges` is `often` or `rarely`, and `often` when the
 file leaves it out. A value's `pin` is one of `topLeft`, `topCenter`,
 `topRight`, `middleLeft`, `center`, `middleRight`, `bottomLeft`,
 `bottomCenter`, and `bottomRight`, and is guessed from where the region is
-when the file leaves it out. Each of its `fixes` has its own window size and
+when the file leaves it out. Its `readingArea` is `true` when the region was
+drawn as a reading area and left out otherwise; only a number or bar fill
+check may have it, and it changes nothing the value reads. Each of its `fixes` has its own window size and
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 

@@ -146,6 +146,40 @@ never clash. Each new set takes a number no saved picture of the value
 uses, so its pictures never overwrite the ones it replaces, and the setup
 app deletes the old ones once the file is saved.
 
+## Content that moves
+
+A check reads one fixed region. Nothing in the runtime looks for a value or
+follows it, so content that moves around inside the window, such as a number
+that shifts as it gains digits, is read only where the region covers it. A
+pin is no help with that: it places the region when the window changes size.
+
+Two checks read their content wherever it is inside the region, so a region
+drawn larger than the content, a reading area, covers every place it shows:
+
+- **Number** finds the ink anywhere in the region, so blank margin on any
+  side changes nothing. All ink on the text's rows is read as characters,
+  left to right, so other ink of the text's color beside the number is read
+  with it. A shape the reference has not learned fails the read when it
+  comes before the number or right after its digits; once a learned
+  character such as `%` has ended the number, a shape after it is skipped.
+  The line read is the run of inked rows that holds the most ink, so ink
+  above or below the number, with a blank row between, is skipped unless it
+  holds more.
+- **Bar fill** counts the pixels near its two colors wherever they are: each
+  pixel within half the distance between the two colors of the nearer one.
+  Any other pixel that near either color counts with the bar's.
+
+**Color** averages the whole region, and **State** compares it pixel by
+pixel, so both need their content to stay put in the region. The setup app's
+**This content may move** option says this where the region is drawn.
+
+A value saves that its region is a reading area as `readingArea`, which only
+a number or bar fill check may have (`AppFile::check`,
+`CheckDef::reads_anywhere`). It is setup guidance: the Values page names the
+region a reading area, and a fix of the value asks for one again. Nothing
+that places or reads the region looks at it, so the value reads the same
+with and without it (`saved::build`).
+
 ## Selection
 
 `screen::select` finds the thing to compare on a screenshot, without a model:

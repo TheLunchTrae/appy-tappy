@@ -88,6 +88,7 @@ fn edit(value: &str, name: &str, drawing: &str) -> EditSpec {
         value: value.to_owned(),
         value_name: name.to_owned(),
         pin: PinDef::TopLeft,
+        reading_area: false,
         drawing: serde_json::from_str(drawing).expect("valid JSON"),
     }
 }
@@ -762,6 +763,38 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
             "{check:?}"
         );
     }
+    std::fs::remove_dir_all(root).expect("clean up");
+}
+
+#[test]
+fn an_edit_sets_whether_the_region_is_a_reading_area_only_for_a_check_that_reads_one() {
+    let (mut harness, root) = with_saved_bar("edit-reading-area");
+    let area = |harness: &Harness| saved_file(harness).values[0].screen.reading_area;
+    assert!(!area(&harness));
+    let mut bar = edit("progress_bar", "Progress bar", KEPT_BAR);
+    bar.reading_area = true;
+    assert!(save(&mut harness, &bar, &[]).is_ok());
+    assert!(area(&harness));
+    // Saved again as it is, nothing is written.
+    harness.forget_reloads();
+    assert!(save(&mut harness, &bar, &[]).is_ok());
+    assert_eq!(harness.reloads(), 0);
+    // A color averages its whole region, so the edit that makes it one
+    // cannot keep the reading area, tried or saved.
+    let refused = "Only a number or a bar fill check reads a reading area. Turn off This content \
+                   may move.";
+    let mut color = edit("progress_bar", "Progress bar", KEPT_COLOR);
+    color.reading_area = true;
+    let files = folder_files(&harness);
+    assert_eq!(
+        harness.ask(|owner| owner.try_edit(&color)),
+        Err(refused.to_owned())
+    );
+    assert_eq!(save(&mut harness, &color, &[]), Err(refused.to_owned()));
+    assert_eq!(folder_files(&harness), files, "nothing was written");
+    color.reading_area = false;
+    assert!(save(&mut harness, &color, &[]).is_ok());
+    assert!(!area(&harness));
     std::fs::remove_dir_all(root).expect("clean up");
 }
 

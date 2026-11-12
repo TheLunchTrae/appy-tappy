@@ -195,6 +195,15 @@ impl<H: Host> Owner<H> {
                 .collect();
             (Vec::new(), dropped)
         };
+        // The application's file refuses a reading area on a check that
+        // reads its whole region, and so does an edit that is only tried.
+        if spec.reading_area && !check.reads_anywhere() {
+            return Err(
+                "Only a number or a bar fill check reads a reading area. Turn off This content \
+                 may move."
+                    .to_owned(),
+            );
+        }
         // A value saved without a pin stays at the side guessed from where
         // its region is, and goes on doing so while the edit names that
         // side.
@@ -211,6 +220,7 @@ impl<H: Host> Owner<H> {
                 region,
                 check,
                 pin,
+                reading_area: spec.reading_area,
                 fixes,
             },
         };

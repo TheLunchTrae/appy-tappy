@@ -11,6 +11,7 @@ import {
   type SelectStep,
   type StateSpec,
 } from './bindings.ts';
+import { AUTOMATIC, type PinChoice } from './pin.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
 import { DEFAULT_COLOR_MATCH, withStep } from './selection.ts';
@@ -55,6 +56,8 @@ export interface Draft {
   readonly region: Rect | null;
   /** The screenshot the region was drawn on, whose window size the region's pixels refer to. */
   readonly drawnOn: number | null;
+  /** How a new value's pin is picked. It lives beside the region, since a region drawn anew changes both. */
+  readonly pin: PinChoice;
   readonly tolerance: number;
   /** The reference's characters' color. */
   readonly ink: Color | null;
@@ -83,6 +86,7 @@ export const EMPTY_DRAFT: Draft = {
   kind: 'number',
   region: null,
   drawnOn: null,
+  pin: AUTOMATIC,
   tolerance: DEFAULT_TOLERANCE.number,
   ink: null,
   labels: new Map(),

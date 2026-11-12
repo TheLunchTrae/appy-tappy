@@ -12,18 +12,28 @@ import type {
   ValueDef,
 } from './bindings.ts';
 import { type Built, type Draft, buildSpec, fixDraft } from './check.ts';
+import { AUTOMATIC, type PinChoice } from './pin.ts';
 import { andList } from './reference.ts';
 import { sameRect } from './region.ts';
 import { guessPin, sameSize, sizeText } from './sizes.ts';
 import { sameContent } from './unsaved.ts';
 
 /**
- * The draft that opens `screen`, a saved value's, to edit it: its check's kind and settings, and its region where
- * it is saved, on no screenshot yet. A state check's names wait in `stateNames`, where they can be changed: its
- * states keep their saved pictures until one is taken from a screenshot.
+ * How `screen`'s pin was picked: by hand when it is saved and is not the side its region is nearest, and automatic
+ * otherwise, so the pin of a value that only ever followed its region goes on following it.
+ */
+export function pickedPin(screen: ScreenDef): PinChoice {
+  const pin = screen.pin ?? null;
+  return pin === null || pin === guessPin(screen.region, screen.windowSize) ? AUTOMATIC : { kind: 'byHand', pin };
+}
+
+/**
+ * The draft that opens `screen`, a saved value's, to edit it: its check's kind and settings, its region where it
+ * is saved, on no screenshot yet, and how its pin was picked. A state check's names wait in `stateNames`, where
+ * they can be changed: its states keep their saved pictures until one is taken from a screenshot.
  */
 export function editDraft(screen: ScreenDef): Draft {
-  return { ...fixDraft(screen.check), region: screen.region };
+  return { ...fixDraft(screen.check), region: screen.region, pin: pickedPin(screen) };
 }
 
 /**
@@ -35,23 +45,16 @@ export function placedOn(draft: Draft, saved: ScreenDef, shot: number, size: Siz
   return draft.drawnOn === null && sameSize(size, saved.windowSize) ? { ...draft, drawnOn: shot } : draft;
 }
 
-/** The side `screen`'s region stays at when the user picked it by hand, or null while it is the guess from where
- * the region is. */
-export function pickedPin(screen: ScreenDef): PinDef | null {
-  const pin = screen.pin ?? null;
-  return pin === guessPin(screen.region, screen.windowSize) ? null : pin;
-}
-
 /**
  * What the capture shows of `value` when an edit of it opens, which leaving the edit loses nothing of: its name,
- * the side it stays at when the user picked one by hand, and its draft.
+ * whether its region was drawn as a reading area, for content that may move, and its draft, which has its pin.
  */
 export function editStart(value: ValueDef): {
   readonly valueName: string;
-  readonly pinned: PinDef | null;
+  readonly mayMove: boolean;
   readonly draft: Draft;
 } {
-  return { valueName: value.name, pinned: pickedPin(value.screen), draft: editDraft(value.screen) };
+  return { valueName: value.name, mayMove: value.screen.readingArea === true, draft: editDraft(value.screen) };
 }
 
 /**
@@ -153,14 +156,27 @@ function editDrawing(draft: Draft, saved: ValueDef, app: string): Built<EditDraw
 
 /**
  * The edit of `saved`, a value of the application `app`, that `draft` describes under the name `name`, staying at
- * `pin`; or the next thing it needs. The region as saved needs no screenshot, so the window may have any size. A
- * region that changed, and a state taken from a screenshot, need the screenshot the region is drawn on.
+ * `pin`, with its region a reading area when `readingArea`; or the next thing it needs. The region as saved needs
+ * no screenshot, so the window may have any size. A region that changed, and a state taken from a screenshot, need
+ * the screenshot the region is drawn on.
  */
-export function buildEdit(draft: Draft, saved: ValueDef, app: string, name: string, pin: PinDef): Built<EditSpec> {
+export function buildEdit(
+  draft: Draft,
+  saved: ValueDef,
+  app: string,
+  name: string,
+  pin: PinDef | null,
+  readingArea: boolean,
+): Built<EditSpec> {
   const valueName = name.trim();
   if (valueName === '') {
     return missing('Name the value.');
   }
+  if (pin === null) {
+    return missing('Draw a region on a screenshot.');
+  }
   const drawing = editDrawing(draft, saved, app);
-  return drawing.ok ? { ok: true, spec: { app, value: saved.id, valueName, pin, drawing: drawing.spec } } : drawing;
+  return drawing.ok
+    ? { ok: true, spec: { app, value: saved.id, valueName, pin, readingArea, drawing: drawing.spec } }
+    : drawing;
 }
