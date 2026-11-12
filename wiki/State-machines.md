@@ -82,7 +82,8 @@ stateDiagram-v2
     Starting --> Running: threads started, first plan carried out
     Starting --> [*]: the window events hook, detection, or the action thread cannot start
     Running --> Running: Carry orders, Reload, Due, or a read of the saved files again
-    Running --> Undoing: Quit, CloseRequested, DetectionEnded
+    Running --> Running: a send to the action thread fails, so it starts again
+    Running --> Undoing: Quit, CloseRequested, DetectionEnded, or a send to detection fails
     Undoing --> Stopping: the action thread ran the queued undos and ended
     Stopping --> [*]: every thread joined
 ```
@@ -107,6 +108,17 @@ stateDiagram-v2
   and, once the retry is due, reads the saved files again. With neither, it
   waits with no limit. After each step the tray gets a fresh menu if it
   changed.
+- **A worker that ended.** Every send to the action thread and to detection
+  goes through `Crew::act` and `Crew::detect`. Each of those threads ends
+  only after the owner, or when it panics, so a send that fails means it
+  panicked. For the action thread, the owner joins it and logs its panic,
+  starts a new one, and sends it the owner's trace and then what the old one
+  could not take. What the old thread changed is not undone, because its
+  journal ended with it. If the new thread cannot start, or ends before it
+  takes the send, the log says so, the send is dropped, and the next send
+  tries again. For detection, the owner sends itself `DetectionEnded` and
+  stops, as when detection ends on its own; the join at the end reports the
+  panic.
 - **Undoing.** `model.set_enabled(false)` stops every running application and
   queues the undo of what its automations changed. The owner then drops the
   job sender and joins the action thread, which runs the queued undos before
@@ -499,11 +511,12 @@ stateDiagram-v2
   has nothing to undo. When the wait ends, or the first job after it comes,
   the worker makes the controls again. The wait starts at 1 second and doubles
   after each failure, up to a minute. The log says when actions can run again.
-- **Telling the owner.** `act::run` sends `ActionReport::CanRun(false)` when the
-  worker reaches **Missing** and `CanRun(true)` when it leaves it, and only
-  then; the owner takes it that actions can run until it hears otherwise. The
-  owner keeps the last report in the model's `actions_can_run`, and the tray
-  shows it.
+- **Telling the owner.** `act::run` sends `ActionReport::CanRun` once when it
+  starts, then `CanRun(false)` when the worker reaches **Missing** and
+  `CanRun(true)` when it leaves it. A thread that the owner starts again
+  after a panic thereby replaces what the old one said. The owner takes it
+  that actions can run until the first report, keeps the last report in the
+  model's `actions_can_run`, and the tray shows it.
 - **Ready.** After each job, the worker tries the pending restores that are
   due. While any restore is pending, it waits for the next job only until the
   next one is due, or 10 seconds (`VOLUME_RETRY`) for a volume restore.

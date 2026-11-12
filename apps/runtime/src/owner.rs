@@ -4,8 +4,10 @@
 
 use std::collections::BTreeMap;
 use std::io;
+use std::mem;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SendError, Sender};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use appytappy_actions::Watched;
@@ -141,12 +143,45 @@ struct Stores {
     enabled: EnabledStore,
 }
 
+/// The action thread and the channel that brings it jobs.
+struct Actor {
+    jobs: Sender<act::Control>,
+    thread: JoinHandle<()>,
+}
+
+impl Actor {
+    /// Starts the action thread. It makes the controls on `system`, and
+    /// sends its notes, and whether actions can run, to `reports`.
+    fn start(system: &Arc<HostSystem>, reports: Sender<Event>) -> io::Result<Self> {
+        let (jobs, job_events) = mpsc::channel();
+        let acting = Arc::clone(system);
+        let thread = spawn("actions", move || {
+            act::run(|| controls(&acting), acting.as_ref(), &job_events, &reports);
+        })?;
+        Ok(Self { jobs, thread })
+    }
+
+    /// Ends the action thread once it has run what is queued, and waits for
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the thread panicked.
+    fn stop(self) -> io::Result<()> {
+        drop(self.jobs);
+        join(self.thread)
+    }
+}
+
 /// The threads and handles the owner carries orders out with.
+///
+/// Every send to the action thread and to detection goes through `act` and
+/// `detect`, which hold what a send that fails means: the thread it went to
+/// ended, because each ends only after the owner, or when it panics.
 struct Crew {
     system: Arc<HostSystem>,
     events: Sender<Event>,
-    /// The action thread's input.
-    jobs: Sender<act::Control>,
+    actor: Actor,
     /// Detection's input.
     inputs: Sender<Input>,
     readers: BTreeMap<SessionId, Reader>,
@@ -161,19 +196,72 @@ impl Crew {
     /// Has every thread that records record to `trace` from now on: the
     /// owner, the action thread, detection, and each reader, which keeps its
     /// capture and what it read.
-    fn set_trace(&mut self, trace: Trace) {
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "the action thread and detection end only after the owner, so neither send fails while it runs"
-        )]
-        let _ = (
-            self.jobs.send(act::Control::Trace(trace.clone())),
-            self.inputs.send(Input::Trace(trace.clone())),
-        );
+    fn set_trace(&mut self, trace: Trace, log: &mut Log) {
+        self.act(act::Control::Trace(trace.clone()), log);
+        self.detect(Input::Trace(trace.clone()));
         for reader in self.readers.values() {
             reader.set_trace(trace.clone());
         }
         self.trace = trace;
+    }
+
+    /// Hands `control` to the action thread. A send fails only when the
+    /// thread panicked, so then the log says why, a new action thread starts
+    /// with the owner's trace, and `control` goes to it. What the thread that
+    /// ended changed is no longer undone, because its journal ended with it.
+    /// When no new thread starts, `control` is dropped, and the next one
+    /// tries again.
+    fn act(&mut self, control: act::Control, log: &mut Log) {
+        let Err(SendError(control)) = self.actor.jobs.send(control) else {
+            return;
+        };
+        let started = Actor::start(&self.system, self.events.clone());
+        let ended = match started {
+            Ok(actor) => mem::replace(&mut self.actor, actor).stop(),
+            Err(error) => {
+                note(
+                    log,
+                    &format!(
+                        "the actions thread ended and cannot start again, so what it was sent \
+                         is dropped: {error}"
+                    ),
+                );
+                return;
+            },
+        };
+        let why = ended.map_or_else(
+            |error| error.to_string(),
+            |()| "the actions thread ended".to_owned(),
+        );
+        note(
+            log,
+            &format!("{why}, so it starts again, and what it changed before is not undone"),
+        );
+        let sent = self
+            .actor
+            .jobs
+            .send(act::Control::Trace(self.trace.clone()))
+            .and_then(|()| self.actor.jobs.send(control));
+        if sent.is_err() {
+            note(
+                log,
+                "the actions thread ended again as it started, so what it was sent is dropped",
+            );
+        }
+    }
+
+    /// Hands `input` to detection. A send fails only when detection ended,
+    /// so the owner then hears that, as when detection says so itself, and
+    /// stops.
+    fn detect(&self, input: Input) {
+        if self.inputs.send(input).is_ok() {
+            return;
+        }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the owner holds the receiver while it runs, so the send cannot fail"
+        )]
+        let _ = self.events.send(Event::DetectionEnded);
     }
 
     /// The job that starts `session`'s reader, and the trace the reader
@@ -261,12 +349,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
         )]
         let _ = changes.send(Event::DetectionEnded);
     });
-    let (jobs, job_events) = mpsc::channel();
-    let reports = sender.clone();
-    let acting = Arc::clone(&system);
-    let actor = spawn("actions", move || {
-        act::run(|| controls(&acting), acting.as_ref(), &job_events, &reports);
-    });
+    let actor = Actor::start(&system, sender.clone());
     let (detector, actor) = match (detector, actor) {
         (Ok(detector), Ok(actor)) => (detector, actor),
         (detector, actor) => {
@@ -288,7 +371,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     let mut crew = Crew {
         system,
         events: sender,
-        jobs,
+        actor,
         inputs,
         readers: BTreeMap::new(),
         tracing,
@@ -297,7 +380,7 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     // The other threads exist only now, so they get a trace that started
     // with the first read here.
     if let Some(trace) = first.trace {
-        crew.set_trace(trace);
+        crew.set_trace(trace, log);
     }
     carry(first.orders, &mut crew, log);
     loop {
@@ -319,14 +402,14 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
             Step::Reload => Some(Stale::BOTH),
             Step::TraceFailed(id) => {
                 if let Some(trace) = crew.tracing.failed(id, log) {
-                    crew.set_trace(trace);
+                    crew.set_trace(trace, log);
                 }
                 None
             },
             Step::Stop => break,
         };
         if let Some(trace) = crew.tracing.expire(Instant::now(), log) {
-            crew.set_trace(trace);
+            crew.set_trace(trace, log);
         }
         if let Some(read) = read {
             let started = crew
@@ -341,12 +424,10 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
                 (read, &mut crew.tracing, &crew.events),
             );
             if let Some(trace) = saved.trace {
-                crew.set_trace(trace);
+                crew.set_trace(trace, log);
             }
-            if let Some(watchlist) = saved.watchlist
-                && crew.inputs.send(Input::Watch(watchlist)).is_err()
-            {
-                break;
+            if let Some(watchlist) = saved.watchlist {
+                crew.detect(Input::Watch(watchlist));
             }
             carry(saved.orders, &mut crew, log);
             crew.trace.record(What::Reloaded, |record| Record {
@@ -372,14 +453,13 @@ pub(crate) fn watch(locations: &Locations, log: &mut Log) -> io::Result<()> {
     // is also what keeps the two from waiting on each other: the tray's wait
     // ends at Tray::stop, which nothing here waits behind.
     let Crew {
-        jobs,
+        actor,
         inputs,
         readers,
         tracing,
         ..
     } = crew;
-    drop(jobs);
-    let acted = join(actor);
+    let acted = actor.stop();
     let tray_stopped = tray.map_or(Ok(()), Tray::stop);
     // Dropping the inputs ends detection, so its join below returns.
     let reload_stopped = reload.map_or(Ok(()), ReloadWatch::stop);
@@ -933,7 +1013,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     restore,
                     cause,
                 };
-                queue(crew, What::Fired, job);
+                queue(crew, What::Fired, job, log);
             },
             Order::Undo {
                 owner,
@@ -945,7 +1025,7 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
                     automation,
                     cause,
                 };
-                queue(crew, What::Released, job);
+                queue(crew, What::Released, job, log);
             },
             Order::Held(owner, cause) => record_rule(&mut crew.trace, What::Held, owner, cause),
         }
@@ -954,14 +1034,10 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
 
 /// Hands `job` to the action thread, and records that its rule `decided`,
 /// fired or released, and that the job was queued.
-fn queue(crew: &mut Crew, decided: What, job: act::Job) {
+fn queue(crew: &mut Crew, decided: What, job: act::Job, log: &mut Log) {
     let (owner, cause) = job.traced();
     record_rule(&mut crew.trace, decided, owner, cause);
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "the action thread ends only after the owner drops the jobs, so a send cannot fail while it runs"
-    )]
-    let _ = crew.jobs.send(act::Control::Job(job));
+    crew.act(act::Control::Job(job), log);
     record_rule(&mut crew.trace, What::Queued, owner, cause);
 }
 
@@ -1901,32 +1977,41 @@ mod tests {
     }
 
     /// A crew whose threads are only channels: it returns what reaches the
-    /// action thread and detection.
-    fn crew() -> (Crew, Receiver<act::Control>, Receiver<Input>) {
-        let (events, _events) = mpsc::channel();
+    /// action thread, detection, and the owner.
+    fn crew() -> (
+        Crew,
+        Receiver<act::Control>,
+        Receiver<Input>,
+        Receiver<Event>,
+    ) {
+        let (events, heard) = mpsc::channel();
         let (jobs, controls) = mpsc::channel();
         let (inputs, received) = mpsc::channel();
         let crew = Crew {
             system: Arc::new(HostSystem::default()),
             events,
-            jobs,
+            actor: Actor {
+                jobs,
+                thread: spawn("actions", || {}).expect("spawn"),
+            },
             inputs,
             readers: BTreeMap::new(),
             tracing: Switch::new(env::temp_dir().join("appytappy-unused-traces")),
             trace: Trace::OFF,
         };
-        (crew, controls, received)
+        (crew, controls, received, heard)
     }
 
     #[test]
     fn a_new_trace_reaches_every_thread_that_records() {
-        let (mut crew, controls, received) = crew();
+        let (mut crew, controls, received, _heard) = crew();
+        let mut scratch = Scratch::new("new-trace");
         let (first, first_told) = Reader::stand_in();
         let (second, second_told) = Reader::stand_in();
         crew.readers.insert(SessionId(0), first);
         crew.readers.insert(SessionId(1), second);
         let (trace, _entries) = Trace::for_test(1, &[TraceCategory::Rules]);
-        crew.set_trace(trace.clone());
+        crew.set_trace(trace.clone(), &mut scratch.log);
         assert_eq!(crew.trace, trace, "the owner's own");
         assert!(
             matches!(controls.try_recv(), Ok(act::Control::Trace(sent)) if sent == trace),
@@ -1946,7 +2031,7 @@ mod tests {
 
     #[test]
     fn a_reader_starts_with_the_owners_trace() {
-        let (mut crew, _controls, _received) = crew();
+        let (mut crew, _controls, _received, _heard) = crew();
         let (trace, _entries) = Trace::for_test(1, &[TraceCategory::Readings]);
         crew.trace = trace.clone();
         let plan = app_plan("Example App", &[]);
@@ -1971,7 +2056,8 @@ mod tests {
 
     #[test]
     fn a_queued_job_reaches_the_action_thread_between_its_decision_and_queued() {
-        let (mut crew, controls, _received) = crew();
+        let (mut crew, controls, _received, _heard) = crew();
+        let mut scratch = Scratch::new("queued-job");
         let (trace, entries) = Trace::for_test(1, &[TraceCategory::Rules, TraceCategory::Actions]);
         crew.trace = trace;
         let cause = Instant::now();
@@ -1981,7 +2067,7 @@ mod tests {
             automation: "Mute".to_owned(),
             cause: Some(cause),
         };
-        queue(&mut crew, What::Released, job.clone());
+        queue(&mut crew, What::Released, job.clone(), &mut scratch.log);
         assert!(
             matches!(controls.try_recv(), Ok(act::Control::Job(sent)) if sent == job),
             "the action thread gets the job"
@@ -1996,6 +2082,65 @@ mod tests {
                     && record.cause == Some(cause)),
             "{sent:?}"
         );
+    }
+
+    #[test]
+    fn an_action_thread_that_panicked_starts_again_and_takes_the_job() {
+        let (mut crew, controls, _received, _heard) = crew();
+        drop(controls);
+        let ended = mem::replace(
+            &mut crew.actor.thread,
+            spawn("actions", || panic!("broke")).expect("spawn"),
+        );
+        join(ended).expect("the stand-in ends");
+        let mut scratch = Scratch::new("action-thread-panicked");
+        let (trace, entries) = Trace::for_test(1, &[TraceCategory::Actions]);
+        crew.trace = trace;
+        let owner = (SessionId(2), appytappy_engine::RuleIndex(4));
+        let job = act::Job::Run {
+            owner,
+            automation: "Mute".to_owned(),
+            watched: Watched {
+                process: ProcessId::new(7),
+                executable: "Example.exe".to_owned(),
+            },
+            actions: Box::new([]),
+            clicks: Arc::default(),
+            restore: appytappy_config::rule::Restore::OnRelease,
+            cause: None,
+        };
+        queue(&mut crew, What::Fired, job, &mut scratch.log);
+        let Crew { actor, .. } = crew;
+        actor.stop().expect("the new thread runs the job and ends");
+        assert!(
+            scratch.log().trim_end().ends_with(
+                "the actions thread panicked: broke, so it starts again, and what it \
+                 changed before is not undone"
+            ),
+            "{:?}",
+            scratch.log()
+        );
+        let ran: Vec<(What, Option<SessionId>, Option<usize>)> = crate::trace::sent(&entries)
+            .into_iter()
+            .filter(|record| record.what != What::Queued)
+            .map(|record| (record.what, record.session, record.item))
+            .collect();
+        assert_eq!(
+            ran,
+            [
+                (What::Started, Some(SessionId(2)), Some(4)),
+                (What::Done, Some(SessionId(2)), Some(4)),
+            ],
+            "the new thread records to the owner's trace and runs the job"
+        );
+    }
+
+    #[test]
+    fn a_send_that_detection_cannot_take_stops_the_owner() {
+        let (crew, _controls, received, heard) = crew();
+        drop(received);
+        crew.detect(Input::Trace(Trace::OFF));
+        assert!(matches!(heard.try_recv(), Ok(Event::DetectionEnded)));
     }
 
     #[test]

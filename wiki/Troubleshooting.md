@@ -166,3 +166,7 @@ window. Switch it to borderless or windowed fullscreen, or use
   text goes away once actions can run.
 - When putting the volume back fails, for example because your headset was
   unplugged, AppyTappy keeps trying and puts it back once the headset returns.
+- If the log says the actions thread panicked, AppyTappy started it again,
+  and later actions run. A change made before that, such as a volume change,
+  is not put back when its automation stops. The log line is a bug in
+  AppyTappy; its text helps a report.
