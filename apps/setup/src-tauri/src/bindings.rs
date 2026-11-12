@@ -62,6 +62,7 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::debug::bundle::BundleSpec;
+use crate::debug::outline::CaptureOutline;
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::OverlayView;
@@ -75,7 +76,7 @@ use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::updates::UpdateOffer;
-use crate::window_list::{WindowFit, WindowList};
+use crate::window_list::{WindowFit, WindowList, WindowScore};
 use crate::{commands, updates};
 
 /// The command to write the files again.

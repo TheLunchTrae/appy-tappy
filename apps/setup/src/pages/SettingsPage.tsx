@@ -160,7 +160,8 @@ function ShowDebug() {
           </Hint>
         </span>
         <span className="note" id="show-debug-note">
-          Adds a Debug page with the runtime&apos;s state, the newest trace, both logs and a debug bundle to share.
+          Adds a Debug page with the runtime&apos;s state, the newest trace, both logs and a debug bundle to share, and
+          shows the working behind live readings, capture outlines and window match scores.
         </span>
         {error === null ? null : (
           <span className="warn" role="alert">

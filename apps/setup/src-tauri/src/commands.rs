@@ -25,6 +25,7 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::debug::bundle::BundleSpec;
+use crate::debug::outline::CaptureOutline;
 use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::{Card, OverlayView};
@@ -35,7 +36,7 @@ use crate::owner::{
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
-use crate::window_list::{WindowFit, WindowList};
+use crate::window_list::{WindowFit, WindowList, WindowScore};
 
 /// The UI's way to the owner thread.
 #[derive(Debug)]
@@ -172,6 +173,21 @@ pub(crate) async fn explain_reading(app: AppHandle) -> Result<Option<ReadingDeta
     try_ask(&app, "explain_reading", |owner| owner.explain_reading()).await
 }
 
+/// What the runtime copies out of each frame of `application`'s window at
+/// `width` by `height`, and where each saved value reads there.
+#[tauri::command]
+pub(crate) async fn capture_outline(
+    app: AppHandle,
+    application: String,
+    width: u32,
+    height: u32,
+) -> Result<CaptureOutline, String> {
+    try_ask(&app, "capture_outline", move |owner| {
+        owner.capture_outline(&application, width, height)
+    })
+    .await
+}
+
 /// Captures the region of the saved value `value` of the application
 /// `application` on its window, for the automation editor, and returns the
 /// watch's number.
@@ -230,6 +246,18 @@ pub(crate) async fn match_windows(
 ) -> Result<Vec<WindowFit>, String> {
     try_ask(&app, "match_windows", move |owner| {
         owner.match_windows(&window)
+    })
+    .await
+}
+
+/// How each open window compares with `window`, for the debug details.
+#[tauri::command]
+pub(crate) async fn window_scores(
+    app: AppHandle,
+    window: WindowDef,
+) -> Result<Vec<WindowScore>, String> {
+    try_ask(&app, "window_scores", move |owner| {
+        owner.window_scores(&window)
     })
     .await
 }

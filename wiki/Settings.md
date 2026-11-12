@@ -43,7 +43,11 @@ right away and does not undo or rerun any automation.
 - **Show debug details.** Off at first. Turn it on to add a
   [Debug](Debug-page.md) tab, which shows whether the background part runs,
   timings from the newest runtime trace, both logs, and a debug bundle to
-  share. While it is on, AppyTappy Setup also writes its own log, `setup.log`.
+  share. It also adds the working behind each live reading, the capture
+  outlines on a screenshot, and how each open window compares with an
+  application's match, as [Debug page](Debug-page.md#debug-details-in-the-editors)
+  describes. While it is on, AppyTappy Setup also writes its own log,
+  `setup.log`.
 
 ## Runtime trace
 

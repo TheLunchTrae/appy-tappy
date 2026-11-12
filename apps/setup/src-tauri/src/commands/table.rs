@@ -56,6 +56,9 @@ macro_rules! with_commands {
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
             /// can.
             commands::review_problems(spec: CheckSpec) -> Vec<Option<String>>;
+            /// What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
+            /// where each of its saved values reads there.
+            commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the
             /// watch's number.
             commands::watch_value(application: String, value: String) -> U64AsNumber;
@@ -69,6 +72,8 @@ macro_rules! with_commands {
             commands::stop_watching(watch: U64AsNumber) -> ();
             /// The running windows `window` takes, the one a new session would read first.
             commands::match_windows(window: WindowDef) -> Vec<WindowFit>;
+            /// How each open window compares with `window`: which fields match, and how the match takes it.
+            commands::window_scores(window: WindowDef) -> Vec<WindowScore>;
             /// The window a new session would read for `window`, or null while none fits.
             commands::read_window(window: WindowDef) -> OptionalU64AsNumber;
             /// Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks

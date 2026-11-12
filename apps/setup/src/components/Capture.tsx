@@ -33,6 +33,7 @@ import { colorAt } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { clock } from '../lib/review.ts';
 import { type Point, type Size, fit } from '../lib/region.ts';
+import { CaptureOutlineNote, CaptureOutlines, useCaptureOutline } from './CaptureOutlines.tsx';
 import { RegionSurface } from './RegionSurface.tsx';
 import { PinPicker } from './PinPicker.tsx';
 import { Hint } from './Hint.tsx';
@@ -237,6 +238,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
   const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
+  const outline = useCaptureOutline(appId, native, appFile.file);
   const frameStyle = {
     left: (space.width - shown.width) / 2,
     top: (space.height - shown.height) / 2,
@@ -562,6 +564,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             ) : shownPicture === null ? null : (
               <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
             )}
+            {native === undefined || outline === null ? null : (
+              <CaptureOutlines outline={outline} size={native} shown={shown} />
+            )}
             {native === undefined ? null : (
               <RegionSurface
                 size={native}
@@ -586,6 +591,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               />
             )}
           </div>
+          {outline === null ? null : <CaptureOutlineNote outline={outline} />}
           <p className="hint">
             {viewHint(
               recording?.recording === true,

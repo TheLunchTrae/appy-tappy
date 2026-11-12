@@ -10,6 +10,7 @@ import type {
   AutomationDef,
   AutomationSummary,
   BundleSpec,
+  CaptureOutline,
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
@@ -38,6 +39,7 @@ import type {
   WindowDef,
   WindowFit,
   WindowList,
+  WindowScore,
 } from './bindings.ts';
 import { type Picture, decodePicture } from './pixels.ts';
 
@@ -130,6 +132,14 @@ export async function reviewProblems(spec: CheckSpec): Promise<ReadonlyArray<str
 }
 
 /**
+ * What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
+ * where each of its saved values reads there.
+ */
+export async function captureOutline(application: string, width: number, height: number): Promise<CaptureOutline> {
+  return invoke<CaptureOutline>('capture_outline', { application, width, height });
+}
+
+/**
  * Captures a saved value's region on its application's window, replacing any capture, and returns the
  * watch's number.
  */
@@ -161,6 +171,11 @@ export async function stopWatching(watch: number): Promise<void> {
 /** The running windows `window` takes, the one a new session would read first. */
 export async function matchWindows(window: WindowDef): Promise<ReadonlyArray<WindowFit>> {
   return invoke<ReadonlyArray<WindowFit>>('match_windows', { window });
+}
+
+/** How each open window compares with `window`: which fields match, and how the match takes it. */
+export async function windowScores(window: WindowDef): Promise<ReadonlyArray<WindowScore>> {
+  return invoke<ReadonlyArray<WindowScore>>('window_scores', { window });
 }
 
 /** The window a new session would read for `window`, or null while none fits. */

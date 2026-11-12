@@ -8,6 +8,8 @@
   --muted: #9aa3b2;
   --capture: #f2b33d;
   --on-capture: #22190a;
+  --outline: #6cb6ff;
+  --on-outline: #0b1a2a;
   --holds: #5bc48a;
   --warn: #e8845b;
   --live: #e05555;
@@ -2178,4 +2180,49 @@ select {
 
 .state-scores tr.read td {
   color: var(--holds);
+}
+
+.capture-outlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.copy-outline {
+  position: absolute;
+  outline: 2px dashed var(--outline);
+  outline-offset: 2px;
+}
+
+.value-outline {
+  position: absolute;
+  border: 1px solid var(--outline);
+}
+
+.value-outline.unwatched {
+  border-style: dotted;
+  opacity: 0.55;
+}
+
+.outline-tag {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  white-space: nowrap;
+  background: var(--outline);
+  color: var(--on-outline);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px 3px 0 0;
+}
+
+.outline-unread {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.window-list .window-score {
+  grid-column: 1 / -1;
+  font-family: ui-monospace, monospace;
 }

@@ -53,8 +53,9 @@ pub struct SettingsFile {
     /// Whether the runtime starts with automations enabled or disabled as
     /// the tray last left them. Off, it starts with them enabled.
     pub remember_enabled: bool,
-    /// Whether the setup app shows its debug details, such as the Debug
-    /// page. On, it also writes `setup.log`. The runtime ignores it.
+    /// Whether the setup app shows its debug details: the Debug page, the
+    /// working behind each live reading, the capture outlines and the window
+    /// match scores. On, it also writes `setup.log`. The runtime ignores it.
     pub show_debug: bool,
 }
 

@@ -4,6 +4,7 @@
 
 pub(crate) mod bundle;
 pub(crate) mod log;
+pub(crate) mod outline;
 pub(crate) mod trace_file;
 pub(crate) mod workings;
 

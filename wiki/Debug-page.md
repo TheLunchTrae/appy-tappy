@@ -12,6 +12,32 @@ the page made to the rest of AppyTappy Setup, how long it took, and why it
 failed, if it did, so a slow or failing page can be told apart from a slow or
 failing runtime.
 
+## Debug details in the editors
+
+The same setting adds debug details to the pages that read a window live.
+
+- **Live readings.** Under the live reading in the value editor and in the
+  automation editor, a dashed line says how long the check took and how old
+  the frame it read was. Under it are the check's scores:
+  - **Number:** each character read, how closely it matches the reference,
+    and the closest other character. A character reads at 75% or closer, so a
+    close second means the reference needs more samples of both.
+  - **State:** how far the region is from each state, on average per color
+    channel, against the state's tolerance. The state read is marked.
+  - **Color:** the region's average color beside the color looked for, and the
+    tolerance.
+  - **Bar fill:** how many of the pixels near either color are nearer the
+    filled one, before it is rounded.
+- **Capture outlines.** On a screenshot in the value editor, dashed outlines
+  show the rectangles the background part copies out of each frame at that
+  window size, for the values that enabled automations watch. A solid outline
+  marks each watched value and a faint one each other saved value, with its
+  name. A line under the preview counts them, and names each value that does
+  not read at that size, with why.
+- **Window match.** In the application editor, each open window says which of
+  its title, class and executable match, and why the match leaves it out if
+  it does.
+
 ## Runtime
 
 The top line says whether the background part is running, and whether a

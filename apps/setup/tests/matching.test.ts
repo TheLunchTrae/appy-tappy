@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { WindowDef, WindowFit } from '../src/lib/bindings.ts';
+import type { WindowDef, WindowFit, WindowScore } from '../src/lib/bindings.ts';
 import {
   exactWindow,
   fallbackUseful,
@@ -10,6 +10,7 @@ import {
   pickedStatus,
   sentence,
   required,
+  scoreText,
   withMustMatch,
 } from '../src/lib/matching.ts';
 
@@ -154,5 +155,36 @@ describe('sentence', () => {
   test('ends text in a full stop once', () => {
     expect(sentence('no answer ')).toBe('no answer.');
     expect(sentence('Done!')).toBe('Done!');
+  });
+});
+
+describe('a window score', () => {
+  const loose = { title: false, class: false };
+  const score = (parts: Partial<WindowScore>): WindowScore => ({
+    handle: 1,
+    title: true,
+    class: true,
+    executable: true,
+    fit: null,
+    ...parts,
+  });
+
+  test('names each field that matches or differs', () => {
+    expect(scoreText(score({ class: false, fit: { handle: 1, fallback: false, best: true } }), loose)).toBe(
+      'Title matches, class differs, executable matches.',
+    );
+  });
+
+  test('says why the match leaves a window out', () => {
+    expect(scoreText(score({ executable: false, title: false }), { title: true, class: false })).toEndWith(
+      'Not taken: its executable differs.',
+    );
+    expect(scoreText(score({ title: false }), { title: true, class: false })).toEndWith(
+      'Not taken: its title must match.',
+    );
+    expect(scoreText(score({ class: false }), { title: true, class: true })).toEndWith(
+      'Not taken: its class must match.',
+    );
+    expect(scoreText(score({ title: false }), loose)).toEndWith('Not taken: another window matches everything ticked.');
   });
 });

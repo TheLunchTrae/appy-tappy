@@ -238,6 +238,21 @@ pictures: boolean,
 trace: string | null, }>;
 
 /**
+ * The capture of one application at one window size.
+ */
+export type CaptureOutline = DeepReadonly<{
+/**
+ * The rectangles the runtime copies out of each frame, in the frame's
+ * pixels. Empty when no enabled automation watches a value that reads
+ * at this size.
+ */
+copies: Array<RegionDef>,
+/**
+ * Each saved value, in the application's order.
+ */
+values: Array<OutlinedValue>, }>;
+
+/**
  * A character's closest glyph and the closest of another character.
  */
 export type CharacterView = DeepReadonly<{
@@ -594,6 +609,31 @@ title: boolean,
  * The class has to match.
  */
 class: boolean, }>;
+
+/**
+ * One saved value in a [`CaptureOutline`].
+ */
+export type OutlinedValue = DeepReadonly<{
+/**
+ * The value's ID.
+ */
+id: string,
+/**
+ * The value's name.
+ */
+name: string,
+/**
+ * Whether an enabled automation watches it, so the runtime copies it.
+ */
+watched: boolean,
+/**
+ * Where it reads in the frame, or `None` where it does not read.
+ */
+region: RegionDef | null,
+/**
+ * Why it does not read at this size, if it does not.
+ */
+problem: string | null, }>;
 
 /**
  * How the setup app shows an application's live readings on top of it. The
@@ -1086,8 +1126,9 @@ trace: TraceDef,
  */
 rememberEnabled: boolean,
 /**
- * Whether the setup app shows its debug details, such as the Debug
- * page. On, it also writes `setup.log`. The runtime ignores it.
+ * Whether the setup app shows its debug details: the Debug page, the
+ * working behind each live reading, the capture outlines and the window
+ * match scores. On, it also writes `setup.log`. The runtime ignores it.
  */
 showDebug: boolean, }>;
 
@@ -1462,6 +1503,32 @@ windows: Array<WindowChoice>,
  * warning, not a classification.
  */
 antiCheat: Array<string>, }>;
+
+/**
+ * How one open window compares with an application's window match, for
+ * the debug details: which fields match, and whether the match takes it.
+ */
+export type WindowScore = DeepReadonly<{
+/**
+ * The window's handle.
+ */
+handle: number,
+/**
+ * Whether its title matches the title's pattern.
+ */
+title: boolean,
+/**
+ * Whether its class matches the class's pattern.
+ */
+class: boolean,
+/**
+ * Whether its executable matches the executable's pattern.
+ */
+executable: boolean,
+/**
+ * How the match takes it, or `None` when it does not.
+ */
+fit: WindowFit | null, }>;
 
 /**
  * [`Workings`] as the page reads it.

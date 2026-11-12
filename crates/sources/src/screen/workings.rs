@@ -282,7 +282,10 @@ mod tests {
             [true, false],
             "within as the read judges it"
         );
-        assert_eq!(check.read(&draw(&["##"])), Ok(Value::State(StateName::new("On").expect("a name"))));
+        assert_eq!(
+            check.read(&draw(&["##"])),
+            Ok(Value::State(StateName::new("On").expect("a name")))
+        );
         assert!(
             check.explain(&draw(&["###"])).is_err(),
             "another size cannot be compared"

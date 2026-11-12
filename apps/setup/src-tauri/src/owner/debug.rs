@@ -3,7 +3,11 @@
 
 use std::time::Duration;
 
+use appytappy_sources::screen::Size;
+
+use crate::automations;
 use crate::debug::bundle::{BundleJob, BundleSpec};
+use crate::debug::outline::{self, CaptureOutline};
 use crate::debug::trace_file::{self, TraceTail};
 use crate::debug::{DebugOverview, LogName, log_tail};
 use crate::settings;
@@ -71,6 +75,27 @@ impl<H: Host> Owner<H> {
         Ok(BundleJob::new(self.debug_stores()?.clone(), spec))
     }
 
+    /// What the runtime copies out of each frame of the saved application
+    /// `app`'s window at `width` by `height` pixels, and where each of its
+    /// saved values reads there, for the value editor's preview.
+    pub(crate) fn capture_outline(
+        &self,
+        app: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<CaptureOutline, String> {
+        let stores = self.stores()?;
+        let found = stores.app(app)?;
+        let watching = automations::load(stores)?;
+        Ok(outline::outline(
+            app,
+            &found.file,
+            &watching,
+            Size { width, height },
+            |name| found.picture(name),
+        ))
+    }
+
     /// Records in `setup.log` that `command` took `took`, and why it failed,
     /// if it did. A command's work calls this as it ends on this thread.
     pub(crate) fn record_command(
@@ -95,10 +120,14 @@ mod tests {
     use std::fs;
     use std::io::{Cursor, Read as _};
 
+    use appytappy_config::app_file::RegionDef;
+    use appytappy_config::automation_file::{
+        ActionDef, AutomationDef, ComparisonDef, MediaCommandDef, TargetDef, WhenDef,
+    };
     use zip::ZipArchive;
 
     use crate::debug::trace_file::{HEADER, Spread};
-    use crate::owner::test_support::{harness_with, scratch_store};
+    use crate::owner::test_support::{harness_with, scratch_store, with_saved_bar};
 
     use super::*;
 
@@ -378,5 +407,59 @@ mod tests {
             "only a trace file in the trace folder goes in"
         );
         fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_outline_shows_what_an_enabled_automation_watches() {
+        let (mut harness, root) = with_saved_bar("owner-debug-outline");
+        let unwatched = harness
+            .ask(|owner| owner.capture_outline("example", 4, 2))
+            .expect("outline");
+        assert_eq!(unwatched.copies, []);
+        assert_eq!(unwatched.values.len(), 1);
+        let value = unwatched.values[0].id.clone();
+        harness
+            .ask(|owner| {
+                owner.save_automation(
+                    None,
+                    AutomationDef {
+                        id: String::new(),
+                        name: "Pause when full".to_owned(),
+                        enabled: true,
+                        when: WhenDef {
+                            app: "example".to_owned(),
+                            value,
+                            is: ComparisonDef::AtLeast,
+                            target: TargetDef::Number(100.0),
+                        },
+                        actions: vec![ActionDef::Media {
+                            command: MediaCommandDef::Pause,
+                            app: None,
+                        }],
+                        undo: false,
+                        cooldown_ms: 0,
+                    },
+                )
+            })
+            .expect("saves");
+        let watched = harness
+            .ask(|owner| owner.capture_outline("example", 4, 2))
+            .expect("outline");
+        let whole = RegionDef {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 2,
+        };
+        assert_eq!(watched.copies, [whole]);
+        assert!(watched.values[0].watched);
+        assert_eq!(watched.values[0].region, Some(whole));
+        assert!(
+            harness
+                .ask(|owner| owner.capture_outline("missing", 4, 2))
+                .is_err(),
+            "an application that is not saved has no outline"
+        );
+        fs::remove_dir_all(root).expect("cleans up");
     }
 }

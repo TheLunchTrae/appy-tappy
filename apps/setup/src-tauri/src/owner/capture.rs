@@ -13,7 +13,7 @@ use crate::check_spec::{self, CheckSpec, RegionCheck};
 use crate::debug::workings::{self, ReadingDetails};
 use crate::pixels;
 use crate::selection::{self, SelectionSpec, SelectionView};
-use crate::window_list::{self, WindowFit, WindowList};
+use crate::window_list::{self, WindowChoice, WindowFit, WindowList, WindowScore};
 
 use super::host::Host;
 use super::messages::{CaptureFailure, Message, Reading};
@@ -238,13 +238,31 @@ impl<H: Host> Owner<H> {
     /// The running windows that `window` matches, the one a new session
     /// would read first.
     pub(crate) fn match_windows(&self, window: &WindowDef) -> Result<Vec<WindowFit>, String> {
+        let (offered, read) = self.offered_and_read(window)?;
+        Ok(window_list::matching(&offered, window, read))
+    }
+
+    /// How each open window compares with `window`, for the debug details.
+    pub(crate) fn window_scores(&self, window: &WindowDef) -> Result<Vec<WindowScore>, String> {
+        let (offered, read) = self.offered_and_read(window)?;
+        Ok(window_list::scores(&offered, window, read))
+    }
+
+    /// The windows the user can pick, and the one a new session would read
+    /// for `window`, if any.
+    fn offered_and_read(
+        &self,
+        window: &WindowDef,
+    ) -> Result<(Vec<WindowChoice>, Option<u64>), String> {
         let (processes, windows) = self.desktop()?;
         let read = self
             .host
             .read_window(&window.to_match(), processes.clone(), windows.clone())
             .map(|read| read.entry.handle);
-        let list = window_list::list(windows, &processes, self.own_process);
-        Ok(window_list::matching(&list.windows, window, read))
+        Ok((
+            window_list::list(windows, &processes, self.own_process).windows,
+            read,
+        ))
     }
 
     /// The window a new session would read for `window`, or `None` while
@@ -538,6 +556,17 @@ mod tests {
             Ok(vec![fit(7, true), fit(6, false)])
         );
         assert_eq!(harness.ask(|owner| owner.read_window(&window)), Ok(Some(7)));
+        let scores = harness
+            .ask(|owner| owner.window_scores(&window))
+            .expect("scores");
+        assert_eq!(
+            scores
+                .iter()
+                .map(|score| (score.handle, score.fit.map(|fit| fit.best)))
+                .collect::<Vec<_>>(),
+            [(6, Some(false)), (7, Some(true))],
+            "each listed window, with the one the runtime reads marked"
+        );
         harness.owner.host.minimized = true;
         assert_eq!(
             harness.ask(|owner| owner.match_windows(&window)),

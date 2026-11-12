@@ -392,6 +392,28 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   everything else is deflated, with the `zip` crate and its pure-Rust deflate
   backend. `setup.log` records the whole time, packing included.
 
+The same setting adds debug details to the editors. The page asks for them
+only while `showDebug` is true, so with it off they cost nothing:
+
+- `explain_reading` and `explain_watched` score the region of the newest frame
+  that the value editor's check or the automation editor's watch read, with
+  `Check::explain` from `appytappy-sources`. Each score comes from the
+  calculation the check decides with (`GlyphScore::matches`,
+  `StateScore::within`), so the scores and the reading always agree; the
+  runtime never asks for them. The page asks every 500 ms, less often than the
+  reading, as scoring a number checks each character against every glyph.
+- `capture_outline` builds the saved application's capture as the runtime
+  would at the screenshot's window size, in `debug/outline.rs`: the values
+  that its enabled automations watch, each placed with `SavedValue::at`, then
+  `Layout::new` for the rectangles copied. It answers every saved value, with
+  where it reads or why it does not, and the page draws them over the
+  screenshot. The page asks again when the window size or the saved file
+  changes.
+- `window_scores` compares each window that the picker lists with the match
+  being edited, field by field, with the same `Pattern::matches` the match
+  uses, and gives the `WindowFit` that `match_windows` gives the windows it
+  takes.
+
 Every command passes its own name to `ask` or `try_ask`, which a test in
 `bindings.rs` checks against the command table. `debug_bundle` passes its name
 to `record_command` once the bundle is packed instead. The work then records how long

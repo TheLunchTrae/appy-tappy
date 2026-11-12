@@ -53,7 +53,7 @@ fn sentence(problem: &str) -> String {
 
 /// Loads the automations, saying what went wrong for the user. Each one
 /// has an ID that no other one has, as [`unique_ids`] makes them.
-fn load(stores: &Stores) -> Result<AutomationsFile, String> {
+pub(crate) fn load(stores: &Stores) -> Result<AutomationsFile, String> {
     let mut file = stores
         .automations
         .load()

@@ -1,6 +1,6 @@
 // How an application's window match is edited and described.
 
-import type { FallbackDef, WindowChoice, WindowDef, WindowFit } from './bindings.ts';
+import type { FallbackDef, MustMatchDef, WindowChoice, WindowDef, WindowFit, WindowScore } from './bindings.ts';
 
 /** One of the things an application's window is recognized by. */
 export type MatchField = 'title' | 'class' | 'executable';
@@ -117,6 +117,27 @@ export function fitLabel(
     };
   }
   return fit.fallback ? { text: 'fallback', className: 'fit fallback' } : { text: 'matches', className: 'note' };
+}
+
+/** Why the match leaves out a window that `score` describes, given which fields must match. */
+function leftOut(score: WindowScore, mustMatch: MustMatchDef): string {
+  if (!score.executable) {
+    return 'its executable differs';
+  }
+  if (mustMatch.title && !score.title) {
+    return 'its title must match';
+  }
+  if (mustMatch.class && !score.class) {
+    return 'its class must match';
+  }
+  return 'another window matches everything ticked';
+}
+
+/** For the debug details: which of a window's fields match, and why the match leaves it out if it does. */
+export function scoreText(score: WindowScore, mustMatch: MustMatchDef): string {
+  const word = (matches: boolean): string => (matches ? 'matches' : 'differs');
+  const parts = `Title ${word(score.title)}, class ${word(score.class)}, executable ${word(score.executable)}.`;
+  return score.fit === null ? `${parts} Not taken: ${leftOut(score, mustMatch)}.` : parts;
 }
 
 /** How many open windows qualify, and which one AppyTappy would use. */
