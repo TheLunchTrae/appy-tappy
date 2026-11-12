@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Five guards drop such stale messages:
+it was about has gone. Seven guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -37,6 +37,14 @@ it was about has gone. Five guards drop such stale messages:
   matching pixels preview (`apps/setup/src/lib/matchPreview.ts`). An answer
   or a failure that carries another number than the request in flight's, such
   as one sent before the preview was turned off, is dropped.
+- **The open flow.** A save's answer closes the setup app's flow only while
+  the flow that saved is still the one open (`afterFlow` in
+  `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
+  on leaves the next flow alone.
+- **List reads.** The setup app numbers each read of the saved applications
+  and automations as it starts. An answer older than the newest one taken is
+  dropped (`supersedes` in `apps/setup/src/lib/reads.ts`), so a read that
+  started before a save and answers late never puts older lists back.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -644,32 +652,259 @@ only once it opens.
 
 The React side (`apps/setup/src/App.tsx`) has two pieces of state: `page`, the
 tab shown, and `flow`, the value, reference, automation, or application being
-made or edited. A flow covers the page while it is open.
+made or edited. A flow covers the page while it is open. A flow can open
+another flow for itself; it then waits under that one as its `opener` and
+shows again when that one ends. `Flow` in `apps/setup/src/lib/flow.ts` names
+the flows, and the transitions between them are pure functions there.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Page
-    Page --> Flow: New or Edit
-    Flow --> Page: Cancel
-    Flow --> Saving: Save
-    Saving --> Page: saved, the page that lists it opens
-    Saving --> Flow: the save fails, the flow shows why
-    Flow --> Page: a tab is clicked with nothing unsaved
-    Flow --> Asking: a tab is clicked with unsaved work
-    Asking --> Page: the user agrees to lose the work
-    Asking --> Flow: the user stays
-    Saving --> Saving: the tabs are disabled until the save ends
-    Flow --> Flow: Add application in the value or reference flow opens the application flow
+    Page --> Open: New or Edit opens a flow with none waiting
+    Open --> Open: the open flow opens another and waits under it
+    Open --> Open: Cancel with a flow waiting shows that flow as it was left
+    Open --> Page: Cancel with none waiting
+    Open --> Saving: Save
+    Saving --> Open: the save fails, the flow shows why
+    Saving --> Open: saved with a flow waiting, which shows again with what was made
+    Saving --> Page: saved with none waiting, the page that lists it opens
+    Saving --> Saving: the tabs, Cancel, and Leave wait until the save ends
+    Open --> Page: a tab is pressed and no flow holds unsaved work
+    Open --> Asking: a tab is pressed and the open flow or a waiting one holds unsaved work
+    Asking --> Page: Leave drops every flow
+    Asking --> Open: Stay
 ```
 
-The unsaved work of a flow, such as its screenshots and recording, lives in the
-flow's components and in the owner thread. Each flow reports what leaving it
-would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
-ask before they drop unsaved work. While a save runs, both are disabled. A save closes
-its flow only while that flow is still open (`saved` in `App.tsx`), so a save
-that finishes after the user moved on leaves the next flow alone. Leaving the
-value or reference flow unmounts it and stops its capture, which clears its screenshots and
-recording.
+**Open** is one flow on screen with up to two waiting under it. The types
+allow only these stacks, the flow on screen last; a fix of a saved value is a
+value flow that no automation opens:
+
+| Stack                            | How it comes about                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| automation                       | **New automation** or **Edit**                                                                 |
+| automation, application          | **Add application** in the automation editor                                                   |
+| automation, value                | **New value** in the automation editor                                                         |
+| automation, value, application   | **Add application** or **Change how it's found** in that value's [picker](#picker)             |
+| value, application               | **Add application** or **Change how it's found** in the picker of a value from the Values page |
+| reference, application           | The same in a reference's picker                                                               |
+| value, reference, or application | **New** or **Edit** on its own page, with none waiting                                         |
+
+- **Opening.** `valueFor` and `applicationFor` make the flow to open, with
+  its opener in it. The opener keeps the application it showed chosen, so it
+  shows again as the user left it. The automation editor also hands over its
+  draft (`waiting`), because the opener unmounts while the other flow shows.
+  The value and reference flows open the application flow only from their
+  picker, before a capture holds anything, so they wait with nothing but that
+  application.
+- **Save and Cancel.** `afterFlow` decides what follows a flow that ended. A
+  save shows the opener with what the save answered: the application's ID to
+  a value or reference flow, whose picker starts with it, and the
+  application's ID with the value's ID from `save_value` to the automation
+  flow, with the number of the newest read of the saved lists started before
+  the save was heard. **Cancel** shows the opener as it was left. With none waiting, a save
+  opens the page that lists what was saved and **Cancel** the page under the
+  flow.
+- **Tab.** What leaving loses is what the open flow reports
+  (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
+  that waits (`heldInAll`). With nothing unsaved the tab's page opens. With
+  unsaved work the question asks first, and `lostText` names what the open
+  flow loses and the automation's unsaved changes. **Leave** drops every
+  flow, and **Stay** keeps the stack as it is. While a save runs, the tabs
+  and the question's answers wait.
+- **A save that finishes after the user moved on.** `App.tsx` tells
+  `afterFlow` whether the flow that saved is still the one open, by identity,
+  and `afterFlow` changes nothing when it is not. The tabs and **Cancel** are
+  disabled while a save runs, so this guards a save whose flow was replaced
+  some other way.
+
+No flow waits for the saved files to be read again before it closes. Each
+save starts that read, and whatever shows next copes with lists that lack
+what was just saved: a picker makes its own look, and the automation editor
+waits for it, as the next section describes. A save that fails leaves its
+flow open with the reason, and changes nothing that waits.
+
+### What an automation watches
+
+The **When** card of the automation editor
+(`apps/setup/src/pages/AutomationEditor.tsx`) chooses the application, then
+one of its values. Its state is the draft's watched value, the application
+chosen before a value is picked, what a flow just handed over (`Handed` in
+`apps/setup/src/lib/flow.ts`), and the saved applications and values as the
+newest read of the pages' lists has them, with that read's number.
+`watchStep` in `apps/setup/src/lib/watch.ts` names where those stand as one
+`WatchStep`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> NoApplications: no saved application reads
+    [*] --> Choosing: several are saved and none is chosen
+    [*] --> Value: the only or chosen application has no value
+    [*] --> Pick: it has values and none is picked
+    [*] --> Ready: a saved automation's value is saved
+    [*] --> Missing: a saved automation's application cannot be read
+    [*] --> Arriving: a flow the editor opened saved an application or a value
+    NoApplications --> [*]: Add application
+    Choosing --> Value: an application without values is chosen
+    Choosing --> Pick: an application with values is chosen
+    Value --> [*]: New value
+    Value --> Pick: another application, with values, is chosen
+    Pick --> Value: another application, without values, is chosen
+    Pick --> Ready: a value is picked
+    Pick --> [*]: New value
+    Ready --> Pick: another application is chosen
+    Ready --> Value: another application, without values, is chosen
+    Ready --> Missing: a read no longer lists the application
+    Ready --> [*]: New value, Add application, or Save automation
+    Missing --> Pick: another application is chosen, or a read lists the application again
+    Missing --> Value: another application, without values, is chosen
+    Missing --> [*]: Add application
+    Arriving --> Value: the lists show the saved application
+    Arriving --> Ready: the lists show the saved value, and the draft picks it
+    Arriving --> Missing: a read newer than the save answers without the application
+    Arriving --> Pick: a read newer than the save answers without the value, or another application is chosen
+    Arriving --> Value: a read newer than the save answers without the value, and the application has none
+    Arriving --> Arriving: a read fails, the card says why
+    Arriving --> [*]: Add application
+```
+
+- **NoApplications**, **Choosing**, **Value**, and **Pick** say which step
+  comes next, and **NoApplications** and **Value** make the flow that takes
+  it the main button. **NoApplications** says so when applications are saved
+  but none of their files reads. **Add application** is offered in every
+  state, and **New value** in each that has an application the lists know.
+- **Ready** has a value to compare, which the editor reads live.
+- **Arriving** is exactly this: a flow handed something over, and no read of
+  the saved lists that started after the hand-over has answered. `App.tsx`
+  numbers the reads, the hand-over carries the number of the newest read
+  started before it, and `watchStep` compares that with the number of the
+  read the lists are from. Each save starts a read, and the lists are read
+  again every three seconds while the editor is open, so a read that failed
+  is tried again; meanwhile the card says why it failed. A value handed over
+  takes the place of the draft's watched value at once (`returned`), so until
+  it is picked the draft has no value: **Save automation** is off, and the
+  foot of the editor says that what was saved is being read (`readiness`).
+  When the lists show the value, the draft picks it (`arrived`) in the same
+  render, with a comparison that suits it, and the card names it.
+- A read newer than the hand-over that answers without what was handed over
+  ends **Arriving**: nothing is on its way any more. A missing application
+  is **Missing**. A missing value is **Pick**, or **Value** when the
+  application has no other, and both say that the saved value is gone.
+- **Missing** is a chosen application that the saved lists do not have with a
+  readable file: the watched value's, one chosen by hand whose file broke
+  since, or one a flow just saved. It says which, and the draft stays while
+  the user chooses another application or adds it again.
+- Every state can be left with the draft kept: by a choice in the card, or by
+  **Add application**, which is offered in all of them.
+- Opening **Add application** or **New value** ends the editor, and a new
+  one opens when that flow ends, with the draft and what the flow saved, as
+  [Pages and flows](#pages-and-flows) describes. Opening one while
+  **Arriving** drops what the editor waited for. Nothing is lost by that,
+  since the draft holds no value meanwhile: the saved value is in the list to
+  pick once the editor shows again.
+
+When the editor shows again after a flow it opened, the focus moves to the
+control the step is taken with (`editorLanding` in
+`apps/setup/src/lib/landing.ts`): **Add application**, the application list,
+**New value**, the value list, or the comparison once a value is picked.
+While **Arriving** it waits for the step to be known. It lands only while
+nothing holds the focus, and it is dropped for good once the user puts the
+focus anywhere themselves, such as in **Name** while the lists are read, so
+it never takes the focus from what they are doing (`settle`). The card's
+guide is a status region that stays mounted and describes those controls, so
+a screen reader hears the step, that what was saved is being read, and the
+value once it is picked. The [picker](#picker) does the same when it shows
+after another flow (`pickerLanding`), by the same rule: the focus moves to
+**Capture this window** once there is a window, and otherwise to the way
+forward.
+
+### Picker
+
+The first step of the value and reference flows
+(`apps/setup/src/components/Picker.tsx`) chooses the application and finds
+the window to capture. Its state is the chosen application, the window picked
+among several, the capture it asked for (`Start`), and the newest look at the
+saved applications and the open windows (`Look`, from
+`apps/setup/src/lib/useAppWindows.ts`). `pickerStep` in
+`apps/setup/src/lib/picker.ts` names where those stand as one `PickerStep`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Looking: the picker opens and the first look starts
+    Looking --> NoApplications: the look finds no saved application
+    Looking --> Choosing: it finds several, and none is chosen
+    Looking --> Missing: the chosen application is not among them
+    Looking --> One: the chosen application, or the only one, has one window that fits best
+    Looking --> Several: it has several that fit equally well
+    Looking --> None: it has no window to capture
+    Looking --> LookFailed: the look fails
+    LookFailed --> Looking: Refresh, before any look answered
+    LookFailed --> Resolving: Refresh, after one answered
+    NoApplications --> [*]: Add application
+    Choosing --> [*]: Add application
+    Choosing --> Resolving: an application is chosen
+    Missing --> Missing: Refresh, until the look answers
+    Missing --> Resolving: the look finds the application again, or another application is chosen
+    Missing --> LookFailed: the look fails
+    Resolving --> One: the look finds one window that fits best
+    Resolving --> Several: the look finds several that fit equally well
+    Resolving --> None: the look finds no window to capture
+    Resolving --> LookFailed: the look fails
+    Resolving --> Missing: the look no longer finds the application
+    One --> Resolving: Refresh, or another application is chosen
+    Several --> Resolving: Refresh, or another application is chosen
+    None --> Resolving: Refresh, or another application is chosen
+    Several --> Several: a window is picked
+    Several --> [*]: Change how it's found
+    None --> [*]: Change how it's found
+    One --> Starting: Capture this window
+    Several --> Starting: Capture this window, with a window picked
+    Starting --> [*]: the capture starts, and the flow moves on with the application and the window
+    Starting --> One: the capture is refused, the picker shows why
+    Starting --> Several: the capture is refused, the picker shows why
+```
+
+- A look is one `list_app_windows` command, so its applications, windows,
+  and fits come from one listing of the desktop. One starts when the picker
+  opens and on **Refresh**. An answer is dropped once another look replaced
+  it. What the last look that answered found stays on show while the next
+  one is made.
+- **Looking** is before any look answered: not even the applications are
+  known.
+- **LookFailed** is a look that could not read the saved applications or list
+  the windows. It shows the reason, whatever application is chosen, and
+  **Refresh** looks again.
+- **NoApplications** and **Choosing** show the list of saved applications
+  with **Add application** in it. With one saved application there is no
+  choice, and the picker resolves that one. A flow that has its application,
+  **Fix at this size** or **Edit** on a reference, shows no list and never
+  reaches them.
+- **Missing** is a chosen application that the look does not find: the flow's
+  own, one handed over by the application flow, or the last choice. The
+  picker says so instead of asking for a choice as if none had been made.
+  **Refresh** keeps it until the new look answers, since the last answer
+  still lacks the application, and leaves it only if that look finds the
+  application again. Choosing another application or **Add application**
+  leaves it too; a flow with its own application has neither, so apart from
+  such a look only **Cancel** leaves it.
+- **Resolving** resolves the chosen application's window: at once from a
+  look that has answered, and otherwise when the look under way answers.
+  While a look is under way after one answered, a picker with no application
+  chosen stays in **Choosing** or **NoApplications**.
+- **One** has the window to capture. **Several** has one once the user picks
+  it among the windows that fit equally well; a look that no longer lists the
+  picked window leaves none picked. Both say when the windows are only the
+  application's fallback.
+- **None** is no window to capture: nothing fits, or a session reads a window
+  the list of open windows leaves out, such as one with no title. Only
+  **Refresh**, another application, or **Change how it's found** leaves it.
+- **Starting** disables every control but **Cancel** until `pick_window`
+  answers. A refusal, such as a window that closed since the look, shows in
+  the step it came from, and the next choice or look clears it.
+- **Add application** and **Change how it's found** end the picker: the
+  application flow opens for the picker's flow, and a new picker opens when
+  it ends, as [Pages and flows](#pages-and-flows) describes. **Change window**
+  in the capture opens a new picker with the same application, and with the
+  same window picked when several fit.
 
 ### Update notice
 

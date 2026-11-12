@@ -327,6 +327,11 @@ export function newAction(key: number, kind: ActionDraft['kind'] = 'media'): Act
   };
 }
 
+/** A key no row of `actions` has, for a row added to them. */
+export function unusedKey(actions: readonly ActionDraft[]): number {
+  return actions.reduce((next, action) => Math.max(next, action.key + 1), 0);
+}
+
 /** A new automation: pause whatever is playing, and undo it afterwards. */
 export const EMPTY_DRAFT: Draft = {
   name: '',
@@ -370,6 +375,11 @@ export function toDraft(automation: AutomationDef): Draft {
     undo: automation.undo,
     cooldown: String(automation.cooldownMs / 1000),
   };
+}
+
+/** The draft the editor starts with: the saved automation's, or a new one. */
+export function startingDraft(existing: AutomationDef | null): Draft {
+  return existing === null ? EMPTY_DRAFT : toDraft(existing);
 }
 
 /** Whether the state check `choice` reads the state `name`: one of its own, or none. */

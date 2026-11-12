@@ -65,8 +65,8 @@ use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
-    AppSummary, ClickPictureView, FixSpec, FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec,
-    SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, FixSpec, FoundClick, Live, Reading,
+    ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;

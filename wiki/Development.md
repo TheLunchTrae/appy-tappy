@@ -25,8 +25,8 @@ Git Bash on Windows.
 To get an installer of a branch without a release, use one of these:
 
 - On GitHub, open the **Release** workflow under **Actions**, select
-  **Run workflow**, and pick the branch. The installer is in the run's
-  artifacts for 14 days.
+  **Run workflow**, pick the branch, and leave **Publish** off. The installer
+  is in the run's artifacts for 14 days.
 - On Windows, run `mise run installer:build`. The installer lands in
   `target/dist/bundle/nsis/`.
 
