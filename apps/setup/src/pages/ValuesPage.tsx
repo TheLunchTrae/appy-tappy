@@ -28,7 +28,7 @@ import {
   sizeText,
 } from '../lib/sizes.ts';
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
-import type { Fixing } from './NewValue.tsx';
+import type { Fixing } from '../lib/flow.ts';
 
 interface AppRowsProps {
   readonly app: AppSummary;
