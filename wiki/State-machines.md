@@ -265,10 +265,11 @@ stateDiagram-v2
   When the process owns none of the windows that fit best, such as while
   another process's window fits better, it waits, and detection follows the
   other process or keeps this one for its grace. Before the capture starts,
-  `framed_at` asks `System::frame_size` for the size the window's frames will
-  have, the window's bounds without its shadow (`DWMWA_EXTENDED_FRAME_BOUNDS`),
-  and places the values there when some value reads there, so a window that
-  is not at the first value's drawn size is not captured twice at each start.
+  `framed_at` asks `System::content_size` for the size the window's frames
+  will have, the size of its
+  [content](Screen-regions.md#window-content), and places the values there
+  when some value reads there, so a window that is not at the first value's
+  drawn size is not captured twice at each start.
   The size is a guess: frames of another size are followed as below, and
   after a capture ended with `Resized`, the next one starts at the size its
   frames settled at, without guessing again. The first capture otherwise

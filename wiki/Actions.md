@@ -184,14 +184,14 @@ window match, but never a window taken only as the fallback: that may be
 another of the application's windows, where the spot or the picture means
 something else. A window that is not open, is minimized, or is hidden is not
 clicked. The
-place is measured in the window's frame as the screen shows it, which the
-desktop window manager reports without the invisible borders that the
-window's own bounds take in, so it matches what a capture of the window
-shows. For a picture, the window must have the size the picture was taken
+place is measured from the window's
+[content](Screen-regions.md#window-content) on the screen, without its title
+bar and borders, so it matches what a capture of the window shows. For a
+picture, the window must have the size the picture was taken
 at; the runtime then grabs one frame of the area, waits up to a second for
 it, and looks for the picture there (see
-[Screen regions](Screen-regions.md)). It reads the window's frame again after
-the search, and a window that moved since the grab is not clicked. Nothing is
+[Screen regions](Screen-regions.md)). It reads where the window's content is again
+after the search, and a window that moved since the grab is not clicked. Nothing is
 clicked when the picture is not found, and the log says why. Placing is the
 same for both deliveries. `place` in `appytappy-sources`
 (`crates/sources/src/screen/place.rs`) owns it, for the runtime and for the

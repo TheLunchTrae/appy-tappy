@@ -5,7 +5,8 @@ as a progress bar, a number counter, or whether an icon is showing. The setup
 app has the user pick the window, take a screenshot, draw a box around the
 information, and choose a check. The code lives in `appytappy-sources`:
 `screen/image.rs` holds images and regions, `screen/layout.rs` where a
-capture packs the regions it copies, `screen/capture.rs` the capture trait,
+capture packs the regions it copies, `screen/capture.rs` the capture trait
+and where a window's content lies in its frame,
 `screen/check.rs` and `screen/digits.rs` the checks, `screen/detect.rs` the
 proposal of a bar's colors, `screen/mask.rs` and
 `screen/select.rs` a state picture's mask and selection, `screen/saved.rs`
@@ -137,6 +138,26 @@ compared whole, and one with no opaque pixel is refused. AppyTappy writes
 8-bit RGB, or RGBA with the left-out pixels fully transparent when a mask
 leaves any out.
 
+## Window content
+
+A capture of a window takes in its frame, title bar and borders included,
+but the application draws only in its client area, and only that grows with
+the window: a title bar keeps its height in a small window and a large one,
+and borderless fullscreen has none. So everything AppyTappy reads is the
+window's content, the part of the frame its client area covers. Each frame
+the capture copies, the setup app's screenshots, a window's size, a
+region's coordinates, and where a click lands are all measured from the
+content's corner, and a value drawn in a window with a title bar lands on
+the same place in fullscreen.
+
+`screen::content` finds the content in a frame from the frame's bounds on the
+screen, which a capture takes in (`DWMWA_EXTENDED_FRAME_BOUNDS`), and the
+client area's (`GetClientRect` and `ClientToScreen`), as the capture reads
+them for each frame it copies. `screen::content_on_screen` gives the same
+area on the screen, which `System::content_size` and
+`System::content_bounds` return. Where the client area cannot be read or
+covers none of the frame, the whole frame is the content.
+
 ## Window sizes
 
 A region is drawn on a screenshot of one window size. Each application says
@@ -156,12 +177,11 @@ its values read at a size they were not drawn at.
   half away from zero, and its width and height are the distance between
   them, at least 1 pixel, so a region that touches the side it is pinned to
   still touches it. A region that scales outside the window does not read
-  there. A frame is the whole window, title bar and borders included, and
-  those do not grow with the window: a value drawn in a window with a title
-  bar scales to a spot lower than its place in the same application in
-  fullscreen, by about the title bar's height, so it needs a fix there. The
-  runtime's log says when a value could not be read where its region scales
-  to, and to fix it at that size if the region is off.
+  there. Regions are measured from the window's
+  [content](#window-content), so a title bar, which keeps its height as the
+  window grows, moves nothing. The runtime's log says when a value could not
+  be read where its region scales to, and to fix it at that size if the
+  region is off.
 - **Rarely** reads each value only at the sizes it was drawn at, so nothing
   is guessed.
 

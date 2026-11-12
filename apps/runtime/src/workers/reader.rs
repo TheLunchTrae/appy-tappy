@@ -180,8 +180,9 @@ enum Unreadable {
 /// follows the value's name: `why` is the check's error, or the way it
 /// failed alone, which stays the same while what the region shows changes.
 /// A region that is not `drawn` at the window's size is scaled to it and
-/// can lie beside the value, as between a window with a title bar and
-/// fullscreen, so the fragment says what to do then.
+/// can lie beside the value, such as when the application lays its
+/// interface out another way at that size, so the fragment says what to do
+/// then.
 fn unreadable(why: &dyn fmt::Display, drawn: bool) -> String {
     if drawn {
         format!("cannot be read: {why}")
@@ -760,7 +761,7 @@ fn settled_elsewhere(
 /// needs no case of its own.
 fn framed_at<S: System>(system: &S, job: &Job, window: u64, placed: Placed) -> Placed {
     system
-        .frame_size(window)
+        .content_size(window)
         .ok()
         .flatten()
         .map(|size| Placed::new(&job.plan, size))
@@ -2250,7 +2251,7 @@ mod tests {
             }))
         }
 
-        fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
             Ok(self.framed)
         }
 
@@ -2798,7 +2799,7 @@ mod tests {
             }))
         }
 
-        fn frame_size(&self, _window: u64) -> io::Result<Option<Size>> {
+        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 

@@ -479,8 +479,9 @@ what AppyTappy reads depends on how often the application's window
   pictures scale with it: shrinking averages the pixels each new pixel
   covers, and growing repeats the nearest one, so sharp edges stay sharp. A
   value whose region would reach past the window's edge isn't read. A
-  window's title bar doesn't scale with it, so between windowed and
-  fullscreen a scaled region can land beside its value:
+  screenshot shows only what the application draws, without the window's
+  title bar and borders, so a title bar doesn't move a value between
+  windowed and fullscreen. If a scaled region lands beside its value,
   [fix the value](#fix-a-value-at-one-size) at the other size.
 - While it changes size **rarely**, the value is read only at the sizes it
   was drawn at.
