@@ -1272,6 +1272,29 @@ mod tests {
             grown(&shape_of(&["...", ".#.", "..."])),
             shape_of(&[".#.", "###", ".#."])
         );
+        // A cell beside two of the shape's cells is set once, whichever
+        // sides they are on: left and right, above and below, a cell and
+        // the one right of it, or the one right of it and the one above.
+        assert_eq!(
+            grown(&shape_of(&["...", "#.#", "..."])),
+            shape_of(&["#.#", "####", "#.#"])
+        );
+        assert_eq!(
+            grown(&shape_of(&[".#.", "...", ".#."])),
+            shape_of(&["###", ".#.", "###", ".#."])
+        );
+        assert_eq!(
+            grown(&shape_of(&["...", ".##", "..."])),
+            shape_of(&[".##", "####", ".##"])
+        );
+        assert_eq!(
+            grown(&shape_of(&["...", ".#.", ".#.", "..."])),
+            shape_of(&[".#.", "###", "###", ".#."])
+        );
+        assert_eq!(
+            grown(&shape_of(&["...", ".#.", "..#", "..."])),
+            shape_of(&[".#.", "###", ".###", "..#"])
+        );
         // The grid's first row and column have nothing above or left.
         assert_eq!(grown(&shape_of(&["#"])), shape_of(&["##", "#."]));
         let mut last = Shape::default();
