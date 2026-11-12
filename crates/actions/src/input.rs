@@ -2,27 +2,12 @@
 //! windows that [`Input`] reads and sends to.
 
 use std::io;
-use std::num::NonZeroU32;
 use std::time::Duration;
 
 use appytappy_config::action::Modifier;
 use appytappy_config::anti_cheat::ProcessId;
 
 use crate::{MouseMessage, Press, Stroke};
-
-/// How Windows scales a window.
-///
-/// The window draws at one number of dots per inch, and its monitor shows
-/// another when the window's program does not follow the monitor's scale.
-/// Windows then stretches the window, and the window counts in its own
-/// pixels, not the screen's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Scale {
-    /// The dots per inch the window draws at.
-    pub window: NonZeroU32,
-    /// The dots per inch of the monitor it shows on.
-    pub monitor: NonZeroU32,
-}
 
 /// The operating system's keyboard, mouse, and windows, as key presses and
 /// clicks use them. Each method reads one thing or sends one thing, and
@@ -110,8 +95,20 @@ pub trait Input {
     /// Waits for `time`, while pressed keys or buttons are held down.
     fn hold(&mut self, time: Duration);
 
-    /// The screen place (`x`, `y`) as `window` counts it: from the top-left
-    /// corner of its client area, in screen pixels. A place outside the
+    /// The screen place (`x`, `y`), in screen pixels, in the pixels that
+    /// `window`'s program counts the screen in. They differ for a window
+    /// that Windows stretches, because its program does not follow its
+    /// monitor's scale. Every other place and size of a window here is in
+    /// that window's own pixels. The place has to lie on the window.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error, including for a window that
+    /// closed.
+    fn own_place(&mut self, window: u64, x: i32, y: i32) -> io::Result<(i32, i32)>;
+
+    /// The screen place (`x`, `y`), as [`Input::own_place`] answers it, from
+    /// the top-left corner of `window`'s client area. A place outside the
     /// client area has a coordinate below zero or past the client area's
     /// size.
     ///
@@ -121,7 +118,7 @@ pub trait Input {
     /// closed.
     fn client_point(&mut self, window: u64, x: i32, y: i32) -> io::Result<(i32, i32)>;
 
-    /// The width and height of `window`'s client area, in screen pixels.
+    /// The width and height of `window`'s client area.
     ///
     /// # Errors
     ///
@@ -129,24 +126,59 @@ pub trait Input {
     /// closed.
     fn client_size(&mut self, window: u64) -> io::Result<(i32, i32)>;
 
-    /// The child window of `window` at (`x`, `y`) in `window`'s client
-    /// area, the topmost one that is visible, enabled, and not transparent
-    /// to the mouse; `window` itself where it has none; or `None` for a
-    /// place outside `window`. It looks only at `window`'s own children,
-    /// not at theirs.
+    /// The topmost child window of `window`, or `None` when it has none.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error.
-    fn child_at(&mut self, window: u64, x: i32, y: i32) -> io::Result<Option<u64>>;
+    fn top_child(&mut self, window: u64) -> io::Result<Option<u64>>;
 
-    /// How Windows scales `window`.
+    /// The window just below `window` among the children of its parent, or
+    /// `None` for the lowest.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn below(&mut self, window: u64) -> io::Result<Option<u64>>;
+
+    /// `window`'s style bits, as Windows keeps them, which say whether it
+    /// is visible and whether it is disabled. A window that closed has
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn style(&mut self, window: u64) -> io::Result<u32>;
+
+    /// `window`'s left, top, right, and bottom edges on the screen, borders
+    /// included, as [`Input::own_place`] answers places.
     ///
     /// # Errors
     ///
     /// Returns the operating system's error, including for a window that
     /// closed.
-    fn scale(&mut self, window: u64) -> io::Result<Scale>;
+    fn bounds(&mut self, window: u64) -> io::Result<(i32, i32, i32, i32)>;
+
+    /// What `window` answers when Windows asks where on it the screen place
+    /// `at` is, as it does to route the mouse (`WM_NCHITTEST`). It waits a
+    /// moment for the window's answer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::PermissionDenied`] when Windows blocks
+    /// messages to the window, as [`Input::post`] does, and the operating
+    /// system's error otherwise, including for a window that did not answer
+    /// in time.
+    fn hit_test(&mut self, window: u64, at: (i16, i16)) -> io::Result<usize>;
+
+    /// The style bits of `window`'s class, as Windows keeps them, which say
+    /// whether the window is told about double clicks. A window that closed
+    /// has none.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn class_style(&mut self, window: u64) -> io::Result<u32>;
 
     /// Puts `message` in `window`'s message queue and returns without
     /// waiting for the window to read it.
@@ -155,8 +187,9 @@ pub trait Input {
     ///
     /// Returns [`io::ErrorKind::PermissionDenied`] when Windows blocks
     /// messages to the window, because its program runs with more rights
-    /// than this one, such as as administrator, and the operating system's
-    /// error otherwise, including for a window that closed.
+    /// than this one, as one started as administrator does, and the
+    /// operating system's error otherwise, including for a window that
+    /// closed.
     fn post(&mut self, window: u64, message: MouseMessage) -> io::Result<()>;
 }
 
@@ -215,6 +248,10 @@ impl Input for Unsupported {
 
     fn hold(&mut self, _time: Duration) {}
 
+    fn own_place(&mut self, _window: u64, _x: i32, _y: i32) -> io::Result<(i32, i32)> {
+        unsupported()
+    }
+
     fn client_point(&mut self, _window: u64, _x: i32, _y: i32) -> io::Result<(i32, i32)> {
         unsupported()
     }
@@ -223,11 +260,27 @@ impl Input for Unsupported {
         unsupported()
     }
 
-    fn child_at(&mut self, _window: u64, _x: i32, _y: i32) -> io::Result<Option<u64>> {
+    fn top_child(&mut self, _window: u64) -> io::Result<Option<u64>> {
         unsupported()
     }
 
-    fn scale(&mut self, _window: u64) -> io::Result<Scale> {
+    fn below(&mut self, _window: u64) -> io::Result<Option<u64>> {
+        unsupported()
+    }
+
+    fn style(&mut self, _window: u64) -> io::Result<u32> {
+        unsupported()
+    }
+
+    fn bounds(&mut self, _window: u64) -> io::Result<(i32, i32, i32, i32)> {
+        unsupported()
+    }
+
+    fn hit_test(&mut self, _window: u64, _at: (i16, i16)) -> io::Result<usize> {
+        unsupported()
+    }
+
+    fn class_style(&mut self, _window: u64) -> io::Result<u32> {
         unsupported()
     }
 
@@ -267,13 +320,18 @@ mod tests {
             input.move_cursor(0, 0),
             input.buttons_held().map(drop),
             input.send_presses(&[press]).map(drop),
+            input.own_place(7, 0, 0).map(drop),
             input.client_point(7, 0, 0).map(drop),
             input.client_size(7).map(drop),
-            input.child_at(7, 0, 0).map(drop),
-            input.scale(7).map(drop),
+            input.top_child(7).map(drop),
+            input.below(7).map(drop),
+            input.style(7).map(drop),
+            input.bounds(7).map(drop),
+            input.hit_test(7, (0, 0)).map(drop),
+            input.class_style(7).map(drop),
             input.post(7, message),
         ]
         .map(|result| result.expect_err("unsupported").kind());
-        assert_eq!(kinds, [io::ErrorKind::Unsupported; 15]);
+        assert_eq!(kinds, [io::ErrorKind::Unsupported; 20]);
     }
 }

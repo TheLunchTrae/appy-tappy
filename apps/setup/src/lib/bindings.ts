@@ -355,9 +355,9 @@ tolerance: number, }>;
 export type ClickButtonDef = DeepReadonly<"left" | "right" | "double">;
 
 /**
- * How a click reaches its window, as the file spells it. A cursor click's
- * return of the focus is the action's own field, so files that name no
- * delivery read as before.
+ * How a click reaches its window, as the file spells it: with the cursor
+ * when the file names none. A cursor click's return of the focus is the
+ * action's own field.
  */
 export type ClickDeliveryDef = DeepReadonly<"cursor" | "message">;
 
@@ -377,6 +377,19 @@ windowWidth: number,
  * The window's height when it was taken.
  */
 windowHeight: number, }>;
+
+/**
+ * The window a click sent on request went to.
+ */
+export type ClickSent = DeepReadonly<{
+/**
+ * The window's handle, as picking a window names it.
+ */
+window: number,
+/**
+ * The window's title, which tells an application's windows apart.
+ */
+title: string, }>;
 
 /**
  * A click to send now, as the click target screen sets it up.

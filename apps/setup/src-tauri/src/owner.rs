@@ -45,7 +45,7 @@ use crate::recording::{Recording, ocr};
 use crate::stores::{SavedApp, Stores};
 use crate::updates::Downloaded;
 
-pub(crate) use self::clicks::{ClickPictureView, ClickSpec, FoundClick};
+pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
 pub(crate) use self::host::{Desktop, Host};
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{

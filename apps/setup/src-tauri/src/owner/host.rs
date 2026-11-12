@@ -40,6 +40,15 @@ pub(crate) struct ClickNow<'click> {
     pub(crate) delivery: ClickDelivery,
 }
 
+/// The window a click sent on request went to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClickedWindow {
+    /// The window's handle.
+    pub(crate) handle: u64,
+    /// Its title.
+    pub(crate) title: String,
+}
+
 /// What the setup app needs from the operating system: its windows and
 /// processes, a capture of one window, a click sent on request, a way to
 /// tell the runtime that a save changed what it reads, and the overlays'
@@ -108,12 +117,13 @@ pub(crate) trait Host: 'static {
     /// does. The setup app stands where the runtime has the watched
     /// application: a click with the cursor clicks only while the setup
     /// app's window or the window it clicks in is in front, and gives the
-    /// focus back to the one that was.
+    /// focus back to the one that was. Answers the window it went to, which
+    /// is the one the application's window rules find now.
     ///
     /// # Errors
     ///
     /// Returns why the click was not placed or not sent, as a clause.
-    fn click(&self, click: ClickNow<'_>) -> Result<(), String>;
+    fn click(&self, click: ClickNow<'_>) -> Result<ClickedWindow, String>;
 
     /// The time now. The tests set it, to settle a window size without
     /// waiting.
@@ -172,13 +182,13 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
         self.system.start(window, crop, interval, handler)
     }
 
-    fn click(&self, click: ClickNow<'_>) -> Result<(), String> {
-        let placed = place(&self.system, click.app, click.window, click.target)?;
+    fn click(&self, click: ClickNow<'_>) -> Result<ClickedWindow, String> {
+        let found = place(&self.system, click.app, click.window, click.target)?;
         let placed = PlacedClick {
-            window: placed.window,
-            process: placed.process,
+            window: found.window,
+            process: found.process,
             app: click.app.to_owned(),
-            at: placed.at,
+            at: found.at,
             button: click.button,
             delivery: click.delivery,
         };
@@ -187,7 +197,11 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
             executable: SETUP_APP.to_owned(),
         };
         appytappy_actions::click(&mut HostInput::default(), &placed, &asking)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok(ClickedWindow {
+            handle: found.window,
+            title: found.title,
+        })
     }
 
     #[mutants::skip] // Sets a named Windows event, which no test can observe.

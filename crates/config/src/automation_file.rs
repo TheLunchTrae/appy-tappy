@@ -313,9 +313,9 @@ impl From<ClickButtonDef> for ClickButton {
     }
 }
 
-/// How a click reaches its window, as the file spells it. A cursor click's
-/// return of the focus is the action's own field, so files that name no
-/// delivery read as before.
+/// How a click reaches its window, as the file spells it: with the cursor
+/// when the file names none. A cursor click's return of the focus is the
+/// action's own field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]

@@ -408,10 +408,8 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use std::num::NonZeroU32;
-
     use appytappy_actions::{
-        Input, MEDIA_RETRY, MediaSession, MouseEvent, MouseMessage, Press, Scale, Stroke, Volume,
+        Input, MEDIA_RETRY, MediaSession, MouseEvent, MouseMessage, Press, Stroke, Volume,
     };
     use appytappy_config::action::{
         MediaCommand, MediaTarget, Modifier, OpenTarget, VolumeLevel, VolumeTarget,
@@ -440,8 +438,8 @@ mod tests {
     }
 
     /// Input with no keyboard and no cursor, whose every window is 200 by
-    /// 100 at (1000, 500) on the screen, has no child, and keeps each
-    /// message posted to it.
+    /// 100 at (1000, 500) on the screen, has no child, takes every click in
+    /// its client area, and keeps each message posted to it.
     #[derive(Default)]
     struct Posts(Vec<(u64, MouseEvent, (i16, i16))>);
 
@@ -492,6 +490,10 @@ mod tests {
 
         fn hold(&mut self, _time: Duration) {}
 
+        fn own_place(&mut self, _window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
+            Ok((x, y))
+        }
+
         fn client_point(&mut self, _window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
             Ok((
                 x.checked_sub(1000).expect("on the screen"),
@@ -503,16 +505,30 @@ mod tests {
             Ok((200, 100))
         }
 
-        fn child_at(&mut self, window: u64, _x: i32, _y: i32) -> io::Result<Option<u64>> {
-            Ok(Some(window))
+        fn top_child(&mut self, _window: u64) -> io::Result<Option<u64>> {
+            Ok(None)
         }
 
-        fn scale(&mut self, _window: u64) -> io::Result<Scale> {
-            let dots = NonZeroU32::new(96).expect("not zero");
-            Ok(Scale {
-                window: dots,
-                monitor: dots,
-            })
+        fn below(&mut self, _window: u64) -> io::Result<Option<u64>> {
+            Ok(None)
+        }
+
+        fn style(&mut self, _window: u64) -> io::Result<u32> {
+            // Visible, and not disabled.
+            Ok(0x1000_0000)
+        }
+
+        fn bounds(&mut self, _window: u64) -> io::Result<(i32, i32, i32, i32)> {
+            Ok((1000, 500, 1200, 600))
+        }
+
+        fn hit_test(&mut self, _window: u64, _at: (i16, i16)) -> io::Result<usize> {
+            // The place is in the window's client area.
+            Ok(1)
+        }
+
+        fn class_style(&mut self, _window: u64) -> io::Result<u32> {
+            Ok(0)
         }
 
         fn post(&mut self, window: u64, message: MouseMessage) -> io::Result<()> {

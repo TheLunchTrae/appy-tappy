@@ -775,9 +775,10 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
           )}
           {sentNames.length === 0 ? null : (
             <p className="note">
-              A click sent to the window of {sentNames.join(' or ')} leaves the cursor and the window in front as they
-              are. Some applications ignore a click sent this way, and nothing tells AppyTappy whether it worked, so
-              test it with Click it now where you set up the target. A picture that is not found is not clicked.
+              For a click sent to the window of {sentNames.join(' or ')}, AppyTappy does not move the cursor or bring a
+              window to the front. Some applications ignore a click sent this way, and nothing tells AppyTappy whether
+              it worked, so test it with Click it now where you set up the target. A picture that is not found is not
+              clicked.
             </p>
           )}
           {pressesKeys ? (

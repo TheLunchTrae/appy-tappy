@@ -18,7 +18,7 @@ use crate::overlay::OverlayWindow;
 use crate::recording::ocr;
 use crate::stores::{self, Stores};
 
-use super::host::{ClickNow, Host};
+use super::host::{ClickNow, ClickedWindow, Host};
 use super::messages::{Message, SaveSpec};
 use super::{Owner, PREVIEW_INTERVAL};
 
@@ -212,7 +212,7 @@ impl Host for FakeHost {
         })
     }
 
-    fn click(&self, click: ClickNow<'_>) -> Result<(), String> {
+    fn click(&self, click: ClickNow<'_>) -> Result<ClickedWindow, String> {
         let spot = match click.target {
             Target::Spot(spot) => Some(spot),
             Target::Picture(_) => None,
@@ -226,7 +226,13 @@ impl Host for FakeHost {
                 delivery: click.delivery,
             })
             .expect("test listens");
-        self.unclicked.clone().map_or(Ok(()), Err)
+        match &self.unclicked {
+            Some(why) => Err(why.clone()),
+            None => Ok(ClickedWindow {
+                handle: 7,
+                title: "Example App".to_owned(),
+            }),
+        }
     }
 
     fn now(&self) -> Instant {

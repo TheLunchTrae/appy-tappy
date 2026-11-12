@@ -30,10 +30,12 @@ pub enum Target<'search> {
 }
 
 /// A click placed on the screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placed {
     /// The window it clicks in.
     pub window: u64,
+    /// That window's title, which tells an application's windows apart.
+    pub title: String,
     /// The process that owns the window.
     pub process: ProcessId,
     /// Where it lands, in screen pixels.
@@ -123,6 +125,7 @@ pub fn place<S: System + Capture>(
         .ok_or_else(|| format!("its place in {name}'s window lies off the screen"))?;
     Ok(Placed {
         window: window.handle,
+        title: window.title,
         process: window.process,
         at,
     })
@@ -352,6 +355,7 @@ mod tests {
             ),
             Ok(Placed {
                 window: 9,
+                title: "Target".to_owned(),
                 process: ProcessId::new(8),
                 at: (1189, 594),
             })

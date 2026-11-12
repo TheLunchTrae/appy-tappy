@@ -33,8 +33,8 @@ export const DELIVERY_NAMES: Readonly<Record<ClickDeliveryDef, string>> = {
 
 /** Each way in a few words, under its name. */
 export const DELIVERY_WORDS: Readonly<Record<ClickDeliveryDef, string>> = {
-  cursor: 'Works everywhere',
-  message: 'Cursor and focus stay',
+  cursor: 'Presses like a real mouse',
+  message: 'Leaves the cursor alone',
 };
 
 /** What each way does and what it cannot promise, where the user chooses between them. */
@@ -42,7 +42,7 @@ export const DELIVERY_NOTES: Readonly<Record<ClickDeliveryDef, string>> = {
   cursor:
     'AppyTappy brings the window to the front for a moment, moves the cursor there, clicks, and puts the cursor back.',
   message:
-    'The cursor and the window in front stay as they are, even a game in full screen. Some applications ignore a click sent this way, and nothing tells AppyTappy whether it worked, so test it with Click it now.',
+    'AppyTappy does not move the cursor or bring the window to the front. What the application does with the click is up to it: some ignore a click sent this way, and nothing tells AppyTappy whether it worked. Test it with Click it now.',
 };
 
 /**
@@ -59,12 +59,19 @@ export function returnsFocus(
 
 /**
  * What the target screen says once Click it now sent a click in `app`: that it was sent, never that it worked, since
- * nothing reports whether the application acted on it.
+ * nothing reports whether the application acted on it. It names the window by `title`, which tells the application's
+ * windows apart, and says so when that is another window than the one the screen shows (`elsewhere`): the click goes
+ * to the window the application's window rules find at that moment, as the automation's will.
  */
-export function sentText(delivery: ClickDeliveryDef, app: string): string {
-  return delivery === 'cursor'
-    ? `AppyTappy clicked in ${app}. Check that ${app} did what you wanted.`
-    : `AppyTappy sent the click to ${app}'s window. Nothing tells it whether ${app} acted on it, so check that it did. If it did nothing, choose ${DELIVERY_NAMES.cursor} instead.`;
+export function sentText(delivery: ClickDeliveryDef, app: string, title: string, elsewhere: boolean): string {
+  const window = title === '' ? `${app}'s window` : `${app}'s window “${title}”`;
+  const sent =
+    delivery === 'cursor'
+      ? `AppyTappy clicked in ${window}. Check that ${app} did what you wanted.`
+      : `AppyTappy sent the click to ${window}. Nothing tells it whether ${app} acted on it, so check that it did. If it did nothing, choose ${DELIVERY_NAMES.cursor} instead.`;
+  return elsewhere
+    ? `${sent} That is not the window shown here: with several open, AppyTappy clicks the one that ${app}'s window rules find first, as the automation will. Select Look again to see that window.`
+    : sent;
 }
 
 /** How alike a picture must look, as a new target starts: a little room for a highlighted button. */

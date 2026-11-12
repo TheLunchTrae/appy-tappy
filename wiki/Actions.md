@@ -155,12 +155,15 @@ in that application's window it lands:
 A click also says how it reaches the window, its delivery:
 
 - **With the cursor,** the default: the window comes to the front, and the
-  real cursor moves there and presses, so it works wherever a person can
-  click. See [A click with the cursor](#a-click-with-the-cursor).
-- **As messages:** the click is posted to the window as mouse messages, so
-  neither the cursor nor the focus moves, and a game in front, including one
-  in exclusive full screen, keeps running undisturbed. Many applications
-  ignore such a click. See
+  real cursor moves there and presses, as a real mouse does. See
+  [A click with the cursor](#a-click-with-the-cursor).
+- **As messages:** the click is posted to the window as mouse messages.
+  AppyTappy moves neither the cursor nor the focus for it, which is what a
+  game in front, such as one in exclusive full screen, needs to keep running
+  undisturbed. What the clicked application does then is its own: one that
+  brings itself to the front when it is clicked still takes the focus. Many
+  applications ignore such a click, and a click under a game in exclusive
+  full screen is not tested. See
   [A click sent as messages](#a-click-sent-as-messages).
 
 The owner decided that the delivery is each click's own choice and that the
@@ -261,8 +264,8 @@ differs:
 - **No focus.** A click with the cursor needs the watched application or the
   one it clicks in to be in front because `SendInput` goes to whichever window
   is in front. A posted message goes only to the window it names, so the
-  click is sent whichever window is in front. Nothing comes to the front, and
-  there is no focus to give back.
+  click is sent whichever window is in front. AppyTappy brings nothing to the
+  front, and has no focus to give back.
 - **No look at what shows at its place.** A message cannot land in a window
   that covers the click's window, so a covered window is still clicked.
 - **No wait for held buttons or keys.** Its messages name the one button it
@@ -270,29 +273,53 @@ differs:
   says. An application that asks Windows which keys are down while it handles
   the message still sees the keys the user holds.
 
-The messages go to the deepest window under the click's place, among the
-click's window and its child windows, because the mouse itself goes to the
-child under it. At each window, `click` asks where the place is in that
-window's client area (`ScreenToClient`), checks that it lies inside it
-(`GetClientRect`), and asks for the child window there
-(`ChildWindowFromPointEx`), which passes over a child that is hidden,
-disabled, or transparent to the mouse, as the mouse does. It stops at a window
-with no child there, and gives up after 64 windows, far more than Windows
-nests. A place outside a client area, such as on a title bar, a border, or a
-scroll bar, is not sent: those places get other messages, which a click does
-not send. Windows stretches a window whose program does not follow its
-monitor's scale, and such a window counts in its own pixels, so the place is
-scaled by the window's dots per inch over its monitor's (`GetDpiForWindow`
-and `GetDpiForMonitor`).
+One thing it needs that a click with the cursor does not: the click's window
+must not be disabled, as a window is while it shows a dialog of its own. The
+mouse reaches no part of a disabled window, so the click is not sent.
+
+The messages go to the window that a real click at the place would reach,
+among the click's window and its child windows. Windows finds that window by
+asking the windows themselves, and `click` asks them the same way. Inside a
+window's client area (`ScreenToClient`, `GetClientRect`) it goes through the
+child windows from the topmost down (`GetWindow`) and passes over one that is
+hidden or disabled (`GetWindowLongW`) or does not hold the place
+(`GetWindowRect`). The first child that takes the place, itself or through a
+window inside it, gets the click. When none does, the window itself answers
+where the place is on it (`WM_NCHITTEST`, sent with `SendMessageTimeoutW`):
+
+- **In its client area:** the window gets the click.
+- **Nowhere the mouse stops:** a label and a group box answer this
+  (`HTTRANSPARENT`), and the click goes on to the window behind, or to the
+  window around them.
+- **On another part,** such as a title bar, a border, or a scroll bar: the
+  click is not sent, because those parts get other messages, which a click
+  does not send.
+
+It goes at most 64 windows deep and through at most 4,096 children of one
+window, far more than Windows has. Unlike the mouse, it asks every child in
+turn whichever thread owns it; the mouse goes on behind a window it goes
+through only to windows of the same thread.
+
+A window that Windows stretches, because its program does not follow its
+monitor's scale, counts in its own pixels, and its mouse messages name places
+in them. The adapter does no scaling of its own for that. It converts the
+click's screen place with `PhysicalToLogicalPointForPerMonitorDPI`, which
+Microsoft documents for getting a place in another program's own pixels, and
+makes every call about a window while its thread has that window's DPI
+awareness context (`GetWindowDpiAwarenessContext`,
+`SetThreadDpiAwarenessContext`). Windows runs a window's procedure in that
+context, so each call answers what the window's own code would get.
 
 The click is then posted with `PostMessageW`: `WM_MOUSEMOVE`, the button's
 down message with its button flag (`MK_LBUTTON` or `MK_RBUTTON`), and its up
 message, each with the place in its `lParam`, 20 ms apart so an application
 that reads its messages once a frame sees each. A double click goes down, up,
-down again as `WM_LBUTTONDBLCLK`, and up. When Windows refuses a message after
-the button went down, the up message is posted once more. `PostMessageW`
-returns without waiting for the window, so a window that hangs does not hold
-up the actions behind the click.
+down again, and up. Its second press depends on the window's class
+(`GetClassLongPtrW`): Windows tells a window about double clicks only when its
+class has `CS_DBLCLKS`, so such a window gets `WM_LBUTTONDBLCLK`, and any other
+window gets a second `WM_LBUTTONDOWN`, as it would from the mouse. When
+Windows refuses a message after the button went down, the up message is
+posted once more. `PostMessageW` returns without waiting for the window.
 
 What a click sent as messages cannot promise:
 
@@ -311,6 +338,13 @@ What a click sent as messages cannot promise:
 - **A window that runs as administrator refuses it.** Windows blocks messages
   from a program with fewer rights, and for a posted message, unlike
   `SendInput`, it says so. The click fails, and the log says why.
+- **A window that Windows stretches is not checked.** The conversion to the
+  window's own pixels rests on what Microsoft documents, as above, and on no
+  check of a stretched window yet: the CI display is not scaled, so the
+  adapter's test of it shows only that the calls work.
+- **A busy window holds the click up for a moment.** Asking a window where a
+  place is on it waits up to 200 ms for the answer. A window that does not
+  answer in time gets no click, and the log says so.
 - **The application may think the pointer stays.** The messages say that the
   pointer came to the click's place, and nothing says that it left, so an
   application that highlights what the pointer is over may keep the highlight
@@ -346,6 +380,14 @@ while the setup app's window or the click's window is in front, as it is when
 the user has just pressed the button, and the focus goes back to the setup
 app when the click asks for that. The screen says that the click was sent,
 not that it worked.
+
+Like the runtime, **Click it now** finds the window through the application's
+window rules at that moment. With several of the application's windows open,
+that can be another window than the one the screen shows and **Find it now**
+looked at, so the answer names the window by its title and says when it is
+another one, and **Look again** then shows it.
+[Click target tries](State-machines.md#click-target-tries) describes the
+screen's states.
 
 ## Restoring
 
@@ -451,13 +493,20 @@ another scale; that a window covering the place stops the click; that a
 game that keeps the cursor inside its window gets no click; and that the
 focus goes back to the watched application.
 
-For a click sent as messages, the adapter's tests make a hidden window with
-child windows, post each kind of click to it, and read the messages, their
-button flags, and their places back from its queue. They run in the `windows`
-CI job. Whether a real application acts on such a click is checked by hand,
+For a click sent as messages, the adapter's tests make hidden windows of
+classes of their own, with and without `CS_DBLCLKS`, and child windows: plain
+ones, a label and a group box over other controls, a hidden one, and a
+disabled one. They post each kind of click and read the messages, their
+button flags, and their places back from the thread's queue, which shows
+that a click reaches the window a real click would. They run in the `windows`
+CI job. One test makes a window that does not follow the monitor's scale;
+on a display that is not scaled, as in CI, it shows only that the calls work.
+
+Whether a real application acts on such a click is checked by hand,
 one application at a time: set up a target in it with **Send to the window**,
 put another window in front, select **Click it now**, and see whether the
-application did what a click there does, while the cursor and the window in
-front stay as they were. Check too a place inside a child control, a window
-that Windows stretches on a monitor with another scale, and a window that runs
-as administrator, which the log says it cannot click.
+application did what a click there does, and whether the cursor and the
+window in front stayed as they were. Check too a place inside a child
+control, a game in exclusive full screen in front, a window that Windows
+stretches on a monitor with another scale, and a window that runs as
+administrator, which the log says it cannot click.

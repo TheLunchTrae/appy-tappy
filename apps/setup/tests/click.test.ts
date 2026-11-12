@@ -105,11 +105,22 @@ describe('how a click is delivered', () => {
   });
 
   test('a click that was sent is said to be sent, not to have worked', () => {
-    expect(sentText('cursor', 'Streaming app')).toBe(
-      'AppyTappy clicked in Streaming app. Check that Streaming app did what you wanted.',
+    expect(sentText('cursor', 'Streaming app', 'Studio', false)).toBe(
+      "AppyTappy clicked in Streaming app's window “Studio”. Check that Streaming app did what you wanted.",
     );
-    const sent = sentText('message', 'Streaming app');
+    const sent = sentText('message', 'Streaming app', '', false);
     expect(sent).toStartWith("AppyTappy sent the click to Streaming app's window.");
     expect(sent).toContain('Nothing tells it whether Streaming app acted on it');
+    expect(sent).not.toContain('not the window shown here');
+  });
+
+  test('a click that went to another window than the one shown says which, and why', () => {
+    for (const delivery of ['cursor', 'message'] as const) {
+      const sent = sentText(delivery, 'Streaming app', 'Studio 2', true);
+      expect(sent).toContain("Streaming app's window “Studio 2”");
+      expect(sent).toEndWith(
+        "That is not the window shown here: with several open, AppyTappy clicks the one that Streaming app's window rules find first, as the automation will. Select Look again to see that window.",
+      );
+    }
   });
 });

@@ -58,9 +58,13 @@ pub enum ActionError {
     /// on a title bar, a border, or a scroll bar, or is too far in for a
     /// mouse message to name.
     Unreachable(String),
+    /// A click sent as messages was not sent, because the named
+    /// application's window is disabled and takes no input, as while it
+    /// shows a dialog.
+    WindowDisabled(String),
     /// A click sent as messages was not sent, because Windows blocks
     /// messages to the named application's window: its program runs with
-    /// more rights than AppyTappy, such as as administrator.
+    /// more rights than AppyTappy, as one started as administrator does.
     MessageBlocked(String),
     /// A click reached the journal without a place: the runtime places
     /// clicks and runs them through [`crate::click`].
@@ -115,10 +119,15 @@ impl fmt::Display for ActionError {
                 "the click was not sent, because a click sent to the window cannot land at its \
                  place in {target}, such as on a title bar, a border, or a scroll bar"
             ),
+            Self::WindowDisabled(target) => write!(
+                formatter,
+                "the click was not sent, because {target}'s window takes no clicks now, as \
+                 while it shows a dialog"
+            ),
             Self::MessageBlocked(target) => write!(
                 formatter,
                 "the click was not sent, because Windows blocks messages to {target}, which runs \
-                 with more rights than AppyTappy, such as as administrator"
+                 with more rights than AppyTappy, as a program started as administrator does"
             ),
             Self::Unplaced => formatter.write_str("the click was not placed on the screen"),
             Self::FocusNotReturned => formatter.write_str(
@@ -146,6 +155,7 @@ impl Error for ActionError {
             | Self::NotBroughtToFront(_)
             | Self::CursorBlocked(_)
             | Self::Unreachable(_)
+            | Self::WindowDisabled(_)
             | Self::MessageBlocked(_)
             | Self::Unplaced
             | Self::FocusNotReturned => None,
@@ -201,6 +211,10 @@ mod tests {
             (
                 ActionError::Unreachable("Target App".to_owned()),
                 "cannot land at its place in Target App",
+            ),
+            (
+                ActionError::WindowDisabled("Target App".to_owned()),
+                "Target App's window takes no clicks now",
             ),
             (
                 ActionError::MessageBlocked("Target App".to_owned()),

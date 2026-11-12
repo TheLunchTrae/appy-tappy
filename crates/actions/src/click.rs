@@ -2,12 +2,13 @@
 //! reaches its window.
 //!
 //! A click with the cursor brings its window to the front, moves the real
-//! cursor there, and presses through the system's input, so it works in
-//! every application. A click sent as messages posts mouse messages to the
-//! window under its place and moves neither the cursor nor the focus, but
-//! an application may ignore it, and nothing reports whether one acted on
-//! it. [`click`] runs either; every choice is made here, and [`Input`]
-//! only reads or sends one thing.
+//! cursor there, and presses through the system's input, so it works
+//! wherever a person can click. A click sent as messages posts mouse
+//! messages to the window that a real click at its place would reach, and
+//! itself moves neither the cursor nor the focus, but an application may
+//! ignore it, and nothing reports whether one acted on it. [`click`] runs
+//! either; every choice is made here, and [`Input`] only reads or sends
+//! one thing.
 
 use std::io;
 use std::time::Duration;
@@ -15,7 +16,7 @@ use std::time::Duration;
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::click::{ClickButton, ClickDelivery};
 
-use crate::{ActionError, Input, Scale, Watched};
+use crate::{ActionError, Input, Watched};
 
 /// A mouse button that a click presses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +62,27 @@ const PRESS_HOLD: Duration = Duration::from_millis(20);
 /// cannot hold up the actions behind it. Windows nests windows far less
 /// deeply.
 const MAX_DEPTH: usize = 64;
+
+/// How many child windows of one window a click sent as messages looks
+/// through, for the same reason. A window has far fewer.
+const MAX_SIBLINGS: usize = 4096;
+
+/// The window style bit of a window that is not hidden: `WS_VISIBLE`.
+const STYLE_VISIBLE: u32 = 0x1000_0000;
+
+/// The window style bit of a window that takes no input: `WS_DISABLED`.
+const STYLE_DISABLED: u32 = 0x0800_0000;
+
+/// The class style bit of a window that is told about double clicks:
+/// `CS_DBLCLKS`.
+const CLASS_DOUBLE_CLICKS: u32 = 0x0008;
+
+/// What a window answers when the mouse goes through it at a place, to the
+/// window behind it: `HTTRANSPARENT`.
+const HIT_THROUGH: i32 = -1;
+
+/// What a window answers for a place in its client area: `HTCLIENT`.
+const HIT_CLIENT: i32 = 1;
 
 /// The presses that click `button`: down and up, twice for a double click.
 fn presses(button: ClickButton) -> Vec<Press> {
@@ -121,8 +143,10 @@ impl MouseMessage {
 
     /// The message's `wParam`: the mouse buttons that are down as it
     /// arrives, `MK_LBUTTON` or `MK_RBUTTON` while its button goes down
-    /// and nothing otherwise. It never names a modifier key, so a click is
-    /// never a Ctrl-click or a Shift-click, whatever the user holds.
+    /// and nothing otherwise. It names no modifier key, whatever the user
+    /// holds, so the message itself never says Ctrl-click or Shift-click.
+    /// An application that asks Windows which keys are down while it
+    /// handles the message still sees the keys the user holds.
     #[must_use]
     pub const fn held(self) -> usize {
         match self.event {
@@ -136,20 +160,32 @@ impl MouseMessage {
         }
     }
 
-    /// The message's `lParam`, as `MAKELPARAM` packs it: across in the low
-    /// 16 bits and down in the next 16.
+    /// The message's `lParam`: its place, as [`pack`] packs it.
     #[must_use]
     pub const fn place(self) -> u32 {
-        let [across_low, across_high] = self.at.0.to_le_bytes();
-        let [down_low, down_high] = self.at.1.to_le_bytes();
-        u32::from_le_bytes([across_low, across_high, down_low, down_high])
+        pack(self.at)
     }
 }
 
+/// A place as `MAKELPARAM` packs it for a message: across in the low 16
+/// bits and down in the next 16.
+#[must_use]
+pub const fn pack((across, down): (i16, i16)) -> u32 {
+    let [across_low, across_high] = across.to_le_bytes();
+    let [down_low, down_high] = down.to_le_bytes();
+    u32::from_le_bytes([across_low, across_high, down_low, down_high])
+}
+
 /// The messages that click `button` at `at`: the pointer arrives, then the
-/// button goes down and up. A double click's second press goes down as a
-/// double click, the way Windows reports one.
-fn messages(button: ClickButton, at: (i16, i16)) -> Vec<MouseMessage> {
+/// button goes down and up.
+///
+/// A double click's second press depends on the window. Windows tells a
+/// window about double clicks only when its class asks for them, which
+/// `double_clicks` says: such a window gets the second press as a double
+/// click, and usually ignores a plain second press. Any other window gets
+/// two plain presses from the mouse, and usually ignores a double-click
+/// message, so it gets two plain presses here too.
+fn messages(button: ClickButton, at: (i16, i16), double_clicks: bool) -> Vec<MouseMessage> {
     let click = |button| {
         vec![
             MouseEvent::Move,
@@ -161,11 +197,13 @@ fn messages(button: ClickButton, at: (i16, i16)) -> Vec<MouseMessage> {
         ClickButton::Left => click(MouseButton::Left),
         ClickButton::Right => click(MouseButton::Right),
         ClickButton::Double => {
+            let again = if double_clicks {
+                MouseEvent::DoubleDown(MouseButton::Left)
+            } else {
+                MouseEvent::Down(MouseButton::Left)
+            };
             let mut events = click(MouseButton::Left);
-            events.extend([
-                MouseEvent::DoubleDown(MouseButton::Left),
-                MouseEvent::Up(MouseButton::Left),
-            ]);
+            events.extend([again, MouseEvent::Up(MouseButton::Left)]);
             events
         },
     };
@@ -210,15 +248,15 @@ pub struct PlacedClick {
 /// back. A button that went down goes up again, even when Windows drops a
 /// press.
 ///
-/// As messages, it finds the window under the click's place among the
-/// click's window and its child windows, and posts that window the pointer
-/// arriving and the button going down and up, a moment apart. Nothing
-/// comes to the front and the cursor stays where it is, so it needs neither
-/// the focus nor a place that shows: a posted message reaches only its
-/// window, whatever is in front or covers it. The messages name no
-/// modifier key. `Ok` says the messages were posted, not that the
-/// application acted on them: many applications ignore posted mouse
-/// messages, and nothing reports which.
+/// As messages, it finds the window that a real click at the place would
+/// reach, among the click's window and its child windows, and posts that
+/// window the pointer arriving and the button going down and up, a moment
+/// apart. It brings nothing to the front and leaves the cursor where it
+/// is, so it needs neither the focus nor a place that shows: a posted
+/// message reaches only its window, whatever is in front or covers it. The
+/// messages name no modifier key. `Ok` says the messages were posted, not
+/// that the application acted on them: many applications ignore posted
+/// mouse messages, and nothing reports which.
 ///
 /// # Errors
 ///
@@ -235,8 +273,10 @@ pub fn click<I: Input>(
             click_with_cursor(input, click, return_focus, watched)
         },
         ClickDelivery::Message => {
-            let (window, at) = landing(input, click)?;
-            post(input, window, &messages(click.button, at), &click.app)
+            let Landing { window, at } = landing(input, click)?;
+            let double_clicks = reports_double_clicks(input.class_style(window)?);
+            let messages = messages(click.button, at, double_clicks);
+            post(input, window, &messages, &click.app)
         },
     }
 }
@@ -338,40 +378,106 @@ fn press_buttons<I: Input>(input: &mut I, presses: &[Press]) -> Result<(), Actio
     Ok(())
 }
 
-/// The window that gets `click` as messages, and its place there as that
-/// window counts it.
+/// Where a click sent as messages lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Landing {
+    /// The window that gets the messages.
+    window: u64,
+    /// The place in that window's client area, as the window counts it.
+    at: (i16, i16),
+}
+
+/// The window that gets `click` as messages, and its place there.
 ///
-/// The window is the deepest one under the click's place, among the
-/// click's window and its children: the mouse itself goes to the child
-/// under it, so the messages do too. A child that is hidden, disabled, or
-/// transparent to the mouse is passed over, as the mouse passes it over.
-/// The place has to lie in the client area of each window on the way,
-/// because a mouse message names a place there: a title bar, a border, or a
-/// scroll bar gets other messages, which a click does not send. A window
-/// that Windows stretches, because its program does not follow the
-/// monitor's scale, counts in its own pixels, so the place is scaled to
-/// them.
-fn landing<I: Input>(input: &mut I, click: &PlacedClick) -> Result<(u64, (i16, i16)), ActionError> {
+/// It is the window a real click at the place would reach, which Windows
+/// finds by asking the windows themselves, so this asks them the same way.
+/// A window that is disabled takes no click at all, as while it shows a
+/// dialog. The place is first put in the pixels the window's program
+/// counts the screen in, which are not the screen's own for a window that
+/// Windows stretches.
+fn landing<I: Input>(input: &mut I, click: &PlacedClick) -> Result<Landing, ActionError> {
+    if disabled(input.style(click.window)?) {
+        return Err(ActionError::WindowDisabled(click.app.clone()));
+    }
     let (x, y) = click.at;
-    let unreachable = || ActionError::Unreachable(click.app.clone());
-    let mut window = click.window;
-    for _ in 0..MAX_DEPTH {
-        let point = input.client_point(window, x, y)?;
-        if !inside(point, input.client_size(window)?) {
+    let place = input.own_place(click.window, x, y)?;
+    under(input, click.window, place, MAX_DEPTH, &click.app)?
+        .ok_or_else(|| ActionError::Unreachable(click.app.clone()))
+}
+
+/// The window that the mouse reaches at `place` in `window` or the windows
+/// inside it, with the place in that window's client area, or `None` when
+/// the mouse goes through `window` there to whatever is behind it.
+///
+/// It follows how Windows routes the mouse. Inside `window`'s client area
+/// it looks at the child windows, topmost first, and passes over one that
+/// is hidden, is disabled, or does not hold the place. The first child
+/// that takes the place, itself or through a window inside it, gets the
+/// click. When none does, `window` answers where the place is on it
+/// (`WM_NCHITTEST`): in its client area, where a mouse message can name
+/// it; nowhere the mouse stops, as a label or a group box answers, so the
+/// click goes on to the window behind; or on another part, such as a title
+/// bar, a border, or a scroll bar, which gets other messages that a click
+/// does not send.
+fn under<I: Input>(
+    input: &mut I,
+    window: u64,
+    place: (i32, i32),
+    depth: usize,
+    app: &str,
+) -> Result<Option<Landing>, ActionError> {
+    let unreachable = || ActionError::Unreachable(app.to_owned());
+    let Some(deeper) = depth.checked_sub(1) else {
+        return Err(unreachable());
+    };
+    let point = input.client_point(window, place.0, place.1)?;
+    if inside(point, input.client_size(window)?) {
+        let mut next = input.top_child(window)?;
+        for _ in 0..MAX_SIBLINGS {
+            let Some(child) = next else {
+                break;
+            };
+            let style = input.style(child)?;
+            if !hidden(style)
+                && !disabled(style)
+                && holds(input.bounds(child)?, place)
+                && let Some(found) = under(input, child, place, deeper, app)?
+            {
+                return Ok(Some(found));
+            }
+            next = input.below(child)?;
+        }
+        if next.is_some() {
             return Err(unreachable());
         }
-        match input.child_at(window, point.0, point.1)? {
-            Some(child) if child != window => window = child,
-            Some(_) => {
-                let scale = input.scale(window)?;
-                return scaled(point, scale)
-                    .map(|at| (window, at))
-                    .ok_or_else(unreachable);
-            },
-            None => return Err(unreachable()),
-        }
     }
-    Err(unreachable())
+    let asked = short(place).ok_or_else(unreachable)?;
+    let answer = input
+        .hit_test(window, asked)
+        .map_err(|error| refused(error, app))?;
+    match hit_code(answer) {
+        HIT_THROUGH => Ok(None),
+        HIT_CLIENT => short(point)
+            .map(|at| Some(Landing { window, at }))
+            .ok_or_else(unreachable),
+        _ => Err(unreachable()),
+    }
+}
+
+/// Whether a window with `style` is hidden.
+const fn hidden(style: u32) -> bool {
+    style & STYLE_VISIBLE == 0
+}
+
+/// Whether a window with `style` is disabled, so it takes no input.
+const fn disabled(style: u32) -> bool {
+    style & STYLE_DISABLED != 0
+}
+
+/// Whether Windows tells a window whose class has `class_style` about
+/// double clicks.
+const fn reports_double_clicks(class_style: u32) -> bool {
+    class_style & CLASS_DOUBLE_CLICKS != 0
 }
 
 /// Whether `point` lies in a client area of `size`.
@@ -379,17 +485,34 @@ fn inside((x, y): (i32, i32), (width, height): (i32, i32)) -> bool {
     (0..width).contains(&x) && (0..height).contains(&y)
 }
 
-/// `point`, in screen pixels from a window's corner, in the pixels the
-/// window counts in, or `None` when a mouse message cannot name a place
-/// that far in. A screen pixel belongs to the window pixel that covers it.
-fn scaled((x, y): (i32, i32), scale: Scale) -> Option<(i16, i16)> {
-    let along = |pixels: i32| {
-        let scaled = i64::from(pixels)
-            .checked_mul(i64::from(scale.window.get()))?
-            .checked_div(i64::from(scale.monitor.get()))?;
-        i16::try_from(scaled).ok()
-    };
-    Some((along(x)?, along(y)?))
+/// Whether a window at `bounds`, its left, top, right, and bottom edges,
+/// holds `place`.
+fn holds((left, top, right, bottom): (i32, i32, i32, i32), (x, y): (i32, i32)) -> bool {
+    (left..right).contains(&x) && (top..bottom).contains(&y)
+}
+
+/// `place` as a message names one, or `None` when it is too far out for a
+/// message.
+fn short((x, y): (i32, i32)) -> Option<(i16, i16)> {
+    Some((i16::try_from(x).ok()?, i16::try_from(y).ok()?))
+}
+
+/// What a window answered to where a place is on it: the low 32 bits of
+/// its answer, which is all a 32-bit program's window gives.
+const fn hit_code(answer: usize) -> i32 {
+    let [first, second, third, fourth, ..] = answer.to_le_bytes();
+    i32::from_le_bytes([first, second, third, fourth])
+}
+
+/// Why a window did not take what a click sent it: Windows blocks messages
+/// to a window whose program runs with more rights, and anything else is
+/// the operating system's own error.
+fn refused(error: io::Error, app: &str) -> ActionError {
+    if error.kind() == io::ErrorKind::PermissionDenied {
+        ActionError::MessageBlocked(app.to_owned())
+    } else {
+        error.into()
+    }
 }
 
 /// Posts `messages` to `window` one at a time, [`PRESS_HOLD`] apart, since
@@ -417,11 +540,7 @@ fn post<I: Input>(
                 )]
                 let _ = input.post(window, up);
             }
-            return Err(if error.kind() == io::ErrorKind::PermissionDenied {
-                ActionError::MessageBlocked(app.to_owned())
-            } else {
-                error.into()
-            });
+            return Err(refused(error, app));
         }
         down = match message.event {
             MouseEvent::Down(button) | MouseEvent::DoubleDown(button) => Some(button),
@@ -438,12 +557,18 @@ fn post<I: Input>(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::num::NonZeroU32;
 
     use appytappy_config::action::Modifier;
 
     use super::*;
     use crate::Stroke;
+
+    /// A window style bit that says nothing about the mouse, which every
+    /// window here has, so only the bits that matter are read.
+    const STYLE_OTHER: u32 = 0x0001_0000;
+
+    /// What a window answers for a place on its border: `HTBORDER`.
+    const HIT_BORDER: usize = 18;
 
     /// A window's client area on the screen, and the windows inside it.
     #[derive(Default)]
@@ -456,21 +581,44 @@ mod tests {
         border: i32,
         /// Its child windows, topmost first.
         children: Vec<u64>,
+        hidden: bool,
+        disabled: bool,
+        /// What it answers for a place in its client area, when not that
+        /// the place is there.
+        answers: Option<usize>,
+        /// Its class's style bits.
+        class_style: u32,
     }
 
     impl Pane {
-        /// Whether the window, border included, holds the screen place.
-        fn holds(&self, (x, y): (i32, i32)) -> bool {
-            let within = |at: i32, origin: i32, size: i32| {
-                let start = origin.checked_sub(self.border).expect("on the screen");
-                let end = origin
+        /// Its left, top, right, and bottom edges, border included.
+        fn edges(&self) -> (i32, i32, i32, i32) {
+            let before = |origin: i32| origin.checked_sub(self.border).expect("on the screen");
+            let after = |origin: i32, size: i32| {
+                origin
                     .checked_add(size)
                     .and_then(|end| end.checked_add(self.border))
-                    .expect("on the screen");
-                (start..end).contains(&at)
+                    .expect("on the screen")
             };
-            within(x, self.origin.0, self.size.0) && within(y, self.origin.1, self.size.1)
+            (
+                before(self.origin.0),
+                before(self.origin.1),
+                after(self.origin.0, self.size.0),
+                after(self.origin.1, self.size.1),
+            )
         }
+    }
+
+    /// The windows a click sent as messages finds.
+    #[derive(Default, PartialEq, Eq)]
+    enum Windows {
+        /// Those in [`Desk::panes`].
+        #[default]
+        Panes,
+        /// Every window has another child under every place.
+        Endless,
+        /// Window 9 has hidden children without end.
+        Crowded,
     }
 
     /// A screen with a cursor, a window in front, and the windows a click
@@ -500,12 +648,12 @@ mod tests {
         moves_fail: Vec<bool>,
         /// Each window's client area, by window.
         panes: BTreeMap<u64, Pane>,
-        /// The windows that answer that a place is outside them.
-        outside: Vec<u64>,
-        /// Whether every window has another child under every place.
-        endless: bool,
-        /// The window's and its monitor's dots per inch, or 96 for both.
-        scale: Option<(u32, u32)>,
+        /// How far the windows' own pixels start from the screen's.
+        own: (i32, i32),
+        /// Which windows a click sent as messages finds.
+        windows: Windows,
+        /// How asking a window where a place is on it fails, if it does.
+        asking_fails: Option<io::ErrorKind>,
         /// How each next post fails, first first, with `None` for one that
         /// works; once it runs out, a post works.
         posts_fail: Vec<Option<io::ErrorKind>>,
@@ -596,8 +744,15 @@ mod tests {
             self.log.push(format!("hold {}ms", time.as_millis()));
         }
 
+        fn own_place(&mut self, _window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
+            Ok((
+                x.checked_sub(self.own.0).expect("on the screen"),
+                y.checked_sub(self.own.1).expect("on the screen"),
+            ))
+        }
+
         fn client_point(&mut self, window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
-            if self.endless {
+            if self.windows == Windows::Endless {
                 return Ok((0, 0));
             }
             let (left, top) = self.pane(window)?.origin;
@@ -608,36 +763,79 @@ mod tests {
         }
 
         fn client_size(&mut self, window: u64) -> io::Result<(i32, i32)> {
-            if self.endless {
+            if self.windows == Windows::Endless {
                 return Ok((1, 1));
             }
             Ok(self.pane(window)?.size)
         }
 
-        fn child_at(&mut self, window: u64, x: i32, y: i32) -> io::Result<Option<u64>> {
-            if self.endless {
+        fn top_child(&mut self, window: u64) -> io::Result<Option<u64>> {
+            if self.windows == Windows::Endless {
                 return Ok(Some(window.checked_add(1).expect("few windows")));
             }
-            if self.outside.contains(&window) {
-                return Ok(None);
+            if self.windows == Windows::Crowded && window == 9 {
+                return Ok(Some(1000));
             }
-            let pane = self.pane(window)?;
-            let place = (
-                pane.origin.0.checked_add(x).expect("on the screen"),
-                pane.origin.1.checked_add(y).expect("on the screen"),
-            );
-            let child = pane.children.iter().copied().find(|child| {
-                self.panes
-                    .get(child)
-                    .is_some_and(|child| child.holds(place))
-            });
-            Ok(Some(child.unwrap_or(window)))
+            Ok(self.pane(window)?.children.first().copied())
         }
 
-        fn scale(&mut self, window: u64) -> io::Result<Scale> {
-            self.pane(window)?;
-            let (window, monitor) = self.scale.unwrap_or((96, 96));
-            Ok(scale(window, monitor))
+        fn below(&mut self, window: u64) -> io::Result<Option<u64>> {
+            if self.windows == Windows::Endless {
+                return Ok(None);
+            }
+            if self.windows == Windows::Crowded {
+                return Ok(Some(window.checked_add(1).expect("few windows")));
+            }
+            Ok(self.panes.values().find_map(|pane| {
+                let mut after = pane.children.iter().skip_while(|child| **child != window);
+                after.next()?;
+                after.next().copied()
+            }))
+        }
+
+        fn style(&mut self, window: u64) -> io::Result<u32> {
+            if self.windows == Windows::Endless {
+                return Ok(STYLE_VISIBLE | STYLE_OTHER);
+            }
+            if self.windows == Windows::Crowded && window != 9 {
+                return Ok(STYLE_OTHER);
+            }
+            let pane = self.pane(window)?;
+            let visible = if pane.hidden { 0 } else { STYLE_VISIBLE };
+            let disabled = if pane.disabled { STYLE_DISABLED } else { 0 };
+            Ok(visible | disabled | STYLE_OTHER)
+        }
+
+        fn bounds(&mut self, window: u64) -> io::Result<(i32, i32, i32, i32)> {
+            if self.windows == Windows::Endless {
+                return Ok((i32::MIN, i32::MIN, i32::MAX, i32::MAX));
+            }
+            Ok(self.pane(window)?.edges())
+        }
+
+        fn hit_test(&mut self, window: u64, at: (i16, i16)) -> io::Result<usize> {
+            if let Some(kind) = self.asking_fails {
+                return Err(kind.into());
+            }
+            let place = (i32::from(at.0), i32::from(at.1));
+            let pane = self.pane(window)?;
+            let (left, top) = pane.origin;
+            let client = inside(
+                (
+                    place.0.checked_sub(left).expect("on the screen"),
+                    place.1.checked_sub(top).expect("on the screen"),
+                ),
+                pane.size,
+            );
+            Ok(match pane.answers {
+                Some(answer) if client => answer,
+                _ if client => 1,
+                _ => HIT_BORDER,
+            })
+        }
+
+        fn class_style(&mut self, window: u64) -> io::Result<u32> {
+            Ok(self.pane(window)?.class_style)
         }
 
         fn post(&mut self, window: u64, message: MouseMessage) -> io::Result<()> {
@@ -650,13 +848,6 @@ mod tests {
             self.log
                 .push(format!("post {window} {:?} {x},{y}", message.event));
             Ok(())
-        }
-    }
-
-    fn scale(window: u32, monitor: u32) -> Scale {
-        Scale {
-            window: NonZeroU32::new(window).expect("not zero"),
-            monitor: NonZeroU32::new(monitor).expect("not zero"),
         }
     }
 
@@ -981,8 +1172,8 @@ mod tests {
 
     #[test]
     fn a_click_s_messages_are_the_pointer_arriving_then_its_button() {
-        let events = |button| -> Vec<MouseEvent> {
-            messages(button, (3, 4))
+        let events = |button, double_clicks| -> Vec<MouseEvent> {
+            messages(button, (3, 4), double_clicks)
                 .into_iter()
                 .map(|message| {
                     assert_eq!(message.at, (3, 4));
@@ -991,31 +1182,45 @@ mod tests {
                 .collect()
         };
         let (left, right) = (MouseButton::Left, MouseButton::Right);
+        for double_clicks in [false, true] {
+            assert_eq!(
+                events(ClickButton::Left, double_clicks),
+                [
+                    MouseEvent::Move,
+                    MouseEvent::Down(left),
+                    MouseEvent::Up(left)
+                ]
+            );
+            assert_eq!(
+                events(ClickButton::Right, double_clicks),
+                [
+                    MouseEvent::Move,
+                    MouseEvent::Down(right),
+                    MouseEvent::Up(right)
+                ]
+            );
+        }
         assert_eq!(
-            events(ClickButton::Left),
-            [
-                MouseEvent::Move,
-                MouseEvent::Down(left),
-                MouseEvent::Up(left)
-            ]
-        );
-        assert_eq!(
-            events(ClickButton::Right),
-            [
-                MouseEvent::Move,
-                MouseEvent::Down(right),
-                MouseEvent::Up(right)
-            ]
-        );
-        assert_eq!(
-            events(ClickButton::Double),
+            events(ClickButton::Double, true),
             [
                 MouseEvent::Move,
                 MouseEvent::Down(left),
                 MouseEvent::Up(left),
                 MouseEvent::DoubleDown(left),
                 MouseEvent::Up(left)
-            ]
+            ],
+            "a window that is told about double clicks gets one"
+        );
+        assert_eq!(
+            events(ClickButton::Double, false),
+            [
+                MouseEvent::Move,
+                MouseEvent::Down(left),
+                MouseEvent::Up(left),
+                MouseEvent::Down(left),
+                MouseEvent::Up(left)
+            ],
+            "any other window gets two presses, as from the mouse"
         );
     }
 
@@ -1048,6 +1253,7 @@ mod tests {
                 at,
             };
             assert_eq!(message.place(), place, "{at:?}");
+            assert_eq!(pack(at), place, "{at:?}");
         }
     }
 
@@ -1068,23 +1274,36 @@ mod tests {
         );
         assert_eq!(desk.cursor, (5, 5));
         assert_eq!(desk.front, Some(1));
+    }
 
-        let mut desk = behind();
-        click(&mut desk, &posted(ClickButton::Double), &watched()).expect("sent");
-        assert_eq!(
-            desk.log,
-            [
-                "post 9 Move 40,50",
-                "hold 20ms",
-                "post 9 Down(Left) 40,50",
-                "hold 20ms",
-                "post 9 Up(Left) 40,50",
-                "hold 20ms",
-                "post 9 DoubleDown(Left) 40,50",
-                "hold 20ms",
-                "post 9 Up(Left) 40,50"
-            ]
-        );
+    #[test]
+    fn a_double_click_s_second_press_is_what_the_window_s_class_is_told() {
+        // Other class style bits say nothing about double clicks.
+        for (class_style, second) in [
+            (0x0003, "post 9 Down(Left) 40,50"),
+            (0x0008, "post 9 DoubleDown(Left) 40,50"),
+            (0x000B, "post 9 DoubleDown(Left) 40,50"),
+            (0, "post 9 Down(Left) 40,50"),
+        ] {
+            let mut desk = behind();
+            desk.panes.entry(9).or_default().class_style = class_style;
+            click(&mut desk, &posted(ClickButton::Double), &watched()).expect("sent");
+            assert_eq!(
+                desk.log,
+                [
+                    "post 9 Move 40,50",
+                    "hold 20ms",
+                    "post 9 Down(Left) 40,50",
+                    "hold 20ms",
+                    "post 9 Up(Left) 40,50",
+                    "hold 20ms",
+                    second,
+                    "hold 20ms",
+                    "post 9 Up(Left) 40,50"
+                ],
+                "{class_style:#x}"
+            );
+        }
     }
 
     /// [`behind`], with window 10 inside window 9 at (90, 180), 50 by 40
@@ -1100,6 +1319,7 @@ mod tests {
                 size: (50, 40),
                 border: 2,
                 children: vec![11],
+                ..Pane::default()
             },
         );
         desk.panes.insert(
@@ -1113,26 +1333,102 @@ mod tests {
         desk
     }
 
+    /// The first thing a click sent as messages at `at` did to `desk`, or
+    /// why it was not sent.
+    fn first(desk: &mut Desk, at: (i32, i32)) -> Result<String, ActionError> {
+        let click_ = PlacedClick {
+            at,
+            ..posted(ClickButton::Right)
+        };
+        click(desk, &click_, &watched())?;
+        assert_eq!(desk.log.len(), 5, "{:?}", desk.log);
+        Ok(desk.log.first().cloned().expect("a message"))
+    }
+
+    fn unreachable(sent: &Result<String, ActionError>) -> bool {
+        matches!(sent, Err(ActionError::Unreachable(app)) if app == "Target App")
+    }
+
     #[test]
     fn messages_go_to_the_deepest_window_under_the_place() {
-        for (at, first) in [
+        for (at, message) in [
             ((100, 200), "post 11 Move 5,10"),
             ((92, 182), "post 10 Move 2,2"),
             ((61, 151), "post 9 Move 1,1"),
+            // Just outside window 10's border, on each side.
+            ((87, 200), "post 9 Move 27,50"),
+            ((142, 200), "post 9 Move 82,50"),
+            ((100, 177), "post 9 Move 40,27"),
+            ((100, 222), "post 9 Move 40,72"),
         ] {
             let mut desk = nested();
-            let click_ = PlacedClick {
-                at,
-                ..posted(ClickButton::Right)
-            };
-            click(&mut desk, &click_, &watched()).expect("sent");
-            assert_eq!(desk.log.first().map(String::as_str), Some(first), "{at:?}");
-            assert_eq!(desk.log.len(), 5, "{:?}", desk.log);
+            let sent = first(&mut desk, at);
+            assert_eq!(sent.as_deref().ok(), Some(message), "{at:?}: {sent:?}");
         }
     }
 
     #[test]
-    fn a_place_outside_a_client_area_gets_no_message() {
+    fn the_topmost_child_that_takes_the_place_gets_the_click() {
+        // Windows 12 and 13 overlap inside window 9, with 12 on top.
+        let overlapping = || {
+            let mut desk = behind();
+            desk.panes.entry(9).or_default().children = vec![12, 13];
+            for window in [12, 13] {
+                desk.panes.insert(
+                    window,
+                    Pane {
+                        origin: (90, 180),
+                        size: (50, 40),
+                        ..Pane::default()
+                    },
+                );
+            }
+            desk
+        };
+        let mut desk = overlapping();
+        assert_eq!(
+            first(&mut desk, (100, 200)).ok().as_deref(),
+            Some("post 12 Move 10,20")
+        );
+        // The mouse goes through a label or a group box, in either form a
+        // program gives the answer in, to the window behind it.
+        for through in [0xFFFF_FFFF, usize::MAX] {
+            let mut desk = overlapping();
+            desk.panes.entry(12).or_default().answers = Some(through);
+            assert_eq!(
+                first(&mut desk, (100, 200)).ok().as_deref(),
+                Some("post 13 Move 10,20"),
+                "{through:#x}"
+            );
+            // With nothing behind it, the window around it gets the click.
+            desk = overlapping();
+            for window in [12, 13] {
+                desk.panes.entry(window).or_default().answers = Some(through);
+            }
+            assert_eq!(
+                first(&mut desk, (100, 200)).ok().as_deref(),
+                Some("post 9 Move 40,50"),
+                "{through:#x}"
+            );
+        }
+        // A hidden or a disabled child is not there for the mouse.
+        let mut desk = overlapping();
+        desk.panes.entry(12).or_default().hidden = true;
+        assert_eq!(
+            first(&mut desk, (100, 200)).ok().as_deref(),
+            Some("post 13 Move 10,20")
+        );
+        let mut desk = overlapping();
+        desk.panes.entry(12).or_default().disabled = true;
+        desk.panes.entry(13).or_default().disabled = true;
+        assert_eq!(
+            first(&mut desk, (100, 200)).ok().as_deref(),
+            Some("post 9 Move 40,50")
+        );
+    }
+
+    #[test]
+    fn a_place_no_mouse_message_can_name_gets_no_message() {
         // Window 9's client area runs from (60, 150) to (259, 249).
         for (at, lands) in [
             ((60, 150), true),
@@ -1145,85 +1441,101 @@ mod tests {
             ((260, 250), false),
         ] {
             let mut desk = behind();
-            let click_ = PlacedClick {
-                at,
-                ..posted(ClickButton::Left)
-            };
-            let sent = click(&mut desk, &click_, &watched());
-            if lands {
-                sent.expect("inside");
-                assert_eq!(desk.log.len(), 5, "{at:?}");
-            } else {
-                assert!(
-                    matches!(&sent, Err(ActionError::Unreachable(app)) if app == "Target App"),
-                    "{at:?}: {sent:?}"
-                );
+            let sent = first(&mut desk, at);
+            assert_eq!(sent.is_ok(), lands, "{at:?}: {sent:?}");
+            if !lands {
+                assert!(unreachable(&sent), "{at:?}: {sent:?}");
                 assert_eq!(desk.log, Vec::<String>::new(), "{at:?}");
             }
         }
         // A child's border belongs to the child, but not to its client
-        // area.
-        let mut desk = nested();
-        let on_border = PlacedClick {
-            at: (89, 180),
-            ..posted(ClickButton::Left)
-        };
-        assert!(matches!(
-            click(&mut desk, &on_border, &watched()),
-            Err(ActionError::Unreachable(_))
-        ));
-        assert_eq!(desk.log, Vec::<String>::new());
+        // area, on each side.
+        for at in [(88, 200), (141, 200), (100, 178), (100, 221)] {
+            let mut desk = nested();
+            let sent = first(&mut desk, at);
+            assert!(unreachable(&sent), "{at:?}: {sent:?}");
+            assert_eq!(desk.log, Vec::<String>::new(), "{at:?}");
+        }
+        // A child that reaches past its parent's client area takes no click
+        // out there.
         let mut desk = behind();
-        desk.outside = vec![9];
+        desk.panes.entry(9).or_default().children = vec![12];
+        desk.panes.insert(
+            12,
+            Pane {
+                origin: (100, 240),
+                size: (50, 40),
+                ..Pane::default()
+            },
+        );
+        assert_eq!(
+            first(&mut desk, (110, 245)).ok().as_deref(),
+            Some("post 12 Move 10,5")
+        );
+        let sent = first(&mut desk, (110, 260));
+        assert!(unreachable(&sent), "{sent:?}");
+        // The mouse goes through the click's own window, to another one.
+        let mut desk = behind();
+        desk.panes.entry(9).or_default().answers = Some(usize::MAX);
+        let sent = first(&mut desk, (100, 200));
+        assert!(unreachable(&sent), "{sent:?}");
+        assert_eq!(desk.log, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_disabled_window_gets_no_message() {
+        let mut desk = nested();
+        desk.panes.entry(9).or_default().disabled = true;
         assert!(matches!(
             click(&mut desk, &posted(ClickButton::Left), &watched()),
-            Err(ActionError::Unreachable(_))
+            Err(ActionError::WindowDisabled(app)) if app == "Target App"
         ));
         assert_eq!(desk.log, Vec::<String>::new());
     }
 
     #[test]
-    fn a_stretched_window_gets_the_place_in_its_own_pixels() {
-        let mut desk = behind();
-        desk.scale = Some((96, 144));
-        click(&mut desk, &posted(ClickButton::Left), &watched()).expect("sent");
+    fn the_place_is_counted_in_the_window_s_own_pixels() {
+        let mut desk = nested();
+        desk.own = (1000, 2000);
         assert_eq!(
-            desk.log.first().map(String::as_str),
-            Some("post 9 Move 26,33")
+            first(&mut desk, (1100, 2200)).ok().as_deref(),
+            Some("post 11 Move 5,10")
         );
-        assert_eq!(scaled((300, 150), scale(96, 144)), Some((200, 100)));
-        assert_eq!(scaled((299, 149), scale(96, 144)), Some((199, 99)));
-        assert_eq!(scaled((100, 10), scale(144, 96)), Some((150, 15)));
-        assert_eq!(scaled((7, 9), scale(120, 120)), Some((7, 9)));
-        assert_eq!(
-            scaled((32_767, 32_767), scale(96, 96)),
-            Some((i16::MAX, i16::MAX))
-        );
-        assert_eq!(scaled((32_768, 0), scale(96, 96)), None);
-        assert_eq!(scaled((0, 32_768), scale(96, 96)), None);
-        assert_eq!(scaled((30_000, 0), scale(144, 96)), None);
-        // A place too far in for a message is not sent.
+        // A place too far for a message to name is not sent: on the screen,
+        // and in a window.
         let mut desk = behind();
         desk.panes.entry(9).or_default().size = (40_000, 100);
-        let far = PlacedClick {
-            at: (39_060, 200),
-            ..posted(ClickButton::Left)
-        };
-        assert!(matches!(
-            click(&mut desk, &far, &watched()),
-            Err(ActionError::Unreachable(_))
-        ));
-        assert_eq!(desk.log, Vec::<String>::new());
+        let sent = first(&mut desk, (39_060, 200));
+        assert!(unreachable(&sent), "{sent:?}");
+        let mut desk = behind();
+        desk.panes.insert(
+            9,
+            Pane {
+                origin: (-30_000, 150),
+                size: (70_000, 100),
+                ..Pane::default()
+            },
+        );
+        assert_eq!(
+            first(&mut desk, (2_767, 200)).ok().as_deref(),
+            Some("post 9 Move 32767,50")
+        );
+        let sent = first(&mut desk, (2_768, 200));
+        assert!(unreachable(&sent), "{sent:?}");
+        assert_eq!(desk.log.len(), 5, "only the first was sent");
     }
 
     #[test]
-    fn windows_nested_without_end_get_no_message() {
+    fn windows_without_end_get_no_message() {
         let mut desk = behind();
-        desk.endless = true;
-        assert!(matches!(
-            click(&mut desk, &posted(ClickButton::Left), &watched()),
-            Err(ActionError::Unreachable(app)) if app == "Target App"
-        ));
+        desk.windows = Windows::Endless;
+        let sent = first(&mut desk, (100, 200));
+        assert!(unreachable(&sent), "{sent:?}");
+        assert_eq!(desk.log, Vec::<String>::new());
+        let mut desk = behind();
+        desk.windows = Windows::Crowded;
+        let sent = first(&mut desk, (100, 200));
+        assert!(unreachable(&sent), "{sent:?}");
         assert_eq!(desk.log, Vec::<String>::new());
     }
 
@@ -1234,6 +1546,19 @@ mod tests {
         assert!(matches!(
             click(&mut desk, &posted(ClickButton::Left), &watched()),
             Err(ActionError::MessageBlocked(app)) if app == "Target App"
+        ));
+        assert_eq!(desk.log, Vec::<String>::new());
+        // Asking it where the place is fails the same ways.
+        let mut desk = behind();
+        desk.asking_fails = Some(io::ErrorKind::PermissionDenied);
+        assert!(matches!(
+            click(&mut desk, &posted(ClickButton::Left), &watched()),
+            Err(ActionError::MessageBlocked(app)) if app == "Target App"
+        ));
+        desk.asking_fails = Some(io::ErrorKind::TimedOut);
+        assert!(matches!(
+            click(&mut desk, &posted(ClickButton::Left), &watched()),
+            Err(ActionError::Os(error)) if error.kind() == io::ErrorKind::TimedOut
         ));
         assert_eq!(desk.log, Vec::<String>::new());
 
@@ -1280,6 +1605,7 @@ mod tests {
             ),
         ] {
             let mut desk = behind();
+            desk.panes.entry(9).or_default().class_style = CLASS_DOUBLE_CLICKS;
             desk.posts_fail = fails;
             let sent = click(&mut desk, &posted(ClickButton::Double), &watched());
             assert!(
@@ -1288,7 +1614,7 @@ mod tests {
             );
             assert_eq!(desk.log, log);
         }
-        // A window that closed has no client area to find the place in.
+        // A window that closed has nothing to ask.
         let mut desk = behind();
         desk.panes.clear();
         assert!(matches!(

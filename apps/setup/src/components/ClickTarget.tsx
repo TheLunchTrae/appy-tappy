@@ -1,4 +1,4 @@
-import { type PointerEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type PointerEvent, type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import {
   addClickPicture,
@@ -16,7 +16,6 @@ import {
   type ClickAtDef,
   type ClickButtonDef,
   type ClickDeliveryDef,
-  type FoundClick,
   LIMITS,
   type SelectionSpec,
 } from '../lib/bindings.ts';
@@ -39,6 +38,7 @@ import {
   sentText,
   spotAt,
 } from '../lib/click.ts';
+import { IDLE, tryStep } from '../lib/clickTry.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { type Point, type Rect, type Size, contains, fit, toPicture } from '../lib/region.ts';
 import { background } from '../lib/repeat.ts';
@@ -111,18 +111,8 @@ type PictureStep = 'picture' | 'press';
 /** Finding the picked window of the application the click is for. */
 type Window =
   | { readonly kind: 'looking' }
-  | { readonly kind: 'picked' }
+  | { readonly kind: 'picked'; readonly handle: number }
   | { readonly kind: 'missing'; readonly message: string };
-
-/** What Find it now found: where the click lands, or why it lands nowhere. */
-type Found =
-  | { readonly kind: 'found'; readonly at: FoundClick }
-  | { readonly kind: 'missed'; readonly message: string };
-
-/** What Click it now did: it sent the click, or why it did not. */
-type Clicked =
-  | { readonly kind: 'sent'; readonly message: string }
-  | { readonly kind: 'unsent'; readonly message: string };
 
 function hintText(
   window: Window,
@@ -207,8 +197,9 @@ function TargetStage({
   const [step, setStep] = useState<PictureStep>('picture');
   const [tool, setTool] = useState<SelectTool>('box');
   const [colorMatch, setColorMatch] = useState(DEFAULT_COLOR_MATCH);
-  const [found, setFound] = useState<Found | null>(null);
-  const [clicked, setClicked] = useState<Clicked | null>(null);
+  // What Find it now and Click it now are doing or answered. Each try has a number, so a late answer is dropped.
+  const [tried, tryNext] = useReducer(tryStep, IDLE);
+  const attempts = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The picture kept for a drawn region, so finding and using it keep it once.
@@ -225,10 +216,10 @@ function TargetStage({
   // What trying the target answered shows below the buttons, which may be past the end of a short window.
   const answer = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (found !== null || clicked !== null) {
+    if (tried.kind === 'answered' || tried.kind === 'failed') {
       answer.current?.scrollIntoView({ block: 'nearest' });
     }
-  }, [found, clicked]);
+  }, [tried]);
 
   const screenshots = useScreenshots();
   const { shots, full, selected, setSelected, position } = screenshots;
@@ -271,7 +262,7 @@ function TargetStage({
           }
           await pickWindow(read);
           if (isCurrent()) {
-            setWindow({ kind: 'picked' });
+            setWindow({ kind: 'picked', handle: read });
           }
         } catch (caught: unknown) {
           if (isCurrent()) {
@@ -326,8 +317,7 @@ function TargetStage({
   const area = drawnHere === null || pictureSize === null ? null : searchArea(drawnHere.region, pictureSize);
 
   const changed = (): void => {
-    setFound(null);
-    setClicked(null);
+    tryNext({ kind: 'changed', what: 'place' });
     setError(null);
   };
 
@@ -453,28 +443,22 @@ function TargetStage({
     );
   };
 
+  const nextAttempt = (): number => {
+    attempts.current += 1;
+    return attempts.current;
+  };
+
   const findNow = (): void => {
+    const attempt = nextAttempt();
     run(async (at) => {
+      tryNext({ kind: 'find', attempt });
       try {
-        setFound({ kind: 'found', at: await findClick(at) });
+        tryNext({ kind: 'answered', attempt, answer: { kind: 'found', at: await findClick(at) } });
       } catch (caught: unknown) {
-        setFound({ kind: 'missed', message: errorText(caught) });
+        tryNext({ kind: 'failed', attempt, message: errorText(caught) });
       }
       // The result shows on the live window.
       setSelected(null);
-    });
-  };
-
-  // Sends one real click. Only the Click it now button calls it.
-  const clickItNow = (): void => {
-    setClicked(null);
-    run(async (at) => {
-      try {
-        await clickNow({ watched, app, button, delivery, returnFocus, at });
-        setClicked({ kind: 'sent', message: sentText(delivery, appName) });
-      } catch (caught: unknown) {
-        setClicked({ kind: 'unsent', message: errorText(caught) });
-      }
     });
   };
 
@@ -495,6 +479,31 @@ function TargetStage({
   const clickedIn = named(app);
   const blocked =
     clickedIn === null ? null : clickBlocked(watched === null ? clickedIn : (named(watched) ?? clickedIn), clickedIn);
+
+  // Sends one real click. Only the Click it now button calls it, and not while anti-cheat blocks the click.
+  const clickItNow = (): void => {
+    if (blocked !== null || window.kind !== 'picked') {
+      return;
+    }
+    const shown = window.handle;
+    const attempt = nextAttempt();
+    run(async (at) => {
+      tryNext({ kind: 'click', attempt });
+      try {
+        const sent = await clickNow({ watched, app, button, delivery, returnFocus, at });
+        const elsewhere = sent.window !== shown;
+        tryNext({
+          kind: 'answered',
+          attempt,
+          answer: { kind: 'sent', message: sentText(delivery, appName, sent.title, elsewhere), elsewhere },
+        });
+      } catch (caught: unknown) {
+        tryNext({ kind: 'failed', attempt, message: errorText(caught) });
+      }
+    });
+  };
+  const landed = tried.kind === 'answered' && tried.answer.kind === 'found' ? tried.answer.at : null;
+  const elsewhere = tried.kind === 'answered' && tried.answer.kind === 'sent' && tried.answer.elsewhere;
 
   const spotHere = spot?.kind === 'spot' && pictureSize !== null ? placeSpot(spot, pictureSize) : null;
   const ready = mode === 'spot' ? spot !== null : drawn !== null || initial?.kind === 'picture';
@@ -517,7 +526,7 @@ function TargetStage({
             </span>
           )}
           <div className="end">
-            {window.kind === 'missing' || (window.kind === 'picked' && liveError !== null) ? (
+            {window.kind === 'missing' || (window.kind === 'picked' && liveError !== null) || elsewhere ? (
               <button
                 type="button"
                 className="btn"
@@ -617,8 +626,8 @@ function TargetStage({
             {mode === 'spot' && spotHere !== null ? (
               <span className="click-spot" style={marker(spotHere)} aria-hidden="true" />
             ) : null}
-            {selected === null && found?.kind === 'found' && nativeSize !== null ? (
-              <span className="click-spot found" style={marker(found.at)} aria-hidden="true" />
+            {selected === null && landed !== null && nativeSize !== null ? (
+              <span className="click-spot found" style={marker(landed)} aria-hidden="true" />
             ) : null}
           </div>
           <p className="hint">
@@ -812,7 +821,7 @@ function TargetStage({
                 type="button"
                 aria-pressed={button === option}
                 onClick={() => {
-                  setClicked(null);
+                  tryNext({ kind: 'changed', what: 'press' });
                   onButton(option);
                 }}
               >
@@ -825,9 +834,9 @@ function TargetStage({
           <span className="name">
             <span id="click-delivery">How to click</span>
             <Hint topic="How to click" id="hint-click-delivery">
-              {DELIVERY_NAMES.cursor} clicks the way you would, so it works everywhere, but the window comes to the
-              front for a moment. {DELIVERY_NAMES.message} leaves the cursor and the window in front alone, which suits
-              a game in full screen, but some applications ignore it.
+              {DELIVERY_NAMES.cursor} presses the way a real mouse does, and the window comes to the front for a moment.{' '}
+              {DELIVERY_NAMES.message} does not move the cursor or bring the window to the front, but some applications
+              ignore it.
             </Hint>
           </span>
           <div className="seg" role="group" aria-labelledby="click-delivery" aria-describedby="hint-click-delivery">
@@ -837,7 +846,7 @@ function TargetStage({
                 type="button"
                 aria-pressed={delivery === option}
                 onClick={() => {
-                  setClicked(null);
+                  tryNext({ kind: 'changed', what: 'press' });
                   onDelivery(option);
                 }}
               >
@@ -853,7 +862,9 @@ function TargetStage({
             <span id="click-try">Try it</span>
             <Hint topic="Try it" id="hint-click-try">
               Find it now shows where the click would land, without clicking. Click it now sends one real click to the
-              window, the way the automation would, so you can see whether the application takes it.
+              window, the way the automation would, so you can see whether the application takes it. With several of the
+              application&apos;s windows open, it clicks the one the automation would click, which may be another one
+              than this screen shows.
             </Hint>
           </span>
           <div className="click-tries" role="group" aria-labelledby="click-try" aria-describedby="hint-click-try">
@@ -869,25 +880,34 @@ function TargetStage({
             <button
               type="button"
               className="btn"
-              disabled={busy || !ready || window.kind !== 'picked' || blocked !== null}
+              // While anti-cheat blocks the click, the button stays in the tab order, so its note is read out.
+              disabled={blocked === null && (busy || !ready || window.kind !== 'picked')}
+              aria-disabled={blocked !== null}
+              aria-describedby={blocked === null ? undefined : 'click-blocked'}
               title="Sends one real click to the window now, the way the automation would."
               onClick={clickItNow}
             >
               Click it now
             </button>
           </div>
-          {blocked === null ? null : <span className="note">{blocked}</span>}
+          {blocked === null ? null : (
+            <span className="note" id="click-blocked">
+              {blocked}
+            </span>
+          )}
           <div role="status" ref={answer}>
-            {found === null ? null : found.kind === 'found' ? (
-              <p className="result">
-                {found.at.likeness === null
-                  ? `It would click ${found.at.x} px across and ${found.at.y} px down the window.`
-                  : `Found it, ${found.at.likeness}% alike. It would click ${found.at.x} px across and ${found.at.y} px down the window.`}
-              </p>
+            {tried.kind === 'finding' ? <p className="note">Looking for it…</p> : null}
+            {tried.kind === 'clicking' ? <p className="note">Clicking…</p> : null}
+            {tried.kind === 'failed' ? <p className="warn">{tried.message}</p> : null}
+            {tried.kind !== 'answered' ? null : tried.answer.kind === 'sent' ? (
+              <p className="result">{tried.answer.message}</p>
             ) : (
-              <p className="warn">{found.message}</p>
+              <p className="result">
+                {tried.answer.at.likeness === null
+                  ? `It would click ${tried.answer.at.x} px across and ${tried.answer.at.y} px down the window.`
+                  : `Found it, ${tried.answer.at.likeness}% alike. It would click ${tried.answer.at.x} px across and ${tried.answer.at.y} px down the window.`}
+              </p>
             )}
-            {clicked === null ? null : <p className={clicked.kind === 'sent' ? 'result' : 'warn'}>{clicked.message}</p>}
           </div>
         </div>
         <span className="warn" role="alert">

@@ -18,7 +18,7 @@ use crate::pixels;
 use crate::selection::{self, SelectionSpec};
 
 use super::Owner;
-use super::host::{ClickNow, Host};
+use super::host::{ClickNow, ClickedWindow, Host};
 
 /// A click picture just kept, and the size of the window it was taken on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -68,6 +68,18 @@ pub(crate) struct ClickSpec {
     pub(crate) at: ClickAtDef,
 }
 
+/// The window a click sent on request went to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClickSent {
+    /// The window's handle, as picking a window names it.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub(crate) window: u64,
+    /// The window's title, which tells an application's windows apart.
+    pub(crate) title: String,
+}
+
 /// Refuses a click while the application `file` describes runs with
 /// anti-cheat, or with none set: a click is input that AppyTappy makes for
 /// another program however it is delivered, which the anti-cheat policy
@@ -92,9 +104,14 @@ impl<H: Host> Owner<H> {
     /// clicks in, and the watched one when the automation has one, with the
     /// anti-cheat class none.
     ///
+    /// The click goes to the window that the application's window rules
+    /// find now, as the runtime's does, which with several of the
+    /// application's windows open may be another one than the picked
+    /// window. The answer names it.
+    ///
     /// `Ok` says the click was sent. Whether its application acted on it,
     /// nothing reports.
-    pub(crate) fn click_now(&self, click: &ClickSpec) -> Result<(), String> {
+    pub(crate) fn click_now(&self, click: &ClickSpec) -> Result<ClickSent, String> {
         let invalid = |error: appytappy_config::click::InvalidClick| sentence(&error.to_string());
         let at = click.at.to_at().map_err(invalid)?;
         let delivery = click.delivery.to_delivery(click.return_focus);
@@ -120,6 +137,10 @@ impl<H: Host> Owner<H> {
                 target,
                 button: click_.button,
                 delivery: click_.delivery,
+            })
+            .map(|ClickedWindow { handle, title }| ClickSent {
+                window: handle,
+                title,
             })
             .map_err(|error| sentence(&error))
     }
@@ -540,7 +561,15 @@ mod tests {
                 .ask(|owner| owner.set_anti_cheat(app, AntiCheatDef::None))
                 .expect("set");
         }
-        assert_eq!(harness.ask(|owner| owner.click_now(&message)), Ok(()));
+        let example = ClickSent {
+            window: 7,
+            title: "Example App".to_owned(),
+        };
+        assert_eq!(
+            harness.ask(|owner| owner.click_now(&message)),
+            Ok(example.clone()),
+            "the answer names the window it went to"
+        );
         let spot = Spot::new(Corner::TopRight, 1, 0).expect("valid");
         let window = WindowDef::exact(WindowFacts {
             title: "Example App",
@@ -561,7 +590,7 @@ mod tests {
         // With no watched application yet, the one clicked in decides, and
         // a click with the cursor keeps where the focus goes after.
         let cursor = spot_click(None, "example", ClickDeliveryDef::Cursor);
-        assert_eq!(harness.ask(|owner| owner.click_now(&cursor)), Ok(()));
+        assert_eq!(harness.ask(|owner| owner.click_now(&cursor)), Ok(example));
         assert_eq!(
             sent(&harness),
             [SentClick {
@@ -645,7 +674,7 @@ mod tests {
             .expect("kept");
         let mut click = spot_click(None, "example", ClickDeliveryDef::Message);
         click.at = picture(&kept.image, (4, 2), (1, 0, 3, 2), 0);
-        assert_eq!(harness.ask(|owner| owner.click_now(&click)), Ok(()));
+        assert!(harness.ask(|owner| owner.click_now(&click)).is_ok());
         let sent = sent(&harness);
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].spot, None, "it looks for the picture");

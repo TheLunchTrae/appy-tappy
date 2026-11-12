@@ -23,10 +23,10 @@ mod keys;
 pub mod win;
 
 pub use backoff::Backoff;
-pub use click::{MouseButton, MouseEvent, MouseMessage, PlacedClick, Press, click};
+pub use click::{MouseButton, MouseEvent, MouseMessage, PlacedClick, Press, click, pack};
 pub use controls::{Controls, MediaSession, Volume};
 pub use error::ActionError;
-pub use input::{Input, Scale, Unsupported};
+pub use input::{Input, Unsupported};
 pub use journal::{Actions, MEDIA_RETRY, Watched};
 pub use keys::{HOLD, Stroke, strokes};
 

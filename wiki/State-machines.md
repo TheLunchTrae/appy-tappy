@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Four guards drop such stale messages:
+it was about has gone. Five guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -33,6 +33,9 @@ it was about has gone. Four guards drop such stale messages:
   reader sends back for a discarded recording is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Attempt numbers.** The click target screen numbers each **Find it now**
+  and **Click it now**, and drops an answer whose number is not that of the
+  try under way.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -666,6 +669,52 @@ its flow only while that flow is still open (`saved` in `App.tsx`), so a save
 that finishes after the user moved on leaves the next flow alone. Leaving the
 value or reference flow unmounts it and stops its capture, which clears its screenshots and
 recording.
+
+### Click target tries
+
+The click target screen (`apps/setup/src/components/ClickTarget.tsx`) tries a
+target with **Find it now** and **Click it now**. `Try` in
+`apps/setup/src/lib/clickTry.ts` names the states, and `tryStep` there is the
+transition.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Finding: Find it now
+    Idle --> Clicking: Click it now
+    Answered --> Finding: Find it now
+    Answered --> Clicking: Click it now
+    Failed --> Finding: Find it now
+    Failed --> Clicking: Click it now
+    Finding --> Answered: where the click would land
+    Finding --> Failed: why it lands nowhere
+    Clicking --> Answered: the click was sent, and to which window
+    Clicking --> Failed: why it was not sent
+    Finding --> Idle: the target changes
+    Clicking --> Idle: the target changes
+    Answered --> Idle: the target changes
+    Failed --> Idle: the target changes
+```
+
+- **Finding** and **Clicking.** The owner thread is asked, and the try keeps
+  its attempt number. The screen's buttons wait meanwhile, as they do while a
+  drawn picture is kept. Both commands end by themselves: the owner waits at
+  most a second for a picture's frame.
+- **Answered.** **Find it now** answers where the click would land, which the
+  live view marks. **Click it now** answers that the click was sent and names
+  the window. When that is another window than the one the screen shows, the
+  screen offers **Look again**.
+- **Failed.** The screen shows why, such as a picture that is not found or a
+  window that refused the click. The next try or a change of the target
+  leaves the state.
+- **The target changes.** A change of where the click lands goes back to
+  **Idle** from every state. A change of the button or of **How to click**
+  does too, except that it keeps where **Find it now** said the click would
+  land, since neither moves that place.
+- **A late answer.** The settings stay enabled while a try is under way. An
+  answer whose attempt number is not that of the try under way is dropped,
+  so the answer to a click sent one way never shows after the user chose the
+  other. The click itself was sent: only its answer is dropped.
 
 ### Update notice
 

@@ -12,9 +12,12 @@
 //! and presses through `SendInput` too, after `WindowFromPoint` says which
 //! top-level window shows there; giving the focus back goes through
 //! `SetForegroundWindow`. A click sent as messages goes through
-//! `PostMessageW`, after `ScreenToClient`, `GetClientRect`,
-//! `ChildWindowFromPointEx`, and the window's and its monitor's dots per
-//! inch say which window is under its place and where in it. Opening a program,
+//! `PostMessageW`, after the window's own answers say which window a real
+//! click at its place would reach: its child windows from `GetWindow`,
+//! their styles and bounds, and where the place is on one from
+//! `WM_NCHITTEST`. Those answers come in the pixels the window's program
+//! counts in, because the calls run in that window's DPI awareness
+//! context. Opening a program,
 //! file, or link goes through `ShellExecuteExW`, the call behind File
 //! Explorer's open, on a short-lived thread of its own, so a slow program
 //! cannot hold up the action worker for longer than 2 seconds; while an open
@@ -35,7 +38,6 @@ use std::fmt;
 use std::io;
 use std::marker::PhantomData;
 use std::mem::size_of;
-use std::num::NonZeroU32;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
@@ -52,7 +54,7 @@ use windows::Media::Control::{
 use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, HWND, LPARAM, POINT, RECT, WPARAM,
 };
-use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow, ScreenToClient};
+use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
@@ -64,7 +66,10 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
 };
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT, GetWindowDpiAwarenessContext, PhysicalToLogicalPointForPerMonitorDPI,
+    SetThreadDpiAwarenessContext,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MOUSEEVENTF_LEFTDOWN,
@@ -78,16 +83,17 @@ use windows::Win32::UI::Shell::{
     SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, ChildWindowFromPointEx, GA_ROOT,
-    GetAncestor, GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics,
-    GetWindowThreadProcessId, IsHungAppWindow, PostMessageW, SM_SWAPBUTTON, SW_SHOWNOACTIVATE,
-    SetCursorPos, SetForegroundWindow, WindowFromPoint,
+    GA_ROOT, GCL_STYLE, GET_WINDOW_CMD, GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetAncestor,
+    GetClassLongPtrW, GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics,
+    GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsHungAppWindow,
+    PostMessageW, SM_SWAPBUTTON, SMTO_ABORTIFHUNG, SW_SHOWNOACTIVATE, SendMessageTimeoutW,
+    SetCursorPos, SetForegroundWindow, WM_NCHITTEST, WindowFromPoint,
 };
 use windows::core::{GUID, IUnknown, Interface, PCWSTR, PWSTR, RuntimeType};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
 use crate::{
-    Backoff, Controls, Input, MediaSession, MouseButton, MouseMessage, Press, Scale, Stroke, Volume,
+    Backoff, Controls, Input, MediaSession, MouseButton, MouseMessage, Press, Stroke, Volume, pack,
 };
 
 /// How long a media request may take before it counts as failed, so an app
@@ -96,6 +102,10 @@ const MEDIA_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How often a pending media request is checked.
 const MEDIA_POLL: Duration = Duration::from_millis(5);
+
+/// How long, in milliseconds, a window may take to answer where a place is
+/// on it, so a window that is busy cannot stall the action worker.
+const HIT_TEST_WAIT_MS: u32 = 200;
 
 /// How long opening a program, file, or link may take before it counts as
 /// failed, so a program that is slow to start cannot stall the action
@@ -577,8 +587,23 @@ impl Input for WindowsInput {
         thread::sleep(time);
     }
 
+    fn own_place(&mut self, window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
+        let handle = handle(window)?;
+        let mut point = POINT { x, y };
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `point` is a live local the call reads and writes, and the
+        // call fails without harm when no such window exists.
+        let converted =
+            unsafe { PhysicalToLogicalPointForPerMonitorDPI(Some(handle), &raw mut point) };
+        if !converted.as_bool() {
+            return Err(gone());
+        }
+        Ok((point.x, point.y))
+    }
+
     fn client_point(&mut self, window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
         let handle = handle(window)?;
+        let _counting = CountsAs::window(handle)?;
         let mut point = POINT { x, y };
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `point` is a live local the call reads and writes, and the
@@ -592,6 +617,7 @@ impl Input for WindowsInput {
 
     fn client_size(&mut self, window: u64) -> io::Result<(i32, i32)> {
         let handle = handle(window)?;
+        let _counting = CountsAs::window(handle)?;
         let mut area = RECT::default();
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `area` is a live local the call writes, and the call fails
@@ -601,44 +627,79 @@ impl Input for WindowsInput {
         Ok((area.right, area.bottom))
     }
 
-    fn child_at(&mut self, window: u64, x: i32, y: i32) -> io::Result<Option<u64>> {
-        let handle = handle(window)?;
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: the call takes a window handle, a point, and flags, reads no
-        // memory of ours, and answers null when no such window exists.
-        let child = unsafe {
-            ChildWindowFromPointEx(
-                handle,
-                POINT { x, y },
-                CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT,
-            )
-        };
-        Ok(number(child))
+    fn top_child(&mut self, window: u64) -> io::Result<Option<u64>> {
+        Ok(related(handle(window)?, GW_CHILD))
     }
 
-    fn scale(&mut self, window: u64) -> io::Result<Scale> {
+    fn below(&mut self, window: u64) -> io::Result<Option<u64>> {
+        Ok(related(handle(window)?, GW_HWNDNEXT))
+    }
+
+    fn style(&mut self, window: u64) -> io::Result<u32> {
         let handle = handle(window)?;
-        #[expect(unsafe_code, reason = "Win32 calls")]
-        // SAFETY: the calls take a window handle and read no memory of ours.
-        // When no such window exists, the first answers 0, which is refused
-        // below, and the second answers a monitor or none, which the next
-        // call takes or refuses.
-        let (drawn, monitor) = unsafe {
-            (
-                GetDpiForWindow(handle),
-                MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST),
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes a window handle and an index, reads no
+        // memory of ours, and answers 0 when no such window exists.
+        let style = unsafe { GetWindowLongW(handle, GWL_STYLE) };
+        // The style is 32 bits, which the call hands over as a signed number.
+        Ok(u32::from_ne_bytes(style.to_ne_bytes()))
+    }
+
+    fn bounds(&mut self, window: u64) -> io::Result<(i32, i32, i32, i32)> {
+        let handle = handle(window)?;
+        let _counting = CountsAs::window(handle)?;
+        let mut edges = RECT::default();
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `edges` is a live local the call writes, and the call
+        // fails without harm when no such window exists.
+        unsafe { GetWindowRect(handle, &raw mut edges) }?;
+        Ok((edges.left, edges.top, edges.right, edges.bottom))
+    }
+
+    fn hit_test(&mut self, window: u64, at: (i16, i16)) -> io::Result<usize> {
+        let handle = handle(window)?;
+        let place = isize::try_from(pack(at)).map_err(io::Error::other)?;
+        let mut answer = 0_usize;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `answer` is a live local the call writes before it
+        // returns. The call hands the window two integers, waits no longer
+        // than its timeout for the window's answer, and fails without harm
+        // when no such window exists.
+        let asked = unsafe {
+            SendMessageTimeoutW(
+                handle,
+                WM_NCHITTEST,
+                WPARAM(0),
+                LPARAM(place),
+                SMTO_ABORTIFHUNG,
+                HIT_TEST_WAIT_MS,
+                Some(&raw mut answer),
             )
         };
-        let (mut across, mut down) = (0_u32, 0_u32);
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `across` and `down` are live locals the call writes, and
-        // `monitor` came from Windows; the call fails without harm for none.
-        unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &raw mut across, &raw mut down) }?;
-        // A monitor's dots per inch are the same across and down.
-        match (NonZeroU32::new(drawn), NonZeroU32::new(across)) {
-            (Some(window), Some(monitor)) => Ok(Scale { window, monitor }),
-            (None, _) | (_, None) => Err(gone()),
+        if asked.0 != 0 {
+            return Ok(answer);
         }
+        // Windows refuses a message to a window of a program that runs with
+        // more rights than this one, which reads as a denied permission.
+        let error = io::Error::last_os_error();
+        // A timeout may leave no error code behind.
+        if error.raw_os_error() == Some(0) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the window did not answer where the place is on it",
+            ));
+        }
+        Err(error)
+    }
+
+    fn class_style(&mut self, window: u64) -> io::Result<u32> {
+        let handle = handle(window)?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes a window handle and an index, reads no
+        // memory of ours, and answers 0 when no such window exists.
+        let style = unsafe { GetClassLongPtrW(handle, GCL_STYLE) };
+        // A class's style is 32 bits in a wider number.
+        u32::try_from(style).map_err(io::Error::other)
     }
 
     fn post(&mut self, window: u64, message: MouseMessage) -> io::Result<()> {
@@ -868,6 +929,67 @@ fn mouse_input(press: Press, swapped: bool) -> INPUT {
     }
 }
 
+/// This thread counting pixels the way a window's program does, until the
+/// value is dropped.
+///
+/// A window that Windows stretches, because its program does not follow its
+/// monitor's scale, counts in its own pixels, and the mouse messages it
+/// gets name places in them. Microsoft documents that Windows runs a
+/// window's procedure in the DPI awareness context the window was made in,
+/// and that a thread's API calls run in the context the thread has taken
+/// ("Mixed-Mode DPI Scaling and DPI-aware APIs",
+/// learn.microsoft.com/windows/win32/hidpi). So while this thread has the
+/// window's context, each call answers what the window's own code would
+/// get, with no scaling of ours. `PhysicalToLogicalPointForPerMonitorDPI`
+/// is the documented way to put a screen place in the window's pixels
+/// first. None of this is checked yet on a window that is stretched.
+#[derive(Debug)]
+struct CountsAs(DPI_AWARENESS_CONTEXT);
+
+impl CountsAs {
+    /// Takes `window`'s DPI awareness context for this thread.
+    fn window(window: HWND) -> io::Result<Self> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes a window handle, reads no memory of ours,
+        // and answers null when no such window exists.
+        let theirs = unsafe { GetWindowDpiAwarenessContext(window) };
+        if theirs.0.is_null() {
+            return Err(gone());
+        }
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes a context Windows gave, changes only this
+        // thread's own setting, and answers null when it refuses the context.
+        let ours = unsafe { SetThreadDpiAwarenessContext(theirs) };
+        if ours.0.is_null() {
+            return Err(io::Error::other(
+                "Windows did not let AppyTappy count pixels the way the window's program does",
+            ));
+        }
+        Ok(Self(ours))
+    }
+}
+
+impl Drop for CountsAs {
+    fn drop(&mut self) {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the context is the one this thread had, which Windows gave
+        // when this value was made on this thread, since the type is not
+        // Send. The call changes only this thread's own setting.
+        let _replaced = unsafe { SetThreadDpiAwarenessContext(self.0) };
+    }
+}
+
+/// The window that stands in `relation` to `window`, such as its topmost
+/// child, or `None` when it has none. The call answers nothing as well for
+/// a window that closed, which the calls around it report.
+fn related(window: HWND, relation: GET_WINDOW_CMD) -> Option<u64> {
+    #[expect(unsafe_code, reason = "a Win32 call")]
+    // SAFETY: the call takes a window handle and a relation, reads no
+    // memory of ours, and fails without harm when no such window exists.
+    let found = unsafe { GetWindow(window, relation) };
+    found.ok().and_then(number)
+}
+
 /// The error for a window that Windows no longer knows, where the call says
 /// only that it failed.
 fn gone() -> io::Error {
@@ -1049,14 +1171,21 @@ mod tests {
     use appytappy_config::action::OpenTarget;
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::click::{ClickButton, ClickDelivery};
-    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::SystemServices::{MK_LBUTTON, MK_RBUTTON};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, MSG, PM_REMOVE, PeekMessageW, WINDOW_EX_STYLE,
-        WINDOW_STYLE, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEFIRST, WM_MOUSELAST,
-        WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WS_CHILD, WS_DISABLED, WS_POPUP, WS_VISIBLE,
+    use windows::Win32::UI::HiDpi::{
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_CONTEXT_UNAWARE,
+        LogicalToPhysicalPointForPerMonitorDPI, SetThreadDpiAwarenessContext,
     };
-    use windows::core::w;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BS_GROUPBOX, CS_DBLCLKS, CreateWindowExW, DefWindowProcW, DestroyWindow, HTCLIENT,
+        HTTRANSPARENT, HWND_TOP, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WINDOW_EX_STYLE, WINDOW_STYLE, WM_LBUTTONDBLCLK,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEFIRST, WM_MOUSELAST, WM_MOUSEMOVE, WM_RBUTTONDOWN,
+        WM_RBUTTONUP, WNDCLASS_STYLES, WNDCLASSW, WS_CHILD, WS_DISABLED, WS_POPUP, WS_VISIBLE,
+    };
+    use windows::core::{PCWSTR, w};
 
     use super::{Opener, WindowsInput, number, play_file, shell_open, wide};
     use crate::{Input, MouseEvent, MouseMessage, PlacedClick, Watched, click};
@@ -1100,21 +1229,79 @@ mod tests {
     /// Where the test window's client area starts on the screen.
     const ORIGIN: (i32, i32) = (300, 200);
 
+    /// A window class of this program whose windows take every click in
+    /// their client area and are not told about double clicks.
+    const PLAIN: PCWSTR = w!("AppyTappy.Test.Plain");
+
+    /// A window class like [`PLAIN`] whose windows are told about double
+    /// clicks.
+    const DOUBLE_CLICKS: PCWSTR = w!("AppyTappy.Test.DoubleClicks");
+
+    /// The procedure of the test classes, which leaves every message to
+    /// Windows.
+    extern "system" fn leave_to_windows(
+        window: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the arguments are the ones Windows called this procedure
+        // with.
+        unsafe {
+            DefWindowProcW(window, message, wparam, lparam)
+        }
+    }
+
+    /// This program's module, which owns the test classes.
+    fn module() -> HINSTANCE {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: no module name asks for the running program's own module.
+        let module = unsafe { GetModuleHandleW(None) }.expect("this program's module");
+        module.into()
+    }
+
+    /// Makes this thread see the screen's own pixels, as the runtime and the
+    /// setup app do, and registers the test classes. A class that another
+    /// test of this process registered already stays as it is.
+    fn set_up() {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes a predefined context and changes only this
+        // thread's own setting.
+        let before =
+            unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        assert!(!before.0.is_null(), "Windows knows the context");
+        for (name, style) in [(PLAIN, WNDCLASS_STYLES(0)), (DOUBLE_CLICKS, CS_DBLCLKS)] {
+            let class = WNDCLASSW {
+                style,
+                lpfnWndProc: Some(leave_to_windows),
+                hInstance: module(),
+                lpszClassName: name,
+                ..WNDCLASSW::default()
+            };
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: `class` is a filled WNDCLASSW whose class name is a
+            // static wide string and whose procedure lives for the whole
+            // program.
+            let _atom = unsafe { RegisterClassW(&raw const class) };
+        }
+    }
+
     /// A window of this thread that is never shown, 400 by 300 at
     /// [`ORIGIN`] with no border, so its client area is all of it. Its
     /// child windows go when it does.
     struct TestWindow(HWND);
 
     impl TestWindow {
-        fn new() -> Self {
+        /// A window of `class`, which [`set_up`] registered.
+        fn new(class: PCWSTR) -> Self {
             #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: the class is a system class, the title is a static
-            // wide string, and the window has no parent, menu, or creation
-            // data.
+            // SAFETY: the class is registered, the title is a static wide
+            // string, and the window has no parent, menu, or creation data.
             let window = unsafe {
                 CreateWindowExW(
                     WINDOW_EX_STYLE(0),
-                    w!("STATIC"),
+                    class,
                     w!("AppyTappy click test"),
                     WS_POPUP,
                     ORIGIN.0,
@@ -1123,7 +1310,7 @@ mod tests {
                     300,
                     None,
                     None,
-                    None,
+                    Some(module()),
                     None,
                 )
             }
@@ -1131,17 +1318,17 @@ mod tests {
             Self(window)
         }
 
-        /// A child window with `style` at (`x`, `y`) of the client area,
-        /// 100 by 80.
-        fn child(&self, style: WINDOW_STYLE, x: i32, y: i32) -> u64 {
+        /// A child window of `class` with `style`, 100 by 80 at (`x`, `y`)
+        /// of the client area, on top of the children made before it.
+        fn child(&self, class: PCWSTR, style: WINDOW_STYLE, x: i32, y: i32) -> u64 {
             #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: the class is a system class, the title is a static
-            // wide string, the parent is this thread's live window, and the
-            // child has no menu or creation data.
+            // SAFETY: the class is a system class or registered, the title
+            // is a static wide string, the parent is this thread's live
+            // window, and the child has no menu or creation data.
             let child = unsafe {
                 CreateWindowExW(
                     WINDOW_EX_STYLE(0),
-                    w!("STATIC"),
+                    class,
                     w!("AppyTappy click test child"),
                     WS_CHILD | style,
                     x,
@@ -1150,11 +1337,26 @@ mod tests {
                     80,
                     Some(self.0),
                     None,
-                    None,
+                    Some(module()),
                     None,
                 )
             }
             .expect("create a child window");
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: the child is this thread's live window, and the call
+            // moves it only among its siblings.
+            unsafe {
+                SetWindowPos(
+                    child,
+                    Some(HWND_TOP),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+            }
+            .expect("put the child on top");
             number(child).expect("a window")
         }
 
@@ -1184,9 +1386,10 @@ mod tests {
         )
     }
 
-    /// Takes every mouse message waiting in this thread's queue: the window
-    /// each is for, its number, its `wParam`, and its `lParam`.
-    fn posted() -> Vec<(Option<u64>, u32, usize, isize)> {
+    /// Takes every mouse message waiting in this thread's queue, for any of
+    /// its windows: the window each is for, its number, its `wParam`, and
+    /// its `lParam`.
+    fn thread_mouse_messages() -> Vec<(Option<u64>, u32, usize, isize)> {
         let mut taken = Vec::new();
         loop {
             let mut message = MSG::default();
@@ -1214,70 +1417,142 @@ mod tests {
         }
     }
 
+    /// The low 32 bits of what a window answered to where a place is on it.
+    fn low(answer: usize) -> u32 {
+        let [first, second, third, fourth, ..] = answer.to_le_bytes();
+        u32::from_le_bytes([first, second, third, fourth])
+    }
+
+    fn watched() -> Watched {
+        Watched {
+            process: ProcessId::new(std::process::id()),
+            executable: "test.exe".to_owned(),
+        }
+    }
+
+    /// A click sent as messages to (`x`, `y`) of `window`'s client area.
+    fn click_at(window: &TestWindow, button: ClickButton, x: i32, y: i32) -> PlacedClick {
+        PlacedClick {
+            window: window.number(),
+            process: ProcessId::new(std::process::id()),
+            app: "Test".to_owned(),
+            at: on_screen(x, y),
+            button,
+            delivery: ClickDelivery::Message,
+        }
+    }
+
+    /// The window that a left click sent as messages to (`x`, `y`) of
+    /// `window`'s client area reaches, and the place its messages name.
+    fn reached(window: &TestWindow, x: i32, y: i32) -> (Option<u64>, isize) {
+        let placed = click_at(window, ClickButton::Left, x, y);
+        click(&mut WindowsInput, &placed, &watched()).expect("sent");
+        let messages = thread_mouse_messages();
+        let &(first, _, _, place) = messages.first().expect("a message");
+        let left = usize::try_from(MK_LBUTTON.0).expect("a small flag");
+        assert_eq!(
+            messages,
+            [
+                (first, WM_MOUSEMOVE, 0, place),
+                (first, WM_LBUTTONDOWN, left, place),
+                (first, WM_LBUTTONUP, 0, place)
+            ]
+        );
+        (first, place)
+    }
+
     #[test]
-    fn a_screen_place_is_found_in_a_window_and_its_children() {
-        let window = TestWindow::new();
+    fn a_window_answers_about_itself_and_its_children() {
+        set_up();
+        let window = TestWindow::new(PLAIN);
         let top = window.number();
-        let child = window.child(WS_VISIBLE, 50, 40);
-        let hidden = window.child(WINDOW_STYLE(0), 200, 40);
-        let disabled = window.child(WS_VISIBLE | WS_DISABLED, 200, 150);
-        assert_ne!(hidden, disabled);
+        let lower = window.child(PLAIN, WS_VISIBLE, 50, 40);
+        let upper = window.child(PLAIN, WS_DISABLED, 200, 40);
         let mut input = WindowsInput;
         let (x, y) = on_screen(60, 50);
+        assert_eq!(
+            input.own_place(top, x, y).expect("its place"),
+            (x, y),
+            "a window that follows its monitor's scale counts in the screen's pixels"
+        );
         assert_eq!(input.client_size(top).expect("its size"), (400, 300));
         assert_eq!(input.client_point(top, x, y).expect("its place"), (60, 50));
-        assert_eq!(input.child_at(top, 60, 50).expect("looked"), Some(child));
-        assert_eq!(input.client_size(child).expect("its size"), (100, 80));
+        assert_eq!(input.client_size(lower).expect("its size"), (100, 80));
         assert_eq!(
-            input.client_point(child, x, y).expect("its place"),
+            input.client_point(lower, x, y).expect("its place"),
             (10, 10)
         );
+        assert_eq!(input.top_child(top).expect("looked"), Some(upper));
+        assert_eq!(input.below(upper).expect("looked"), Some(lower));
+        assert_eq!(input.below(lower).expect("looked"), None);
+        assert_eq!(input.top_child(lower).expect("looked"), None);
+        let (left, top_edge) = on_screen(50, 40);
+        let (right, bottom) = on_screen(150, 120);
         assert_eq!(
-            input.child_at(child, 10, 10).expect("looked"),
-            Some(child),
-            "a window with no child under the place answers itself"
+            input.bounds(lower).expect("its bounds"),
+            (left, top_edge, right, bottom)
         );
-        assert_eq!(input.child_at(top, 10, 10).expect("looked"), Some(top));
-        assert_eq!(
-            input.child_at(top, 210, 50).expect("looked"),
-            Some(top),
-            "a hidden child is passed over"
+        let bits = |style: u32| (style & WS_VISIBLE.0 != 0, style & WS_DISABLED.0 != 0);
+        assert_eq!(bits(input.style(lower).expect("its style")), (true, false));
+        assert_eq!(bits(input.style(upper).expect("its style")), (false, true));
+        let at = (
+            i16::try_from(x).expect("near"),
+            i16::try_from(y).expect("near"),
         );
+        assert_eq!(low(input.hit_test(lower, at).expect("answered")), HTCLIENT);
+        assert_eq!(low(input.hit_test(top, at).expect("answered")), HTCLIENT);
+        let label = window.child(w!("STATIC"), WS_VISIBLE, 50, 150);
         assert_eq!(
-            input.child_at(top, 210, 160).expect("looked"),
-            Some(top),
-            "a disabled child is passed over"
+            low(input.hit_test(label, at).expect("answered")),
+            u32::from_ne_bytes(HTTRANSPARENT.to_ne_bytes()),
+            "the mouse goes through a label"
         );
+        assert_eq!(input.class_style(top).expect("its class") & CS_DBLCLKS.0, 0);
+        let other = TestWindow::new(DOUBLE_CLICKS);
         assert_eq!(
-            input.child_at(top, 500, 10).expect("looked"),
-            None,
-            "a place outside the window"
-        );
-        let scale = input.scale(top).expect("its scale");
-        assert_eq!(
-            scale.window, scale.monitor,
-            "Windows does not stretch a window of this process"
+            input.class_style(other.number()).expect("its class") & CS_DBLCLKS.0,
+            CS_DBLCLKS.0
         );
     }
 
     #[test]
-    fn each_click_posts_its_messages_to_the_window_under_its_place() {
-        let window = TestWindow::new();
-        let child = window.child(WS_VISIBLE, 50, 40);
+    fn a_click_reaches_the_window_a_real_click_would() {
+        set_up();
+        let window = TestWindow::new(PLAIN);
+        let top = Some(window.number());
+        // An ordinary child gets its own click, in its own client area.
+        let plain = window.child(PLAIN, WS_VISIBLE, 50, 40);
+        assert_eq!(reached(&window, 60, 50), (Some(plain), 0x000A_000A));
+        // The window itself gets a click beside its children.
+        assert_eq!(reached(&window, 3, 2), (top, 0x0002_0003));
+        // The mouse goes through a label to the control behind it.
+        let behind_label = window.child(PLAIN, WS_VISIBLE, 200, 40);
+        let _label = window.child(w!("STATIC"), WS_VISIBLE, 200, 40);
+        assert_eq!(reached(&window, 210, 50), (Some(behind_label), 0x000A_000A));
+        // With nothing behind a label, the window around it gets the click.
+        let _alone = window.child(w!("STATIC"), WS_VISIBLE, 50, 150);
+        assert_eq!(reached(&window, 60, 160), (top, 0x00A0_003C));
+        // The mouse goes through a group box to the control inside it.
+        let in_group = window.child(PLAIN, WS_VISIBLE, 200, 150);
+        let group_box = WINDOW_STYLE(u32::try_from(BS_GROUPBOX).expect("a small style"));
+        let _group = window.child(w!("BUTTON"), WS_VISIBLE | group_box, 200, 150);
+        assert_eq!(reached(&window, 210, 160), (Some(in_group), 0x000A_000A));
+        // A hidden child and a disabled one are not there for the mouse.
+        let _hidden = window.child(PLAIN, WINDOW_STYLE(0), 300, 40);
+        assert_eq!(reached(&window, 310, 50), (top, 0x0032_0136));
+        let _disabled = window.child(PLAIN, WS_VISIBLE | WS_DISABLED, 300, 150);
+        assert_eq!(reached(&window, 310, 160), (top, 0x00A0_0136));
+    }
+
+    #[test]
+    fn each_click_posts_its_messages_as_the_window_s_class_is_told() {
+        set_up();
         let left = usize::try_from(MK_LBUTTON.0).expect("a small flag");
         let right = usize::try_from(MK_RBUTTON.0).expect("a small flag");
-        // (10, 10) in the child, as MAKELPARAM packs it.
-        let place = 0x000A_000A_isize;
-        let watched = Watched {
-            process: ProcessId::new(std::process::id()),
-            executable: "test.exe".to_owned(),
-        };
-        for (button, messages) in [
+        let place = 0x0032_003C_isize;
+        for (class, button, messages) in [
             (
-                ClickButton::Left,
-                vec![(WM_MOUSEMOVE, 0), (WM_LBUTTONDOWN, left), (WM_LBUTTONUP, 0)],
-            ),
-            (
+                PLAIN,
                 ClickButton::Right,
                 vec![
                     (WM_MOUSEMOVE, 0),
@@ -1286,6 +1561,18 @@ mod tests {
                 ],
             ),
             (
+                PLAIN,
+                ClickButton::Double,
+                vec![
+                    (WM_MOUSEMOVE, 0),
+                    (WM_LBUTTONDOWN, left),
+                    (WM_LBUTTONUP, 0),
+                    (WM_LBUTTONDOWN, left),
+                    (WM_LBUTTONUP, 0),
+                ],
+            ),
+            (
+                DOUBLE_CLICKS,
                 ClickButton::Double,
                 vec![
                     (WM_MOUSEMOVE, 0),
@@ -1296,58 +1583,91 @@ mod tests {
                 ],
             ),
         ] {
-            let placed = PlacedClick {
-                window: window.number(),
-                process: watched.process,
-                app: "Test".to_owned(),
-                at: on_screen(60, 50),
-                button,
-                delivery: ClickDelivery::Message,
-            };
-            click(&mut WindowsInput, &placed, &watched).expect("sent");
+            let window = TestWindow::new(class);
+            let placed = click_at(&window, button, 60, 50);
+            click(&mut WindowsInput, &placed, &watched()).expect("sent");
             let expected: Vec<_> = messages
                 .into_iter()
-                .map(|(number, held)| (Some(child), number, held, place))
+                .map(|(number, held)| (Some(window.number()), number, held, place))
                 .collect();
-            assert_eq!(posted(), expected, "{button:?}");
+            assert_eq!(thread_mouse_messages(), expected, "{button:?}");
         }
-        // A place outside every child goes to the window itself.
-        let placed = PlacedClick {
-            window: window.number(),
-            process: watched.process,
-            app: "Test".to_owned(),
-            at: on_screen(3, 2),
-            button: ClickButton::Left,
-            delivery: ClickDelivery::Message,
-        };
-        click(&mut WindowsInput, &placed, &watched).expect("sent");
-        let top = Some(window.number());
+    }
+
+    #[test]
+    fn a_window_that_does_not_follow_the_scale_gets_places_in_its_own_pixels() {
+        set_up();
+        // A window made by a thread that does not follow the monitor's
+        // scale does not follow it either, so Windows stretches it on a
+        // monitor that is scaled. On one that is not, its pixels are the
+        // screen's, and this only shows that the calls work across the two
+        // ways of counting.
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes a predefined context and changes only this
+        // thread's own setting.
+        let ours = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE) };
+        assert!(!ours.0.is_null(), "Windows knows the context");
+        let window = TestWindow::new(PLAIN);
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the context is the one this thread had.
+        let theirs = unsafe { SetThreadDpiAwarenessContext(ours) };
+        assert!(!theirs.0.is_null(), "Windows knows the context");
+        // Where the window's own place (360, 248) is in the screen's pixels.
+        let mut point = POINT { x: 360, y: 248 };
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `point` is a live local the call reads and writes, and the
+        // window is this thread's live window.
+        let converted =
+            unsafe { LogicalToPhysicalPointForPerMonitorDPI(Some(window.0), &raw mut point) };
+        assert!(converted.as_bool(), "converted");
+        let mut input = WindowsInput;
+        let top = window.number();
         assert_eq!(
-            posted(),
+            input.own_place(top, point.x, point.y).expect("its place"),
+            (360, 248)
+        );
+        assert_eq!(input.client_size(top).expect("its size"), (400, 300));
+        assert_eq!(
+            input.client_point(top, 360, 248).expect("its place"),
+            (60, 48)
+        );
+        assert_eq!(input.bounds(top).expect("its bounds"), (300, 200, 700, 500));
+        let placed = PlacedClick {
+            at: (point.x, point.y),
+            ..click_at(&window, ClickButton::Left, 0, 0)
+        };
+        click(&mut input, &placed, &watched()).expect("sent");
+        let left = usize::try_from(MK_LBUTTON.0).expect("a small flag");
+        assert_eq!(
+            thread_mouse_messages(),
             [
-                (top, WM_MOUSEMOVE, 0, 0x0002_0003),
-                (top, WM_LBUTTONDOWN, left, 0x0002_0003),
-                (top, WM_LBUTTONUP, 0, 0x0002_0003)
+                (Some(top), WM_MOUSEMOVE, 0, 0x0030_003C),
+                (Some(top), WM_LBUTTONDOWN, left, 0x0030_003C),
+                (Some(top), WM_LBUTTONUP, 0, 0x0030_003C)
             ]
         );
     }
 
     #[test]
     fn a_message_arrives_as_it_was_posted() {
-        let window = TestWindow::new();
+        set_up();
+        let window = TestWindow::new(PLAIN);
         let top = window.number();
         let message = MouseMessage {
             event: MouseEvent::Move,
             at: (7, 9),
         };
         WindowsInput.post(top, message).expect("posted");
-        let (wparam, lparam) = (WPARAM(0), LPARAM(0x0009_0007));
-        assert_eq!(posted(), [(Some(top), WM_MOUSEMOVE, wparam.0, lparam.0)]);
+        assert_eq!(
+            thread_mouse_messages(),
+            [(Some(top), WM_MOUSEMOVE, 0, 0x0009_0007)]
+        );
     }
 
     #[test]
     fn a_window_that_is_gone_gets_nothing() {
-        let window = TestWindow::new();
+        set_up();
+        let window = TestWindow::new(PLAIN);
         let gone = window.number();
         drop(window);
         let mut input = WindowsInput;
@@ -1357,12 +1677,16 @@ mod tests {
         };
         assert!(input.client_point(gone, 0, 0).is_err());
         assert!(input.client_size(gone).is_err());
-        assert_eq!(input.child_at(gone, 0, 0).expect("looked"), None);
-        assert!(input.scale(gone).is_err());
+        assert!(input.bounds(gone).is_err());
+        assert_eq!(input.top_child(gone).expect("looked"), None);
+        assert_eq!(input.below(gone).expect("looked"), None);
+        assert_eq!(input.style(gone).expect("looked"), 0);
+        assert_eq!(input.class_style(gone).expect("looked"), 0);
+        assert!(input.hit_test(gone, (0, 0)).is_err());
         let refused = input.post(gone, message).expect_err("no such window");
         assert_ne!(refused.kind(), std::io::ErrorKind::PermissionDenied);
         // No window at all would mean this thread's own queue.
         assert!(input.post(0, message).is_err());
-        assert_eq!(posted(), []);
+        assert_eq!(thread_mouse_messages(), []);
     }
 }

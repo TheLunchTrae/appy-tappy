@@ -515,7 +515,7 @@ mod tests {
     use appytappy_config::click::{Click, ClickAt, ClickButton, ClickDelivery, Corner, Spot};
 
     use super::*;
-    use crate::{MouseMessage, Press, Scale};
+    use crate::{MouseMessage, Press};
 
     /// Controls over a few media sessions and volume controls that apply every
     /// command, and log each one.
@@ -674,6 +674,10 @@ mod tests {
             no_mouse()
         }
 
+        fn own_place(&mut self, _window: u64, _x: i32, _y: i32) -> io::Result<(i32, i32)> {
+            no_mouse()
+        }
+
         fn client_point(&mut self, _window: u64, _x: i32, _y: i32) -> io::Result<(i32, i32)> {
             no_mouse()
         }
@@ -682,11 +686,27 @@ mod tests {
             no_mouse()
         }
 
-        fn child_at(&mut self, _window: u64, _x: i32, _y: i32) -> io::Result<Option<u64>> {
+        fn top_child(&mut self, _window: u64) -> io::Result<Option<u64>> {
             no_mouse()
         }
 
-        fn scale(&mut self, _window: u64) -> io::Result<Scale> {
+        fn below(&mut self, _window: u64) -> io::Result<Option<u64>> {
+            no_mouse()
+        }
+
+        fn style(&mut self, _window: u64) -> io::Result<u32> {
+            no_mouse()
+        }
+
+        fn bounds(&mut self, _window: u64) -> io::Result<(i32, i32, i32, i32)> {
+            no_mouse()
+        }
+
+        fn hit_test(&mut self, _window: u64, _at: (i16, i16)) -> io::Result<usize> {
+            no_mouse()
+        }
+
+        fn class_style(&mut self, _window: u64) -> io::Result<u32> {
             no_mouse()
         }
 

@@ -25,8 +25,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, ClickPictureView, ClickSpec, Desktop, FixSpec, FoundClick, Live, Message, Owner,
-    Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, ClickPictureView, ClickSent, ClickSpec, Desktop, FixSpec, FoundClick, Live,
+    Message, Owner, Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -209,9 +209,9 @@ pub(crate) async fn find_click(app: AppHandle, at: ClickAtDef) -> Result<FoundCl
     ask(&app, move |owner| owner.find_click(&at)).await?
 }
 
-/// Sends the click `click` now, once.
+/// Sends the click `click` now, once, and answers the window it went to.
 #[tauri::command]
-pub(crate) async fn click_now(app: AppHandle, click: ClickSpec) -> Result<(), String> {
+pub(crate) async fn click_now(app: AppHandle, click: ClickSpec) -> Result<ClickSent, String> {
     ask(&app, move |owner| owner.click_now(&click)).await?
 }
 

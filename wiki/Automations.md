@@ -164,15 +164,15 @@ left button twice. **Use this target** keeps the target.
 
 **How to click** sets how the click gets to the window:
 
-- **Move the cursor** clicks the way you would. AppyTappy brings the
+- **Move the cursor** presses the way a real mouse does. AppyTappy brings the
   application's window to the front for a moment, moves the cursor there,
-  clicks, and puts the cursor back. It works everywhere, but it takes the
-  cursor for a moment, and a game in full screen may minimize when another
-  window comes to the front.
-- **Send to the window** sends the click straight to the window. The cursor
-  stays where it is and the window in front keeps the focus, even a game in
-  full screen. Some applications ignore a click sent this way, and nothing
-  tells AppyTappy whether it worked. Try it before you rely on it.
+  clicks, and puts the cursor back. It takes the cursor for a moment, and a
+  game in full screen may minimize when another window comes to the front.
+- **Send to the window** sends the click straight to the window. AppyTappy
+  does not move the cursor or bring the window to the front. What the
+  application does with the click is up to it: some ignore a click sent this
+  way, and nothing tells AppyTappy whether it worked. Try it before you rely
+  on it.
 
 With **Move the cursor**, the action has **Go back to the window that was in
 front**. While it is on, the window you were using gets the focus back after
@@ -186,9 +186,15 @@ Under **Try it**, **Find it now** looks for the target on the live window and
 shows where the click would land, without clicking. **Click it now** sends one
 real click to the window, the way the automation would, so you can see whether
 the application takes it. Nothing is clicked until you select **Click it
-now**. Afterwards, AppyTappy says that it sent the click. It cannot tell
-whether the application did anything, so look at the application. If a click
-sent to the window does nothing, choose **Move the cursor**.
+now**. Afterwards, AppyTappy says that it sent the click and names the window
+it went to. It cannot tell whether the application did anything, so look at
+the application. If a click sent to the window does nothing, choose **Move
+the cursor**.
+
+**Click it now** clicks the window the automation would click: the one the
+application's window rules find at that moment. When several of the
+application's windows are open, that can be another window than the one the
+screen shows. AppyTappy then says so, and **Look again** shows that window.
 
 **Click it now** follows the same rules as the automation's click. It needs
 anti-cheat set to **None** for the application it clicks in and for the one
@@ -209,7 +215,8 @@ With **Send to the window**, none of those matter, because the click reaches
 only its window: it is sent whichever window is in front, and even when
 another window covers the place. It is skipped when the place is on the
 window's title bar, border, or a scroll bar, which a click sent this way
-cannot reach.
+cannot reach, and while the window takes no clicks, such as while it shows a
+dialog of its own.
 
 Either way, the window must be open and not minimized, and a click on a
 picture happens only when the picture is found. When AppyTappy skips a click,
