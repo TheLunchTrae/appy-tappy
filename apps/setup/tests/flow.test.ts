@@ -12,6 +12,7 @@ import {
   afterFlow,
   applicationFor,
   heldInAll,
+  holdsAutomation,
   lostText,
   savedNote,
   trail,
@@ -46,7 +47,7 @@ const automation: AutomationFlow = { kind: 'automation', existing: null, draft: 
 const typed = { ...EMPTY_DRAFT, name: 'Pause music' };
 /** A new automation with a name typed, as it waits under a flow it opened. */
 const waits = waiting(automation, typed);
-const value: ValueFlow = { kind: 'value', fixing: null, app: null, opener: null };
+const value: ValueFlow = { kind: 'value', changing: null, app: null, opener: null };
 const reference: RefFlow = { kind: 'reference', existing: null, app: null };
 const application: ApplicationFlow = { kind: 'application', existing: null, opener: null };
 
@@ -66,7 +67,7 @@ describe('a flow opens another', () => {
   test('a value for an automation starts with the application its condition has, which the automation keeps', () => {
     expect(valueFor(waits, 'example')).toEqual({
       kind: 'value',
-      fixing: null,
+      changing: null,
       app: 'example',
       opener: { ...waits, app: 'example' },
     });
@@ -177,8 +178,15 @@ describe('the breadcrumb', () => {
   test('names a waiting flow by what it changes', () => {
     const editing = { ...automation, existing: pauseMusic };
     expect(trail(valueFor(editing, 'example'))).toEqual(['Automations', 'Pause music']);
-    const fixing: ValueFlow = { kind: 'value', fixing: { app: 'example', value: progress }, app: null, opener: null };
+    const fixing: ValueFlow = {
+      kind: 'value',
+      changing: { app: 'example', value: progress, how: 'fix' },
+      app: null,
+      opener: null,
+    };
     expect(trail(applicationFor(fixing, 'example', example))).toEqual(['Values', 'Fix Progress']);
+    const edited: ValueFlow = { ...fixing, changing: { app: 'example', value: progress, how: 'edit' } };
+    expect(trail(applicationFor(edited, 'example', example))).toEqual(['Values', 'Edit Progress']);
     const percent = { id: 'percent', name: 'Percent', ink: { red: 0, green: 0, blue: 0 }, tolerance: 0, samples: [] };
     const changing = { ...reference, existing: { app: 'example', reference: percent } };
     expect(trail(applicationFor(changing, 'example', example))).toEqual(['References', 'Percent']);
@@ -225,6 +233,19 @@ describe('leaving a stack of flows', () => {
     expect(lostText(reference, 'unsaved')).toBe(
       'Leave without saving? The screenshots, the labels and any recording are lost.',
     );
+    // An edit leaves the saved value as it is, so only its changes go; a fix loses what a new value does.
+    const changing = (how: 'fix' | 'edit'): ValueFlow => ({
+      kind: 'value',
+      changing: { app: 'example', value: progress, how },
+      app: null,
+      opener: null,
+    });
+    expect(lostText(changing('edit'), 'unsaved')).toBe(
+      'Leave without saving? The screenshots and the changes to this value are lost.',
+    );
+    expect(lostText(changing('fix'), 'unsaved')).toBe(
+      'Leave without saving? The screenshots, the region and any recording are lost.',
+    );
     expect(lostText(automation, 'unsaved')).toBe('Leave without saving? The changes to this automation are lost.');
     expect(lostText(application, 'unsaved')).toBe('Leave without saving? The changes to this application are lost.');
   });
@@ -250,4 +271,21 @@ test('a capture says where its value shows once saved: back in the automation th
   expect(savedNote(trail(valueFor(waits, 'example')), 'Example App')).toBe(
     'Saving returns to the automation with this value picked. The value also shows on the Values page, under Example App.',
   );
+});
+
+describe('an automation being made', () => {
+  test('lasts while its flow is open or waits under the flows it opened', () => {
+    const forAutomation = valueFor(waits, 'example');
+    expect(holdsAutomation(automation)).toBe(true);
+    expect(holdsAutomation(forAutomation)).toBe(true);
+    expect(holdsAutomation(applicationFor(waits, null, null))).toBe(true);
+    expect(holdsAutomation(applicationFor(forAutomation, 'example', null))).toBe(true);
+  });
+
+  test('is over once no automation flow is left', () => {
+    expect(holdsAutomation(null)).toBe(false);
+    expect(holdsAutomation(value)).toBe(false);
+    expect(holdsAutomation(reference)).toBe(false);
+    expect(holdsAutomation(applicationFor(value, null, null))).toBe(false);
+  });
 });

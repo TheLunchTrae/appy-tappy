@@ -178,8 +178,8 @@ mod tests {
         RegionDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
-        ActionDef, ClickAtDef, ClickButtonDef, ComparisonDef, CornerDef, MediaCommandDef, PointDef,
-        TargetDef, WhenDef,
+        ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef, CornerDef,
+        MediaCommandDef, PointDef, TargetDef, WhenDef,
     };
 
     use super::*;
@@ -219,6 +219,7 @@ mod tests {
                     },
                     check,
                     pin: None,
+                    reading_area: false,
                     fixes: Vec::new(),
                 },
             }],
@@ -259,6 +260,7 @@ mod tests {
         ActionDef::Click {
             app: "target".to_owned(),
             button: ClickButtonDef::Left,
+            delivery: ClickDeliveryDef::Cursor,
             return_focus: true,
             at,
         }

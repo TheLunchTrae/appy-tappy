@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{BuildDef, WindowDef};
+use appytappy_config::click::{ClickButton, ClickDelivery, Spot};
+use appytappy_config::window_match::WindowMatch;
+use appytappy_sources::screen::place::Target;
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};
 use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
@@ -15,7 +18,7 @@ use crate::overlay::OverlayWindow;
 use crate::recording::ocr;
 use crate::stores::{self, Stores};
 
-use super::host::Host;
+use super::host::{ClickNow, ClickedWindow, Host};
 use super::messages::{Message, SaveSpec};
 use super::{Owner, PREVIEW_INTERVAL};
 
@@ -47,6 +50,23 @@ pub(super) struct FakeHost {
     pub(super) unsynced: Option<String>,
     /// The time the owner reads, which [`Harness::wait`] moves on.
     pub(super) clock: Instant,
+    /// Told each click the owner sends.
+    clicks: Sender<SentClick>,
+    /// Why sending a click fails, if it does.
+    pub(super) unclicked: Option<String>,
+}
+
+/// A click the owner had the fake host send.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct SentClick {
+    /// The name of the application it clicks in.
+    pub(super) app: String,
+    /// How that application's window is found.
+    pub(super) window: WindowMatch,
+    /// Its spot, or `None` for a click on a picture.
+    pub(super) spot: Option<Spot>,
+    pub(super) button: ClickButton,
+    pub(super) delivery: ClickDelivery,
 }
 
 /// The build the fake host's application runs unless a test changes it.
@@ -192,6 +212,29 @@ impl Host for FakeHost {
         })
     }
 
+    fn click(&self, click: ClickNow<'_>) -> Result<ClickedWindow, String> {
+        let spot = match click.target {
+            Target::Spot(spot) => Some(spot),
+            Target::Picture(_) => None,
+        };
+        self.clicks
+            .send(SentClick {
+                app: click.app.to_owned(),
+                window: click.window.clone(),
+                spot,
+                button: click.button,
+                delivery: click.delivery,
+            })
+            .expect("test listens");
+        match &self.unclicked {
+            Some(why) => Err(why.clone()),
+            None => Ok(ClickedWindow {
+                handle: 7,
+                title: "Example App".to_owned(),
+            }),
+        }
+    }
+
     fn now(&self) -> Instant {
         self.clock
     }
@@ -218,6 +261,8 @@ pub(super) struct Harness {
     /// The overlay windows wanted each time the owner opened and closed
     /// them to match.
     pub(super) synced: Receiver<Vec<OverlayWindow>>,
+    /// Each click the owner sent.
+    pub(super) clicks: Receiver<SentClick>,
 }
 
 /// Fresh, empty stores for one test, all in one folder.
@@ -240,6 +285,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
     let (job_sender, jobs) = mpsc::channel();
     let (reload_sender, reloads) = mpsc::channel();
     let (synced_sender, synced) = mpsc::channel();
+    let (click_sender, clicks) = mpsc::channel();
     let host = FakeHost {
         handlers: handler_sender,
         closed: closed_sender,
@@ -253,6 +299,8 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         synced: synced_sender,
         unsynced: None,
         clock: Instant::now(),
+        clicks: click_sender,
+        unclicked: None,
     };
     Harness {
         owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),
@@ -262,6 +310,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         jobs,
         reloads,
         synced,
+        clicks,
     }
 }
 
@@ -375,6 +424,7 @@ pub(super) fn spec(app: &str, value_name: &str, check: &str) -> SaveSpec {
         check: serde_json::from_str(check).expect("valid JSON"),
         screenshot: 0,
         pin: appytappy_config::app_file::PinDef::TopLeft,
+        reading_area: false,
     }
 }
 

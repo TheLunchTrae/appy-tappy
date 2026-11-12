@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { PinDef, ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
-import { errorText, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
+import type { ReferenceDef, ReferenceRef, ValueDef } from '../lib/bindings.ts';
+import { editValue, errorText, placeValue, saveFix, saveReference, saveValue } from '../lib/api.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import {
   type Built,
@@ -19,8 +19,11 @@ import {
   regionScreenshot,
   settingsDiffer,
   toReference,
+  withFixRegion,
   withKind,
+  withState,
 } from '../lib/check.ts';
+import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/edit.ts';
 import { readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
@@ -36,23 +39,29 @@ import { clock } from '../lib/review.ts';
 import { type Point, type Size, fit } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
 import { PinPicker } from './PinPicker.tsx';
+import { PinGuides } from './PinGuides.tsx';
+import { MovingContentField } from './MovingContentField.tsx';
 import { Hint } from './Hint.tsx';
-import { FIX_HINT, READ_WITH_HINT, guessPin, sizeText } from '../lib/sizes.ts';
+import { AREA_DRAW_HINT, fixNote, isReadingArea, movingContent, regionLabel } from '../lib/moving.ts';
+import { pinChoiceAfterRegion, pinOfView, pinView } from '../lib/pin.ts';
+import { FIX_HINT, READ_WITH_HINT, sameSize, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
+import { EditIntro, EditOutcome, SavedStates } from './ValueEdit.tsx';
 import { CHECK_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
-import { useLiveCheck } from '../lib/useLiveCheck.ts';
+import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
 import { useScreenshots } from '../lib/useScreenshots.ts';
 import { useStateSelections } from '../lib/useStateSelections.ts';
+import { useValueEdit } from '../lib/useValueEdit.ts';
 
 /** The widest live frame asked for, which keeps a large window's preview cheap. */
 const LIVE_MAX_WIDTH = 1600;
@@ -65,6 +74,8 @@ function viewHint(
   liveError: string | null,
   shortcut: string,
   tool: SelectTool,
+  area: boolean,
+  otherSize: boolean,
 ): string {
   if (selected === null && liveError !== null) {
     return liveError;
@@ -82,23 +93,27 @@ function viewHint(
   if (picking) {
     return 'Click the color to pick it.';
   }
+  if (otherSize) {
+    return 'The region shows on screenshots of the size the value was drawn at.';
+  }
   if (tool === 'snap') {
     return 'Drag a rough box around the thing to snap to it.';
   }
   if (tool === 'click') {
     return 'Click the thing to select it.';
   }
-  return 'Drag to draw a region. Drag inside it to move it, or drag a corner to resize it.';
+  return area ? AREA_DRAW_HINT : 'Drag to draw a region. Drag inside it to move it, or drag a corner to resize it.';
 }
 
 /**
- * What the capture screen makes: a value; a reference, new or saved, on the References page; or a fix, a saved value
- * drawn again at the window's size now.
+ * What the capture screen makes: a value; a reference, new or saved, on the References page; a fix, a saved value
+ * drawn again at the window's size now; or an edit, a saved value changed as it was first drawn.
  */
 export type CaptureMode =
   | { readonly kind: 'value' }
   | { readonly kind: 'reference'; readonly existing: ReferenceDef | null }
-  | { readonly kind: 'fix'; readonly value: ValueDef };
+  | { readonly kind: 'fix'; readonly value: ValueDef }
+  | { readonly kind: 'edit'; readonly value: ValueDef };
 
 /** The reference being made or changed, and its name as typed. */
 interface Editing {
@@ -125,16 +140,21 @@ interface Props {
 }
 
 export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved, onHeld }: Props) {
-  // What the capture shows before the user does anything, which leaving it loses nothing of.
-  const [start] = useState(() => {
+  // What the capture shows before the user does anything, which leaving it loses nothing of. A fix and an edit
+  // open on a screenshot the capture takes itself, and start from there.
+  const [start, setStart] = useState(() => {
     const editing: Editing | null =
       mode.kind === 'reference'
         ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
         : null;
+    if (mode.kind === 'edit') {
+      return { screenshots: 0, recording: false, editing, ...editStart(mode.value) };
+    }
     return {
       screenshots: 0,
       recording: false,
       valueName: '',
+      mayMove: false,
       editing,
       draft:
         mode.kind === 'fix'
@@ -154,9 +174,11 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   const [picking, setPicking] = useState<ColorTarget | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   const [valueName, setValueName] = useState(start.valueName);
-  // The side the value stays at as the user picked it, or null to follow the guess from where its region is.
-  const [pinned, setPinned] = useState<PinDef | null>(null);
   const fixing = mode.kind === 'fix' ? mode.value : null;
+  // The saved value an edit changes as it was first drawn.
+  const edited = mode.kind === 'edit' ? mode.value : null;
+  // Whether the user said the value's content may move around inside the window.
+  const [mayMove, setMayMove] = useState(start.mayMove);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const screenshots = useScreenshots();
@@ -181,6 +203,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
     screenshots: shots.length,
     recording: recording !== null,
     valueName,
+    mayMove,
     editing,
     draft,
   });
@@ -202,7 +225,6 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
     () => (isEditing ? buildCharacters(draft, editingRef) : buildSpec(draft, appId)),
     [isEditing, draft, editingRef, appId],
   );
-  const check = useLiveCheck(built);
   const selection = useStateSelections(draft, setDraft, selected);
   const selecting = draft.kind === 'state' ? tool : 'box';
   const review = useReview(recording, draft, setDraft, editingRef);
@@ -220,34 +242,40 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   }, []);
 
   // A fix opens on a screenshot of the window as it is now, with the region where the value would be read there.
+  // An edit opens on one too, which its region sits on when the window has the size the value was drawn at.
   const fixShot = useRef<'none' | 'taken' | 'placed'>('none');
   const take = screenshots.take;
+  const opened = fixing ?? edited;
   useEffect(() => {
-    if (fixing === null || liveSize === null || fixShot.current !== 'none') {
+    if (opened === null || liveSize === null || fixShot.current !== 'none') {
       return;
     }
     fixShot.current = 'taken';
     background(take());
-  }, [fixing, liveSize, take]);
+  }, [opened, liveSize, take]);
   const firstShot = shots[0]?.index ?? null;
   const firstPicture = firstShot === null ? undefined : full.get(firstShot);
   useEffect(() => {
-    if (fixing === null || firstShot === null || firstPicture === undefined || fixShot.current === 'placed') {
+    if (opened === null || firstShot === null || firstPicture === undefined || fixShot.current === 'placed') {
       return;
     }
     fixShot.current = 'placed';
+    const size = { width: firstPicture.width, height: firstPicture.height };
     const place = async (): Promise<void> => {
       try {
-        const region = await placeValue(appId, fixing.id, firstPicture.width, firstPicture.height);
-        if (region !== null) {
-          setDraft((current) => (current.region === null ? { ...current, region, drawnOn: firstShot } : current));
-        }
+        const region = fixing === null ? null : await placeValue(appId, fixing.id, size.width, size.height);
+        const placed = (current: Draft): Draft =>
+          edited === null
+            ? withFixRegion(current, region, firstShot)
+            : placedOn(current, edited.screen, firstShot, size);
+        setDraft(placed);
+        setStart((began) => ({ ...began, screenshots: 1, draft: placed(began.draft) }));
       } catch (error: unknown) {
         setSaveError(errorText(error));
       }
     };
     background(place());
-  }, [fixing, firstShot, firstPicture, appId]);
+  }, [opened, fixing, edited, firstShot, firstPicture, appId]);
 
   const shownOn = regionScreenshot(selected, draft.drawnOn, full, shots.at(-1)?.index ?? null);
   const native = shownOn === null ? undefined : full.get(shownOn);
@@ -275,30 +303,71 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
     }
   };
 
-  const pin: PinDef =
-    pinned ?? (draft.region === null || drawnSize === null ? 'topLeft' : guessPin(draft.region, drawnSize));
+  // An edit's region keeps to the size the value was drawn at while no screenshot of that size holds it.
+  const staysAt = pinView(draft.pin, draft.region, drawnSize ?? edited?.screen.windowSize ?? null);
+  const pin = pinOfView(staysAt);
+  // The value's region is a reading area while its content may move and its check reads it wherever it is. A fix
+  // draws the kind of region its value saved.
+  const moving = movingContent(draft.kind, fixing === null ? mayMove : fixing.screen.readingArea === true);
+  const area = isReadingArea(moving) && editing === null;
+  // A fix keeps its value's side, so only a new value and an edit need one to save.
+  const hasSide = fixing !== null || pin !== null;
+
+  const edit = useValueEdit({
+    value: edited,
+    open: editing === null,
+    app: appId,
+    draft,
+    setDraft,
+    name: valueName,
+    pin,
+    readingArea: isReadingArea(moving),
+    sizes: full,
+  });
+  const trial = useMemo(() => trialOf(built, edit.built), [built, edit.built]);
+  const check = useLiveCheck(trial, edit.again);
+  const dropFixes = agreedFixes(check.preview, edit.lost);
+  // The size of the screenshot the region would show over, when an edited value was drawn at another: its region
+  // is in the pixels of the size it was drawn at, so it shows and moves on screenshots of that size only.
+  const otherSize =
+    edited !== null && editing === null && native !== undefined && !sameSize(native, edited.screen.windowSize)
+      ? native
+      : null;
+
+  // What Save sends, or null while something is missing.
+  const sends = (): (() => Promise<Made>) | null => {
+    const changes = edit.built;
+    if (changes !== null) {
+      return changes.ok ? async () => editValue(changes.spec, dropFixes) : null;
+    }
+    const screenshot = draft.drawnOn;
+    if (!built.ok || screenshot === null) {
+      return null;
+    }
+    const { spec } = built;
+    if (fixing !== null) {
+      return async () => saveFix({ app: choice.app, value: fixing.id, check: spec, screenshot });
+    }
+    // A new value saves only with a side.
+    if (pin === null) {
+      return null;
+    }
+    const readingArea = isReadingArea(moving);
+    return async () =>
+      saveValue({ app: choice.app, valueName: valueName.trim(), check: spec, screenshot, pin, readingArea });
+  };
 
   const save = async (): Promise<void> => {
-    if (!built.ok || draft.drawnOn === null) {
+    const send = sends();
+    if (send === null) {
       return;
     }
     setSaving(true);
     try {
-      let made: Made;
-      if (fixing === null) {
-        made = await saveValue({
-          app: choice.app,
-          valueName: valueName.trim(),
-          check: built.spec,
-          screenshot: draft.drawnOn,
-          pin,
-        });
-      } else {
-        made = await saveFix({ app: choice.app, value: fixing.id, check: built.spec, screenshot: draft.drawnOn });
-      }
-      onSaved(made);
+      onSaved(await send());
     } catch (error: unknown) {
       setSaveError(errorText(error));
+      edit.refused();
     } finally {
       setSaving(false);
     }
@@ -471,7 +540,11 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
         listed={listedKept(looks.view?.kept ?? [], shots).length}
         recorded={shots.filter((shot) => shot.recorded).length}
         removable={removable.length}
-        blocked={lookBlocked(draft)}
+        blocked={
+          otherSize !== null && edited !== null
+            ? `Recording needs the window at ${sizeText(edited.screen.windowSize)}, the size ${edited.name} was drawn at.`
+            : lookBlocked(draft)
+        }
         appName={choice.name}
         error={looks.error}
         onStart={() => {
@@ -486,12 +559,28 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
       />
     ) : null;
 
+  // What the region stays at shows over the picture while the first step sets it, on a picture of the size the
+  // region is drawn at.
+  const guides =
+    step === 'where' &&
+    mode.kind === 'value' &&
+    editing === null &&
+    native !== undefined &&
+    drawnSize !== null &&
+    sameSize(native, drawnSize) &&
+    draft.region !== null &&
+    pin !== null
+      ? { size: native, region: draft.region, pin }
+      : null;
   const named = fixing !== null || valueName.trim().length > 0;
-  const canSave = named && built.ok && draft.drawnOn !== null && check.state.kind === 'set' && !saving;
+  const ready =
+    edit.built === null ? named && hasSide && built.ok && draft.drawnOn !== null : saveable(check.preview, edit.lost);
+  const canSave = ready && check.state.kind === 'set' && !saving;
   const canSaveRef =
     editing !== null && editing.name.trim().length > 0 && built.ok && check.state.kind === 'set' && !saving;
   const whereDone = named && draft.region !== null;
   const fixName = fixing === null ? null : `Fix ${fixing.name}`;
+  const flowName = fixName ?? (edited === null ? 'New value' : `Edit ${edited.name}`);
   // The saved reference a fix of a number shares with its first drawing.
   const fixedCheck = fixing?.screen.check;
   const sharedReference = fixedCheck?.kind === 'number' ? fixedCheck.reference : null;
@@ -503,13 +592,13 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
         <div className="bar">
           <span className="crumb">
             {trail.join(' / ')}
-            {mode.kind !== 'reference' && editing !== null ? ` / ${fixName ?? 'New value'}` : ''} /{' '}
+            {mode.kind !== 'reference' && editing !== null ? ` / ${flowName}` : ''} /{' '}
             {reviewing ? (
               <>
                 {editedName} / <b>Review recording</b>
               </>
             ) : (
-              <b>{editing === null ? (fixName ?? 'New value') : editedName}</b>
+              <b>{editing === null ? flowName : editedName}</b>
             )}
           </span>
           {recordingNow !== null ? (
@@ -649,7 +738,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
         ) : null}
         {/* Hidden rather than removed during review, so the view keeps its measured size. */}
         <div className="view" ref={view} hidden={reviewing}>
-          <div className="frame" style={frameStyle}>
+          <div className={area ? 'frame reading-area' : 'frame'} style={frameStyle}>
             {reviewing ? null : selected === null ? (
               <LiveCanvas
                 maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
@@ -663,15 +752,24 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               <RegionSurface
                 size={native}
                 shown={shown}
-                region={draft.region}
+                region={otherSize === null ? draft.region : null}
                 recording={recordingNow !== null && selected === null}
-                label={editing !== null ? editedName : valueName.trim() === '' ? 'Region' : valueName.trim()}
-                editable={shownPicture !== null}
+                label={editing !== null ? editedName : regionLabel(valueName, moving)}
+                editable={shownPicture !== null && (otherSize === null || picking !== null)}
                 picking={picking !== null}
                 tool={selecting}
                 ignored={selection.ignored}
                 onRegion={(region) => {
-                  setDraft((current) => ({ ...current, region, drawnOn: selected }));
+                  setDraft((current) => ({
+                    ...current,
+                    region,
+                    drawnOn: selected,
+                    // The reference editor draws for its own characters, which leaves the value's side alone.
+                    pin:
+                      editing === null
+                        ? pinChoiceAfterRegion(current.pin, current.region, region, native)
+                        : current.pin,
+                  }));
                 }}
                 onPick={pick}
                 onSnap={(rough, combine) => {
@@ -682,6 +780,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                 }}
               />
             )}
+            {guides === null ? null : <PinGuides shown={shown} {...guides} />}
           </div>
           <p className="hint">
             {viewHint(
@@ -692,6 +791,8 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               liveError,
               shortcut.label,
               selecting,
+              area,
+              otherSize !== null,
             )}
           </p>
         </div>
@@ -788,11 +889,8 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                 </span>
                 <Hint topic="Fix at this size">{FIX_HINT}</Hint>
               </div>
-              <p className="note">
-                {draft.region === null
-                  ? 'Take a screenshot, then draw the region where the value shows at this size.'
-                  : 'Starts from the scaled region. Move it onto the value where it shows at this size.'}
-              </p>
+              <p className="note">{fixNote(moving, draft.region !== null)}</p>
+              {moving.kind === 'area' ? <p className="note">{moving.limits}</p> : null}
               <RegionFields
                 region={draft.region}
                 onRegion={(region) => {
@@ -819,6 +917,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             </>
           ) : step === 'where' ? (
             <>
+              {edited === null ? null : <EditIntro value={edited} shown={otherSize} />}
               <div className="field">
                 <label htmlFor="value-name">Value name</label>
                 <input
@@ -869,22 +968,20 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               {selection.error === null ? null : <p className="warn">{selection.error}</p>}
               <RegionFields
                 region={draft.region}
+                locked={edited !== null && draft.drawnOn === null}
                 onRegion={(region) => {
                   // Typed pixels keep to the screenshot the region was drawn on.
                   setDraft((current) => ({ ...current, region, drawnOn: current.drawnOn ?? shownOn }));
                 }}
               />
+              <MovingContentField moving={moving} appName={choice.name} onMayMove={setMayMove} />
               <PinPicker
-                pin={pin}
-                guessed={pinned === null}
-                onPin={(picked) => {
-                  setPinned(picked);
+                view={staysAt}
+                scales={file?.sizeChanges !== 'rarely'}
+                onChoice={(pinChoice) => {
+                  setDraft((current) => ({ ...current, pin: pinChoice }));
                 }}
               />
-              <p className="note">
-                Draw the region where the value shows, on any screenshot of {choice.name}. Only where it is matters
-                here; how to read it comes next.
-              </p>
               {lookPanel}
               <div className="sep" />
               <div className="actions">
@@ -980,6 +1077,24 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                     setDraft((current) => ({ ...current, whole }));
                   }}
                 />
+              ) : edited !== null && keepsStates(draft, edited.screen) ? (
+                <SavedStates
+                  value={edited}
+                  draft={draft}
+                  retakeBlocked={
+                    selected === null
+                      ? 'Select a screenshot that shows the first state.'
+                      : otherSize === null
+                        ? null
+                        : `Select a screenshot at ${sizeText(edited.screen.windowSize)}.`
+                  }
+                  onDraft={setDraft}
+                  onRetake={() => {
+                    if (selected !== null) {
+                      setDraft((current) => withState(current, selected));
+                    }
+                  }}
+                />
               ) : draft.kind === 'state' ? (
                 <StatesField
                   draft={draft}
@@ -1003,13 +1118,22 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               )}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               {lookPanel}
-              <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
+              {check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
+                <p className="reading note">{check.preview.unread}</p>
+              ) : (
+                <ReadingBox built={trial.ok ? null : trial.next} state={check.state} reading={check.reading} />
+              )}
+              {edit.built === null || check.preview === null ? null : (
+                <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
+              )}
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
               <p className="note">
-                {fixing === null
-                  ? savedNote(trail, choice.name)
-                  : `The fix shows on the Values page, beside ${fixing.name}.`}
+                {fixing !== null
+                  ? `The fix shows on the Values page, beside ${fixing.name}.`
+                  : edited !== null
+                    ? `The changes to ${edited.name} show on the Values page, and its automations keep using it.`
+                    : savedNote(trail, choice.name)}
               </p>
               <div className="actions">
                 <button
@@ -1029,7 +1153,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                     background(save());
                   }}
                 >
-                  {fixing === null ? 'Save value' : 'Save fix'}
+                  {fixing !== null ? 'Save fix' : edited === null ? 'Save value' : 'Save changes'}
                 </button>
               </div>
             </>
