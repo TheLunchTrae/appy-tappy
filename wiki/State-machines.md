@@ -797,10 +797,10 @@ stateDiagram-v2
 - **What to ask** (`plan`) is the screenshot shown, a rectangle of it, and the
   rule: a reference's characters on the whole screenshot, or a bar's or a
   color check's colors in the region.
-- **In flight** has one request with the owner. The transition (`step`) sends
-  a request at once while none is in flight and gives it the next number. At
-  most one request is in flight, so the tint follows a dragged slider as fast
-  as the owner answers, and requests never pile up.
+- **In flight** awaits one request's answer. The transition (`step`) sends a
+  request at once while none is awaited and gives it the next number. One
+  request counts at a time, so the tint follows a dragged slider as fast as
+  the owner answers, and a drag never piles requests up.
 - **In flight, one queued** also remembers the newest request wanted since.
   A newer one replaces it, so a burst of changes sends the first and the
   last. The queued request goes out when the one in flight is answered or
@@ -812,7 +812,10 @@ stateDiagram-v2
   shows instead of a screenshot, a color is not picked, or the region is not
   drawn. Like **Off**, it forgets the request in flight, the queued request,
   and the answer, so nothing more is sent and an answer still on its way is
-  dropped.
+  dropped. Neither waits for that request, so turning the switch on again
+  sends a new one while the forgotten one may still be with the owner: two
+  can be there then, and only the newer one's answer counts. The capture
+  screen clears the preview when it closes.
 - **Off** shows the plain screenshot in the same render that turns the switch
   off. Each setting has its own switch, which stays as the user left it
   until the capture screen closes: going back a step and returning, or
@@ -833,7 +836,8 @@ It is a switch that stays as the user left it until the capture screen
 closes, and it tints the selection the capture screen last made on the
 screenshot shown (`selectedPixels`). While the selection for a new color
 match is awaited, the last one for the same steps stays, and its count says
-that it is updating.
+that it is updating. When that selection cannot be made, nothing is awaited:
+the tint goes, and the line under the switch says so beside the error.
 
 ### Recording
 

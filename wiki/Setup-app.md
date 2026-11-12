@@ -76,15 +76,21 @@ This page covers what the user guide leaves out.
   the tint stays on its pixels at any size the frame shows at, and under the
   surface that takes the pointer. The page asks for a reference's characters
   on the whole screenshot and counts those in the region itself, so moving
-  the region asks nothing. It keeps at most one request with the owner and
-  sends the newest settings when that one is answered, so the tint follows a
-  dragged slider as fast as the owner answers.
+  the region asks nothing. It awaits one request at a time and sends the
+  newest settings when that one is answered, so the tint follows a dragged
+  slider as fast as the owner answers. A request the page stopped awaiting,
+  as when the switch is turned off, may still be with the owner, and its
+  answer is dropped.
   [State machines](State-machines.md#matching-pixels-preview) maps its
   requests and answers. **Show selected pixels** asks the owner nothing of
   its own: it draws the runs the `select` answer for the screenshot shown
   already carries, on the same canvas. That selection is remade once
   **Color match** rests (`SELECT_DELAY_MS`), so until then the tint is the
-  last selection's and its count says that it is updating.
+  last selection's and its count says that it is updating; a `select` that
+  fails drops the tint. The tint is the selection, not what the state check
+  compares: that is the selected pixels that lie in the region while
+  **Ignore the background** is on, and the whole region otherwise, and the
+  switch's help says which.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to

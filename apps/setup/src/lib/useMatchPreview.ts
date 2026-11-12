@@ -79,6 +79,13 @@ export function useMatchPreview(
   useEffect(() => {
     want(request);
   }, [want, request]);
+  // Once the capture screen is gone, a queued request has no one to answer.
+  useEffect(
+    () => () => {
+      want(null);
+    },
+    [want],
+  );
   const tint = tinted(preview, request);
   const painted = useMemo(() => (tint === null ? null : paintedOf(tint)), [tint]);
   return {
@@ -107,8 +114,8 @@ export function useMatchPreview(
 
 /** The selected pixels preview as the capture screen shows it, under **Color match**. */
 export interface SelectedPreview {
-  /** Whether the screenshot also shades what a selection leaves out. */
-  readonly shaded: boolean;
+  /** Whether the state check compares only what is selected, and the screenshot shades what a selection leaves out. */
+  readonly ignoresBackground: boolean;
   readonly on: boolean;
   readonly setOn: (on: boolean) => void;
   readonly selected: SelectedPixels;
@@ -118,23 +125,25 @@ export interface SelectedPreview {
 
 /**
  * What **Show selected pixels** shows of the selection `draft` has on the screenshot shown, `selected`, from the
- * `selections` the capture screen made already. `offered` is whether **Color match** is in the inspector; no tint
- * shows without it. The switch stays as the user left it for as long as the capture screen is open.
+ * `selections` the capture screen made already, or tried to when `failed`. `offered` is whether **Color match** is in
+ * the inspector; no tint shows without it. The switch stays as the user left it for as long as the capture screen is
+ * open.
  */
 export function useSelectedPreview(
   offered: boolean,
   draft: Pick<Draft, 'states' | 'colorMatch' | 'ignoreBackground'>,
   selections: ReadonlyMap<number, Selection>,
   selected: number | null,
+  failed: boolean,
 ): SelectedPreview {
   const [on, setOn] = useState(false);
   const { states, colorMatch, ignoreBackground } = draft;
   const pixels = useMemo(
-    () => selectedPixels(states, selections, selected, colorMatch),
-    [states, selections, selected, colorMatch],
+    () => selectedPixels(states, selections, selected, colorMatch, failed),
+    [states, selections, selected, colorMatch, failed],
   );
   return {
-    shaded: ignoreBackground,
+    ignoresBackground: ignoreBackground,
     on,
     setOn,
     selected: pixels,

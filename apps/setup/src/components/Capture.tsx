@@ -248,7 +248,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const previewField = <MatchPreviewField preview={preview} region={draft.region} />;
   // Color match is in the inspector while a state's thing is selected with Snap or Click.
   const colorMatched = editing === null && step === 'where' && draft.kind === 'state' && tool !== 'box';
-  const selectedPreview = useSelectedPreview(colorMatched, draft, selection.selections, selected);
+  const selectedPreview = useSelectedPreview(
+    colorMatched,
+    draft,
+    selection.selections,
+    selected,
+    selection.error !== null,
+  );
   const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
   const frameStyle = {
     left: (space.width - shown.width) / 2,

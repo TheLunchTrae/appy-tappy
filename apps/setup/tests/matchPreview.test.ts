@@ -228,6 +228,17 @@ describe('previewDriver', () => {
     });
   });
 
+  test('sends nothing after it is cleared with one request in flight and one queued', async () => {
+    const { asks, want, latest } = driven();
+    want(a);
+    want(b);
+    want(null);
+    asks[0]?.answer(view(4));
+    await settle();
+    expect(asks.map((ask) => ask.request)).toEqual([a]);
+    expect(latest()).toEqual({ ...NO_PREVIEW, sent: 1 });
+  });
+
   test('gives each answer the number its own request was sent with', async () => {
     const { asks, want, latest } = driven();
     // Request 1 is still out when the preview is turned off and on again, which sends request 2.
@@ -388,35 +399,45 @@ describe('selectedPixels', () => {
     new Map([[4, { steps, colorMatch, view }]]);
 
   test("tints the selection's own pixels where its box is, and counts them", () => {
-    expect(selectedPixels(states, made(found), 4, 24)).toEqual({
-      line: '5 of the 8 pixels in the box around the selection (63%) are selected.',
+    expect(selectedPixels(states, made(found), 4, 24, false)).toEqual({
+      line: 'The selection takes 5 of the 8 pixels in the box around it (63%).',
       painted: { area: found.region, layers: [found], tints: [SELECTED_TINT] },
       updating: false,
     });
   });
 
   test('keeps the last selection while the one for a new color match is awaited, and says so', () => {
-    const waiting = selectedPixels(states, made(found, 20), 4, 24);
+    const waiting = selectedPixels(states, made(found, 20), 4, 24, false);
     expect(waiting.painted?.layers).toEqual([found]);
     expect(waiting.updating).toBe(true);
   });
 
   test('says why nothing is tinted', () => {
     const none = (line: string, updating = false) => ({ line, painted: null, updating });
-    expect(selectedPixels(states, made(found), null, 24)).toEqual(
+    expect(selectedPixels(states, made(found), null, 24, false)).toEqual(
       none('Selected pixels show on a screenshot. Select the one the thing was selected on.'),
     );
     const unselected = none('Nothing is selected on this screenshot yet. Select the thing on it with Snap or Click.');
-    expect(selectedPixels(states, made(found), 5, 24)).toEqual(unselected);
-    expect(selectedPixels([{ screenshot: 4, steps: [] }], made(found), 4, 24)).toEqual(unselected);
+    expect(selectedPixels(states, made(found), 5, 24, false)).toEqual(unselected);
+    expect(selectedPixels([{ screenshot: 4, steps: [] }], made(found), 4, 24, false)).toEqual(unselected);
     // A selection made for other steps is not this state's.
-    expect(selectedPixels([{ screenshot: 4, steps: [...steps] }], made(found), 4, 24)).toEqual(
+    expect(selectedPixels([{ screenshot: 4, steps: [...steps] }], made(found), 4, 24, false)).toEqual(
       none('Selecting…', true),
     );
-    expect(selectedPixels(states, new Map(), 4, 24)).toEqual(none('Selecting…', true));
-    expect(selectedPixels(states, made(null), 4, 24)).toEqual(
+    expect(selectedPixels(states, new Map(), 4, 24, false)).toEqual(none('Selecting…', true));
+    expect(selectedPixels(states, made(null), 4, 24, false)).toEqual(
       none('Nothing is selected at this color match. Change it, or select the thing again.'),
     );
+  });
+
+  test('tints nothing and awaits nothing once the selection for this color match failed', () => {
+    const failed = { line: 'The selection could not be made, so none is tinted.', painted: null, updating: false };
+    // An earlier color match's selection is not shown as if it were updating.
+    expect(selectedPixels(states, made(found, 20), 4, 24, true)).toEqual(failed);
+    expect(selectedPixels(states, new Map(), 4, 24, true)).toEqual(failed);
+    // A selection made for this color match stays, whatever failed since.
+    expect(selectedPixels(states, made(found), 4, 24, true).painted?.layers).toEqual([found]);
+    expect(selectedPixels(states, made(found), 4, 24, true).updating).toBe(false);
   });
 });
 

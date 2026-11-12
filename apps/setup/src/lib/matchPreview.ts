@@ -83,13 +83,13 @@ interface Sent {
 }
 
 /**
- * The preview's requests and answers. It is idle while `flight` is null, in flight while a request is out, and in
- * flight with one queued while `queued` also holds the newest request wanted since.
+ * The preview's requests and answers. It is idle while `flight` is null, in flight while the request that counts is
+ * out, and in flight with one queued while `queued` also holds the newest request wanted since.
  */
 export interface Preview {
   /** The number of the last request sent, so each request gets its own. */
   readonly sent: number;
-  /** The request whose answer is awaited, or null while none is. */
+  /** The request whose answer counts, or null while none is awaited. */
   readonly flight: Sent | null;
   /** The newest request wanted since the one in flight went out, which goes out when that one is answered. */
   readonly queued: PreviewRequest | null;
@@ -134,10 +134,11 @@ function settled(preview: Preview): Stepped {
 }
 
 /**
- * The preview after `event`, and the request to send. At most one request is in flight. A request wanted meanwhile
- * waits, and a newer one takes its place, so a burst of changes sends the first and the last. Only the answer or
- * failure of the request in flight counts: one that carries another number, such as one sent before the preview was
- * cleared, changes nothing and sends nothing.
+ * The preview after `event`, and the request to send. One request counts at a time. A request wanted meanwhile
+ * waits, and a newer one takes its place, so a burst of changes sends the first and the last. Clearing forgets the
+ * request in flight without waiting for it, so the next one wanted goes out while that one may still be with the
+ * owner; its answer or failure carries another number than the one that counts, and changes nothing and sends
+ * nothing.
  */
 export function step(preview: Preview, event: PreviewEvent): Stepped {
   switch (event.kind) {
@@ -489,7 +490,7 @@ interface Selecting {
 
 /** What **Show selected pixels** shows of the selection on the screenshot shown. */
 export interface SelectedPixels {
-  /** What is selected, in words, or why nothing shows. */
+  /** What the selection takes, in words, or why nothing shows. */
   readonly line: string;
   /** The selection's own pixels to tint, or null. */
   readonly painted: Painted | null;
@@ -500,13 +501,15 @@ export interface SelectedPixels {
 /**
  * What to show of the selection `states` has on the screenshot shown, `selected`, at `colorMatch`. `selections`
  * holds the selection last made on each screenshot. One made for the same steps at an earlier color match stays
- * until the new one is made, so the tint does not flicker under the slider.
+ * until the new one is made, so the tint does not flicker under the slider. Once making it `failed`, none is
+ * awaited: an earlier one would show what the settings no longer select, so nothing is tinted.
  */
 export function selectedPixels(
   states: readonly Selecting[],
   selections: ReadonlyMap<number, Selection>,
   selected: number | null,
   colorMatch: number,
+  failed: boolean,
 ): SelectedPixels {
   const nothing = (line: string, updating = false): SelectedPixels => ({ line, painted: null, updating });
   if (selected === null) {
@@ -517,19 +520,23 @@ export function selectedPixels(
     return nothing('Nothing is selected on this screenshot yet. Select the thing on it with Snap or Click.');
   }
   const made = selections.get(selected);
-  if (made === undefined || made.steps !== state.steps) {
+  const sameSteps = made?.steps === state.steps;
+  const current = sameSteps && made.colorMatch === colorMatch;
+  if (failed && !current) {
+    return nothing('The selection could not be made, so none is tinted.');
+  }
+  if (made === undefined || !sameSteps) {
     return nothing('Selecting…', true);
   }
-  const updating = made.colorMatch !== colorMatch;
   const { view } = made;
   if (view === null) {
-    return nothing('Nothing is selected at this color match. Change it, or select the thing again.', updating);
+    return nothing('Nothing is selected at this color match. Change it, or select the thing again.', !current);
   }
   const count = view.spans.reduce((sum, [start, end]) => sum + end - start, 0);
   const box = area(view.region);
   return {
-    line: `${count.toLocaleString('en-US')} of the ${pixelsText(box)} in the box around the selection (${share(count, box)}) are selected.`,
+    line: `The selection takes ${count.toLocaleString('en-US')} of the ${pixelsText(box)} in the box around it (${share(count, box)}).`,
     painted: { area: view.region, layers: [view], tints: [SELECTED_TINT] },
-    updating,
+    updating: !current,
   };
 }

@@ -179,10 +179,11 @@ export function MatchPreviewField({
 
 /**
  * Under **Color match**: a switch that tints the pixels the selection takes on the screenshot shown. The selection
- * is remade once the slider rests, so the tint is the last selection's until then.
+ * is remade once the slider rests, so the tint is the last selection's until then. Its help says what the state
+ * check compares, which is not the tint: the whole region, or the selected pixels that lie in it.
  */
 export function SelectedPixelsField({ preview }: { readonly preview: SelectedPreview }) {
-  const { shaded, on, selected } = preview;
+  const { ignoresBackground, on, selected } = preview;
   return (
     <div className="field">
       <label className="toggle-row">
@@ -200,8 +201,10 @@ export function SelectedPixelsField({ preview }: { readonly preview: SelectedPre
         Show selected pixels
       </label>
       <span id="selected-pixels-help" className="note">
-        Tints the pixels the selection takes on the screenshot shown. It follows Color match once the slider rests.
-        {shaded ? ' While Ignore the background is on, the pixels the selection leaves out are shaded as well.' : ''}
+        Tints the pixels the selection takes on the screenshot shown. It follows Color match once the slider rests.{' '}
+        {ignoresBackground
+          ? 'The value compares the tinted pixels that lie in the region and skips the shaded ones. If you make the region smaller by hand, the tinted pixels outside it are not compared.'
+          : 'Ignore the background is off, so the value compares its whole region, tinted or not, and the selection only fits the region around the thing.'}
       </span>
       <Results updating={on && selected.updating && selected.painted !== null}>
         {on ? (

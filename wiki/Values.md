@@ -140,7 +140,12 @@ To see what it selects, turn on **Show selected pixels** under
 **Color match**. It tints the selected pixels on the screenshot shown and
 counts them. The selection is made again each time the slider rests, and the
 tint and the count follow then; until they do, the count says **Updating…**.
-The tint is only a guide, like [Show matching pixels](#show-matching-pixels).
+The tint shows the selection, not what the value compares. While
+**Ignore the background** is on, the value compares the tinted pixels that
+lie in the region, so if you make the region smaller by hand, the tinted
+pixels outside it are not compared. While it is off, the value compares its
+whole region, tinted or not, and the selection only fits the region around
+the thing.
 Selecting on a screenshot with no state yet adds one for it, so you can name
 it under **How to read it**. Each state keeps its own selection, made on its
 own screenshot, and the region fits around what every state selects.
