@@ -363,6 +363,35 @@ application's anti-cheat class starts as `unknown`, which blocks key press
 actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
 
+## Debug page
+
+The [Debug page](Debug-page.md) shows only while `showDebug` in
+`settings.json` is true; the runtime ignores that setting. Its commands live in
+`owner/debug.rs` and its file readers in `src-tauri/src/debug/`:
+
+- `debug_overview` asks `InstanceGuard::is_held` whether the runtime runs, and
+  summarizes the newest `trace-*.csv` in the trace folder. `TraceTail` keeps
+  its place in that file, so each poll reads only the rows added since the last
+  one, and starts over when a newer file appears or the file shrinks. A header
+  other than the one this build writes is reported as a trace from another
+  version, not parsed. Frame to action is each `started` row's time minus its
+  `cause`, rule handling is each `handled` row's `took_ns`, and both are
+  summarized as a median and 95th percentile of the newest 10,000, so a long
+  trace keeps a fixed amount in memory. The summary covers the newest
+  file only, so a trace that has moved to its next file starts its numbers
+  again.
+- `read_log` returns the last 64 KB of `runtime.log` or `setup.log`, as whole
+  lines.
+- `debug_bundle` builds the zip in memory and returns its bytes, which the page
+  saves with the WebView's save picker. Pictures are stored, everything else is
+  deflated, with the `zip` crate and its pure-Rust deflate backend.
+
+Every command passes its own name to `ask` or `try_ask`, which a test in
+`bindings.rs` checks against the command table. The work then records how long
+the command took from being sent, and why it failed, in `SetupLog`, which the
+owner thread holds and opens only while `showDebug` is true. Loading or saving
+the settings opens or closes it.
+
 ## Page types
 
 The page sends and reads the Rust side's own types. `ts-rs` writes their

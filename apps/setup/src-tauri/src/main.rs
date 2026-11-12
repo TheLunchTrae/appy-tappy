@@ -13,6 +13,7 @@ mod automations;
 mod bindings;
 mod check_spec;
 mod commands;
+mod debug;
 mod overlay;
 mod owner;
 mod pixels;

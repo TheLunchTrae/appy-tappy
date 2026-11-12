@@ -9,9 +9,9 @@
 //! argument and answer types, and the test the argument names. The doc
 //! comments are the page's; they become the page functions' docs.
 //!
-//! An argument or answer is its Rust type, except for three the page reads
+//! An argument or answer is its Rust type, except for four the page reads
 //! differently from their ts-rs type: `Pixels`, the raw bytes of a picture
-//! that the page decodes, `U64AsNumber`, a `u64` the page takes as a number
+//! that the page decodes, `Bytes`, the raw bytes of a file, `U64AsNumber`, a `u64` the page takes as a number
 //! because it stays far below 2^53, and `OptionalU64AsNumber`, one that can
 //! be missing.
 
@@ -136,6 +136,15 @@ macro_rules! with_commands {
             commands::trace_folder() -> String;
             /// Opens the trace folder in File Explorer.
             commands::open_trace_folder() -> ();
+            /// Whether the runtime runs, and the newest trace file read so far, for the Debug page.
+            commands::debug_overview() -> DebugOverview;
+            /// The end of `log`, whole lines only, or an empty string before anything was logged.
+            commands::read_log(log: LogName) -> String;
+            /// Opens the logs folder in File Explorer.
+            commands::open_logs_folder() -> ();
+            /// The debug bundle, as the bytes of a zip file, with the pictures and the newest trace if `contents`
+            /// asks for them.
+            commands::debug_bundle(contents: BundleSpec) -> Bytes;
             /// The newer release on GitHub, or null when this one is the newest or this build does not update itself.
             updates::check_for_update() -> Option<UpdateOffer>;
             /// Downloads the newest release and checks its signature; AppyTappy Setup keeps it until

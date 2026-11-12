@@ -25,4 +25,14 @@ impl InstanceGuard {
     pub fn acquire(name: &str) -> io::Result<Option<Self>> {
         host::InstanceGuard::acquire(name).map(|guard| guard.map(|held| Self { _held: held }))
     }
+
+    /// Whether another program holds the guard called `name`, without taking
+    /// it, so a check never stops that program from starting.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    pub fn is_held(name: &str) -> io::Result<bool> {
+        host::InstanceGuard::is_held(name)
+    }
 }

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::window_match::WindowMatch;
+use appytappy_platform::InstanceGuard;
 use appytappy_sources::HostSystem;
 use appytappy_sources::screen::{Capture, CaptureSession, Crop, FrameHandler};
 use appytappy_sources::system::{
@@ -89,6 +90,14 @@ pub(crate) trait Host: 'static {
     /// keeps what it read, so the save stands either way.
     fn reload_runtime(&self);
 
+    /// Whether the runtime is running, which its single-instance guard
+    /// tells without the check taking it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating system's error.
+    fn runtime_runs(&self) -> io::Result<bool>;
+
     /// Opens a window for each overlay in `wanted` that has none, and
     /// closes the overlay windows nothing wants any more.
     ///
@@ -148,6 +157,11 @@ impl<S: System + Capture + 'static, R: Runtime> Host for Desktop<S, R> {
             reason = "the save already happened; the runtime picks it up when it next starts"
         )]
         let _ = appytappy_platform::request_reload(appytappy_platform::RELOAD);
+    }
+
+    #[mutants::skip] // Reads a Windows mutex, checked by hand on Windows.
+    fn runtime_runs(&self) -> io::Result<bool> {
+        InstanceGuard::is_held(InstanceGuard::RUNTIME)
     }
 
     #[mutants::skip] // Opens and closes windows, which needs a running app.

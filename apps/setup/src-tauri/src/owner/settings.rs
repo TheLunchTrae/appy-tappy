@@ -13,19 +13,25 @@ use super::host::Host;
 
 impl<H: Host> Owner<H> {
     /// The saved settings, or the defaults and why they cannot be read.
-    pub(crate) fn settings(&self) -> SettingsView {
-        match self.stores() {
+    /// `setup.log` starts or stops as they say.
+    pub(crate) fn settings(&mut self) -> SettingsView {
+        let view = match self.stores() {
             Ok(stores) => settings::load(stores),
             Err(problem) => SettingsView {
                 settings: SettingsFile::default(),
                 problem: Some(problem),
             },
-        }
+        };
+        self.setup_log.set(view.settings.show_debug);
+        view
     }
 
-    /// Saves every setting, or says what to fix.
+    /// Saves every setting, or says what to fix. Once they are saved,
+    /// `setup.log` starts or stops as they say.
     pub(crate) fn save_settings(&mut self, file: &SettingsFile) -> Result<(), String> {
-        self.update_runtime(|stores| settings::save(stores, file))
+        self.update_runtime(|stores| settings::save(stores, file))?;
+        self.setup_log.set(file.show_debug);
+        Ok(())
     }
 
     /// Whether the runtime starts when the user signs in to Windows. It
@@ -75,8 +81,11 @@ impl<H: Host> Owner<H> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile};
 
+    use crate::owner::Owner;
     use crate::owner::test_support::{harness_with, scratch_store};
 
     #[test]
@@ -92,7 +101,7 @@ mod tests {
         };
         assert_eq!(harness.ask(|owner| owner.save_settings(&faster)), Ok(()));
         assert_eq!(harness.reloads(), 1, "the runtime reads the settings again");
-        assert_eq!(harness.ask(|owner| owner.settings()).settings, faster);
+        assert_eq!(harness.ask(Owner::settings).settings, faster);
 
         let backwards = SettingsFile {
             read_interval: ReadIntervalDef {
@@ -108,9 +117,49 @@ mod tests {
         );
         assert_eq!(harness.reloads(), 0, "a save that failed tells no one");
         assert_eq!(
-            harness.ask(|owner| owner.settings()).settings,
+            harness.ask(Owner::settings).settings,
             faster,
             "the saved settings stay"
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn debug_details_open_the_setup_log_and_hiding_them_closes_it() {
+        let (stores, root) = scratch_store("owner-setup-log");
+        let log = stores.logs.join("setup.log");
+        let settings_file = stores.locations.settings();
+        let mut harness = harness_with(false, Ok(stores));
+        let shown = SettingsFile {
+            show_debug: true,
+            ..SettingsFile::default()
+        };
+        assert_eq!(harness.ask(|owner| owner.save_settings(&shown)), Ok(()));
+        let failed = "No window.".to_owned();
+        harness.ask(|owner| owner.record_command("pick_window", Duration::ZERO, Some(&failed)));
+        let text = std::fs::read_to_string(&log).expect("the setup log");
+        assert!(text.contains("pick_window failed"), "{text}");
+
+        assert_eq!(
+            harness.ask(|owner| owner.save_settings(&SettingsFile::default())),
+            Ok(())
+        );
+        harness.ask(|owner| owner.record_command("save_value", Duration::ZERO, None));
+        assert_eq!(
+            std::fs::read_to_string(&log).expect("the setup log"),
+            text,
+            "hidden, it writes nothing"
+        );
+
+        // Loading settings that show debug details opens it again.
+        std::fs::write(&settings_file, "{\"format\": 1, \"showDebug\": true}").expect("settings");
+        assert!(harness.ask(Owner::settings).settings.show_debug);
+        harness.ask(|owner| owner.record_command("save_value", Duration::ZERO, None));
+        assert!(
+            std::fs::read_to_string(&log)
+                .expect("the setup log")
+                .contains("save_value took"),
+            "loaded, it writes again"
         );
         std::fs::remove_dir_all(root).expect("clean up");
     }

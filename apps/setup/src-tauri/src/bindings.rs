@@ -61,6 +61,8 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::debug::bundle::BundleSpec;
+use crate::debug::{DebugOverview, LogName};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
@@ -115,6 +117,17 @@ impl Wire for Pixels {
     type Rust = Response;
     fn ts(_cfg: &Config) -> String {
         "ArrayBuffer".to_owned()
+    }
+    fn visit(_found: &mut Declarations<'_>) {}
+}
+
+/// A file, which a command answers as its raw bytes rather than JSON.
+struct Bytes;
+
+impl Wire for Bytes {
+    type Rust = Response;
+    fn ts(_cfg: &Config) -> String {
+        "Blob".to_owned()
     }
     fn visit(_found: &mut Declarations<'_>) {}
 }
@@ -244,6 +257,13 @@ fn parameters(module: &str, name: &str) -> Vec<String> {
         "the command {name} takes the app's handle first"
     );
     let names: Vec<String> = names.collect();
+    let body = rest.split_once("\n}\n").map_or(rest, |(body, _after)| body);
+    for call in body.split("ask(&app, ").skip(1) {
+        assert!(
+            call.starts_with(&format!("\"{name}\"")),
+            "the command {name} should name itself where it asks the owner, as setup.log records it"
+        );
+    }
     assert!(
         names.iter().all(|name| !name.starts_with('_')),
         "Tauri drops the leading underscore of {name}'s argument key, which the page's key keeps; rename the parameter"
@@ -284,7 +304,7 @@ fn doc_comment(lines: &[&str]) -> String {
 
 /// `api.ts`: a function for each command, which sends its arguments under
 /// the keys Tauri reads and types its answer. A picture comes back decoded,
-/// and an answer of nothing as `void`.
+/// a file as its bytes, and an answer of nothing as `void`.
 fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
     let mut imported = BTreeSet::new();
     let mut functions = Vec::new();
@@ -321,6 +341,10 @@ fn api(commands: &[Command], declared: &BTreeSet<String>) -> String {
             "ArrayBuffer" => (
                 "Picture | null".to_owned(),
                 format!("return decodePicture(await invoke<ArrayBuffer>({call}));"),
+            ),
+            "Blob" => (
+                "Blob".to_owned(),
+                format!("return new Blob([await invoke<ArrayBuffer>({call})]);"),
             ),
             answer => (
                 answer.to_owned(),

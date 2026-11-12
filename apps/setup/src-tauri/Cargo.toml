@@ -20,6 +20,9 @@ appytappy-config = { version = "=0.1.0", path = "../../../crates/config" }
 # Tells the runtime to read the automations again after each save.
 appytappy-platform = { version = "=0.1.0", path = "../../../crates/platform" }
 appytappy-sources = { version = "=0.1.0", path = "../../../crates/sources" }
+# Picks the pure-Rust backend for zip's compression, so the debug bundle
+# builds the same on every system. Nothing calls it directly.
+flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
 mutants = "0.0.4"
@@ -52,6 +55,9 @@ tauri-plugin-single-instance = "=2.5.5"
 # Each command awaits the owner thread's answer on a oneshot channel, so a
 # slow request never freezes the window; Tauri does not re-export it.
 tokio = { version = "=1.54.1", features = ["sync"] }
+# Packs the debug bundle into one zip file, compressed with deflate, the
+# method every zip tool reads. Only writing, with no other method.
+zip = { version = "=9.5.1", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 # The bindings test writes the TypeScript types of the commands' arguments and
@@ -71,6 +77,7 @@ tauri-build = { version = "=2.7.4", features = [] }
 workspace = true
 
 # cargo-machete reads only the package's library and binary sources, so it
-# misses build.rs, which calls tauri-build.
+# misses build.rs, which calls tauri-build, and flate2, which only picks
+# zip's backend.
 [package.metadata.cargo-machete]
-ignored = ["tauri-build"]
+ignored = ["tauri-build", "flate2"]

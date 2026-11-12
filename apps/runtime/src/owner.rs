@@ -14,14 +14,13 @@ use appytappy_config::paths::Locations;
 use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile, TraceCategory};
 use appytappy_config::store::{AppStore, AutomationStore, EnabledStore, SettingsStore};
 use appytappy_platform::{
-    RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
+    Log, RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
 };
 use appytappy_sources::HostSystem;
 use appytappy_sources::schedule::ReadInterval;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
-use crate::log::Log;
 use crate::model::{Model, Order, Owner, SessionId};
 use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
@@ -1214,7 +1213,8 @@ mod tests {
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
 
     use super::*;
-    use crate::{log, model};
+    use crate::model;
+    use appytappy_platform::LOG_LIMIT;
 
     #[cfg(not(windows))]
     #[test]
@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn events_update_the_model_and_the_log_until_quit() {
         let folder = env::temp_dir().join(format!("appytappy-handle-{}", process::id()));
-        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let mut log = Log::open(&folder, "runtime", LOG_LIMIT).expect("open");
         let enabled = EnabledStore::new(folder.join("enabled.txt"));
         let mut model = Model::default();
         let started = Event::from(Change::Started {
@@ -1461,7 +1461,7 @@ mod tests {
     #[test]
     fn a_value_s_problem_is_logged_with_its_newest_name() {
         let folder = env::temp_dir().join(format!("appytappy-value-names-{}", process::id()));
-        let mut log = Log::open(&folder, log::LIMIT).expect("open");
+        let mut log = Log::open(&folder, "runtime", LOG_LIMIT).expect("open");
         let named = |app: &str, value: &str| {
             let mut plan = app_plan(app, &["Pause"]);
             Arc::get_mut(&mut plan).expect("unshared").labels.values = vec![value.to_owned()];
@@ -1570,7 +1570,7 @@ mod tests {
                 settings: SettingsStore::new(folder.join("settings.json")),
                 enabled: EnabledStore::new(folder.join("enabled.txt")),
             };
-            let log = Log::open(&folder.join("logs"), log::LIMIT).expect("open");
+            let log = Log::open(&folder.join("logs"), "runtime", LOG_LIMIT).expect("open");
             let tracing = Switch::new(folder.join("traces"));
             Self {
                 folder,

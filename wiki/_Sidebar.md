@@ -10,6 +10,7 @@
 - [References](References.md)
 - [Automations](Automations.md)
 - [Settings](Settings.md)
+- [Debug page](Debug-page.md)
 - [The tray icon](The-tray-icon.md)
 - [Troubleshooting](Troubleshooting.md)
 

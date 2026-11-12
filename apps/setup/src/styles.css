@@ -1999,3 +1999,108 @@ select {
   align-items: center;
   color: var(--text);
 }
+
+/* Debug page */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.table.mono td {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table caption {
+  text-align: left;
+  padding-bottom: 6px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* A switch beside a heading is as wide as its words, so its buttons need their own room. */
+.card-head .seg button {
+  padding: 5px 12px;
+}
+
+.logbox {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--base);
+  color: var(--muted);
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.dialog {
+  /* The reset at the top zeroes every margin, and a modal dialog centers itself with an automatic one. */
+  margin: auto;
+  max-width: 520px;
+  color: inherit;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 45%);
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.check-row input {
+  margin-top: 3px;
+  accent-color: var(--capture);
+}
+
+.check-row .what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -47,6 +47,8 @@ pub(super) struct FakeHost {
     pub(super) unsynced: Option<String>,
     /// The time the owner reads, which [`Harness::wait`] moves on.
     pub(super) clock: Instant,
+    /// Whether the runtime runs, or why that cannot be told.
+    pub(super) runtime: Result<bool, String>,
 }
 
 /// The build the fake host's application runs unless a test changes it.
@@ -200,6 +202,10 @@ impl Host for FakeHost {
         self.reloads.send(()).expect("test listens");
     }
 
+    fn runtime_runs(&self) -> io::Result<bool> {
+        self.runtime.clone().map_err(io::Error::other)
+    }
+
     fn sync_overlay_windows(&self, wanted: &[OverlayWindow]) -> Result<(), String> {
         self.synced.send(wanted.to_vec()).expect("test listens");
         self.unsynced.clone().map_or(Ok(()), Err)
@@ -253,6 +259,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         synced: synced_sender,
         unsynced: None,
         clock: Instant::now(),
+        runtime: Ok(false),
     };
     Harness {
         owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),

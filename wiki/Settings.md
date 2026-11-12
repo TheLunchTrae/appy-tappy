@@ -38,6 +38,13 @@ read cannot wait longer than the slowest. Type a number and press Enter, or
 move to another field, to apply it. A change applies to every application
 right away and does not undo or rerun any automation.
 
+## Debug
+
+- **Show debug details.** Off at first. Turn it on to add a
+  [Debug](Debug-page.md) tab, which shows whether the background part runs,
+  timings from the newest runtime trace, both logs, and a debug bundle to
+  share. While it is on, AppyTappy Setup also writes its own log, `setup.log`.
+
 ## Runtime trace
 
 The runtime trace records what the background part reads and does, with

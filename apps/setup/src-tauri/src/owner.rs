@@ -16,6 +16,7 @@
 mod automations;
 mod capture;
 mod clicks;
+mod debug;
 mod fixes;
 mod host;
 mod messages;
@@ -40,6 +41,8 @@ use appytappy_config::app_file::{AppFile, BuildDef};
 use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::check_spec::{Pictures, RegionCheck};
+use crate::debug::log::SetupLog;
+use crate::debug::trace_file::TraceTail;
 use crate::overlay::{Overlays, Purpose};
 use crate::recording::{Recording, ocr};
 use crate::stores::{SavedApp, Stores};
@@ -100,11 +103,16 @@ pub(crate) struct Owner<H: Host> {
     /// The build each running process runs, read once per process, since
     /// the application list asks again every few seconds.
     builds: BTreeMap<ProcessId, BuildDef>,
+    /// The newest trace file as the Debug page last read it, so the next
+    /// read takes only the rows added since.
+    trace_tail: Option<TraceTail>,
+    /// `setup.log`, open while the settings show debug details.
+    setup_log: SetupLog,
 }
 
 impl<H: Host> Owner<H> {
     /// An owner with no window picked.
-    pub(crate) const fn new(
+    pub(crate) fn new(
         host: H,
         stores: Result<Stores, String>,
         own_process: u32,
@@ -113,7 +121,6 @@ impl<H: Host> Owner<H> {
     ) -> Self {
         Self {
             host,
-            stores,
             own_process,
             messages,
             generation: 0,
@@ -130,6 +137,12 @@ impl<H: Host> Owner<H> {
             live: Overlays::new(Purpose::ValuesPage),
             update: None,
             builds: BTreeMap::new(),
+            trace_tail: None,
+            setup_log: SetupLog::new(match &stores {
+                Ok(stores) => Some(stores.logs.clone()),
+                Err(_unknown) => None,
+            }),
+            stores,
         }
     }
 

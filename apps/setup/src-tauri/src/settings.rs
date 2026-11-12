@@ -96,7 +96,7 @@ pub(crate) fn open_trace_folder(folder: &Path) -> Result<(), String> {
 /// Shows `folder` in File Explorer.
 #[cfg(windows)]
 #[mutants::skip] // Opens a window, checked by hand on Windows.
-fn open_folder(folder: &Path) -> io::Result<()> {
+pub(crate) fn open_folder(folder: &Path) -> io::Result<()> {
     std::process::Command::new("explorer.exe")
         .arg(folder)
         .spawn()
@@ -106,7 +106,7 @@ fn open_folder(folder: &Path) -> io::Result<()> {
 /// Off Windows there is no File Explorer to show a folder in.
 #[cfg(not(windows))]
 #[mutants::skip] // The setup app runs only on Windows.
-fn open_folder(_folder: &Path) -> io::Result<()> {
+pub(crate) fn open_folder(_folder: &Path) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "folders open only on Windows",

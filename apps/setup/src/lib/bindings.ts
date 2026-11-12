@@ -224,6 +224,19 @@ size: number,
 modified: number, }>;
 
 /**
+ * What goes in the bundle beyond the files it always holds.
+ */
+export type BundleSpec = DeepReadonly<{
+/**
+ * The pictures the values, references and click actions learned from.
+ */
+pictures: boolean,
+/**
+ * The newest trace file.
+ */
+trace: boolean, }>;
+
+/**
  * How a value is read from its region.
  */
 export type CheckDef = DeepReadonly<{ "kind": "number",
@@ -408,6 +421,23 @@ export type ComparisonDef = DeepReadonly<"below" | "atMost" | "equals" | "notEqu
 export type CornerDef = DeepReadonly<"topLeft" | "topRight" | "bottomLeft" | "bottomRight">;
 
 /**
+ * What the Debug page's overview shows.
+ */
+export type DebugOverview = DeepReadonly<{
+/**
+ * Whether the runtime is running, or `None` when that cannot be told.
+ */
+runtime: boolean | null,
+/**
+ * The newest trace file, or `None` without one.
+ */
+trace: TraceSummary | null,
+/**
+ * Why the newest trace file cannot be read, if it cannot.
+ */
+traceProblem: string | null, }>;
+
+/**
  * [`WindowMatch::fallback`] as the file spells it.
  */
 export type FallbackDef = DeepReadonly<"none" | "executable">;
@@ -505,6 +535,11 @@ message: string, } | { "kind": "lost",
  * What happened, for the user.
  */
 message: string, }>;
+
+/**
+ * One of the two logs.
+ */
+export type LogName = DeepReadonly<"runtime" | "setup">;
 
 /**
  * [`MediaCommand`] as the file spells it.
@@ -975,7 +1010,13 @@ trace: TraceDef,
  * Whether the runtime starts with automations enabled or disabled as
  * the tray last left them. Off, it starts with them enabled.
  */
-rememberEnabled: boolean, }>;
+rememberEnabled: boolean,
+/**
+ * Whether the setup app shows its debug details: the Debug page, and
+ * the working behind each reading. On, it also writes `setup.log`. The
+ * runtime ignores it.
+ */
+showDebug: boolean, }>;
 
 /**
  * The settings as the Settings page shows them.
@@ -1013,6 +1054,19 @@ height: number, }>;
  * A window's size as the UI describes one.
  */
 export type SizeView = DeepReadonly<{ width: number, height: number, }>;
+
+/**
+ * A middle and a slow time, in nanoseconds.
+ */
+export type Spread = DeepReadonly<{
+/**
+ * The median.
+ */
+medianNs: number,
+/**
+ * The 95th percentile: 1 in 20 took longer.
+ */
+p95Ns: number, }>;
 
 /**
  * One look a state check knows, such as a corner showing `Paused`.
@@ -1086,6 +1140,59 @@ fileLimitMb: number,
  * How many trace files to keep; the oldest beyond this are deleted.
  */
 keepFiles: number, }>;
+
+/**
+ * One row of a trace file, as the page shows it.
+ */
+export type TraceRow = DeepReadonly<{
+/**
+ * When it happened, in nanoseconds since the trace started.
+ */
+timeNs: number, thread: string, event: string, app: string, item: string, value: string,
+/**
+ * How long it took, in nanoseconds, where the event says.
+ */
+tookNs: number | null,
+/**
+ * When the frame arrived whose reading led to this row.
+ */
+cause: number | null, detail: string, }>;
+
+/**
+ * What the overview shows of the newest trace file.
+ */
+export type TraceSummary = DeepReadonly<{
+/**
+ * The file's name.
+ */
+file: string,
+/**
+ * Its size.
+ */
+bytes: number,
+/**
+ * Why its rows cannot be read, such as a trace from another version.
+ */
+problem: string | null,
+/**
+ * From a frame arriving to the action it led to starting, or `None`
+ * when no action started from a frame, as with `actions` or `changes`
+ * not recorded.
+ */
+frameToAction: Spread | null,
+/**
+ * How long the runtime took to handle each event, or `None` when no
+ * event was recorded, as with `rules` not recorded.
+ */
+ruleHandling: Spread | null,
+/**
+ * How many records the trace dropped, because its buffer was full.
+ */
+dropped: number,
+/**
+ * The newest rows, oldest first.
+ */
+newest: Array<TraceRow>, }>;
 
 /**
  * A newer release the user can install.
@@ -2369,5 +2476,6 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     "fileLimitMb": 50,
     "keepFiles": 5
   },
-  "rememberEnabled": false
+  "rememberEnabled": false,
+  "showDebug": false
 };

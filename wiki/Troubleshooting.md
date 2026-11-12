@@ -7,6 +7,11 @@ start, stop, change, and problem. To open it, paste
 `%LOCALAPPDATA%\AppyTappy\logs` into File Explorer's address bar. The log
 names each automation that cannot run, and why.
 
+With **Show debug details** on in [Settings](Settings.md#debug), the
+[Debug page](Debug-page.md) shows the end of the log, and AppyTappy Setup's own
+log beside it. Its **Export debug bundle** saves the logs, your settings, and
+the newest trace in one zip file to share with a developer.
+
 ## Windows warns about the installer
 
 AppyTappy is not signed, so Windows warns the first time you run the installer.

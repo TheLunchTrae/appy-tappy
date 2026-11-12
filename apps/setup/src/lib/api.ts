@@ -9,13 +9,16 @@ import type {
   AppSummary,
   AutomationDef,
   AutomationSummary,
+  BundleSpec,
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
   ColorSpec,
+  DebugOverview,
   FixSpec,
   FoundClick,
   Live,
+  LogName,
   OverlayModeDef,
   OverlayView,
   Reading,
@@ -313,6 +316,29 @@ export async function traceFolder(): Promise<string> {
 /** Opens the trace folder in File Explorer. */
 export async function openTraceFolder(): Promise<void> {
   await invoke('open_trace_folder');
+}
+
+/** Whether the runtime runs, and the newest trace file read so far, for the Debug page. */
+export async function debugOverview(): Promise<DebugOverview> {
+  return invoke<DebugOverview>('debug_overview');
+}
+
+/** The end of `log`, whole lines only, or an empty string before anything was logged. */
+export async function readLog(log: LogName): Promise<string> {
+  return invoke<string>('read_log', { log });
+}
+
+/** Opens the logs folder in File Explorer. */
+export async function openLogsFolder(): Promise<void> {
+  await invoke('open_logs_folder');
+}
+
+/**
+ * The debug bundle, as the bytes of a zip file, with the pictures and the newest trace if `contents`
+ * asks for them.
+ */
+export async function debugBundle(contents: BundleSpec): Promise<Blob> {
+  return new Blob([await invoke<ArrayBuffer>('debug_bundle', { contents })]);
 }
 
 /** The newer release on GitHub, or null when this one is the newest or this build does not update itself. */
