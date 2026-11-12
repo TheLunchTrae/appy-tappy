@@ -468,7 +468,8 @@ green: number,
 blue: number, }>;
 
 /**
- * A color the user picked on a screenshot.
+ * A color of a screenshot: one the user picked on it, or one the setup app
+ * read from it for the UI to show.
  */
 export type ColorSpec = DeepReadonly<{ red: number, green: number, blue: number, }>;
 
@@ -640,6 +641,21 @@ likeness: number | null, }>;
 export type Label = DeepReadonly<{ screenshot: number, text: string, }>;
 
 /**
+ * The pixels of one kind in the rectangle asked about.
+ */
+export type Layer = DeepReadonly<{
+/**
+ * How many pixels are of this kind.
+ */
+count: number,
+/**
+ * The runs of them in the rectangle, each as the index of its first
+ * pixel and of the pixel after its last, row by row from the top, as a
+ * selection's are. Missing when there are too many runs to draw.
+ */
+spans: Array<[number, number]> | null, }>;
+
+/**
  * What a watched value reads on the newest frame, for the automation
  * editor.
  */
@@ -688,6 +704,33 @@ problem: string | null,
  * first showed.
  */
 kept: Array<number>, }>;
+
+/**
+ * What makes a pixel match, as the UI describes it.
+ */
+export type MatchRule = DeepReadonly<{ "kind": "ink", ink: ColorSpec, tolerance: number, } | { "kind": "barFill", filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", color: ColorSpec, tolerance: number, }>;
+
+/**
+ * What a rule takes of a rectangle of a screenshot.
+ */
+export type MatchView = DeepReadonly<{ "kind": "ink", ink: Layer, } | { "kind": "barFill", filled: Layer, empty: Layer, } | { "kind": "color",
+/**
+ * The pixels that are near the color on their own.
+ */
+near: Layer,
+/**
+ * The rectangle's average color.
+ */
+average: ColorSpec,
+/**
+ * The largest difference between the average's red, green, and
+ * blue and the color's, which the tolerance bounds.
+ */
+distance: number,
+/**
+ * Whether the check reads yes on this rectangle.
+ */
+matches: boolean, }>;
 
 /**
  * [`MediaCommand`] as the file spells it.

@@ -22,6 +22,8 @@ import type {
   FoundClick,
   Live,
   LookRecordingView,
+  MatchRule,
+  MatchView,
   OverlayModeDef,
   OverlayView,
   Reading,
@@ -88,6 +90,14 @@ export async function removeScreenshots(indexes: ReadonlyArray<number>): Promise
 /** What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected. */
 export async function select(screenshot: number, selection: SelectionSpec): Promise<SelectionView | null> {
   return invoke<SelectionView | null>('select', { screenshot, selection });
+}
+
+/**
+ * The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
+ * to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
+ */
+export async function matchPixels(screenshot: number, area: RegionSpec, rule: MatchRule): Promise<MatchView> {
+  return invoke<MatchView>('match_pixels', { screenshot, area, rule });
 }
 
 export async function setCheck(spec: CheckSpec): Promise<void> {

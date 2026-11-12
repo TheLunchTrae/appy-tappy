@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Seven guards drop such stale messages:
+it was about has gone. Eight guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -34,6 +34,10 @@ it was about has gone. Seven guards drop such stale messages:
   that was discarded, or replaced by one of either kind, is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Request numbers.** The capture screen numbers each request of its
+  matching pixels preview (`apps/setup/src/lib/matchPreview.ts`). An answer
+  or a failure that carries another number than the request in flight's, such
+  as one sent before the preview was turned off, is dropped.
 - **Attempt numbers.** The click target screen numbers each **Find it now**
   and **Click it now**, and drops an answer whose number is not that of the
   try under way.
@@ -1063,6 +1067,85 @@ stateDiagram-v2
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
+
+### Matching pixels preview
+
+The capture screen's matching pixels preview
+(`apps/setup/src/lib/matchPreview.ts`, run by `useMatchPreview.ts`) tints the
+pixels of the screenshot shown that a color setting takes. Its state is on
+the page only: which settings' switches are on, the request in flight and
+its number, the newest request wanted since, the newest answer, and the
+newest failure. The owner thread keeps nothing for it; each request is one
+`match_pixels` command.
+
+```mermaid
+stateDiagram-v2
+    state "In flight" as InFlight
+    state "In flight, one queued" as Queued
+    [*] --> Off
+    Off --> Blocked: the switch is turned on with nothing to ask
+    Off --> InFlight: the switch is turned on, which sends a request
+    Blocked --> InFlight: what was missing arrives, which sends a request
+    InFlight --> Idle: the request is answered or fails
+    InFlight --> Queued: what to ask changes
+    Queued --> Queued: what to ask changes again, which replaces the queued request
+    Queued --> InFlight: the request in flight is answered or fails, which sends the queued one
+    Queued --> InFlight: what to ask goes back to what the request in flight asks
+    Idle --> InFlight: what to ask changes, which sends a request
+    InFlight --> Blocked: what to ask goes missing
+    Queued --> Blocked: what to ask goes missing
+    Idle --> Blocked: what to ask goes missing
+    Blocked --> Off: the switch is turned off, or its setting leaves the inspector
+    InFlight --> Off: the switch is turned off, or its setting leaves the inspector
+    Queued --> Off: the switch is turned off, or its setting leaves the inspector
+    Idle --> Off: the switch is turned off, or its setting leaves the inspector
+```
+
+- **What to ask** (`plan`) is the screenshot shown, a rectangle of it, and the
+  rule: a reference's characters on the whole screenshot, or a bar's or a
+  color check's colors in the region.
+- **In flight** awaits one request's answer. The transition (`step`) sends a
+  request at once while none is awaited and gives it the next number. One
+  request counts at a time, so the tint follows a dragged slider as fast as
+  the owner answers, and a drag never piles requests up.
+- **In flight, one queued** also remembers the newest request wanted since.
+  A newer one replaces it, so a burst of changes sends the first and the
+  last. The queued request goes out when the one in flight is answered or
+  fails.
+- **Idle** shows the last request's answer, or why it failed, such as a
+  screenshot that is gone or a region that reaches past the window. A failure
+  tints nothing, and the next change to what is asked leaves it.
+- **Blocked** has nothing to ask and says why under the switch: the live view
+  shows instead of a screenshot, a color is not picked, the region is not
+  drawn, or an edited value's region belongs to screenshots of another size
+  than the one shown. Like **Off**, it forgets the request in flight, the queued request,
+  and the answer, so nothing more is sent and an answer still on its way is
+  dropped. Neither waits for that request, so turning the switch on again
+  sends a new one while the forgotten one may still be with the owner: two
+  can be there then, and only the newer one's answer counts. The capture
+  screen clears the preview when it closes.
+- **Off** shows the plain screenshot in the same render that turns the switch
+  off. Each setting has its own switch, which stays as the user left it
+  until the capture screen closes: going back a step and returning, or
+  changing the kind of check and changing it back, shows the tint again
+  without another press. A setting whose fields are not in the inspector
+  shows no tint.
+- An answer counts only under the number of the request in flight
+  (`step`). `previewDriver` gives each answer the number its own request was
+  sent with, so an answer to a request sent before **Off** or **Blocked** is
+  not taken for the answer to a later one.
+- While a request is in flight, the tint of the last answer stays if it is
+  for the same rectangle of the same screenshot (`tinted`), and its counts
+  dim and say that they are updating (`awaited`). An answer for another
+  screenshot or rectangle stops showing at once.
+
+**Show selected pixels**, under **Color match**, has no requests of its own.
+It is a switch that stays as the user left it until the capture screen
+closes, and it tints the selection the capture screen last made on the
+screenshot shown (`selectedPixels`). While the selection for a new color
+match is awaited, the last one for the same steps stays, and its count says
+that it is updating. When that selection cannot be made, nothing is awaited:
+the tint goes, and the line under the switch says so beside the error.
 
 ### Recording
 

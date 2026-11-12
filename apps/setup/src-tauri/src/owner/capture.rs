@@ -9,7 +9,8 @@ use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
-use crate::check_spec::{self, CheckSpec, RegionCheck};
+use crate::check_spec::{self, CheckSpec, RegionCheck, RegionSpec};
+use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
 use crate::recording::Recorder;
 use crate::selection::{self, SelectionSpec, SelectionView};
@@ -222,6 +223,20 @@ impl<H: Host> Owner<H> {
             .ok_or_else(|| check_spec::SpecError::NoScreenshot.to_string())
     }
 
+    /// The pixels of `area` on screenshot `screenshot` that `rule` takes.
+    pub(crate) fn match_pixels(
+        &self,
+        screenshot: usize,
+        area: RegionSpec,
+        rule: MatchRule,
+    ) -> Result<MatchView, String> {
+        self.screenshots
+            .get(screenshot)
+            .ok_or(check_spec::SpecError::NoScreenshot)
+            .and_then(|image| match_preview::find(image, area, rule))
+            .map_err(|error| error.to_string())
+    }
+
     /// Makes `spec` the check the live frame is read with.
     pub(crate) fn set_check(&mut self, spec: &CheckSpec) -> Result<(), String> {
         let check = self
@@ -420,6 +435,52 @@ mod tests {
         );
         assert_eq!(
             harness.ask(select(1, 0)),
+            Err("That screenshot is gone. Take a new one and try again.".to_owned())
+        );
+    }
+
+    #[test]
+    fn matching_pixels_are_found_on_the_named_screenshot() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let matching = |screenshot, width| {
+            move |owner: &mut Owner<FakeHost>| {
+                owner
+                    .match_pixels(
+                        screenshot,
+                        serde_json::from_value(serde_json::json!(
+                            {"x": 0, "y": 0, "width": width, "height": 2}
+                        ))
+                        .expect("the UI's spelling"),
+                        serde_json::from_value(serde_json::json!({
+                            "kind": "ink",
+                            "ink": {"red": 255, "green": 0, "blue": 0},
+                            "tolerance": 0
+                        }))
+                        .expect("the UI's spelling"),
+                    )
+                    .map(|view| serde_json::to_value(view).expect("plain data"))
+            }
+        };
+        assert_eq!(
+            harness.ask(matching(0, 4)),
+            Ok(serde_json::json!({
+                "kind": "ink",
+                "ink": {"count": 4, "spans": [[0, 2], [4, 6]]}
+            })),
+            "the red half of each row"
+        );
+        assert_eq!(
+            harness.ask(matching(0, 5)),
+            Err(
+                "The region reaches past the edge of the window. Draw it inside the window."
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            harness.ask(matching(1, 4)),
             Err("That screenshot is gone. Take a new one and try again.".to_owned())
         );
     }

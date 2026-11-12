@@ -217,6 +217,41 @@ instant can then be missed.
 State names are up to 32 characters, with no space at either end. Two states
 cannot share a name, ignoring case, and none can be named `none`.
 
+### Show matching pixels
+
+A **Bar fill** and a **Color** check each have a switch under their colors
+that tints the pixels the colors match on the screenshot shown, so you can
+see what a color or a tolerance takes in instead of guessing. The tint
+follows while you drag **Tolerance**, and when you pick another color or
+move the region. While it catches up, the counts under the switch dim and
+say **Updating…**. The tint is magenta or green, whichever stands out more
+against the color you picked, and the screenshot shows through it. It is
+only a guide: it changes neither the screenshot nor the value, and turning
+the switch off shows the plain screenshot again. Each switch stays as you
+left it until you save or leave the value, so it is still on when you come
+back to its step. It needs a screenshot, so while the live view shows, it
+asks you to select one. While you edit a saved value, it needs a screenshot
+at the size the value was drawn at, as the region does.
+
+- **Show matching pixels**, for a bar fill, tints the region's filled pixels
+  in one color and its empty pixels in stripes of the other. Under the
+  switch, AppyTappy counts the filled pixels, the empty ones, and those that
+  are neither. A pixel is neither when it is too far from both colors, such
+  as a border or a label, and the reading leaves it out. If parts of the bar
+  stay untinted, pick the color again on that part.
+- **Show pixels within the tolerance**, for a color check, tints each pixel of
+  the region that is within the tolerance on its own, and counts them. The
+  value itself does not go by single pixels: it compares the region's average
+  color. So under the switch AppyTappy also shows what the value goes by on
+  this screenshot: the region's average color, its distance from the
+  **Color to look for**, and whether the value is yes. The distance is the
+  largest difference in red, green, or blue between the two colors, and the
+  value is yes while the distance is at most the tolerance. A region can read
+  yes with few pixels tinted, or no with many, when its colors average out.
+
+A [reference](References.md#make-a-reference) has the same switch for its
+characters' color.
+
 ## Select the thing in a state
 
 A **State** check compares every pixel of its region, so a background that
@@ -235,13 +270,24 @@ thing on the screenshot shown instead:
 Hold **Shift** while you drag or click to add a part, or **Alt** to take one
 away. **Color match** says how close a color must be to count as the same:
 raise it if the selection stops short, and lower it if it spills over.
+To see what it selects, turn on **Show selected pixels** under
+**Color match**. It tints the selected pixels on the screenshot shown and
+counts them. The selection is made again each time the slider rests, and the
+tint and the count follow then; until they do, the count says **Updating…**.
+The tint shows the selection, not what the value compares. While
+**Ignore the background** is on, the value compares the tinted pixels that
+lie in the region, so if you make the region smaller by hand, the tinted
+pixels outside it are not compared. While it is off, the value compares its
+whole region, tinted or not, and the selection only fits the region around
+the thing.
 Selecting on a screenshot with no state yet adds one for it, so you can name
 it under **How to read it**. Each state keeps its own selection, made on its
 own screenshot, and the region fits around what every state selects.
 **Clear selection** on a state compares its whole region again.
 
 While **Ignore the background** is on, the pixels a state's selection leaves
-out are shaded over its screenshot, and the check skips them. Turn it off to
+out are shaded over its screenshot, once **Color match** rests, and the
+check skips them. Turn it off to
 compare the whole region again. You can still adjust the region by hand with
 **Box**; anything you add to it counts as background.
 

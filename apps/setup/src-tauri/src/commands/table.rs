@@ -34,6 +34,9 @@ macro_rules! with_commands {
             commands::remove_screenshots(indexes: Vec<usize>) -> ();
             /// What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected.
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;
+            /// The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
+            /// to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
+            commands::match_pixels(screenshot: usize, area: RegionSpec, rule: MatchRule) -> MatchView;
             commands::set_check(spec: CheckSpec) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
