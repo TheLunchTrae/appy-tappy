@@ -347,6 +347,15 @@ pub(crate) enum Message<H: Host = Desktop> {
         /// What it read.
         text: Text,
     },
+    /// The text reader read find `index` of search `search`.
+    FoundText {
+        /// Which search it belongs to; text for an earlier one is dropped.
+        search: u64,
+        /// The find's index.
+        index: usize,
+        /// What it read.
+        text: Text,
+    },
     /// The watch with this generation saw a frame, or stopped and why.
     Watch {
         /// Which capture sent it; frames from an earlier one are dropped.

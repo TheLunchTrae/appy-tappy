@@ -18,6 +18,7 @@ mod capture;
 mod clicks;
 mod edits;
 mod fixes;
+mod found;
 mod host;
 mod looks;
 mod messages;
@@ -51,6 +52,7 @@ use crate::stores::{SavedApp, Stores};
 use crate::updates::Downloaded;
 
 pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
+pub(crate) use self::found::FoundView;
 pub(crate) use self::host::{Desktop, Host};
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
@@ -92,6 +94,12 @@ pub(crate) struct Owner<H: Host> {
     /// Counts recordings of both kinds, so text read for one the user
     /// discarded or replaced is dropped.
     recording_id: u64,
+    /// The text found like a reference's sample, until the user adds it or
+    /// moves on.
+    found: Option<found::Found>,
+    /// Counts searches, so text read for one the user dismissed or replaced
+    /// is dropped.
+    search_id: u64,
     /// Sends new readings to the text reader's thread.
     ocr: Sender<ocr::Job>,
     /// The saved value the automation editor watches.
@@ -130,6 +138,8 @@ impl<H: Host> Owner<H> {
             check: None,
             recording: None,
             recording_id: 0,
+            found: None,
+            search_id: 0,
             ocr,
             watched: None,
             overlays: Overlays::new(Purpose::Overlay),
@@ -164,6 +174,11 @@ impl<H: Host> Owner<H> {
                     current.read(index, text);
                 }
             },
+            Message::FoundText {
+                search,
+                index,
+                text,
+            } => self.found_text(search, index, text),
             Message::CaptureFailed {
                 generation,
                 failure,

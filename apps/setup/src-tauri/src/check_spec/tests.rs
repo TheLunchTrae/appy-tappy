@@ -144,6 +144,7 @@ fn characters(
 fn one(screenshot: usize) -> Vec<Label> {
     vec![Label {
         screenshot,
+        region: None,
         text: "1".to_owned(),
     }]
 }
@@ -573,6 +574,7 @@ fn a_label_the_reference_cannot_learn_names_the_text() {
         None,
         vec![Label {
             screenshot: 0,
+            region: None,
             text: "12".to_owned(),
         }],
         Vec::new(),
@@ -613,6 +615,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
             tolerance: 5,
             labels: vec![Label {
                 screenshot: 0,
+                region: None,
                 text: "12".to_owned(),
             }],
             recorded: Vec::new(),

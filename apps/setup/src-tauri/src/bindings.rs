@@ -61,13 +61,14 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
-use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::check_spec::{CheckSpec, ColorSpec, Label, RegionSpec};
 use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
-    FoundClick, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId, SavedValue,
+    FoundClick, FoundView, Live, Reading, ReferenceSaveSpec, SaveSpec, SavedReferenceId,
+    SavedValue,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;

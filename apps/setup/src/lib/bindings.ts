@@ -635,6 +635,19 @@ drawing: EditDrawing, }>;
 export type FallbackDef = DeepReadonly<"none" | "executable">;
 
 /**
+ * One find as the UI shows it.
+ */
+export type FindView = DeepReadonly<{
+/**
+ * Where it is on the screenshot.
+ */
+region: RegionSpec,
+/**
+ * What the text reader made of it.
+ */
+text: RecordedText, }>;
+
+/**
  * A value drawn again at one window size, which it reads there exactly
  * instead of scaling its first drawing.
  */
@@ -700,10 +713,40 @@ y: number,
 likeness: number | null, }>;
 
 /**
+ * A search as the UI shows it.
+ */
+export type FoundView = DeepReadonly<{
+/**
+ * Its number in the session.
+ */
+id: number,
+/**
+ * The screenshot it searched.
+ */
+screenshot: number,
+/**
+ * Each find, top to bottom and left to right.
+ */
+finds: Array<FindView>,
+/**
+ * Finds past the most a search keeps.
+ */
+more: number,
+/**
+ * Runs in the characters' color of another size, left out.
+ */
+otherSizes: number, }>;
+
+/**
  * What one screenshot's region shows, typed by the user so a reference
  * learns its characters.
  */
-export type Label = DeepReadonly<{ screenshot: number, text: string, }>;
+export type Label = DeepReadonly<{ screenshot: number,
+/**
+ * Where on the screenshot the text shows, when it is not the spec's
+ * region, as for text found like a sample elsewhere on it.
+ */
+region?: RegionSpec, text: string, }>;
 
 /**
  * The pixels of one kind in the rectangle asked about.

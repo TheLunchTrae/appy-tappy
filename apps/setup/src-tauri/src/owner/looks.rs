@@ -58,6 +58,7 @@ mod tests {
     use crate::pixels;
     use crate::recording::Text;
     use crate::recording::looks::MAX_LOOKS;
+    use crate::recording::ocr;
 
     use super::*;
 
@@ -418,12 +419,12 @@ mod tests {
             .ask(start_readings(false))
             .expect("records readings");
         harness.deliver(&mut handler, Ok(&frame_image()));
-        let jobs: Vec<(u64, usize)> = harness
+        let jobs: Vec<(ocr::Source, usize)> = harness
             .jobs
             .try_iter()
-            .map(|job| (job.recording, job.index))
+            .map(|job| (job.source, job.index))
             .collect();
-        assert_eq!(jobs, [(1, 0)]);
+        assert_eq!(jobs, [(ocr::Source::Recording(1), 0)]);
 
         harness.ask(start_looks).expect("records looks instead");
         assert_eq!(
@@ -457,12 +458,12 @@ mod tests {
             .expect("records readings again");
         assert_eq!(harness.looks(), None, "the recording of looks is gone");
         harness.deliver(&mut handler, Ok(&frame_image()));
-        let jobs: Vec<(u64, usize)> = harness
+        let jobs: Vec<(ocr::Source, usize)> = harness
             .jobs
             .try_iter()
-            .map(|job| (job.recording, job.index))
+            .map(|job| (job.source, job.index))
             .collect();
-        assert_eq!(jobs, [(3, 0)]);
+        assert_eq!(jobs, [(ocr::Source::Recording(3), 0)]);
         // Text for the first recording of readings, which a recording of
         // looks replaced, and for the recording of looks' own number.
         for recording in [1, 2] {

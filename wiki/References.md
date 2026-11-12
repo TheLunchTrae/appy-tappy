@@ -36,7 +36,8 @@ select **Capture this window**, as the first step of
    [Draw a region](Values.md#draw-the-region) around text on a screenshot,
    then type what it shows, such as `87%`. AppyTappy learns the shape of each
    character from what you type. Label screenshots until
-   **Characters it knows** shows every digit the numbers need, or
+   **Characters it knows** shows every digit the numbers need,
+   [find more like it](#find-more-like-it) on the same screenshot, or
    [record the region](#record-readings) to collect them as they show.
 4. **Save.** Select **Save reference**.
 
@@ -53,6 +54,32 @@ To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;
 new labels and readings add to it. Changing its color or tolerance changes how
 every value that reads with it reads, and the editor names them.
+
+## Find more like it
+
+A screen often shows more numbers in the same font than the one you drew the
+region around, such as a stats panel. After you draw the region and pick the
+**Characters' color**, select **Find more like it** under the text you typed.
+AppyTappy looks on the screenshot for other text in that color and as tall as
+the text in the region, and reads each as text.
+
+1. **Check what it found.** Each find shows numbered on the screenshot and in
+   the list, with the text AppyTappy read. Fix any text it got wrong, and clear
+   the box beside any find that is not in the font, such as a label. When
+   AppyTappy reads a letter while the reference has learned none, such as a `0`
+   read as `O`, the find is flagged until you type its text, and so is text
+   that gives one shape two different characters: fix it or leave it out.
+2. **Add them.** Select the button that says how many you add, such as
+   **Add 3 to the reference**. They teach the reference like labeled
+   screenshots, and **Characters it knows** outlines the characters only the
+   finds would teach until you add them. **Not these** closes the list without
+   adding any, and **Remove found text** takes the added finds back out.
+
+Draw the region tightly around the text first, since the finds' characters
+must be about as tall as the text in it; a comma or a mark below them does not
+count. Text of another size is skipped, and the list says how much. One search
+lists at most 12 finds; add those, then select **Find more like it** again, and
+it lists the rest, leaving out what you added.
 
 ## What a reference can't learn
 
