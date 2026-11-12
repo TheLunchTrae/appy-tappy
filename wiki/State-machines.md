@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Six guards drop such stale messages:
+it was about has gone. Seven guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -33,6 +33,9 @@ it was about has gone. Six guards drop such stale messages:
   reader sends back for a discarded recording is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **Attempt numbers.** The click target screen numbers each **Find it now**
+  and **Click it now**, and drops an answer whose number is not that of the
+  try under way.
 - **The open flow.** A save's answer closes the setup app's flow only while
   the flow that saved is still the one open (`afterFlow` in
   `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
@@ -902,6 +905,60 @@ stateDiagram-v2
   it ends, as [Pages and flows](#pages-and-flows) describes. **Change window**
   in the capture opens a new picker with the same application, and with the
   same window picked when several fit.
+
+### Click target tries
+
+The click target screen (`apps/setup/src/components/ClickTarget.tsx`) tries a
+target with **Find it now** and **Click it now**. `Try` in
+`apps/setup/src/lib/clickTry.ts` names the states, and `tryStep` there is the
+transition.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Finding: Find it now
+    Idle --> Clicking: Click it now
+    Answered --> Finding: Find it now
+    Answered --> Clicking: Click it now
+    Failed --> Finding: Find it now
+    Failed --> Clicking: Click it now
+    Finding --> Answered: where the click would land
+    Finding --> Failed: why it lands nowhere
+    Clicking --> Answered: the click was sent, and to which window
+    Clicking --> Failed: why it was not sent
+    Finding --> Idle: the target changes
+    Answered --> Idle: the target changes
+    Failed --> Idle: the target changes
+```
+
+- **Finding** and **Clicking.** The try starts with the press and keeps its
+  attempt number. A drawn picture is kept first, then the owner thread is
+  asked, and the screen's buttons wait meanwhile. Every way the try can end
+  answers it, a target that is not set up included, so none stays under way.
+  Both commands end by themselves. The owner waits at most a second for a
+  picture's frame. For a click sent to the window it then waits at most half
+  a second for the windows' answers to where the place is on them, and for a
+  click with the cursor about a tenth of a second while the buttons are held.
+- **Clicking locks the target.** A click that is being sent is a real click,
+  so from the press until its answer the button, **How to click**, where it
+  clicks, and the application cannot change. A click that was sent therefore
+  always shows its answer. `tryStep` also keeps **Clicking** through a change
+  that reaches it all the same.
+- **Answered.** **Find it now** answers where the click would land, which the
+  live view marks. **Click it now** answers that the click was sent and names
+  the window. When that is another window than the one the screen shows, the
+  screen offers **Look again**.
+- **Failed.** The screen shows why, such as a picture that is not found or a
+  window that refused the click. The next try or a change of the target
+  leaves the state.
+- **The target changes.** A change of where the click lands goes back to
+  **Idle** from every state but **Clicking**. A change of the button or of
+  **How to click** does too, except that it keeps where **Find it now** said
+  the click would land, since neither moves that place.
+- **A late answer.** The settings stay enabled while **Find it now** looks,
+  which clicks nothing. An answer whose attempt number is not that of the
+  try under way is dropped, so where an earlier target would land never
+  shows for the target as it is set up now.
 
 ### Update notice
 

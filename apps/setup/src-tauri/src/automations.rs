@@ -404,8 +404,8 @@ mod tests {
         SizeDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
-        ActionDef, ClickAtDef, ClickButtonDef, ComparisonDef, FORMAT as AUTOMATIONS_FORMAT,
-        MediaCommandDef, PointDef, TargetDef, WhenDef,
+        ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef,
+        FORMAT as AUTOMATIONS_FORMAT, MediaCommandDef, PointDef, TargetDef, WhenDef,
     };
     use appytappy_config::click::InvalidClick;
     use appytappy_config::window_match::WindowFacts;
@@ -840,6 +840,7 @@ mod tests {
         clicking.actions = vec![ActionDef::Click {
             app: "example".to_owned(),
             button: ClickButtonDef::Left,
+            delivery: ClickDeliveryDef::Cursor,
             return_focus: true,
             at: ClickAtDef::Picture {
                 image: image.to_owned(),

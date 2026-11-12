@@ -1,15 +1,13 @@
-//! What actions act on: the media sessions, volume controls, focused
-//! process, windows, and cursor that [`Controls`] lists, and the calls that
-//! act on them.
+//! What actions act on: the media sessions and volume controls that
+//! [`Controls`] lists, the calls that act on them, and the [`Input`] that
+//! key presses and clicks go through.
 
 use std::io;
 use std::path::Path;
-use std::time::Duration;
 
-use appytappy_config::action::{MediaCommand, Modifier, OpenTarget, VolumeLevel};
-use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::action::{MediaCommand, OpenTarget, VolumeLevel};
 
-use crate::{Press, Stroke};
+use crate::Input;
 
 /// A media session as Windows reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +37,11 @@ pub trait Controls {
     /// A volume control: a device's or one audio session's. Two keys are
     /// equal when they name the same control.
     type Volume: PartialEq;
+    /// The keyboard, the mouse, and the windows.
+    type Input: Input;
+
+    /// The input that key presses and clicks go through.
+    fn input(&mut self) -> &mut Self::Input;
 
     /// The session Windows considers current, if any.
     ///
@@ -85,88 +88,6 @@ pub trait Controls {
     /// Returns the operating system's error, including for a device that is
     /// unplugged, which may come back.
     fn set_volume(&mut self, control: &Self::Volume, level: VolumeLevel) -> io::Result<bool>;
-
-    /// The process whose window has the keyboard focus, or `None` when no
-    /// window has it.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn focused_process(&mut self) -> io::Result<Option<ProcessId>>;
-
-    /// The modifiers the user is holding down now.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>>;
-
-    /// Sends `strokes`, in order, to whichever window has the keyboard
-    /// focus. Answers how many of them the operating system took, from the
-    /// first; it takes fewer when another program blocks input.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn send_strokes(&mut self, strokes: &[Stroke]) -> io::Result<usize>;
-
-    /// The window in front, the one with the keyboard focus, or `None` when
-    /// no window has it.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn front_window(&mut self) -> io::Result<Option<u64>>;
-
-    /// The top-level window that shows at (`x`, `y`) in screen pixels, the
-    /// one a click there would land in, or `None` where none shows.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn window_at(&mut self, x: i32, y: i32) -> io::Result<Option<u64>>;
-
-    /// Asks for `window` to come to the front with the keyboard focus.
-    /// Returns whether it is in front after.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn bring_to_front(&mut self, window: u64) -> io::Result<bool>;
-
-    /// Where the cursor is, in screen pixels.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn cursor(&mut self) -> io::Result<(i32, i32)>;
-
-    /// Moves the cursor to (`x`, `y`) in screen pixels.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error, such as when another program
-    /// blocks input.
-    fn move_cursor(&mut self, x: i32, y: i32) -> io::Result<()>;
-
-    /// Whether a mouse button is held down now.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn buttons_held(&mut self) -> io::Result<bool>;
-
-    /// Sends `presses`, in order, where the cursor is. Answers how many of
-    /// them the operating system took, from the first; it takes fewer when
-    /// another program blocks input.
-    ///
-    /// # Errors
-    ///
-    /// Returns the operating system's error.
-    fn send_presses(&mut self, presses: &[Press]) -> io::Result<usize>;
-
-    /// Waits for `time`, while pressed keys are held down.
-    fn hold(&mut self, time: Duration);
 
     /// Opens `target` the way opening it from File Explorer would: a program
     /// runs, a file opens in the program its type is set to, and a link
