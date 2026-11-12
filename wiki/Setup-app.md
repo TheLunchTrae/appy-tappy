@@ -390,7 +390,7 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   asks again at once while it has more to read. The view keeps each count for
   the whole file and by the second for its last 10 minutes, the newest 20,000
   times of each kind with when each happened, and the newest 100,000 rows,
-  each name held once and compacted as old names pile up, so a long trace
+  each name held once and let go with the last row that uses it, so a long trace
   holds about the same amount, more only for each value and automation it
   names. A range is measured back from the newest row. The view starts over
   when the file shrinks, and `close_trace` lets it go as the page leaves its

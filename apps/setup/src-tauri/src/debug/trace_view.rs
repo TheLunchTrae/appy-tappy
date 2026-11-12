@@ -241,42 +241,70 @@ type Name = Arc<str>;
 /// An application and a value's or automation's name.
 type Key = (Name, Name);
 
-/// Each text the rows hold, held once and named by its place.
+/// Each text the held rows use, held once and named by its place, with how
+/// many of them use it. A text no held row uses any more is let go and its
+/// place used again, so names of dropped rows, such as values read once, never
+/// pile up.
 #[derive(Debug, Default)]
 struct Names {
     places: HashMap<Name, u32>,
-    names: Vec<Name>,
+    /// Each place's text and how many held rows use it.
+    entries: Vec<(Name, u32)>,
+    /// The places let go, to use again.
+    free: Vec<u32>,
 }
 
 impl Names {
-    /// The place of `text`, added if it is new.
-    fn place(&mut self, text: &str) -> u32 {
-        if let Some(place) = self.places.get(text) {
-            return *place;
+    /// The place of `text` for one more held row, added if it is new.
+    fn hold(&mut self, text: &str) -> u32 {
+        if let Some(&place) = self.places.get(text) {
+            if let Some(entry) = self.entries.get_mut(place as usize) {
+                entry.1 = entry.1.saturating_add(1);
+            }
+            return place;
         }
         let name: Name = Arc::from(text);
-        let place = u32::try_from(self.names.len()).unwrap_or(u32::MAX);
-        self.names.push(Arc::clone(&name));
+        let entry = (Arc::clone(&name), 1);
+        let place = if let Some(place) = self.free.pop() {
+            if let Some(free) = self.entries.get_mut(place as usize) {
+                *free = entry;
+            }
+            place
+        } else {
+            self.entries.push(entry);
+            u32::try_from(self.entries.len().saturating_sub(1)).unwrap_or(u32::MAX)
+        };
         self.places.insert(name, place);
         place
     }
 
-    /// `text`, held once.
-    fn name(&mut self, text: &str) -> Name {
-        let place = self.place(text);
-        self.names
-            .get(place as usize)
-            .map_or_else(|| Arc::from(text), Arc::clone)
+    /// Lets go of one held row's use of `place`, and of its text once no
+    /// held row uses it.
+    fn release(&mut self, place: u32) {
+        let Some(entry) = self.entries.get_mut(place as usize) else {
+            return;
+        };
+        entry.1 = entry.1.saturating_sub(1);
+        if entry.1 == 0 {
+            self.places.remove(&*entry.0);
+            entry.0 = Name::default();
+            self.free.push(place);
+        }
+    }
+
+    /// `text` as held, or a new copy when no held row uses it.
+    fn name(&self, text: &str) -> Name {
+        self.places
+            .get_key_value(text)
+            .map_or_else(|| Arc::from(text), |(name, _)| Arc::clone(name))
     }
 
     /// The text at `place`. Every place a row holds came from
-    /// [`Self::place`], so it is always there.
+    /// [`Self::hold`], so it is always there.
     fn get(&self, place: u32) -> &str {
-        self.names.get(place as usize).map_or("", |name| name)
-    }
-
-    fn len(&self) -> usize {
-        self.names.len()
+        self.entries
+            .get(place as usize)
+            .map_or("", |(name, _)| name)
     }
 }
 
@@ -306,6 +334,11 @@ impl Tally {
     fn add(&mut self, time_ns: u64, count: u64) {
         self.total = self.total.saturating_add(count);
         let second = time_ns / NS_PER_S;
+        // Most rows land in the newest second.
+        if let Some(newest) = self.seconds.back_mut().filter(|newest| newest.0 == second) {
+            newest.1 = newest.1.saturating_add(count);
+            return;
+        }
         // Rows from different threads can arrive a little out of order, so
         // a second can come after a later one.
         let at = self.seconds.iter().rposition(|(each, _)| *each <= second);
@@ -402,8 +435,6 @@ pub(crate) struct TraceView {
     reader: RowReader,
     bytes: u64,
     names: Names,
-    /// How many names are held before they are compacted.
-    compact_at: usize,
     rows: VecDeque<Row>,
     total: u64,
     first_ns: Option<u64>,
@@ -433,7 +464,6 @@ impl TraceView {
             reader,
             bytes: 0,
             names: Names::default(),
-            compact_at: ROWS.saturating_mul(2),
             rows: VecDeque::new(),
             total: 0,
             first_ns: None,
@@ -498,7 +528,8 @@ impl TraceView {
         self.first_ns = Some(self.first_ns.map_or(time, |first| first.min(time)));
         self.newest_ns = self.newest_ns.max(time);
         self.recorded.insert(category);
-        // Names the rows hold already, so a value or automation seen before
+        self.hold(row, category);
+        // The held row holds these names, so a value or automation seen before
         // costs no new text.
         let key: Key = (self.names.name(&row.app), self.names.name(&row.item));
         let from_frame = row.cause.map(|cause| time.saturating_sub(cause));
@@ -545,13 +576,16 @@ impl TraceView {
             "dropped" => self.dropped.add(time, row.value.parse().unwrap_or(0)),
             _ => {},
         }
-        self.hold(row, category);
     }
 
     /// Holds `row` for the rows table, dropping the oldest past [`ROWS`].
     fn hold(&mut self, row: &TraceRow, category: TraceCategory) {
-        if self.rows.len() == ROWS {
-            self.rows.pop_front();
+        if self.rows.len() == ROWS
+            && let Some(dropped) = self.rows.pop_front()
+        {
+            for text in dropped.texts {
+                self.names.release(text);
+            }
         }
         let texts = [
             &row.thread,
@@ -561,7 +595,7 @@ impl TraceView {
             &row.value,
             &row.detail,
         ]
-        .map(|text| self.names.place(text));
+        .map(|text| self.names.hold(text));
         self.rows.push_back(Row {
             time_ns: row.time_ns,
             took_ns: row.took_ns,
@@ -569,25 +603,6 @@ impl TraceView {
             category,
             texts,
         });
-        if self.names.len() > self.compact_at {
-            self.compact();
-        }
-    }
-
-    /// Holds again only the names the held rows use, as names of dropped
-    /// rows, such as values read once, would otherwise pile up.
-    fn compact(&mut self) {
-        let mut names = Names::default();
-        for row in &mut self.rows {
-            for text in &mut row.texts {
-                *text = names.place(self.names.get(*text));
-            }
-        }
-        // Held rows can use more names than rows, so the next compaction waits
-        // until as many names again were added, keeping each one's cost
-        // spread over the rows that led to it.
-        self.compact_at = names.len().saturating_mul(2).max(ROWS.saturating_mul(2));
-        self.names = names;
     }
 
     /// Drops the counts by the second that no range reads any more.
@@ -699,9 +714,9 @@ impl TraceView {
             Vec::new()
         } else {
             self.names
-                .names
+                .entries
                 .iter()
-                .map(|name| name.to_lowercase().contains(&needle))
+                .map(|(name, _)| name.to_lowercase().contains(&needle))
                 .collect()
         };
         let app = filter
@@ -1254,11 +1269,15 @@ mod tests {
             view.add(&each(index));
         }
         assert_eq!(view.rows.len(), ROWS);
-        // Each row names its own value, so without compacting there would be
+        // Each row names its own value, so without letting names go there would be
         // a name for every row read.
-        let held = view.names.names.len();
-        assert!(held < count, "{held}");
-        assert!(held <= view.compact_at, "{held}");
+        // The held rows' own values, and the five texts every row shares.
+        assert_eq!(view.names.places.len(), ROWS + 5);
+        assert!(
+            view.names.entries.len() <= ROWS + 6,
+            "{}",
+            view.names.entries.len()
+        );
         let newest = view.rows(&RowFilter {
             search: format!("value {}", count - 1),
             ..every_row(TraceRange::Whole)
