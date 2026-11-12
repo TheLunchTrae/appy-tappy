@@ -166,8 +166,8 @@ impl DraftStore {
     /// Saves `draft` over the draft `id`, or as a new one, with `screenshots`,
     /// each a PNG with the index it has in its capture; a draft without
     /// screenshots keeps none. Another draft of the same saved automation, application,
-    /// or reference goes, so the item has one; a value can have a fix draft
-    /// for each window size, so fixes are left alone. Answers the draft's ID.
+    /// or reference goes, so the item has one; a value can have several fix
+    /// drafts, so fixes are left alone. Answers the draft's ID.
     ///
     /// The draft is written to a folder of its own, each file flushed to the
     /// disk, and only then swapped in for the old one, so a save that fails
