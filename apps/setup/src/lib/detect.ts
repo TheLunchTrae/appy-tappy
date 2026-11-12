@@ -171,7 +171,7 @@ function foundText(proposal: Proposal, position: (index: number) => number): str
   }
   if (proposal.around) {
     said.push(
-      'A label, an icon, or something else lies in part of the region, so AppyTappy went by the strips that show the bar from end to end. The marks leave its pixels out unless they have one of the two colors.',
+      'Only some strips of the region show the bar from end to end, so AppyTappy went by those. What lies in the rest, such as a label, an icon, or the background, is left out of the marks unless it has one of the two colors.',
     );
   }
   if (proposal.rough) {

@@ -219,17 +219,29 @@ what it is for.
   region's lanes to be left (`CLEAR`). Each of those lanes spans the bar by
   itself, so where they lie across the bar does not matter. The same rules
   then hold over those lanes on every screenshot, with the reader still
-  reading the whole region. Stripes, segments, and a fading fill touch every
-  lane, so no lane shows the bar and they stay refused. The proposal says
-  that it went by part of the region.
+  reading the whole region. A fill that is striped, segmented, or fading in
+  every lane leaves no such lane and stays refused. One that is so in only
+  some lanes leaves the others, and is held to the even spread below. The
+  proposal says that it went by part of the region.
+- **Even spread.** The reader divides the pixels of the filled color by
+  those of either color, so what lies over part of the bar and has neither
+  color shifts the reading by an amount that depends on the fill: a label,
+  an icon, a shine in another shade. A screenshot shows that at one fill
+  only, where the reader may well agree. So on every screenshot that shows
+  the bar, the pixels the reader counts have to be spread evenly along the
+  bar: were the fill to end at any column, the share of the counted pixels
+  before that column may differ from the column's place along the bar by
+  no more than `AGREE`. A region that fails is refused, whichever way the
+  colors were found.
 
-A refusal carries a `NoBar` reason. The detector does not find a bar drawn
-as separate segments, a striped, textured, or fading fill, a bar with a
-trail between its parts, a bar under a label or an icon that leaves too few
-lanes free, or a bar that fills from its middle. A fill that fades so little along the bar
-that it stays one plain color is proposed, and every screenshot must still
-read with it. The reader reads some of those bars with hand-picked colors;
-supporting them here needs a wider detector, not another reader.
+A refusal carries a `NoBar` reason. The detector does not find a bar drawn as
+separate segments, a striped, textured, or fading fill, a bar with a trail
+between its parts, a bar under a label or an icon that leaves too few lanes
+free or takes the reader too far off at some fill, or a bar that fills from
+its middle. A fill that fades so little along the bar that it stays one plain
+color is proposed, and every screenshot must still read with it. The reader
+reads some of those bars with hand-picked colors; supporting them here needs a
+wider detector, not another reader.
 
 ## Read interval
 

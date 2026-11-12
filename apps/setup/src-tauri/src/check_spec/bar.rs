@@ -152,9 +152,18 @@ fn advice(reason: NoBar, drawn_on: usize, screenshot: impl Fn(usize) -> usize) -
         NoBar::NotABar => format!(
             "On screenshot {drawn}, the region does not look like a bar: one plain color from the left, or from the bottom of a tall region, and another plain color after it. If a label or an icon covers most of the bar's height, draw the region over a strip of the bar above or below it. Otherwise draw the region closely around the bar, or pick the colors by hand."
         ),
-        NoBar::Misread => format!(
-            "On screenshot {drawn}, the two colors found do not read the region as full as the bar looks: they also show beside the bar, or part of the bar has another shade. Draw the region closely around the bar, or pick the colors by hand."
-        ),
+        NoBar::Misread { image } => {
+            let other = screenshot(image).saturating_add(1);
+            format!(
+                "On screenshot {other}, the two colors found do not read the region as full as the bar looks: they also show beside the bar, or part of the bar has another shade. Draw the region closely around the bar, or pick the colors by hand."
+            )
+        },
+        NoBar::Uneven { image } => {
+            let other = screenshot(image).saturating_add(1);
+            format!(
+                "On screenshot {other}, something lies over part of the bar, such as a label, an icon, or a shine in another shade. The two colors read that screenshot right, but would read other fills wrong. Draw the region over a strip of the bar that is clear from end to end, or pick the colors by hand."
+            )
+        },
         NoBar::Differs { found_on, image } => {
             let found = screenshot(found_on).saturating_add(1);
             let other = screenshot(image).saturating_add(1);
@@ -486,6 +495,28 @@ mod tests {
     }
 
     #[test]
+    fn a_bar_with_something_over_part_of_it_is_declined_by_the_screenshots_name() {
+        // The first six columns of the bar's first row are white, on the
+        // second screenshot: pixels 32 to 37. At the fill it shows, the
+        // reader is 4 points off, and a fill that ends after those columns
+        // would read 18 for 30.
+        let mut bgra = screenshot(30, 15).as_bgra().to_vec();
+        bgra[128..152].fill(255);
+        let covered = Image::new(
+            Size {
+                width: 30,
+                height: 4,
+            },
+            bgra,
+        )
+        .expect("the same size");
+        assert_eq!(
+            declined(detect(&[screenshot(30, 15), covered], BAR, 0)),
+            "On screenshot 2, something lies over part of the bar, such as a label, an icon, or a shine in another shade. The two colors read that screenshot right, but would read other fills wrong. Draw the region over a strip of the bar that is clear from end to end, or pick the colors by hand."
+        );
+    }
+
+    #[test]
     fn a_reading_a_few_points_off_is_named_rough() {
         // Two of the bar's forty pixels, in different columns of its filled
         // part, are white: pixels 32 and 63 of the screenshot. So the reader
@@ -521,7 +552,7 @@ mod tests {
                 "On screenshot 3, the region does not look like a bar",
             ),
             (
-                NoBar::Misread,
+                NoBar::Misread { image: 2 },
                 "On screenshot 3, the two colors found do not read the region as full as the bar looks",
             ),
         ];

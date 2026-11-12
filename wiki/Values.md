@@ -109,23 +109,24 @@ bar, and proposes them only when they read every screenshot it looked at:
   you see, or take a screenshot at another fill and detect again.
 - A screenshot that shows neither color in the region, such as one of a
   menu, is named and not compared.
-- When something else lies in part of the region, such as a label or an
-  icon over the bar, or background beside it, it goes by the strips of the
-  region that show the bar from end to end, and says so. The tints then
-  leave the label's pixels out.
+- When only some strips of the region show the bar from end to end, because
+  a label or an icon lies over it or background beside it, it goes by those
+  strips and says so. The tints then leave the rest out, unless it has one
+  of the two colors.
 - When the colors read a screenshot a few points off where the bar ends on
   it, as a label or a soft edge on the bar causes, it says so.
 
 Under the colors, **These colors read** lists what each screenshot it looked
 at reads with them, such as **Screenshot 1: 72**. Compare each number with
-how full the bar looks on that screenshot. While
-**Mark what counts on the screenshot** is on, the screenshot shown has one
-tint over the pixels that count as filled and another over those that count
-as empty. Pixels with no tint, such as a border or a label, are left out. If
-a tint covers something beside the bar, draw the region more closely. A
-region with too many separate patches of the two colors to mark says so
-instead. The list and the tints follow the colors, so they show for colors
-you pick by hand too.
+how full the bar looks on that screenshot. While **Mark what counts on the
+screenshot** is on, the screenshot shown has one tint over the pixels that
+count as filled and another over those that count as empty. Pixels with no
+tint, such as a border or a label, are left out. The tints show what counts:
+if anything beside the bar is tinted as filled or empty, such as a second
+bar or a background in the same colors, draw the region more tightly around
+the bar. A region with too many separate patches of the two colors to mark
+says so instead. The list and the tints follow the colors, so they show for
+colors you pick by hand too.
 
 If you already picked a color by hand, **Detect the bar** asks before it
 replaces it, and the list and the tints show the detected colors meanwhile:
@@ -141,7 +142,13 @@ It proposes no colors, and says why and what to do, when:
   bar made of separate segments, a striped or textured fill, a fill that
   fades along the bar, and a label, an icon, or a busy background that
   leaves too few strips of the bar free from end to end. Around a label or
-  an icon, draw the region over a strip of the bar above or below it.
+  an icon, draw the region over a strip of the bar above or below it. Over
+  a busy background, draw the region closer to the bar.
+- Something lies over part of the bar, such as a large label, an icon at
+  one end, or a shine in another shade. The colors read the screenshot
+  right, but would read other fills wrong, because the bar's countable
+  pixels are not spread evenly along it. Draw the region over a strip of
+  the bar that is clear from end to end, or pick the colors by hand.
 - The two colors do not read the region as full as the bar looks: they also
   show beside the bar, or part of the bar has another shade. Draw the region
   more closely.

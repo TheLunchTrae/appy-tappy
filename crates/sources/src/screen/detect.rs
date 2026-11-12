@@ -28,6 +28,7 @@
 use std::error::Error;
 use std::fmt;
 use std::iter;
+use std::ops::Range;
 
 use super::Image;
 use super::check::{BarFill, BarPart, distance};
@@ -115,10 +116,21 @@ pub enum NoBar {
     /// The region is not one plain color and then another along its long
     /// side.
     NotABar,
-    /// The two colors read the region other than its layout looks, as when
+    /// The two colors read a screenshot other than its layout looks, as when
     /// something beside the bar has one of them or part of the bar has
     /// another shade.
-    Misread,
+    Misread {
+        /// The screenshot.
+        image: usize,
+    },
+    /// The two colors read a screenshot as its layout looks, but the
+    /// pixels they count are not spread evenly along the bar, as under
+    /// something that lies over part of it: at another fill the reader
+    /// would be further off than it may be.
+    Uneven {
+        /// The screenshot.
+        image: usize,
+    },
     /// The colors found on one screenshot do not read another, which shows
     /// one of them but not the bar in both, as a bar that changes color
     /// does.
@@ -141,9 +153,14 @@ impl fmt::Display for NoBar {
             Self::NotABar => formatter.write_str(
                 "the region is not one plain color and then another along its long side",
             ),
-            Self::Misread => {
-                formatter.write_str("the two colors read the region other than its layout looks")
-            },
+            Self::Misread { image } => write!(
+                formatter,
+                "the two colors read screenshot {image} other than its layout looks"
+            ),
+            Self::Uneven { image } => write!(
+                formatter,
+                "the two colors would misread screenshot {image} at another fill"
+            ),
             Self::Differs { found_on, image } => write!(
                 formatter,
                 "the colors of the bar on screenshot {found_on} do not read screenshot {image}"
@@ -202,7 +219,10 @@ impl NoBar {
     /// Whether the reason is about a bar that was found, which says more
     /// than why some lanes show none.
     const fn tells(self) -> bool {
-        matches!(self, Self::Misread | Self::Differs { .. })
+        matches!(
+            self,
+            Self::Misread { .. } | Self::Uneven { .. } | Self::Differs { .. }
+        )
     }
 }
 
@@ -219,7 +239,12 @@ fn clear_lanes(images: &[(usize, &Image)]) -> Vec<bool> {
     };
     let each = images.iter().map(|&(_, image)| {
         let strip = Strip::new(image);
-        let clear = (0..strip.lanes()).map(|lane| two_parts(&strip.lane(lane)).is_ok());
+        let clear = (0..strip.lanes()).map(|lane| {
+            // Most lanes of a busy picture are told apart by a look at
+            // their start, without gathering their colors.
+            !broken(strip.lane(lane), strip.length())
+                && two_parts(&strip.lane(lane).collect::<Vec<Rgb>>()).is_ok()
+        });
         clear.collect::<Vec<bool>>()
     });
     let on_all = each.filter(enough).reduce(|mut all, lanes| {
@@ -231,24 +256,56 @@ fn clear_lanes(images: &[(usize, &Image)]) -> Vec<bool> {
     on_all.filter(enough).unwrap_or_default()
 }
 
+/// Whether `colors`, the `length` colors of a lane, change more often than
+/// those of a lane that lays out as a bar can, which saves gathering them.
+///
+/// Two neighbors in one part are both as near the part's color as one plain
+/// color stays, so no further apart than twice that. Neighbors further
+/// apart lie at the one edge between the parts, or among the colors that
+/// belong to neither part, which are no more than [`laid_out`] lets lie at
+/// the two ends. More such neighbors than that, and no two colors lay the
+/// lane out.
+fn broken(colors: impl Iterator<Item = Rgb> + Clone, length: usize) -> bool {
+    let ends = length
+        .saturating_mul(100_usize.saturating_sub(COVER))
+        .checked_div(100)
+        .unwrap_or_default();
+    let most = ends.saturating_add(EDGE).saturating_add(1);
+    let neighbors = colors.clone().zip(colors.skip(1));
+    let mut breaks = neighbors.filter(|&(one, next)| distance(one, next) > SAME.saturating_mul(4));
+    breaks.nth(most).is_some()
+}
+
 /// The bar that the `kept` lanes of `images` show: the colors of the first
 /// image whose layout shows one, when they read every image.
+///
+/// # Errors
+///
+/// Returns why the first image shows no bar when none does, or rather what
+/// is wrong with a bar that one of them shows; or which image the colors
+/// found do not read.
 fn propose(images: &[(usize, &Image)], kept: &[bool]) -> Result<BarProposal, NoBar> {
     let seen: Vec<(usize, &Image, Vec<Rgb>)> = images
         .iter()
         .map(|&(number, image)| (number, image, Strip::new(image).columns(kept)))
         .collect();
-    let mut first_reason = None;
+    let mut reasons = Vec::new();
     let found = seen.iter().find_map(|(number, image, columns)| {
-        let reason = match from_layout(image, columns) {
-            Ok(bar) => return Some((*number, bar)),
-            Err(reason) => reason,
-        };
-        first_reason.get_or_insert(reason);
-        None
+        match from_layout(*number, image, columns) {
+            Ok(bar) => Some((*number, bar)),
+            Err(reason) => {
+                reasons.push(reason);
+                None
+            },
+        }
     });
-    // No image at all shows no bar.
-    let (found_on, bar) = found.ok_or_else(|| first_reason.unwrap_or(NoBar::NotABar))?;
+    let Some((found_on, bar)) = found else {
+        // A reason about a bar that one image shows says more than why the
+        // first shows none. No image at all shows no bar.
+        let telling = reasons.iter().find(|reason| reason.tells());
+        let reason = telling.or_else(|| reasons.first()).copied();
+        return Err(reason.unwrap_or(NoBar::NotABar));
+    };
     let mut shown_on = Vec::new();
     // The fills of the images that show both parts.
     let mut partly: Vec<f64> = Vec::new();
@@ -257,6 +314,7 @@ fn propose(images: &[(usize, &Image)], kept: &[bool]) -> Result<BarProposal, NoB
         let (shown, off) = match verdict(image, columns, bar) {
             Verdict::Shows { shown, off } => (shown, off),
             Verdict::Absent => continue,
+            Verdict::Uneven => return Err(NoBar::Uneven { image: *number }),
             Verdict::Differs => {
                 return Err(NoBar::Differs {
                     found_on,
@@ -284,12 +342,13 @@ fn propose(images: &[(usize, &Image)], kept: &[bool]) -> Result<BarProposal, NoB
 
 /// The bar that `columns`, the columns of `image`, lay out as, its two main
 /// colors with the one at the start as the filled one, when the reader reads
-/// `image` as full as that layout looks.
-fn from_layout(image: &Image, columns: &[Rgb]) -> Result<BarFill, NoBar> {
+/// `image`, the screenshot numbered `number`, as that layout looks.
+fn from_layout(number: usize, image: &Image, columns: &[Rgb]) -> Result<BarFill, NoBar> {
     let bar = two_parts(columns)?;
     match verdict(image, columns, bar) {
         Verdict::Shows { .. } => Ok(bar),
-        Verdict::Absent | Verdict::Differs => Err(NoBar::Misread),
+        Verdict::Uneven => Err(NoBar::Uneven { image: number }),
+        Verdict::Absent | Verdict::Differs => Err(NoBar::Misread { image: number }),
     }
 }
 
@@ -297,7 +356,7 @@ fn from_layout(image: &Image, columns: &[Rgb]) -> Result<BarFill, NoBar> {
 /// end: their two main colors, the one at the start as the filled one.
 fn two_parts(colors: &[Rgb]) -> Result<BarFill, NoBar> {
     let pair = two_colors(&classes(colors.iter().copied()), part(colors.len()))?;
-    let both = |bar: &BarFill| matches!(laid_out(colors, *bar), Some(Shown::Both { .. }));
+    let both = |bar: &BarFill| matches!(laid_out(colors, *bar), Some((Shown::Both { .. }, _)));
     [pair, pair.turned()]
         .into_iter()
         .find(both)
@@ -348,12 +407,12 @@ impl Shown {
     }
 }
 
-/// What `columns` show of `bar`, or `None` when they do not lay out as it:
-/// its filled part, then at most an edge of columns that belong to neither
-/// part, then its empty part. One part alone is a full or an empty bar. The
-/// columns before and after belong to neither part, and are no more of the
-/// region than a border is.
-fn laid_out(columns: &[Rgb], bar: BarFill) -> Option<Shown> {
+/// What `columns` show of `bar` and which of them it takes up, or `None`
+/// when they do not lay out as it: its filled part, then at most an edge
+/// of columns that belong to neither part, then its empty part. One part
+/// alone is a full or an empty bar. The columns before and after belong to
+/// neither part, and are no more of the region than a border is.
+fn laid_out(columns: &[Rgb], bar: BarFill) -> Option<(Shown, Range<usize>)> {
     let parts: Vec<Option<BarPart>> = columns.iter().map(|&column| belongs(bar, column)).collect();
     let start = parts.iter().position(Option::is_some)?;
     let end = parts.iter().rposition(Option::is_some)?;
@@ -368,20 +427,44 @@ fn laid_out(columns: &[Rgb], bar: BarFill) -> Option<Shown> {
             _ => runs.push((part, 1)),
         }
     }
-    match *runs.as_slice() {
-        [(Some(BarPart::Filled), _)] => Some(Shown::Filled),
-        [(Some(BarPart::Empty), _)] => Some(Shown::Empty),
+    let shown = match *runs.as_slice() {
+        [(Some(BarPart::Filled), _)] => Shown::Filled,
+        [(Some(BarPart::Empty), _)] => Shown::Empty,
         [
             (Some(BarPart::Filled), filled),
             (Some(BarPart::Empty), empty),
-        ] => Some(Shown::Both { filled, empty }),
+        ] => Shown::Both { filled, empty },
         [
             (Some(BarPart::Filled), filled),
             (None, edge),
             (Some(BarPart::Empty), empty),
-        ] if edge <= EDGE => Some(Shown::Both { filled, empty }),
-        _ => None,
-    }
+        ] if edge <= EDGE => Shown::Both { filled, empty },
+        _ => return None,
+    };
+    Some((shown, start..start.saturating_add(inner.len())))
+}
+
+/// Whether the pixels of `image` that the reader counts with `bar` are
+/// spread evenly along `extent`, the columns the bar takes up.
+///
+/// The reader divides the pixels of the filled color by those of either
+/// color. So were the fill to end at a column, it would read the share of
+/// the countable pixels that lie before that column, while the fill would
+/// be that column's place along the bar. Where something lies over part of
+/// the bar, such as a label, an icon, or a shine of another color, those
+/// two come apart, though the reader agrees with the layout at the fill the
+/// screenshot shows. They may differ by [`AGREE`] at no column.
+fn spread_evenly(image: &Image, bar: BarFill, extent: &Range<usize>) -> bool {
+    let counted = Strip::new(image).counted(bar);
+    let total: usize = counted.iter().sum();
+    let mut before: usize = counted.iter().take(extent.start).sum();
+    let mut along = counted.iter().skip(extent.start);
+    (0..=extent.len()).all(|place| {
+        let reads = before as f64 * 100.0 / total as f64;
+        let means = place as f64 * 100.0 / extent.len() as f64;
+        before = before.saturating_add(along.next().copied().unwrap_or_default());
+        (reads - means).abs() <= AGREE
+    })
 }
 
 /// How one screenshot of a region stands to a bar's two colors.
@@ -392,6 +475,10 @@ enum Verdict {
     Shows { shown: Shown, off: f64 },
     /// It shows neither color, as a screenshot of something else does.
     Absent,
+    /// It shows the bar and the reader agrees, but the reader would not at
+    /// other fills: the pixels it counts are not spread evenly along the
+    /// bar.
+    Uneven,
     /// It shows one of the colors on a part's worth of columns, but not
     /// the bar in both, or the reader reads it otherwise than it looks.
     Differs,
@@ -399,7 +486,7 @@ enum Verdict {
 
 /// How `image`, whose columns are `columns`, stands to `bar`.
 fn verdict(image: &Image, columns: &[Rgb], bar: BarFill) -> Verdict {
-    let Some(shown) = laid_out(columns, bar) else {
+    let Some((shown, extent)) = laid_out(columns, bar) else {
         let either = columns
             .iter()
             .filter(|&&column| belongs(bar, column).is_some());
@@ -412,10 +499,12 @@ fn verdict(image: &Image, columns: &[Rgb], bar: BarFill) -> Verdict {
     let off = bar
         .percent(image)
         .map_or(f64::INFINITY, |reads| (reads.raw() - shown.fill()).abs());
-    if off <= AGREE {
+    if off > AGREE {
+        Verdict::Differs
+    } else if spread_evenly(image, bar, &extent) {
         Verdict::Shows { shown, off }
     } else {
-        Verdict::Differs
+        Verdict::Uneven
     }
 }
 
@@ -509,11 +598,34 @@ impl<'a> Strip<'a> {
             .collect()
     }
 
+    /// How many pixels of each column the reader counts with `bar`, from
+    /// the start. It goes through the image row by row, as it is stored.
+    fn counted(self, bar: BarFill) -> Vec<usize> {
+        let mut counted = vec![0_usize; self.length()];
+        for (row, pixels) in self.image.rows().enumerate() {
+            let counts = pixels
+                .iter()
+                .map(|&pixel| usize::from(bar.part(color(pixel)).is_some()));
+            if self.tall {
+                // A row of a tall region is one column, counted from the
+                // bottom.
+                let last = self.length().checked_sub(1);
+                let column = last.and_then(|last| last.checked_sub(row));
+                if let Some(count) = column.and_then(|column| counted.get_mut(column)) {
+                    *count = counts.sum();
+                }
+            } else {
+                for (count, one) in counted.iter_mut().zip(counts) {
+                    *count = count.saturating_add(one);
+                }
+            }
+        }
+        counted
+    }
+
     /// The colors of lane `lane`, from the start.
-    fn lane(self, lane: usize) -> Vec<Rgb> {
-        (0..self.length())
-            .filter_map(|column| self.at(column, lane))
-            .collect()
+    fn lane(self, lane: usize) -> impl Iterator<Item = Rgb> + Clone + 'a {
+        (0..self.length()).filter_map(move |column| self.at(column, lane))
     }
 }
 
@@ -728,6 +840,13 @@ mod tests {
         assert!((reads(&tall, &[]) - 30.0).abs() < 1e-9);
         let hanging = picture(8, 100, |_, y| if y < 30 { GREEN } else { GRAY });
         assert_eq!(detect_bar(&hanging, &[]), Ok(alone(GRAY, GREEN)));
+        // What is neither part lies at one end only, the top.
+        let under = picture(8, 100, |_, y| match y {
+            0..15 => WHITE,
+            15..70 => GRAY,
+            _ => GREEN,
+        });
+        assert_eq!(detect_bar(&under, &[]), Ok(alone(GREEN, GRAY)));
         // A square region counts as wide.
         let square = picture(12, 12, |x, _| if x < 6 { GREEN } else { GRAY });
         assert_eq!(detect_bar(&square, &[]), Ok(alone(GREEN, GRAY)));
@@ -1054,7 +1173,7 @@ mod tests {
                 GRAY
             }
         });
-        assert_eq!(detect_bar(&image, &[]), Err(NoBar::Misread));
+        assert_eq!(detect_bar(&image, &[]), Err(NoBar::Misread { image: 0 }));
     }
 
     /// A bar half full, but for the first of its `lanes` lanes, which has
@@ -1089,7 +1208,10 @@ mod tests {
         );
         // One lane in 10 is 5 points off, the most there may be.
         assert_eq!(detect_bar(&with_an_empty_lane(10), &[]), Ok(rough));
-        assert_eq!(detect_bar(&with_an_empty_lane(9), &[]), Err(NoBar::Misread));
+        assert_eq!(
+            detect_bar(&with_an_empty_lane(9), &[]),
+            Err(NoBar::Misread { image: 0 })
+        );
     }
 
     #[test]
@@ -1184,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn something_over_part_of_the_bar_is_looked_around_on_every_screenshot() {
+    fn something_over_the_bar_on_another_screenshot_is_refused() {
         let cream = Rgb {
             red: 255,
             green: 255,
@@ -1197,18 +1319,19 @@ mod tests {
                 _ => GRAY,
             })
         };
-        // Six lanes of twenty stay free of it, and it hides as much of one
-        // part as of the other, so the reader still reads a half.
-        let found = BarProposal {
-            shown_on: vec![0, 1],
-            ..around()
-        };
+        // It hides as much of one part as of the other, so the reader
+        // still reads a half, but a fill that ends beside it would not read
+        // right.
         assert_eq!(
             detect_bar(&bar(100, 20, 50), &[tooltip(30)]),
-            Ok(found.clone())
+            Err(NoBar::Uneven { image: 1 })
         );
-        assert_eq!(detect_bar(&tooltip(30), &[bar(100, 20, 50)]), Ok(found));
-        // Over the filled part alone it takes the reader too far off.
+        assert_eq!(
+            detect_bar(&tooltip(30), &[bar(100, 20, 50)]),
+            Err(NoBar::Uneven { image: 0 })
+        );
+        // Over the filled part alone it takes the reader too far off as
+        // it is.
         assert_eq!(
             detect_bar(&bar(100, 20, 50), &[tooltip(5)]),
             Err(NoBar::Differs {
@@ -1301,7 +1424,10 @@ mod tests {
                 }
             })
         };
-        assert_eq!(detect_bar(&beside(30), &[beside(70)]), Err(NoBar::Misread));
+        assert_eq!(
+            detect_bar(&beside(30), &[beside(70)]),
+            Err(NoBar::Misread { image: 0 })
+        );
         // The whole region shows a bar that another screenshot differs
         // from, which looking at fewer lanes does not change.
         let bright = Rgb {
@@ -1466,7 +1592,7 @@ mod tests {
         let free = |lanes: u32| {
             picture(200, 20, move |x, y| match (x, y) {
                 (0 | 199, _) | (_, 0 | 19) => BLACK,
-                (60..140, _)
+                (90..110, _)
                     if y > lanes && y < 19_u32.saturating_sub(lanes) && x.is_multiple_of(2) =>
                 {
                     WHITE
@@ -1573,7 +1699,7 @@ mod tests {
             (0..90, 8..22) => GREEN,
             _ => GRAY,
         });
-        assert_eq!(detect_bar(&beside, &[]), Err(NoBar::Misread));
+        assert_eq!(detect_bar(&beside, &[]), Err(NoBar::Misread { image: 0 }));
     }
 
     #[test]
@@ -1588,6 +1714,150 @@ mod tests {
             let reads = proposal.bar.percent(image).unwrap().raw();
             assert!((reads - fill).abs() < 2.0, "reads {reads}, drawn at {fill}");
         }
+    }
+
+    /// A bar 200 by 20 whose upper half fades along the bar from dark to
+    /// bright, as a shine does, over a plain lower half.
+    fn shining(filled: u32) -> Image {
+        let dark = Rgb {
+            red: 0,
+            green: 90,
+            blue: 0,
+        };
+        let bright = Rgb {
+            red: 80,
+            green: 255,
+            blue: 80,
+        };
+        picture(200, 20, move |x, y| match y {
+            _ if x >= filled => GRAY,
+            0..10 => mix(dark, bright, x.saturating_mul(5)),
+            _ => GREEN,
+        })
+    }
+
+    #[test]
+    fn a_fill_that_fades_in_some_lanes_only_is_refused() {
+        // The plain lanes show the bar, and the reader agrees at this fill:
+        // the dark start of the fade is neither color, so a lower fill
+        // would read too low.
+        for filled in [150, 160, 170, 180, 190] {
+            assert_eq!(
+                detect_bar(&shining(filled), &[]),
+                Err(NoBar::Uneven { image: 0 }),
+                "{filled} columns filled"
+            );
+        }
+        assert!(detect_bar(&shining(180), &[shining(100)]).is_err());
+    }
+
+    /// A bar 200 by 20 with its first `filled` columns filled, under a
+    /// white block 40 columns wide from column `from` on, over its first
+    /// `lanes` lanes.
+    fn blocked(filled: u32, from: u32, lanes: u32) -> Image {
+        picture(200, 20, move |x, y| match x.checked_sub(from) {
+            Some(column) if column < 40 && y < lanes => WHITE,
+            _ if x < filled => GREEN,
+            _ => GRAY,
+        })
+    }
+
+    #[test]
+    fn something_over_one_end_of_the_bar_is_refused_once_other_fills_would_read_wrong() {
+        let uneven = |image| Err(NoBar::Uneven { image });
+        // Over half the lanes of the first 40 columns, the reader is a
+        // point off at this fill, and a fill that ends there would read 11
+        // for 20.
+        assert_eq!(detect_bar(&blocked(180, 0, 10), &[]), uneven(0));
+        // Over most lanes of the first 30 columns the bar seems to start
+        // after it, and what shows of the fill before that start is counted
+        // all the same: an empty bar would read 7.
+        let at_the_start = picture(200, 20, |x, y| match x {
+            0..30 if y < 11 => WHITE,
+            0..100 => GREEN,
+            _ => GRAY,
+        });
+        assert_eq!(detect_bar(&at_the_start, &[]), uneven(0));
+        // The same at the far end, where the bar seems to end early: a
+        // full bar would read 93.
+        let at_the_end = picture(200, 20, |x, y| match x {
+            170..200 if y < 11 => WHITE,
+            0..100 => GREEN,
+            _ => GRAY,
+        });
+        assert_eq!(detect_bar(&at_the_end, &[]), uneven(0));
+        // Before the bar and after it at once, each takes the reader less
+        // far off than it may be, and they do not add up.
+        let at_both_ends = picture(200, 20, |x, y| match x {
+            0..15 | 185..200 if y < 11 => WHITE,
+            0..100 => GREEN,
+            _ => GRAY,
+        });
+        assert_eq!(detect_bar(&at_both_ends, &[]), Ok(alone(GREEN, GRAY)));
+        // A later screenshot's bar is the one spoken of when the first
+        // shows none.
+        let beside = picture(200, 20, |x, y| if x < 100 && y < 6 { GREEN } else { GRAY });
+        assert_eq!(
+            detect_bar(&bar(200, 20, 200), &[beside]),
+            Err(NoBar::Misread { image: 1 })
+        );
+        assert_eq!(
+            detect_bar(&bar(200, 20, 200), &[blocked(180, 0, 10)]),
+            uneven(1)
+        );
+        // On another screenshot than the one the colors come from.
+        assert_eq!(
+            detect_bar(&bar(200, 20, 180), &[blocked(180, 0, 10)]),
+            uneven(1)
+        );
+        // In the middle of the bar it takes as much from both sides, but a
+        // fill that ends beside it would still read wrong.
+        assert_eq!(detect_bar(&blocked(180, 80, 14), &[]), uneven(0));
+    }
+
+    #[test]
+    fn something_small_over_the_bar_leaves_every_fill_within_what_the_reader_may_be_off() {
+        let small = |from: u32, lanes: u32| {
+            picture(200, 20, move |x, y| match x.checked_sub(from) {
+                Some(column) if column < 10 && y < lanes => WHITE,
+                _ if x < 180 => GREEN,
+                _ => GRAY,
+            })
+        };
+        assert_eq!(detect_bar(&small(0, 10), &[]), Ok(alone(GREEN, GRAY)));
+        assert_eq!(detect_bar(&small(0, 12), &[]), Ok(alone(GREEN, GRAY)));
+        assert_eq!(detect_bar(&small(95, 12), &[]), Ok(around()));
+    }
+
+    #[test]
+    fn a_lane_is_broken_past_the_changes_a_bar_can_show() {
+        // Of 100 colors, 15 may belong to neither part and 3 lie at the
+        // edge between the parts, so 18 changes may be a bar's, and 19 not.
+        let striped = |changes: usize| {
+            let colors = (0..100).map(move |place: usize| {
+                if place < changes && place.is_multiple_of(2) {
+                    WHITE
+                } else {
+                    GREEN
+                }
+            });
+            broken(colors, 100)
+        };
+        assert!(!striped(18));
+        assert!(striped(19));
+        // Colors twice as far apart as one plain color stays do not count.
+        let shades = |step: u8| {
+            let colors = (0..100).map(move |place: u8| {
+                red(if place.is_multiple_of(2) {
+                    100
+                } else {
+                    100_u8.saturating_add(step)
+                })
+            });
+            broken(colors, 100)
+        };
+        assert!(!shades(32));
+        assert!(shades(33));
     }
 
     #[test]
@@ -1655,13 +1925,14 @@ mod tests {
             columns.push(WHITE);
             columns
         };
-        assert_eq!(laid_out(&columns(18, 0), bar), Some(Shown::Filled));
-        assert_eq!(laid_out(&columns(0, 18), bar), Some(Shown::Empty));
+        // The bar takes up the columns between the white ones.
+        assert_eq!(laid_out(&columns(18, 0), bar), Some((Shown::Filled, 1..19)));
+        assert_eq!(laid_out(&columns(0, 18), bar), Some((Shown::Empty, 1..19)));
         let both = Shown::Both {
             filled: 6,
             empty: 12,
         };
-        assert_eq!(laid_out(&columns(6, 12), bar), Some(both));
+        assert_eq!(laid_out(&columns(6, 12), bar), Some((both, 1..19)));
         assert_eq!(laid_out(&columns(6, 12), bar.turned()), None);
         assert_eq!(laid_out(&[WHITE, WHITE], bar), None);
         assert!((both.fill() - 100.0 / 3.0).abs() < 1e-9);
@@ -1720,8 +1991,12 @@ mod tests {
                 "the region is not one plain color and then another along its long side",
             ),
             (
-                NoBar::Misread,
-                "the two colors read the region other than its layout looks",
+                NoBar::Misread { image: 0 },
+                "the two colors read screenshot 0 other than its layout looks",
+            ),
+            (
+                NoBar::Uneven { image: 1 },
+                "the two colors would misread screenshot 1 at another fill",
             ),
             (
                 NoBar::Differs {
@@ -1737,6 +2012,22 @@ mod tests {
     }
 
     proptest! {
+        /// A lane that is broken lays out as no bar, so leaving such lanes
+        /// out early changes nothing that is found.
+        #[test]
+        fn a_broken_lane_shows_no_bar(
+            runs in proptest::collection::vec((0_usize..6, 1_usize..30), 1..12),
+        ) {
+            let palette = [GREEN, GRAY, WHITE, BLACK, Rgb { green: 180, ..GREEN }, Rgb { red: 80, ..GRAY }];
+            let lane: Vec<Rgb> = runs
+                .iter()
+                .flat_map(|&(color, length)| iter::repeat_n(palette[color], length))
+                .collect();
+            if broken(lane.iter().copied(), lane.len()) {
+                prop_assert!(two_parts(&lane).is_err(), "{:?}", two_parts(&lane));
+            }
+        }
+
         /// A bar drawn at any two fills that show both parts gets colors
         /// with which the reader reads each fill, to the column.
         #[test]

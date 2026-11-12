@@ -172,7 +172,7 @@ describe('detectingText', () => {
       `${start} On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
     );
     expect(detectingText(found({ ...proposed, around: true, rough: true }), held, position)).toBe(
-      `${start} A label, an icon, or something else lies in part of the region, so AppyTappy went by the strips that show the bar from end to end. The marks leave its pixels out unless they have one of the two colors. On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
+      `${start} Only some strips of the region show the bar from end to end, so AppyTappy went by those. What lies in the rest, such as a label, an icon, or the background, is left out of the marks unless it has one of the two colors. On at least one screenshot the colors read a few points off where the bar ends, as a label or a soft edge on the bar causes. ${side}`,
     );
     expect(detectingText(found({ ...proposed, leftOut: 1 }), held, position)).toBe(
       `${start} One older screenshot of this size was not looked at. ${side}`,

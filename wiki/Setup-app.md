@@ -63,22 +63,22 @@ This page covers what the user guide leaves out.
   screenshot and from the newest others of its window size, at most
   `MAX_OTHERS` of them (`check_spec/bar.rs`), since the region means another
   spot at another size and each screenshot costs the owner thread a copy of
-  the region and a few passes over it. It hands them to
-  [the detector](Screen-regions.md#bar-detection), the drawn-on one first,
-  and answers the two colors, the screenshot they were found on, the ones
-  that show the bar and the ones that show neither color, whether it went
-  by only part of the region, and how many older ones it left out; or a sentence that says why none are proposed and
-  names the screenshots concerned. `measure_bar` reads the same screenshots
-  with two colors through the bar reader itself, and answers the pixels
-  that count as filled and as empty on the screenshot shown, which the UI
-  tints. Each part's pixels are a count and its runs; past `MAX_RUNS` runs
-  a part carries only the count, and the UI says that it marks none. The UI
-  measures the draft's colors, or the detected ones while it asks whether
-  they replace colors picked by hand, so the list and the tints describe
-  hand-picked colors as well. Colors found go into a draft with no color at
-  once. A fix keeps its value's colors and offers neither.
-  [Bar detection](State-machines.md#bar-detection) covers the request and
-  its stale answers.
+  the region and a few passes over it. It hands them to [the
+  detector](Screen-regions.md#bar-detection), the drawn-on one first, and
+  answers the two colors, the screenshot they were found on, the ones that
+  show the bar and the ones that show neither color, whether it went by only
+  part of the region, and how many older ones it left out; or a sentence
+  that says why none are proposed and names the screenshots concerned.
+  `measure_bar` reads the same screenshots with two colors through the bar
+  reader itself, and answers the pixels that count as filled and as empty on
+  the screenshot shown, which the UI tints. Each part's pixels are a count
+  and its runs; past `MAX_RUNS` runs a part carries only the count, and the
+  UI says that it marks none. The UI measures the draft's colors, or the
+  detected ones while it asks whether they replace colors picked by hand, so
+  the list and the tints describe hand-picked colors as well. Colors found
+  go into a draft with no color at once. A fix keeps its value's colors and
+  offers neither. [Bar detection](State-machines.md#bar-detection) covers
+  the request and its stale answers.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to
