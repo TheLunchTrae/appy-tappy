@@ -45,20 +45,21 @@ the text in the region, and reads each as text.
 
 1. **Check what it found.** Each find shows numbered on the screenshot and in
    the list, with the text AppyTappy read. Fix any text it got wrong, and clear
-   **Keep** on any find that is not in the font, such as a label. A find whose
-   text has a letter while the reference has learned none, such as a `0` read
-   as `O`, is flagged, and so is text that gives one shape two different
-   characters: fix it or leave it out.
+   the box beside any find that is not in the font, such as a label. When
+   AppyTappy reads a letter while the reference has learned none, such as a `0`
+   read as `O`, the find is flagged until you type its text, and so is text
+   that gives one shape two different characters: fix it or leave it out.
 2. **Add them.** Select the button that says how many you add, such as
    **Add 3 to the reference**. They teach the reference like labeled
    screenshots, and **Characters it knows** outlines the characters only the
    finds would teach until you add them. **Not these** closes the list without
-   adding any.
+   adding any, and **Remove found text** takes the added finds back out.
 
-Draw the region tightly around the text first, since the finds must be about
-as tall as the text in it. Text of another size is skipped, and the list says
-how much. One search lists at most 12 finds; add those, then select **Find
-more like it** again for the rest.
+Draw the region tightly around the text first, since the finds' characters
+must be about as tall as the text in it; a comma or a mark below them does not
+count. Text of another size is skipped, and the list says how much. One search
+lists at most 12 finds; add those, then select **Find more like it** again, and
+it lists the rest, leaving out what you added.
 
 ## Record readings
 

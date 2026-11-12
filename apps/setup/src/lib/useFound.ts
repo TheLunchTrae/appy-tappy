@@ -17,7 +17,6 @@ import {
   rowFlags,
 } from './found.ts';
 import type { Picture } from './pixels.ts';
-import { sameRect } from './region.ts';
 import { background, useRepeat } from './repeat.ts';
 
 /** How long the search's state waits between reads while text is still being read. */
@@ -39,10 +38,8 @@ export function useFound(
   learned: readonly string[],
 ): {
   readonly view: FoundView | null;
-  /** The finds not added yet, with the user's edits. */
+  /** The finds, with the user's edits. */
   readonly rows: readonly FoundRow[];
-  /** How many finds of this search were added already. */
-  readonly added: number;
   /** Each kept find's flag, by its index. */
   readonly flags: ReadonlyMap<number, string>;
   readonly crops: ReadonlyMap<number, Picture>;
@@ -51,7 +48,7 @@ export function useFound(
   /** Why the last search, or the last check of the finds, failed. */
   readonly error: string | null;
   readonly searching: boolean;
-  /** Searches screenshot `screenshot` for text like the draft's region shows there. */
+  /** Searches screenshot `screenshot` for text like the draft's region shows there, away from the finds added already. */
   readonly search: (screenshot: number) => Promise<void>;
   readonly edit: (index: number, entry: FoundEntry) => void;
   /** Adds the kept finds to the draft and forgets the search. */
@@ -106,7 +103,7 @@ export function useFound(
     }
     for (let index = 0; index < findCount; index += 1) {
       background(
-        foundPicture(index, CROP_WIDTH).then((picture) => {
+        foundPicture(searchId, index, CROP_WIDTH).then((picture) => {
           if (picture === null) {
             return;
           }
@@ -119,18 +116,7 @@ export function useFound(
     }
   }, [searchId, findCount]);
 
-  const { found } = draft;
-  const all = useMemo(() => (view === null ? [] : foundRows(view, edits, learned)), [view, edits, learned]);
-  // A find added already, from an earlier search of the same screenshot, is not offered again.
-  const rows = useMemo(
-    () =>
-      view === null
-        ? []
-        : all.filter(
-            (row) => !found.some((label) => label.screenshot === view.screenshot && sameRect(label.region, row.region)),
-          ),
-    [all, found, view],
-  );
+  const rows = useMemo(() => (view === null ? [] : foundRows(view, edits, learned)), [view, edits, learned]);
   const asked = useMemo(() => askable(rows), [rows]);
   const spec = useMemo(() => taughtSpec(draft, reference), [draft, reference]);
   const labels = useMemo(() => (view === null ? [] : asLabels(view.screenshot, asked)), [view, asked]);
@@ -182,15 +168,17 @@ export function useFound(
   };
 
   const search = async (screenshot: number): Promise<void> => {
-    const { region, ink, tolerance } = draft;
+    const { region, ink, tolerance, found } = draft;
     if (region === null || ink === null) {
       return;
     }
+    // The server leaves these out, so a search after adding offers the rest.
+    const added = found.filter((label) => label.screenshot === screenshot).map((label) => label.region);
     turn.current += 1;
     const sent = turn.current;
     setSearching(true);
     try {
-      const result = await findLike(screenshot, region, ink, tolerance);
+      const result = await findLike(screenshot, region, added, ink, tolerance);
       if (sent === turn.current) {
         setView(result);
         setEdits(new Map());
@@ -209,7 +197,6 @@ export function useFound(
   return {
     view,
     rows,
-    added: all.length - rows.length,
     flags,
     crops: crops.id === searchId ? crops.pictures : new Map<number, Picture>(),
     blocked: addBlocked(rows, flags, checked),

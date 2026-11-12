@@ -5,10 +5,12 @@
 //! It looks at the ink of the whole screenshot, as the reference's color and
 //! tolerance tell ink from background, and joins touching ink pixels into
 //! blobs. Blobs side by side on one line, no further apart than the
-//! sample's height, make a run of text. A run as tall as the sample's
-//! characters, within [`SIZE_PERCENT`], is a find. Ink much taller than the
-//! sample, such as a panel in the characters' color, is left out, and so is
-//! the run inside the sample's own region.
+//! sample's height, make a run of text. A run whose tallest character is as
+//! tall as the sample's, within [`SIZE_PERCENT`], is a find. Ink much
+//! taller than the sample, such as a panel in the characters' color, is left
+//! out, and so is the run inside the sample's own region.
+
+use std::collections::HashMap;
 
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region};
@@ -217,18 +219,89 @@ fn neighbors(x: u32, y: u32) -> impl Iterator<Item = (u32, u32)> {
         .filter(move |&(nx, ny)| (nx, ny) != (x, y))
 }
 
-/// Joins `blobs` into runs of text: blobs whose rows meet a run's and that
-/// start no further than `gap` past its right edge join it.
-fn runs(mut blobs: Vec<Bounds>, gap: u32) -> Vec<Bounds> {
+/// A run of text: blobs side by side on one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Run {
+    bounds: Bounds,
+    /// The height of its tallest blob: its characters' height, which a
+    /// comma or a mark below them does not stretch.
+    tallest: u32,
+}
+
+impl Run {
+    const fn of(blob: Bounds) -> Self {
+        Self {
+            bounds: blob,
+            tallest: blob.height(),
+        }
+    }
+
+    fn join(self, blob: Bounds) -> Self {
+        Self {
+            bounds: self.bounds.join(blob),
+            tallest: self.tallest.max(blob.height()),
+        }
+    }
+}
+
+/// The bands of `band` rows that rows `top` to `bottom` (exclusive) cross.
+fn bands(top: u32, bottom: u32, band: u32) -> std::ops::RangeInclusive<u32> {
+    let first = top.checked_div(band).unwrap_or(top);
+    let last = bottom
+        .saturating_sub(1)
+        .max(top)
+        .checked_div(band)
+        .unwrap_or(bottom);
+    first..=last
+}
+
+/// Joins `blobs` into runs of text: a blob whose rows meet a run's and that
+/// starts no further than `gap` past its right edge joins the first such
+/// run. Runs are looked up by the bands of `band` rows they cross, and a run
+/// the next blobs start too far right of is dropped from that lookup, so the
+/// work grows with the blobs, not with blobs times runs.
+fn runs(mut blobs: Vec<Bounds>, gap: u32, band: u32) -> Vec<Run> {
     blobs.sort_by_key(|blob| (blob.left, blob.top));
-    let mut runs: Vec<Bounds> = Vec::new();
+    let band = band.max(1);
+    let mut runs: Vec<Run> = Vec::new();
+    let mut open: HashMap<u32, Vec<usize>> = HashMap::new();
     for blob in blobs {
-        let joined = runs
-            .iter_mut()
-            .find(|run| run.rows_meet(blob) && blob.left <= run.right.saturating_add(gap));
-        match joined {
-            Some(run) => *run = run.join(blob),
-            None => runs.push(blob),
+        let mut joined: Option<usize> = None;
+        for key in bands(blob.top, blob.bottom, band) {
+            let Some(ids) = open.get_mut(&key) else {
+                continue;
+            };
+            // Blobs come left to right, so a run this blob starts too far
+            // right of is too far from every later one too.
+            ids.retain(|&id| {
+                runs.get(id)
+                    .is_some_and(|run| blob.left <= run.bounds.right.saturating_add(gap))
+            });
+            let first = ids
+                .iter()
+                .copied()
+                .filter(|&id| runs.get(id).is_some_and(|run| run.bounds.rows_meet(blob)))
+                .min();
+            joined = match (joined, first) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+        }
+        let joined = joined.and_then(|id| runs.get_mut(id).map(|run| (id, run)));
+        let id = if let Some((id, run)) = joined {
+            *run = run.join(blob);
+            id
+        } else {
+            runs.push(Run::of(blob));
+            runs.len().saturating_sub(1)
+        };
+        if let Some(run) = runs.get(id) {
+            for key in bands(run.bounds.top, run.bounds.bottom, band) {
+                let ids = open.entry(key).or_default();
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
         }
     }
     runs
@@ -242,24 +315,37 @@ fn same_size(height: u32, sample: u32) -> bool {
 }
 
 /// The text on `image` like the sample in `region`: in the ink `reader`
-/// tells from background and as tall as the sample's characters. `None`
-/// when `region` holds no ink or lies outside `image`.
-pub(crate) fn like(image: &Image, region: Region, reader: &DigitReader) -> Option<Search> {
+/// tells from background and with characters as tall as the sample's,
+/// leaving out text that meets any of `skip`, such as finds added already.
+/// `None` when `region` holds no ink or lies outside `image`.
+pub(crate) fn like(
+    image: &Image,
+    region: Region,
+    skip: &[Region],
+    reader: &DigitReader,
+) -> Option<Search> {
     if !region.fits(image.size()) {
         return None;
     }
     let mask = Mask::of(image, reader);
-    let sample = mask.line_height(region)?;
-    let runs = runs(mask.blobs(sample.saturating_mul(2)), sample);
+    let line = mask.line_height(region)?;
+    let blobs = mask.blobs(line.saturating_mul(2));
+    // Measured as each run is: by its tallest character.
+    let sample = blobs
+        .iter()
+        .filter(|blob| blob.meets(region))
+        .map(|blob| blob.height())
+        .max()
+        .unwrap_or(line);
     let mut finds = Vec::new();
     let mut other_sizes = 0_usize;
-    for run in runs {
-        if run.meets(region) {
+    for run in runs(blobs, sample, sample) {
+        if run.bounds.meets(region) || skip.iter().any(|&added| run.bounds.meets(added)) {
             continue;
         }
-        if same_size(run.height(), sample) {
-            finds.push(run);
-        } else if run.height().saturating_mul(2) >= sample {
+        if same_size(run.tallest, sample) {
+            finds.push(run.bounds);
+        } else if run.tallest.saturating_mul(2) >= sample {
             // Specks of ink are not text of another size.
             other_sizes = other_sizes.saturating_add(1);
         }
@@ -344,7 +430,8 @@ mod tests {
     fn text_of_the_same_size_elsewhere_is_found_with_a_margin() {
         let boxes = [pair(2, 2, 8), pair(30, 20, 8)].concat();
         let image = screenshot(60, 40, &boxes);
-        let search = like(&image, region(0, 0, 12, 12), &reader()).expect("the sample has ink");
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
         assert_eq!(search.more, 0);
         assert_eq!(search.other_sizes, 0);
         assert_eq!(search.finds.len(), 1);
@@ -359,7 +446,8 @@ mod tests {
     fn text_of_another_size_is_counted_and_left_out() {
         let boxes = [pair(2, 2, 8), pair(30, 20, 14), pair(30, 2, 9)].concat();
         let image = screenshot(60, 40, &boxes);
-        let search = like(&image, region(0, 0, 12, 12), &reader()).expect("the sample has ink");
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
         // 9 is within 15% of 8 (a slack of 2); 14 is not.
         assert_eq!(search.finds.len(), 1);
         assert_eq!(search.finds[0].region, region(28, 0, 11, 13));
@@ -372,7 +460,8 @@ mod tests {
         let mut boxes = pair(2, 2, 8).to_vec();
         boxes.extend([(40, 30, 1, 2), (50, 2, 6, 30)]);
         let image = screenshot(60, 40, &boxes);
-        let search = like(&image, region(0, 0, 12, 12), &reader()).expect("the sample has ink");
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds, []);
         assert_eq!(search.other_sizes, 0);
     }
@@ -382,7 +471,8 @@ mod tests {
         // The sample is 8 tall; the second pair starts 9 past the first's edge.
         let boxes = [pair(2, 2, 8), pair(2, 20, 8), pair(20, 20, 8)].concat();
         let image = screenshot(60, 40, &boxes);
-        let search = like(&image, region(0, 0, 12, 12), &reader()).expect("the sample has ink");
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
         let lefts: Vec<u32> = search.finds.iter().map(|find| find.region.x()).collect();
         assert_eq!(lefts, [0, 18]);
     }
@@ -397,7 +487,7 @@ mod tests {
             }
         }
         let image = screenshot(64, 66, &boxes);
-        let search = like(&image, region(0, 0, 6, 8), &reader()).expect("the sample has ink");
+        let search = like(&image, region(0, 0, 6, 8), &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds.len(), MAX_FOUND);
         assert_eq!(search.more, 14 - MAX_FOUND);
         let first: Vec<(u32, u32)> = search
@@ -412,27 +502,97 @@ mod tests {
     #[test]
     fn a_region_without_ink_or_outside_the_screenshot_finds_nothing() {
         let image = screenshot(20, 20, &pair(10, 10, 6));
-        assert_eq!(like(&image, region(0, 0, 5, 5), &reader()), None);
-        assert_eq!(like(&image, region(15, 15, 10, 10), &reader()), None);
+        assert_eq!(like(&image, region(0, 0, 5, 5), &[], &reader()), None);
+        assert_eq!(like(&image, region(15, 15, 10, 10), &[], &reader()), None);
     }
 
     #[test]
     fn a_find_at_the_edge_keeps_its_margin_inside_the_screenshot() {
         let boxes = [pair(30, 2, 8), pair(0, 32, 8)].concat();
         let image = screenshot(40, 40, &boxes);
-        let search = like(&image, region(28, 0, 12, 12), &reader()).expect("the sample has ink");
+        let search =
+            like(&image, region(28, 0, 12, 12), &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds[0].region, region(0, 30, 9, 10));
     }
 
     #[test]
-    fn the_sample_height_is_its_band_with_the_most_ink() {
+    fn a_speck_by_the_sample_does_not_change_its_size() {
         // A one-row speck above the 8-row characters does not stretch them.
         let mut boxes = pair(2, 4, 8).to_vec();
         boxes.push((2, 1, 1, 1));
         boxes.extend(pair(30, 20, 8));
         let image = screenshot(60, 40, &boxes);
-        let search = like(&image, region(0, 0, 12, 14), &reader()).expect("the sample has ink");
+        let search =
+            like(&image, region(0, 0, 12, 14), &[], &reader()).expect("the sample has ink");
         assert_eq!(search.finds.len(), 1);
+    }
+
+    #[test]
+    fn a_comma_below_the_characters_does_not_change_their_size() {
+        // The find's comma reaches 4 rows below its 8-row characters, a pixel
+        // to their right.
+        let mut boxes = [pair(2, 2, 8), pair(30, 20, 8)].concat();
+        boxes.push((38, 25, 2, 7));
+        let image = screenshot(60, 40, &boxes);
+        let search =
+            like(&image, region(0, 0, 12, 12), &[], &reader()).expect("the sample has ink");
+        assert_eq!(search.other_sizes, 0);
+        assert_eq!(search.finds.len(), 1);
+        assert_eq!(search.finds[0].region, region(28, 18, 14, 16));
+    }
+
+    #[test]
+    fn text_meeting_a_skipped_region_is_neither_found_nor_counted() {
+        // Fourteen single characters, as above; the first twelve finds were
+        // added, so a second search offers the last two.
+        let mut boxes = vec![(1, 1, 4, 6)];
+        for row in 0..7 {
+            for column in 0..2 {
+                boxes.push((20 + column * 20, 1 + row * 9, 4, 6));
+            }
+        }
+        let image = screenshot(64, 66, &boxes);
+        let first = like(&image, region(0, 0, 6, 8), &[], &reader()).expect("the sample has ink");
+        let added: Vec<Region> = first.finds.iter().map(|find| find.region).collect();
+        let second =
+            like(&image, region(0, 0, 6, 8), &added, &reader()).expect("the sample has ink");
+        assert_eq!(second.more, 0);
+        assert_eq!(second.other_sizes, 0);
+        let rest: Vec<(u32, u32)> = second
+            .finds
+            .iter()
+            .map(|find| (find.region.x(), find.region.y()))
+            .collect();
+        assert_eq!(rest, [(19, 54), (39, 54)]);
+    }
+
+    #[test]
+    fn runs_join_only_blobs_on_shared_rows_within_the_gap() {
+        let blob = |left: u32, top: u32| Bounds {
+            left,
+            top,
+            right: left.saturating_add(3),
+            bottom: top.saturating_add(8),
+        };
+        // Two lines; on the first, a blob 8 past the run joins and one 9 past
+        // starts a new run; a blob on the second line is its own run.
+        let found = runs(
+            vec![blob(0, 0), blob(11, 4), blob(23, 0), blob(0, 30)],
+            8,
+            8,
+        );
+        let bounds: Vec<(u32, u32, u32, u32)> = found
+            .iter()
+            .map(|run| {
+                (
+                    run.bounds.left,
+                    run.bounds.top,
+                    run.bounds.right,
+                    run.bounds.bottom,
+                )
+            })
+            .collect();
+        assert_eq!(bounds, [(0, 0, 14, 12), (0, 30, 3, 38), (23, 0, 26, 8)]);
     }
 
     #[test]

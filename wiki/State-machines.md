@@ -829,17 +829,22 @@ stateDiagram-v2
 
 - Each find starts `Pending` and turns `Read` or `Failed` when the text
   reader answers for the search's ID. The UI polls only while one is pending.
-- The UI keeps each find's Keep box and typed text (`useFound`) until a new
-  search or a dismissal. A kept find is flagged without asking the owner when
-  it has no text, or a letter while the reference has learned none
-  (`foundRows`), and otherwise when the reference cannot learn it after the
+  Reads queued for a forgotten search still run; the owner drops their text,
+  and a newer search's jobs make the reader skip the rest.
+- The UI keeps each find's box, its text, and whether the user typed it
+  (`useFound`) until a new search or a dismissal. Answers to a search the user
+  moved on from are ignored by the UI's turn and, for pictures, by the
+  search's ID. A kept find is flagged without asking the owner when it has no
+  text, or when the reader's guess has a letter while the reference has
+  learned none (`foundRows`), and otherwise when the reference cannot learn it after the
   draft's own labels (`found_problems`). **Add** waits until no kept find is
   pending or flagged and the owner has answered for the current text.
 - **Add** appends the kept finds to the draft's `found` labels, each with its
   own region, and forgets the search. A later search of the same screenshot
-  leaves out finds whose region was added already. The draft's found labels
-  are dropped with its other labels when the reference editor opens or closes
-  (`toReference`, `fromReference`).
+  is given the added regions, and the finder leaves out runs that meet them
+  before it caps the list, so it offers the rest. **Remove found text** drops
+  the draft's found labels, and so does opening or closing the reference
+  editor, with its other labels (`toReference`, `fromReference`).
 
 ### Overlays
 

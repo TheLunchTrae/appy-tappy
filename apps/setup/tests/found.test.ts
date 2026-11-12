@@ -31,9 +31,9 @@ describe('foundRows', () => {
 
   test("take the user's edits, and flag no letter once the reference learned one", () => {
     const edits = new Map([
-      [1, { keep: true, text: '1205' }],
-      [2, { keep: false, text: '' }],
-      [3, { keep: true, text: '  ' }],
+      [1, { keep: true, text: '1205', typed: true }],
+      [2, { keep: false, text: '', typed: false }],
+      [3, { keep: true, text: '  ', typed: true }],
     ]);
     const rows = foundRows(view, edits, ['Lv 3']);
     expect(rows.map((row) => [row.keep, row.text, row.reading, row.flag])).toEqual([
@@ -44,12 +44,19 @@ describe('foundRows', () => {
     ]);
     expect(foundRows(view, new Map(), ['Lv 3'])[1]?.flag).toBeNull();
   });
+
+  test('take letters the user typed, but not a guess only kept by ticking its box', () => {
+    const typed = foundRows(view, new Map([[1, { keep: true, text: 'Lv 3', typed: true }]]), ['87%']);
+    expect(typed[1]?.flag).toBeNull();
+    const ticked = foundRows(view, new Map([[1, { keep: true, text: '12O5', typed: false }]]), ['87%']);
+    expect(ticked[1]?.flag).toBe('O is a letter, and the reference has learned none. Type what this shows.');
+  });
 });
 
 describe('adding found text', () => {
   const edits = new Map([
-    [1, { keep: true, text: '1205' }],
-    [3, { keep: false, text: '' }],
+    [1, { keep: true, text: '1205', typed: true }],
+    [3, { keep: false, text: '', typed: false }],
   ]);
 
   test('asks the reference about the kept, read, unflagged rows, and maps its answers back', () => {
@@ -80,12 +87,16 @@ describe('adding found text', () => {
   test('waits for text still read, and needs one kept', () => {
     const rows = foundRows(view, edits, []);
     expect(addBlocked(rows, rowFlags(rows, new Map()), true)).toBe('Reading the text…');
-    const none = foundRows(view, new Map(view.finds.map((_, index) => [index, { keep: false, text: '' }])), []);
+    const none = foundRows(
+      view,
+      new Map(view.finds.map((_, index) => [index, { keep: false, text: '', typed: false }])),
+      [],
+    );
     expect(addBlocked(none, rowFlags(none, new Map()), true)).toBe('Keep at least one to add it.');
   });
 
   test('a flag on a row left out is no flag', () => {
-    const rows = foundRows(view, new Map([[1, { keep: false, text: '12O5' }]]), []);
+    const rows = foundRows(view, new Map([[1, { keep: false, text: '12O5', typed: false }]]), []);
     expect(rowFlags(rows, new Map([[1, 'Nope.']])).has(1)).toBe(false);
   });
 });

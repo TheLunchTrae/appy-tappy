@@ -10,10 +10,11 @@ export interface FoundLabel {
   readonly text: string;
 }
 
-/** The user's choice for one find: whether to add it, and its text as typed. */
+/** The user's choice for one find: whether to add it, its text, and whether the user typed that text. */
 export interface FoundEntry {
   readonly keep: boolean;
   readonly text: string;
+  readonly typed: boolean;
 }
 
 /** One find as the panel lists it. */
@@ -22,6 +23,8 @@ export interface FoundRow {
   readonly region: Rect;
   readonly keep: boolean;
   readonly text: string;
+  /** Whether the user typed its text, rather than keeping the text reader's guess. */
+  readonly typed: boolean;
   /** Whether the text reader has not read it yet and the user typed nothing. */
   readonly reading: boolean;
   /** Why it cannot be added as it is, found without asking the reference, or null. */
@@ -35,8 +38,8 @@ function firstLetter(text: string): string | null {
 
 /**
  * The finds of `view` with the user's `edits`. A find starts kept, with the text reader's guess. A kept one is flagged
- * when it has no text, or, while the reference has `learned` no letter, when its text has one: the reader often takes
- * a 0 for an O.
+ * when it has no text, or, while the reference has `learned` no letter, when the reader's guess has one: the reader
+ * often takes a 0 for an O. Text the user typed is theirs, letters and all.
  */
 export function foundRows(
   view: FoundView,
@@ -49,8 +52,9 @@ export function foundRows(
     const guess = find.text.kind === 'read' ? find.text.text : '';
     const keep = edit?.keep ?? true;
     const text = edit?.text ?? guess;
+    const typed = edit?.typed ?? false;
     const reading = edit === undefined && find.text.kind === 'pending';
-    const letter = letters ? null : firstLetter(text);
+    const letter = letters || typed ? null : firstLetter(text);
     let flag: string | null = null;
     if (keep && !reading) {
       if (text.trim() === '') {
@@ -60,7 +64,7 @@ export function foundRows(
         flag = `${letter} is a letter, and the reference has learned none. Type what this shows.`;
       }
     }
-    return { index, region: find.region, keep, text, reading, flag };
+    return { index, region: find.region, keep, text, typed, reading, flag };
   });
 }
 

@@ -1,6 +1,8 @@
+import { useEffect, useRef } from 'react';
+
 import type { FoundView } from '../lib/bindings.ts';
 import type { FoundEntry, FoundRow } from '../lib/found.ts';
-import { FIND_LIKE_HINT } from '../lib/hints.ts';
+import { FIND_LIKE_HINT, FOUND_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
 import type { Size } from '../lib/region.ts';
 import { PictureCanvas } from './canvas.tsx';
@@ -9,8 +11,6 @@ import { Hint } from './Hint.tsx';
 interface PanelProps {
   readonly view: FoundView | null;
   readonly rows: readonly FoundRow[];
-  /** How many of the search's finds were added already. */
-  readonly added: number;
   readonly flags: ReadonlyMap<number, string>;
   readonly crops: ReadonlyMap<number, Picture>;
   /** Why the search cannot start, or null when it can. */
@@ -43,16 +43,35 @@ function placeholder(row: FoundRow): string {
 
 /** The inspector's part for finding more text like the first sample, and adding what the user confirms. */
 export function FoundPanel(props: PanelProps) {
-  const { view, rows, added, flags, crops, findBlocked, addBlocked, error, searching } = props;
+  const { view, rows, flags, crops, findBlocked, addBlocked, error, searching } = props;
+  const title = useRef<HTMLHeadingElement>(null);
+  const find = useRef<HTMLButtonElement>(null);
+  // The pressed button leaves with the panel it was on, so focus follows to what replaced it: the results'
+  // heading after a search, and Find more like it after adding or dismissing them.
+  const shown = view?.id ?? null;
+  const last = useRef(shown);
+  useEffect(() => {
+    if (shown === last.current) {
+      return;
+    }
+    const before = last.current;
+    last.current = shown;
+    if (shown !== null) {
+      title.current?.focus();
+    } else if (before !== null) {
+      find.current?.focus();
+    }
+  }, [shown]);
   if (view === null) {
     return (
       <div className="field">
         <div className="row">
           <button
+            ref={find}
             type="button"
             className="btn"
             disabled={findBlocked !== null || searching}
-            aria-describedby="hint-find-like"
+            aria-describedby={findBlocked === null ? 'hint-find-like' : 'hint-find-like find-blocked'}
             onClick={props.onFind}
           >
             {searching ? 'Finding…' : 'Find more like it'}
@@ -61,7 +80,11 @@ export function FoundPanel(props: PanelProps) {
             {FIND_LIKE_HINT}
           </Hint>
         </div>
-        {findBlocked === null ? null : <p className="note">{findBlocked}</p>}
+        {findBlocked === null ? null : (
+          <p id="find-blocked" className="note">
+            {findBlocked}
+          </p>
+        )}
         {error === null ? null : <p className="warn">{error}</p>}
       </div>
     );
@@ -73,14 +96,15 @@ export function FoundPanel(props: PanelProps) {
   ].filter((part) => part !== null);
   return (
     <section className="autofill" aria-labelledby="found-title">
-      <h3 id="found-title" tabIndex={-1}>
-        {rows.length === 0 && added === 0 ? 'Found nothing more like it' : `Found ${rows.length + added} more like it`}
-      </h3>
+      <div className="row">
+        <h3 id="found-title" ref={title} tabIndex={-1}>
+          {rows.length === 0 ? 'Found nothing more like it' : `Found ${rows.length} more like it`}
+        </h3>
+        <Hint topic="Found text">{FOUND_HINT}</Hint>
+      </div>
       {rows.length === 0 ? (
         <p className="note">
-          {added === 0
-            ? 'No other text on this screenshot has the same color and size.'
-            : 'Each one was added already.'}
+          No other text on this screenshot, apart from what was added, has the same color and size.
         </p>
       ) : (
         <>
@@ -100,7 +124,7 @@ export function FoundPanel(props: PanelProps) {
                     aria-label={`Keep find ${number}`}
                     checked={row.keep}
                     onChange={(event) => {
-                      props.onEntry(row.index, { keep: event.target.checked, text: row.text });
+                      props.onEntry(row.index, { keep: event.target.checked, text: row.text, typed: row.typed });
                     }}
                   />
                   <span className={flag === undefined ? 'n' : 'n flagged'} aria-hidden="true">
@@ -118,6 +142,7 @@ export function FoundPanel(props: PanelProps) {
                       props.onEntry(row.index, {
                         keep: row.keep || event.target.value.trim() !== '',
                         text: event.target.value,
+                        typed: true,
                       });
                     }}
                   />
@@ -150,9 +175,10 @@ export function FoundPanel(props: PanelProps) {
           {rows.length === 0 ? 'Close' : 'Not these'}
         </button>
       </div>
-      {addBlocked === null || rows.length === 0 ? null : (
+      {rows.length === 0 ? null : (
+        // Kept while the list shows, so a screen reader hears each change of why Add waits.
         <p id="found-blocked" className="note pending" aria-live="polite">
-          {addBlocked}
+          {addBlocked ?? ''}
         </p>
       )}
     </section>

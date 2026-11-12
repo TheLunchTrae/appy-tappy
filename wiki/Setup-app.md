@@ -140,20 +140,28 @@ review without keeping, and review's edits stay for the next one.
 [Find more like it](References.md#find-more-like-it) searches the screenshot
 the user labels for more text like the region shows (`recording/find.rs`). It
 marks each pixel as ink with the reference's color and tolerance, as
-`DigitReader` does, and measures the sample's height as the band of inked rows
-with the most ink, as the reader segments it. It joins touching ink, corners
-included, into blobs, leaving out blobs over twice the sample's height, such as
-a panel in the same color. Blobs whose rows meet and that start no further than
-the sample's height past each other join into a run of text. A run within 15%
-of the sample's height (`SIZE_PERCENT`) that does not touch the region is a
-find; a shorter or taller run, at least half the sample's height, counts as
-another size, and smaller specks are ignored. Finds go top to bottom, then
+`DigitReader` does, and takes the band of inked rows with the most ink in the
+region, as the reader segments it. It joins touching ink, corners included,
+into blobs, leaving out blobs over twice that band's height, such as a panel in
+the same color. The sample's height is its tallest blob that meets the region,
+and a run's is its tallest blob, so a comma or a mark below the characters
+measures neither. Blobs whose rows meet and that start no further than the
+sample's height past each other join into a run of text; runs are looked up by
+bands of rows and dropped from the lookup once the next blobs start too far
+right of them, so a screenshot full of ink takes tens of milliseconds, not
+seconds. A run within 15% of the sample's height (`SIZE_PERCENT`) that touches
+neither the region nor a find added already is a find; a shorter or taller run,
+at least half the sample's height, counts as another size, and smaller specks
+are ignored. Finds go top to bottom, then
 left to right; the first 12 (`MAX_FOUND`) are kept with a margin of a quarter
 of the sample's height, and the rest are counted.
 
 The owner keeps the search (`owner/found.rs`) with each find's pixels and
 sends each to the text reader. A new search replaces it, and dismissing,
-adding, picking another window, or leaving the flow forgets it. The UI lists
+adding, picking another window, or leaving the flow forgets it; reads already
+queued for a forgotten search still run, and their text is dropped. Pictures
+of finds are asked for by the search's number, so an answer for a replaced
+search is empty. The UI lists
 the finds, polls while text is still being read, and asks which kept finds the
 reference cannot learn (`found_problems`), learning them after the draft's own
 labels the way review learns recorded readings. Added finds become labels with
@@ -171,8 +179,8 @@ a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
 as black text on white with a margin, whatever the application's colors
 (`recording/ink.rs`). Text for a recording or a search the user discarded or
-replaced is dropped by its number, and a queued job of an older recording or
-search is skipped without reading it. Only the setup app uses it; the runtime reads
+replaced is dropped by its number, and a queued job of a recording or search
+that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
 regions](Screen-regions.md#checks)).
 

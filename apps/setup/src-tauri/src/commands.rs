@@ -497,18 +497,19 @@ pub(crate) async fn review_problems(
 }
 
 /// Finds text like what `region` of screenshot `screenshot` shows, in the
-/// characters' color and at their size, elsewhere on that screenshot, in
-/// place of any earlier search.
+/// characters' color and at their size, elsewhere on that screenshot and
+/// away from `added`, in place of any earlier search.
 #[tauri::command]
 pub(crate) async fn find_like(
     app: AppHandle,
     screenshot: usize,
     region: RegionSpec,
+    added: Vec<RegionSpec>,
     ink: ColorSpec,
     tolerance: u8,
 ) -> Result<FoundView, String> {
     ask(&app, move |owner| {
-        owner.find_like(screenshot, region, ink, tolerance)
+        owner.find_like(screenshot, region, &added, ink, tolerance)
     })
     .await?
 }
@@ -519,16 +520,20 @@ pub(crate) async fn found_state(app: AppHandle) -> Result<Option<FoundView>, Str
     ask(&app, |owner| owner.found_state()).await
 }
 
-/// A find, at most `max_width` wide; no bytes for an unknown index.
+/// A find of search `search`, at most `max_width` wide; no bytes for an
+/// unknown index or a search that was replaced.
 #[tauri::command]
 pub(crate) async fn found_picture(
     app: AppHandle,
+    search: u64,
     index: usize,
     max_width: u32,
 ) -> Result<Response, String> {
-    ask(&app, move |owner| owner.found_pixels(index, max_width))
-        .await
-        .map(pixels)
+    ask(&app, move |owner| {
+        owner.found_pixels(search, index, max_width)
+    })
+    .await
+    .map(pixels)
 }
 
 /// Forgets the search.

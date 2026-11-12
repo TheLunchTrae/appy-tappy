@@ -36,6 +36,8 @@ interface Props {
   readonly onPick: () => void;
   readonly onTolerance: (tolerance: number) => void;
   readonly onLabel: (text: string) => void;
+  /** Takes the added found text back out of the reference. */
+  readonly onForgetFound: () => void;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -125,6 +127,13 @@ export function ReferenceEditor(props: Props) {
           {pending.length === 0 ? '' : ' Outlined characters come from the found text, once you add it.'} Draw a region
           around text on any screenshot, then type what it shows or record it.
         </span>
+        {found.length === 0 ? null : (
+          <div className="row">
+            <button type="button" className="btn" onClick={props.onForgetFound}>
+              Remove found text
+            </button>
+          </div>
+        )}
       </div>
       {props.record}
       {readers.length === 0 ? null : (

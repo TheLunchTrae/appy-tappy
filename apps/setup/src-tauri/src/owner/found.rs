@@ -88,12 +88,14 @@ impl Found {
 impl<H: Host> Owner<H> {
     /// Finds text like what `region` of screenshot `screenshot` shows,
     /// in the characters' color `ink` within `tolerance` and at its size,
-    /// elsewhere on that screenshot, in place of any earlier search, and
-    /// sends each find to the text reader.
+    /// elsewhere on that screenshot and away from `added`, the finds added
+    /// already, in place of any earlier search, and sends each find to the
+    /// text reader.
     pub(crate) fn find_like(
         &mut self,
         screenshot: usize,
         region: RegionSpec,
+        added: &[RegionSpec],
         ink: ColorSpec,
         tolerance: u8,
     ) -> Result<FoundView, String> {
@@ -111,17 +113,23 @@ impl<H: Host> Owner<H> {
             );
         }
         let reader = DigitReader::new(ink.into(), tolerance);
-        let search = find::like(image, region, &reader).ok_or_else(|| {
+        let added: Vec<Region> = added
+            .iter()
+            .filter_map(|spec| Region::new(spec.x, spec.y, spec.width, spec.height))
+            .collect();
+        let search = find::like(image, region, &added, &reader).ok_or_else(|| {
             "The region shows no characters in that color. Pick the characters' color first."
                 .to_owned()
         })?;
         self.search_id = self.search_id.wrapping_add(1);
         let id = self.search_id;
         let mut items = Vec::with_capacity(search.finds.len());
-        for (index, found) in search.finds.into_iter().enumerate() {
+        for found in search.finds {
             let Some(cropped) = image.crop(found.region) else {
                 continue;
             };
+            // Its place among the finds kept, which the reader's guess names.
+            let index = items.len();
             let text = match found.line {
                 Some(line) => {
                     let job = ocr::Job {
@@ -173,10 +181,17 @@ impl<H: Host> Owner<H> {
         self.found.as_ref().map(Found::view)
     }
 
-    /// Find `index`'s pixels, at most `max_width` wide.
-    pub(crate) fn found_pixels(&self, index: usize, max_width: u32) -> Option<Vec<u8>> {
+    /// Find `index`'s pixels of search `search`, at most `max_width` wide;
+    /// `None` when that search was replaced or forgotten.
+    pub(crate) fn found_pixels(
+        &self,
+        search: u64,
+        index: usize,
+        max_width: u32,
+    ) -> Option<Vec<u8>> {
         self.found
             .as_ref()
+            .filter(|found| found.id == search)
             .and_then(|found| found.items.get(index))
             .map(|item| pixels::rgba(&item.image, max_width))
     }
@@ -256,7 +271,7 @@ mod tests {
     fn find_like(
         region: RegionSpec,
     ) -> impl FnOnce(&mut Owner<FakeHost>) -> Result<FoundView, String> {
-        move |owner: &mut Owner<FakeHost>| owner.find_like(0, region, red(), 0)
+        move |owner: &mut Owner<FakeHost>| owner.find_like(0, region, &[], red(), 0)
     }
 
     #[test]
@@ -296,12 +311,29 @@ mod tests {
         let state = harness.ask(|owner| owner.found_state()).expect("kept");
         assert_eq!(state.finds[0].text, Text::Pending);
         assert_eq!(state.finds[1].text, Text::Read("7".to_owned()));
-        let pixels_of = |index| move |owner: &mut Owner<FakeHost>| owner.found_pixels(index, 20);
+        let pixels_of = |search, index| {
+            move |owner: &mut Owner<FakeHost>| owner.found_pixels(search, index, 20)
+        };
         let crop = marks()
             .crop(Region::new(0, 6, 4, 5).expect("not empty"))
             .expect("inside");
-        assert_eq!(harness.ask(pixels_of(1)), Some(pixels::rgba(&crop, 20)));
-        assert_eq!(harness.ask(pixels_of(2)), None);
+        assert_eq!(harness.ask(pixels_of(1, 1)), Some(pixels::rgba(&crop, 20)));
+        assert_eq!(harness.ask(pixels_of(1, 2)), None);
+        assert_eq!(harness.ask(pixels_of(0, 1)), None, "an earlier search's");
+    }
+
+    #[test]
+    fn a_search_leaves_out_the_finds_added_already() {
+        let (mut harness, _handler) = searchable();
+        let found = harness
+            .ask(move |owner: &mut Owner<FakeHost>| {
+                owner.find_like(0, region(0, 0, 4, 5), &[region(7, 0, 4, 5)], red(), 0)
+            })
+            .expect("found");
+        let regions: Vec<RegionSpec> = found.finds.iter().map(|find| find.region).collect();
+        assert_eq!(regions, [region(0, 6, 4, 5)]);
+        let indexes: Vec<usize> = harness.jobs.try_iter().map(|job| job.index).collect();
+        assert_eq!(indexes, [0]);
     }
 
     #[test]

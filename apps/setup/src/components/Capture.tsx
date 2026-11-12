@@ -953,6 +953,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             labeled={[...draft.labels.values()].filter((text) => text.trim() !== '')}
             recorded={[...draft.recorded.values()]}
             found={draft.found.map((label) => label.text)}
+            onForgetFound={() => {
+              setDraft((current) => ({ ...current, found: [] }));
+            }}
             finding={finder.rows.filter((row) => row.keep).map((row) => row.text)}
             readers={editing.existing === null || file === null ? [] : readers(file, editing.existing.id)}
             onName={(name) => {
@@ -974,7 +977,6 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 <FoundPanel
                   view={finder.view}
                   rows={finder.rows}
-                  added={finder.added}
                   flags={finder.flags}
                   crops={finder.crops}
                   findBlocked={findBlocked}
