@@ -32,19 +32,22 @@ export function MovingContentField({ moving, appName, onMayMove }: Props) {
           {MOVING_HINT}
         </Hint>
       </span>
-      {moving.kind === 'fixed' ? (
-        <p className="note">
-          Draw the region where the value shows, on any screenshot of {appName}. Only where it is matters here; how to
-          read it comes next.
-        </p>
-      ) : null}
-      {moving.kind === 'area' ? (
-        <>
-          <p className="note">{moving.guidance}</p>
-          <p className="note">{moving.limits}</p>
-        </>
-      ) : null}
-      {moving.kind === 'unsupported' ? <p className="warn">{moving.why}</p> : null}
+      {/* Always there, so a screen reader hears what the option, or another check, changes. */}
+      <div className="moving-says" role="status">
+        {moving.kind === 'fixed' ? (
+          <p className="note">
+            Draw the region where the value shows, on any screenshot of {appName}. Only where it is matters here; how to
+            read it comes next.
+          </p>
+        ) : null}
+        {moving.kind === 'area' ? (
+          <>
+            <p className="note">{moving.guidance}</p>
+            <p className="note">{moving.limits}</p>
+          </>
+        ) : null}
+        {moving.kind === 'unsupported' ? <p className="warn">{moving.why}</p> : null}
+      </div>
     </div>
   );
 }

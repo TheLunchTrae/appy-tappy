@@ -1,6 +1,7 @@
 // What a value can do about content that moves around inside the window: a number or a bar is read wherever it is
 // inside a larger reading area, and the other checks need their content to stay put. Nothing follows content; this
-// is apart from the window changing size, which the value's pin covers.
+// is apart from the window changing size, which the value's pin covers. A value saves whether its region is a
+// reading area, so the Values page and a fix show it as one.
 
 import type { CheckKind } from './check.ts';
 
@@ -49,8 +50,8 @@ export function movingContent(kind: CheckKind, mayMove: boolean): MovingContent 
           "Draw the box around everywhere the bar can show. AppyTappy counts the bar's filled and empty colors " +
           'wherever they are inside the box.',
         limits:
-          'Anything else in the box that has either color counts as part of the bar, so keep it out. It does not ' +
-          'look outside the box.',
+          'Anything else in the box with a color near the filled or the empty color counts as part of the bar, so ' +
+          'keep it out. It does not look outside the box.',
       };
     case 'color':
       return {
@@ -65,11 +66,31 @@ export function movingContent(kind: CheckKind, mayMove: boolean): MovingContent 
   }
 }
 
+/** Whether the region is a reading area, which is what a value saves: never for a check that cannot read one. */
+export function isReadingArea(moving: MovingContent): boolean {
+  return moving.kind === 'area';
+}
+
 /** What the region is called on the screenshot: the value's name as typed, and whether it is a reading area. */
 export function regionLabel(valueName: string, moving: MovingContent): string {
   const name = valueName.trim();
-  if (moving.kind !== 'area') {
+  if (!isReadingArea(moving)) {
     return name === '' ? 'Region' : name;
   }
   return name === '' ? 'Reading area' : `${name} reading area`;
+}
+
+/**
+ * What a fix says about its region: to draw it while there is none, and where it starts once it is `placed`. A
+ * reading area is drawn around everywhere the value can show, at this size as at the first.
+ */
+export function fixNote(moving: MovingContent, placed: boolean): string {
+  if (isReadingArea(moving)) {
+    return placed
+      ? 'Starts from the scaled reading area. Move or resize it so it covers everywhere the value can show at this size.'
+      : 'Take a screenshot, then draw the reading area around everywhere the value can show at this size.';
+  }
+  return placed
+    ? 'Starts from the scaled region. Move it onto the value where it shows at this size.'
+    : 'Take a screenshot, then draw the region where the value shows at this size.';
 }

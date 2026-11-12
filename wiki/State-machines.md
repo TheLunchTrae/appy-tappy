@@ -806,8 +806,10 @@ stateDiagram-v2
 A new value's pin is picked in the capture screen's first step
 (`apps/setup/src/components/Capture.tsx`, shown by `PinPicker.tsx`). The
 choice is one `PinChoice`, automatic or by hand with a pin
-(`apps/setup/src/lib/pin.ts`). What the control shows, `PinView`, follows from
-the choice and the region, so no pin is kept beside the region it came from.
+(`apps/setup/src/lib/pin.ts`). It lives on the capture's draft beside the
+region, so one update changes both. What the control shows, `PinView`,
+follows from the choice and the region, so no pin is kept beside the region
+it came from.
 
 ```mermaid
 stateDiagram-v2
@@ -831,16 +833,20 @@ stateDiagram-v2
   never governs another unseen.
 - A region set on the screenshot is new when it keeps neither the size nor a
   corner of the one before (`pinChoiceAfterRegion`): a move keeps the size
-  and a corner drag keeps a corner, even when it flips the region over. The
-  typed fields only move or resize. A State check's selection fits the
-  region without this check, so it keeps a pin chosen by hand and the
-  control says when the two disagree.
+  and a corner drag keeps a corner, even when it flips the region over. A
+  region drawn on a larger screenshot can reach past the one shown, where a
+  corner drag keeps its still corner inside the picture, so the corners of
+  the region before are compared as kept inside it. The typed fields only
+  move or resize. A State check's selection fits the region without this
+  check, so it keeps a pin chosen by hand and the control says when the two
+  disagree.
 - The reference editor draws on the same screenshot for its own characters,
   so a region drawn there leaves the choice alone.
 - A fix has no choice: it reads at its own region, and its value keeps its
   pin.
-- `pinChoiceOf` is the choice a saved pin makes for its region: automatic
-  when it is the side the region is nearest, and by hand otherwise.
+- **Back to automatic** moves the focus to **Change**, which takes its
+  place. The notice is a live region that stays in the page while it has
+  nothing to say.
 
 ### Reading area
 
@@ -855,9 +861,15 @@ check's kind it comes to one of three (`movingContent` in
   region, and the step says why and what to do instead.
 
 Changing the check's kind moves between **Area** and **Unsupported**, and the
-flag moves to and from **Fixed**. The flag is not saved: a check reads its
-region the same way whatever it says, as
-[Content that moves](Screen-regions.md#content-that-moves) describes.
+flag moves to and from **Fixed**. Saving sends `readingArea` only in
+**Area** (`isReadingArea`), so a value whose check cannot read a reading
+area saves without one while the switch stays on. The owner refuses a save
+that names one for such a check, with the rule of `AppFile::check`.
+
+A fix has no switch. It starts in **Area** when its value saved a reading
+area and in **Fixed** otherwise, and stays there, since a fix keeps its
+value's kind of check. [Content that moves](Screen-regions.md#content-that-moves)
+says what the saved flag is for.
 
 ### Text reader
 

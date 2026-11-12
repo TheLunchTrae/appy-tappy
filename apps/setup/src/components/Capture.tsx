@@ -37,8 +37,8 @@ import { PinPicker } from './PinPicker.tsx';
 import { PinGuides } from './PinGuides.tsx';
 import { MovingContentField } from './MovingContentField.tsx';
 import { Hint } from './Hint.tsx';
-import { AREA_DRAW_HINT, movingContent, regionLabel } from '../lib/moving.ts';
-import { AUTOMATIC, type PinChoice, pinChoiceAfterRegion, pinOfView, pinView } from '../lib/pin.ts';
+import { AREA_DRAW_HINT, fixNote, isReadingArea, movingContent, regionLabel } from '../lib/moving.ts';
+import { pinChoiceAfterRegion, pinOfView, pinView } from '../lib/pin.ts';
 import { FIX_HINT, READ_WITH_HINT, sameSize, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
@@ -150,11 +150,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const [picking, setPicking] = useState<ColorTarget | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   const [valueName, setValueName] = useState(start.valueName);
-  // Whether the side the value stays at follows where its region is or was chosen by hand.
-  const [pinChoice, setPinChoice] = useState<PinChoice>(AUTOMATIC);
-  // Whether the user said the value's content may move around inside the window.
-  const [mayMove, setMayMove] = useState(false);
   const fixing = mode.kind === 'fix' ? mode.value : null;
+  // Whether the user said the new value's content may move around inside the window.
+  const [mayMove, setMayMove] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const screenshots = useScreenshots();
@@ -261,11 +259,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     }
   };
 
-  const staysAt = pinView(pinChoice, draft.region, drawnSize);
+  const staysAt = pinView(draft.pin, draft.region, drawnSize);
   const pin = pinOfView(staysAt);
-  // A new value's region is a reading area while its content may move and its check reads it wherever it is.
-  const moving = movingContent(draft.kind, mayMove);
-  const area = moving.kind === 'area' && editing === null;
+  // The value's region is a reading area while its content may move and its check reads it wherever it is. A fix
+  // draws the kind of region its value saved.
+  const moving = movingContent(draft.kind, fixing === null ? mayMove : fixing.screen.readingArea === true);
+  const area = isReadingArea(moving) && editing === null;
   // A fix keeps its value's side, so only a new value needs one to save.
   const hasSide = fixing !== null || pin !== null;
 
@@ -284,6 +283,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
           check: built.spec,
           screenshot: draft.drawnOn,
           pin,
+          readingArea: isReadingArea(moving),
         });
       }
       onSaved();
@@ -598,10 +598,16 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 tool={selecting}
                 ignored={selection.ignored}
                 onRegion={(region) => {
-                  setDraft((current) => ({ ...current, region, drawnOn: selected }));
-                  if (editing === null) {
-                    setPinChoice((current) => pinChoiceAfterRegion(current, draft.region, region));
-                  }
+                  setDraft((current) => ({
+                    ...current,
+                    region,
+                    drawnOn: selected,
+                    // The reference editor draws for its own characters, which leaves the value's side alone.
+                    pin:
+                      editing === null
+                        ? pinChoiceAfterRegion(current.pin, current.region, region, native)
+                        : current.pin,
+                  }));
                 }}
                 onPick={pick}
                 onSnap={(rough, combine) => {
@@ -700,11 +706,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 </span>
                 <Hint topic="Fix at this size">{FIX_HINT}</Hint>
               </div>
-              <p className="note">
-                {draft.region === null
-                  ? 'Take a screenshot, then draw the region where the value shows at this size.'
-                  : 'Starts from the scaled region. Move it onto the value where it shows at this size.'}
-              </p>
+              <p className="note">{fixNote(moving, draft.region !== null)}</p>
+              {moving.kind === 'area' ? <p className="note">{moving.limits}</p> : null}
               <RegionFields
                 region={draft.region}
                 onRegion={(region) => {
@@ -786,7 +789,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 }}
               />
               <MovingContentField moving={moving} appName={choice.name} onMayMove={setMayMove} />
-              <PinPicker view={staysAt} scales={file?.sizeChanges !== 'rarely'} onChoice={setPinChoice} />
+              <PinPicker
+                view={staysAt}
+                scales={file?.sizeChanges !== 'rarely'}
+                onChoice={(pinChoice) => {
+                  setDraft((current) => ({ ...current, pin: pinChoice }));
+                }}
+              />
               <div className="sep" />
               <div className="actions">
                 <button type="button" className="btn" disabled={saving} onClick={onCancel}>

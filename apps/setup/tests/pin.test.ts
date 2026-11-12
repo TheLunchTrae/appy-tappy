@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { dragCorner, fromCorners, moveRect } from '../src/lib/region.ts';
+import { dragCorner, fromCorners, moveRect, type Rect } from '../src/lib/region.ts';
 import {
   AUTOMATIC,
   type PinChoice,
   pinChoiceAfterRegion,
-  pinChoiceOf,
   pinGuides,
   pinMeaning,
   pinNotice,
@@ -22,50 +21,58 @@ const bottomLeft = { x: 10, y: 70, width: 40, height: 10 };
 const byHand: PinChoice = { kind: 'byHand', pin: 'topRight' };
 
 describe('pinChoiceAfterRegion', () => {
+  /** The choice once the region on a picture of the window's size goes from the top right one to `next`. */
+  const after = (choice: PinChoice, next: Rect): PinChoice => pinChoiceAfterRegion(choice, topRight, next, window);
+
   test('keeps a side chosen by hand while the region is moved or resized', () => {
     const moved = moveRect(topRight, -240, 65, window);
     expect(moved).toEqual(bottomLeft);
-    expect(pinChoiceAfterRegion(byHand, topRight, moved)).toBe(byHand);
+    expect(after(byHand, moved)).toBe(byHand);
     for (const corner of ['nw', 'ne', 'sw', 'se'] as const) {
-      expect(pinChoiceAfterRegion(byHand, topRight, dragCorner(topRight, corner, { x: 200, y: 40 }, window))).toBe(
-        byHand,
-      );
+      expect(after(byHand, dragCorner(topRight, corner, { x: 200, y: 40 }, window))).toBe(byHand);
     }
     // Dragged past the corner that stays put, the region flips over it and still has it.
     const flipped = dragCorner(topRight, 'se', { x: 100, y: 2 }, window);
     expect(flipped).toEqual({ x: 100, y: 2, width: 150, height: 3 });
-    expect(pinChoiceAfterRegion(byHand, topRight, flipped)).toBe(byHand);
+    expect(after(byHand, flipped)).toBe(byHand);
     // An edge moved by typing keeps the corners of the edge across from it.
-    expect(pinChoiceAfterRegion(byHand, topRight, { ...topRight, width: 20 })).toBe(byHand);
-    expect(pinChoiceAfterRegion(byHand, topRight, { ...topRight, x: 3 })).toBe(byHand);
+    expect(after(byHand, { ...topRight, width: 20 })).toBe(byHand);
+    expect(after(byHand, { ...topRight, x: 3 })).toBe(byHand);
+  });
+
+  test('keeps a side chosen by hand while a region that reaches past a smaller picture is resized', () => {
+    // Drawn on a 1920 wide screenshot and now dragged on a 1280 wide one: the corner that stays put is kept inside
+    // the picture, so the region keeps none of its own corners.
+    const drawn = { x: 1800, y: 50, width: 100, height: 40 };
+    const smaller = { width: 1280, height: 720 };
+    const fromRight = dragCorner(drawn, 'se', { x: 1000, y: 200 }, smaller);
+    expect(fromRight).toEqual({ x: 1000, y: 50, width: 280, height: 150 });
+    expect(pinChoiceAfterRegion(byHand, drawn, fromRight, smaller)).toBe(byHand);
+    const fromLeft = dragCorner(drawn, 'nw', { x: 900, y: 10 }, smaller);
+    expect(fromLeft).toEqual({ x: 900, y: 10, width: 380, height: 80 });
+    expect(pinChoiceAfterRegion(byHand, drawn, fromLeft, smaller)).toBe(byHand);
+    // On a picture that holds the whole region, the same change is a new drawing.
+    expect(pinChoiceAfterRegion(byHand, drawn, fromRight, { width: 1920, height: 1080 })).toBe(AUTOMATIC);
+    // A region drawn elsewhere on the smaller picture is new there too.
+    expect(pinChoiceAfterRegion(byHand, drawn, { x: 100, y: 300, width: 60, height: 20 }, smaller)).toBe(AUTOMATIC);
   });
 
   test('returns to automatic when a region is drawn anew', () => {
     // A drag that starts outside the region draws a new one from there.
     const drawn = fromCorners({ x: 20, y: 60 }, { x: 23, y: 62 }, window);
-    expect(drawn).not.toBeNull();
-    if (drawn !== null) {
-      expect(pinChoiceAfterRegion(byHand, topRight, drawn)).toBe(AUTOMATIC);
-    }
+    expect(drawn).toEqual({ x: 20, y: 60, width: 3, height: 2 });
+    expect(after(byHand, { x: 20, y: 60, width: 3, height: 2 })).toBe(AUTOMATIC);
     // A new region as wide as the old one, or with one edge in line with it, is still new.
-    expect(pinChoiceAfterRegion(byHand, topRight, { x: 10, y: 70, width: 40, height: 12 })).toBe(AUTOMATIC);
-    expect(pinChoiceAfterRegion(byHand, topRight, { x: 10, y: 70, width: 30, height: 10 })).toBe(AUTOMATIC);
-    expect(pinChoiceAfterRegion(byHand, topRight, { x: 250, y: 40, width: 20, height: 20 })).toBe(AUTOMATIC);
-    expect(pinChoiceAfterRegion(byHand, topRight, { x: 100, y: 5, width: 20, height: 20 })).toBe(AUTOMATIC);
-    expect(pinChoiceAfterRegion(byHand, null, topRight)).toBe(AUTOMATIC);
+    expect(after(byHand, { x: 10, y: 70, width: 40, height: 12 })).toBe(AUTOMATIC);
+    expect(after(byHand, { x: 10, y: 70, width: 30, height: 10 })).toBe(AUTOMATIC);
+    expect(after(byHand, { x: 250, y: 40, width: 20, height: 20 })).toBe(AUTOMATIC);
+    expect(after(byHand, { x: 100, y: 5, width: 20, height: 20 })).toBe(AUTOMATIC);
+    expect(pinChoiceAfterRegion(byHand, null, topRight, window)).toBe(AUTOMATIC);
   });
 
   test('stays automatic through every change', () => {
-    expect(pinChoiceAfterRegion(AUTOMATIC, topRight, bottomLeft)).toBe(AUTOMATIC);
-    expect(pinChoiceAfterRegion(AUTOMATIC, topRight, { ...topRight, x: 3 })).toBe(AUTOMATIC);
-  });
-});
-
-describe('pinChoiceOf', () => {
-  test('is automatic for the side the region is nearest and by hand for any other', () => {
-    expect(pinChoiceOf('topRight', topRight, window)).toEqual(AUTOMATIC);
-    expect(pinChoiceOf(undefined, topRight, window)).toEqual(AUTOMATIC);
-    expect(pinChoiceOf('center', topRight, window)).toEqual({ kind: 'byHand', pin: 'center' });
+    expect(after(AUTOMATIC, bottomLeft)).toBe(AUTOMATIC);
+    expect(after(AUTOMATIC, { ...topRight, x: 3 })).toBe(AUTOMATIC);
   });
 });
 

@@ -11,6 +11,18 @@ export type PinChoice = { readonly kind: 'automatic' } | { readonly kind: 'byHan
 /** The choice a new value starts with, and the one **Back to automatic** returns to. */
 export const AUTOMATIC: PinChoice = { kind: 'automatic' };
 
+/** `rect` with each edge kept inside `bounds`, as a drag on a picture of that size keeps the corner it holds still. */
+function within(rect: Rect, bounds: Size): Rect {
+  const x = Math.min(rect.x, bounds.width);
+  const y = Math.min(rect.y, bounds.height);
+  return {
+    x,
+    y,
+    width: Math.min(rect.x + rect.width, bounds.width) - x,
+    height: Math.min(rect.y + rect.height, bounds.height) - y,
+  };
+}
+
 /** Whether `a` and `b` have a corner at the same point, whichever corner of each it is. */
 function shareCorner(a: Rect, b: Rect): boolean {
   const across = (rect: Rect): readonly number[] => [rect.x, rect.x + rect.width];
@@ -19,24 +31,19 @@ function shareCorner(a: Rect, b: Rect): boolean {
 }
 
 /**
- * The choice once the region on the screenshot goes from `previous` to `next`. Moving a region keeps its size and
- * resizing it keeps a corner, and both keep a side chosen by hand. A region that keeps neither is drawn anew, which
- * returns to automatic, since a side chosen for the region before says nothing about this one.
+ * The choice once the region on a picture of `bounds` goes from `previous` to `next`. Moving a region keeps its size
+ * and resizing it keeps a corner, and both keep a side chosen by hand. A region that keeps neither is drawn anew,
+ * which returns to automatic, since a side chosen for the region before says nothing about this one.
+ *
+ * A region drawn on a larger picture can reach past `bounds`. A corner drag then keeps the corner it holds still
+ * inside the picture, so the corners compared are `previous`'s as kept inside `bounds`.
  */
-export function pinChoiceAfterRegion(choice: PinChoice, previous: Rect | null, next: Rect): PinChoice {
+export function pinChoiceAfterRegion(choice: PinChoice, previous: Rect | null, next: Rect, bounds: Size): PinChoice {
   if (previous === null) {
     return AUTOMATIC;
   }
   const moved = previous.width === next.width && previous.height === next.height;
-  return moved || shareCorner(previous, next) ? choice : AUTOMATIC;
-}
-
-/**
- * The choice that a saved value's pin makes for its `region`, drawn on a window of `window`: automatic when it is
- * the side the region is nearest or the value has none saved, and by hand otherwise.
- */
-export function pinChoiceOf(saved: PinDef | undefined, region: Rect, window: Size): PinChoice {
-  return saved === undefined || saved === guessPin(region, window) ? AUTOMATIC : { kind: 'byHand', pin: saved };
+  return moved || shareCorner(within(previous, bounds), next) ? choice : AUTOMATIC;
 }
 
 /** What the **Stays at** control shows for a choice. */

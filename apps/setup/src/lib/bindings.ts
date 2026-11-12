@@ -855,7 +855,12 @@ screenshot: number,
  * The side of the window the region stays at as the window changes
  * size.
  */
-pin: PinDef, }>;
+pin: PinDef,
+/**
+ * Whether the region was drawn as a reading area, larger than what it
+ * reads. Only a check that reads anywhere in its region may have one.
+ */
+readingArea: boolean, }>;
 
 /**
  * Where a reference was saved.
@@ -911,6 +916,19 @@ check: CheckDef,
  * size, or `None` for the side [`PinDef::guess`] picks.
  */
 pin?: PinDef,
+/**
+ * Whether the user drew the region as a reading area: larger than what
+ * it reads, to cover every place content that moves inside the window
+ * can show. Left out of the file when it is not.
+ *
+ * Setup guidance only. The setup app shows the region as a reading
+ * area when the value is listed or drawn again. Nothing that places
+ * or reads the region looks at it, so the value reads the same with
+ * and without it. Only a check that
+ * [reads anywhere in its region](CheckDef::reads_anywhere) may have
+ * one.
+ */
+readingArea?: boolean,
 /**
  * The value drawn again at other window sizes, each read exactly at its
  * own size. Always written, even when empty, since the setup app reads

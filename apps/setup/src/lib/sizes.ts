@@ -109,10 +109,11 @@ export function sizeText(size: SizeDef): string {
 }
 
 /** Where a value is drawn and stays, with each size it is fixed at, such as `Drawn at 1920 × 1080, pinned bottom
- * left · fixed at 3440 × 1440`. */
+ * left · fixed at 3440 × 1440`. A region drawn as a reading area says so: `Reading area drawn at …`. */
 export function regionText(screen: ScreenDef): string {
   const fixes = screen.fixes.map((fix) => ` · fixed at ${sizeText(fix.windowSize)}`).join('');
-  return `Drawn at ${sizeText(screen.windowSize)}, pinned ${PIN_NAMES[pinOf(screen)].toLowerCase()}${fixes}`;
+  const drawn = screen.readingArea === true ? 'Reading area drawn' : 'Drawn';
+  return `${drawn} at ${sizeText(screen.windowSize)}, pinned ${PIN_NAMES[pinOf(screen)].toLowerCase()}${fixes}`;
 }
 
 /** The two sizes are the same. */

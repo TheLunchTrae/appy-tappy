@@ -1900,6 +1900,18 @@ select {
   color: var(--text);
 }
 
+/* The notice under a side chosen by hand stays in the page while it has nothing to say, and takes no room then. */
+.pin-notice:not(:empty) {
+  margin-top: 5px;
+}
+
+/* What This content may move comes to, as paragraphs spaced like the field's own parts. */
+.moving-says {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 /* A value's reading at the window's size now, or why it has none. */
 .now {
   display: flex;

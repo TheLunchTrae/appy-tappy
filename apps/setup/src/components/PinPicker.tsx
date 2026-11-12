@@ -1,7 +1,7 @@
 // The side of the window a value stays at as the window changes size. It follows where the region is, and says so
 // in words; the 3 by 3 grid of the window's sides and corners is there to choose one by hand instead.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { PinDef } from '../lib/bindings.ts';
 import { AUTOMATIC, type PinChoice, type PinView, pinMeaning, pinNotice, pinOfView, pinSummary } from '../lib/pin.ts';
@@ -20,56 +20,66 @@ export function PinPicker({ view, scales, onChoice }: Props) {
   // Whether the grid is open to choose a side while the side still follows the region.
   const [choosing, setChoosing] = useState(false);
   const pin = pinOfView(view);
-  const notice = pinNotice(view);
   const byHand = view.kind === 'byHand';
+  const grid = pin !== null && (byHand || choosing);
+  // Back to automatic gives way to Change, which takes the focus it had.
+  const change = useRef<HTMLButtonElement>(null);
+  const returned = useRef(false);
+  useEffect(() => {
+    if (returned.current && !byHand) {
+      returned.current = false;
+      change.current?.focus();
+    }
+  }, [byHand]);
   return (
-    <div className="field">
+    <div className="field" role="group" aria-labelledby="stays-at">
       <span className="name">
         <span id="stays-at">Stays at</span>
         <Hint topic="Stays at" id="hint-stays-at">
           {PIN_HINT}
         </Hint>
       </span>
-      <div className="toggle-row">
-        <span>{pinSummary(view)}</span>
-        {byHand ? (
-          <button
-            type="button"
-            className="btn small"
-            onClick={() => {
-              setChoosing(false);
-              onChoice(AUTOMATIC);
-            }}
-          >
-            Back to automatic
-          </button>
-        ) : pin === null ? null : (
-          <button
-            type="button"
-            className="btn small"
-            aria-expanded={choosing}
-            aria-controls="stays-at-grid"
-            onClick={() => {
-              setChoosing(!choosing);
-            }}
-          >
-            Change
-          </button>
-        )}
-      </div>
-      {notice === null ? null : (
-        <p className="warn" role="status">
-          {notice}
+      <div>
+        <div className="toggle-row">
+          <span id="stays-at-now">{pinSummary(view)}</span>
+          {byHand ? (
+            <button
+              key="automatic"
+              type="button"
+              className="btn small"
+              aria-describedby="stays-at-now"
+              onClick={() => {
+                returned.current = true;
+                setChoosing(false);
+                onChoice(AUTOMATIC);
+              }}
+            >
+              Back to automatic
+            </button>
+          ) : pin === null ? null : (
+            <button
+              key="change"
+              ref={change}
+              type="button"
+              className="btn small"
+              aria-describedby="stays-at-now"
+              aria-expanded={choosing}
+              aria-controls={choosing ? 'stays-at-grid' : undefined}
+              onClick={() => {
+                setChoosing(!choosing);
+              }}
+            >
+              Change
+            </button>
+          )}
+        </div>
+        {/* Always there, so a screen reader hears the notice when its text comes. */}
+        <p className="warn pin-notice" role="status">
+          {pinNotice(view)}
         </p>
-      )}
-      {pin !== null && (byHand || choosing) ? (
-        <div
-          id="stays-at-grid"
-          className="pins"
-          role="group"
-          aria-labelledby="stays-at"
-          aria-describedby="hint-stays-at"
-        >
+      </div>
+      {grid ? (
+        <div id="stays-at-grid" className="pins" role="group" aria-label="Side" aria-describedby="hint-stays-at">
           {PINS.map((each: PinDef) => (
             <button
               key={each}
@@ -86,13 +96,13 @@ export function PinPicker({ view, scales, onChoice }: Props) {
         </div>
       ) : null}
       {pin === null ? null : (
-        <span className="note">
+        <p className="note">
           {pinMeaning(pin)}
           {scales
             ? ''
             : " This application's window rarely changes size, so the value is read only at the sizes it is drawn " +
               'at and the side is not used.'}
-        </span>
+        </p>
       )}
     </div>
   );

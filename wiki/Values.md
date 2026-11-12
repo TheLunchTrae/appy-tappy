@@ -132,13 +132,18 @@ the check:
   outline, and AppyTappy reads the number or the bar wherever it is inside
   it. A **Number** check reads everything in the area that has the
   characters' color, so keep other text and shapes of that color out. A
-  **Bar fill** check counts everything in the area that has the bar's filled
-  or empty color, so keep anything else of those colors out. Neither looks
-  outside the area.
+  **Bar fill** check counts everything in the area with a color near the
+  bar's filled or empty color, so keep anything else of those colors out.
+  Neither looks outside the area. The value keeps that its region is a
+  reading area: the Values page shows it under **Region**, such as
+  **Reading area drawn at 1920 × 1080, pinned top right**, and a
+  [fix](#fix-a-value-at-one-size) of the value asks for a reading area
+  again.
 - A **Color** check averages its whole region, and a **State** check
   compares its region pixel by pixel with each state's screenshot. Both need
-  what they read to stay in the same place, so the option only says so. Make
-  a value for each place it can show instead.
+  what they read to stay in the same place, so the option only says so, and
+  the value is saved with a plain region. Make a value for each place it can
+  show instead.
 
 This is separate from the window changing size, which
 [Window size](#window-size) covers.
@@ -166,7 +171,8 @@ its distance from the right edge as the window gets wider, and one that stays
 at the center keeps its distance from the middle. Under the control, a
 sentence says what the region keeps its distance from, and dashed lines on
 the screenshot run from the region to those edges, or to the middle of the
-window.
+window. The lines show which edges the region is measured from. They don't
+show where the region lands at another window size.
 
 AppyTappy picks the side for you: the third of the window the region's center
 is in, so a health bar in the bottom left stays at the bottom left. The
@@ -198,6 +204,10 @@ region may show none of the states right now.
    size now, with the region where the value would be read there: it
    **Starts from the scaled region**.
 2. Move the region onto the value, then select **Next: how to read it**.
+   For a value drawn as a [reading area](#content-that-moves), the region
+   **Starts from the scaled reading area**, with a dashed outline: move or
+   resize it so it covers everywhere the value can show at this size,
+   rather than fitting it to the value.
 3. For a **State** check, take a screenshot of each of its states at this
    size and add them in the same order; each takes the next state's name.
    The fix compares with the first drawing's tolerance.
