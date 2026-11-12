@@ -111,7 +111,7 @@ This page covers what the user guide leaves out.
   exactly the ones the edit removes. An edit removes a value's fixes when
   the check's kind changes or a state check's states no longer line up with
   the fixes' pictures: each state has to keep its picture or its name, in
-  the same place. A fix that stays reads as it did: when a number value's
+  the same place. A fix that stays keeps the reference it reads with: when a number value's
   reference changes, a fix that read with the old one names it, and a fix
   that named the new one names none, so a fix still names a reference only
   when it differs from the value's. A fix has no `whole` of its own and

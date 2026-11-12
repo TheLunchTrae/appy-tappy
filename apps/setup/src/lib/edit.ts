@@ -43,6 +43,18 @@ export function pickedPin(screen: ScreenDef): PinDef | null {
 }
 
 /**
+ * What the capture shows of `value` when an edit of it opens, which leaving the edit loses nothing of: its name,
+ * the side it stays at when the user picked one by hand, and its draft.
+ */
+export function editStart(value: ValueDef): {
+  readonly valueName: string;
+  readonly pinned: PinDef | null;
+  readonly draft: Draft;
+} {
+  return { valueName: value.name, pinned: pickedPin(value.screen), draft: editDraft(value.screen) };
+}
+
+/**
  * Whether `draft` reads `saved`'s states with the pictures saved for them: a state check on the region as saved,
  * with no state taken from a screenshot. The names and the tolerance may differ.
  */

@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import type { ValueDef } from '../src/lib/bindings.ts';
 import { DEFAULT_TOLERANCE, EMPTY_DRAFT, withKind, withState, withStateAt } from '../src/lib/check.ts';
+import { held } from '../src/lib/unsaved.ts';
 import {
   agreedFixes,
   buildEdit,
   droppedFixesText,
   editDraft,
+  editStart,
   keepsStates,
   otherSizeText,
   pickedPin,
@@ -63,6 +65,21 @@ test('the region sits on the first screenshot only when it has the size the valu
   // A region that sits on a screenshot already stays there.
   const placed = { ...draft, drawnOn: 3 };
   expect(placedOn(placed, bar.screen, 4, windowSize)).toBe(placed);
+});
+
+test('an edit holds unsaved work once anything it opened with changed, the picked side included', () => {
+  const centered = { ...bar, screen: { ...bar.screen, pin: 'center' as const } };
+  const start = editStart(centered);
+  expect(start).toEqual({ valueName: 'Status', pinned: 'center', draft: editDraft(centered.screen) });
+  expect(held(false, start, editStart(centered))).toBe('nothing');
+  // Another side, or back to the guess, is the only change.
+  expect(held(false, start, { ...start, pinned: 'topRight' })).toBe('unsaved');
+  expect(held(false, start, { ...start, pinned: null })).toBe('unsaved');
+  expect(held(false, editStart(bar), { ...editStart(bar), pinned: 'topLeft' })).toBe('unsaved');
+  // Once the capture's own screenshot holds the region, that is where the edit starts.
+  const placed = { ...start, draft: placedOn(start.draft, centered.screen, 0, windowSize) };
+  expect(held(false, placed, { ...placed, pinned: 'center' })).toBe('nothing');
+  expect(held(false, placed, { ...placed, valueName: 'Health' })).toBe('unsaved');
 });
 
 test('a pin shows as picked by hand only when it is not the guess', () => {

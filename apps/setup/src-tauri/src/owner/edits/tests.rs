@@ -659,15 +659,25 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
     let mut harness = harness_with(false, Ok(stores));
     add_example_app(&mut harness);
     let mut handler = harness.pick();
-    for (index, image) in [frame_image(), red_image(LARGER), red_image(WIDER)]
-        .iter()
-        .enumerate()
+    let widest = SizeDef {
+        width: 16,
+        height: 8,
+    };
+    for (index, image) in [
+        frame_image(),
+        red_image(LARGER),
+        red_image(WIDER),
+        red_image(widest),
+    ]
+    .iter()
+    .enumerate()
     {
         harness.deliver(&mut handler, Ok(image));
         assert_eq!(harness.ask(Owner::screenshot), Ok(index));
     }
-    // Two references that read the red square of screenshot 0 differently.
-    for (name, text) in [("Digits", "1"), ("Small", "7")] {
+    // Three references that read the red square of screenshot 0
+    // differently.
+    for (name, text) in [("Digits", "1"), ("Small", "7"), ("Tiny", "4")] {
         let reference = ReferenceSaveSpec {
             app: "example".to_owned(),
             reference_name: name.to_owned(),
@@ -686,8 +696,8 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
     harness
         .ask(|owner| owner.save(&spec("example", "Progress", &drawn)))
         .expect("saves");
-    // One fix reads with the value's reference, and one with its own.
-    for (screenshot, reference) in [(1, "digits"), (2, "small")] {
+    // One fix reads with the value's reference, and two with their own.
+    for (screenshot, reference) in [(1, "digits"), (2, "small"), (3, "tiny")] {
         let fix = FixSpec {
             app: "example".to_owned(),
             value: "progress".to_owned(),
@@ -706,13 +716,15 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
             .map(|fix| fix.reference)
             .collect()
     };
-    let own = [None, Some("small".to_owned())];
+    let own = [None, Some("small".to_owned()), Some("tiny".to_owned())];
     assert_eq!(references(&harness), own);
-    let sizes = [LARGER, WIDER];
+    let sizes = [LARGER, WIDER, widest];
     let before = checks_at(&harness, &sizes);
-    assert_ne!(before[0], before[1], "the two references read differently");
+    assert_ne!(before[0], before[1], "the references read differently");
+    assert_ne!(before[1], before[2], "the references read differently");
 
-    // The value reads with the other reference, and each fix as it did.
+    // The value reads with the other reference, and each fix with the one
+    // it read with: the fix that names a third reference is left alone.
     let small = edit("progress", "Progress", &kept_number("small", true));
     assert_eq!(
         harness.ask(|owner| owner.try_edit(&small)),
@@ -725,7 +737,7 @@ fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes()
     assert!(save(&mut harness, &small, &[]).is_ok());
     assert_eq!(
         references(&harness),
-        [Some("digits".to_owned()), None],
+        [Some("digits".to_owned()), None, Some("tiny".to_owned())],
         "each fix names a reference only when it is not the value's"
     );
     assert_eq!(checks_at(&harness, &sizes), before);

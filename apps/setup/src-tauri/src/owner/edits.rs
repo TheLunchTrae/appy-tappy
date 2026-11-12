@@ -267,10 +267,12 @@ fn fixes_suit(saved: &CheckDef, edited: &CheckDef) -> bool {
 }
 
 /// The fixes of `screen` for an edit that makes its check `check`, which
-/// they still suit, each reading as it did. A fix of a number names a
-/// reference only when it is not its value's, so when the value's reference
-/// changes, a fix that read with the old one names it, and a fix that named
-/// the new one names none.
+/// they still suit, each reading with the reference it read with. A fix of
+/// a number names a reference only when it is not its value's, so when the
+/// value's reference changes, a fix that read with the old one names it, a
+/// fix that named the new one names none, and a fix that names any other
+/// keeps it. Nothing else of a fix changes: it has no setting of its own for
+/// the whole part, so it follows the value's.
 fn kept_fixes(screen: &ScreenDef, check: &CheckDef) -> Vec<FixDef> {
     let mut fixes = screen.fixes.clone();
     if let (CheckDef::Number { reference: old, .. }, CheckDef::Number { reference: new, .. }) =

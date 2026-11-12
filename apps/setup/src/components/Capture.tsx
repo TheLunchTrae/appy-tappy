@@ -23,7 +23,7 @@ import {
   withKind,
   withState,
 } from '../lib/check.ts';
-import { agreedFixes, editDraft, keepsStates, pickedPin, placedOn, saveable } from '../lib/edit.ts';
+import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/edit.ts';
 import { readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
@@ -133,19 +133,21 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       mode.kind === 'reference'
         ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
         : null;
+    if (mode.kind === 'edit') {
+      return { screenshots: 0, recording: false, editing, ...editStart(mode.value) };
+    }
     return {
       screenshots: 0,
       recording: false,
-      valueName: mode.kind === 'edit' ? mode.value.name : '',
+      valueName: '',
+      pinned: null,
       editing,
       draft:
         mode.kind === 'fix'
           ? fixDraft(mode.value.screen.check)
-          : mode.kind === 'edit'
-            ? editDraft(mode.value.screen)
-            : editing === null
-              ? EMPTY_DRAFT
-              : toReference(EMPTY_DRAFT, editing.existing),
+          : editing === null
+            ? EMPTY_DRAFT
+            : toReference(EMPTY_DRAFT, editing.existing),
     };
   });
   const [draft, setDraft] = useState<Draft>(start.draft);
@@ -159,7 +161,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const [tool, setTool] = useState<SelectTool>('box');
   const [valueName, setValueName] = useState(start.valueName);
   // The side the value stays at as the user picked it, or null to follow the guess from where its region is.
-  const [pinned, setPinned] = useState<PinDef | null>(mode.kind === 'edit' ? pickedPin(mode.value.screen) : null);
+  const [pinned, setPinned] = useState<PinDef | null>(start.pinned);
   const fixing = mode.kind === 'fix' ? mode.value : null;
   // The saved value an edit changes as it was first drawn.
   const edited = mode.kind === 'edit' ? mode.value : null;
@@ -175,6 +177,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     screenshots: shots.length,
     recording: recording !== null,
     valueName,
+    pinned,
     editing,
     draft,
   });

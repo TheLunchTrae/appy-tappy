@@ -255,11 +255,13 @@ back, while the region is where it was saved.
   **Saving this removes its fix at 3440 × 1440**, and saves only once you
   turn on **Remove its fix**. If the fixes it would remove are not the ones
   you agreed to lose, the save is refused and lists them again.
-- **What a fix reads with.** A fix that stays reads as it did. When you pick
-  another reference for a **Number** value, a fix that read with the old
-  reference keeps reading with it, so the old reference still cannot be
-  deleted while that fix uses it. **Whole number only** is the value's
-  setting at every size, so its fixes follow it.
+- **What a fix reads with.** A fix that stays keeps its region, its
+  pictures, and the reference it reads with. When you pick another reference
+  for a **Number** value, a fix that read with the old reference keeps
+  reading with it, so the old reference still cannot be deleted while that
+  fix uses it. One thing does follow the edit: **Whole number only** is the
+  value's setting at every size, so changing it changes how its fixes read
+  too.
 
 ## When an application updates
 
