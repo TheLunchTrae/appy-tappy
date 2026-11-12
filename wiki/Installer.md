@@ -119,7 +119,8 @@ gh attestation verify AppyTappy_0.1.0_x64-setup.exe -R TheLunchTrae/appy-tappy
 Only the release job attests, and only in a publishing run on `main` once it
 has tagged the commit. Test builds have no attestation, so a passing check
 means the installer came from a release run. Add `--source-digest` with the
-commit that the release's tag names to check that it came from one release in particular, and
+commit that the release's tag names to check that it came from one release in
+particular, and
 `--signer-workflow TheLunchTrae/appy-tappy/.github/workflows/release.yml` to
 reject an attestation that any other workflow might add later. The attesting
 job alone gets the `id-token` and `attestations` permissions, so the build
