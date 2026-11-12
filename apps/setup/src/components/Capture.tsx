@@ -1023,7 +1023,12 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               {check.state.kind === 'set' && check.preview !== null && check.preview.unread !== null ? (
                 <p className="reading note">{check.preview.unread}</p>
               ) : (
-                <ReadingBox built={trial.ok ? null : trial.next} state={check.state} reading={check.reading} />
+                <ReadingBox
+                  built={trial.ok ? null : trial.next}
+                  state={check.state}
+                  reading={check.reading}
+                  problem={check.problem}
+                />
               )}
               {edit.built === null || check.preview === null ? null : (
                 <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
@@ -1121,7 +1126,12 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
               />
             }
           />
-          <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
+          <ReadingBox
+            built={built.ok ? null : built.next}
+            state={check.state}
+            reading={check.reading}
+            problem={check.problem}
+          />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
           <div className="actions">

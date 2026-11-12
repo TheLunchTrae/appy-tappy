@@ -40,10 +40,43 @@ select **Capture this window**, as the first step of
    [record the region](#record-readings) to collect them as they show.
 4. **Save.** Select **Save reference**.
 
+The box at the bottom of the panel shows what the reference reads on the
+live window, a few times a second. When it can't read the window, it says why
+instead, in the words
+[A number reads in setup but the automation does nothing](Troubleshooting.md#a-number-reads-in-setup-but-the-automation-does-nothing)
+explains. That box is the reference's own reading of the region where you
+drew it. The automation reads with the same reference; at a window size the
+value wasn't drawn at, it reads where the region
+[scales to](Values.md#window-size).
+
 To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;
 new labels and readings add to it. Changing its color or tolerance changes how
 every value that reads with it reads, and the editor names them.
+
+## What a reference can't learn
+
+A label has one character for each character the region shows, and AppyTappy
+says so when the two differ:
+
+- **The region shows fewer characters than you typed.** Characters that touch
+  count as one, and a reference can't learn them.
+- **The region shows more characters than you typed.** A character counts once
+  for each of its marks that has blank space on both sides. Some percent
+  signs are three such marks: a ring, a slash, and a ring. Type a character
+  for each mark, such as `87o/o`; the number still reads as 87. Anything else
+  in the characters' color counts too, so draw the region around the number
+  alone.
+
+A reference knows a character as it looked beside the others in the region.
+A sign that reaches above or below the digits, such as the `,` in `1,234`,
+changes how every character beside it looks to AppyTappy. Label readings
+that show the sign until they show every digit, and readings without it
+too.
+
+Small text takes more labels. Where the characters are less than about 16
+pixels tall, label several readings of each character, or
+[record](#record-readings) them.
 
 ## Record readings
 
@@ -88,6 +121,10 @@ reference. One recording keeps at most 200 readings.
 
 If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.
+
+The text in review comes from a separate text reader that only fills in the
+labels for you to check. It doesn't show what the reference reads: the box
+at the bottom of the panel does, on the live window.
 
 ## Delete a reference
 
