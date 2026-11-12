@@ -6,7 +6,7 @@ import { referenceCoverage } from '../lib/expected.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
 import { CharacterChips, MissingNote } from '../components/CharacterChips.tsx';
-import type { SavedRef } from './ReferenceFlow.tsx';
+import type { SavedRef } from '../lib/flow.ts';
 
 interface Props {
   readonly apps: readonly AppSummary[] | null;

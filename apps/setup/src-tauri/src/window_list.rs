@@ -112,9 +112,12 @@ pub(crate) struct WindowFit {
     pub(crate) handle: u64,
     /// Whether it is taken only because no window qualifies.
     pub(crate) fallback: bool,
-    /// Whether it is the window a new session would read, so a value has
-    /// to be drawn on it.
+    /// Whether it is the window a new session would read now.
     pub(crate) best: bool,
+    /// Whether it fits as well as the window a new session would read. A
+    /// session reads one of these, so a value can be drawn on any of them.
+    /// Only offered windows count: one the list leaves out ties with none.
+    pub(crate) tied: bool,
 }
 
 /// The `windows` that `window` takes: `read`, the window a new session
@@ -131,15 +134,23 @@ pub(crate) fn matching(
         class: &choice.class,
         executable: &choice.executable,
     });
-    let mut fits: Vec<WindowFit> = matcher
+    let ranked: Vec<_> = matcher
         .rank(facts)
         .into_iter()
-        .filter_map(|(position, fit)| {
-            windows.get(position).map(|choice| WindowFit {
-                handle: choice.handle,
-                fallback: fit.is_fallback(),
-                best: Some(choice.handle) == read,
-            })
+        .filter_map(|(position, fit)| Some((windows.get(position)?.handle, fit)))
+        .collect();
+    // No window ties with one that is not offered, since its fit is unknown.
+    let read_fit = ranked
+        .iter()
+        .find(|&&(handle, _)| Some(handle) == read)
+        .map(|&(_, fit)| fit);
+    let mut fits: Vec<WindowFit> = ranked
+        .into_iter()
+        .map(|(handle, fit)| WindowFit {
+            handle,
+            fallback: fit.is_fallback(),
+            best: Some(handle) == read,
+            tied: Some(fit) == read_fit,
         })
         .collect();
     fits.sort_by_key(|fit| !fit.best);
@@ -261,19 +272,20 @@ mod tests {
             class: "AppWindow",
             executable: "example.exe",
         });
-        let fit = |handle, fallback, best| WindowFit {
+        let fit = |handle, fallback, best, tied| WindowFit {
             handle,
             fallback,
             best,
+            tied,
         };
         assert_eq!(
             matching(&offered, &exact, Some(3)),
-            [fit(3, false, true), fit(5, false, false)]
+            [fit(3, false, true, true), fit(5, false, false, false)]
         );
         assert_eq!(
             matching(&offered, &exact, None),
-            [fit(3, false, false), fit(5, false, false)],
-            "the runtime reads a window that is not offered"
+            [fit(3, false, false, false), fit(5, false, false, false)],
+            "the runtime reads a window that is not offered, so none ties with it"
         );
         // A second instance fits as well, and the runtime reads one of them.
         let mut twins = windows;
@@ -281,9 +293,9 @@ mod tests {
         assert_eq!(
             matching(&list(twins, &processes, 0).windows, &exact, Some(8)),
             [
-                fit(8, false, true),
-                fit(3, false, false),
-                fit(5, false, false)
+                fit(8, false, true, true),
+                fit(3, false, false, true),
+                fit(5, false, false, false)
             ]
         );
         let mut title_only = exact.clone();
@@ -291,12 +303,12 @@ mod tests {
         title_only.fallback = FallbackDef::Executable;
         assert_eq!(
             matching(&offered, &title_only, Some(3)),
-            [fit(3, false, true)]
+            [fit(3, false, true, true)]
         );
         title_only.title = "Missing".to_owned();
         assert_eq!(
             matching(&offered, &title_only, Some(3)),
-            [fit(3, true, true), fit(5, true, false)]
+            [fit(3, true, true, true), fit(5, true, false, false)]
         );
         let nothing = WindowDef {
             executable: "Other.exe".to_owned(),

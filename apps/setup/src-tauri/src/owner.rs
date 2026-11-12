@@ -49,7 +49,7 @@ pub(crate) use self::clicks::{ClickPictureView, FoundClick};
 pub(crate) use self::host::{Desktop, Host};
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, FixSpec, Live, Message, Reading, ReferenceSaveSpec, Run, SaveSpec,
+    AppSummary, AppWindows, FixSpec, Live, Message, Reading, ReferenceSaveSpec, Run, SaveSpec,
     SavedReferenceId, SavedValue,
 };
 use self::watch::Watched;
