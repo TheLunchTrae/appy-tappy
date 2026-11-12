@@ -686,13 +686,33 @@ export type RecordedReading = DeepReadonly<{
  */
 firstMs: number,
 /**
- * How many frames showed it.
+ * How many frames showed exactly this reading.
  */
 seen: number,
 /**
  * What the text reader made of it.
  */
-text: RecordedText, }>;
+text: RecordedText,
+/**
+ * Each of its characters' shapes, left to right, as an index into the
+ * recording's shapes.
+ */
+shapes: Array<number>, }>;
+
+/**
+ * How often one shape showed, as the UI shows it. These are counts of
+ * what the recording saw, not a measure of how well the shape reads: a
+ * shape that shows often is still whatever the user's label says it is.
+ */
+export type RecordedShape = DeepReadonly<{
+/**
+ * How many frames showed it.
+ */
+frames: number,
+/**
+ * How many different readings showed it.
+ */
+readings: number, }>;
 
 /**
  * What the text reader made of a reading.
@@ -738,9 +758,9 @@ recording: boolean,
  */
 elapsedMs: number,
 /**
- * Whether it holds [`MAX_READINGS`], so it keeps no more.
+ * Why it keeps and counts no more, once it is full.
  */
-full: boolean,
+full: string | null,
 /**
  * Why the latest frame could not be recorded.
  */
@@ -750,9 +770,14 @@ problem: string | null,
  */
 settings: RecordingSettings,
 /**
- * Its readings, in the order they first showed.
+ * The readings it kept, in the order they first showed.
  */
-readings: Array<RecordedReading>, }>;
+readings: Array<RecordedReading>,
+/**
+ * Every different shape its frames showed, in the order they first
+ * showed. Each shows in at least one kept reading.
+ */
+shapes: Array<RecordedShape>, }>;
 
 /**
  * The characters of one font at one color, that number values read with.

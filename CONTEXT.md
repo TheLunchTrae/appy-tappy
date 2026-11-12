@@ -45,8 +45,9 @@ parts fit.
 - **Release.** End a fired rule's effect: it re-armed, or the session ended. A
   rule that restores undoes its paired actions then.
 - **Recording.** A setup-app capture of one number region over time that
-  keeps each different reading once, for the user to review and label. Kept
-  readings teach a reference like labeled screenshots.
+  keeps a reading for each different character shape it shows, for the user
+  to review and label. Kept readings teach a reference like labeled
+  screenshots.
 - **Reference.** The characters of one font in one application, learned from
   labeled pictures of its text. A number check reads with one, at any size.
 - **Rule.** A condition on signals, the actions to run when it starts to hold,

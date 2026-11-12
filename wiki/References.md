@@ -93,22 +93,83 @@ it needs to see what is left to teach.
 
 Typing what a counter shows on screenshot after screenshot is slow when it
 shows many values. A reference can record its region instead, while you use
-the application, and keep each different reading it shows.
+the application, and collect the characters it shows.
+
+A recording keeps a reading when it shows a character shape that no kept
+reading has. A counter that runs from `0%` to `100%` shows 101 readings but
+only eleven characters, the digits `0` to `9` and the `%`, so it leaves about
+ten readings to review, or a few more where a character shows as more than
+one shape. Every other reading is counted, not kept.
+
+A shape can first show beside something that is no character, such as a `7`
+caught while the digit next to it was half drawn. No text fits that reading,
+so the recording keeps one more reading for the `7`: the next one whose
+other shapes have all shown elsewhere too. **Record more** does the same.
+
+That helps when the stray shape showed in one reading only. A shape that
+shows in two different readings counts as a character, so an in-between
+shape that a counter draws at every change passes for one. The recording
+then keeps no cleaner reading, however long it records, and review cannot
+offer one. If a character stays under **Still missing**, or its only reading
+cannot be labeled, take a screenshot that shows the character without the
+stray shape and label that instead.
 
 1. **Start recording.** Draw the region and pick the **Characters' color**
    first. Then select **Start recording** under **Record readings**. The
    region turns red while it records.
 2. **Use the application.** Go on in it until the region has shown the
-   characters you need, such as every digit. Each different reading is kept
-   once, with the time it first showed, and AppyTappy reads its text for you.
-   Readings appear under **Recording** as they are found. Moments when the
-   region shows none of the characters' color, such as while a menu covers
-   it, are skipped.
-3. **Stop and review.** Come back and select **Stop and review**. Each
-   reading shows with the text AppyTappy read. Fix any text it got wrong, and
-   clear **Keep** on any reading that is not the value, such as a paused
-   screen. A reading whose text gives one shape two different characters,
-   such as a `1` typed as `l`, is flagged: fix it or leave it out.
+   characters you need. AppyTappy reads each kept reading's text for you, and
+   **Recording** says what that gives so far:
+   - **Still missing** shows each character the reference needs that nothing
+     has shown yet. Make the application show these. It shows when you
+     [chose what the reference needs](#choose-what-it-needs).
+   - **Found, not checked yet** shows the characters AppyTappy read in the
+     kept readings. They are its guess until you check their readings in
+     review: type in a reading's text, set its **Keep**, or select
+     **Keep all** or the button that keeps them. **Keep all** counts every
+     reading as checked, so read the texts first.
+   - **Found** shows the characters the reference knows already, and the ones
+     in readings you checked.
+   - **Without text** counts the shapes that no reading's text names, such as
+     while a reading is still being read.
+
+   The newest kept readings show below. Moments when the region shows none of
+   the characters' color, such as while a menu covers it, are skipped.
+   Recording goes on until you stop it.
+
+3. **Stop and review.** Come back and select **Stop and review**. Each kept
+   reading shows with the text AppyTappy read, and the readings that add
+   characters come first. Fix any text it got wrong, and clear **Keep** on
+   any reading that is not the value, such as a paused screen. Under each
+   reading:
+   - **Adds** lists the characters that no other kept reading teaches, each
+     with how often its shape showed, such as `seen 214 times in 37
+     readings`. The counts say how much the recording saw of a shape. They do
+     not say that its character is right: only the text you check does.
+   - **Would add** lists the same for a reading that is left out: what
+     keeping it would teach.
+   - **Shows 2 shapes no kept reading has**, with the number of shapes,
+     stands in for either list while the reading's text does not have one
+     character for each of its shapes, so the shapes have no characters to
+     show yet.
+   - **Adds nothing** marks a reading whose characters other kept readings
+     all show. It starts with **Keep** cleared, and you can leave it out.
+   - A reading whose text gives a shape another character than another
+     reading's text gives it, such as a `1` read as `l`, is flagged, and so
+     is the other reading, whether they are kept or left out. Neither starts
+     left out. Fix the text that is wrong. While both are kept, **Keep**
+     waits.
+
+   A reading's **Keep** is set once, when review first shows the reading
+   with its text read, and after that only you change it. A reading still
+   being read says **Reading…** and gets its **Keep** when its text arrives.
+
+   The same lists as while recording show above the readings, and follow
+   what you type and keep. When the only readings that could teach a
+   character are left out, a notice there says **No kept reading teaches**
+   it and offers a button for each reading to keep for it, such as
+   **Keep 12, first at 0:02**.
+
 4. **Keep them.** Select the button that says how many you keep, such as
    **Keep 12 readings**. The kept readings teach the reference like labeled
    screenshots. **Review recording** opens them again with your choices, and
@@ -119,16 +180,39 @@ the application, and keep each different reading it shows.
    settings** puts them back. Or **Discard** the recording to start a new one.
    Changing window also discards it.
 
+A digit, a sign such as `%` or `.`, and a letter are collected the same way.
+One character can show as more than one shape, and the recording keeps each:
+an edge that blends with the background differently, or a digit beside a `,`
+that reaches below the line, is another shape of the same character. Type the
+same character for each. A sign that the application draws as separate marks
+side by side, with a gap between them, counts as one shape for each mark, and
+a reference cannot learn it as one character.
+
 Keep the window the size it was when you took the screenshot you drew the
 region on: at another size, recording pauses and says to resize the window.
 Every screenshot you label, and the recording, must have that size too, and
-the reference says which one does not. If the window's capture fails for a
-moment, recording stops and says why; select **Record more** once the window
-shows again. If the window closes, nothing more can be recorded from it.
-Review and keep the readings you want, then select **Save reference**, which
-still works after the window closed: **Change window** drops everything you
-have not saved. To record more, open the window again and **Edit** the
-reference. One recording keeps at most 200 readings.
+the reference says which one does not. What a reference learned still reads
+at other sizes. If the window's capture fails for a moment, recording stops
+and says why; select **Record more** once the window shows again. If the
+window closes, nothing more can be recorded from it. Review and keep the
+readings you want, then select **Save reference**, which still works after
+the window closed: **Change window** drops everything you have not saved. To
+record more, open the window again and **Edit** the reference.
+
+A recording finds its shapes with the characters' color and tolerance it was
+started with, and a reference learns the kept readings with the ones it has
+when you save. Keep them as they were until you save. With another color or
+tolerance a kept reading can show other shapes than the recording counted:
+its text may not fit it anymore, which review and the save flag, and a shape
+the recording took for one it had may be in no kept reading. **Use its
+settings** puts the recording's own back.
+
+A recording is full once its region has shown more than 256 different shapes,
+more than a reference learns, and says so. It keeps nothing more. That many
+shapes mean the region shows more than the value, such as a picture behind
+it: draw the region around the value alone and record again. A recording is
+also full once it has shown more than a million different readings, which
+takes hours of a timer that changes many times a second.
 
 If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.

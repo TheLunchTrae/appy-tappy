@@ -1548,6 +1548,78 @@ select {
   border-color: var(--warn);
 }
 
+/* What a reading adds to the kept ones: each new character with how often it showed. */
+.tile .adds ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tile .adds li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The characters a recording found so far, in rows of a name and its characters. */
+.discovered {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.discovered > div {
+  display: grid;
+  grid-template-columns: 9.5em 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.discovered dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.discovered dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+/* What only readings that are left out could teach, with the readings to keep for it. */
+.untaught {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  max-width: 70ch;
+}
+
+.untaught p {
+  color: var(--warn);
+}
+
+.untaught .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Characters only the text reader's guess shows: outlined, since the user has yet to check them. */
+.glyphs.unchecked .glyph {
+  border: 1px dashed var(--muted);
+  background: none;
+}
+
 /* A hidden view or strip stays out of the layout, whatever its display. */
 .view[hidden],
 .strip[hidden] {

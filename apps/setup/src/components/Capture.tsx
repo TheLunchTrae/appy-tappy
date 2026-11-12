@@ -21,6 +21,7 @@ import {
   toReference,
   withKind,
 } from '../lib/check.ts';
+import { discovery } from '../lib/discovery.ts';
 import { TOO_MANY, coverage, startingExpected, tooMany } from '../lib/expected.ts';
 import { knownCharacters, readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
@@ -73,7 +74,7 @@ function viewHint(
     return liveError;
   }
   if (recording && selected === null) {
-    return 'Recording. Use the application; each different reading is kept.';
+    return 'Recording. Use the application; a reading is kept for each new shape.';
   }
   if (selected === null) {
     return shotCount === 0
@@ -463,6 +464,16 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
     editing?.expects ?? [],
     knownCharacters([...taught.saved, ...taught.labeled, ...taught.recorded]),
   );
+  // What the recording found, against what the reference needs and knows without it.
+  const needs = editing?.expects ?? [];
+  const found = discovery(
+    needs,
+    knownCharacters([...taught.saved, ...taught.labeled]),
+    recording?.readings ?? [],
+    review.entries,
+    review.checked,
+    recording?.shapes.length ?? 0,
+  );
 
   return (
     <main className="capture">
@@ -535,7 +546,9 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                 type="button"
                 className="btn primary"
                 disabled={review.keepBlocked !== null}
-                aria-describedby={review.keepBlocked === null ? undefined : 'keep-blocked'}
+                aria-describedby={
+                  review.keepBlocked === null && review.untaught.readings.length === 0 ? undefined : 'keep-blocked'
+                }
                 onClick={review.keep}
               >
                 {review.keeping.length === 1 ? 'Keep 1 reading' : `Keep ${review.keeping.length} readings`}
@@ -605,9 +618,14 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
         {reviewing && recording !== null ? (
           <ReviewSheet
             view={recording}
+            found={found}
+            needs={needs.length > 0}
+            adds={review.adds}
             entries={review.entries}
             problems={review.flagged}
             crops={recorder.crops}
+            clashes={review.clashes}
+            untaught={review.untaught}
             blocked={review.keepBlocked}
             error={recordError}
             onEntry={review.edit}
@@ -1018,6 +1036,8 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             record={
               <RecordPanel
                 view={recording}
+                found={found}
+                needs={needs.length > 0}
                 reviewing={reviewing}
                 kept={draft.recorded.size}
                 keeping={review.keeping.length}
