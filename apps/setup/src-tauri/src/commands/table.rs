@@ -31,6 +31,18 @@ macro_rules! with_commands {
             commands::screenshot(index: usize, max_width: u32) -> Pixels;
             /// What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected.
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;
+            /// The filled and the empty color of the bar in `region`, which was drawn on screenshot `screenshot`, found
+            /// on the screenshots of that one's window size; or why none are proposed.
+            commands::detect_bar(region: RegionSpec, screenshot: usize) -> BarDetection;
+            /// What a bar of the colors `filled` and `empty` reads in `region`, drawn on screenshot `screenshot`, on each
+            /// screenshot of that one's window size, and which pixels it counts on screenshot `shown`.
+            commands::measure_bar(
+                region: RegionSpec,
+                screenshot: usize,
+                filled: ColorSpec,
+                empty: ColorSpec,
+                shown: Option<usize>
+            ) -> BarMeasure;
             commands::set_check(spec: CheckSpec) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;

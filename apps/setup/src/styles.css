@@ -594,6 +594,16 @@ select {
   image-rendering: pixelated;
 }
 
+/* What a bar's two colors count, marked over its region on the screenshot. */
+.bar-marks {
+  position: absolute;
+  pointer-events: none;
+}
+
+.bar-marks canvas {
+  image-rendering: pixelated;
+}
+
 .rough {
   position: absolute;
   border: 1.5px dashed rgb(255 255 255 / 75%);
@@ -719,6 +729,21 @@ select {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.btn.detect,
+.btn.swap {
+  align-self: flex-start;
+}
+
+.bar-readings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 .range input {

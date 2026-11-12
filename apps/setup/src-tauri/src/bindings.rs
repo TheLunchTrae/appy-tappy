@@ -60,6 +60,7 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
+use crate::check_spec::bar::{BarDetection, BarMeasure};
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayView;
 use crate::overlay::window::label;

@@ -201,6 +201,64 @@ automation: AutomationDef,
 problem: string | null, }>;
 
 /**
+ * What a bar's colors were found from.
+ */
+export type BarBasis = DeepReadonly<"layout" | "changes" | "roughChanges">;
+
+/**
+ * What looking for a bar in a region found.
+ */
+export type BarDetection = DeepReadonly<{ "kind": "proposed", filled: ColorSpec, empty: ColorSpec, basis: BarBasis,
+/**
+ * The screenshots looked at, by index: those with the window size
+ * of the one the region was drawn on.
+ */
+screenshots: Array<number>, } | { "kind": "declined", message: string, }>;
+
+/**
+ * The pixels of a region two colors count, each as runs of pixels: the
+ * index of a run's first pixel and of the pixel after its last, row by row
+ * from the top of the region.
+ */
+export type BarMarks = DeepReadonly<{
+/**
+ * The pixels that count as filled.
+ */
+filled: Array<[number, number]>,
+/**
+ * The pixels that count as empty.
+ */
+empty: Array<[number, number]>, }>;
+
+/**
+ * What two colors measure on the session's screenshots.
+ */
+export type BarMeasure = DeepReadonly<{
+/**
+ * What each screenshot reads, in the order they were taken.
+ */
+readings: Array<BarReading>,
+/**
+ * The pixels counted on the screenshot shown, or `None` when none is
+ * shown or it has another window size.
+ */
+marks: BarMarks | null, }>;
+
+/**
+ * What a screenshot's region reads with two colors.
+ */
+export type BarReading = DeepReadonly<{
+/**
+ * The screenshot, by index.
+ */
+screenshot: number,
+/**
+ * How full the bar reads, from 0 to 100, or `None` when no pixel of
+ * the region is near either color.
+ */
+fill: number | null, }>;
+
+/**
  * One build of an application, as its executable file tells it apart.
  *
  * Many applications keep the same file version across updates, so the
@@ -383,7 +441,8 @@ green: number,
 blue: number, }>;
 
 /**
- * A color the user picked on a screenshot.
+ * A color of a screenshot: one the user picked on it, or one proposed to
+ * them.
  */
 export type ColorSpec = DeepReadonly<{ red: number, green: number, blue: number, }>;
 

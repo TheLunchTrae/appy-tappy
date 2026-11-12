@@ -22,6 +22,7 @@ import {
   withKind,
 } from '../lib/check.ts';
 import { readers } from '../lib/reference.ts';
+import { BarDetect, BarMarksOverlay, BarReadings } from './BarFields.tsx';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { Question, useQuestion } from './Question.tsx';
@@ -43,6 +44,7 @@ import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
+import { useBarSetup } from '../lib/useBarSetup.ts';
 import { useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
@@ -184,6 +186,13 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const check = useLiveCheck(built);
   const selection = useStateSelections(draft, setDraft, selected);
   const selecting = draft.kind === 'state' ? tool : 'box';
+  const bar = useBarSetup(
+    draft,
+    setDraft,
+    shots.length,
+    selected,
+    step === 'how' && editing === null && fixing === null,
+  );
   const review = useReview(recording, draft, setDraft, editingRef);
   const { reviewing } = review;
   const recordError = recorder.commandError ?? review.error ?? recorder.pollError;
@@ -561,6 +570,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             ) : shownPicture === null ? null : (
               <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
             )}
+            {bar.marks === null || draft.region === null || shownPicture === null || picking !== null ? null : (
+              <BarMarksOverlay marks={bar.marks} region={draft.region} scale={shown.width / shownPicture.width} />
+            )}
             {native === undefined ? null : (
               <RegionSurface
                 size={native}
@@ -870,13 +882,17 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   fix={fixing !== null}
                 />
               ) : (
-                <ColorFields
-                  draft={draft}
-                  picking={picking}
-                  canPick={shownPicture !== null}
-                  onDraft={setDraft}
-                  onPicking={setPicking}
-                />
+                <>
+                  {draft.kind === 'barFill' ? <BarDetect bar={bar} picked={draft} position={position} /> : null}
+                  <ColorFields
+                    draft={draft}
+                    picking={picking}
+                    canPick={shownPicture !== null}
+                    onDraft={setDraft}
+                    onPicking={setPicking}
+                  />
+                  {draft.kind === 'barFill' ? <BarReadings bar={bar} position={position} /> : null}
+                </>
               )}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />

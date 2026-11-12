@@ -58,6 +58,22 @@ This page covers what the user guide leaves out.
   is ignored. The UI gets the
   selection's box and its runs of selected pixels, and shades the rest of the
   region itself.
+- **Bar detection.** **Detect the bar** sends the region and the screenshot
+  it was drawn on (`detect_bar`). The owner cuts the region from every
+  screenshot of that one's window size, since the region means another spot
+  at another size, and hands them to
+  [the detector](Screen-regions.md#bar-detection), the drawn-on one first.
+  It answers the two colors with how they were found and which screenshots
+  were looked at, or a sentence that says why none are proposed
+  (`check_spec/bar.rs`). `measure_bar` reads each of those screenshots with
+  two colors through the bar reader itself, and answers the runs of pixels
+  that count as filled and as empty on the screenshot shown, which the UI
+  tints. The UI measures the draft's colors, or the detected ones while it
+  asks whether they replace colors picked by hand, so the list and the tints
+  describe hand-picked colors as well. Colors found go into a draft with no
+  color at once. A fix keeps its value's colors and offers neither.
+  [Bar detection](State-machines.md#bar-detection) covers the request and
+  its stale answers.
 - **Live reading.** The value editor and the automation editor read the
   window the runtime would, and capture only the value's region. The
   automation editor reads about twice a second and shows numbers as read, to

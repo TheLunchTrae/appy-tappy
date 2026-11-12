@@ -22,6 +22,7 @@ use tokio::sync::oneshot;
 
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
+use crate::check_spec::bar::{BarDetection, BarMeasure};
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
@@ -112,6 +113,33 @@ pub(crate) async fn select(
     selection: SelectionSpec,
 ) -> Result<Option<SelectionView>, String> {
     ask(&app, move |owner| owner.select(screenshot, &selection)).await?
+}
+
+/// The colors of the bar in `region`, drawn on screenshot `screenshot`.
+#[tauri::command]
+pub(crate) async fn detect_bar(
+    app: AppHandle,
+    region: RegionSpec,
+    screenshot: usize,
+) -> Result<BarDetection, String> {
+    ask(&app, move |owner| owner.detect_bar(region, screenshot)).await?
+}
+
+/// What a bar of the colors `filled` and `empty` reads in `region` on the
+/// screenshots, and which pixels it counts on screenshot `shown`.
+#[tauri::command]
+pub(crate) async fn measure_bar(
+    app: AppHandle,
+    region: RegionSpec,
+    screenshot: usize,
+    filled: ColorSpec,
+    empty: ColorSpec,
+    shown: Option<usize>,
+) -> Result<BarMeasure, String> {
+    ask(&app, move |owner| {
+        owner.measure_bar(region, screenshot, filled, empty, shown)
+    })
+    .await?
 }
 
 /// Sets up the check the live reading uses.

@@ -9,6 +9,8 @@ import type {
   AppSummary,
   AutomationDef,
   AutomationSummary,
+  BarDetection,
+  BarMeasure,
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
@@ -73,6 +75,22 @@ export async function screenshot(index: number, maxWidth: number): Promise<Pictu
 /** What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected. */
 export async function select(screenshot: number, selection: SelectionSpec): Promise<SelectionView | null> {
   return invoke<SelectionView | null>('select', { screenshot, selection });
+}
+
+/**
+ * The filled and the empty color of the bar in `region`, which was drawn on screenshot `screenshot`, found
+ * on the screenshots of that one's window size; or why none are proposed.
+ */
+export async function detectBar(region: RegionSpec, screenshot: number): Promise<BarDetection> {
+  return invoke<BarDetection>('detect_bar', { region, screenshot });
+}
+
+/**
+ * What a bar of the colors `filled` and `empty` reads in `region`, drawn on screenshot `screenshot`, on each
+ * screenshot of that one's window size, and which pixels it counts on screenshot `shown`.
+ */
+export async function measureBar(region: RegionSpec, screenshot: number, filled: ColorSpec, empty: ColorSpec, shown: number | null): Promise<BarMeasure> {
+  return invoke<BarMeasure>('measure_bar', { region, screenshot, filled, empty, shown });
 }
 
 export async function setCheck(spec: CheckSpec): Promise<void> {

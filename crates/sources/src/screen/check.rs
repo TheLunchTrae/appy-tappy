@@ -54,13 +54,13 @@ impl Check {
     }
 }
 
-/// The squared distance between a pixel's blue, green, and red bytes and a
-/// color. It is at most 3 * 255², so it never overflows a `u32`.
-fn distance([blue, green, red, _]: [u8; 4], color: Rgb) -> u32 {
+/// The squared distance between two colors. It is at most 3 * 255², so it
+/// never overflows a `u32`.
+pub(super) fn distance(one: Rgb, other: Rgb) -> u32 {
     let square = |a: u8, b: u8| u32::from(a.abs_diff(b)).wrapping_mul(u32::from(a.abs_diff(b)));
-    square(blue, color.blue)
-        .wrapping_add(square(green, color.green))
-        .wrapping_add(square(red, color.red))
+    square(one.blue, other.blue)
+        .wrapping_add(square(one.green, other.green))
+        .wrapping_add(square(one.red, other.red))
 }
 
 /// A bar's fill: the share of its pixels nearer the filled color than the
@@ -77,6 +77,15 @@ pub struct BarFill {
     empty: Rgb,
 }
 
+/// Which of a bar's two colors a pixel counts as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarPart {
+    /// The filled part.
+    Filled,
+    /// The empty part.
+    Empty,
+}
+
 impl BarFill {
     /// A bar whose filled part has the color `filled` and whose empty part
     /// has the color `empty`, as the user picks them on a screenshot.
@@ -91,26 +100,64 @@ impl BarFill {
         Ok(Self { filled, empty })
     }
 
+    /// The color of the filled part.
+    #[must_use]
+    pub const fn filled(self) -> Rgb {
+        self.filled
+    }
+
+    /// The color of the empty part.
+    #[must_use]
+    pub const fn empty(self) -> Rgb {
+        self.empty
+    }
+
+    /// This bar with its two colors the other way around.
+    #[must_use]
+    pub const fn turned(self) -> Self {
+        Self {
+            filled: self.empty,
+            empty: self.filled,
+        }
+    }
+
+    /// The part a pixel of the color `color` counts as, or `None` for one
+    /// the fill leaves out.
+    #[must_use]
+    pub fn part(self, color: Rgb) -> Option<BarPart> {
+        let to_filled = distance(color, self.filled);
+        let to_empty = distance(color, self.empty);
+        // Squared distances, so half the distance is a quarter of the
+        // distance between the two colors.
+        if to_filled.min(to_empty).saturating_mul(4) > distance(self.filled, self.empty) {
+            None
+        } else if to_filled < to_empty {
+            Some(BarPart::Filled)
+        } else {
+            Some(BarPart::Empty)
+        }
+    }
+
+    /// The part each pixel of `image` counts as, row by row from the top.
+    pub fn parts(self, image: &Image) -> impl Iterator<Item = Option<BarPart>> + '_ {
+        image
+            .pixels()
+            .iter()
+            .map(move |&[blue, green, red, _]| self.part(Rgb { red, green, blue }))
+    }
+
     /// The filled share of `image`, from 0 to 100.
     ///
     /// # Errors
     ///
     /// Returns [`CheckError::NoBar`] when no pixel is near either color.
     pub fn percent(self, image: &Image) -> Result<Number, CheckError> {
-        let reach = distance(
-            [self.empty.blue, self.empty.green, self.empty.red, 0],
-            self.filled,
-        );
         let mut filled = 0_u64;
         let mut counted = 0_u64;
-        for &pixel in image.pixels() {
-            let to_filled = distance(pixel, self.filled);
-            let to_empty = distance(pixel, self.empty);
-            // Squared distances, so half the distance is a quarter of `reach`.
-            let near = to_filled.min(to_empty).saturating_mul(4) <= reach;
+        for part in self.parts(image).flatten() {
             // Pixel counts fit in a u64, so these additions never wrap.
-            filled = filled.wrapping_add(u64::from(near && to_filled < to_empty));
-            counted = counted.wrapping_add(u64::from(near));
+            filled = filled.wrapping_add(u64::from(part == BarPart::Filled));
+            counted = counted.wrapping_add(1);
         }
         if counted == 0 {
             return Err(CheckError::NoBar);

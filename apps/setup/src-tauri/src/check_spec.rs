@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::recording::Recording;
 use crate::selection::{self, SelectionSpec};
 
+pub(crate) mod bar;
 mod error;
 
 pub(crate) use error::{Cut, SpecError, sentence};
@@ -37,13 +38,24 @@ pub(crate) struct RegionSpec {
     pub(crate) height: u32,
 }
 
-/// A color the user picked on a screenshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// A color of a screenshot: one the user picked on it, or one proposed to
+/// them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ColorSpec {
     red: u8,
     green: u8,
     blue: u8,
+}
+
+impl From<Rgb> for ColorSpec {
+    fn from(color: Rgb) -> Self {
+        Self {
+            red: color.red,
+            green: color.green,
+            blue: color.blue,
+        }
+    }
 }
 
 impl From<ColorSpec> for ColorDef {
