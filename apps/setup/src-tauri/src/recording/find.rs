@@ -176,39 +176,42 @@ impl Mask {
     fn fill(&self, x: u32, y: u32, seen: &mut [bool]) -> Option<Bounds> {
         let start = self.index(x, y)?;
         if !self.ink.get(start).copied().unwrap_or(false)
-            || seen.get(start).copied().unwrap_or(true)
+            || std::mem::replace(seen.get_mut(start)?, true)
         {
             return None;
         }
         let mut stack = vec![(x, y)];
-        let mut bounds: Option<Bounds> = None;
-        while let Some((px, py)) = stack.pop() {
-            // A pixel is taken when it comes off the stack, so one pushed by
-            // two neighbors joins once and the fill ends with the blob.
-            let Some(flag) = self.index(px, py).and_then(|index| seen.get_mut(index)) else {
-                continue;
+        let mut bounds = Bounds {
+            left: x,
+            top: y,
+            right: x.saturating_add(1),
+            bottom: y.saturating_add(1),
+        };
+        // Each pixel is marked as it is pushed, so it comes off the stack at
+        // most once and the mask's size bounds the fill.
+        for _ in 0..self.ink.len() {
+            let Some((px, py)) = stack.pop() else {
+                break;
             };
-            if std::mem::replace(flag, true) {
-                continue;
-            }
-            let pixel = Bounds {
+            bounds = bounds.join(Bounds {
                 left: px,
                 top: py,
                 right: px.saturating_add(1),
                 bottom: py.saturating_add(1),
-            };
-            bounds = Some(bounds.map_or(pixel, |joined| joined.join(pixel)));
+            });
             for (nx, ny) in neighbors(px, py) {
-                let fresh = self
-                    .index(nx, ny)
-                    .and_then(|index| seen.get(index))
-                    .is_some_and(|&taken| !taken);
-                if fresh && self.at(nx, ny) {
+                let Some(next) = self.index(nx, ny) else {
+                    continue;
+                };
+                if self.ink.get(next).copied().unwrap_or(false)
+                    && let Some(flag) = seen.get_mut(next)
+                    && !std::mem::replace(flag, true)
+                {
                     stack.push((nx, ny));
                 }
             }
         }
-        bounds
+        Some(bounds)
     }
 }
 
