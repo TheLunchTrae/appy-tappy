@@ -90,6 +90,9 @@ macro_rules! with_commands {
             /// Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere.
             commands::find_click(at: ClickAtDef) -> FoundClick;
             commands::list_apps() -> Vec<AppSummary>;
+            /// The saved applications and the open windows, with the windows each application's match takes, from
+            /// one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
+            commands::list_app_windows() -> AppWindows;
             /// Saves `spec` over the application `existing`, or as a new one; returns its ID.
             commands::save_app(existing: Option<String>, spec: AppSpec) -> String;
             /// Removes an application with its values, unless an automation uses one of them, and closes its overlay.

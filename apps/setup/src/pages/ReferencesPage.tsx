@@ -5,7 +5,7 @@ import { deleteReference, errorText } from '../lib/api.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
-import type { SavedRef } from './ReferenceFlow.tsx';
+import type { SavedRef } from '../lib/flow.ts';
 
 interface Props {
   readonly apps: readonly AppSummary[] | null;

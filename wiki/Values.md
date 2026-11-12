@@ -10,14 +10,19 @@ whose window is open now.
 
 ## Make a value
 
-On the Values page, select **New value**.
+On the Values page, select **New value**. Or select **New value** while you
+make an automation: it starts with the automation's
+[application](Automations.md#what-to-watch), and saving the value brings you
+back to the automation with the value picked.
 
-1. **Pick the window.** Choose the application in **Save to**, then
-   pick its window in the list of open windows; type in the filter to find
-   one. Picking a window a saved application finds chooses that application.
-   If the application isn't saved yet, select **Add application** to
-   [add it](Applications.md#add-change-or-remove-an-application) first. Then
-   select **Capture this window**.
+1. **Choose the application.** Select the application the value belongs to
+   in the list, which says whether each one is running. If it isn't in the
+   list yet, select **Add application** to
+   [add it](Applications.md#add-change-or-remove-an-application); saving or
+   canceling it brings you back here. AppyTappy then finds the application's
+   window the way it does when it runs your automations, and names it. Select
+   **Capture this window**. [When the window isn't found](#when-the-window-isnt-found)
+   says what to do when it has no window to capture.
 2. **Take screenshots.** Select **Take screenshot**, or press the screenshot
    shortcut, `F9` at first. The shortcut works while the other application
    has the keyboard, so you can carry on in it until it shows what you want
@@ -44,6 +49,31 @@ AppyTappy keeps the screenshots until you select **Change window** or leave
 the new value. Before either drops work you have not saved, it asks first:
 select **Keep this window** or **Stay** to carry on, as
 [Leave before you save](Getting-started.md#leave-before-you-save) describes.
+**Change window** returns to the first step with the same application chosen.
+
+### When the window isn't found
+
+AppyTappy captures only a window it would read for the application, so what you
+draw is what your automations see.
+
+- **The application isn't open, or its window doesn't match.** Open the
+  application and select **Refresh**. If it is open, the way AppyTappy finds
+  its window no longer fits, such as after its title changed: select
+  **Change how it's found** to
+  [change it](Applications.md#how-appytappy-finds-the-window), and saving or
+  canceling brings you back.
+- **Several windows fit equally well.** AppyTappy reads one of them, as
+  [How AppyTappy finds the window](Applications.md#how-appytappy-finds-the-window)
+  describes, so it lists them and asks which to capture. Each shows its size,
+  window class, and executable, and **Read if it starts now** marks the one
+  AppyTappy would read if the application started now. Pick one, or select
+  **Change how it's found** so that only one fits.
+- **The window is the fallback.** AppyTappy says so when no open window
+  matches everything that must match and it reads the
+  [fallback](Applications.md#how-appytappy-finds-the-window) instead. You can
+  capture it; check that it is the window you mean.
+- **The applications couldn't be read.** AppyTappy says why. Select
+  **Refresh** to read them again.
 
 ## Checks
 
@@ -235,9 +265,11 @@ the size the value was first drawn at. At that size, a value that reads wrong
 is deleted and made again. **Matches no state** isn't always wrong: the
 region may show none of the states right now.
 
-1. Pick the application's window. AppyTappy takes a screenshot of it at its
-   size now, with the region where the value would be read there: it
-   **Starts from the scaled region**.
+1. AppyTappy finds the application's window and names it; select
+   **Capture this window**. If it has none to capture, see
+   [When the window isn't found](#when-the-window-isnt-found). AppyTappy
+   takes a screenshot of the window at its size now, with the region where
+   the value would be read there: it **Starts from the scaled region**.
 2. Move the region onto the value, then select **Next: how to read it**.
 3. For a **State** check, take a screenshot of each of its states at this
    size and add them in the same order; each takes the next state's name.
