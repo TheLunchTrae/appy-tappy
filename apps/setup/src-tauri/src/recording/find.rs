@@ -178,11 +178,10 @@ impl Mask {
         if !self.ink.get(start).copied().unwrap_or(false) {
             return None;
         }
-        let flag = seen.get_mut(start)?;
-        if *flag {
+        // Marks each pixel as it is taken, so none is taken twice.
+        if std::mem::replace(seen.get_mut(start)?, true) {
             return None;
         }
-        *flag = true;
         let mut stack = vec![(x, y)];
         let mut bounds = Bounds {
             left: x,
@@ -203,9 +202,8 @@ impl Mask {
                 };
                 if self.ink.get(next).copied().unwrap_or(false)
                     && let Some(flag) = seen.get_mut(next)
-                    && !*flag
+                    && !std::mem::replace(flag, true)
                 {
-                    *flag = true;
                     stack.push((nx, ny));
                 }
             }
@@ -618,5 +616,43 @@ mod tests {
         assert!(!bounds.meets(region(0, 0, 9, 3)));
         assert!(bounds.centered_in(region(4, 5, 1, 1)));
         assert!(!bounds.centered_in(region(5, 7, 1, 1)));
+        assert!(!bounds.centered_in(region(4, 0, 1, 2)), "only its column");
+        assert!(!bounds.centered_in(region(0, 5, 2, 1)), "only its row");
+    }
+
+    #[test]
+    fn runs_leave_out_blobs_whose_rows_only_touch() {
+        let blob = |left: u32, top: u32| Bounds {
+            left,
+            top,
+            right: left.saturating_add(3),
+            bottom: top.saturating_add(8),
+        };
+        // The second blob ends on the row the first starts on, and the third
+        // starts on the row the first ends on.
+        let found = runs(vec![blob(0, 10), blob(4, 2), blob(4, 18)], 8, 8);
+        assert_eq!(found.len(), 3);
+    }
+
+    #[test]
+    fn the_mask_reads_no_ink_past_its_edges() {
+        // Ink only at (0, 1) of a 3 by 2 screenshot: (3, 0) would land on it
+        // if the row wrapped.
+        let image = screenshot(3, 2, &[(0, 1, 1, 1)]);
+        let mask = Mask::of(&image, &reader());
+        assert!(mask.at(0, 1));
+        assert_eq!(mask.index(3, 0), None);
+        assert_eq!(mask.index(0, 2), None);
+        assert!(!mask.at(3, 0));
+    }
+
+    #[test]
+    fn the_line_height_counts_rows_inside_the_region_and_takes_the_first_of_a_tie() {
+        // Ink 4 wide on rows 0 and 1, and 2 wide on rows 4 to 7: 8 pixels each.
+        let image = screenshot(6, 12, &[(0, 0, 4, 2), (0, 4, 2, 4), (0, 9, 6, 3)]);
+        let mask = Mask::of(&image, &reader());
+        assert_eq!(mask.line_height(region(0, 0, 6, 8)), Some(2));
+        // The region ends inside the ink below it.
+        assert_eq!(mask.line_height(region(0, 9, 6, 2)), Some(2));
     }
 }
