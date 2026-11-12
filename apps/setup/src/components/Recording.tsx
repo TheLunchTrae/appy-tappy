@@ -83,7 +83,10 @@ function Discovered({
                 </span>
               ))}
             </span>
-            <span className="note">AppyTappy read these. They count once you keep their readings in review.</span>
+            <span className="note">
+              AppyTappy read these, and they are its guess until you check their readings in review: change a
+              reading&apos;s text or its Keep, or select Keep all or the button that keeps them.
+            </span>
           </dd>
         </div>
       )}
@@ -100,8 +103,8 @@ function Discovered({
           <dt>Without text</dt>
           <dd className="note">
             {found.unnamed === 1
-              ? '1 shape has no character yet. Type the text of the reading that shows it.'
-              : `${found.unnamed} shapes have no character yet. Type the text of the readings that show them.`}
+              ? '1 shape has no character yet. If it is a character, type the text of the reading that shows it.'
+              : `${found.unnamed} shapes have no character yet. If they are characters, type the text of the readings that show them.`}
           </dd>
         </div>
       )}

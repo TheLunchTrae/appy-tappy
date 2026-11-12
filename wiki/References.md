@@ -101,8 +101,15 @@ one shape. Every other reading is counted, not kept.
 A shape can first show beside something that is no character, such as a `7`
 caught while the digit next to it was half drawn. No text fits that reading,
 so the recording keeps one more reading for the `7`: the next one whose
-other shapes have all shown elsewhere too. **Record more** does the same, so
-recording on gets you a reading you can label.
+other shapes have all shown elsewhere too. **Record more** does the same.
+
+That helps when the stray shape showed in one reading only. A shape that
+shows in two different readings counts as a character, so an in-between
+shape that a counter draws at every change passes for one. The recording
+then keeps no cleaner reading, however long it records, and review cannot
+offer one. If a character stays under **Still missing**, or its only reading
+cannot be labeled, take a screenshot that shows the character without the
+stray shape and label that instead.
 
 1. **Start recording.** Draw the region and pick the **Characters' color**
    first. Then select **Start recording** under **Record readings**. The
