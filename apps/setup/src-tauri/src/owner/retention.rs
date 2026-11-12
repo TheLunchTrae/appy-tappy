@@ -193,8 +193,8 @@ fn each_saved_picture_holds_only_its_region() {
         height: 4,
     });
     assert_eq!(click.image, "click-1.png");
-    // Nothing else is written: no picture has a screenshot's 4 by 2 or
-    // 8 by 4, and no file holds a whole one.
+    // Nothing else is written, and each picture has its region's size, not
+    // its screenshot's 4 by 2 or 8 by 4.
     assert_eq!(
         files_under(&root),
         [

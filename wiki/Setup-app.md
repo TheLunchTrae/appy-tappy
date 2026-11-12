@@ -374,25 +374,28 @@ actions until the user sets it
 ## Pictures kept
 
 AppyTappy keeps a picture only where reading or clicking needs one, cut to
-the region the user drew. A picture of a whole window exists only in memory
-while its capture is open, and no file ever holds one. The user guide says so
-in [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
+the region the user drew, and never the rest of the window. A window's whole
+frame exists only in memory while its capture is open. A file holds a region
+alone, which is as much of the window as the user drew. The user guide says
+so in [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps).
 
 ### In memory
 
 The owner thread and the page hold these for the picked window. All of them
 go when its capture stops (`Owner::stop`): the user selects **Change window**,
-another window is picked, or the flow closes, as a save, **Discard**,
-**Cancel**, and a page tab close it. Closing AppyTappy Setup ends the process.
+another window is picked, or the flow closes: on **Discard**, **Cancel**, a
+page tab, or the save of what the flow makes. A reference saved from inside a
+value flow leaves the flow, and so its capture, open. Closing AppyTappy Setup
+ends the process.
 
-| What                               | Held by            | How much of the window                                 |
-| ---------------------------------- | ------------------ | ------------------------------------------------------ |
-| The newest frame                   | Owner              | All of it; each frame replaces the one before          |
-| The live view                      | Page               | All of it, at most 1600 pixels wide                    |
-| Each screenshot                    | Owner and page     | All of it, and a thumbnail 224 pixels wide on the page |
-| Each recorded reading              | Owner and page     | The region; a recording keeps at most 200              |
-| The check being tried              | Owner              | The region, once for each state                        |
-| A new reading, for the text reader | Text reader thread | The region's ink, until it is read                     |
+| What                               | Held by            | How much of the window                                    |
+| ---------------------------------- | ------------------ | --------------------------------------------------------- |
+| The newest frame                   | Owner              | All of it; each frame replaces the one before             |
+| The live view                      | Page               | All of it, scaled down to `LIVE_MAX_WIDTH` at most        |
+| Each screenshot                    | Owner and page     | All of it, and a thumbnail `THUMB_WIDTH` wide on the page |
+| Each recorded reading              | Owner and page     | The region; a recording keeps at most `MAX_READINGS`      |
+| The check being tried              | Owner              | The region, once for each state                           |
+| A new reading, for the text reader | Text reader thread | The region's ink, until it is read                        |
 
 A capture holds as many screenshots as the user takes. Setting up a click's
 target is a capture like a value's, and its screen stops the capture when it
@@ -416,8 +419,8 @@ keeps its value's region of the newest frame.
 A number, bar fill, or color value saves no picture of its own. Nothing else
 AppyTappy writes holds pixels: the runtime's log and its [trace](Trace.md)
 hold names, readings, and timings as text, and the
-[MCP server](Development.md#tools)'s `screen_sample` answers the colors of at
-most 64 points of the screen.
+[MCP server](Development.md#tools)'s `screen_sample` answers the colors of
+single points of the screen, at most `SCREEN_POINTS_LIMIT` a call.
 
 A sample keeps the whole region, not only the box around its characters. A
 reference that is edited learns its saved samples again with the color and

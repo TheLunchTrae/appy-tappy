@@ -65,19 +65,21 @@ and press Esc to hide it.
 
 ## What AppyTappy keeps
 
-AppyTappy never saves a picture of a whole window. A screenshot you take in
-AppyTappy Setup stays in memory only while you work with it. It is gone once
-you select **Change window**, once the value, reference, or click target it
-was taken for is saved or left, and when AppyTappy Setup closes.
-
-What AppyTappy saves is the part inside the box you drew, and only where it
-needs a picture to read or to click:
+AppyTappy saves only the part of a window inside a box you drew, never the
+rest of the window, and only where it needs a picture to read or to click:
 
 - A [reference](References.md) keeps the box from each screenshot you
   labeled and from each recorded reading you kept.
 - A **State** value keeps the box for each of its states, and again for each
   size you [fixed it at](Values.md#fix-a-value-at-one-size).
 - A click on **A picture** keeps the picture you marked.
+
+A screenshot you take in AppyTappy Setup stays in memory only while you work
+with it. It is gone once you select **Change window**, once you save or leave
+the value, fix, or reference you opened the window for, once you close a
+click's target screen, and when AppyTappy Setup closes. A reference you make
+or change while you make a value is part of that value: saving the reference
+keeps the screenshots, and they go when the value is saved or left.
 
 A **Bar fill** or **Color** value keeps only its colors, and a **Number**
 value only which reference it reads with. Deleting a value, a reference, or

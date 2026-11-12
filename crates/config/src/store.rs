@@ -183,9 +183,9 @@ impl AppStore {
     /// Removes the pictures in the application `id`'s folder that `file`
     /// does not name: those of a value, a fix or a reference that was
     /// removed or replaced, and those a save wrote before it failed or the
-    /// program ended. Only a file named as AppyTappy names a picture
-    /// ([`is_own_image_name`]) goes, so a file the user put in the folder
-    /// stays. A folder that does not exist holds none.
+    /// program ended. Only a file named as AppyTappy names a picture goes,
+    /// a reference's sample or a state's picture, so a file the user put in
+    /// the folder stays. A folder that does not exist holds none.
     ///
     /// # Errors
     ///

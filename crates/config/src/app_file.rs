@@ -1061,7 +1061,7 @@ pub fn state_image_name(value: &str, fix: Option<usize>, state: usize) -> String
 /// A file with any other name, such as one the user put in the folder, is
 /// not AppyTappy's to remove.
 #[must_use]
-pub fn is_own_image_name(name: &str) -> bool {
+pub(crate) fn is_own_image_name(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".png").filter(|_| is_image_name(name)) else {
         return false;
     };
