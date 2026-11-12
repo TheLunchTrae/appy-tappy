@@ -37,6 +37,18 @@ pub(crate) struct RegionSpec {
     pub(crate) height: u32,
 }
 
+impl From<Region> for RegionSpec {
+    fn from(region: Region) -> Self {
+        let size = region.size();
+        Self {
+            x: region.x(),
+            y: region.y(),
+            width: size.width,
+            height: size.height,
+        }
+    }
+}
+
 /// A color the user picked on a screenshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -72,6 +84,11 @@ impl From<ColorSpec> for Rgb {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct Label {
     pub(crate) screenshot: usize,
+    /// Where on the screenshot the text shows, when it is not the spec's
+    /// region, as for text found like a sample elsewhere on it.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) region: Option<RegionSpec>,
     pub(crate) text: String,
 }
 
@@ -349,7 +366,7 @@ pub(crate) fn to_saved_reference(
         .iter()
         .map(|label| {
             Ok((
-                cut(session.screenshots, built.region, label.screenshot)?,
+                label_image(session.screenshots, built.region, label)?,
                 &label.text,
             ))
         })
@@ -619,6 +636,40 @@ pub(crate) fn recorded_problems(
         .collect())
 }
 
+/// For each of `found`, labels the user has not added to `spec` yet, why
+/// the reference `spec` teaches cannot learn it: `None` for one it learns.
+/// Like [`recorded_problems`], it learns the reference first and then each
+/// label in order, leaving out the ones it cannot learn. Any other check
+/// learns no labels.
+pub(crate) fn label_problems(
+    spec: &CheckSpec,
+    session: Session<'_>,
+    found: &[Label],
+) -> Result<Vec<Option<String>>, SpecError> {
+    let CheckSpec::Characters { region, .. } = spec else {
+        return Ok(Vec::new());
+    };
+    let region = to_region(*region)?;
+    let mut reader = taught_reader(spec, session, region)?;
+    Ok(found
+        .iter()
+        .map(|label| {
+            let image = match label_image(session.screenshots, region, label) {
+                Ok(image) => image,
+                Err(error) => return Some(error.to_string()),
+            };
+            let mut trial = reader.clone();
+            match trial.learn(&image, &label.text) {
+                Ok(()) => {
+                    reader = trial;
+                    None
+                },
+                Err(error) => Some(sentence(&error.to_string())),
+            }
+        })
+        .collect())
+}
+
 /// The reader of a [`CheckSpec::Characters`] before its recorded readings:
 /// the saved reference's samples relearned with the spec's own color and
 /// tolerance, then its labeled screenshots, cut at `region`.
@@ -649,7 +700,7 @@ fn taught_reader(
     for label in labels {
         learn(
             &mut reader,
-            &cut(session.screenshots, region, label.screenshot)?,
+            &label_image(session.screenshots, region, label)?,
             &label.text,
         )?;
     }
@@ -697,6 +748,15 @@ fn cut(screenshots: &[Image], region: Region, screenshot: usize) -> Result<Image
         .ok_or(SpecError::NoScreenshot)?
         .crop(region)
         .ok_or(SpecError::Outside)
+}
+
+/// What `label` labels: its own region of its screenshot, or `region`.
+fn label_image(screenshots: &[Image], region: Region, label: &Label) -> Result<Image, SpecError> {
+    let region = match label.region {
+        Some(own) => to_region(own)?,
+        None => region,
+    };
+    cut(screenshots, region, label.screenshot)
 }
 
 /// Teaches `reader` that `image` shows `text`.

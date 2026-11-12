@@ -54,6 +54,17 @@ macro_rules! with_commands {
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
             /// can.
             commands::review_problems(spec: CheckSpec) -> Vec<Option<String>>;
+            /// Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
+            /// at its size, elsewhere on that screenshot, in place of any earlier search.
+            commands::find_like(screenshot: usize, region: RegionSpec, ink: ColorSpec, tolerance: u8) -> FoundView;
+            /// The search and the text read for each find so far, or null without one.
+            commands::found_state() -> Option<FoundView>;
+            /// A find at most `maxWidth` wide, or null for an unknown index.
+            commands::found_picture(index: usize, max_width: u32) -> Pixels;
+            /// Forgets the search.
+            commands::forget_found() -> ();
+            /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.
+            commands::found_problems(spec: CheckSpec, found: Vec<Label>) -> Vec<Option<String>>;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the
             /// watch's number.
             commands::watch_value(application: String, value: String) -> U64AsNumber;

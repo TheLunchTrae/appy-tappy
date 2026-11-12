@@ -23,7 +23,7 @@ impl<H: Host> Owner<H> {
             return;
         };
         let job = ocr::Job {
-            recording: recording.id,
+            source: ocr::Source::Recording(recording.id),
             index: new.index,
             line: new.line,
         };
@@ -227,7 +227,10 @@ mod tests {
         let jobs: Vec<(u64, usize)> = harness
             .jobs
             .try_iter()
-            .map(|job| (job.recording, job.index))
+            .map(|job| match job.source {
+                ocr::Source::Recording(recording) => (recording, job.index),
+                ocr::Source::Search(_) => panic!("no search was made"),
+            })
             .collect();
         assert_eq!(jobs, [(1, 0), (1, 1)], "one job per new reading");
         assert_eq!(
@@ -384,8 +387,8 @@ mod tests {
             .ask(start_recording(200, false))
             .expect("records other ink");
         assert_eq!(harness.readings().len(), 0, "a new recording");
-        let jobs: Vec<u64> = harness.jobs.try_iter().map(|job| job.recording).collect();
-        assert_eq!(jobs, [1, 1]);
+        let jobs: Vec<ocr::Source> = harness.jobs.try_iter().map(|job| job.source).collect();
+        assert_eq!(jobs, [ocr::Source::Recording(1), ocr::Source::Recording(1)]);
         assert!(
             harness
                 .owner

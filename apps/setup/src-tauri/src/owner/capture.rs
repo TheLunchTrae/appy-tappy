@@ -61,8 +61,8 @@ impl<H: Host> Owner<H> {
         Ok((processes, windows))
     }
 
-    /// Stops the capture and forgets its frames, screenshots, recording, and
-    /// check.
+    /// Stops the capture and forgets its frames, screenshots, recording,
+    /// search, and check.
     pub(crate) fn stop(&mut self) {
         // A capture that failed already said why; what comes next matters now.
         #[expect(
@@ -76,6 +76,7 @@ impl<H: Host> Owner<H> {
         self.screenshots.clear();
         self.check = None;
         self.recording = None;
+        self.found = None;
         self.watched = None;
     }
 

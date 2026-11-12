@@ -11,6 +11,7 @@
 //! recording rather than on every frame. A crop with no ink, such as while a
 //! menu covers the region, is skipped.
 
+pub(crate) mod find;
 mod ink;
 pub(crate) mod ocr;
 

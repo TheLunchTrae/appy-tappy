@@ -15,6 +15,8 @@ import type {
   ColorSpec,
   FixSpec,
   FoundClick,
+  FoundView,
+  Label,
   Live,
   OverlayModeDef,
   OverlayView,
@@ -118,6 +120,34 @@ export async function recordedReading(index: number, maxWidth: number): Promise<
  */
 export async function reviewProblems(spec: CheckSpec): Promise<ReadonlyArray<string | null>> {
   return invoke<ReadonlyArray<string | null>>('review_problems', { spec });
+}
+
+/**
+ * Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
+ * at its size, elsewhere on that screenshot, in place of any earlier search.
+ */
+export async function findLike(screenshot: number, region: RegionSpec, ink: ColorSpec, tolerance: number): Promise<FoundView> {
+  return invoke<FoundView>('find_like', { screenshot, region, ink, tolerance });
+}
+
+/** The search and the text read for each find so far, or null without one. */
+export async function foundState(): Promise<FoundView | null> {
+  return invoke<FoundView | null>('found_state');
+}
+
+/** A find at most `maxWidth` wide, or null for an unknown index. */
+export async function foundPicture(index: number, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('found_picture', { index, maxWidth }));
+}
+
+/** Forgets the search. */
+export async function forgetFound(): Promise<void> {
+  await invoke('forget_found');
+}
+
+/** Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can. */
+export async function foundProblems(spec: CheckSpec, found: ReadonlyArray<Label>): Promise<ReadonlyArray<string | null>> {
+  return invoke<ReadonlyArray<string | null>>('found_problems', { spec, found });
 }
 
 /**

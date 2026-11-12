@@ -22,11 +22,11 @@ use tokio::sync::oneshot;
 
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
-use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::check_spec::{CheckSpec, ColorSpec, Label, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
-    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, FoundView, Live, Message, Owner,
+    Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -494,6 +494,58 @@ pub(crate) async fn review_problems(
     spec: CheckSpec,
 ) -> Result<Vec<Option<String>>, String> {
     ask(&app, move |owner| owner.review_problems(&spec)).await?
+}
+
+/// Finds text like what `region` of screenshot `screenshot` shows, in the
+/// characters' color and at their size, elsewhere on that screenshot, in
+/// place of any earlier search.
+#[tauri::command]
+pub(crate) async fn find_like(
+    app: AppHandle,
+    screenshot: usize,
+    region: RegionSpec,
+    ink: ColorSpec,
+    tolerance: u8,
+) -> Result<FoundView, String> {
+    ask(&app, move |owner| {
+        owner.find_like(screenshot, region, ink, tolerance)
+    })
+    .await?
+}
+
+/// The search and the text read for each find so far; `None` without one.
+#[tauri::command]
+pub(crate) async fn found_state(app: AppHandle) -> Result<Option<FoundView>, String> {
+    ask(&app, |owner| owner.found_state()).await
+}
+
+/// A find, at most `max_width` wide; no bytes for an unknown index.
+#[tauri::command]
+pub(crate) async fn found_picture(
+    app: AppHandle,
+    index: usize,
+    max_width: u32,
+) -> Result<Response, String> {
+    ask(&app, move |owner| owner.found_pixels(index, max_width))
+        .await
+        .map(pixels)
+}
+
+/// Forgets the search.
+#[tauri::command]
+pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
+    ask(&app, Owner::forget_found).await
+}
+
+/// Why the reference `spec` teaches cannot learn each of `found`, in
+/// order: `None` for one it can.
+#[tauri::command]
+pub(crate) async fn found_problems(
+    app: AppHandle,
+    spec: CheckSpec,
+    found: Vec<Label>,
+) -> Result<Vec<Option<String>>, String> {
+    ask(&app, move |owner| owner.found_problems(&spec, &found)).await?
 }
 
 /// The saved settings, or the defaults and why the file cannot be read.
