@@ -582,6 +582,26 @@ mod tests {
     }
 
     #[test]
+    fn a_row_as_long_as_a_window_is_still_waited_for() {
+        let folder = scratch("tail-window-row");
+        let path = folder.join("trace-a.csv");
+        fs::write(&path, format!("{HEADER}\n1,")).expect("write");
+        let mut tail = TraceTail::new(path.clone());
+        assert!(!tail.update().expect("read").partial);
+        // The unfinished row grows to a whole window: still one row being
+        // written, not quotes misread.
+        let rest = usize::try_from(WINDOW).expect("fits") - 2;
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open");
+        io::Write::write_all(&mut file, "a".repeat(rest).as_bytes()).expect("append");
+        let summary = tail.update().expect("read");
+        assert!(!summary.partial, "nothing was skipped");
+        fs::remove_dir_all(&folder).expect("clean up");
+    }
+
+    #[test]
     fn a_file_that_has_not_grown_is_not_read_again() {
         let folder = scratch("tail-same");
         let path = folder.join("trace-a.csv");
