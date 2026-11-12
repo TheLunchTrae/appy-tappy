@@ -926,6 +926,24 @@ select {
   border-color: var(--capture);
 }
 
+/* What the condition watches: the application, and the flows that add an application or make a value for it. */
+.watch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-row .input {
+  flex: 0 1 280px;
+  min-width: 0;
+}
+
+/* The next step toward a value to watch, said where the step is taken. */
+.guide {
+  max-width: 68ch;
+}
+
 .live-reading {
   margin-top: 8px;
   padding: 8px 10px;

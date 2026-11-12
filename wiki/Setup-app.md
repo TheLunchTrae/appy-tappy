@@ -29,6 +29,15 @@ This page covers what the user guide leaves out.
   window. **Add application** and **Change how it's found** open the
   application flow for the picker's flow, as
   [Pages and flows](State-machines.md#pages-and-flows) describes.
+- **One flow from an automation.** The automation editor is where a first
+  automation starts: its condition chooses the application, then one of that
+  application's values (`lib/watch.ts`), and says which step is missing while
+  there is no value to compare. **Add application** and **New value** open
+  those flows for the automation, which waits under them with its draft
+  (`lib/flow.ts`). `save_value` answers the saved value's application and ID,
+  which the editor picks when it shows again, so nothing is looked up by
+  name. [Pages and flows](State-machines.md#pages-and-flows) lists the
+  transitions.
 - **Application editor.** A new application's match starts from the picked
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
@@ -55,6 +64,13 @@ This page covers what the user guide leaves out.
   the tabs, **Change window**, the questions' answers, and **Discard** or
   **Cancel** wait. A save closes its flow only while that flow is still open,
   so one that finishes after the user moved on leaves the next flow alone. Leaving a capture stops its recording.
+  A flow opened for another unmounts that one, so what a waiting flow would
+  lose has to travel in its `Flow` value. Only the automation editor opens a
+  flow while it holds work, so it hands over its draft, and the window counts
+  that draft with what the open flow reports (`heldInAll`). A tab then asks
+  even when the open flow holds nothing, and the question names both losses
+  (`lostText`). **Cancel** in a flow opened for another shows that one again
+  and drops only its own work.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
   selection, with one color match for all of them (`selection.rs`). The owner

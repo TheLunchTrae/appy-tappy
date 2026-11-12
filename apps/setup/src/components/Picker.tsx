@@ -13,6 +13,7 @@ import {
 } from '../lib/picker.ts';
 import { background } from '../lib/repeat.ts';
 import { useOpenWindows } from '../lib/useOpenWindows.ts';
+import { Trail } from './Trail.tsx';
 
 /** The window to capture and the application its values belong to. */
 export interface Choice {
@@ -30,6 +31,8 @@ interface Props {
   readonly apps: readonly AppSummary[];
   /** The page's heading, such as New value. */
   readonly heading: string;
+  /** The way to the picker's flow, for its breadcrumb. */
+  readonly trail: readonly string[];
   /** The saved application the flow belongs to already, such as a reference's own, or null to let the user choose. */
   readonly lockedApp: string | null;
   /** The application chosen at first: the last choice's, or one just added for this flow. */
@@ -48,6 +51,7 @@ interface Props {
 export function Picker({
   apps,
   heading,
+  trail,
   lockedApp,
   startApp,
   startWindow,
@@ -89,6 +93,7 @@ export function Picker({
 
   return (
     <main className="page">
+      <Trail trail={trail} here={heading} />
       <div className="page-head">
         <h1>{heading}</h1>
         <span className="lead">

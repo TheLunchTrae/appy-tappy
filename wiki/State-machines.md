@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Four guards drop such stale messages:
+it was about has gone. Five guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -33,6 +33,10 @@ it was about has gone. Four guards drop such stale messages:
   reader sends back for a discarded recording is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
+- **The open flow.** A save's answer closes the setup app's flow only while
+  the flow that saved is still the one open (`afterSave` in
+  `apps/setup/src/lib/flow.ts`), so a save that finishes after the user moved
+  on leaves the next flow alone.
 
 Source files are named as code text rather than linked, so a file that moves
 leaves no broken link.
@@ -640,46 +644,88 @@ only once it opens.
 
 The React side (`apps/setup/src/App.tsx`) has two pieces of state: `page`, the
 tab shown, and `flow`, the value, reference, automation, or application being
-made or edited. A flow covers the page while it is open.
+made or edited. A flow covers the page while it is open. A flow can open
+another flow for itself; it then waits under that one as its `opener` and
+shows again when that one ends. `Flow` in `apps/setup/src/lib/flow.ts` names
+the flows, and the transitions between them are pure functions there.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Page
-    Page --> Flow: New or Edit
-    Flow --> Page: Cancel
-    Flow --> Saving: Save
-    Saving --> Page: saved, the page that lists it opens
-    Saving --> Flow: the save fails, the flow shows why
-    Flow --> Page: a tab is clicked with nothing unsaved
-    Flow --> Asking: a tab is clicked with unsaved work
-    Asking --> Page: the user agrees to lose the work
-    Asking --> Flow: the user stays
-    Saving --> Saving: the tabs are disabled until the save ends
-    Flow --> Flow: the value or reference flow opens the application flow for itself
-    Flow --> Flow: Cancel in an application flow opened for another flow shows that flow again
-    Saving --> Flow: an application flow opened for another flow saves, and that flow shows again with the application
+    Page --> Open: New or Edit opens a flow with none waiting
+    Open --> Open: the open flow opens another and waits under it
+    Open --> Open: Cancel with a flow waiting shows that flow as it was
+    Open --> Page: Cancel with none waiting
+    Open --> Saving: Save
+    Saving --> Open: the save fails, the flow shows why
+    Saving --> Open: saved with a flow waiting, which shows again with what was made
+    Saving --> Page: saved with none waiting, the page that lists it opens
+    Saving --> Saving: the tabs, Cancel, and Leave wait until the save ends
+    Open --> Page: a tab is pressed and no flow holds unsaved work
+    Open --> Asking: a tab is pressed and the open flow or a waiting one holds unsaved work
+    Asking --> Page: Leave drops every flow
+    Asking --> Open: Stay
 ```
 
-The value and reference flows open the application flow for themselves:
-**Add application** for a new application, and **Change how it's found** for
-the chosen one. That application flow keeps the flow that opened it as its
-`opener`. When it saves, `App.tsx` reads the saved files again and then shows
-the opener with the saved application's ID as the one it starts with
-(`resume` in `apps/setup/src/lib/flow.ts`); the application editor counts as
-saving until then. **Cancel** shows the opener as it was. A tab still leaves
-both flows for its page. The opener holds no unsaved work while the
-application flow covers it, because it opens that flow only from its
-[picker](#picker), before a capture starts, so the question a tab asks names
-only the application's changes.
+**Open** is one flow on screen with up to two waiting under it. The types
+allow only these stacks, the flow on screen last:
 
-The unsaved work of a flow, such as its screenshots and recording, lives in the
-flow's components and in the owner thread. Each flow reports what leaving it
-would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
-ask before they drop unsaved work. While a save runs, both are disabled. A save closes
-its flow only while that flow is still open (`saved` in `App.tsx`), so a save
-that finishes after the user moved on leaves the next flow alone. Leaving the
-value or reference flow unmounts it and stops its capture, which clears its screenshots and
-recording.
+| Stack                            | How it comes about                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| automation                       | **New automation** or **Edit**                                                                 |
+| automation, application          | **Add application** in the automation editor                                                   |
+| automation, value                | **New value** in the automation editor                                                         |
+| automation, value, application   | **Add application** or **Change how it's found** in that value's [picker](#picker)             |
+| value, application               | **Add application** or **Change how it's found** in the picker of a value from the Values page |
+| reference, application           | The same in a reference's picker                                                               |
+| value, reference, or application | **New** or **Edit** on its own page, with none waiting                                         |
+
+- **Opening.** `valueFor` and `applicationFor` make the flow to open, with
+  its opener in it. The automation editor first hands over its draft and the
+  application its condition has (`waiting`), because the opener unmounts
+  while the other flow shows. The value and reference flows open the
+  application flow only from their picker, before a capture holds anything,
+  so they wait with nothing but the application to start with.
+- **Save.** The flow counts as saving until `App.tsx` has decided what shows
+  next. With a flow waiting, it first reads the saved files again, so the
+  opener finds what was made in the lists. `afterSave` then gives the opener
+  what the save answered (`resume`): the application's ID to a value or
+  reference flow, whose picker starts with it; the application's ID, and the
+  value's ID from `save_value`, to the automation flow, whose editor chooses
+  the application and picks the value in its draft (`watching` in
+  `apps/setup/src/lib/watch.ts`). With none waiting, the page that lists what
+  was saved opens.
+- **Cancel.** `resume` with nothing made shows the opener as it waited: the
+  automation with its draft, or the picker with the application it had. With
+  none waiting, the page shows.
+- **Tab.** What leaving loses is what the open flow reports
+  (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
+  that waits (`heldInAll`). With nothing unsaved the tab's page opens. With
+  unsaved work the question asks first, and `lostText` names what the open
+  flow loses and the automation's unsaved changes. **Leave** drops every
+  flow, and **Stay** keeps the stack as it is. While a save runs, the tabs
+  and the question's answers wait.
+- **A save that finishes after the user moved on.** `afterSave` compares the
+  flow that saved with the flow open now, by identity, and changes nothing
+  unless they are the same flow. The tabs and **Cancel** are disabled while
+  a save runs, so this guards a save whose flow was replaced some other way.
+
+Failures and how the machine recovers:
+
+- **The save fails.** The flow stays open and shows why. Nothing waiting
+  changes.
+- **The saved files cannot be read after a save.** The opener still shows,
+  with the lists it had. The automation editor then shows the application as
+  one it cannot read, with no value picked. The lists are read again every
+  three seconds while it is open, so what was saved appears and the user
+  chooses it. A picker shows no application chosen, and no read repeats
+  while a value or reference flow is open, so **Cancel** and a new start
+  list it.
+
+The unsaved work of a value or reference flow, such as its screenshots and
+recording, lives in the flow's components and in the owner thread. Leaving
+that flow, for its opener or for a page, unmounts it and stops its capture,
+which clears its screenshots and recording.
 
 ### Picker
 

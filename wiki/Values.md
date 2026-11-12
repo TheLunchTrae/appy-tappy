@@ -10,7 +10,10 @@ whose window is open now.
 
 ## Make a value
 
-On the Values page, select **New value**.
+On the Values page, select **New value**. Or select **New value** while you
+make an automation: it starts with the automation's
+[application](Automations.md#what-to-watch), and saving the value brings you
+back to the automation with the value picked.
 
 1. **Choose the application.** Select the application the value belongs to
    in the list, which says whether each one is running. If it isn't in the

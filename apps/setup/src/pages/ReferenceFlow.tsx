@@ -1,17 +1,12 @@
 import { useEffect, useState } from 'react';
 
-import type { AppSummary, ReferenceDef } from '../lib/bindings.ts';
+import type { AppSummary } from '../lib/bindings.ts';
 import { stopCapture } from '../lib/api.ts';
 import { Capture, type CaptureMode } from '../components/Capture.tsx';
 import { type Choice, Picker } from '../components/Picker.tsx';
+import type { Made, SavedRef } from '../lib/flow.ts';
 import { background } from '../lib/repeat.ts';
 import type { Held } from '../lib/unsaved.ts';
-
-/** A saved reference and the application it belongs to. */
-export interface SavedRef {
-  readonly app: string;
-  readonly reference: ReferenceDef;
-}
 
 interface Props {
   readonly apps: readonly AppSummary[];
@@ -19,8 +14,11 @@ interface Props {
   readonly existing: SavedRef | null;
   /** The application a new reference starts with, such as one just added for it, or null to let the user choose. */
   readonly app: string | null;
+  /** The way to this flow, for its breadcrumb. */
+  readonly trail: readonly string[];
   readonly onCancel: () => void;
-  readonly onSaved: () => void;
+  /** Hears where the reference was saved. The capture counts as saving until this settles. */
+  readonly onSaved: (made: Made) => Promise<void>;
   /** Leaves to add an application, and comes back with it chosen. */
   readonly onAddApplication: () => void;
   /** Leaves to change how the application with this ID is found, and comes back to it. */
@@ -34,6 +32,7 @@ export function ReferenceFlow({
   apps,
   existing,
   app,
+  trail,
   onCancel,
   onSaved,
   onAddApplication,
@@ -55,6 +54,7 @@ export function ReferenceFlow({
       <Picker
         apps={apps}
         heading={existing === null ? 'New reference' : `Edit ${existing.reference.name}`}
+        trail={trail}
         lockedApp={existing?.app ?? null}
         startApp={choice?.app ?? app}
         startWindow={choice?.window.handle ?? null}
@@ -72,6 +72,7 @@ export function ReferenceFlow({
     <Capture
       choice={choice}
       mode={mode}
+      trail={trail}
       onCancel={onCancel}
       onChangeWindow={() => {
         setPicking(true);

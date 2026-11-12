@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { type AppSummary, type AutomationDef, type MediaCommandDef, NO_STATE, type WhenDef } from '../lib/bindings.ts';
+import { type AppSummary, type MediaCommandDef, NO_STATE, type WhenDef } from '../lib/bindings.ts';
 import { errorText, listWindows, saveAutomation, stopWatching, watchValue, watchedReading } from '../lib/api.ts';
 import {
   type ActionDraft,
@@ -8,31 +8,33 @@ import {
   type LiveState,
   COMPARISONS,
   COMPARISON_NAMES,
-  EMPTY_DRAFT,
   MEDIA_NAMES,
   type ValueChoice,
   buildAutomation,
   buildWhen,
   clicksBlocked,
-  findValue,
   keysBlocked,
   liveAnnouncement,
   liveText,
   newAction,
   readsState,
   readsText,
-  toDraft,
+  startingDraft,
   undoText,
+  unusedKey,
   valueChoices,
   withSource,
 } from '../lib/automation.ts';
 import { clickApps, targetSummary } from '../lib/click.ts';
+import type { AutomationFlow } from '../lib/flow.ts';
 import { ACTIONS_HINT, COOLDOWN_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
+import { pickerApps } from '../lib/picker.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { actionKeys } from '../lib/shortcut.ts';
+import { watchGuide, watchStep, watching } from '../lib/watch.ts';
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
 type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
@@ -462,19 +464,34 @@ function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly 
 
 interface Props {
   readonly apps: readonly AppSummary[];
-  /** The saved automation to change, or null for a new one. */
-  readonly existing: AutomationDef | null;
+  /**
+   * The automation to make or change. After a flow the editor opened ends, it also has the draft to show again, the
+   * application its condition starts with, and the value that flow saved.
+   */
+  readonly flow: AutomationFlow;
   readonly onCancel: () => void;
   readonly onSaved: () => void;
+  /** Leaves to add an application, and comes back with `draft` and that application chosen. */
+  readonly onAddApplication: (draft: Draft, app: string | null) => void;
+  /** Leaves to make a value for the application `app`, and comes back with `draft` and that value picked. */
+  readonly onNewValue: (draft: Draft, app: string) => void;
   /** Hears what leaving the editor would lose. */
   readonly onHeld: (held: Held) => void;
 }
 
-/** Making or changing an automation: the value it watches, the actions it runs, and whether it undoes them. */
-export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: Props) {
-  const [start] = useState<Draft>(() => (existing === null ? EMPTY_DRAFT : toDraft(existing)));
-  const [draft, setDraft] = useState<Draft>(start);
-  const [nextKey, setNextKey] = useState(() => draft.actions.length);
+/**
+ * Making or changing an automation: the application and the value it watches, the actions it runs, and whether it
+ * undoes them. It leads to adding the application and making the value when the one to watch is not saved yet.
+ */
+export function AutomationEditor({ apps, flow, onCancel, onSaved, onAddApplication, onNewValue, onHeld }: Props) {
+  const { existing } = flow;
+  const [start] = useState<Draft>(() => startingDraft(existing));
+  const [draft, setDraft] = useState<Draft>(() =>
+    watching(flow.draft ?? start, valueChoices(apps), flow.app, flow.value),
+  );
+  // The application chosen for the condition before a value of it is picked.
+  const [chosenApp, setChosenApp] = useState(flow.app);
+  const [nextKey, setNextKey] = useState(() => unusedKey(draft.actions));
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   useReportHeld(onHeld, held(saving, start, draft));
@@ -502,7 +519,12 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
   }, []);
 
   const choices = useMemo(() => valueChoices(apps), [apps]);
-  const choice = draft.source === null ? null : findValue(choices, draft.source);
+  const saved = useMemo(() => pickerApps(apps), [apps]);
+  const step = watchStep(saved, choices, draft, chosenApp);
+  const guide = watchGuide(step);
+  const choice = step.kind === 'ready' ? step.choice : null;
+  // The application the condition watches, or null before one is chosen.
+  const watched = 'app' in step ? step.app.id : step.kind === 'missing' ? step.id : null;
   const built = buildAutomation(draft, choices, existing?.id ?? '', apps);
   const typedWhen = choice === null ? null : buildWhen(draft, choice);
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
@@ -540,7 +562,6 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
     }
   };
 
-  const appsWithValues = apps.filter((app) => app.file !== null && app.file.values.length > 0);
   const targeted = targeting === null ? undefined : draft.actions.find((action) => action.key === targeting);
   if (targeted !== undefined) {
     return (
@@ -599,109 +620,161 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
             <h2 id="when-heading">When</h2>
             <Hint topic="When">{WHEN_HINT}</Hint>
           </div>
-          <div className="when-row">
-            <select
-              className="input value-select"
-              aria-label="Value"
-              value={draft.source === null ? '' : `${draft.source.app}/${draft.source.value}`}
-              onChange={(event) => {
-                const picked = choices.find((option) => `${option.app}/${option.value.id}` === event.target.value);
-                if (picked !== undefined) {
-                  setDraft((current) => withSource(current, picked));
-                  setSaveError(null);
-                }
-              }}
-            >
-              <option value="" disabled>
-                Pick a value
-              </option>
-              {appsWithValues.map((app) => (
-                <optgroup key={app.id} label={app.file?.name ?? app.id}>
-                  {app.file?.values.map((value) => (
-                    <option key={value.id} value={`${app.id}/${value.id}`}>
-                      {value.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <select
-              className="input"
-              aria-label="Comparison"
-              value={draft.is}
-              disabled={choice === null}
-              onChange={(event) => {
-                const picked = COMPARISONS[choice?.kind ?? 'number'].find(
-                  (comparison) => comparison === event.target.value,
-                );
-                if (picked !== undefined) {
-                  update({ is: picked });
-                }
-              }}
-            >
-              {COMPARISONS[choice?.kind ?? 'number'].map((comparison) => (
-                <option key={comparison} value={comparison}>
-                  {COMPARISON_NAMES[comparison]}
-                </option>
-              ))}
-            </select>
-            {choice?.kind === 'state' ? (
+          {guide === null ? null : <p className={guide.warn ? 'warn' : 'guide'}>{guide.text}</p>}
+          <div className="watch-row">
+            {step.kind === 'no-applications' ? null : (
               <select
                 className="input"
-                aria-label="State"
-                value={draft.state}
+                aria-label="Application"
+                value={watched ?? ''}
                 onChange={(event) => {
-                  update({ state: event.target.value });
+                  const picked = event.target.value;
+                  setChosenApp(picked);
+                  setDraft((current) => watching(current, choices, picked, null));
+                  setSaveError(null);
                 }}
               >
-                {readsState(choice, draft.state) ? null : (
-                  <option value={draft.state} disabled>
-                    {draft.state === '' ? 'Pick a state' : `${draft.state} (no longer read)`}
+                {step.kind === 'choosing' ? (
+                  <option value="" disabled>
+                    Pick an application
                   </option>
-                )}
-                {[...choice.states, NO_STATE].map((state) => (
-                  <option key={state} value={state}>
-                    {state}
+                ) : null}
+                {step.kind === 'missing' ? (
+                  <option value={step.id} disabled>
+                    {step.id} (not saved)
+                  </option>
+                ) : null}
+                {saved.map((app) => (
+                  <option key={app.id} value={app.id}>
+                    {app.name}
                   </option>
                 ))}
               </select>
-            ) : choice?.kind === 'flag' ? (
-              <div className="seg" role="group" aria-label="Yes or no">
-                {[true, false].map((flag) => (
-                  <button
-                    key={String(flag)}
-                    type="button"
-                    aria-pressed={draft.flag === flag}
-                    onClick={() => {
-                      update({ flag });
-                    }}
-                  >
-                    {flag ? 'Yes' : 'No'}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <input
-                className="input"
-                aria-label="Number"
-                inputMode="decimal"
-                placeholder="90"
-                disabled={choice === null}
-                value={draft.number}
-                onChange={(event) => {
-                  update({ number: event.target.value });
-                }}
-              />
             )}
+            {'app' in step ? (
+              <button
+                type="button"
+                className={guide?.opens === 'value' ? 'btn primary' : 'btn'}
+                onClick={() => {
+                  onNewValue(draft, step.app.id);
+                }}
+              >
+                New value
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={guide?.opens === 'application' ? 'btn primary' : 'btn'}
+              onClick={() => {
+                onAddApplication(draft, watched);
+              }}
+            >
+              Add application
+            </button>
           </div>
+          {step.kind === 'pick' || step.kind === 'ready' ? (
+            <div className="when-row">
+              <select
+                className="input value-select"
+                aria-label="Value"
+                value={choice === null ? '' : choice.value.id}
+                onChange={(event) => {
+                  const picked = step.values.find((option) => option.value.id === event.target.value);
+                  if (picked !== undefined) {
+                    setDraft((current) => withSource(current, picked));
+                    setSaveError(null);
+                  }
+                }}
+              >
+                <option value="" disabled>
+                  Pick a value
+                </option>
+                {step.values.map((option) => (
+                  <option key={option.value.id} value={option.value.id}>
+                    {option.value.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="input"
+                aria-label="Comparison"
+                value={draft.is}
+                disabled={choice === null}
+                onChange={(event) => {
+                  const picked = COMPARISONS[choice?.kind ?? 'number'].find(
+                    (comparison) => comparison === event.target.value,
+                  );
+                  if (picked !== undefined) {
+                    update({ is: picked });
+                  }
+                }}
+              >
+                {COMPARISONS[choice?.kind ?? 'number'].map((comparison) => (
+                  <option key={comparison} value={comparison}>
+                    {COMPARISON_NAMES[comparison]}
+                  </option>
+                ))}
+              </select>
+              {choice?.kind === 'state' ? (
+                <select
+                  className="input"
+                  aria-label="State"
+                  value={draft.state}
+                  onChange={(event) => {
+                    update({ state: event.target.value });
+                  }}
+                >
+                  {readsState(choice, draft.state) ? null : (
+                    <option value={draft.state} disabled>
+                      {draft.state === '' ? 'Pick a state' : `${draft.state} (no longer read)`}
+                    </option>
+                  )}
+                  {[...choice.states, NO_STATE].map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
+                </select>
+              ) : choice?.kind === 'flag' ? (
+                <div className="seg" role="group" aria-label="Yes or no">
+                  {[true, false].map((flag) => (
+                    <button
+                      key={String(flag)}
+                      type="button"
+                      aria-pressed={draft.flag === flag}
+                      onClick={() => {
+                        update({ flag });
+                      }}
+                    >
+                      {flag ? 'Yes' : 'No'}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  className="input"
+                  aria-label="Number"
+                  inputMode="decimal"
+                  placeholder="90"
+                  disabled={choice === null}
+                  value={draft.number}
+                  onChange={(event) => {
+                    update({ number: event.target.value });
+                  }}
+                />
+              )}
+            </div>
+          ) : null}
           {choice === null ? null : (
             <LiveReading key={`${choice.app}/${choice.value.id}`} choice={choice} when={liveWhen} />
           )}
-          <p className="note">
-            {runningApp === null || runningApp === undefined
-              ? 'One value for now. Conditions that combine several values come later.'
-              : `Runs while ${runningApp.file?.name ?? runningApp.id} is open. ${choice === null ? 'The value reads a number.' : readsText(choice)}`}
-          </p>
+          {step.kind === 'no-applications' || step.kind === 'value' ? null : (
+            <p className="note">
+              {runningApp === null || runningApp === undefined
+                ? 'One value for now. Conditions that combine several values come later.'
+                : `Runs while ${runningApp.file?.name ?? runningApp.id} is open. ${choice === null ? 'The value reads a number.' : readsText(choice)}`}
+            </p>
+          )}
         </section>
 
         <section className="card" aria-labelledby="do-heading">

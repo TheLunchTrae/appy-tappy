@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  type AppSummary,
-  type AutomationDef,
-  type AutomationSummary,
-  DEFAULT_SETTINGS,
-  type SettingsFile,
-} from './lib/bindings.ts';
+import { type AppSummary, type AutomationSummary, DEFAULT_SETTINGS, type SettingsFile } from './lib/bindings.ts';
 import { errorText, listApps, listAutomations, loadSettings, saveSettings, syncOverlays } from './lib/api.ts';
 import { Question, useQuestion } from './components/Question.tsx';
 import { UpdateNotice } from './components/UpdateNotice.tsx';
@@ -14,10 +8,22 @@ import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
 import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
-import { type Fixing, NewValue } from './pages/NewValue.tsx';
-import { type TakesApplication, resume } from './lib/flow.ts';
+import { NewValue } from './pages/NewValue.tsx';
+import {
+  type Flow,
+  type Made,
+  type Opener,
+  afterSave,
+  applicationFor,
+  heldInAll,
+  lostText,
+  resume,
+  trail,
+  valueFor,
+  waiting,
+} from './lib/flow.ts';
 import { background, useRepeat } from './lib/repeat.ts';
-import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
+import { ReferenceFlow } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { ValuesPage } from './pages/ValuesPage.tsx';
@@ -38,25 +44,12 @@ const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
   { id: 'settings', name: 'Settings' },
 ];
 
-/**
- * What the window shows in place of a page: a flow that makes or changes something. The application flow can be
- * opened for the flow `opener`, which shows again when the application flow ends, with the application it saved.
- */
-type Flow =
-  | { readonly kind: 'value'; readonly fixing: Fixing | null; readonly app: string | null }
-  | { readonly kind: 'automation'; readonly existing: AutomationDef | null }
-  | { readonly kind: 'application'; readonly existing: AppSummary | null; readonly opener: Opener | null }
-  | { readonly kind: 'reference'; readonly existing: SavedRef | null; readonly app: string | null };
-
-/** A flow that opens the application flow for the application it needs. */
-type Opener = Extract<Flow, TakesApplication>;
-
-/** What leaving each kind of flow before it is saved loses. */
-const LOST: Readonly<Record<Flow['kind'], string>> = {
-  value: 'Leave without saving? The screenshots, the region and any recording are lost.',
-  reference: 'Leave without saving? The screenshots, the labels and any recording are lost.',
-  automation: 'Leave without saving? The changes to this automation are lost.',
-  application: 'Leave without saving? The changes to this application are lost.',
+/** The page that lists what each kind of flow saves. */
+const LISTED_ON: Readonly<Record<Flow['kind'], Page>> = {
+  automation: 'automations',
+  application: 'applications',
+  value: 'values',
+  reference: 'references',
 };
 
 /** How often the saved files are read again, which also refreshes which applications are running. */
@@ -65,8 +58,9 @@ const REFRESH_MS = 3000;
 export function App() {
   const [page, setPage] = useState<Page>('automations');
   const [flow, setFlow] = useState<Flow | null>(null);
-  // What the open flow would lose, as it reports it.
-  const [held, setHeld] = useState<Held>('nothing');
+  // What the open flow would lose, as it reports it, and what leaving it would lose with the flows that wait under it.
+  const [reported, setReported] = useState<Held>('nothing');
+  const held = heldInAll(flow, reported);
   // The page a press asked to leave the flow for, while the question asks whether to; and the last one asked for,
   // whose tab takes focus back after the answer.
   const [leaving, setLeaving] = useState<Page | null>(null);
@@ -183,30 +177,42 @@ export function App() {
         break;
     }
   };
-  // A save closes its own flow, for the flow `next` that opened it or else the page `target`, and nothing once
-  // the user has left it for another.
-  const saved = (opened: Flow, target: Page, next: Flow | null = null): void => {
-    if (openFlow.current !== opened) {
-      return;
-    }
-    if (next === null) {
-      goTo(target);
-    } else {
-      open(next);
+  // A save closes its own flow, for the flow that opened it or else the page that lists what it saved, and
+  // nothing once the user has left it for another.
+  const saved = (ended: Flow, made: Made | null = null): void => {
+    const next = afterSave(openFlow.current, ended, made);
+    switch (next.kind) {
+      case 'flow':
+        open(next.flow);
+        break;
+      case 'page':
+        goTo(LISTED_ON[ended.kind]);
+        break;
+      case 'stay':
+        break;
     }
   };
-  // What lets the value or reference flow `opener` open the application flow and show again when that ends.
-  const applicationFor = (opener: Opener) => ({
+  // The save of a value or reference flow. When a flow waits for what it made, the lists are read first, so that
+  // flow finds it in them.
+  const captured = async (ended: Flow, made: Made): Promise<void> => {
+    if (resume(ended, null) !== null) {
+      await refresh();
+    }
+    saved(ended, made);
+  };
+  // What lets the flow `opener` open the application flow from its picker and show again when that ends.
+  const pickerFor = (opener: Opener) => ({
     onAddApplication: (): void => {
-      open({ kind: 'application', existing: null, opener });
+      open(applicationFor(opener, null));
     },
     onEditApplication: (id: string): void => {
       const existing = apps?.find((app) => app.id === id);
       if (existing !== undefined) {
-        open({ kind: 'application', existing, opener: { ...opener, app: id } });
+        open(applicationFor(opener, existing));
       }
     },
   });
+  const path = flow === null ? [] : trail(flow);
 
   const content = (() => {
     if (flow?.kind === 'value') {
@@ -215,14 +221,13 @@ export function App() {
           apps={apps ?? []}
           fixing={flow.fixing}
           app={flow.app}
+          trail={path}
           onCancel={() => {
-            open(null);
+            open(resume(flow, null));
           }}
-          onSaved={() => {
-            saved(flow, 'values');
-          }}
-          {...applicationFor(flow)}
-          onHeld={setHeld}
+          onSaved={(made) => captured(flow, made)}
+          {...pickerFor(flow)}
+          onHeld={setReported}
         />
       );
     }
@@ -230,15 +235,16 @@ export function App() {
       return (
         <ApplicationEditor
           existing={flow.existing}
+          trail={path}
           onCancel={() => {
-            open(resume(flow.opener, null));
+            open(resume(flow, null));
           }}
           onSaved={async (id) => {
             // The lists are read first, so the flow that opened this one finds the application in them.
             await refresh();
-            saved(flow, 'applications', resume(flow.opener, id));
+            saved(flow, { app: id, value: null });
           }}
-          onHeld={setHeld}
+          onHeld={setReported}
         />
       );
     }
@@ -248,14 +254,13 @@ export function App() {
           apps={apps ?? []}
           existing={flow.existing}
           app={flow.app}
+          trail={path}
           onCancel={() => {
             open(null);
           }}
-          onSaved={() => {
-            saved(flow, 'references');
-          }}
-          {...applicationFor(flow)}
-          onHeld={setHeld}
+          onSaved={(made) => captured(flow, made)}
+          {...pickerFor(flow)}
+          onHeld={setReported}
         />
       );
     }
@@ -263,15 +268,21 @@ export function App() {
       return (
         <AutomationEditor
           apps={apps ?? []}
-          existing={flow.existing}
+          flow={flow}
           onCancel={() => {
             open(null);
           }}
           onSaved={() => {
-            saved(flow, 'automations');
+            saved(flow);
             background(refresh());
           }}
-          onHeld={setHeld}
+          onAddApplication={(draft, app) => {
+            open(applicationFor(waiting(flow, draft, app), null));
+          }}
+          onNewValue={(draft, app) => {
+            open(valueFor(waiting(flow, draft, app)));
+          }}
+          onHeld={setReported}
         />
       );
     }
@@ -284,10 +295,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'value', fixing: null, app: null });
+              open({ kind: 'value', fixing: null, app: null, opener: null });
             }}
             onFix={(fixing) => {
-              open({ kind: 'value', fixing, app: null });
+              open({ kind: 'value', fixing, app: null, opener: null });
             }}
           />
         );
@@ -299,10 +310,10 @@ export function App() {
             loadError={automationError ?? loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'automation', existing: null });
+              open({ kind: 'automation', existing: null, draft: null, app: null, value: null });
             }}
             onEdit={(summary) => {
-              open({ kind: 'automation', existing: summary.automation });
+              open({ kind: 'automation', existing: summary.automation, draft: null, app: null, value: null });
             }}
           />
         );
@@ -376,7 +387,7 @@ export function App() {
                 goTo(leaving);
               }}
             >
-              {LOST[flow.kind]}
+              {lostText(flow, reported)}
             </Question>
           )}
           <UpdateNotice busy={held !== 'nothing'} hidden={leaving !== null && flow !== null} />

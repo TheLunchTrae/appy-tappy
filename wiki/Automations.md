@@ -18,7 +18,10 @@ On the Automations page, select **New automation**. To change one, select
 **Edit**.
 
 1. **Name** it, such as `Pause music near the end`.
-2. **When.** Pick the value, then how it compares:
+2. **When.** Choose the application, pick one of its values, then how it
+   compares. If the application or the value isn't saved yet, make it from
+   here, as [What to watch](#what-to-watch) describes. Until there is a value
+   to watch, the editor says which step comes next.
    - A value that reads a number: **is at least**, **is above**,
      **is at most**, **is below**, **is**, or **is not** a number you type.
    - A value that reads yes or no: **is** or **is not**, then **Yes** or
@@ -49,6 +52,30 @@ automation's condition or actions, or a value's region, starts all of that
 application's automations over: they undo what they changed first, and one
 whose condition still holds runs again. Renaming an application, a value or an
 automation starts nothing over.
+
+## What to watch
+
+An automation watches one value of one application. The editor lists the
+saved applications and, for the chosen one, its values. With one saved
+application, it is chosen for you.
+
+- **Add application** adds an application that isn't in the list yet, as
+  [Applications](Applications.md#add-change-or-remove-an-application)
+  describes. Saving it brings you back to the automation with that
+  application chosen.
+- **New value** makes a value for the chosen application, as
+  [Make a value](Values.md#make-a-value) describes. It starts with that
+  application chosen. A number's reference is made there too, with
+  **New reference from this region**.
+  Saving the value brings you back to the automation with that value picked.
+
+Whichever you open, the automation keeps its name, condition, actions, and
+the rest as you left them, and **Cancel** there returns to it unchanged. So a
+first automation needs no other page: select **New automation**, add the
+application, make the value, and then say what happens.
+
+Selecting a page while one of these is open leaves the automation too, as
+[Leave before you save](Getting-started.md#leave-before-you-save) describes.
 
 ## Actions
 
