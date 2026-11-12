@@ -76,6 +76,26 @@ This page covers what the user guide leaves out.
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
+- **Region.** The region is kept in the pixels of the screenshot it is drawn
+  on, whatever size the screenshot shows at. `ZoomView` lays the picture out:
+  the whole picture with room around it at first, and larger by the zoom,
+  which belongs to screenshots of one size. `RegionSurface` reads the pointer
+  against the picture's box on the page at each pointer event, and again when
+  a scroll or a zoom moves the picture under a pointer that stays still, so
+  the zoom, the scroll, and the window's size are no state of the drag. The
+  region's outline, its label, and the dim around it are drawn by `Marquee`,
+  outside the box. A corner takes presses 12 pixels out from the box and up
+  to 4 into it, less into a small box, which keeps 8 pixels each way, or all
+  of a smaller side, to be moved by (`.marquee .corner` in `styles.css`). The
+  zoom controls stay focusable at their limits and say so with
+  `aria-disabled`, and the percentage is a status that screen readers hear
+  when it changes. The surface reaches over the
+  room around the picture, which is how a drag starts outside it, and only
+  while a tool drags: a click that picks a color or selects a pixel lands on
+  the picture alone. `onRegion` is called once, when a drag is let go
+  ([Region drag](State-machines.md#region-drag)), so a check runs for the
+  finished region and not for each one on the way. A selection that fails
+  says why above the view, on either step.
 - **Capture failures.** A frame error shows in the preview until the next good
   frame of the same capture; only a closed window ends the capture. While a
   failure stands, a screenshot is refused, and a recording stops with the

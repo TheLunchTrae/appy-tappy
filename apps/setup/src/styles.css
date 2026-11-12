@@ -537,6 +537,15 @@ select {
   color: var(--text);
 }
 
+/* The view, and the row under it with the hint and the zoom. */
+.viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .view {
   position: relative;
   flex: 1;
@@ -545,16 +554,41 @@ select {
   overflow: hidden;
   background: #111317;
   border: 1px solid var(--line);
+  /* A drag on the picture selects no text, which a later press could drag in place of the region. */
+  user-select: none;
+}
+
+/* A zoomed picture pans by scrolling. */
+.scroller {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+/* The picture and the room around it: as large as the view at least, and as large as the zoomed picture needs. */
+.pad {
+  display: grid;
+  place-items: center;
+  width: max-content;
+  height: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  /* Cuts off the surface's reach, so it leaves nothing to scroll to. */
+  overflow: clip;
 }
 
 .frame {
-  position: absolute;
+  position: relative;
 }
 
 .frame canvas {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.frame.crisp canvas {
+  image-rendering: pixelated;
 }
 
 .surface {
@@ -564,47 +598,110 @@ select {
   touch-action: none;
 }
 
+/* A surface that takes drags reaches over the room around the picture, so a drag can start there. */
+.surface.reach::before {
+  content: '';
+  position: absolute;
+  inset: -100vmax;
+}
+
 .surface.picking {
   cursor: copy;
 }
 
-.marquee {
+/* The picture around the region, dimmed a little. Its shape leaves the region out. */
+.dim {
   position: absolute;
-  border: 2px solid var(--capture);
-  box-shadow: 0 0 0 9999px rgb(0 0 0 / 38%);
+  inset: 0;
+  background: rgb(0 0 0 / 30%);
   pointer-events: none;
 }
 
-.marquee .corner {
+/*
+ * The region's outline lies outside its box: a light line with a dark one around it, so it shows on any picture and
+ * covers nothing the region holds.
+ */
+.marquee {
+  --outline: var(--capture);
+
   position: absolute;
-  width: 10px;
-  height: 10px;
-  background: var(--capture);
+  box-shadow:
+    0 0 0 1px var(--outline),
+    0 0 0 2px rgb(0 0 0 / 85%);
+  pointer-events: none;
+}
+
+/* The inside of a region that can be moved. */
+.marquee .grip {
+  position: absolute;
+  inset: 0;
+  cursor: move;
   pointer-events: auto;
 }
 
+/*
+ * A corner takes presses over more than the square it draws. It reaches 12 pixels out from the box and up to 4 into
+ * it, less into a small box, so that the box keeps 8 pixels each way, or all of a smaller side, to be moved by.
+ */
+.marquee .corner {
+  position: absolute;
+  width: calc(12px + clamp(0px, (100% - 8px) / 2, 4px));
+  height: calc(12px + clamp(0px, (100% - 8px) / 2, 4px));
+  pointer-events: auto;
+}
+
+/* The square a corner draws lies outside the box, with its inner tip on the box's. */
+.marquee .corner::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--outline);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 85%);
+}
+
 .marquee .nw {
-  left: -6px;
-  top: -6px;
+  left: -12px;
+  top: -12px;
   cursor: nwse-resize;
+}
+
+.marquee .nw::after {
+  left: 6px;
+  top: 6px;
 }
 
 .marquee .ne {
-  right: -6px;
-  top: -6px;
+  right: -12px;
+  top: -12px;
   cursor: nesw-resize;
+}
+
+.marquee .ne::after {
+  right: 6px;
+  top: 6px;
 }
 
 .marquee .sw {
-  left: -6px;
-  bottom: -6px;
+  left: -12px;
+  bottom: -12px;
   cursor: nesw-resize;
 }
 
+.marquee .sw::after {
+  left: 6px;
+  bottom: 6px;
+}
+
 .marquee .se {
-  right: -6px;
-  bottom: -6px;
+  right: -12px;
+  bottom: -12px;
   cursor: nwse-resize;
+}
+
+.marquee .se::after {
+  right: 6px;
+  bottom: 6px;
 }
 
 .shade-box {
@@ -689,29 +786,72 @@ div.match-answer {
   cursor: cell;
 }
 
+/* The region's label, which takes 26 pixels beside the box: TAG_ROOM in RegionSurface.tsx. */
 .marquee .tag {
   position: absolute;
-  top: 100%;
-  left: -2px;
   white-space: nowrap;
-  background: var(--capture);
+  background: var(--outline);
   color: var(--on-capture);
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 0 0 4px 4px;
+  line-height: 16px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.marquee .tag.above {
+  bottom: calc(100% + 8px);
+}
+
+.marquee .tag.below {
+  top: calc(100% + 8px);
+}
+
+.marquee .tag.inside {
+  top: 4px;
+}
+
+.marquee .tag.left {
+  left: -2px;
+}
+
+.marquee .tag.right {
+  right: -2px;
+}
+
+.marquee .tag.inside.left {
+  left: 4px;
+}
+
+.marquee .tag.inside.right {
+  right: 4px;
+}
+
+.view-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .hint {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  background: rgb(20 22 28 / 85%);
-  padding: 6px 10px;
-  border-radius: 6px;
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   color: var(--muted);
-  pointer-events: none;
+}
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zoom-level {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 .strip {
@@ -1439,11 +1579,10 @@ div.match-answer {
 }
 
 .marquee.recording {
-  border-color: var(--live);
+  --outline: var(--live);
 }
 
 .marquee.recording .tag {
-  background: var(--live);
   color: #fff;
 }
 
@@ -1633,7 +1772,7 @@ div.match-answer {
 }
 
 /* A hidden view or strip stays out of the layout, whatever its display. */
-.view[hidden],
+.viewer[hidden],
 .strip[hidden] {
   display: none;
 }
@@ -2026,8 +2165,9 @@ div.match-answer {
 }
 
 /* A region drawn as a reading area: larger than what it reads, which may be anywhere inside. */
-.frame.reading-area .marquee {
-  border-style: dashed;
+.marquee.area {
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 85%);
+  outline: 1px dashed var(--outline);
   background: rgb(242 179 61 / 10%);
 }
 

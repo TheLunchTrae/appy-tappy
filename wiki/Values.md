@@ -36,15 +36,16 @@ back to the automation with the value picked.
    you use the application: [record them](#record-screenshots).
 3. **Where to read.** Type a **Value name**, such as `Progress`, and choose
    the **Check**, one of the four [checks](#checks) below. On a screenshot,
-   drag to draw a box around what to read. Drag inside the box to move it, or
-   drag a corner to resize it. The **X**, **Y**, **Width**, and **Height**
-   fields set it to the exact pixel, counted in the window's own pixels from
-   its top-left corner. Turn on **This content may move** if the value shows
-   in different places inside the window, as
-   [Content that moves](#content-that-moves) describes. **Stays at** says
-   which side of the window the region keeps to as the window changes size,
-   as [Window size](#window-size) describes; it follows the region, so you
-   can leave it alone. Then select **Next: how to read it**.
+   drag to draw a box around what to read, as
+   [Draw the region](#draw-the-region) describes. The **X**, **Y**,
+   **Width**, and **Height** fields set it to the exact pixel, counted in the
+   window's own pixels from its top-left corner. Turn on
+   **This content may move** if the value shows in different places inside
+   the window, as [Content that moves](#content-that-moves) describes.
+   **Stays at** says which side of the window the region keeps to as the
+   window changes size, as [Window size](#window-size) describes; it follows
+   the region, so you can leave it alone. Then select
+   **Next: how to read it**.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
    box under it then shows what AppyTappy reads on the live window, a few
    times a second. If the check cannot work, such as a bar whose filled and
@@ -90,6 +91,44 @@ draw is what your automations see.
   capture it; check that it is the window you mean.
 - **The applications couldn't be read.** AppyTappy says why. Select
   **Refresh** to read them again.
+
+## Draw the region
+
+The region is the box that a value reads, a reference learns from, or a click
+looks for. You draw it on a screenshot, not on the live window.
+
+- **Draw.** Drag from one corner of the thing to the opposite corner. The
+  drag can start in the empty space around the screenshot, such as above its
+  top edge, so a box that touches an edge is easy to draw: the box holds the
+  part of the screenshot that the drag covers. A drag whose box covers none
+  of the screenshot draws nothing, and so does a click.
+- **Move.** Drag inside the box. It stops at the edges of the screenshot.
+- **Resize.** Drag one of the four squares at its corners.
+
+A click changes nothing, so clicking the box or a corner leaves a region you
+typed in the **X**, **Y**, **Width**, and **Height** fields as it is. The
+squares lie outside the box, so even a very small box can be moved by
+dragging inside it.
+
+The box changes when you let go of the mouse button. A drag that is
+interrupted, such as by a screenshot that arrives while you drag, leaves the
+box as it was, and you can drag again.
+
+The box's outline and its label, which shows the region's size in the
+window's pixels, lie outside the box, so nothing covers what you select. The
+rest of the screenshot is dimmed a little.
+
+To select something small, zoom in. Under the screenshot, **Zoom in** (**+**)
+and **Zoom out** (**−**) change how large the screenshot shows, and the
+percentage between them says how large that is against the window's own
+pixels. **Fit** shows the whole screenshot again. Hold Ctrl and turn the mouse
+wheel to zoom around the pointer. While the screenshot is larger than the
+view, turn the wheel or drag the scroll bars to move around it. The wheel
+also works in the middle of a drag, and the box follows the screenshot as it
+scrolls, to draw a box larger than the view shows.
+Zoom changes only how you see the screenshot: the region keeps its pixels.
+The live window always shows whole, and a screenshot of another size starts
+whole again.
 
 ## Record screenshots
 

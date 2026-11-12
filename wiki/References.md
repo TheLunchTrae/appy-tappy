@@ -32,7 +32,8 @@ select **Capture this window**, as the first step of
    counts the tinted pixels in the region and on the rest of the screenshot.
    The tint is only a guide, as
    [Show matching pixels](Values.md#show-matching-pixels) describes.
-3. **Teach it the characters.** Draw a region around text on a screenshot,
+3. **Teach it the characters.**
+   [Draw a region](Values.md#draw-the-region) around text on a screenshot,
    then type what it shows, such as `87%`. AppyTappy learns the shape of each
    character from what you type. Label screenshots until
    **Characters it knows** shows every digit the numbers need, or
