@@ -73,7 +73,7 @@ function Discovered({
                 </span>
               ))}
             </span>
-            <span className="note">AppyTappy read these. They count once you check them in review.</span>
+            <span className="note">AppyTappy read these. They count once you keep their readings in review.</span>
           </dd>
         </div>
       )}
@@ -89,8 +89,9 @@ function Discovered({
         <div>
           <dt>Without text</dt>
           <dd className="note">
-            {plural(found.unnamed, 'shape has', 'shapes have')} no character yet. Type what their readings show in
-            review.
+            {found.unnamed === 1
+              ? '1 shape has no character yet. It gets one from the text of a kept reading that shows it.'
+              : `${found.unnamed} shapes have no character yet. Each gets one from the text of a kept reading that shows it.`}
           </dd>
         </div>
       )}
@@ -198,8 +199,8 @@ export function RecordPanel(props: PanelProps) {
           </ul>
         )}
         <p className="note">
-          Recording goes on while you use {appName}. {needs ? 'Make it show what is still missing, then come' : 'Come'}{' '}
-          back here to stop.
+          Recording goes on while you use {appName}.{' '}
+          {found.missing.length > 0 ? 'Make it show what is still missing, then come' : 'Come'} back here to stop.
         </p>
         <div className="row">
           <button type="button" className="btn primary" ref={stopButton} onClick={props.onStop}>
@@ -280,12 +281,7 @@ function Adds({
     return <span className="meta">Adds nothing: other kept readings show its characters.</span>;
   }
   if (added.some((each) => each.character === null)) {
-    return (
-      <span className="meta">
-        Shows {plural(added.length, 'shape', 'shapes')} no kept reading has. Its text names them once it has a character
-        for each.
-      </span>
-    );
+    return <span className="meta">Shows {plural(added.length, 'shape', 'shapes')} no kept reading has.</span>;
   }
   return (
     <span className="meta adds">

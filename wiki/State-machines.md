@@ -759,10 +759,12 @@ stateDiagram-v2
 
 ### Recording
 
-A recording (`apps/setup/src-tauri/src/recording.rs`) keeps each reading a
-region shows once, for the user to review. It is `None` or a `Recording` whose
-`stopped` field says whether it still records, and whose `problem` says why
-it skips frames or why it stopped by itself.
+A recording (`apps/setup/src-tauri/src/recording.rs`) keeps a reading for
+each shape a region shows, for the user to review. It is `None` or a
+`Recording` whose `stopped` field says whether it still records, and whose
+`problem` says why it skips frames or why it stopped by itself. While it
+records it is **Full** or not, which its shapes and readings decide
+(`Sightings::full`) and no field holds.
 
 ```mermaid
 stateDiagram-v2
@@ -784,8 +786,14 @@ stateDiagram-v2
   it goes on recording. A crop with no ink is skipped and clears the problem,
   as does a crop that reads. A capture failure stops the recording, and its
   problem says why.
-- A crop whose characters are new is kept and sent to the text reader. A
-  recording keeps at most 200 readings (`MAX_READINGS`).
+- A crop that shows a shape no kept reading has is kept and sent to the text
+  reader. A crop of shapes that all showed before is counted and not kept.
+- A recording is **Full** once it found `MAX_SHAPES` different shapes or
+  counted `MAX_READINGS` different readings. It still records, and each
+  frame still sets or clears the problem, but it keeps and counts nothing
+  more, and its view says why in `full`. A full recording stays full:
+  **Stop** and review what it found, or **Discard** it to start a new one.
+  **Record more** goes on with it, still full.
 - **Record more** needs the same region, ink, tolerance, and window size, and
   clears the problem. When any of them differs (`settingsDiffer`), **Use its
   settings** shows and puts all of them back, with the region on a screenshot

@@ -30,8 +30,8 @@ pub(super) const MAX_SHAPES: usize = MAX_GLYPHS;
 /// The most different readings one recording counts. A fingerprint costs
 /// about 16 bytes in the set, so the bound is about 16 MB. A timer that
 /// shows hundredths of a second, and so another reading every frame,
-/// reaches it in nine hours.
-pub(super) const MAX_READINGS: usize = 1 << 20;
+/// reaches it in about ten hours.
+const MAX_READINGS: usize = 1 << 20;
 
 /// Why a recording keeps and counts no more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,7 +182,10 @@ mod tests {
         assert!(sightings.shows_new(&[one, two]));
         assert_eq!(sightings.count(&[one, two]), [0, 1]);
         assert!(!sightings.shows_new(&[two, one]));
-        assert!(sightings.shows_new(&[two, three]), "one new shape is enough");
+        assert!(
+            sightings.shows_new(&[two, three]),
+            "one new shape is enough"
+        );
         // The same reading again is another frame of each shape, not
         // another reading.
         assert_eq!(sightings.count(&[one, two]), [0, 1]);

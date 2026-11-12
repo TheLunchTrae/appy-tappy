@@ -167,13 +167,7 @@ mod tests {
     fn red_where(red: [bool; 4]) -> Image {
         let row: Vec<u8> = red
             .into_iter()
-            .flat_map(|red| {
-                if red {
-                    [0, 0, 255, 0]
-                } else {
-                    [40, 40, 40, 0]
-                }
-            })
+            .flat_map(|red| if red { [0, 0, 255, 0] } else { [40, 40, 40, 0] })
             .collect();
         Image::new(
             Size {

@@ -128,17 +128,66 @@ This page covers what the user guide leaves out.
 the reference editor's preview capture already takes, about 30 a second, in
 the owner thread (`recording.rs`). Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
-into characters, and scales each to the grid the check compares. A crop whose
-shapes equal a kept reading's is another sighting of that reading, because it
-would teach the check nothing new. A blended edge seldom changes a grid
-cell, and when it does the reading is kept twice, which costs a tile in review
-and teaches no wrong shape. One stroke of a different character changes a
-shape however long the number. The
-shapes ignore size, so a counter drawn larger is the same reading. Every kept
-reading is compared, not only the latest, so a value that comes back is not
-kept twice. A crop with no ink is skipped, and so
-is a frame of another size than the screenshot the region was drawn on. One
-recording keeps at most 200 readings.
+into characters, and scales each to the grid the check compares. A crop with
+no ink is skipped, and so is a frame of another size than the screenshot the
+region was drawn on.
+
+A recording collects shapes, not readings (`recording/sightings.rs`). A crop
+is kept when it shows a shape no kept reading has, and the first frame that
+shows a new shape is the one kept. A crop whose shapes all showed before
+would teach the check nothing, so it is only counted. A digit, a `%`, and a
+`.` are shapes alike: whatever `DigitReader::shapes` makes one character is
+one shape.
+
+- **What counts as the same shape.** Two shapes are the same only when every
+  grid cell is, which is how `DigitReader::learn` tells glyphs apart. Shapes
+  that differ in a cell are not merged, because nothing in a grid tells a
+  blended edge from a second character, and merging would hide a glyph the
+  check needs. So one character can be several shapes: a blended edge that
+  changes a cell is one, and so is a digit beside a `,`, because the grid
+  scales by the line's height and the `,` makes the line taller. Each costs a
+  kept reading and teaches no wrong shape.
+- **Evidence.** Each shape holds how many frames showed it and how many
+  different readings did. A reading is counted as different by a 64-bit
+  fingerprint of its shapes, so no frame is kept to count it. A kept reading
+  also holds how many frames showed exactly it. These are counts of what the
+  recording saw. They are not a match score and say nothing of whether a
+  label is right, so the UI shows them as counts and never as a percentage.
+- **Bounds.** Recording runs until the user stops it. It is full, and keeps
+  and counts no more, at `MAX_SHAPES` different shapes or `MAX_READINGS`
+  different readings, and its view says which in words. `MAX_SHAPES` is the
+  256 glyphs a reference learns, so a recording that found more could not
+  teach them. Each kept reading shows a new shape, so it also bounds the kept
+  readings, which hold their crop at four bytes a pixel: a region 300 by 60
+  pixels costs 72 KB a reading and 18 MB at the bound. `MAX_READINGS` is
+  1,048,576 fingerprints, about 16 MB, which a timer that changes every
+  frame reaches in about ten hours.
+- **Sizes.** A frame of another window size is skipped because a recording
+  has a region and no [pin](Screen-regions.md#window-sizes): only a value says which side
+  of the window its region keeps its distance from, and a reference's region
+  is drawn only to teach. Placing it at another size would mean guessing the
+  pin, and a wrong guess records other pixels. A reference learned at one
+  size reads at others, since shapes scale to the grid, so the limit is where
+  the recording looks, not what it learns.
+- **Signs in several marks.** The reader splits characters at columns with no
+  ink. A sign whose marks share no column, such as a `%` drawn as two dots
+  and a stroke apart, is one shape for each mark, each time alike, and no
+  one-character label can teach it.
+
+The page works out what the shapes mean, because the labels live there
+(`lib/review.ts`, `lib/discovery.ts`). A kept reading's text names its shapes
+when it has one character for each. From that, while recording and in review,
+the page shows the characters the reference needs that nothing shows, using
+the [expected characters](#behavior-the-guide-leaves-out) and `coverage`; the ones
+only the text reader's unchecked guesses show; and the ones the reference
+knows or a reading the user checked shows. A guess is never counted as
+learned: a character is learned only when the user keeps its reading and the
+reference learns it as before. In review, a reading adds the shapes no other
+kept reading teaches. Going through the kept readings in order, one whose
+every shape another still shows is dropped, and each shape counts for the
+first of the rest that shows it. A reading that adds nothing starts left out.
+Review lists the readings that add shapes first, in an order that follows
+the shapes alone, so tiles stay put while the user types.
 
 Kept readings are named by index in the spec the UI sends, so their pixels
 never cross into the UI except as thumbnails. A reference learns its saved

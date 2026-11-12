@@ -27,7 +27,7 @@ use appytappy_sources::system::Rgb;
 use serde::Serialize;
 
 use self::ink::{Ink, Line};
-use self::sightings::{Full, MAX_READINGS, MAX_SHAPES, ShapeView, Sightings};
+use self::sightings::{Full, MAX_SHAPES, ShapeView, Sightings};
 
 /// What the text reader made of a reading.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -265,10 +265,10 @@ impl Recording {
                      a reference learns. Stop and review them. If the region shows more than \
                      the value, draw it around the value alone and record again."
                 ),
-                Full::Readings => format!(
-                    "This recording is full: it counted {MAX_READINGS} different readings, the \
-                     most one recording counts. Stop and review what it found."
-                ),
+                Full::Readings => "This recording is full: it counted more than a million \
+                                   different readings, the most one recording counts. Stop and \
+                                   review what it found."
+                    .to_owned(),
             }),
             problem: self.problem.clone(),
             settings: Settings {
