@@ -802,11 +802,14 @@ When the editor shows again after a flow it opened, the focus moves to the
 control the step is taken with (`editorLanding` in
 `apps/setup/src/lib/landing.ts`): **Add application**, the application list,
 **New value**, the value list, or the comparison once a value is picked.
-While **Arriving** it waits and moves when the step is known. The card's
+While **Arriving** it waits for the step to be known. It lands only while
+nothing holds the focus, and it is dropped for good once the user puts the
+focus anywhere themselves, such as in **Name** while the lists are read, so
+it never takes the focus from what they are doing (`settle`). The card's
 guide is a status region that stays mounted and describes those controls, so
 a screen reader hears the step, that what was saved is being read, and the
 value once it is picked. The [picker](#picker) does the same when it shows
-after another flow (`pickerLanding`): the focus moves to
+after another flow (`pickerLanding`), by the same rule: the focus moves to
 **Capture this window** once there is a window, and otherwise to the way
 forward.
 

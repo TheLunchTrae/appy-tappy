@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ValueChoice } from '../src/lib/automation.ts';
-import { type PickerControl, type WatchControl, editorLanding, pickerLanding } from '../src/lib/landing.ts';
+import { type PickerControl, type WatchControl, editorLanding, pickerLanding, settle } from '../src/lib/landing.ts';
 import type { PickerApp, PickerStep } from '../src/lib/picker.ts';
 import type { WatchStep } from '../src/lib/watch.ts';
 
@@ -85,5 +85,29 @@ describe('where the focus lands when the picker shows after another flow', () =>
   test('waits while the look is under way', () => {
     expect(pickerLanding({ kind: 'looking' })).toBeNull();
     expect(pickerLanding({ kind: 'resolving', app })).toBeNull();
+  });
+});
+
+describe('a landing that is owed', () => {
+  test('lands while nothing holds the focus, and only once', () => {
+    expect(settle(true, 'comparison', false)).toEqual({ land: 'comparison', owed: false });
+    expect(settle(false, 'comparison', false)).toEqual({ land: null, owed: false });
+  });
+
+  test('waits while the control to land on is not known', () => {
+    expect(settle(true, null, false)).toEqual({ land: null, owed: true });
+  });
+
+  test('leaves the focus where the user put it', () => {
+    expect(settle(true, 'comparison', true)).toEqual({ land: null, owed: false });
+  });
+
+  test('does not come back once the user moved the focus while it waited', () => {
+    // The user clicks a field while what was saved is still read, then the step becomes known.
+    const typing = settle(true, null, true);
+    expect(typing).toEqual({ land: null, owed: false });
+    expect(settle(typing.owed, 'comparison', true)).toEqual({ land: null, owed: false });
+    // Also after they left that field again, so nothing holds the focus.
+    expect(settle(typing.owed, 'comparison', false)).toEqual({ land: null, owed: false });
   });
 });

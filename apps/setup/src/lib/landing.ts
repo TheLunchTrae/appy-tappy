@@ -57,16 +57,53 @@ export function pickerLanding(step: PickerStep): PickerControl | null {
   }
 }
 
+/** What a landing that may still be owed does now. */
+export interface Landing {
+  /** The control to move the focus to now, or null to leave the focus alone. */
+  readonly land: string | null;
+  /** Whether the landing is still owed afterwards. */
+  readonly owed: boolean;
+}
+
 /**
- * Moves the focus to the control `within` marks as `data-landing="target"`, once, as soon as `target` names one,
- * when `owed`: the component shows because another flow ended, which took the focused control with it.
+ * What a landing does when `target` names the control to land on, or null while it is not known, and `held` says
+ * something has the keyboard focus. A landing is for a user whose focus fell to the page because the control they
+ * pressed went away: it lands only while nothing holds the focus, and it is dropped for good once the user has
+ * put the focus somewhere themselves, so it never takes the focus from what they are doing.
+ */
+export function settle(owed: boolean, target: string | null, held: boolean): Landing {
+  if (!owed || held) {
+    return { land: null, owed: false };
+  }
+  return target === null ? { land: null, owed: true } : { land: target, owed: false };
+}
+
+/** Whether something other than the page itself has the keyboard focus. */
+function focusHeld(): boolean {
+  return document.activeElement !== null && document.activeElement !== document.body;
+}
+
+/**
+ * Lands the focus once on the control `within` marks as `data-landing="target"`, as {@link settle} decides, when
+ * `owed`: the component shows because another flow ended, which took the focused control with it.
  */
 export function useLanding(owed: boolean, target: string | null, within: RefObject<HTMLElement | null>): void {
   const pending = useRef(owed);
+  // A focus the user moves while the landing waits ends the wait, also if they leave that control again.
   useEffect(() => {
-    if (pending.current && target !== null) {
-      pending.current = false;
-      within.current?.querySelector<HTMLElement>(`[data-landing="${target}"]`)?.focus();
+    const moved = (): void => {
+      pending.current = settle(pending.current, null, true).owed;
+    };
+    document.addEventListener('focusin', moved);
+    return () => {
+      document.removeEventListener('focusin', moved);
+    };
+  }, []);
+  useEffect(() => {
+    const now = settle(pending.current, target, focusHeld());
+    pending.current = now.owed;
+    if (now.land !== null) {
+      within.current?.querySelector<HTMLElement>(`[data-landing="${now.land}"]`)?.focus();
     }
   }, [target, within]);
 }
