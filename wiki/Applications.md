@@ -1,7 +1,8 @@
 # Applications
 
-An application is a program whose window AppyTappy watches. Add it before you
-[make its values](Values.md#make-a-value), since every value belongs to one.
+An application is a program whose window AppyTappy watches. Every value
+belongs to one, so add it here first, or while you
+[make its first value](Values.md#make-a-value).
 
 The **Applications** page in AppyTappy Setup lists each saved application:
 how AppyTappy finds its window, its anti-cheat setting, its

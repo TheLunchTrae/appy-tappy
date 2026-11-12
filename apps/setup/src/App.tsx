@@ -15,6 +15,7 @@ import { ApplicationsPage } from './pages/ApplicationsPage.tsx';
 import { AutomationEditor } from './pages/AutomationEditor.tsx';
 import { AutomationsPage } from './pages/AutomationsPage.tsx';
 import { type Fixing, NewValue } from './pages/NewValue.tsx';
+import { type TakesApplication, resume } from './lib/flow.ts';
 import { background, useRepeat } from './lib/repeat.ts';
 import { ReferenceFlow, type SavedRef } from './pages/ReferenceFlow.tsx';
 import { ReferencesPage } from './pages/ReferencesPage.tsx';
@@ -37,12 +38,18 @@ const PAGES: readonly { readonly id: Page; readonly name: string }[] = [
   { id: 'settings', name: 'Settings' },
 ];
 
-/** What the window shows in place of a page: a flow that makes or changes something. */
+/**
+ * What the window shows in place of a page: a flow that makes or changes something. The application flow can be
+ * opened for the flow `opener`, which shows again when the application flow ends, with the application it saved.
+ */
 type Flow =
-  | { readonly kind: 'value'; readonly fixing: Fixing | null }
+  | { readonly kind: 'value'; readonly fixing: Fixing | null; readonly app: string | null }
   | { readonly kind: 'automation'; readonly existing: AutomationDef | null }
-  | { readonly kind: 'application'; readonly existing: AppSummary | null }
-  | { readonly kind: 'reference'; readonly existing: SavedRef | null };
+  | { readonly kind: 'application'; readonly existing: AppSummary | null; readonly opener: Opener | null }
+  | { readonly kind: 'reference'; readonly existing: SavedRef | null; readonly app: string | null };
+
+/** A flow that opens the application flow for the application it needs. */
+type Opener = Extract<Flow, TakesApplication>;
 
 /** What leaving each kind of flow before it is saved loses. */
 const LOST: Readonly<Record<Flow['kind'], string>> = {
@@ -176,12 +183,30 @@ export function App() {
         break;
     }
   };
-  // A save closes its own flow, and nothing once the user has left it for another.
-  const saved = (opened: Flow, target: Page): void => {
-    if (openFlow.current === opened) {
+  // A save closes its own flow, for the flow `next` that opened it or else the page `target`, and nothing once
+  // the user has left it for another.
+  const saved = (opened: Flow, target: Page, next: Flow | null = null): void => {
+    if (openFlow.current !== opened) {
+      return;
+    }
+    if (next === null) {
       goTo(target);
+    } else {
+      open(next);
     }
   };
+  // What lets the value or reference flow `opener` open the application flow and show again when that ends.
+  const applicationFor = (opener: Opener) => ({
+    onAddApplication: (): void => {
+      open({ kind: 'application', existing: null, opener });
+    },
+    onEditApplication: (id: string): void => {
+      const existing = apps?.find((app) => app.id === id);
+      if (existing !== undefined) {
+        open({ kind: 'application', existing, opener: { ...opener, app: id } });
+      }
+    },
+  });
 
   const content = (() => {
     if (flow?.kind === 'value') {
@@ -189,15 +214,14 @@ export function App() {
         <NewValue
           apps={apps ?? []}
           fixing={flow.fixing}
+          app={flow.app}
           onCancel={() => {
             open(null);
           }}
           onSaved={() => {
             saved(flow, 'values');
           }}
-          onAddApplication={() => {
-            open({ kind: 'application', existing: null });
-          }}
+          {...applicationFor(flow)}
           onHeld={setHeld}
         />
       );
@@ -207,11 +231,12 @@ export function App() {
         <ApplicationEditor
           existing={flow.existing}
           onCancel={() => {
-            open(null);
+            open(resume(flow.opener, null));
           }}
-          onSaved={() => {
-            saved(flow, 'applications');
-            background(refresh());
+          onSaved={async (id) => {
+            // The lists are read first, so the flow that opened this one finds the application in them.
+            await refresh();
+            saved(flow, 'applications', resume(flow.opener, id));
           }}
           onHeld={setHeld}
         />
@@ -222,15 +247,14 @@ export function App() {
         <ReferenceFlow
           apps={apps ?? []}
           existing={flow.existing}
+          app={flow.app}
           onCancel={() => {
             open(null);
           }}
           onSaved={() => {
             saved(flow, 'references');
           }}
-          onAddApplication={() => {
-            open({ kind: 'application', existing: null });
-          }}
+          {...applicationFor(flow)}
           onHeld={setHeld}
         />
       );
@@ -260,10 +284,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'value', fixing: null });
+              open({ kind: 'value', fixing: null, app: null });
             }}
             onFix={(fixing) => {
-              open({ kind: 'value', fixing });
+              open({ kind: 'value', fixing, app: null });
             }}
           />
         );
@@ -289,10 +313,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onAdd={() => {
-              open({ kind: 'application', existing: null });
+              open({ kind: 'application', existing: null, opener: null });
             }}
             onEdit={(app) => {
-              open({ kind: 'application', existing: app });
+              open({ kind: 'application', existing: app, opener: null });
             }}
           />
         );
@@ -303,10 +327,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'reference', existing: null });
+              open({ kind: 'reference', existing: null, app: null });
             }}
             onEdit={(existing) => {
-              open({ kind: 'reference', existing });
+              open({ kind: 'reference', existing, app: null });
             }}
           />
         );

@@ -1225,10 +1225,15 @@ handle: number,
  */
 fallback: boolean,
 /**
- * Whether it is the window a new session would read, so a value has
- * to be drawn on it.
+ * Whether it is the window a new session would read now.
  */
-best: boolean, }>;
+best: boolean,
+/**
+ * Whether it fits as well as the window a new session would read. A
+ * session reads one of these, whichever shows in front, so a value can
+ * be drawn on any of them.
+ */
+tied: boolean, }>;
 
 /**
  * The windows to offer, with the anti-cheat products running now.
