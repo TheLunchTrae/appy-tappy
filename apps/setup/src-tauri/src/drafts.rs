@@ -234,8 +234,9 @@ impl DraftStore {
     /// Puts back an old draft that a stopped save moved aside without putting
     /// the new one in its place, and removes what stopped saves left. A save
     /// stopped there when its own `.saving` folder is still beside the old
-    /// one; an old one without it was replaced, so it goes. A folder that
-    /// cannot be moved or removed now is tried again next time.
+    /// one, and that folder stays until the old one is back; an old one
+    /// without it was replaced, so it goes. A folder that cannot be moved or
+    /// removed now is tried again next time.
     fn tidy(&self) {
         let Ok(entries) = self.entries() else {
             return;
@@ -251,14 +252,22 @@ impl DraftStore {
                 clippy::let_underscore_must_use,
                 reason = "tidying is tried again at the next list"
             )]
-            let _ = if stopped && is_draft_id(id) && !folder.exists() {
+            let _ = if !stopped {
+                fs::remove_dir_all(path)
+            } else if !folder.exists() {
                 fs::rename(path, folder)
             } else {
-                fs::remove_dir_all(path)
+                // Something is in the draft's place; the copy waits.
+                Ok(())
             };
         }
         for (name, path) in &entries {
-            if name.ends_with(SAVING) {
+            // A save's folder stays while its old draft is still aside, so a
+            // put back that failed is tried again rather than taken as done.
+            let waits = name
+                .strip_suffix(SAVING)
+                .is_some_and(|save| self.folder.join(format!("{save}{OLD}")).exists());
+            if name.ends_with(SAVING) && !waits {
                 #[expect(
                     clippy::let_underscore_must_use,
                     reason = "tidying is tried again at the next list"
@@ -305,18 +314,30 @@ impl DraftStore {
     ///
     /// Returns the error from removing its folder.
     pub(crate) fn delete(&self, id: &str) -> io::Result<()> {
-        match fs::remove_dir_all(self.draft_folder(id)?) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {},
-            removed => removed?,
-        }
-        // A copy a save moved aside goes too, so tidying never brings it back.
+        let folder = self.draft_folder(id)?;
+        // What a stopped save left goes first: without its `.saving` folder,
+        // a copy moved aside is never put back. A copy that cannot be removed
+        // now is removed at the next list.
         let prefix = format!("{id}.");
-        for (name, path) in self.entries()? {
-            if name.starts_with(&prefix) && name.ends_with(OLD) {
+        let entries = self.entries()?;
+        for (name, path) in &entries {
+            if name.starts_with(&prefix) && name.ends_with(SAVING) {
                 fs::remove_dir_all(path)?;
             }
         }
-        Ok(())
+        for (name, path) in &entries {
+            if name.starts_with(&prefix) && name.ends_with(OLD) {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "without its save's folder, the next list removes it"
+                )]
+                let _ = fs::remove_dir_all(path);
+            }
+        }
+        match fs::remove_dir_all(folder) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            removed => removed,
+        }
     }
 
     /// The click pictures the drafts name, which saving the automations
@@ -516,6 +537,23 @@ mod tests {
         assert!(!aside.exists());
         assert!(!stopped.exists());
 
+        // While the old draft cannot be put back, here because a folder is
+        // in its place, the save's folder stays, so it is tried again.
+        fs::rename(&folder, &aside).expect("moves aside");
+        fs::create_dir_all(&stopped).expect("folder");
+        fs::write(&folder, b"in the way").expect("writes");
+        store.list().expect("lists");
+        assert!(
+            stopped.exists(),
+            "the save's folder waits for the old draft"
+        );
+        assert!(aside.exists());
+        fs::remove_file(&folder).expect("clears the way");
+        store.list().expect("lists");
+        assert_eq!(store.screenshots(&id).expect("reads"), [vec![1]]);
+        assert!(!stopped.exists());
+        assert!(!aside.exists());
+
         // One left behind once the new draft is in place goes.
         fs::create_dir_all(&aside).expect("folder");
         store.save(Some(&id), &saved, &[vec![3]]).expect("saves");
@@ -536,10 +574,14 @@ mod tests {
         fs::create_dir_all(&aside).expect("folder");
         fs::create_dir_all(&stopped).expect("folder");
         let other = store.folder.join(format!("other.9{OLD}"));
+        let other_save = store.folder.join(format!("other.9{SAVING}"));
         fs::create_dir_all(&other).expect("folder");
+        fs::create_dir_all(&other_save).expect("folder");
         store.delete(&id).expect("deletes");
         assert!(!aside.exists(), "deleting takes it");
+        assert!(!stopped.exists(), "and the save's folder");
         assert!(other.exists(), "and leaves another draft's");
+        assert!(other_save.exists());
         assert_eq!(store.list().expect("lists"), []);
         store.save(Some(&id), &saved, &[vec![3]]).expect("saves");
 
