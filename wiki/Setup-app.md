@@ -383,17 +383,18 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   was added, and a row that no line break ends within that much is given up
   at the next line break. The summary covers the newest file only, so a trace
   that has moved to its next file starts its numbers again.
-- `debug_bundle` hands the owner's file locations to a blocking task, which
-  packs the zip away from the owner thread, so the page's other commands do
-  not wait for a large trace to be packed.
 - `read_log` returns the last 64 KB of `runtime.log` or `setup.log`, as whole
   lines.
-- `debug_bundle` builds the zip in memory and returns its bytes, which the page
-  saves with the WebView's save picker. Pictures are stored, everything else is
-  deflated, with the `zip` crate and its pure-Rust deflate backend.
+- `debug_bundle` hands the owner's file locations to a blocking task, which
+  builds the zip in memory away from the owner thread, so the page's other
+  commands do not wait for a large trace to be packed. The page saves the
+  returned bytes with the WebView's save picker. Pictures are stored,
+  everything else is deflated, with the `zip` crate and its pure-Rust deflate
+  backend. `setup.log` records the whole time, packing included.
 
 Every command passes its own name to `ask` or `try_ask`, which a test in
-`bindings.rs` checks against the command table. The work then records how long
+`bindings.rs` checks against the command table. `debug_bundle` passes its name
+to `record_command` once the bundle is packed instead. The work then records how long
 the command took from being sent, and why it failed, in `SetupLog`, which the
 owner thread holds and opens only while `showDebug` is true. Loading or saving
 the settings opens or closes it.
