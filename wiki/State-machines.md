@@ -1190,6 +1190,10 @@ area and in **Fixed** otherwise, and stays there, since a fix keeps its
 value's kind of check. [Content that moves](Screen-regions.md#content-that-moves)
 says what the saved flag is for.
 
+An edit has the switch. It starts in **Area** when its value saved a reading
+area and in **Fixed** otherwise, and moves as a new value does; the owner
+refuses an edit that names a reading area for a Color or a State check.
+
 ### Text reader
 
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
