@@ -382,6 +382,18 @@ pub struct ReferenceDef {
     pub tolerance: u8,
     /// The pictures it learns from.
     pub samples: Vec<SampleDef>,
+    /// The characters the user says it needs to know, such as
+    /// `0123456789.%`, or `None` when the user chose none.
+    ///
+    /// Setup guidance only. The setup app shows which of them the samples
+    /// have yet to teach, and writes them each once, in order, when it saves
+    /// the reference. Nothing that learns or reads looks at it, and no rule
+    /// of the file covers it: it adds no glyph, labels no shape, leaves how
+    /// a number is read as it is, and never stops a file from loading,
+    /// whatever text it holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub expects: Option<String>,
 }
 
 /// A value read from a region of the window's frame.
@@ -882,7 +894,8 @@ impl AppFile {
     /// [`CheckDef::check`], and a reading area only for a check that reads
     /// anywhere in its region. Whether a value's pictures and region can be
     /// read is up to `appytappy-sources`' `saved::build`, so a value that
-    /// cannot be read stops only itself.
+    /// cannot be read stops only itself. A reference's expected characters
+    /// are setup guidance, which no rule covers.
     ///
     /// # Errors
     ///
@@ -932,6 +945,18 @@ fn check_reference(reference: &ReferenceDef) -> Result<(), String> {
         .samples
         .iter()
         .try_for_each(|sample| check_image(&sample.image))
+}
+
+/// Whether a label teaches `character`: every character but whitespace,
+/// which a label may hold anywhere and a reference skips.
+///
+/// A reference learns one shape for each such character of a sample's text,
+/// exactly as typed: `A` and `a` are two characters, and nothing folds case
+/// or combines marks. The setup app counts a reference's expected characters
+/// the same way.
+#[must_use]
+pub fn is_label_character(character: char) -> bool {
+    !character.is_whitespace()
 }
 
 /// Checks one value's part of the file's rules, answering the problem as a
@@ -1100,6 +1125,32 @@ pub fn state_image_name(value: &str, set: Option<usize>, state: usize) -> String
     }
 }
 
+/// Whether `name` is a file name AppyTappy itself gives a picture in an
+/// application's folder.
+///
+/// That is a reference's sample as [`sample_name`] names it, or a state's
+/// picture as [`state_image_name`] names it, for a first drawing or a fix.
+/// A file with any other name, such as one the user put in the folder, is
+/// not AppyTappy's to remove.
+#[must_use]
+pub(crate) fn is_own_image_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".png").filter(|_| is_image_name(name)) else {
+        return false;
+    };
+    let id = |part: &str| SignalName::new(part).is_ok();
+    let number = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    let mut parts = stem.split('-');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(value), Some(state), None, None) => id(value) && number(state),
+        // A sample's middle part is an ID, which starts with a letter, and a
+        // fix's is a number, so a name is one or the other.
+        (Some(first), Some(middle), Some(last), None) => {
+            number(last) && ((first == "ref" && id(middle)) || (id(first) && number(middle)))
+        },
+        _ => false,
+    }
+}
+
 /// An ID made from a name the user typed, as [`value_id`] describes, with
 /// `prefix` in front when the name does not start with a letter, and at most
 /// `max_len` bytes long.
@@ -1204,6 +1255,7 @@ mod tests {
                     image: sample_name("percent", 1),
                     text: "87%".to_owned(),
                 }],
+                expects: None,
             }],
         }
     }
@@ -1235,6 +1287,43 @@ mod tests {
         let older = json.replace(",\n  \"references\": []", "");
         assert!(!older.contains("references"));
         assert_eq!(AppFile::parse(&older), Ok(file));
+    }
+
+    #[test]
+    fn a_reference_s_expected_characters_are_left_out_until_chosen_and_round_trip() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(!json.contains("expects"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        file.references[0].expects = Some("0123456789.%Aa".to_owned());
+        let json = file.to_json();
+        assert!(json.contains("\"expects\": \"0123456789.%Aa\""), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn no_rule_covers_what_a_reference_expects() {
+        // Setup guidance that a person edited by hand: repeats, whitespace,
+        // a control character, nothing at all, or far more than the setup
+        // app saves. The file loads as it does without it.
+        let plain = dash();
+        for odd in ["11 ", "", "0 1\u{7}\n", &"x".repeat(5000)] {
+            let mut file = dash();
+            file.references[0].expects = Some(odd.to_owned());
+            assert_eq!(file.check(), Ok(()), "{odd:?}");
+            let read = AppFile::parse(&file.to_json()).expect("loads");
+            assert_eq!(read.references[0].expects.as_deref(), Some(odd));
+            assert_eq!(read.values, plain.values);
+            assert_eq!(read.references[0].samples, plain.references[0].samples);
+        }
+    }
+
+    #[test]
+    fn a_label_teaches_every_character_but_whitespace() {
+        assert!(is_label_character('1') && is_label_character('\u{7}'));
+        assert!(is_label_character('\u{feff}') && is_label_character('\u{301}'));
+        assert!(!is_label_character(' ') && !is_label_character('\n'));
+        assert!(!is_label_character('\u{85}') && !is_label_character('\u{3000}'));
     }
 
     #[test]
@@ -1804,6 +1893,42 @@ mod tests {
             long.as_str(),
         ] {
             assert!(!is_image_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn only_the_names_appytappy_gives_pictures_are_its_own() {
+        for name in [
+            "ref-percent_font-3.png",
+            "status-1.png",
+            "status-2-1.png",
+            // A value named `ref`, and a fix of it.
+            "ref-1.png",
+            "ref-1-2.png",
+        ] {
+            assert!(is_own_image_name(name), "{name}");
+        }
+        let long = format!("a-{}.png", "1".repeat(61));
+        for name in [
+            "photo.png",
+            "icon_visible.png",
+            "holiday-snap.png",
+            "holiday-snap-1.png",
+            "status-2-x.png",
+            "status-1-2-3.png",
+            "ref-9x-1.png",
+            "1-2.png",
+            "9-1-1.png",
+            "status-.png",
+            "-1.png",
+            "Status-1.png",
+            "status-1.PNG",
+            "status-1.jpg",
+            "status-1",
+            "status-1.png.bak",
+            long.as_str(),
+        ] {
+            assert!(!is_own_image_name(name), "{name}");
         }
     }
 

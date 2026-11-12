@@ -256,6 +256,71 @@ automation: AutomationDef,
 problem: string | null, }>;
 
 /**
+ * What looking for a bar in a region found.
+ */
+export type BarDetection = DeepReadonly<{ "kind": "proposed", filled: ColorSpec, empty: ColorSpec,
+/**
+ * The screenshot whose layout gave the colors.
+ */
+foundOn: number,
+/**
+ * The screenshots that show the bar in these colors, full, empty,
+ * or in between.
+ */
+shownOn: Array<number>,
+/**
+ * The screenshots looked at that show neither color.
+ */
+without: Array<number>,
+/**
+ * Whether two screenshots show both colors at different fills.
+ */
+moves: boolean,
+/**
+ * Whether the colors read a screenshot a few points off where the
+ * bar ends on it.
+ */
+rough: boolean,
+/**
+ * Whether the colors were found over only the strips of the
+ * region that show the bar from end to end, past a label, an icon,
+ * or what lies beside the bar.
+ */
+around: boolean,
+/**
+ * How many older screenshots of the window size were not looked
+ * at.
+ */
+leftOut: number, } | { "kind": "declined", message: string, }>;
+
+/**
+ * What two colors measure on the session's screenshots.
+ */
+export type BarMeasure = DeepReadonly<{
+/**
+ * What each screenshot looked at reads, in the order they were taken.
+ */
+readings: Array<BarReading>,
+/**
+ * How many older screenshots of the window size were not looked at.
+ */
+leftOut: number, }>;
+
+/**
+ * What a screenshot's region reads with two colors.
+ */
+export type BarReading = DeepReadonly<{
+/**
+ * The screenshot, by index.
+ */
+screenshot: number,
+/**
+ * How full the bar reads, from 0 to 100, or `None` when no pixel of
+ * the region is near either color.
+ */
+fill: number | null, }>;
+
+/**
  * One build of an application, as its executable file tells it apart.
  *
  * Many applications keep the same file version across updates, so the
@@ -554,7 +619,8 @@ green: number,
 blue: number, }>;
 
 /**
- * A color the user picked on a screenshot.
+ * A color of a screenshot: one the user picked on it, one proposed to them,
+ * or one the setup app read from it for the UI to show.
  */
 export type ColorSpec = DeepReadonly<{ red: number, green: number, blue: number, }>;
 
@@ -672,6 +738,19 @@ drawing: EditDrawing, }>;
 export type FallbackDef = DeepReadonly<"none" | "executable">;
 
 /**
+ * One find as the UI shows it.
+ */
+export type FindView = DeepReadonly<{
+/**
+ * Where it is on the screenshot.
+ */
+region: RegionSpec,
+/**
+ * What the text reader made of it.
+ */
+text: RecordedText, }>;
+
+/**
  * A value drawn again at one window size, which it reads there exactly
  * instead of scaling its first drawing.
  */
@@ -737,6 +816,31 @@ y: number,
 likeness: number | null, }>;
 
 /**
+ * A search as the UI shows it.
+ */
+export type FoundView = DeepReadonly<{
+/**
+ * Its number in the session.
+ */
+id: number,
+/**
+ * The screenshot it searched.
+ */
+screenshot: number,
+/**
+ * Each find, top to bottom and left to right.
+ */
+finds: Array<FindView>,
+/**
+ * Finds past the most a search keeps.
+ */
+more: number,
+/**
+ * Runs in the characters' color of another size, left out.
+ */
+otherSizes: number, }>;
+
+/**
  * How close a character is to one glyph.
  */
 export type GlyphView = DeepReadonly<{
@@ -745,16 +849,21 @@ export type GlyphView = DeepReadonly<{
  */
 character: string,
 /**
- * How many grid cells differ.
+ * How many grid cells one of the two sets where the other sets
+ * neither that cell nor one beside it.
+ */
+apart: number,
+/**
+ * How many grid cells only one of the two sets.
  */
 differing: number,
 /**
- * How many grid cells either shape inks.
+ * How many grid cells either of the two sets.
  */
-inked: number,
+set: number,
 /**
- * Whether the character reads as this glyph: at most a quarter of the
- * inked cells differ.
+ * Whether the character reads as this glyph: at most 1 in 32 of the
+ * set cells are apart.
  */
 matches: boolean, }>;
 
@@ -762,7 +871,27 @@ matches: boolean, }>;
  * What one screenshot's region shows, typed by the user so a reference
  * learns its characters.
  */
-export type Label = DeepReadonly<{ screenshot: number, text: string, }>;
+export type Label = DeepReadonly<{ screenshot: number,
+/**
+ * Where on the screenshot the text shows, when it is not the spec's
+ * region, as for text found like a sample elsewhere on it.
+ */
+region?: RegionSpec, text: string, }>;
+
+/**
+ * The pixels of one kind in the rectangle asked about.
+ */
+export type Layer = DeepReadonly<{
+/**
+ * How many pixels are of this kind.
+ */
+count: number,
+/**
+ * The runs of them in the rectangle, each as the index of its first
+ * pixel and of the pixel after its last, row by row from the top, as a
+ * selection's are. Missing when there are too many runs to draw.
+ */
+spans: Array<[number, number]> | null, }>;
 
 /**
  * What a watched value reads on the newest frame, for the automation
@@ -791,6 +920,60 @@ message: string, }>;
  * One of the two logs.
  */
 export type LogName = DeepReadonly<"runtime" | "setup">;
+
+/**
+ * A recording of looks as the UI shows it.
+ */
+export type LookRecordingView = DeepReadonly<{
+/**
+ * Its number in the session.
+ */
+id: number,
+/**
+ * Whether it still records.
+ */
+recording: boolean,
+/**
+ * How long it has recorded, or recorded in all once stopped.
+ */
+elapsedMs: number,
+/**
+ * Why the latest frame could not be recorded, or why it stopped by
+ * itself.
+ */
+problem: string | null,
+/**
+ * The indexes of the screenshots it kept, in the order their looks
+ * first showed.
+ */
+kept: Array<number>, }>;
+
+/**
+ * What makes a pixel match, as the UI describes it.
+ */
+export type MatchRule = DeepReadonly<{ "kind": "ink", ink: ColorSpec, tolerance: number, } | { "kind": "barFill", filled: ColorSpec, empty: ColorSpec, } | { "kind": "color", color: ColorSpec, tolerance: number, }>;
+
+/**
+ * What a rule takes of a rectangle of a screenshot.
+ */
+export type MatchView = DeepReadonly<{ "kind": "ink", ink: Layer, } | { "kind": "barFill", filled: Layer, empty: Layer, } | { "kind": "color",
+/**
+ * The pixels that are near the color on their own.
+ */
+near: Layer,
+/**
+ * The rectangle's average color.
+ */
+average: ColorSpec,
+/**
+ * The largest difference between the average's red, green, and
+ * blue and the color's, which the tolerance bounds.
+ */
+distance: number,
+/**
+ * Whether the check reads yes on this rectangle.
+ */
+matches: boolean, }>;
 
 /**
  * [`MediaCommand`] as the file spells it.
@@ -1033,13 +1216,33 @@ export type RecordedReading = DeepReadonly<{
  */
 firstMs: number,
 /**
- * How many frames showed it.
+ * How many frames showed exactly this reading.
  */
 seen: number,
 /**
  * What the text reader made of it.
  */
-text: RecordedText, }>;
+text: RecordedText,
+/**
+ * Each of its characters' shapes, left to right, as an index into the
+ * recording's shapes.
+ */
+shapes: Array<number>, }>;
+
+/**
+ * How often one shape showed, as the UI shows it. These are counts of
+ * what the recording saw, not a measure of how well the shape reads: a
+ * shape that shows often is still whatever the user's label says it is.
+ */
+export type RecordedShape = DeepReadonly<{
+/**
+ * How many frames showed it.
+ */
+frames: number,
+/**
+ * How many different readings showed it.
+ */
+readings: number, }>;
 
 /**
  * What the text reader made of a reading.
@@ -1085,9 +1288,9 @@ recording: boolean,
  */
 elapsedMs: number,
 /**
- * Whether it holds [`MAX_READINGS`], so it keeps no more.
+ * Why it keeps and counts no more, once it is full.
  */
-full: boolean,
+full: string | null,
 /**
  * Why the latest frame could not be recorded.
  */
@@ -1097,9 +1300,14 @@ problem: string | null,
  */
 settings: RecordingSettings,
 /**
- * Its readings, in the order they first showed.
+ * The readings it kept, in the order they first showed.
  */
-readings: Array<RecordedReading>, }>;
+readings: Array<RecordedReading>,
+/**
+ * Every different shape its frames showed, in the order they first
+ * showed. Each shows in at least one kept reading.
+ */
+shapes: Array<RecordedShape>, }>;
 
 /**
  * The characters of one font at one color, that number values read with.
@@ -1129,7 +1337,19 @@ tolerance: number,
 /**
  * The pictures it learns from.
  */
-samples: Array<SampleDef>, }>;
+samples: Array<SampleDef>,
+/**
+ * The characters the user says it needs to know, such as
+ * `0123456789.%`, or `None` when the user chose none.
+ *
+ * Setup guidance only. The setup app shows which of them the samples
+ * have yet to teach, and writes them each once, in order, when it saves
+ * the reference. Nothing that learns or reads looks at it, and no rule
+ * of the file covers it: it adds no glyph, labels no shape, leaves how
+ * a number is read as it is, and never stops a file from loading,
+ * whatever text it holds.
+ */
+expects?: string, }>;
 
 /**
  * A saved reference of a saved application.
@@ -1160,7 +1380,14 @@ referenceName: string,
  * The characters it is taught, as a [`CheckSpec::Characters`] that
  * names the reference when it is saved already.
  */
-check: CheckSpec, }>;
+check: CheckSpec,
+/**
+ * The characters the user says it needs to know, or empty when the
+ * user chose none. The save lists each once, in order, refuses more
+ * than a reference saves, and replaces what the saved reference
+ * expected.
+ */
+expects: string, }>;
 
 /**
  * A rectangle in pixels from the window's top-left corner.
@@ -1971,13 +2198,14 @@ states: Array<StateView>, }>;
 
 /**
  * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the
- * most states, the settings' ranges, the highest tolerance, and the most pixels a click's search area holds, as the
- * saved files take them.
+ * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most
+ * pixels a click's search area holds, as the saved files take them.
  */
 export const LIMITS = {
   "fastestReadMs": 1,
   "maxActionAppBytes": 256,
   "maxCooldownMs": 86400000,
+  "maxExpectedCharacters": 128,
   "maxSearchPixels": 160000,
   "maxStates": 16,
   "maxTargetBytes": 2048,
@@ -2136,9 +2364,9 @@ export const TRACE_HEADER = "time_ns,thread,event,app,item,value,took_ns,cause,d
 export const TRACE_SAMPLES = 20000;
 
 /**
- * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts and app names: the text it
- * keeps, or null when it refuses one; and where sample spots land in sample windows. The page's own checks must read
- * each the same.
+ * What the Rust side makes of sample paths, links, key presses, screenshot shortcuts, app names, labels and expected
+ * characters: the text it keeps, or null when it refuses one; and where sample spots land in sample windows. The
+ * page's own checks must read each the same.
  */
 export const PARSE_CASES = {
   "appName": [
@@ -2177,6 +2405,68 @@ export const PARSE_CASES = {
     {
       "read": "\u00e9\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "text": "\u00e9\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "expectedCharacters": [
+    {
+      "read": "578%.",
+      "text": "87.5%"
+    },
+    {
+      "read": "123",
+      "text": " 1 2\t3\n"
+    },
+    {
+      "read": "01%",
+      "text": "%10 0%"
+    },
+    {
+      "read": "Aa",
+      "text": "Aa"
+    },
+    {
+      "read": "",
+      "text": ""
+    },
+    {
+      "read": "",
+      "text": "   "
+    },
+    {
+      "read": "12",
+      "text": "1\u00852"
+    },
+    {
+      "read": "12\ufeff",
+      "text": "\ufeff12"
+    },
+    {
+      "read": "123",
+      "text": "1\u30002\u00a03"
+    },
+    {
+      "read": "x\u200b",
+      "text": "\u2028x\u2029\u200b"
+    },
+    {
+      "read": "e\u0301",
+      "text": "e\u0301"
+    },
+    {
+      "read": "9z\uff11\ud835\udfd9\ud83d\ude00",
+      "text": "\ud835\udfd9z\uff119\ud83d\ude00"
+    },
+    {
+      "read": "12",
+      "text": "1\u00072\u009f"
+    },
+    {
+      "read": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f",
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f"
+    },
+    {
+      "read": null,
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f\u0180"
     }
   ],
   "keys": [
@@ -2327,6 +2617,68 @@ export const PARSE_CASES = {
     {
       "read": null,
       "text": "Control+M"
+    }
+  ],
+  "labelCharacters": [
+    {
+      "read": "87.5%",
+      "text": "87.5%"
+    },
+    {
+      "read": "123",
+      "text": " 1 2\t3\n"
+    },
+    {
+      "read": "%100%",
+      "text": "%10 0%"
+    },
+    {
+      "read": "Aa",
+      "text": "Aa"
+    },
+    {
+      "read": "",
+      "text": ""
+    },
+    {
+      "read": "",
+      "text": "   "
+    },
+    {
+      "read": "12",
+      "text": "1\u00852"
+    },
+    {
+      "read": "\ufeff12",
+      "text": "\ufeff12"
+    },
+    {
+      "read": "123",
+      "text": "1\u30002\u00a03"
+    },
+    {
+      "read": "x\u200b",
+      "text": "\u2028x\u2029\u200b"
+    },
+    {
+      "read": "e\u0301",
+      "text": "e\u0301"
+    },
+    {
+      "read": "\ud835\udfd9z\uff119\ud83d\ude00",
+      "text": "\ud835\udfd9z\uff119\ud83d\ude00"
+    },
+    {
+      "read": "1\u00072\u009f",
+      "text": "1\u00072\u009f"
+    },
+    {
+      "read": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f",
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f"
+    },
+    {
+      "read": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f\u0180",
+      "text": "\u0100\u0101\u0102\u0103\u0104\u0105\u0106\u0107\u0108\u0109\u010a\u010b\u010c\u010d\u010e\u010f\u0110\u0111\u0112\u0113\u0114\u0115\u0116\u0117\u0118\u0119\u011a\u011b\u011c\u011d\u011e\u011f\u0120\u0121\u0122\u0123\u0124\u0125\u0126\u0127\u0128\u0129\u012a\u012b\u012c\u012d\u012e\u012f\u0130\u0131\u0132\u0133\u0134\u0135\u0136\u0137\u0138\u0139\u013a\u013b\u013c\u013d\u013e\u013f\u0140\u0141\u0142\u0143\u0144\u0145\u0146\u0147\u0148\u0149\u014a\u014b\u014c\u014d\u014e\u014f\u0150\u0151\u0152\u0153\u0154\u0155\u0156\u0157\u0158\u0159\u015a\u015b\u015c\u015d\u015e\u015f\u0160\u0161\u0162\u0163\u0164\u0165\u0166\u0167\u0168\u0169\u016a\u016b\u016c\u016d\u016e\u016f\u0170\u0171\u0172\u0173\u0174\u0175\u0176\u0177\u0178\u0179\u017a\u017b\u017c\u017d\u017e\u017f\u0180"
     }
   ],
   "openTarget": [

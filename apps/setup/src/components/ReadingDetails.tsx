@@ -4,12 +4,12 @@ import type { ReadingDetails, WorkingsView } from '../lib/bindings.ts';
 import { durationText } from '../lib/debug.ts';
 import { useRepeat } from '../lib/repeat.ts';
 import { useSettings } from '../lib/settings.ts';
-import { averageDifference, channelsText, closeness, cssColor, percentOf } from '../lib/workings.ts';
+import { averageDifference, channelsText, cssColor, distanceText, percentOf } from '../lib/workings.ts';
 
 /** How long the details wait between reads. A read scores every glyph, so it runs less often than the reading. */
 const DETAILS_PAUSE_MS = 500;
 
-/** Each character's closest glyph, how close it is, and the closest glyph of another character. */
+/** Each character's closest glyph, how far it is from it, and the closest glyph of another character. */
 function Characters({ workings }: { readonly workings: Extract<WorkingsView, { kind: 'number' }> }) {
   if (workings.characters.length === 0) {
     return <p className="note">No characters in the region.</p>;
@@ -23,18 +23,20 @@ function Characters({ workings }: { readonly workings: Extract<WorkingsView, { k
             // The characters only ever change as a whole, so their place is their key.
             <li key={index} className={best?.matches === true ? 'glyph-score' : 'glyph-score off'}>
               <span className="glyph-char">{best === null ? '?' : best.character}</span>
-              <span className="glyph-close">{best === null ? 'no glyphs' : `${closeness(best)}%`}</span>
+              <span className="glyph-close">{best === null ? 'no glyphs' : distanceText(best)}</span>
               <span className="note">
-                {runnerUp === null ? 'no other' : `next: ${runnerUp.character} ${closeness(runnerUp)}%`}
+                {runnerUp === null ? 'no other' : `next: ${runnerUp.character}, ${distanceText(runnerUp)}`}
               </span>
             </li>
           );
         })}
       </ul>
       <p className="note">
-        Each character read, how closely it matches the reference, and the closest other character. A character reads at
-        75% or closer. A close second means the reference needs more samples of both. A read stops at the first
-        character after the number, so any after it are shown but not read.
+        Each character read, how far it is from the closest character of the reference, in cells of the grid both are
+        sampled onto, and the closest other character. A cell is apart when one of the two sets it and the other sets
+        neither it nor a cell beside it. A character reads while at most 1 in 32 of the cells either sets are apart. A
+        close second means the reference needs more samples of both. A read stops at the first character after the
+        number, so any after it are shown but not read.
       </p>
     </>
   );

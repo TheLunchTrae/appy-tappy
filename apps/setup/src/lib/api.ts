@@ -10,6 +10,8 @@ import type {
   AppWindows,
   AutomationDef,
   AutomationSummary,
+  BarDetection,
+  BarMeasure,
   BundleSpec,
   CaptureOutline,
   CheckSpec,
@@ -23,8 +25,13 @@ import type {
   EditSpec,
   FixSpec,
   FoundClick,
+  FoundView,
+  Label,
   Live,
   LogName,
+  LookRecordingView,
+  MatchRule,
+  MatchView,
   OverlayModeDef,
   OverlayView,
   Reading,
@@ -87,9 +94,41 @@ export async function screenshot(index: number, maxWidth: number): Promise<Pictu
   return decodePicture(await invoke<ArrayBuffer>('screenshot', { index, maxWidth }));
 }
 
+/**
+ * Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. Rejects
+ * while a recording of looks records.
+ */
+export async function removeScreenshots(indexes: ReadonlyArray<number>): Promise<void> {
+  await invoke('remove_screenshots', { indexes });
+}
+
 /** What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected. */
 export async function select(screenshot: number, selection: SelectionSpec): Promise<SelectionView | null> {
   return invoke<SelectionView | null>('select', { screenshot, selection });
+}
+
+/**
+ * The filled and the empty color of the bar in `region`, which was drawn on screenshot `screenshot`, found
+ * on the screenshots of that one's window size; or why none are proposed.
+ */
+export async function detectBar(region: RegionSpec, screenshot: number): Promise<BarDetection> {
+  return invoke<BarDetection>('detect_bar', { region, screenshot });
+}
+
+/**
+ * What a bar of the colors `filled` and `empty` reads in `region`, drawn on screenshot `screenshot`, on each
+ * screenshot of that one's window size.
+ */
+export async function measureBar(region: RegionSpec, screenshot: number, filled: ColorSpec, empty: ColorSpec): Promise<BarMeasure> {
+  return invoke<BarMeasure>('measure_bar', { region, screenshot, filled, empty });
+}
+
+/**
+ * The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
+ * to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
+ */
+export async function matchPixels(screenshot: number, area: RegionSpec, rule: MatchRule): Promise<MatchView> {
+  return invoke<MatchView>('match_pixels', { screenshot, area, rule });
 }
 
 export async function setCheck(spec: CheckSpec): Promise<void> {
@@ -114,19 +153,33 @@ export async function startRecording(region: RegionSpec, ink: ColorSpec, toleran
   await invoke('start_recording', { region, ink, tolerance, screenshot, more });
 }
 
-/** Stops the recording, keeping its readings for review. */
+/** Stops the recording, of readings or of looks, keeping what it recorded. */
 export async function stopRecording(): Promise<void> {
   await invoke('stop_recording');
 }
 
-/** Forgets the recording and its readings. */
+/** Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay. */
 export async function discardRecording(): Promise<void> {
   await invoke('discard_recording');
 }
 
-/** The recording and its readings so far, or null without one. */
+/** The recording of readings and its readings so far, or null without one. */
 export async function recordingState(): Promise<RecordingView | null> {
   return invoke<RecordingView | null>('recording_state');
+}
+
+/**
+ * Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
+ * screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
+ * Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
+ */
+export async function startLookRecording(region: RegionSpec, tolerance: number, screenshot: number): Promise<void> {
+  await invoke('start_look_recording', { region, tolerance, screenshot });
+}
+
+/** The recording of looks and the screenshots it kept so far, or null without one. */
+export async function lookRecordingState(): Promise<LookRecordingView | null> {
+  return invoke<LookRecordingView | null>('look_recording_state');
 }
 
 /** A recorded reading at most `maxWidth` wide, or null for an unknown index. */
@@ -148,6 +201,35 @@ export async function reviewProblems(spec: CheckSpec): Promise<ReadonlyArray<str
  */
 export async function captureOutline(application: string, width: number, height: number): Promise<CaptureOutline> {
   return invoke<CaptureOutline>('capture_outline', { application, width, height });
+}
+
+/**
+ * Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
+ * at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
+ * earlier search.
+ */
+export async function findLike(screenshot: number, region: RegionSpec, added: ReadonlyArray<RegionSpec>, ink: ColorSpec, tolerance: number): Promise<FoundView> {
+  return invoke<FoundView>('find_like', { screenshot, region, added, ink, tolerance });
+}
+
+/** The search and the text read for each find so far, or null without one. */
+export async function foundState(): Promise<FoundView | null> {
+  return invoke<FoundView | null>('found_state');
+}
+
+/** A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search. */
+export async function foundPicture(search: number, index: number, maxWidth: number): Promise<Picture | null> {
+  return decodePicture(await invoke<ArrayBuffer>('found_picture', { search, index, maxWidth }));
+}
+
+/** Forgets the search. */
+export async function forgetFound(): Promise<void> {
+  await invoke('forget_found');
+}
+
+/** Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can. */
+export async function foundProblems(spec: CheckSpec, found: ReadonlyArray<Label>): Promise<ReadonlyArray<string | null>> {
+  return invoke<ReadonlyArray<string | null>>('found_problems', { spec, found });
 }
 
 /**
@@ -196,10 +278,16 @@ export async function readWindow(window: WindowDef): Promise<number | null> {
 
 /**
  * Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
- * when it is given. One that no saved automation names goes the next time automations are saved.
+ * when it is given. One that no saved automation names goes the next time automations are saved, or with
+ * {@link forgetUnsavedClickPictures}.
  */
 export async function addClickPicture(screenshot: number, region: RegionSpec, selection: SelectionSpec | null): Promise<ClickPictureView> {
   return invoke<ClickPictureView>('add_click_picture', { screenshot, region, selection });
+}
+
+/** Removes the click pictures no saved automation names, for when no automation is being made or changed. */
+export async function forgetUnsavedClickPictures(): Promise<void> {
+  await invoke('forget_unsaved_click_pictures');
 }
 
 /** The click picture `image`, at most `maxWidth` wide. */

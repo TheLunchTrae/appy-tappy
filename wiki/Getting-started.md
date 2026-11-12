@@ -81,6 +81,39 @@ A **?** beside a field, heading, or column header in AppyTappy Setup explains
 it. Hold the pointer over it, or move to it with Tab, to read the explanation,
 and press Esc to hide it.
 
+## What AppyTappy keeps
+
+AppyTappy saves only the part of a window inside a box you drew, or around
+text it found that you added, never the rest of the window, and only where it
+needs a picture to read or to click:
+
+- A [reference](References.md) keeps the box from each screenshot you
+  labeled and from each recorded reading you kept, and the box around each
+  text you added with [Find more like it](References.md#find-more-like-it).
+- A **State** value keeps the box for each of its states, and again for each
+  size you [fixed it at](Values.md#fix-a-value-at-one-size).
+- A click on **A picture** keeps the picture you marked.
+
+A screenshot you take in AppyTappy Setup stays in memory only while you work
+with it. It is gone once you select **Change window**, once you save or leave
+the value, fix, or reference you opened the window for, once you close a
+click's target screen, and when AppyTappy Setup closes. A reference you make
+or change while you make a value is part of that value: saving the reference
+keeps the screenshots, and they go when the value is saved or left.
+
+A **Bar fill** or **Color** value keeps only its colors, and a **Number**
+value only which reference it reads with. Deleting a value, a reference, or
+an automation, removing a fix, or removing an application deletes its
+pictures with it.
+
+While it watches a window, the background part looks only at the boxes of
+your values and keeps nothing it sees. Its
+[log](Troubleshooting.md#appytappys-log) and the
+[runtime trace](Settings.md#runtime-trace) hold text, such as a value's name
+and what it read, and never a picture. A
+[debug bundle](Debug-page.md#debug-bundle) holds copies of the pictures above
+only when you include them, in a file you save yourself.
+
 ## Update
 
 When a newer version is out, AppyTappy Setup says so when it opens, at the end

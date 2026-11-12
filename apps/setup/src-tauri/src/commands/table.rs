@@ -29,8 +29,20 @@ macro_rules! with_commands {
             commands::take_screenshot() -> usize;
             /// A screenshot at most `maxWidth` wide, or null for an unknown index.
             commands::screenshot(index: usize, max_width: u32) -> Pixels;
+            /// Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. Rejects
+            /// while a recording of looks records.
+            commands::remove_screenshots(indexes: Vec<usize>) -> ();
             /// What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected.
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;
+            /// The filled and the empty color of the bar in `region`, which was drawn on screenshot `screenshot`, found
+            /// on the screenshots of that one's window size; or why none are proposed.
+            commands::detect_bar(region: RegionSpec, screenshot: usize) -> BarDetection;
+            /// What a bar of the colors `filled` and `empty` reads in `region`, drawn on screenshot `screenshot`, on each
+            /// screenshot of that one's window size.
+            commands::measure_bar(region: RegionSpec, screenshot: usize, filled: ColorSpec, empty: ColorSpec) -> BarMeasure;
+            /// The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
+            /// to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
+            commands::match_pixels(screenshot: usize, area: RegionSpec, rule: MatchRule) -> MatchView;
             commands::set_check(spec: CheckSpec) -> ();
             /// What the check reads on the newest frame, or null without a check or a frame.
             commands::read_value() -> Option<Reading>;
@@ -45,12 +57,18 @@ macro_rules! with_commands {
                 screenshot: usize,
                 more: bool
             ) -> ();
-            /// Stops the recording, keeping its readings for review.
+            /// Stops the recording, of readings or of looks, keeping what it recorded.
             commands::stop_recording() -> ();
-            /// Forgets the recording and its readings.
+            /// Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay.
             commands::discard_recording() -> ();
-            /// The recording and its readings so far, or null without one.
+            /// The recording of readings and its readings so far, or null without one.
             commands::recording_state() -> Option<RecordingView>;
+            /// Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
+            /// screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
+            /// Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
+            commands::start_look_recording(region: RegionSpec, tolerance: u8, screenshot: usize) -> ();
+            /// The recording of looks and the screenshots it kept so far, or null without one.
+            commands::look_recording_state() -> Option<LookRecordingView>;
             /// A recorded reading at most `maxWidth` wide, or null for an unknown index.
             commands::recorded_reading(index: usize, max_width: u32) -> Pixels;
             /// Why the reference `spec` teaches cannot learn each of its recorded readings, in order, or null for one it
@@ -59,6 +77,18 @@ macro_rules! with_commands {
             /// What the runtime copies out of each frame of a saved application's window at `width` by `height`, and
             /// where each of its saved values reads there.
             commands::capture_outline(application: String, width: u32, height: u32) -> CaptureOutline;
+            /// Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
+            /// at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
+            /// earlier search.
+            commands::find_like(screenshot: usize, region: RegionSpec, added: Vec<RegionSpec>, ink: ColorSpec, tolerance: u8) -> FoundView;
+            /// The search and the text read for each find so far, or null without one.
+            commands::found_state() -> Option<FoundView>;
+            /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.
+            commands::found_picture(search: U64AsNumber, index: usize, max_width: u32) -> Pixels;
+            /// Forgets the search.
+            commands::forget_found() -> ();
+            /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.
+            commands::found_problems(spec: CheckSpec, found: Vec<Label>) -> Vec<Option<String>>;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the
             /// watch's number.
             commands::watch_value(application: String, value: String) -> U64AsNumber;
@@ -77,12 +107,15 @@ macro_rules! with_commands {
             /// The window a new session would read for `window`, or null while none fits.
             commands::read_window(window: WindowDef) -> OptionalU64AsNumber;
             /// Keeps `region` of screenshot `screenshot` as a new click picture, comparing only what `selection` picks
-            /// when it is given. One that no saved automation names goes the next time automations are saved.
+            /// when it is given. One that no saved automation names goes the next time automations are saved, or with
+            /// {@link forgetUnsavedClickPictures}.
             commands::add_click_picture(
                 screenshot: usize,
                 region: RegionSpec,
                 selection: Option<SelectionSpec>
             ) -> ClickPictureView;
+            /// Removes the click pictures no saved automation names, for when no automation is being made or changed.
+            commands::forget_unsaved_click_pictures() -> ();
             /// The click picture `image`, at most `maxWidth` wide.
             commands::click_picture(image: String, max_width: u32) -> Pixels;
             /// Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere.

@@ -6,7 +6,7 @@
       "name": "appy-tappy-docs",
       "devDependencies": {
         "markdownlint-cli2": "^0.24.0",
-        "oxfmt": "0.75.0",
+        "oxfmt": "^0.75.0",
       },
     },
   },

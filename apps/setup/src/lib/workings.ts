@@ -3,14 +3,11 @@
 import type { GlyphView, ReadingColor, StateView } from './bindings.ts';
 
 /**
- * How close a character is to a glyph, as a whole percent of the cells either inks that agree. It rounds down, so a
- * character that does not match never shows the 75% a match needs.
+ * How far a character is from a glyph, in the counts a read decides with: the cells apart, of the cells either sets,
+ * and the cells that differ at all, which order glyphs with as many apart.
  */
-export function closeness(glyph: GlyphView): number {
-  if (glyph.inked === 0) {
-    return 100;
-  }
-  return Math.floor((100 * (glyph.inked - glyph.differing)) / glyph.inked);
+export function distanceText(glyph: GlyphView): string {
+  return `${glyph.apart} of ${glyph.set} apart, ${glyph.differing} differ`;
 }
 
 /** A share of `whole` as a whole percent, or null when there is nothing to share. */

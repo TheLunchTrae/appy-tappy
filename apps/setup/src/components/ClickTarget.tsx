@@ -40,16 +40,16 @@ import {
 } from '../lib/click.ts';
 import { IDLE, tryStep } from '../lib/clickTry.ts';
 import type { Picture } from '../lib/pixels.ts';
-import { type Point, type Rect, type Size, contains, fit, toPicture } from '../lib/region.ts';
+import { type Point, type Rect, type Size, contains, pixelAt, toPicture } from '../lib/region.ts';
 import { background } from '../lib/repeat.ts';
 import { DEFAULT_COLOR_MATCH, type SelectTool } from '../lib/selection.ts';
-import { useSize } from '../lib/size.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
 import { useScreenshots } from '../lib/useScreenshots.ts';
 import { LiveCanvas, PictureCanvas } from './canvas.tsx';
 import { SelectFields } from './CheckFields.tsx';
 import { Hint } from './Hint.tsx';
-import { RegionSurface } from './RegionSurface.tsx';
+import { Marquee, RegionSurface } from './RegionSurface.tsx';
+import { ZoomView } from './ZoomView.tsx';
 
 /** The widest live frame asked for, which keeps a large window's preview cheap. */
 const LIVE_MAX_WIDTH = 1600;
@@ -273,13 +273,14 @@ function TargetStage({
     );
     return () => {
       current = false;
+      // The stage's capture ends with it, whether the screen closes, so the editor's live reading can watch again,
+      // or another stage opens, which may find no window to pick in its place. Its screenshots go with it.
+      background(stopCapture());
     };
     // The window rules are read when the stage opens, and looking again opens a new one, not each time the lists
     // are read again.
   }, []);
 
-  const view = useRef<HTMLDivElement>(null);
-  const space = useSize(view);
   const [liveSize, setLiveSize] = useState<Size | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const onFrame = useCallback((width: number, height: number): void => {
@@ -296,21 +297,6 @@ function TargetStage({
   const native = shownPicture ?? (newest === undefined ? null : (full.get(newest.index) ?? null));
   const nativeSize: Size | null = native === null ? null : { width: native.width, height: native.height };
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
-  const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
-  const frameStyle = {
-    left: (space.width - shown.width) / 2,
-    top: (space.height - shown.height) / 2,
-    width: shown.width,
-    height: shown.height,
-  };
-  const scale = nativeSize === null || nativeSize.width === 0 ? 0 : shown.width / nativeSize.width;
-  const marker = (point: Point) => ({ left: (point.x + 0.5) * scale, top: (point.y + 0.5) * scale });
-  const box = (rect: Rect) => ({
-    left: rect.x * scale,
-    top: rect.y * scale,
-    width: rect.width * scale,
-    height: rect.height * scale,
-  });
 
   const drawnHere = drawn?.screenshot === selected ? drawn : null;
   const pictureSize = shownPicture === null ? null : { width: shownPicture.width, height: shownPicture.height };
@@ -365,10 +351,7 @@ function TargetStage({
       { width: bounds.width, height: bounds.height },
       pictureSize,
     );
-    return {
-      x: Math.min(Math.floor(point.x), pictureSize.width - 1),
-      y: Math.min(Math.floor(point.y), pictureSize.height - 1),
-    };
+    return pixelAt(point, pictureSize);
   };
   const onPoint = (event: PointerEvent<HTMLDivElement>): void => {
     const point = pointAt(event);
@@ -576,78 +559,95 @@ function TargetStage({
         </p>
         {shortcut.error === null ? null : <p className="warn">{shortcut.error}</p>}
         {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
-        <div className="view" ref={view}>
-          <div className="frame" style={frameStyle}>
-            {window.kind !== 'picked' ? null : selected === null ? (
-              <LiveCanvas
-                maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
-                onFrame={onFrame}
-                onError={onLiveError}
-              />
-            ) : shownPicture === null ? null : (
-              <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
-            )}
-            {mode === 'picture' && area !== null ? (
-              <div className="search-area" style={box(area)}>
-                <span className="tag">
-                  Search area · {area.width} × {area.height}
-                </span>
-              </div>
-            ) : null}
-            {mode === 'picture' && shownPicture !== null && !pointing ? (
-              <RegionSurface
-                size={shownPicture}
-                shown={shown}
-                region={drawnHere?.region ?? null}
-                label="Picture"
-                editable={!sending}
-                picking={false}
-                tool={tool}
-                onRegion={(region) => {
-                  setRegion(region, null);
-                }}
-                onPick={() => {
-                  // Clicks pick no colors.
-                }}
-                onSnap={(rough) => {
-                  selectWith([{ kind: 'snap', region: rough, combine: 'replace' }]);
-                }}
-                onSelectAt={(point) => {
-                  selectWith([{ kind: 'click', x: point.x, y: point.y, combine: 'replace' }]);
-                }}
-              />
-            ) : null}
-            {pointing ? (
-              <div className="surface clicking" onPointerDown={onPoint}>
-                {mode === 'picture' && drawnHere !== null ? (
-                  <div className="marquee" style={box(drawnHere.region)}>
+        <ZoomView
+          picture={layoutSize}
+          zoomable={shownPicture !== null}
+          hint={
+            selected === null && liveError !== null
+              ? liveError
+              : hintText(window, mode, step, selected, shortcut.label, tool)
+          }
+        >
+          {({ space, shown }) => {
+            const scale = nativeSize === null || nativeSize.width === 0 ? 0 : shown.width / nativeSize.width;
+            const marker = (point: Point) => ({ left: (point.x + 0.5) * scale, top: (point.y + 0.5) * scale });
+            return (
+              <>
+                {window.kind !== 'picked' ? null : selected === null ? (
+                  <LiveCanvas
+                    maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
+                    onFrame={onFrame}
+                    onError={onLiveError}
+                  />
+                ) : shownPicture === null ? null : (
+                  <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
+                )}
+                {mode === 'picture' && area !== null ? (
+                  <div
+                    className="search-area"
+                    style={{
+                      left: area.x * scale,
+                      top: area.y * scale,
+                      width: area.width * scale,
+                      height: area.height * scale,
+                    }}
+                  >
                     <span className="tag">
-                      Picture · {drawnHere.region.width} × {drawnHere.region.height}
+                      Search area · {area.width} × {area.height}
                     </span>
                   </div>
                 ) : null}
-              </div>
-            ) : null}
-            {mode === 'picture' && drawnHere !== null ? (
-              <span
-                className="click-spot"
-                style={marker({ x: drawnHere.region.x + drawnHere.press.x, y: drawnHere.region.y + drawnHere.press.y })}
-                aria-hidden="true"
-              />
-            ) : null}
-            {mode === 'spot' && spotHere !== null ? (
-              <span className="click-spot" style={marker(spotHere)} aria-hidden="true" />
-            ) : null}
-            {selected === null && landed !== null && nativeSize !== null ? (
-              <span className="click-spot found" style={marker(landed)} aria-hidden="true" />
-            ) : null}
-          </div>
-          <p className="hint">
-            {selected === null && liveError !== null
-              ? liveError
-              : hintText(window, mode, step, selected, shortcut.label, tool)}
-          </p>
-        </div>
+                {mode === 'picture' && shownPicture !== null && !pointing ? (
+                  <RegionSurface
+                    size={shownPicture}
+                    shown={shown}
+                    screenshot={selected}
+                    region={drawnHere?.region ?? null}
+                    label="Picture"
+                    editable={!sending}
+                    picking={false}
+                    tool={tool}
+                    onRegion={(region) => {
+                      setRegion(region, null);
+                    }}
+                    onPick={() => {
+                      // Clicks pick no colors.
+                    }}
+                    onSnap={(rough) => {
+                      selectWith([{ kind: 'snap', region: rough, combine: 'replace' }]);
+                    }}
+                    onSelectAt={(point) => {
+                      selectWith([{ kind: 'click', x: point.x, y: point.y, combine: 'replace' }]);
+                    }}
+                  />
+                ) : null}
+                {pointing ? (
+                  <div className="surface clicking" onPointerDown={onPoint}>
+                    {mode === 'picture' && drawnHere !== null && pictureSize !== null ? (
+                      <Marquee rect={drawnHere.region} picture={pictureSize} scale={scale} label="Picture" />
+                    ) : null}
+                  </div>
+                ) : null}
+                {mode === 'picture' && drawnHere !== null ? (
+                  <span
+                    className="click-spot"
+                    style={marker({
+                      x: drawnHere.region.x + drawnHere.press.x,
+                      y: drawnHere.region.y + drawnHere.press.y,
+                    })}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                {mode === 'spot' && spotHere !== null ? (
+                  <span className="click-spot" style={marker(spotHere)} aria-hidden="true" />
+                ) : null}
+                {selected === null && landed !== null && nativeSize !== null ? (
+                  <span className="click-spot found" style={marker(landed)} aria-hidden="true" />
+                ) : null}
+              </>
+            );
+          }}
+        </ZoomView>
         <div className="strip">
           <button
             type="button"
@@ -973,14 +973,6 @@ export function ClickTarget({ apps, automation, watched, initial, onCancel, onUs
   const chosen = choices.find((choice) => choice.id === app) ?? null;
   // Each look again opens a new stage, which picks the window afresh and forgets the screenshots.
   const [round, setRound] = useState(0);
-
-  // Capture stops when the screen closes, so the editor's live reading can watch again.
-  useEffect(
-    () => () => {
-      background(stopCapture());
-    },
-    [],
-  );
 
   return (
     <TargetStage

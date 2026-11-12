@@ -2,9 +2,10 @@ import { useState } from 'react';
 
 import type { AppSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
+import { referenceCoverage } from '../lib/expected.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
-import { CharacterChips } from '../components/CharacterChips.tsx';
+import { CharacterChips, MissingNote } from '../components/CharacterChips.tsx';
 import type { SavedRef } from '../lib/flow.ts';
 
 interface Props {
@@ -98,6 +99,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
                       <td>{reference.name}</td>
                       <td>
                         <CharacterChips characters={referenceCharacters(reference)} ink={reference.ink} />
+                        <MissingNote characters={referenceCoverage(reference).missing} />
                       </td>
                       <td className="note">{used.length === 0 ? 'No values yet' : andList(used)}</td>
                       <td className="end">

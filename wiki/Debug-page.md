@@ -19,9 +19,12 @@ The same setting adds debug details to the pages that read a window live.
 - **Live readings.** Under the live reading in the value editor and in the
   automation editor, a dashed line says how long the check took and how old
   the frame it read was. Under it are the check's scores:
-  - **Number:** each character read, how closely it matches the reference,
-    and the closest other character. A character reads at 75% or closer, so a
-    close second means the reference needs more samples of both.
+  - **Number:** each character read, how far it is from the closest
+    character of the reference, and the closest other character. The distance
+    counts cells of the grid that a character is sampled onto: a cell is apart
+    when one of the two has it and the other has neither it nor a cell beside
+    it. A character reads while at most 1 in 32 of the cells either has are
+    apart, so a close second means the reference needs more samples of both.
   - **State:** how far the region is from each state, on average per color
     channel, against the state's tolerance. The state read is marked.
   - **Color:** the region's average color beside the color looked for, and the
@@ -137,7 +140,8 @@ and who gets it. It holds:
 - the newest trace file, unless you leave it out;
 - the AppyTappy Setup version and when the bundle was made.
 
-**Include pictures** adds the screenshots your values, references, and click
-actions learned from. They are off at first, because they can show what was on
-your screen. Even without them, the bundle holds your applications' window
-titles and executable names.
+**Include pictures** adds the pictures your values, references, and click
+actions keep, which [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps)
+lists. They are off at first, because they show parts of your applications'
+windows. Even without them, the bundle holds your applications' window titles
+and executable names.

@@ -8,9 +8,11 @@
 //! way, as [`CheckSpec::Characters`], so the UI can see what it reads before
 //! it is saved.
 
+use std::collections::BTreeSet;
+
 use appytappy_config::app_file::{
     CheckDef, CheckDefError, ColorDef, ReferenceDef, RegionDef, SampleDef, StateDef, check_states,
-    sample_name, state_image_name,
+    is_label_character, sample_name, state_image_name,
 };
 use appytappy_config::signal::StateName;
 use appytappy_sources::screen::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
@@ -21,11 +23,18 @@ use appytappy_sources::system::Rgb;
 use serde::{Deserialize, Serialize};
 
 use crate::recording::Recording;
+use crate::screenshots::Shots;
 use crate::selection::{self, SelectionSpec};
 
+pub(crate) mod bar;
 mod error;
 
 pub(crate) use error::{Cut, SpecError, sentence};
+
+/// The most characters a reference is saved as expecting: room for the
+/// digits, both cases of the English letters, and every other printable
+/// ASCII character, with some to spare.
+pub(crate) const MAX_EXPECTED_CHARACTERS: usize = 128;
 
 /// A rectangle of the window, in pixels from its top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -37,13 +46,36 @@ pub(crate) struct RegionSpec {
     pub(crate) height: u32,
 }
 
-/// A color the user picked on a screenshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+impl From<Region> for RegionSpec {
+    fn from(region: Region) -> Self {
+        let size = region.size();
+        Self {
+            x: region.x(),
+            y: region.y(),
+            width: size.width,
+            height: size.height,
+        }
+    }
+}
+
+/// A color of a screenshot: one the user picked on it, one proposed to them,
+/// or one the setup app read from it for the UI to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ColorSpec {
     red: u8,
     green: u8,
     blue: u8,
+}
+
+impl From<Rgb> for ColorSpec {
+    fn from(color: Rgb) -> Self {
+        Self {
+            red: color.red,
+            green: color.green,
+            blue: color.blue,
+        }
+    }
 }
 
 impl From<ColorSpec> for ColorDef {
@@ -72,6 +104,11 @@ impl From<ColorSpec> for Rgb {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct Label {
     pub(crate) screenshot: usize,
+    /// Where on the screenshot the text shows, when it is not the spec's
+    /// region, as for text found like a sample elsewhere on it.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub(crate) region: Option<RegionSpec>,
     pub(crate) text: String,
 }
 
@@ -211,7 +248,7 @@ pub(crate) struct SavedCheck {
 /// checks the UI describes name.
 #[derive(Clone, Copy)]
 pub(crate) struct Session<'a> {
-    pub(crate) screenshots: &'a [Image],
+    pub(crate) screenshots: &'a dyn Shots,
     pub(crate) recording: Option<&'a Recording>,
     pub(crate) references: References<'a>,
 }
@@ -313,16 +350,23 @@ pub(crate) fn to_saved_fix(
 /// `ref-{id}-1.png` onward, the labeled screenshots first and then the
 /// recorded readings.
 ///
+/// `expected` is the characters the user says it needs, saved as
+/// [`expected_characters`] lists them. It is guidance for the setup app: no
+/// sample is learned or left out because of it.
+///
 /// # Errors
 ///
 /// Returns the [`SpecError`] that [`build`] would, so only a reference that
 /// learns every sample is saved; [`SpecError::NotAValue`] for any other
-/// check; or [`SpecError::Picture`] when a picture cannot be encoded.
+/// check; [`SpecError::TooManyExpected`] for more expected characters than
+/// a reference saves; or [`SpecError::Picture`] when a picture cannot be
+/// encoded.
 pub(crate) fn to_saved_reference(
     spec: &CheckSpec,
     session: Session<'_>,
     id: &str,
     name: &str,
+    expected: &str,
 ) -> Result<(ReferenceDef, Pictures), SpecError> {
     let built = build(spec, session)?;
     let CheckSpec::Characters {
@@ -349,7 +393,7 @@ pub(crate) fn to_saved_reference(
         .iter()
         .map(|label| {
             Ok((
-                cut(session.screenshots, built.region, label.screenshot)?,
+                label_image(session.screenshots, built.region, label)?,
                 &label.text,
             ))
         })
@@ -390,9 +434,37 @@ pub(crate) fn to_saved_reference(
             ink: (*ink).into(),
             tolerance: *tolerance,
             samples,
+            expects: expected_characters(expected)?,
         },
         pictures,
     ))
+}
+
+/// The characters of `expected` as a reference saves them, or `None` when
+/// it has none: each character a label teaches, as [`is_label_character`]
+/// says, that is no control character, once, the digits `0` to `9` first
+/// and the rest by code point.
+///
+/// # Errors
+///
+/// Returns [`SpecError::TooManyExpected`] for more than
+/// [`MAX_EXPECTED_CHARACTERS`] of them.
+pub(crate) fn expected_characters(expected: &str) -> Result<Option<String>, SpecError> {
+    // A digit sorts before every other character, and each group by code
+    // point.
+    let characters: BTreeSet<(bool, char)> = expected
+        .chars()
+        .filter(|&character| is_label_character(character) && !character.is_control())
+        .map(|character| (!character.is_ascii_digit(), character))
+        .collect();
+    if characters.len() > MAX_EXPECTED_CHARACTERS {
+        return Err(SpecError::TooManyExpected);
+    }
+    let list: String = characters
+        .into_iter()
+        .map(|(_, character)| character)
+        .collect();
+    Ok((!list.is_empty()).then_some(list))
 }
 
 /// The window size of screenshot `drawn_on`, the one the region of `spec`
@@ -538,7 +610,7 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
 /// Returns a [`SpecError`] when a name breaks the rules or a picture cannot
 /// be cut.
 fn state_pictures(
-    screenshots: &[Image],
+    screenshots: &dyn Shots,
     region: Region,
     states: &[StateSpec],
     tolerance: u8,
@@ -561,7 +633,7 @@ fn state_pictures(
 /// and with a selection the mask of the pixels of `region` it selects on
 /// that screenshot.
 fn picture_of(
-    screenshots: &[Image],
+    screenshots: &dyn Shots,
     region: Region,
     state: &StateSpec,
 ) -> Result<(Image, Option<Mask>), SpecError> {
@@ -619,6 +691,40 @@ pub(crate) fn recorded_problems(
         .collect())
 }
 
+/// For each of `found`, labels the user has not added to `spec` yet, why
+/// the reference `spec` teaches cannot learn it: `None` for one it learns.
+/// Like [`recorded_problems`], it learns the reference first and then each
+/// label in order, leaving out the ones it cannot learn. Any other check
+/// learns no labels.
+pub(crate) fn label_problems(
+    spec: &CheckSpec,
+    session: Session<'_>,
+    found: &[Label],
+) -> Result<Vec<Option<String>>, SpecError> {
+    let CheckSpec::Characters { region, .. } = spec else {
+        return Ok(Vec::new());
+    };
+    let region = to_region(*region)?;
+    let mut reader = taught_reader(spec, session, region)?;
+    Ok(found
+        .iter()
+        .map(|label| {
+            let image = match label_image(session.screenshots, region, label) {
+                Ok(image) => image,
+                Err(error) => return Some(error.to_string()),
+            };
+            let mut trial = reader.clone();
+            match trial.learn(&image, &label.text) {
+                Ok(()) => {
+                    reader = trial;
+                    None
+                },
+                Err(error) => Some(sentence(&error.to_string())),
+            }
+        })
+        .collect())
+}
+
 /// The reader of a [`CheckSpec::Characters`] before its recorded readings:
 /// the saved reference's samples relearned with the spec's own color and
 /// tolerance, then its labeled screenshots, cut at `region`.
@@ -649,7 +755,7 @@ fn taught_reader(
     for label in labels {
         learn(
             &mut reader,
-            &cut(session.screenshots, region, label.screenshot)?,
+            &label_image(session.screenshots, region, label)?,
             &label.text,
         )?;
     }
@@ -691,12 +797,21 @@ fn region_def(region: Region) -> RegionDef {
 }
 
 /// The `region` of screenshot `screenshot`.
-fn cut(screenshots: &[Image], region: Region, screenshot: usize) -> Result<Image, SpecError> {
+fn cut(screenshots: &dyn Shots, region: Region, screenshot: usize) -> Result<Image, SpecError> {
     screenshots
         .get(screenshot)
         .ok_or(SpecError::NoScreenshot)?
         .crop(region)
         .ok_or(SpecError::Outside)
+}
+
+/// What `label` labels: its own region of its screenshot, or `region`.
+fn label_image(screenshots: &dyn Shots, region: Region, label: &Label) -> Result<Image, SpecError> {
+    let region = match label.region {
+        Some(own) => to_region(own)?,
+        None => region,
+    };
+    cut(screenshots, region, label.screenshot)
 }
 
 /// Teaches `reader` that `image` shows `text`.
@@ -729,5 +844,7 @@ fn recorded_image(
         .ok_or(SpecError::NoRecording)
 }
 
+#[cfg(test)]
+mod round_trip;
 #[cfg(test)]
 mod tests;

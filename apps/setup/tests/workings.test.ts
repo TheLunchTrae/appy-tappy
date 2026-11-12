@@ -1,15 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { StateView } from '../src/lib/bindings.ts';
-import { averageDifference, channelsText, closeness, cssColor, percentOf } from '../src/lib/workings.ts';
+import { averageDifference, channelsText, cssColor, distanceText, percentOf } from '../src/lib/workings.ts';
 
-describe('closeness', () => {
-  test('is the share of inked cells that agree, rounded down', () => {
-    expect(closeness({ character: '7', differing: 2, inked: 8, matches: true })).toBe(75);
-    expect(closeness({ character: '7', differing: 1, inked: 3, matches: false })).toBe(66);
-    // 74.8% does not match, so it never shows as the 75% a match needs.
-    expect(closeness({ character: '7', differing: 63, inked: 250, matches: false })).toBe(74);
-    expect(closeness({ character: '7', differing: 0, inked: 0, matches: true })).toBe(100);
+describe('distanceText', () => {
+  test('gives the cells apart of the cells set, then the cells that differ', () => {
+    expect(distanceText({ character: '7', apart: 3, differing: 5, set: 67, matches: false })).toBe(
+      '3 of 67 apart, 5 differ',
+    );
   });
 });
 

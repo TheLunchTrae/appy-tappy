@@ -11,7 +11,7 @@ publish.workspace = true
 [dependencies]
 # Provides `#[mutants::skip]` for functions no test can reach; it expands to
 # nothing.
-mutants = "0.0.4"
+mutants.workspace = true
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
 # in `win.rs` and `win/` calls: the window event hook and its message loop,
@@ -20,7 +20,7 @@ mutants = "0.0.4"
 # single-instance guard, the `Run` registry key, the local clock, and
 # showing a window without activating it.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "=0.62.2", features = [
+windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Security",

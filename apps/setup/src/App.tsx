@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type AppSummary, type AutomationSummary, DEFAULT_SETTINGS, type SettingsFile } from './lib/bindings.ts';
-import { errorText, listApps, listAutomations, loadSettings, saveSettings, syncOverlays } from './lib/api.ts';
+import {
+  errorText,
+  forgetUnsavedClickPictures,
+  listApps,
+  listAutomations,
+  loadSettings,
+  saveSettings,
+  syncOverlays,
+} from './lib/api.ts';
 import { Question, useQuestion } from './components/Question.tsx';
 import { UpdateNotice } from './components/UpdateNotice.tsx';
 import { ApplicationEditor } from './pages/ApplicationEditor.tsx';
@@ -18,6 +26,7 @@ import {
   afterFlow,
   applicationFor,
   heldInAll,
+  holdsAutomation,
   lostText,
   trail,
   valueFor,
@@ -161,6 +170,18 @@ export function App() {
   useEffect(() => {
     background(syncOverlays());
   }, []);
+  // A click picture is kept as a file while its target is set up, and the automation's draft names it, also while
+  // the editor waits under a value or application flow it opened. Once no automation flow is left, those that the
+  // saved automations do not name go, such as after Cancel.
+  const automating = holdsAutomation(flow);
+  useEffect(() => {
+    if (!automating) {
+      return undefined;
+    }
+    return () => {
+      background(forgetUnsavedClickPictures());
+    };
+  }, [automating]);
   // A flow that makes a value or a reference captures a window, so the lists wait until it ends.
   useRepeat(refresh, REFRESH_MS, flow?.kind !== 'value' && flow?.kind !== 'reference');
 

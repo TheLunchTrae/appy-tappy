@@ -84,7 +84,7 @@ impl Check {
                 Ok(Workings::BarFill { filled, counted })
             },
             Self::Color(color) => Ok(Workings::Color {
-                average: super::check::ColorMatch::average(image),
+                average: super::check::average(image),
                 color: color.color,
                 tolerance: color.tolerance,
             }),

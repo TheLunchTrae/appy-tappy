@@ -54,13 +54,13 @@ impl Check {
     }
 }
 
-/// The squared distance between a pixel's blue, green, and red bytes and a
-/// color. It is at most 3 * 255², so it never overflows a `u32`.
-fn distance([blue, green, red, _]: [u8; 4], color: Rgb) -> u32 {
+/// The squared distance between two colors. It is at most 3 * 255², so it
+/// never overflows a `u32`.
+pub(super) fn distance(one: Rgb, other: Rgb) -> u32 {
     let square = |a: u8, b: u8| u32::from(a.abs_diff(b)).wrapping_mul(u32::from(a.abs_diff(b)));
-    square(blue, color.blue)
-        .wrapping_add(square(green, color.green))
-        .wrapping_add(square(red, color.red))
+    square(one.blue, other.blue)
+        .wrapping_add(square(one.green, other.green))
+        .wrapping_add(square(one.red, other.red))
 }
 
 /// A bar's fill: the share of its pixels nearer the filled color than the
@@ -91,6 +91,47 @@ impl BarFill {
         Ok(Self { filled, empty })
     }
 
+    /// The color of the filled part.
+    #[must_use]
+    pub const fn filled(self) -> Rgb {
+        self.filled
+    }
+
+    /// The color of the empty part.
+    #[must_use]
+    pub const fn empty(self) -> Rgb {
+        self.empty
+    }
+
+    /// This bar with its two colors the other way around.
+    #[must_use]
+    pub const fn turned(self) -> Self {
+        Self {
+            filled: self.empty,
+            empty: self.filled,
+        }
+    }
+
+    /// What `pixel` counts as, as `[blue, green, red, unused]` like
+    /// [`Image::pixels`] holds it: the nearer of the two colors when it is
+    /// within half their distance of it, the empty color on a tie, and
+    /// neither otherwise.
+    #[must_use]
+    pub fn classify(self, [blue, green, red, _]: [u8; 4]) -> BarPixel {
+        let color = Rgb { red, green, blue };
+        let to_filled = distance(color, self.filled);
+        let to_empty = distance(color, self.empty);
+        // Squared distances, so half the distance is a quarter of the
+        // distance between the two colors.
+        if to_filled.min(to_empty).saturating_mul(4) > distance(self.filled, self.empty) {
+            BarPixel::Neither
+        } else if to_filled < to_empty {
+            BarPixel::Filled
+        } else {
+            BarPixel::Empty
+        }
+    }
+
     /// The filled share of `image`, from 0 to 100.
     ///
     /// # Errors
@@ -107,23 +148,27 @@ impl BarFill {
     /// How many of `image`'s pixels count as filled, and how many count at
     /// all.
     pub(super) fn count(self, image: &Image) -> (u64, u64) {
-        let reach = distance(
-            [self.empty.blue, self.empty.green, self.empty.red, 0],
-            self.filled,
-        );
         let mut filled = 0_u64;
         let mut counted = 0_u64;
         for &pixel in image.pixels() {
-            let to_filled = distance(pixel, self.filled);
-            let to_empty = distance(pixel, self.empty);
-            // Squared distances, so half the distance is a quarter of `reach`.
-            let near = to_filled.min(to_empty).saturating_mul(4) <= reach;
+            let class = self.classify(pixel);
             // Pixel counts fit in a u64, so these additions never wrap.
-            filled = filled.wrapping_add(u64::from(near && to_filled < to_empty));
-            counted = counted.wrapping_add(u64::from(near));
+            filled = filled.wrapping_add(u64::from(class == BarPixel::Filled));
+            counted = counted.wrapping_add(u64::from(class != BarPixel::Neither));
         }
         (filled, counted)
     }
+}
+
+/// What one pixel of a bar counts as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarPixel {
+    /// Part of the bar's filled share.
+    Filled,
+    /// Part of the bar's empty share.
+    Empty,
+    /// Far from both colors, such as a border or a label, and left out.
+    Neither,
 }
 
 /// A bar's filled and empty colors were the same.
@@ -153,30 +198,48 @@ impl ColorMatch {
     /// Whether the average color of `image` is within the tolerance.
     #[must_use]
     pub fn matches(self, image: &Image) -> bool {
-        let average = Self::average(image);
-        let near = |average: u8, target: u8| average.abs_diff(target) <= self.tolerance;
-        near(average.blue, self.color.blue)
-            && near(average.green, self.color.green)
-            && near(average.red, self.color.red)
+        self.near(average(image))
     }
 
-    /// The average color of `image`, or black when it has no pixels.
-    pub(super) fn average(image: &Image) -> Rgb {
-        let mut sums = [0_u64; 3];
-        let mut pixels = 0_u64;
-        for pixel in image.pixels() {
-            for (sum, &channel) in sums.iter_mut().zip(pixel) {
-                // At most 8192² pixels of 255 each, far below u64::MAX.
-                *sum = sum.wrapping_add(u64::from(channel));
-            }
-            pixels = pixels.wrapping_add(1);
-        }
-        // An average of bytes is at most 255, so it always fits a byte.
-        let [blue, green, red] = sums.map(|sum| {
-            u8::try_from(sum.checked_div(pixels).unwrap_or_default()).unwrap_or(u8::MAX)
-        });
-        Rgb { red, green, blue }
+    /// Whether each of `color`'s red, green, and blue is within the
+    /// tolerance of the looked-for color's.
+    #[must_use]
+    pub fn near(self, color: Rgb) -> bool {
+        self.farthest_channel(color) <= self.tolerance
     }
+
+    /// How far `color` is from the looked-for color: the largest difference
+    /// among their red, green, and blue, which the tolerance bounds.
+    #[must_use]
+    pub fn farthest_channel(self, color: Rgb) -> u8 {
+        color
+            .red
+            .abs_diff(self.color.red)
+            .max(color.green.abs_diff(self.color.green))
+            .max(color.blue.abs_diff(self.color.blue))
+    }
+}
+
+/// The average color of `image`: the mean of each of its pixels' red, green,
+/// and blue, rounded down.
+#[must_use]
+pub fn average(image: &Image) -> Rgb {
+    let mut sums = [0_u64; 3];
+    let mut pixels = 0_u64;
+    for pixel in image.pixels() {
+        for (sum, &channel) in sums.iter_mut().zip(pixel) {
+            // At most 8192² pixels of 255 each, far below u64::MAX.
+            *sum = sum.wrapping_add(u64::from(channel));
+        }
+        pixels = pixels.wrapping_add(1);
+    }
+    // A mean of bytes is a byte, and an image is never empty.
+    let [blue, green, red] = sums.map(|sum| {
+        sum.checked_div(pixels)
+            .and_then(|mean| u8::try_from(mean).ok())
+            .unwrap_or_default()
+    });
+    Rgb { red, green, blue }
 }
 
 /// Whether a region looks like a saved picture of the same region, such as
@@ -211,13 +274,25 @@ impl ImageMatch {
                 });
             },
             Some(mask) => mask.spans(),
-            None => std::iter::once(0..picture.pixels().len()).collect(),
+            None => return Ok(Self::whole(picture, tolerance)),
         };
         Ok(Self {
             picture,
             spans: spans.into_boxed_slice(),
             tolerance,
         })
+    }
+
+    /// A check that compares every pixel of a region with `picture`. It
+    /// takes no mask, so it cannot fail.
+    #[must_use]
+    pub fn whole(picture: Image, tolerance: u8) -> Self {
+        let spans = std::iter::once(0..picture.pixels().len()).collect();
+        Self {
+            picture,
+            spans,
+            tolerance,
+        }
     }
 
     /// The region as the setup screenshot showed it.
@@ -376,8 +451,21 @@ pub enum CheckError {
         /// The region's size.
         found: Size,
     },
-    /// The digits could not be read.
+    /// The number could not be read, and at which stage of the read.
     Number(ReadError),
+}
+
+impl CheckError {
+    /// What went wrong, without what this read saw: a region that keeps
+    /// failing the same way keeps this text while what it shows changes, so
+    /// a log can say it once. [`ReadError::stage`] for a number.
+    #[must_use]
+    pub fn stage(&self) -> String {
+        match self {
+            Self::Number(error) => error.stage().to_owned(),
+            Self::NoBar | Self::SizeMismatch { .. } => self.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for CheckError {
@@ -389,26 +477,22 @@ impl fmt::Display for CheckError {
                 formatter,
                 "the region is {found} but its saved picture is {expected}"
             ),
-            Self::Number(_) => formatter.write_str("the region's number could not be read"),
+            // The read's own error says which stage failed, in full.
+            Self::Number(error) => write!(formatter, "{error}"),
         }
     }
 }
 
-impl Error for CheckError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Number(error) => Some(error),
-            _ => None,
-        }
-    }
-}
+/// A number's error shows as its read's error, which has no cause of its
+/// own, so no variant has a source to give.
+impl Error for CheckError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn errors_explain_themselves_and_keep_their_source() {
+    fn errors_explain_themselves() {
         let size = Size {
             width: 2,
             height: 1,
@@ -432,13 +516,17 @@ mod tests {
             mismatch.to_string(),
             "the region is 3x1 but its saved picture is 2x1"
         );
-        assert!(mismatch.source().is_none());
-        let number = CheckError::Number(ReadError::NoNumber);
-        assert_eq!(number.to_string(), "the region's number could not be read");
-        assert_eq!(
-            number.source().map(ToString::to_string).as_deref(),
-            Some("the region holds no digits")
-        );
+        assert_eq!(mismatch.stage(), mismatch.to_string());
+        assert_eq!(CheckError::NoBar.stage(), CheckError::NoBar.to_string());
+        // A number's error is its read's, so the reason shows wherever the
+        // check's error does.
+        let read = DigitReader::new(WHITE, 0)
+            .read(&solid(1, WHITE), false)
+            .expect_err("no glyph learned");
+        let number = CheckError::Number(read.clone());
+        assert_eq!(number.to_string(), read.to_string());
+        assert_eq!(number.stage(), read.stage());
+        assert_ne!(number.stage(), number.to_string());
     }
 
     fn solid(width: u32, color: Rgb) -> Image {
@@ -568,6 +656,15 @@ mod tests {
     }
 
     #[test]
+    fn a_bar_pixel_is_filled_empty_or_neither() {
+        let bar = BarFill::new(GREEN, GRAY).unwrap();
+        let pixel = |color: Rgb| [color.blue, color.green, color.red, 255];
+        assert_eq!(bar.classify(pixel(GREEN)), BarPixel::Filled);
+        assert_eq!(bar.classify(pixel(GRAY)), BarPixel::Empty);
+        assert_eq!(bar.classify(pixel(WHITE)), BarPixel::Neither);
+    }
+
+    #[test]
     fn bar_fill_skips_a_dark_border() {
         let black = Rgb {
             red: 0,
@@ -614,6 +711,47 @@ mod tests {
         assert_eq!(
             Check::Color(red).read(&solid(1, dark)),
             Ok(Value::Flag(true))
+        );
+    }
+
+    #[test]
+    fn a_color_is_as_far_as_its_farthest_channel() {
+        let red = ColorMatch {
+            color: Rgb {
+                red: 200,
+                green: 20,
+                blue: 20,
+            },
+            tolerance: 10,
+        };
+        let color = |red, green, blue| Rgb { red, green, blue };
+        assert_eq!(red.farthest_channel(color(197, 25, 20)), 5);
+        assert_eq!(red.farthest_channel(color(200, 20, 13)), 7);
+        assert_eq!(red.farthest_channel(color(209, 20, 20)), 9);
+        // Exactly the tolerance is near; one more is not.
+        assert!(red.near(color(210, 10, 30)));
+        assert!(!red.near(color(210, 9, 30)));
+    }
+
+    #[test]
+    fn the_average_color_is_each_channels_mean_rounded_down() {
+        let dark = Rgb {
+            red: 10,
+            green: 0,
+            blue: 255,
+        };
+        let light = Rgb {
+            red: 13,
+            green: 1,
+            blue: 255,
+        };
+        assert_eq!(
+            average(&row(&[dark, light, light])),
+            Rgb {
+                red: 12,
+                green: 0,
+                blue: 255
+            }
         );
     }
 

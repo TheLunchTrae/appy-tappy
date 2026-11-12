@@ -83,12 +83,15 @@ pub(crate) struct CharacterView {
 pub(crate) struct GlyphView {
     /// The glyph's character.
     pub(crate) character: String,
-    /// How many grid cells differ.
+    /// How many grid cells one of the two sets where the other sets
+    /// neither that cell nor one beside it.
+    pub(crate) apart: u32,
+    /// How many grid cells only one of the two sets.
     pub(crate) differing: u32,
-    /// How many grid cells either shape inks.
-    pub(crate) inked: u32,
-    /// Whether the character reads as this glyph: at most a quarter of the
-    /// inked cells differ.
+    /// How many grid cells either of the two sets.
+    pub(crate) set: u32,
+    /// Whether the character reads as this glyph: at most 1 in 32 of the
+    /// set cells are apart.
     pub(crate) matches: bool,
 }
 
@@ -199,8 +202,9 @@ impl From<GlyphScore> for GlyphView {
     fn from(score: GlyphScore) -> Self {
         Self {
             character: score.character.to_string(),
+            apart: score.apart,
             differing: score.differing,
-            inked: score.inked,
+            set: score.set,
             matches: score.matches(),
         }
     }

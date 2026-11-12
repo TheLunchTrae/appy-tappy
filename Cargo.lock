@@ -127,6 +127,7 @@ dependencies = [
  "flate2",
  "mutants",
  "ocrs",
+ "proptest",
  "rten",
  "rten-imageproc",
  "serde",

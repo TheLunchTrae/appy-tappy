@@ -53,7 +53,7 @@ export function NewValue({
   const [picking, setPicking] = useState(true);
   const [mode] = useState<CaptureMode>(changing === null ? VALUE : { kind: changing.how, value: changing.value });
   // Leaving the flow stops the window's capture, which would otherwise keep
-  // copying frames nobody looks at.
+  // copying frames nobody looks at, and its screenshots and recording go with it.
   useEffect(
     () => () => {
       background(stopCapture());
@@ -86,6 +86,8 @@ export function NewValue({
       trail={trail}
       onCancel={onCancel}
       onChangeWindow={() => {
+        // The capture ends here, not when another window is picked, so nothing keeps its screenshots meanwhile.
+        background(stopCapture());
         setPicking(true);
       }}
       onSaved={onSaved}
