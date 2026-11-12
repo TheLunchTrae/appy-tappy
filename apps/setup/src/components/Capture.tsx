@@ -591,7 +591,6 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               />
             )}
           </div>
-          {outline === null ? null : <CaptureOutlineNote outline={outline} />}
           <p className="hint">
             {viewHint(
               recording?.recording === true,
@@ -640,6 +639,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             {editing === null ? '' : ' A reference learns from each screenshot you label.'}
           </span>
         </div>
+        {outline === null || reviewing ? null : <CaptureOutlineNote outline={outline} />}
       </section>
       {editing === null ? (
         <aside className="inspector" aria-label="Value">

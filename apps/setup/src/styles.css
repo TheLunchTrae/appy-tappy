@@ -2224,5 +2224,4 @@ select {
 
 .window-list .window-score {
   grid-column: 1 / -1;
-  font-family: ui-monospace, monospace;
 }
