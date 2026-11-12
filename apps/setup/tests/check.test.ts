@@ -15,6 +15,7 @@ import {
   settingsDiffer,
   stateOn,
   toReference,
+  withFixRegion,
   withKind,
   withoutState,
   withState,
@@ -378,6 +379,15 @@ describe('fixDraft', () => {
       tolerance: 7,
       color: red,
     });
+  });
+
+  test('starts its region where the value reads on its first screenshot, unless one is drawn', () => {
+    const draft = fixDraft({ kind: 'barFill', filled: red, empty: gray });
+    expect(withFixRegion(draft, region, 2)).toEqual({ ...draft, region, drawnOn: 2 });
+    // Scaled past the window, the value reads nowhere there.
+    expect(withFixRegion(draft, null, 2)).toBe(draft);
+    const drawn = { ...draft, region: { ...region, x: 9 }, drawnOn: 5 };
+    expect(withFixRegion(drawn, region, 2)).toBe(drawn);
   });
 
   test('names the states taken at the new size after the saved ones, in order', () => {

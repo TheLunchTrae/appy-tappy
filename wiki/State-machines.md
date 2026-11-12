@@ -672,8 +672,8 @@ stateDiagram-v2
 ```
 
 **Open** is one flow on screen with up to two waiting under it. The types
-allow only these stacks, the flow on screen last; a fix of a saved value is a
-value flow that no automation opens:
+allow only these stacks, the flow on screen last; a fix or an edit of a saved
+value is a value flow that no automation opens:
 
 | Stack                            | How it comes about                                                                             |
 | -------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -702,7 +702,8 @@ value flow that no automation opens:
   flow.
 - **Tab.** What leaving loses is what the open flow reports
   (`apps/setup/src/lib/unsaved.ts`) together with the draft of an automation
-  that waits (`heldInAll`). With nothing unsaved the tab's page opens. With
+  that waits (`heldInAll`). A fix and an edit start from the screenshot the
+  capture takes when they open, so that screenshot is not unsaved work. With nothing unsaved the tab's page opens. With
   unsaved work the question asks first, and `lostText` names what the open
   flow loses and the automation's unsaved changes. **Leave** drops every
   flow, and **Stay** keeps the stack as it is. While a save runs, the tabs
@@ -882,8 +883,8 @@ stateDiagram-v2
 - **NoApplications** and **Choosing** show the list of saved applications
   with **Add application** in it. With one saved application there is no
   choice, and the picker resolves that one. A flow that has its application,
-  **Fix at this size** or **Edit** on a reference, shows no list and never
-  reaches them.
+  **Fix at this size**, or **Edit** on a value or a reference, shows no list
+  and never reaches them.
 - **Missing** is a chosen application that the look does not find: the flow's
   own, one handed over by the application flow, or the last choice. The
   picker says so instead of asking for a choice as if none had been made.
@@ -1049,6 +1050,163 @@ stateDiagram-v2
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
 
+### Value edit
+
+**Edit** on the Values page opens the capture screen on a saved value
+(`apps/setup/src/components/Capture.tsx`, with the edit's own logic in
+`apps/setup/src/lib/edit.ts` and `useValueEdit.ts`). No type names the
+edit's states: they follow from the draft's region, the screenshot it was
+drawn on (`drawnOn`), and its states, compared with the saved value.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unplaced: Edit, and the window is captured
+    Unplaced --> Placed: a screenshot has the window size the value was drawn at
+    Placed --> Moved: the region is drawn, moved, or typed on a screenshot of that size
+    Moved --> Placed: the region is put back where it was saved
+    Unplaced --> [*]: Save changes, Discard, or the flow is left
+    Placed --> [*]: Save changes, Discard, or the flow is left
+    Moved --> [*]: Save changes, Discard, or the flow is left
+```
+
+- **Unplaced.** The region is where it was saved, on no screenshot, because
+  none has the window size the value was drawn at. The region shows on no
+  screenshot and cannot be drawn or typed, and the editor says which size
+  the value was drawn at and which the screenshot has. The edit is a `kept`
+  drawing, which needs no screenshot, so the name, the pin, the check's kind
+  and its settings still save. A window that never takes that size never
+  leaves this state; the editor points to **Fix at this size** for it.
+- **Placed.** `drawnOn` is the newest screenshot of that size, and the region
+  shows on every screenshot of that size. The edit is still a `kept` drawing
+  while the region equals the saved one.
+- **Moved.** The region differs from the saved one, so the edit is a `drawn`
+  drawing on `drawnOn`.
+
+A saved state check has a second machine beside it, which says where each
+state's picture comes from:
+
+```mermaid
+stateDiagram-v2
+    [*] --> SavedPictures: the saved check is a state check
+    SavedPictures --> NeedsScreenshots: the region moves
+    NeedsScreenshots --> SavedPictures: the region is put back where it was saved
+    SavedPictures --> TakenAgain: Take the states again, or a selection on a screenshot
+    NeedsScreenshots --> TakenAgain: a state is added from a screenshot
+    TakenAgain --> SavedPictures: every taken state is removed, with the region where it was saved
+    TakenAgain --> NeedsScreenshots: every taken state is removed, with the region moved
+```
+
+- **SavedPictures.** The draft has no state of its own and the region is the
+  saved one (`keepsStates`). The edit names the saved pictures in their
+  order, and the names in `stateNames` and the tolerance can change.
+- **NeedsScreenshots.** The saved pictures no longer fit the region, so the
+  edit is not built and **Save changes** waits; the editor says each state
+  needs a new screenshot.
+- **TakenAgain.** Every state comes from a screenshot of the size the value
+  was drawn at, as for a new value, and takes the next saved name.
+
+Each change to the edit is tried on the owner thread after a quarter of a
+second (`try_edit`, through `useLiveCheck`). The same edit is tried again
+when the window's size changes, which the page asks the owner for twice a
+second (`window_size`), and after a save the owner refused. The owner makes
+the edited value its `check`, placed where the value reads at the newest
+frame's size, or clears `check` when the value is not read at that size or
+the edit cannot be tried, and answers what a save would do. An answer for an
+edit that has changed since is dropped, as a late check's is.
+
+- **The edit cannot be built or read back.** The reading box says why, such
+  as a name another value has or a state's screenshot of another size, and
+  **Save changes** waits. The next change tries again.
+- **An automation refuses it.** The answer names the automations, the editor
+  shows them, and **Save changes** waits until a change no longer breaks
+  them. `edit_value` refuses the same edit, so a file that changed since the
+  answer cannot let one through.
+- **It removes fixes.** The answer lists their window sizes, and **Save
+  changes** waits until the user turns on **Remove its fix**. The agreement
+  holds the sizes agreed to, and counts only while the answer lists exactly
+  those, so an edit that later removes other fixes asks again. The save
+  carries those sizes, and `edit_value` refuses it unless they are exactly
+  the fixes the edit removes when it runs.
+- **The save fails.** The editor shows why and stays open with the draft, the
+  saved value is as it was, and the edit is tried again, so the answer shows
+  what the saved files say now.
+
+### Pin choice
+
+The pin of a new value, and of a saved value being edited, is picked in the
+capture screen's first step
+(`apps/setup/src/components/Capture.tsx`, shown by `PinPicker.tsx`). The
+choice is one `PinChoice`, automatic or by hand with a pin
+(`apps/setup/src/lib/pin.ts`). It lives on the capture's draft beside the
+region, so one update changes both. What the control shows, `PinView`,
+follows from the choice and the region, so no pin is kept beside the region
+it came from.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Automatic: a new value, or an edit of a value whose pin is the side its region is nearest
+    [*] --> ByHand: an edit of a value saved with another side
+    Automatic --> Automatic: the region is drawn, moved, resized, or typed, and the pin follows it
+    Automatic --> ByHand: a side is picked on the grid
+    ByHand --> ByHand: another side is picked
+    ByHand --> ByHand: the region is moved, resized, or typed, and the pin stays
+    ByHand --> Automatic: Back to automatic
+    ByHand --> Automatic: a new region is drawn
+```
+
+- **Automatic** shows as `waiting` until a region is drawn on a screenshot,
+  and nothing can be picked by hand before then. After that, the pin is the
+  third of the window the region's center is in (`guessPin`), worked out
+  again each time the control draws. **Change** opens the grid without
+  leaving **Automatic**.
+- **ByHand** keeps its pin wherever the region goes. While the region is
+  nearest another side, the control says so and names both
+  (`pinNotice`), next to **Back to automatic**, so a pin chosen for one place
+  never governs another unseen.
+- A region set on the screenshot is new when it keeps neither the size nor a
+  corner of the one before (`pinChoiceAfterRegion`): a move keeps the size
+  and a corner drag keeps a corner, even when it flips the region over. A
+  region drawn on a larger screenshot can reach past the one shown, where a
+  corner drag keeps its still corner inside the picture, so the corners of
+  the region before are compared as kept inside it. The typed fields only
+  move or resize. A State check's selection fits the region without this
+  check, so it keeps a pin chosen by hand and the control says when the two
+  disagree.
+- The reference editor draws on the same screenshot for its own characters,
+  so a region drawn there leaves the choice alone.
+- A fix has no choice: it reads at its own region, and its value keeps its
+  pin.
+- **Back to automatic** moves the focus to **Change**, which takes its
+  place. The notice is a live region that stays in the page while it has
+  nothing to say.
+
+### Reading area
+
+**This content may move**, in the same step, is one flag, `mayMove`. With the
+check's kind it comes to one of three (`movingContent` in
+`apps/setup/src/lib/moving.ts`):
+
+- **Fixed**, while the flag is off: the region is drawn around the value.
+- **Area**, for a Number or a Bar fill check: the region is a reading area,
+  drawn dashed and named so on the screenshot, with what else it would read.
+- **Unsupported**, for a Color or a State check: the region stays a plain
+  region, and the step says why and what to do instead.
+
+Changing the check's kind moves between **Area** and **Unsupported**, and the
+flag moves to and from **Fixed**. Saving sends `readingArea` only in
+**Area** (`isReadingArea`), so a value whose check cannot read a reading
+area saves without one while the switch stays on. The owner refuses a save
+that names one for such a check, with the rule of `AppFile::check`.
+
+A fix has no switch. It starts in **Area** when its value saved a reading
+area and in **Fixed** otherwise, and stays there, since a fix keeps its
+value's kind of check. [Content that moves](Screen-regions.md#content-that-moves)
+says what the saved flag is for.
+
+An edit has the switch. It starts in **Area** when its value saved a reading
+area and in **Fixed** otherwise, and moves as a new value does; the owner
+refuses an edit that names a reading area for a Color or a State check.
+
 ### Text reader
 
 The text reader (`apps/setup/src-tauri/src/recording/ocr.rs`) runs on its own thread. It
@@ -1111,7 +1269,8 @@ second copy over to the first, which brings its window forward
 Every write in `crates/config/src/store.rs` goes to a temporary file, is synced,
 and is renamed over the saved file, so a reader sees the old file or the new
 one. Each save reads the file, changes it, and writes it back. A save of an
-application's file goes through `Owner::update_app`, which loads the file,
+application's file, an edit of one of its values included, goes through
+`Owner::update_app`, which loads the file,
 changes it and hands it to `Owner::write_app`, and a save of the automations
 or the settings goes through `Owner::update_runtime`. After a save that works,
 they tell who reads what it changed, as its `Changed` kind says:
@@ -1135,8 +1294,9 @@ left when the program ended in the middle of it go with the application's
 next save. That removal is best effort: one that fails does not fail the
 save, and the next save tries again. Deleting a reference that is already
 gone saves nothing and tells no one, but still removes the pictures an
-earlier delete left behind. Moving a panel writes the application's file
-without telling anyone.
+earlier delete left behind. An edit that leaves a value as it was saved
+writes nothing and tells no one. Moving a panel writes the application's
+file without telling anyone.
 
 A click's picture is written to the `clicks` folder when its target is set
 up, before its automation is saved. Each save of the automations removes the

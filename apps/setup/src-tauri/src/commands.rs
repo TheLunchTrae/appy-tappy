@@ -25,8 +25,8 @@ use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, AppWindows, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner,
-    Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, Desktop, EditPreview, EditSpec, FixSpec, FoundClick,
+    Live, Message, Owner, Reading, ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -255,6 +255,32 @@ pub(crate) async fn remove_app(
 #[tauri::command]
 pub(crate) async fn save_value(app: AppHandle, spec: SaveSpec) -> Result<SavedValue, String> {
     ask(&app, move |owner| owner.save(&spec)).await?
+}
+
+/// Reads the live frame with a saved value as `spec` edits it, and answers
+/// what saving the edit would do. Nothing is saved.
+#[tauri::command]
+pub(crate) async fn try_edit(app: AppHandle, spec: EditSpec) -> Result<EditPreview, String> {
+    ask(&app, move |owner| owner.try_edit(&spec)).await?
+}
+
+/// Saves a saved value as `spec` edits it, under the ID it has, and
+/// removes the fixes at the window sizes `drop_fixes`, which must be
+/// exactly the ones the edit leaves unusable.
+#[tauri::command]
+pub(crate) async fn edit_value(
+    app: AppHandle,
+    spec: EditSpec,
+    drop_fixes: Vec<SizeDef>,
+) -> Result<SavedValue, String> {
+    ask(&app, move |owner| owner.edit_value(&spec, &drop_fixes)).await?
+}
+
+/// The size of the picked window on its newest frame, or `None` before one
+/// arrived.
+#[tauri::command]
+pub(crate) async fn window_size(app: AppHandle) -> Result<Option<SizeDef>, String> {
+    ask(&app, |owner| owner.window_size()).await
 }
 
 /// Where the saved value `value` of the application `application` starts

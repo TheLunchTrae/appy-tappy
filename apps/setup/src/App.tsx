@@ -254,7 +254,7 @@ export function App() {
     if (flow?.kind === 'value') {
       return (
         <NewValue
-          fixing={flow.fixing}
+          changing={flow.changing}
           app={flow.app}
           trail={path}
           continued={continued}
@@ -335,10 +335,10 @@ export function App() {
             loadError={loadError}
             onChanged={refresh}
             onNew={() => {
-              open({ kind: 'value', fixing: null, app: null, opener: null });
+              open({ kind: 'value', changing: null, app: null, opener: null });
             }}
-            onFix={(fixing) => {
-              open({ kind: 'value', fixing, app: null, opener: null });
+            onChange={(changing) => {
+              open({ kind: 'value', changing, app: null, opener: null });
             }}
           />
         );

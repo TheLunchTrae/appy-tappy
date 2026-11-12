@@ -35,6 +35,10 @@ export const OVERLAY_HINT =
 export const CHECK_HINT =
   "Number reads digits, such as a score, with a reference. Bar fill reads how full a bar is, from 0 to 100. Color is yes while the region's average color is close to one you pick. State reads which of a few named looks the region shows.";
 
+/** Editing a saved value, beside a fix of it at one window size. */
+export const EDIT_HINT =
+  'An edit changes the value as it was first drawn, which every window size reads or scales from. A fix leaves that alone and draws the value again at one other size.';
+
 /** The region's typed pixels. */
 export const REGION_HINT =
   "X and Y are the region's top-left corner, counted in pixels from the window's top-left corner. Drawing on a screenshot fills these in; type here to nudge it.";

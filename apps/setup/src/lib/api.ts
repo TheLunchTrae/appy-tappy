@@ -14,6 +14,8 @@ import type {
   ClickAtDef,
   ClickPictureView,
   ColorSpec,
+  EditPreview,
+  EditSpec,
   FixSpec,
   FoundClick,
   Live,
@@ -30,6 +32,7 @@ import type {
   SelectionView,
   SettingsFile,
   SettingsView,
+  SizeDef,
   UpdateOffer,
   WhenDef,
   WindowDef,
@@ -204,6 +207,31 @@ export async function removeApp(application: string): Promise<string | null> {
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
   return invoke<SavedValue>('save_value', { spec });
+}
+
+/**
+ * Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
+ * now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.
+ */
+export async function tryEdit(spec: EditSpec): Promise<EditPreview> {
+  return invoke<EditPreview>('try_edit', { spec });
+}
+
+/**
+ * Saves a saved value as `spec` edits it, under the ID it has. `dropFixes` is the window sizes of the fixes
+ * the user agreed to lose: an edit that leaves other fixes unusable than exactly those is refused, as is
+ * one that would break an automation.
+ */
+export async function editValue(spec: EditSpec, dropFixes: ReadonlyArray<SizeDef>): Promise<SavedValue> {
+  return invoke<SavedValue>('edit_value', { spec, dropFixes });
+}
+
+/**
+ * The size of the picked window on its newest frame, which an edit is tried at, or null before one
+ * arrives.
+ */
+export async function windowSize(): Promise<SizeDef | null> {
+  return invoke<SizeDef | null>('window_size');
 }
 
 /**

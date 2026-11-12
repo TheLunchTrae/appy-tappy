@@ -643,6 +643,7 @@ mod tests {
                         tolerance: 0,
                     },
                     pin: None,
+                    reading_area: false,
                     fixes: Vec::new(),
                 },
             }],
