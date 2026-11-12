@@ -7,6 +7,7 @@ import type {
   AntiCheatDef,
   AppSpec,
   AppSummary,
+  AppWindows,
   AutomationDef,
   AutomationSummary,
   BundleSpec,
@@ -14,8 +15,12 @@ import type {
   CheckSpec,
   ClickAtDef,
   ClickPictureView,
+  ClickSent,
+  ClickSpec,
   ColorSpec,
   DebugOverview,
+  EditPreview,
+  EditSpec,
   FixSpec,
   FoundClick,
   Live,
@@ -35,6 +40,7 @@ import type {
   SelectionView,
   SettingsFile,
   SettingsView,
+  SizeDef,
   TraceFile,
   TraceMetrics,
   TraceRange,
@@ -206,8 +212,27 @@ export async function findClick(at: ClickAtDef): Promise<FoundClick> {
   return invoke<FoundClick>('find_click', { at });
 }
 
+/**
+ * Sends `click` now, once: one real click in its application's window, placed and sent the way the
+ * background part does both. Call it only when the user asks for the click. It resolves with the window
+ * the click went to once it is sent, which does not say that the application acted on it, and rejects
+ * with why it was not sent. The window is the one the application's window rules find now, which may be
+ * another one than the picked window.
+ */
+export async function clickNow(click: ClickSpec): Promise<ClickSent> {
+  return invoke<ClickSent>('click_now', { click });
+}
+
 export async function listApps(): Promise<ReadonlyArray<AppSummary>> {
   return invoke<ReadonlyArray<AppSummary>>('list_apps');
+}
+
+/**
+ * The saved applications and the open windows, with the windows each application's match takes, from
+ * one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
+ */
+export async function listAppWindows(): Promise<AppWindows> {
+  return invoke<AppWindows>('list_app_windows');
 }
 
 /** Saves `spec` over the application `existing`, or as a new one; returns its ID. */
@@ -226,6 +251,31 @@ export async function removeApp(application: string): Promise<string | null> {
 
 export async function saveValue(spec: SaveSpec): Promise<SavedValue> {
   return invoke<SavedValue>('save_value', { spec });
+}
+
+/**
+ * Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
+ * now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.
+ */
+export async function tryEdit(spec: EditSpec): Promise<EditPreview> {
+  return invoke<EditPreview>('try_edit', { spec });
+}
+
+/**
+ * Saves a saved value as `spec` edits it, under the ID it has. `dropFixes` is the window sizes of the fixes
+ * the user agreed to lose: an edit that leaves other fixes unusable than exactly those is refused, as is
+ * one that would break an automation.
+ */
+export async function editValue(spec: EditSpec, dropFixes: ReadonlyArray<SizeDef>): Promise<SavedValue> {
+  return invoke<SavedValue>('edit_value', { spec, dropFixes });
+}
+
+/**
+ * The size of the picked window on its newest frame, which an edit is tried at, or null before one
+ * arrives.
+ */
+export async function windowSize(): Promise<SizeDef | null> {
+  return invoke<SizeDef | null>('window_size');
 }
 
 /**

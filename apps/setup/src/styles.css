@@ -166,7 +166,8 @@ select {
   cursor: pointer;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.45;
   cursor: default;
 }
@@ -466,6 +467,30 @@ select {
 .side h2 {
   font-size: 14px;
   font-weight: 600;
+}
+
+/* A flow that knows its application has only that application's window to find. */
+.picker.alone {
+  grid-template-columns: minmax(0, 480px);
+}
+
+/* The windows that fit an application equally well, listed in the side panel only as tall as they are. */
+.side .window-list {
+  flex: none;
+}
+
+.side > .btn {
+  align-self: flex-start;
+}
+
+.window-list button:disabled {
+  cursor: default;
+}
+
+/* Adding an application is a choice among the saved applications, marked as the one that makes something. */
+.window-list button.add .title::before {
+  content: '+ ';
+  color: var(--capture);
 }
 
 .actions {
@@ -902,6 +927,29 @@ select {
 
 .value-select {
   border-color: var(--capture);
+}
+
+/* What the condition watches: the application, and the flows that add an application or make a value for it. */
+.watch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-row .input {
+  flex: 0 1 280px;
+  min-width: 0;
+}
+
+/* The next step toward a value to watch, said where the step is taken. */
+.guide {
+  max-width: 68ch;
+}
+
+/* The guide stays in the page while it has nothing to say, without the card's gap around it. */
+.guide:empty {
+  margin-bottom: -10px;
 }
 
 .live-reading {
@@ -1577,6 +1625,11 @@ select {
   background: var(--base);
 }
 
+/* A state that keeps its saved picture, which the editor has no screenshot of */
+.state.saved {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .state[aria-current='true'] {
   border-color: var(--capture);
 }
@@ -1862,6 +1915,58 @@ select {
   background: var(--capture);
 }
 
+/* What a region keeps its distance from as the window changes size, over the screenshot. */
+.pin-guides {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pin-guides line {
+  stroke: var(--capture);
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 80%));
+}
+
+.pin-guides .guide {
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.pin-guides .mark {
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.pin-guides .mark.middle {
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+  stroke-linecap: butt;
+}
+
+/* A region drawn as a reading area: larger than what it reads, which may be anywhere inside. */
+.frame.reading-area .marquee {
+  border-style: dashed;
+  background: rgb(242 179 61 / 10%);
+}
+
+.name > .toggle {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* The notice under a side chosen by hand stays in the page while it has nothing to say, and takes no room then. */
+.pin-notice:not(:empty) {
+  margin-top: 5px;
+}
+
+/* What This content may move comes to, as paragraphs spaced like the field's own parts. */
+.moving-says {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 /* A value's reading at the window's size now, or why it has none. */
 .now {
   display: flex;
@@ -1985,6 +2090,11 @@ select {
 .click-app {
   grid-column: span 2;
   min-width: 0;
+}
+
+.click-tries {
+  display: flex;
+  gap: 8px;
 }
 
 .click-options {

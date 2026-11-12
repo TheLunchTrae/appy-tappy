@@ -32,6 +32,7 @@ pub(crate) const REPEATED: &[&str] = &[
     "trace_metrics",
     "trace_rows",
     "watched_reading",
+    "window_size",
 ];
 
 /// How long a repeated command takes before its success is logged.

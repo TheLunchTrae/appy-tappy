@@ -454,6 +454,12 @@ struct NoControls(std::convert::Infallible);
 impl appytappy_actions::Controls for NoControls {
     type Media = ();
     type Volume = ();
+    type Input = appytappy_actions::Unsupported;
+
+    #[mutants::skip]
+    fn input(&mut self) -> &mut appytappy_actions::Unsupported {
+        match self.0 {}
+    }
 
     #[mutants::skip]
     fn current_media(&mut self) -> io::Result<Option<appytappy_actions::MediaSession<()>>> {
@@ -490,61 +496,6 @@ impl appytappy_actions::Controls for NoControls {
         (): &(),
         _level: appytappy_config::action::VolumeLevel,
     ) -> io::Result<bool> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn focused_process(&mut self) -> io::Result<Option<appytappy_config::anti_cheat::ProcessId>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn held_modifiers(&mut self) -> io::Result<Vec<appytappy_config::action::Modifier>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn send_strokes(&mut self, _strokes: &[appytappy_actions::Stroke]) -> io::Result<usize> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn front_window(&mut self) -> io::Result<Option<u64>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn window_at(&mut self, _x: i32, _y: i32) -> io::Result<Option<u64>> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn bring_to_front(&mut self, _window: u64) -> io::Result<bool> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn cursor(&mut self) -> io::Result<(i32, i32)> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn move_cursor(&mut self, _x: i32, _y: i32) -> io::Result<()> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn buttons_held(&mut self) -> io::Result<bool> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn send_presses(&mut self, _presses: &[appytappy_actions::Press]) -> io::Result<usize> {
-        match self.0 {}
-    }
-
-    #[mutants::skip]
-    fn hold(&mut self, _time: std::time::Duration) {
         match self.0 {}
     }
 

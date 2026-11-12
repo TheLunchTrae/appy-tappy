@@ -32,8 +32,9 @@ use crate::debug::workings::ReadingDetails;
 use crate::debug::{DebugOverview, LogName};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
-    AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
-    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
+    FixSpec, FoundClick, Live, Message, Owner, Reading, ReferenceSaveSpec, Run, SaveSpec,
+    SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
@@ -306,10 +307,23 @@ pub(crate) async fn find_click(app: AppHandle, at: ClickAtDef) -> Result<FoundCl
     try_ask(&app, "find_click", move |owner| owner.find_click(&at)).await
 }
 
+/// Sends the click `click` now, once, and answers the window it went to.
+#[tauri::command]
+pub(crate) async fn click_now(app: AppHandle, click: ClickSpec) -> Result<ClickSent, String> {
+    try_ask(&app, "click_now", move |owner| owner.click_now(&click)).await
+}
+
 /// The saved applications and their values.
 #[tauri::command]
 pub(crate) async fn list_apps(app: AppHandle) -> Result<Vec<AppSummary>, String> {
     try_ask(&app, "list_apps", Owner::apps).await
+}
+
+/// The saved applications and the open windows, with the windows each
+/// application's match takes, from one listing of the desktop.
+#[tauri::command]
+pub(crate) async fn list_app_windows(app: AppHandle) -> Result<AppWindows, String> {
+    try_ask(&app, "list_app_windows", Owner::app_windows).await
 }
 
 /// Saves an application's name and window match over the application
@@ -345,6 +359,35 @@ pub(crate) async fn remove_app(
 #[tauri::command]
 pub(crate) async fn save_value(app: AppHandle, spec: SaveSpec) -> Result<SavedValue, String> {
     try_ask(&app, "save_value", move |owner| owner.save(&spec)).await
+}
+
+/// Reads the live frame with a saved value as `spec` edits it, and answers
+/// what saving the edit would do. Nothing is saved.
+#[tauri::command]
+pub(crate) async fn try_edit(app: AppHandle, spec: EditSpec) -> Result<EditPreview, String> {
+    try_ask(&app, "try_edit", move |owner| owner.try_edit(&spec)).await
+}
+
+/// Saves a saved value as `spec` edits it, under the ID it has, and
+/// removes the fixes at the window sizes `drop_fixes`, which must be
+/// exactly the ones the edit leaves unusable.
+#[tauri::command]
+pub(crate) async fn edit_value(
+    app: AppHandle,
+    spec: EditSpec,
+    drop_fixes: Vec<SizeDef>,
+) -> Result<SavedValue, String> {
+    try_ask(&app, "edit_value", move |owner| {
+        owner.edit_value(&spec, &drop_fixes)
+    })
+    .await
+}
+
+/// The size of the picked window on its newest frame, or `None` before one
+/// arrived.
+#[tauri::command]
+pub(crate) async fn window_size(app: AppHandle) -> Result<Option<SizeDef>, String> {
+    ask(&app, "window_size", |owner| owner.window_size()).await
 }
 
 /// Where the saved value `value` of the application `application` starts

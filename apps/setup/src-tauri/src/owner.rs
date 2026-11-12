@@ -17,6 +17,7 @@ mod automations;
 mod capture;
 mod clicks;
 mod debug;
+mod edits;
 mod fixes;
 mod host;
 mod messages;
@@ -49,12 +50,12 @@ use crate::recording::{Recording, ocr};
 use crate::stores::{SavedApp, Stores};
 use crate::updates::Downloaded;
 
-pub(crate) use self::clicks::{ClickPictureView, FoundClick};
+pub(crate) use self::clicks::{ClickPictureView, ClickSent, ClickSpec, FoundClick};
 pub(crate) use self::host::{Desktop, Host};
 use self::messages::CaptureFailure;
 pub(crate) use self::messages::{
-    AppSummary, FixSpec, Live, Message, Reading, ReferenceSaveSpec, Run, SaveSpec,
-    SavedReferenceId, SavedValue,
+    AppSummary, AppWindows, EditPreview, EditSpec, FixSpec, Live, Message, Reading,
+    ReferenceSaveSpec, Run, SaveSpec, SavedReferenceId, SavedValue,
 };
 use self::watch::Watched;
 

@@ -87,7 +87,16 @@ macro_rules! with_commands {
             commands::click_picture(image: String, max_width: u32) -> Pixels;
             /// Where a click at `at` lands on the picked window's newest frame; rejects with why it lands nowhere.
             commands::find_click(at: ClickAtDef) -> FoundClick;
+            /// Sends `click` now, once: one real click in its application's window, placed and sent the way the
+            /// background part does both. Call it only when the user asks for the click. It resolves with the window
+            /// the click went to once it is sent, which does not say that the application acted on it, and rejects
+            /// with why it was not sent. The window is the one the application's window rules find now, which may be
+            /// another one than the picked window.
+            commands::click_now(click: ClickSpec) -> ClickSent;
             commands::list_apps() -> Vec<AppSummary>;
+            /// The saved applications and the open windows, with the windows each application's match takes, from
+            /// one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
+            commands::list_app_windows() -> AppWindows;
             /// Saves `spec` over the application `existing`, or as a new one; returns its ID.
             commands::save_app(existing: Option<String>, spec: AppSpec) -> String;
             /// Removes an application with its values, unless an automation uses one of them, and closes its overlay.
@@ -95,6 +104,16 @@ macro_rules! with_commands {
             /// null.
             commands::remove_app(application: String) -> Option<String>;
             commands::save_value(spec: SaveSpec) -> SavedValue;
+            /// Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
+            /// now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.
+            commands::try_edit(spec: EditSpec) -> EditPreview;
+            /// Saves a saved value as `spec` edits it, under the ID it has. `dropFixes` is the window sizes of the fixes
+            /// the user agreed to lose: an edit that leaves other fixes unusable than exactly those is refused, as is
+            /// one that would break an automation.
+            commands::edit_value(spec: EditSpec, drop_fixes: Vec<SizeDef>) -> SavedValue;
+            /// The size of the picked window on its newest frame, which an edit is tried at, or null before one
+            /// arrives.
+            commands::window_size() -> Option<SizeDef>;
             /// Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would
             /// not fit.
             commands::place_value(

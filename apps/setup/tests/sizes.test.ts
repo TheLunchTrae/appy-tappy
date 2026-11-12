@@ -57,6 +57,10 @@ describe('regionText', () => {
     expect(regionText(screen)).toBe('Drawn at 1920 × 1080, pinned bottom left');
     expect(regionText({ ...fixed, pin: 'center' })).toBe('Drawn at 1920 × 1080, pinned center · fixed at 3440 × 1440');
     expect(pinOf({ ...screen, pin: 'topRight' })).toBe('topRight');
+    expect(regionText({ ...fixed, readingArea: true })).toBe(
+      'Reading area drawn at 1920 × 1080, pinned bottom left · fixed at 3440 × 1440',
+    );
+    expect(regionText({ ...screen, readingArea: false })).toBe('Drawn at 1920 × 1080, pinned bottom left');
   });
 });
 

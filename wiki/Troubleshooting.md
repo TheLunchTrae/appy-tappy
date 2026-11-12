@@ -67,6 +67,20 @@ says what to do.
   front. The log says when it skipped a press for that reason.
 - Windows drops keys sent to a program that runs as administrator.
 
+## A click does nothing
+
+- Both the watched application and the one clicked in must have anti-cheat
+  set to **None** on the Applications page. See
+  [Anti-cheat](Applications.md#anti-cheat).
+- The log says why AppyTappy skipped a click, such as a window that is
+  minimized, a picture that was not found, or another window in front.
+- With **Send to the window**, the log says each time that the click was sent.
+  If the application still did nothing, it ignores clicks sent this way:
+  change the click to **Move the cursor**. See
+  [How to click](Automations.md#how-to-click).
+- Windows does not let AppyTappy click in a program that runs as
+  administrator.
+
 ## The overlay doesn't show over a game
 
 The game probably runs in exclusive fullscreen, which draws over every other

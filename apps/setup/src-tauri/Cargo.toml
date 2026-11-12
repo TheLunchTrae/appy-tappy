@@ -16,6 +16,9 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
+# Sends the click the user asks for on the click target screen, the way the
+# runtime clicks.
+appytappy-actions = { version = "=0.1.0", path = "../../../crates/actions" }
 appytappy-config = { version = "=0.1.0", path = "../../../crates/config" }
 # Tells the runtime to read the automations again after each save.
 appytappy-platform = { version = "=0.1.0", path = "../../../crates/platform" }

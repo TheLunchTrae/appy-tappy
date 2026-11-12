@@ -7,7 +7,6 @@ import {
   fitCount,
   fitLabel,
   matchSummary,
-  pickedStatus,
   sentence,
   required,
   scoreText,
@@ -69,8 +68,8 @@ describe('the summary', () => {
 
 describe('the window list', () => {
   const fits: readonly WindowFit[] = [
-    { handle: 3, fallback: false, best: true },
-    { handle: 5, fallback: false, best: false },
+    { handle: 3, fallback: false, best: true, tied: true },
+    { handle: 5, fallback: false, best: false, tied: false },
   ];
 
   test('marks the best match, the other matches and windows the match does not take', () => {
@@ -82,8 +81,8 @@ describe('the window list', () => {
 
   test('marks fallback windows', () => {
     const fallbacks: readonly WindowFit[] = [
-      { handle: 3, fallback: true, best: true },
-      { handle: 5, fallback: true, best: false },
+      { handle: 3, fallback: true, best: true, tied: true },
+      { handle: 5, fallback: true, best: false, tied: false },
     ];
     expect(fitLabel(fallbacks, 3)?.text).toBe('best match, fallback');
     expect(fitLabel(fallbacks, 5)?.text).toBe('fallback');
@@ -92,62 +91,11 @@ describe('the window list', () => {
   test('counts what qualifies and says when the fallback is used', () => {
     expect(fitCount(null)).toBe('Looking for matching windows…');
     expect(fitCount([])).toBe('No open window qualifies, so AppyTappy treats the application as closed.');
-    expect(fitCount([{ handle: 3, fallback: true, best: true }])).toBe(
+    expect(fitCount([{ handle: 3, fallback: true, best: true, tied: true }])).toBe(
       'No open window qualifies, so AppyTappy uses the fallback: 1 window.',
     );
     expect(fitCount(fits.slice(0, 1))).toBe('1 open window qualifies.');
     expect(fitCount(fits)).toBe('2 open windows qualify. AppyTappy uses the one that matches the most fields.');
-  });
-});
-
-describe('the picked window', () => {
-  const titles = (handle: number): string | null => (handle === 3 ? 'Example App - Save 3' : null);
-
-  test('can be captured only when the application reads it', () => {
-    const fits: readonly WindowFit[] = [
-      { handle: 3, fallback: false, best: true },
-      { handle: 5, fallback: false, best: false },
-    ];
-    expect(pickedStatus('Example App', 3, fits, null, titles)).toEqual({
-      text: 'Example App reads this window.',
-      ok: true,
-    });
-    const other = pickedStatus('Example App', 5, fits, null, titles);
-    expect(other.ok).toBe(false);
-    expect(other.text).toStartWith('Example App reads “Example App - Save 3” instead');
-  });
-
-  test('waits while the windows are matched and says when that fails', () => {
-    expect(pickedStatus('Example App', 3, null, null, titles).ok).toBe(false);
-    const failed = pickedStatus('Example App', 3, null, 'Windows did not answer.', titles);
-    expect(failed.ok).toBe(false);
-    expect(failed.text).toContain('Windows did not answer.');
-    expect(pickedStatus('Example App', 3, null, 'no answer', titles).text).toContain('no answer. Refresh');
-  });
-
-  test('is only the window the runtime reads among windows that fit as well', () => {
-    const twins: readonly WindowFit[] = [
-      { handle: 8, fallback: false, best: true },
-      { handle: 3, fallback: false, best: false },
-    ];
-    expect(pickedStatus('Example App', 8, twins, null, titles).ok).toBe(true);
-    const twin = pickedStatus('Example App', 3, twins, null, titles);
-    expect(twin.ok).toBe(false);
-    expect(twin.text).toStartWith('Example App reads another window instead');
-  });
-
-  test('says another window is read when the runtime reads one the list leaves out', () => {
-    const unlisted: readonly WindowFit[] = [
-      { handle: 3, fallback: false, best: false },
-      { handle: 5, fallback: false, best: false },
-    ];
-    const status = pickedStatus('Example App', 3, unlisted, null, titles);
-    expect(status.ok).toBe(false);
-    expect(status.text).toStartWith('Example App reads another window instead');
-  });
-
-  test('says when the application finds no open window', () => {
-    expect(pickedStatus('Example App', 3, [], null, titles).text).toStartWith("Example App doesn't find this window");
   });
 });
 
@@ -170,7 +118,7 @@ describe('a window score', () => {
   });
 
   test('names each field that matches or differs', () => {
-    expect(scoreText(score({ class: false, fit: { handle: 1, fallback: false, best: true } }), loose)).toBe(
+    expect(scoreText(score({ class: false, fit: { handle: 1, fallback: false, best: true, tied: true } }), loose)).toBe(
       'Title matches, class differs, executable matches.',
     );
   });

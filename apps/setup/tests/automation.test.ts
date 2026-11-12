@@ -18,6 +18,7 @@ import {
   toDraft,
   undoable,
   undoText,
+  unusedKey,
   usedBy,
   valueChoices,
   valueKind,
@@ -296,6 +297,13 @@ describe('buildAutomation', () => {
       [0, 'app', 'Player.exe'],
       [1, 'default', ''],
     ]);
+  });
+
+  test('an added action gets a key no row has, also after rows were removed', () => {
+    expect(unusedKey([])).toBe(0);
+    expect(unusedKey(toDraft(pauseMusic).actions)).toBe(2);
+    expect(unusedKey([newAction(1), newAction(2)])).toBe(3);
+    expect(unusedKey([newAction(4), newAction(0)])).toBe(5);
   });
 });
 
@@ -631,6 +639,7 @@ describe('clicks', () => {
         kind: 'click',
         app: 'streaming',
         button: 'left',
+        delivery: 'message',
         returnFocus: true,
         at: {
           kind: 'picture',
@@ -692,8 +701,24 @@ describe('clicks', () => {
     });
   });
 
-  test('a new click starts with the left button, going back to the window in front, and no target', () => {
+  test('a new click starts with the left button and the cursor, going back to the window in front, and no target', () => {
     const action = newAction(3, 'click');
-    expect([action.clickApp, action.button, action.returnFocus, action.at]).toEqual(['', 'left', true, null]);
+    expect([action.clickApp, action.button, action.delivery, action.returnFocus, action.at]).toEqual([
+      '',
+      'left',
+      'cursor',
+      true,
+      null,
+    ]);
+  });
+
+  test('a click sent to the window needs no anti-cheat on either side, as a click with the cursor does', () => {
+    for (const delivery of ['cursor', 'message'] as const) {
+      const draft = toDraft({ ...click, actions: click.actions.map((action) => ({ ...action, delivery })) });
+      for (const blocked of [withAntiCheat('none', 'userMode'), withAntiCheat('kernelLevel', 'none')]) {
+        const built = buildAutomation(draft, valueChoices(blocked), 'pause_music', blocked);
+        expect(built.ok ? null : built.next).toContain('so AppyTappy cannot click while it runs');
+      }
+    }
   });
 });

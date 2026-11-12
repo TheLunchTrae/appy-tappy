@@ -6,9 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, value_id,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, new_value_id,
+    value_id,
 };
 use appytappy_sources::screen::saved;
+use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
 use crate::applications::{self, AppSpec};
 use crate::automations;
@@ -17,21 +19,40 @@ use crate::stores::SavedApp;
 use crate::window_list;
 
 use super::host::Host;
-use super::messages::{AppSummary, SaveSpec, SavedValue};
+use super::messages::{AppFits, AppSummary, AppWindows, SaveSpec, SavedValue};
 use super::{Changed, Edit, Owner, Write};
 
 impl<H: Host> Owner<H> {
     /// The saved applications.
     pub(crate) fn apps(&mut self) -> Result<Vec<AppSummary>, String> {
+        // The saved files read fine without the running windows, so a
+        // failed window listing only leaves each one's windows empty.
+        let (processes, windows) = self.desktop().unwrap_or_default();
+        let found = self.app_windows_among(&processes, windows)?;
+        Ok(found.apps.into_iter().map(|each| each.app).collect())
+    }
+
+    /// The saved applications and the open windows, with the windows each
+    /// application's match takes, all from one listing of the desktop, so
+    /// a window that opens or closes meanwhile cannot make them disagree.
+    pub(crate) fn app_windows(&mut self) -> Result<AppWindows, String> {
+        let (processes, windows) = self.desktop()?;
+        self.app_windows_among(&processes, windows)
+    }
+
+    /// The saved applications, with what each one's match takes among
+    /// `processes` and `all`, and the windows of `all` to offer.
+    fn app_windows_among(
+        &mut self,
+        processes: &[ProcessEntry],
+        all: Vec<WindowEntry>,
+    ) -> Result<AppWindows, String> {
         let stored = self
             .stores()?
             .apps
             .load()
             .map_err(|error| error.to_string())?;
-        // The saved files read fine without the running windows, so a
-        // failed window listing only leaves each one's windows empty.
-        let (processes, all) = self.desktop().unwrap_or_default();
-        let windows = window_list::list(all.clone(), &processes, self.own_process).windows;
+        let open = window_list::list(all.clone(), processes, self.own_process);
         // Each application with the window a new session would read for it.
         let apps: Vec<_> = stored
             .into_iter()
@@ -42,7 +63,7 @@ impl<H: Host> Owner<H> {
                 };
                 let read = file.as_ref().and_then(|file| {
                     self.host
-                        .read_window(&file.window.to_match(), processes.clone(), all.clone())
+                        .read_window(&file.window.to_match(), processes.to_vec(), all.clone())
                 });
                 (app.id, file, error, read)
             })
@@ -54,17 +75,14 @@ impl<H: Host> Owner<H> {
                     .is_some_and(|read| read.entry.process == *process)
             })
         });
-        Ok(apps
+        let apps = apps
             .into_iter()
             .map(|(id, file, error, read)| {
-                let matched: Vec<u64> = file
+                let fits = file
                     .as_ref()
                     .map(|file| {
                         let handle = read.as_ref().map(|read| read.entry.handle);
-                        window_list::matching(&windows, &file.window, handle)
-                            .into_iter()
-                            .map(|fit| fit.handle)
-                            .collect()
+                        window_list::matching(&open.windows, &file.window, handle)
                     })
                     .unwrap_or_default();
                 // Only an application with values shows its build, and one
@@ -77,15 +95,19 @@ impl<H: Host> Owner<H> {
                             .ok()
                             .flatten()
                     });
-                AppSummary {
-                    id,
-                    file,
-                    error,
-                    windows: matched,
-                    running,
+                AppFits {
+                    app: AppSummary {
+                        id,
+                        file,
+                        error,
+                        windows: fits.iter().map(|fit| fit.handle).collect(),
+                        running,
+                    },
+                    fits,
                 }
             })
-            .collect())
+            .collect();
+        Ok(AppWindows { open, apps })
     }
 
     /// Saves a value and answers where it was saved, or what to fix.
@@ -105,13 +127,14 @@ impl<H: Host> Owner<H> {
             .with_session(|session| check_spec::drawn_size(&spec.check, session, spec.screenshot))
             .map_err(|error| error.to_string())?;
         self.update_app(&spec.app, Changed::Values, |owner, found| {
-            let id = value_id(name);
-            if found.file.values.iter().any(|value| value.id == id) {
-                return Err(format!(
-                    "{} already has a value named like \"{name}\". Pick another name.",
-                    found.file.name
-                ));
-            }
+            named_apart(&found.file, None, name)?;
+            let taken: Vec<&str> = found
+                .file
+                .values
+                .iter()
+                .map(|value| value.id.as_str())
+                .collect();
+            let id = new_value_id(name, &taken);
             let saved = owner
                 .with_session(|session| check_spec::to_saved(&spec.check, session, &spec.app, &id))
                 .map_err(|error| error.to_string())?;
@@ -123,6 +146,7 @@ impl<H: Host> Owner<H> {
                 region: saved.region,
                 check: saved.check,
                 pin: Some(spec.pin),
+                reading_area: spec.reading_area,
                 fixes: Vec::new(),
             };
             read_back(&screen, found, &saved.pictures)?;
@@ -263,6 +287,24 @@ fn checked_now(build: BuildDef) -> CheckedDef {
     CheckedDef { build, at }
 }
 
+/// Fails when a value of `file` other than `own` has a name like `name`.
+/// Names that make the same ID, such as "Progress" and "progress ", are one
+/// name, whatever ID the value named so has: a renamed value keeps its ID.
+pub(super) fn named_apart(file: &AppFile, own: Option<&str>, name: &str) -> Result<(), String> {
+    let same = value_id(name);
+    if file
+        .values
+        .iter()
+        .any(|value| Some(value.id.as_str()) != own && value_id(&value.name) == same)
+    {
+        return Err(format!(
+            "{} already has a value named like \"{name}\". Pick another name.",
+            file.name
+        ));
+    }
+    Ok(())
+}
+
 /// Reads `screen` back as the runtime will, with the references and size
 /// changes of `app`'s file, from `pictures`, about to be saved, and those
 /// already in its folder, so a value that saves is one the runtime can read.
@@ -270,7 +312,7 @@ pub(super) fn read_back(
     screen: &ScreenDef,
     app: &SavedApp,
     pictures: &Pictures,
-) -> Result<(), String> {
+) -> Result<saved::SavedValue, String> {
     saved::build(
         screen,
         &app.file.references,
@@ -282,7 +324,6 @@ pub(super) fn read_back(
                 .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
         },
     )
-    .map(drop)
     .map_err(|error| format!("AppyTappy could not read this value as saved: {error}."))
 }
 
@@ -291,6 +332,8 @@ mod tests {
     use appytappy_config::app_file::WindowDef;
     use appytappy_config::automation_file::{ActionDef, AutomationDef, MediaCommandDef};
     use appytappy_sources::screen::{Image, Size};
+
+    use crate::window_list::WindowFit;
 
     use crate::owner::test_support::{
         BAR, FakeHost, Harness, NO_STORE, STATE, add_example_app, example_build, frame_image,
@@ -338,16 +381,17 @@ mod tests {
                 tolerance: 0,
             },
             pin: None,
+            reading_area: false,
             fixes: Vec::new(),
         };
         std::fs::write(app.folder.join("old.png"), &png).expect("writes");
         let new = vec![("new.png".to_owned(), png)];
         assert_eq!(
-            read_back(&screen(["new.png", "old.png"]), &app, &new),
+            read_back(&screen(["new.png", "old.png"]), &app, &new).map(drop),
             Ok(())
         );
         assert_eq!(
-            read_back(&screen(["new.png", "gone.png"]), &app, &new),
+            read_back(&screen(["new.png", "gone.png"]), &app, &new).map(drop),
             Err(
                 "AppyTappy could not read this value as saved: its picture gone.png cannot be \
                  read."
@@ -358,6 +402,55 @@ mod tests {
             read_back(&screen(["old.png", "new.png"]), &app, &Vec::new()).is_err(),
             "a new picture is not on disk yet"
         );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn the_applications_and_the_open_windows_come_from_one_listing() {
+        let (stores, root) = scratch_store("app-windows");
+        let mut harness = harness_with(false, Ok(stores));
+        add_example_app(&mut harness);
+        let fit = |handle, best| WindowFit {
+            handle,
+            fallback: false,
+            best,
+            tied: true,
+        };
+        let handles = |found: &AppWindows| -> Vec<u64> {
+            found.open.windows.iter().map(|each| each.handle).collect()
+        };
+
+        let found = harness.ask(Owner::app_windows).expect("lists");
+        assert_eq!(
+            handles(&found),
+            [7],
+            "the setup app's own window is left out"
+        );
+        assert_eq!(found.apps.len(), 1);
+        let example = &found.apps[0];
+        assert_eq!(example.app.id, "example");
+        assert_eq!(example.app.windows, [7]);
+        assert_eq!(example.fits, [fit(7, true)]);
+        assert_eq!(
+            example.app.file.as_ref().map(|file| file.name.as_str()),
+            Some("Example App")
+        );
+
+        // Another copy's window fits as well, and both are offered.
+        harness.owner.host.twin = Some(40);
+        let found = harness.ask(Owner::app_windows).expect("lists");
+        assert_eq!(handles(&found), [6, 7]);
+        assert_eq!(found.apps[0].fits, [fit(7, true), fit(6, false)]);
+        assert_eq!(found.apps[0].app.windows, [7, 6]);
+
+        // Without the windows there is nothing to capture, so the look
+        // fails where the list of applications alone would not.
+        harness.owner.host.unlisted = true;
+        assert_eq!(
+            harness.ask(Owner::app_windows),
+            Err("no windows here".to_owned())
+        );
+        assert!(harness.ask(Owner::apps).is_ok());
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -402,6 +495,17 @@ mod tests {
             ),
             "a value is saved at one window size"
         );
+        // Only a check that reads anywhere in its region has a reading area.
+        let mut area = spec("example", "Icon visible", STATE);
+        area.reading_area = true;
+        assert_eq!(
+            harness.ask(save(area)),
+            Err(
+                "value \"icon_visible\": its region is a reading area, which only a number or \
+                 bar fill check can read"
+                    .to_owned()
+            )
+        );
         let saved = harness
             .ask(save(spec("example", "Icon visible", STATE)))
             .expect("saves a new app");
@@ -412,9 +516,9 @@ mod tests {
                 value: "icon_visible".to_owned()
             }
         );
-        harness
-            .ask(save(spec("example", "Progress bar", BAR)))
-            .expect("adds to the app");
+        let mut bar = spec("example", "Progress bar", BAR);
+        bar.reading_area = true;
+        harness.ask(save(bar)).expect("adds to the app");
         assert_eq!(
             harness.ask(save(spec("example", "Progress BAR", BAR))),
             Err(
@@ -436,6 +540,12 @@ mod tests {
         assert_eq!(file.name, "Example App");
         let ids: Vec<&str> = file.values.iter().map(|value| value.id.as_str()).collect();
         assert_eq!(ids, ["icon_visible", "progress_bar"]);
+        let areas: Vec<bool> = file
+            .values
+            .iter()
+            .map(|value| value.screen.reading_area)
+            .collect();
+        assert_eq!(areas, [false, true], "a value keeps what its save said");
         assert_eq!(
             file.values[0].screen.window_size,
             SizeDef {

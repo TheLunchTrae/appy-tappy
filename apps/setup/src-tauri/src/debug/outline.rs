@@ -152,6 +152,7 @@ mod tests {
                     tolerance: 10,
                 },
                 pin: None,
+                reading_area: false,
                 fixes: Vec::new(),
             },
         }
