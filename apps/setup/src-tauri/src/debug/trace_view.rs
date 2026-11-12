@@ -1215,19 +1215,27 @@ mod tests {
     #[test]
     fn rows_out_of_order_are_counted_in_their_own_second() {
         let mut tally = Tally::default();
-        for (ms, count) in [(5_000, 1), (3_000, 2), (5_500, 4), (1_000, 8), (4_000, 16)] {
+        // The last row lands in an older second that already has a count.
+        for (ms, count) in [
+            (5_000, 1),
+            (3_000, 2),
+            (5_500, 4),
+            (1_000, 8),
+            (4_000, 16),
+            (3_200, 32),
+        ] {
             tally.add(ms * MS, count);
         }
         assert_eq!(
             Vec::from(tally.seconds.clone()),
-            [(1, 8), (3, 2), (4, 16), (5, 5)]
+            [(1, 8), (3, 34), (4, 16), (5, 5)]
         );
-        assert_eq!(tally.total, 31);
-        assert_eq!(tally.since(Some(3_900 * MS)), 23);
-        assert_eq!(tally.since(None), 31);
+        assert_eq!(tally.total, 63);
+        assert_eq!(tally.since(Some(3_900 * MS)), 55);
+        assert_eq!(tally.since(None), 63);
         tally.trim((RECENT_S + 4) * NS_PER_S);
         assert_eq!(Vec::from(tally.seconds.clone()), [(4, 16), (5, 5)]);
-        assert_eq!(tally.total, 31);
+        assert_eq!(tally.total, 63);
     }
 
     #[test]
