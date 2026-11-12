@@ -741,6 +741,8 @@ select {
   background: var(--base);
   border: 1px solid var(--line);
   min-height: 66px;
+  /* A reason it cannot be read runs to several lines, which the panel scrolls to rather than squeezing. */
+  flex: none;
 }
 
 .reading strong {

@@ -334,6 +334,14 @@ stateDiagram-v2
 - A value that does not read at the capture's own size, such as one whose
   scaled region reaches outside the window, says why once and is not
   copied.
+- A value whose check fails on a frame keeps its last reading and says why
+  once, until it reads again or fails another way. A number's check fails
+  one way for each stage of its read, such as a character its reference has
+  not learned, whatever the characters are, so a counter that stays
+  unreadable while it counts is said once, with what its first failed read
+  showed ([Why a number is not read](Screen-regions.md#why-a-number-is-not-read)).
+  At a size the value was not drawn at, the line says its region is scaled
+  there and to fix the value at that size if the region is off.
 - Each value's problem leaves the window size out and is carried into the
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.

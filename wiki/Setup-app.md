@@ -37,6 +37,15 @@ This page covers what the user guide leaves out.
   failure stands, a screenshot is refused, and a recording stops with the
   failure as its problem. Once the window has closed, no recording starts or goes
   on until another window is picked.
+- **Live reading.** `read_value` answers what the check being set up reads
+  on the newest frame, or why that frame cannot be read, in the check's own
+  words (`CheckError`), which the box under the check shows in place of a
+  reading. A reference being taught is read by the reader its labels teach
+  (`CheckSpec::Characters`), never by the text reader, and the runtime
+  builds the same reader from the saved file
+  (`check_spec/round_trip.rs`). The region is read where it was drawn,
+  whatever size the live window has, so a window resized since its
+  screenshot shows another spot there.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A

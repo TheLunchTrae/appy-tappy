@@ -55,6 +55,7 @@
 //! which records to it from its next frame, so the capture goes on and no
 //! value is read again for it.
 
+use std::fmt;
 use std::io;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -65,6 +66,7 @@ use appytappy_actions::Watched;
 use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::Value;
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
+use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::{AtSize, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{
@@ -128,6 +130,9 @@ pub(crate) enum Reading {
     /// Something keeps one value from being read. The log puts the value's
     /// newest name before `problem`, so a renamed value shows its new name.
     /// Each is sent once until a different one, or a good read, replaces it.
+    /// A check that keeps failing the same way is one problem, sent with
+    /// what its first failed read saw, such as the characters a number
+    /// read, however that changes from frame to frame.
     ValueProblem {
         /// The session.
         session: SessionId,
@@ -150,8 +155,42 @@ pub(crate) enum Reading {
     },
 }
 
-/// Each value's last problem, in the order of its application's values.
+/// Each value's last problem, in the order of its application's values: why
+/// it is not read at the window's size, or the way its check failed, as
+/// [`unreadable`] words it.
 type Problems = Vec<Option<String>>;
+
+/// Why a value could not be read from a frame.
+#[derive(Debug)]
+enum Unreadable {
+    /// It does not read at the window's size.
+    NotRead(Unread),
+    /// Its check failed on the region's pixels.
+    Check {
+        /// Why.
+        error: CheckError,
+        /// Whether the region is one the value was drawn at, at this window
+        /// size, rather than scaled to it.
+        drawn: bool,
+    },
+}
+
+/// That a value's check failed and why, as a sentence fragment that
+/// follows the value's name: `why` is the check's error, or the way it
+/// failed alone, which stays the same while what the region shows changes.
+/// A region that is not `drawn` at the window's size is scaled to it and
+/// can lie beside the value, as between a window with a title bar and
+/// fullscreen, so the fragment says what to do then.
+fn unreadable(why: &dyn fmt::Display, drawn: bool) -> String {
+    if drawn {
+        format!("cannot be read: {why}")
+    } else {
+        format!(
+            "cannot be read where its region scales to at the window's size now: {why}; if \
+             the region is off the value there, fix the value at this size in AppyTappy Setup"
+        )
+    }
+}
 
 /// What reaches the reader thread.
 #[derive(Debug, Clone, PartialEq)]
@@ -1015,7 +1054,7 @@ impl<E: From<Reading>> FrameReader<E> {
             }
             match read {
                 Some(Ok(reading)) => changed |= self.record(position, reading, frame.as_ref()),
-                Some(Err(problem)) => self.report(position, problem),
+                Some(Err(problem)) => self.report(position, &problem),
                 None => {},
             }
         }
@@ -1049,21 +1088,27 @@ impl<E: From<Reading>> FrameReader<E> {
     }
 
     /// Reads the value at `position`, or says why it cannot be read.
-    fn read(&self, position: usize, frame: Option<&Frame<'_>>) -> Option<Result<Value, String>> {
+    fn read(
+        &self,
+        position: usize,
+        frame: Option<&Frame<'_>>,
+    ) -> Option<Result<Value, Unreadable>> {
         let value = self.plan.runs.values.get(position)?;
         let at = match self.placed.values.get(position)? {
             Ok(at) => at,
-            Err(unread) => return Some(Err(not_read(*unread))),
+            Err(unread) => return Some(Err(Unreadable::NotRead(*unread))),
         };
         let region = self.layout.packed(position)?;
         let image = frame?.image.crop(region)?;
-        Some(
-            value
-                .check
-                .check(at)
-                .read(&image)
-                .map_err(|error| format!("cannot be read: {error}")),
-        )
+        Some(value.check.check(at).read(&image).map_err(|error| {
+            Unreadable::Check {
+                error,
+                drawn: value
+                    .check
+                    .drawn_sizes()
+                    .any(|size| size == self.placed.size),
+            }
+        }))
     }
 
     /// Keeps a good reading and sends it when it changed; returns whether it
@@ -1101,12 +1146,21 @@ impl<E: From<Reading>> FrameReader<E> {
         true
     }
 
-    /// Sends a value's problem once until it changes.
-    fn report(&mut self, position: usize, problem: String) {
+    /// Sends a value's problem once until it changes. A check's problem
+    /// changes when the way it fails does, not with what the region shows,
+    /// so a number that stays unreadable while it counts is said once.
+    fn report(&mut self, position: usize, problem: &Unreadable) {
         let Some(slot) = self.problems.get_mut(position) else {
             return;
         };
-        if let Some(problem) = newly(slot, problem) {
+        let (kind, check) = match problem {
+            Unreadable::NotRead(unread) => (not_read(*unread), None),
+            Unreadable::Check { error, drawn } => {
+                (unreadable(&error.stage(), *drawn), Some((error, *drawn)))
+            },
+        };
+        if let Some(kind) = newly(slot, kind) {
+            let problem = check.map_or(kind, |(error, drawn)| unreadable(error, drawn));
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a failed send means the owner stopped this session"
@@ -1779,7 +1833,70 @@ mod tests {
         frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(
             problems(&readings),
-            ["value 0 cannot be read: the region's number could not be read"]
+            ["value 0 cannot be read: no pixel in the region has the characters' color"]
+        );
+    }
+
+    #[test]
+    fn a_value_unreadable_where_its_region_scales_to_says_to_fix_it_there() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, _control) = mpsc::channel();
+        let mut value = scaling("count", 4, 6, WINDOW, SizeChangesDef::Often);
+        value.check.drawn.check = Check::Number {
+            reader: DigitReader::new(RED, 10),
+            whole: false,
+        };
+        let job = job(vec![value]);
+        let mut frames = frames_at(&job, SMALL, events, control).expect("values to read");
+        let black = frame_image(16, 16, |_, _| false);
+        frames.handle(Ok(frame(&black, SMALL)));
+        assert_eq!(
+            problems(&readings),
+            [
+                "value 0 cannot be read where its region scales to at the window's size now: \
+                 no pixel in the region has the characters' color; if the region is off the \
+                 value there, fix the value at this size in AppyTappy Setup"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_number_that_stays_unreadable_one_way_is_said_once_with_what_it_first_read() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, _control) = mpsc::channel();
+        let mut value = red_at("count", 0, 0);
+        value.check.drawn.region = Region::new(0, 0, 3, 2).expect("not empty");
+        value.check.drawn.check = Check::Number {
+            reader: DigitReader::new(RED, 10),
+            whole: false,
+        };
+        let job = job(vec![value]);
+        let mut frames = frames_at(&job, WINDOW, events, control).expect("values to read");
+        // One character, then two, of a reference that learned none.
+        let one = frame_image(3, 2, |x, _| x == 0);
+        let two = frame_image(3, 2, |x, _| x != 1);
+        let none = frame_image(3, 2, |_, _| false);
+        let unlearned = |read: &str, of: usize| {
+            format!(
+                "value 0 cannot be read: a character has a shape the reference has not \
+                 learned: it read `{read}`, and character 1 of {of} is unlike any, since it \
+                 has learned none"
+            )
+        };
+        frames.handle(Ok(frame(&one, WINDOW)));
+        frames.handle(Ok(frame(&two, WINDOW)));
+        assert_eq!(problems(&readings), [unlearned("?", 1)]);
+        // Another way to fail is another problem, and so is the first way
+        // when it comes back.
+        frames.handle(Ok(frame(&none, WINDOW)));
+        frames.handle(Ok(frame(&two, WINDOW)));
+        assert_eq!(
+            problems(&readings),
+            [
+                "value 0 cannot be read: no pixel in the region has the characters' color"
+                    .to_owned(),
+                unlearned("? ?", 2)
+            ]
         );
     }
 

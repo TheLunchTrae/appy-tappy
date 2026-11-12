@@ -360,8 +360,21 @@ pub enum CheckError {
         /// The region's size.
         found: Size,
     },
-    /// The digits could not be read.
+    /// The number could not be read, and at which stage of the read.
     Number(ReadError),
+}
+
+impl CheckError {
+    /// What went wrong, without what this read saw: a region that keeps
+    /// failing the same way keeps this text while what it shows changes, so
+    /// a log can say it once. [`ReadError::stage`] for a number.
+    #[must_use]
+    pub fn stage(&self) -> String {
+        match self {
+            Self::Number(error) => error.stage().to_owned(),
+            Self::NoBar | Self::SizeMismatch { .. } => self.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for CheckError {
@@ -373,26 +386,22 @@ impl fmt::Display for CheckError {
                 formatter,
                 "the region is {found} but its saved picture is {expected}"
             ),
-            Self::Number(_) => formatter.write_str("the region's number could not be read"),
+            // The read's own error says which stage failed, in full.
+            Self::Number(error) => write!(formatter, "{error}"),
         }
     }
 }
 
-impl Error for CheckError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Number(error) => Some(error),
-            _ => None,
-        }
-    }
-}
+/// A number's error shows as its read's error, which has no cause of its
+/// own, so no variant has a source to give.
+impl Error for CheckError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn errors_explain_themselves_and_keep_their_source() {
+    fn errors_explain_themselves() {
         let size = Size {
             width: 2,
             height: 1,
@@ -416,13 +425,17 @@ mod tests {
             mismatch.to_string(),
             "the region is 3x1 but its saved picture is 2x1"
         );
-        assert!(mismatch.source().is_none());
-        let number = CheckError::Number(ReadError::NoNumber);
-        assert_eq!(number.to_string(), "the region's number could not be read");
-        assert_eq!(
-            number.source().map(ToString::to_string).as_deref(),
-            Some("the region holds no digits")
-        );
+        assert_eq!(mismatch.stage(), mismatch.to_string());
+        assert_eq!(CheckError::NoBar.stage(), CheckError::NoBar.to_string());
+        // A number's error is its read's, so the reason shows wherever the
+        // check's error does.
+        let read = DigitReader::new(WHITE, 0)
+            .read(&solid(1, WHITE), false)
+            .expect_err("no glyph learned");
+        let number = CheckError::Number(read.clone());
+        assert_eq!(number.to_string(), read.to_string());
+        assert_eq!(number.stage(), read.stage());
+        assert_ne!(number.stage(), number.to_string());
     }
 
     fn solid(width: u32, color: Rgb) -> Image {

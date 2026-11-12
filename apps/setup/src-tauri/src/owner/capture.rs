@@ -36,7 +36,8 @@ fn preview_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Me
     }
 }
 
-/// What `check` reads on `frame`.
+/// What `check` reads on `frame`, or why it cannot be read there, for the
+/// user.
 fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
     let cropped = frame.crop(check.region).ok_or_else(|| {
         "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
@@ -44,7 +45,7 @@ fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
     check
         .check
         .read(&cropped)
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("Not read on the live window now: {error}."))
 }
 
 impl<H: Host> Owner<H> {
@@ -456,6 +457,45 @@ mod tests {
                 .ask(|owner| owner.reading())
                 .expect_err("outside")
                 .contains("past the edge")
+        );
+    }
+
+    #[test]
+    fn a_live_frame_the_check_cannot_read_says_which_stage_failed() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // A reference taught that the screenshot's red half is a 1.
+        let spec: CheckSpec = serde_json::from_str(
+            r#"{"kind":"characters","region":{"x":0,"y":0,"width":4,"height":2},"screenshot":0,
+                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                "labels":[{"screenshot":0,"text":"1"}]}"#,
+        )
+        .expect("valid JSON");
+        harness
+            .ask(|owner| owner.set_check(&spec))
+            .expect("valid check");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(1.0)))
+        );
+        let gray = Image::new(
+            Size {
+                width: 4,
+                height: 2,
+            },
+            [40, 40, 40, 0].repeat(8),
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&gray));
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(
+                "Not read on the live window now: no pixel in the region has the characters' \
+                 color."
+                    .to_owned()
+            )
         );
     }
 
