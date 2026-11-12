@@ -9,7 +9,6 @@ import {
   fixDraft,
   fromReference,
   newestOfSize,
-  readingOf,
   recordBlocked,
   regionScreenshot,
   reviewSpec,
@@ -409,16 +408,4 @@ describe('fixDraft', () => {
     const both = withState(first, 5);
     expect(withState(both, 6).states.map((state) => state.name)).toEqual(['Shown', 'Hidden', 'State 3']);
   });
-});
-
-test('a reading shows only for the check that read it', () => {
-  const bar = withKind({ ...EMPTY_DRAFT, region, filled: red, empty: gray }, 'barFill');
-  const built = buildSpec(bar, 'example');
-  const read = { of: built, reading: { kind: 'number', value: 62 } } as const;
-  expect(readingOf(read, built)).toEqual({ kind: 'number', value: 62 });
-  // A check tried since shows none, whatever it reads: its own reading has yet to arrive.
-  expect(readingOf(read, buildSpec({ ...bar, empty: red }, 'example'))).toBeNull();
-  expect(readingOf(read, buildSpec(bar, 'example'))).toBeNull();
-  expect(readingOf({ of: built, reading: null }, built)).toBeNull();
-  expect(readingOf(null, built)).toBeNull();
 });

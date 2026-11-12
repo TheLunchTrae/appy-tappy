@@ -5,7 +5,7 @@
 //! A command sends a [`Run`], work that runs on this thread with the state
 //! and answers on a oneshot channel. The state is
 //! the picked window's capture, its newest frame, the session's screenshots,
-//! and the check the user is setting up.
+//! what it records, and the check the user is setting up.
 //!
 //! This file keeps the state and the thread's loop, and the one way each
 //! save of an application reaches the runtime, the overlays and their
@@ -19,6 +19,7 @@ mod clicks;
 mod edits;
 mod fixes;
 mod host;
+mod looks;
 mod messages;
 mod overlays;
 mod recording;
@@ -44,7 +45,8 @@ use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::check_spec::{Pictures, RegionCheck};
 use crate::overlay::{Overlays, Purpose};
-use crate::recording::{Recording, ocr};
+use crate::recording::{Recorder, ocr};
+use crate::screenshots::Screenshots;
 use crate::stores::{SavedApp, Stores};
 use crate::updates::Downloaded;
 
@@ -82,12 +84,13 @@ pub(crate) struct Owner<H: Host> {
     latest: Option<Image>,
     /// Why the picked window's capture failed, until a good frame arrives.
     failure: Option<CaptureFailure>,
-    screenshots: Vec<Image>,
+    screenshots: Screenshots,
     check: Option<RegionCheck>,
-    /// The region the user records, with the readings it showed.
-    recording: Option<Recording>,
-    /// Counts recordings, so text read for one the user discarded or
-    /// replaced is dropped.
+    /// What the capture records: the readings a number's region shows or
+    /// the looks a value's region shows, one recording at a time.
+    recording: Option<Recorder>,
+    /// Counts recordings of both kinds, so text read for one the user
+    /// discarded or replaced is dropped.
     recording_id: u64,
     /// Sends new readings to the text reader's thread.
     ocr: Sender<ocr::Job>,
@@ -123,7 +126,7 @@ impl<H: Host> Owner<H> {
             session: None,
             latest: None,
             failure: None,
-            screenshots: Vec::new(),
+            screenshots: Screenshots::new(),
             check: None,
             recording: None,
             recording_id: 0,
@@ -155,8 +158,7 @@ impl<H: Host> Owner<H> {
                 text,
             } => {
                 if let Some(current) = self
-                    .recording
-                    .as_mut()
+                    .readings_mut()
                     .filter(|current| current.id == recording)
                 {
                     current.read(index, text);

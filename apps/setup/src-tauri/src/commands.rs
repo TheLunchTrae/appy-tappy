@@ -32,6 +32,7 @@ use crate::owner::{
     SavedReferenceId, SavedValue,
 };
 use crate::recording::RecordingView;
+use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
 use crate::window_list::{WindowFit, WindowList};
@@ -104,6 +105,13 @@ pub(crate) async fn screenshot(
     ask(&app, move |owner| owner.screenshot_pixels(index, max_width))
         .await
         .map(pixels)
+}
+
+/// Removes the screenshots `indexes` names and releases their pixels, or
+/// says why it cannot.
+#[tauri::command]
+pub(crate) async fn remove_screenshots(app: AppHandle, indexes: Vec<usize>) -> Result<(), String> {
+    ask(&app, move |owner| owner.remove_screenshots(&indexes)).await?
 }
 
 /// What the steps in `selection` select on the screenshot `screenshot`;
@@ -543,22 +551,47 @@ pub(crate) async fn start_recording(
     .await?
 }
 
-/// Stops the recording, keeping its readings for review.
+/// Stops the recording, of readings or of looks, keeping what it recorded.
 #[tauri::command]
 pub(crate) async fn stop_recording(app: AppHandle) -> Result<(), String> {
     ask(&app, Owner::stop_recording).await
 }
 
-/// Forgets the recording and its readings.
+/// Forgets the recording, of readings or of looks.
 #[tauri::command]
 pub(crate) async fn discard_recording(app: AppHandle) -> Result<(), String> {
     ask(&app, Owner::discard_recording).await
 }
 
-/// The recording and its readings so far; `None` without one.
+/// The recording of readings and its readings so far; `None` without one.
 #[tauri::command]
 pub(crate) async fn recording_state(app: AppHandle) -> Result<Option<RecordingView>, String> {
     ask(&app, |owner| owner.recording_state()).await
+}
+
+/// Records the looks of `region` of the picked window, drawn on
+/// `screenshot`, keeping a screenshot of each look no screenshot shows yet,
+/// in place of any recording.
+#[tauri::command]
+pub(crate) async fn start_look_recording(
+    app: AppHandle,
+    region: RegionSpec,
+    tolerance: u8,
+    screenshot: usize,
+) -> Result<(), String> {
+    ask(&app, move |owner| {
+        owner.start_look_recording(region, tolerance, screenshot)
+    })
+    .await?
+}
+
+/// The recording of looks and the screenshots it kept so far; `None`
+/// without one.
+#[tauri::command]
+pub(crate) async fn look_recording_state(
+    app: AppHandle,
+) -> Result<Option<LookRecordingView>, String> {
+    ask(&app, |owner| owner.look_recording_state()).await
 }
 
 /// A recorded reading, at most `max_width` wide; no bytes for an unknown

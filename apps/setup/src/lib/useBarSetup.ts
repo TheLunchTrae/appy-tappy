@@ -42,20 +42,21 @@ export interface BarSetup {
 }
 
 /**
- * Detects the colors of the bar in `draft`'s region when asked, and measures the colors on the session's `shots`
- * screenshots while `active`.
+ * Detects the colors of the bar in `draft`'s region when asked, and measures the colors on the session's
+ * screenshots, whose indexes `shots` holds, while `active`.
  */
 export function useBarSetup(
   draft: Draft,
   setDraft: Dispatch<SetStateAction<Draft>>,
-  shots: number,
+  shots: readonly number[],
   active: boolean,
 ): BarSetup {
   const { kind, region, drawnOn, filled, empty } = draft;
+  const row = shots.join(',');
   const key = useMemo(
     (): DetectKey | null =>
-      kind === 'barFill' && region !== null && drawnOn !== null ? { region, drawnOn, shots } : null,
-    [kind, region, drawnOn, shots],
+      kind === 'barFill' && region !== null && drawnOn !== null ? { region, drawnOn, shots: row } : null,
+    [kind, region, drawnOn, row],
   );
   const [detecting, setDetecting] = useState<Detecting>({ kind: 'idle' });
   // What an answer that arrives later meets: the detection as it stands and the draft's colors.

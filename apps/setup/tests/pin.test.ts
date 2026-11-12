@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
-import { dragCorner, fromCorners, moveRect, type Rect } from '../src/lib/region.ts';
+import {
+  type Corner,
+  type Point,
+  type Rect,
+  type Size,
+  across,
+  cornerAt,
+  fromCorners,
+  moveRect,
+} from '../src/lib/region.ts';
 import {
   AUTOMATIC,
   type PinChoice,
@@ -19,6 +28,11 @@ const topRight = { x: 250, y: 5, width: 40, height: 10 };
 /** In the bottom left third. */
 const bottomLeft = { x: 10, y: 70, width: 40, height: 10 };
 const byHand: PinChoice = { kind: 'byHand', pin: 'topRight' };
+
+/** `rect` after `corner` is dragged to `to`, as a resize leaves it: the corner across from it stays put. */
+function dragCorner(rect: Rect, corner: Corner, to: Point, bounds: Size): Rect {
+  return fromCorners(cornerAt(rect, across(corner)), to, bounds) ?? rect;
+}
 
 describe('pinChoiceAfterRegion', () => {
   /** The choice once the region on a picture of the window's size goes from the top right one to `next`. */

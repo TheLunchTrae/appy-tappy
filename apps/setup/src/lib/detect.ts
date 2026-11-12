@@ -17,11 +17,15 @@ export interface PickedColors {
   readonly empty: Color | null;
 }
 
-/** What a detection looks at: the region, the screenshot it was drawn on, and how many screenshots there are. */
+/**
+ * What a detection looks at: the region, the screenshot it was drawn on, and which screenshots there are, as their
+ * indexes in a row. A screenshot's index is never given to another, so the row changes when one is taken, recorded,
+ * or removed.
+ */
 export interface DetectKey {
   readonly region: Rect;
   readonly drawnOn: number;
-  readonly shots: number;
+  readonly shots: string;
 }
 
 type Proposal = Extract<BarDetection, { readonly kind: 'proposed' }>;

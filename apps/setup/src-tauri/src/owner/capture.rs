@@ -13,6 +13,7 @@ use crate::check_spec::bar::{self, BarDetection, BarMeasure};
 use crate::check_spec::{self, CheckSpec, ColorSpec, RegionCheck, RegionSpec};
 use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
+use crate::recording::Recorder;
 use crate::selection::{self, SelectionSpec, SelectionView};
 use crate::window_list::{self, WindowFit, WindowList};
 
@@ -38,7 +39,8 @@ fn preview_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Me
     }
 }
 
-/// What `check` reads on `frame`.
+/// What `check` reads on `frame`, or why it cannot be read there, for the
+/// user.
 fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
     let cropped = frame.crop(check.region).ok_or_else(|| {
         "The region reaches past the edge of the window. Draw it inside the window.".to_owned()
@@ -46,7 +48,7 @@ fn read(check: &RegionCheck, frame: &Image) -> Result<Value, String> {
     check
         .check
         .read(&cropped)
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("Not read on the live window now: {error}."))
 }
 
 impl<H: Host> Owner<H> {
@@ -135,6 +137,8 @@ impl<H: Host> Owner<H> {
     /// nothing until frames come again, with the failure as its problem.
     pub(super) fn capture_failed(&mut self, failure: CaptureFailure) {
         if let Some(recording) = &mut self.recording {
+            let next = recording.after_failure();
+            let recording = recording.life_mut();
             let error = check_spec::sentence(&failure.error);
             if failure.ended {
                 recording.end(
@@ -142,10 +146,7 @@ impl<H: Host> Owner<H> {
                     format!("Recording stopped: {error} Change window to pick it again."),
                 );
             } else {
-                recording.fail(
-                    Instant::now(),
-                    format!("Recording stopped: {error} Record more once the window shows again."),
-                );
+                recording.fail(Instant::now(), format!("Recording stopped: {error} {next}"));
             }
         }
         self.failure = Some(failure);
@@ -165,8 +166,22 @@ impl<H: Host> Owner<H> {
             .latest
             .clone()
             .ok_or_else(|| "No frame has arrived from the window yet.".to_owned())?;
-        self.screenshots.push(image);
-        Ok(self.screenshots.len().saturating_sub(1))
+        Ok(self.screenshots.push(image))
+    }
+
+    /// Releases each of the screenshots `indexes` names. The others keep
+    /// their indexes. Refused while a recording of looks records: it knows
+    /// each look it kept, so it would not keep a removed one again.
+    pub(crate) fn remove_screenshots(&mut self, indexes: &[usize]) -> Result<(), String> {
+        if let Some(Recorder::Looks(recording)) = &self.recording
+            && recording.life.is_recording()
+        {
+            return Err("Stop recording to remove a screenshot.".to_owned());
+        }
+        for &index in indexes {
+            self.screenshots.remove(index);
+        }
+        Ok(())
     }
 
     /// What the check reads on the newest frame: `None` until a check is
@@ -217,7 +232,7 @@ impl<H: Host> Owner<H> {
         region: RegionSpec,
         screenshot: usize,
     ) -> Result<BarDetection, String> {
-        bar::detect(&self.screenshots, region, screenshot).map_err(|error| error.to_string())
+        bar::detect(self.screenshots.slots(), region, screenshot).map_err(|error| error.to_string())
     }
 
     /// What a bar of the colors `filled` and `empty` reads in `region`,
@@ -230,7 +245,7 @@ impl<H: Host> Owner<H> {
         filled: ColorSpec,
         empty: ColorSpec,
     ) -> Result<BarMeasure, String> {
-        bar::measure(&self.screenshots, region, screenshot, filled, empty)
+        bar::measure(self.screenshots.slots(), region, screenshot, filled, empty)
             .map_err(|error| error.to_string())
     }
 
@@ -594,6 +609,45 @@ mod tests {
                 .ask(|owner| owner.reading())
                 .expect_err("outside")
                 .contains("past the edge")
+        );
+    }
+
+    #[test]
+    fn a_live_frame_the_check_cannot_read_says_which_stage_failed() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        // A reference taught that the screenshot's red half is a 1.
+        let spec: CheckSpec = serde_json::from_str(
+            r#"{"kind":"characters","region":{"x":0,"y":0,"width":4,"height":2},"screenshot":0,
+                "ink":{"red":255,"green":0,"blue":0},"tolerance":0,
+                "labels":[{"screenshot":0,"text":"1"}]}"#,
+        )
+        .expect("valid JSON");
+        harness
+            .ask(|owner| owner.set_check(&spec))
+            .expect("valid check");
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Ok(Some(Reading::Number(1.0)))
+        );
+        let gray = Image::new(
+            Size {
+                width: 4,
+                height: 2,
+            },
+            [40, 40, 40, 0].repeat(8),
+        )
+        .expect("matching length");
+        harness.deliver(&mut handler, Ok(&gray));
+        assert_eq!(
+            harness.ask(|owner| owner.reading()),
+            Err(
+                "Not read on the live window now: no pixel in the region has the characters' \
+                 color."
+                    .to_owned()
+            )
         );
     }
 

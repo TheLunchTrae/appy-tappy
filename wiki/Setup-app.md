@@ -55,9 +55,20 @@ This page covers what the user guide leaves out.
 - **Application editor.** A new application's match starts from the picked
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
-- **Screenshots.** The owner thread keeps the session's screenshots until
-  its capture stops: on **Change window**, when another window is picked, or
-  when the flow closes ([Pictures kept](#pictures-kept)). The draft keeps
+- **Screenshots.** The owner thread keeps the session's screenshots, taken or
+  [recorded](#recording-looks), in memory until the user removes them or
+  their capture stops: on **Change window**, when another window is picked, or
+  when the flow closes ([Pictures kept](#pictures-kept)); none is written to
+  disk. A recording, with the looks or readings it holds, goes with them.
+  Each screenshot is named by the index it got when it was kept
+  (`screenshots.rs`).
+  Removing one releases its pixels and leaves its index empty, so the indexes
+  the draft holds stay right, and the strip numbers a screenshot by its index
+  so its number never changes. The UI refuses to remove a screenshot the draft
+  uses: the one its region is drawn on, one a state is taken from, a labeled
+  one, and the value's own while the reference editor is open over it
+  (`lib/looks.ts`). A check that names a removed screenshot is refused like
+  one that names a screenshot of another session. The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
   a labeled screenshot, a recording, or a compared screenshot of another
@@ -65,11 +76,40 @@ This page covers what the user guide leaves out.
   shortcut is a global shortcut from `tauri-plugin-global-shortcut`; a letter,
   digit, or Space needs a modifier so the shortcut does not take that key from
   every other program.
+- **Region.** The region is kept in the pixels of the screenshot it is drawn
+  on, whatever size the screenshot shows at. `ZoomView` lays the picture out:
+  the whole picture with room around it at first, and larger by the zoom,
+  which belongs to screenshots of one size. `RegionSurface` reads the pointer
+  against the picture's box on the page at each pointer event, and again when
+  a scroll or a zoom moves the picture under a pointer that stays still, so
+  the zoom, the scroll, and the window's size are no state of the drag. The
+  region's outline, its label, and the dim around it are drawn by `Marquee`,
+  outside the box. A corner takes presses 12 pixels out from the box and up
+  to 4 into it, less into a small box, which keeps 8 pixels each way, or all
+  of a smaller side, to be moved by (`.marquee .corner` in `styles.css`). The
+  zoom controls stay focusable at their limits and say so with
+  `aria-disabled`, and the percentage is a status that screen readers hear
+  when it changes. The surface reaches over the
+  room around the picture, which is how a drag starts outside it, and only
+  while a tool drags: a click that picks a color or selects a pixel lands on
+  the picture alone. `onRegion` is called once, when a drag is let go
+  ([Region drag](State-machines.md#region-drag)), so a check runs for the
+  finished region and not for each one on the way. A selection that fails
+  says why above the view, on either step.
 - **Capture failures.** A frame error shows in the preview until the next good
   frame of the same capture; only a closed window ends the capture. While a
   failure stands, a screenshot is refused, and a recording stops with the
   failure as its problem. Once the window has closed, no recording starts or goes
   on until another window is picked.
+- **Live reading.** `read_value` answers what the check being set up reads
+  on the newest frame, or why that frame cannot be read, in the check's own
+  words (`CheckError`), which the box under the check shows in place of a
+  reading. A reference being taught is read by the reader its labels teach
+  (`CheckSpec::Characters`), never by the text reader, and the runtime
+  builds the same reader from the saved file
+  (`check_spec/round_trip.rs`). The region is read where it was drawn,
+  whatever size the live window has, so a window resized since its
+  screenshot shows another spot there.
 - **Leaving a flow.** Each flow reports what leaving it would lose
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
@@ -105,8 +145,9 @@ This page covers what the user guide leaves out.
   region itself.
 - **Bar detection.** **Detect the bar** sends the region and the screenshot
   it was drawn on (`detect_bar`). The owner cuts the region from that
-  screenshot and from the newest others of its window size, at most
-  `MAX_OTHERS` of them (`check_spec/bar.rs`), since the region means another
+  screenshot and from the newest others of its window size that the session
+  still keeps, taken or recorded, at most `MAX_OTHERS` of them
+  (`check_spec/bar.rs`), since the region means another
   spot at another size and each screenshot costs the owner thread a copy of
   the region and a few passes over it. It hands them to [the
   detector](Screen-regions.md#bar-detection), the drawn-on one first, and
@@ -271,9 +312,22 @@ This page covers what the user guide leaves out.
 
 ## Recording
 
-[Recording readings](References.md#record-readings) samples the frames
-the reference editor's preview capture already takes, about 30 a second, in
-the owner thread (`recording.rs`). Each frame is cut to the region and reduced
+A capture records one thing at a time (`Recorder` in `recording.rs`): the
+readings a number's region shows, for a reference to learn, or
+[the looks a value's region shows](#recording-looks), each kept as a
+screenshot. Both sample the frames the preview capture already takes, about 30
+a second, in the owner thread, and share when they record and why they stop
+(`recording/lifecycle.rs`): a frame of another size than the screenshot the
+region was drawn on is skipped, a capture failure stops the recording with the
+failure as its problem, and a closed window ends it. Starting one kind
+replaces a recording of the other. Recordings of both kinds are numbered from
+one counter.
+
+[Recording readings](References.md#record-readings) runs in the reference
+editor. A number value's **Record readings** opens that editor on the value's
+region, for the reference picked or a new one. A saved reference has its
+characters' color, so its recording starts at once; for a new one the editor
+opens on the screenshot the region is drawn on, with the color next to pick. Each frame is cut to the region and reduced
 to the shapes a reference reads: `DigitReader::shapes` finds the ink, splits it
 into characters, and scales each to the grid the check compares. A crop whose
 shapes equal a kept reading's is another sighting of that reading, because it
@@ -305,6 +359,66 @@ the newest screenshot of that size. Kept readings are lost only on a discard,
 on **Change window**, or when the flow is left; a closed window keeps them
 for review. **Back** and Escape leave
 review without keeping, and review's edits stay for the next one.
+
+### Recording looks
+
+[Recording screenshots](Values.md#record-screenshots) is for the checks that
+are set up on screenshots: a state, a bar fill, and a color
+(`recording/looks.rs`, `owner/looks.rs`). A frame is cut to the region and
+compared with every look the recording knows. Each look is an `ImageMatch` of
+the whole region, the comparison a state check makes with a state's whole
+picture: two looks are the same when the average difference of their red,
+green, and blue is at most the tolerance. A frame that shows a look it does
+not know is kept whole in the screenshot store, like a screenshot the user
+takes, so every tool that works on a screenshot works on it. Only the crop of
+a frame is compared; the whole frame is copied only when it is kept.
+
+- **The whole region.** A state check with **Ignore the background** compares
+  only the pixels each state selects, and a recording does not: it has no
+  selection to compare within, since a state gets its selection on a
+  screenshot the recording has yet to keep. So a changing background behind
+  the thing makes most frames new looks, which stops the recording at its
+  limit, and a small change in a large region can stay within the tolerance
+  and never be kept. Comparing within the draft's state selections is left
+  out.
+- **Sensitivity.** The UI sends the tolerance when the recording starts
+  (`lookTolerance`). For a state check it is the check's own **Tolerance**,
+  so one control adjusts both. A bar's and a color's own tolerance compare
+  colors, not looks, so they record with 16, the tolerance a state check
+  starts with.
+- **What it knows.** A recording starts knowing the region on every screenshot
+  of the same window size that the session holds, taken or recorded. So the
+  look of the screenshot the region was drawn on is not kept again, and
+  recording again keeps only what is new. A screenshot removed since is not
+  known, so its look is kept again if it shows.
+- **Bounds.** A recording keeps at most 16 screenshots (`MAX_LOOKS`, the most
+  states a check holds), then stops with the limit as its problem. A screenshot
+  is a whole window at four bytes a pixel, about 8 MB at 1920 by 1080, so one
+  recording holds at most about 130 MB there. Each new recording may keep 16
+  more, and the screenshots the user takes have no limit; removing a
+  screenshot releases it at once, and the capture's end releases all of them.
+- **Cost.** A comparison is one pass over the region for each look known,
+  until one matches, on the owner thread, which also answers the UI. After
+  each comparison the recording rests four times as long as that frame took
+  from arriving to compared (`REST`), and a frame that comes meanwhile only
+  becomes the preview. So comparing takes at most a fifth of the owner
+  thread's time, whatever the region's size and the number of looks, and less
+  while the thread is behind, since a frame that waited took longer. A frame's
+  wait behind a slow command counts too, so a recording rests longer after
+  the owner was busy, while the panel still says it records. Frames
+  cannot pile up behind it, and a command waits for one comparison at most:
+  one pass over the region for each look known. A small region has every frame
+  compared. A large one that shows many looks has fewer frames compared, so
+  it can miss a look that shows only briefly.
+- **Review.** There is no review sheet: the UI lists each kept screenshot in
+  the strip as the recording reports it (`useLookRecording`), marked as
+  recorded, and the user keeps or removes them there. The owner refuses to
+  remove a screenshot while a recording of looks records, and the UI says so:
+  the recording knows each look it kept and would not keep a removed one
+  again. Stopping shows the first kept screenshot that the strip lists, and
+  the panel counts what the recording kept against the strip. A stopped recording only says what it kept and why it stopped;
+  discarding it, or starting readings in the reference editor, leaves its
+  screenshots in the strip.
 
 ### The text reader
 
@@ -360,8 +474,8 @@ condition still holds, so it neither runs again nor undoes what it changed
 while the window is out of sight.
 A value that does not read at the window's size is not read. Once the
 window has settled at that size, the runtime logs why and that the window
-should be resized or the value fixed at that size, once until the reason
-changes.
+should be resized or the value fixed at that size, each reason once until
+the value is read again.
 
 ## Saved files
 
@@ -568,13 +682,17 @@ ends the process.
 | The live view                      | Page               | All of it, scaled down to `LIVE_MAX_WIDTH` at most        |
 | Each screenshot                    | Owner and page     | All of it, and a thumbnail `THUMB_WIDTH` wide on the page |
 | Each recorded reading              | Owner and page     | The region; a recording keeps at most `MAX_READINGS`      |
+| Each look a recording knows        | Owner              | The region, once for each screenshot it knew or kept      |
 | The check being tried              | Owner              | The region, once for each state                           |
 | A new reading, for the text reader | Text reader thread | The region's ink, until it is read                        |
 
-A capture holds as many screenshots as the user takes. Setting up a click's
+A capture holds as many screenshots as the user takes, and at most
+`MAX_LOOKS` more for each [recording of looks](#recording-looks). A screenshot
+the user removes goes at once. Setting up a click's
 target is a capture like a value's, and its screen stops the capture when it
 closes and each time it looks for the window again. A recording's readings
-also go when it is discarded or another replaces it.
+or looks also go when it is discarded or another replaces it; the screenshots
+a recording of looks kept stay with the capture's others.
 
 The automation editor's live reading, the overlays, and the Values page
 capture only the regions of the values they read, as the runtime does. The

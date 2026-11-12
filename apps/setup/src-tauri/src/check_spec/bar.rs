@@ -133,24 +133,23 @@ fn left_out_note(left_out: usize) -> String {
 /// `region` of the screenshots looked at, each with its index, in the
 /// order they were taken, and how many were left out: of `screenshots`
 /// with the window size of screenshot `drawn_on`, that one and the newest
-/// `most` others.
+/// `most` others. `screenshots` holds `None` where one was removed, so the
+/// others keep their indexes.
 fn frames(
-    screenshots: &[Image],
+    screenshots: &[Option<Image>],
     region: Region,
     drawn_on: usize,
     most: usize,
 ) -> Result<(Vec<(usize, Image)>, usize), SpecError> {
-    let size = screenshots
-        .get(drawn_on)
-        .ok_or(SpecError::NoScreenshot)?
-        .size();
+    let kept = |index: usize| screenshots.get(index).and_then(Option::as_ref);
+    let size = kept(drawn_on).ok_or(SpecError::NoScreenshot)?.size();
     if !region.fits(size) {
         return Err(SpecError::Outside);
     }
-    let same_size = screenshots.iter().enumerate();
-    let others: Vec<usize> = same_size
-        .filter(|&(index, screenshot)| index != drawn_on && screenshot.size() == size)
-        .map(|(index, _)| index)
+    let others: Vec<usize> = (0..screenshots.len())
+        .filter(|&index| {
+            index != drawn_on && kept(index).is_some_and(|screenshot| screenshot.size() == size)
+        })
         .collect();
     let left_out = others.len().saturating_sub(most);
     let mut looked_at: Vec<usize> = others.into_iter().skip(left_out).collect();
@@ -158,7 +157,7 @@ fn frames(
     looked_at.sort_unstable();
     let frames = looked_at
         .into_iter()
-        .filter_map(|index| Some((index, screenshots.get(index)?.crop(region)?)))
+        .filter_map(|index| Some((index, kept(index)?.crop(region)?)))
         .collect();
     Ok((frames, left_out))
 }
@@ -171,7 +170,7 @@ fn frames(
 /// Returns [`SpecError::EmptyRegion`], [`SpecError::NoScreenshot`], or
 /// [`SpecError::Outside`] when there is no such region to look at.
 pub(crate) fn detect(
-    screenshots: &[Image],
+    screenshots: &[Option<Image>],
     region: RegionSpec,
     drawn_on: usize,
 ) -> Result<BarDetection, SpecError> {
@@ -223,7 +222,7 @@ pub(crate) fn detect(
 /// Returns what [`detect`] does, or [`CheckDefError::SameColors`] for two
 /// colors that are the same.
 pub(crate) fn measure(
-    screenshots: &[Image],
+    screenshots: &[Option<Image>],
     region: RegionSpec,
     drawn_on: usize,
     filled: ColorSpec,
@@ -295,6 +294,38 @@ mod tests {
         width: 20,
         height: 2,
     };
+
+    /// `screenshots` as the session keeps them while none was removed.
+    fn kept(screenshots: &[Image]) -> Vec<Option<Image>> {
+        screenshots.iter().cloned().map(Some).collect()
+    }
+
+    fn frames(
+        screenshots: &[Image],
+        region: Region,
+        drawn_on: usize,
+        most: usize,
+    ) -> Result<(Vec<(usize, Image)>, usize), SpecError> {
+        super::frames(&kept(screenshots), region, drawn_on, most)
+    }
+
+    fn detect(
+        screenshots: &[Image],
+        region: RegionSpec,
+        drawn_on: usize,
+    ) -> Result<BarDetection, SpecError> {
+        super::detect(&kept(screenshots), region, drawn_on)
+    }
+
+    fn measure(
+        screenshots: &[Image],
+        region: RegionSpec,
+        drawn_on: usize,
+        filled: ColorSpec,
+        empty: ColorSpec,
+    ) -> Result<BarMeasure, SpecError> {
+        super::measure(&kept(screenshots), region, drawn_on, filled, empty)
+    }
 
     fn found(detection: Result<BarDetection, SpecError>) -> serde_json::Value {
         serde_json::to_value(detection.expect("a region to look at")).expect("plain data")
@@ -495,6 +526,30 @@ mod tests {
         assert_eq!(
             measure(&screenshots, wide, 0, green, GRAY.into()),
             Err(SpecError::Outside)
+        );
+    }
+
+    #[test]
+    fn a_removed_screenshot_is_skipped_and_the_others_keep_their_indexes() {
+        // Screenshot 1 was removed.
+        let mut screenshots = kept(&[screenshot(30, 5), screenshot(30, 15)]);
+        screenshots.insert(1, None);
+        let detection = found(super::detect(&screenshots, BAR, 0));
+        assert_eq!(detection["shownOn"], json!([0, 2]));
+        assert_eq!(detection["without"], json!([]));
+        assert_eq!(detection["moves"], true);
+        let measured = super::measure(&screenshots, BAR, 2, GREEN.into(), GRAY.into());
+        assert_eq!(
+            serde_json::to_value(measured.expect("a region")).expect("plain data")["readings"],
+            json!([
+                {"screenshot": 0, "fill": 25.0},
+                {"screenshot": 2, "fill": 75.0},
+            ])
+        );
+        assert_eq!(
+            super::detect(&screenshots, BAR, 1),
+            Err(SpecError::NoScreenshot),
+            "the region was drawn on the one removed"
         );
     }
 

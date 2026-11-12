@@ -23,6 +23,7 @@ import type {
   FixSpec,
   FoundClick,
   Live,
+  LookRecordingView,
   MatchRule,
   MatchView,
   OverlayModeDef,
@@ -80,6 +81,14 @@ export async function screenshot(index: number, maxWidth: number): Promise<Pictu
   return decodePicture(await invoke<ArrayBuffer>('screenshot', { index, maxWidth }));
 }
 
+/**
+ * Removes the screenshots `indexes` names and releases their pixels. The others keep their indexes. Rejects
+ * while a recording of looks records.
+ */
+export async function removeScreenshots(indexes: ReadonlyArray<number>): Promise<void> {
+  await invoke('remove_screenshots', { indexes });
+}
+
 /** What `selection`'s steps select on screenshot `screenshot`, or null when they leave nothing selected. */
 export async function select(screenshot: number, selection: SelectionSpec): Promise<SelectionView | null> {
   return invoke<SelectionView | null>('select', { screenshot, selection });
@@ -126,19 +135,33 @@ export async function startRecording(region: RegionSpec, ink: ColorSpec, toleran
   await invoke('start_recording', { region, ink, tolerance, screenshot, more });
 }
 
-/** Stops the recording, keeping its readings for review. */
+/** Stops the recording, of readings or of looks, keeping what it recorded. */
 export async function stopRecording(): Promise<void> {
   await invoke('stop_recording');
 }
 
-/** Forgets the recording and its readings. */
+/** Forgets the recording, of readings or of looks. The screenshots a recording of looks kept stay. */
 export async function discardRecording(): Promise<void> {
   await invoke('discard_recording');
 }
 
-/** The recording and its readings so far, or null without one. */
+/** The recording of readings and its readings so far, or null without one. */
 export async function recordingState(): Promise<RecordingView | null> {
   return invoke<RecordingView | null>('recording_state');
+}
+
+/**
+ * Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
+ * screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
+ * Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
+ */
+export async function startLookRecording(region: RegionSpec, tolerance: number, screenshot: number): Promise<void> {
+  await invoke('start_look_recording', { region, tolerance, screenshot });
+}
+
+/** The recording of looks and the screenshots it kept so far, or null without one. */
+export async function lookRecordingState(): Promise<LookRecordingView | null> {
+  return invoke<LookRecordingView | null>('look_recording_state');
 }
 
 /** A recorded reading at most `maxWidth` wide, or null for an unknown index. */

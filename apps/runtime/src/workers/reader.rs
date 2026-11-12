@@ -29,9 +29,9 @@
 //! with `SavedValue::at`: the value's drawing at that size, or its first
 //! drawing scaled to it while its application's window changes size often.
 //! When some value reads there, the capture starts again for them, once; a
-//! value that does not read there is not read, and the reader says why once
-//! until the reason changes, as soon as the size settles, even when the
-//! window draws no more frames.
+//! value that does not read there is not read, and the reader says why, each
+//! reason once until the value is read again, as soon as the size settles,
+//! even when the window draws no more frames.
 //!
 //! When the capture ends, the reader looks for the window again, because
 //! many applications replace their window as they run, such as when they
@@ -55,6 +55,7 @@
 //! which records to it from its next frame, so the capture goes on and no
 //! value is read again for it.
 
+use std::fmt;
 use std::io;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -65,6 +66,7 @@ use appytappy_actions::Watched;
 use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::Value;
 use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
+use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::{AtSize, Unread};
 use appytappy_sources::screen::settle::Settle;
 use appytappy_sources::screen::{
@@ -127,7 +129,11 @@ pub(crate) enum Reading {
     },
     /// Something keeps one value from being read. The log puts the value's
     /// newest name before `problem`, so a renamed value shows its new name.
-    /// Each is sent once until a different one, or a good read, replaces it.
+    /// Each is sent once until the value is read again, so a region that
+    /// flickers between two problems sends each once, not one for each
+    /// frame. A check that keeps failing the same way is one problem, sent
+    /// with what its first failed read saw, such as the characters a
+    /// number read, however that changes from frame to frame.
     ValueProblem {
         /// The session.
         session: SessionId,
@@ -150,8 +156,42 @@ pub(crate) enum Reading {
     },
 }
 
-/// Each value's last problem, in the order of its application's values.
-type Problems = Vec<Option<String>>;
+/// The problems said for each value since it was last read, in the order of
+/// its application's values: why it is not read at the window's size, or
+/// the way its check failed, as [`unreadable`] words it.
+type Problems = Vec<Vec<String>>;
+
+/// Why a value could not be read from a frame.
+#[derive(Debug)]
+enum Unreadable {
+    /// It does not read at the window's size.
+    NotRead(Unread),
+    /// Its check failed on the region's pixels.
+    Check {
+        /// Why.
+        error: CheckError,
+        /// Whether the region is one the value was drawn at, at this window
+        /// size, rather than scaled to it.
+        drawn: bool,
+    },
+}
+
+/// That a value's check failed and why, as a sentence fragment that
+/// follows the value's name: `why` is the check's error, or the way it
+/// failed alone, which stays the same while what the region shows changes.
+/// A region that is not `drawn` at the window's size is scaled to it and
+/// can lie beside the value, as between a window with a title bar and
+/// fullscreen, so the fragment says what to do then.
+fn unreadable(why: &dyn fmt::Display, drawn: bool) -> String {
+    if drawn {
+        format!("cannot be read: {why}")
+    } else {
+        format!(
+            "cannot be read where its region scales to at the window's size now: {why}; if \
+             the region is off the value there, fix the value at this size in AppyTappy Setup"
+        )
+    }
+}
 
 /// What reaches the reader thread.
 #[derive(Debug, Clone, PartialEq)]
@@ -368,8 +408,8 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
     // Whether `placed` is at the size the last capture's frames settled at,
     // rather than a guess.
     let mut known_size = false;
-    // Each value's last problem, carried to the capture started for a new
-    // size.
+    // The problems said for each value, carried to the capture started for
+    // a new size.
     let mut carried: Problems = Vec::new();
     // The last problem sent, so each is sent once until it changes.
     let mut reported: Option<String> = None;
@@ -571,17 +611,17 @@ enum Ended {
     Failing(String),
 }
 
-/// Says why each value is not read where `placed` places it, once until
-/// its reason in `problems` changes.
+/// Says why each value is not read where `placed` places it, unless
+/// `problems` holds its reason as said already.
 fn say_unread<E: From<Reading>>(
     placed: &Placed,
-    problems: &mut [Option<String>],
+    problems: &mut [Vec<String>],
     session: SessionId,
     events: &Sender<E>,
 ) {
-    for (value, (at, last)) in placed.values.iter().zip(problems).enumerate() {
+    for (value, (at, said)) in placed.values.iter().zip(problems).enumerate() {
         if let Err(unread) = at
-            && let Some(problem) = newly(last, not_read(*unread))
+            && let Some(problem) = newly(said, not_read(*unread))
         {
             send(
                 events,
@@ -595,9 +635,14 @@ fn say_unread<E: From<Reading>>(
     }
 }
 
-/// `problem` when it is not `last`, which it then becomes.
-fn newly(last: &mut Option<String>, problem: String) -> Option<String> {
-    (last.as_ref() != Some(&problem)).then(|| last.insert(problem).clone())
+/// `problem` when it is not among those `said`, which it then joins. A
+/// value has a handful of problems at most: one for each reason it is not
+/// read at a size, and one for each way its check fails.
+fn newly(said: &mut Vec<String>, problem: String) -> Option<String> {
+    (!said.contains(&problem)).then(|| {
+        said.push(problem.clone());
+        problem
+    })
 }
 
 /// What [`watch`] watches.
@@ -619,9 +664,10 @@ struct Watching<'job, E> {
 /// Waits while a window is captured, checking it every `check`, and
 /// returns what ended the capture, or why the reader should look for the
 /// window again. A size that frames show is acted on once it settles: when
-/// no value reads there, it says why each does not, once until the reason
-/// changes, even when the window draws no more frames. A new trace becomes
-/// `trace` and goes on to the capture's handler, so the capture goes on.
+/// no value reads there, it says why each does not, each reason once until
+/// the value is read again, even when the window draws no more frames. A
+/// new trace becomes `trace` and goes on to the capture's handler, so the
+/// capture goes on.
 fn watch<S: System, E: From<Reading>>(
     system: &S,
     watching: Watching<'_, E>,
@@ -641,7 +687,7 @@ fn watch<S: System, E: From<Reading>>(
     let mut settle = Settle::new(reads_at);
     // Each value's last problem, as the handler handed it over when frames
     // left the capture's size.
-    let mut problems = vec![None; job.plan.runs.values.len()];
+    let mut problems = vec![Vec::new(); job.plan.runs.values.len()];
     let mut next_check = Instant::now().checked_add(check);
     loop {
         let now = Instant::now();
@@ -855,9 +901,10 @@ struct FrameReader<E> {
     layout: Layout,
     /// Each value's last reading.
     last: Vec<Option<Value>>,
-    /// Each value's last problem. It is handed to the reader when frames
-    /// leave the size it reads at, since the reader says why values are not
-    /// read at another size, and taken back when they show it again.
+    /// The problems said for each value since it was last read. They are
+    /// handed to the reader when frames leave the size it reads at, since
+    /// the reader says why values are not read at another size, and taken
+    /// back when they show it again.
     problems: Problems,
     /// Where the reader gives `problems` back.
     heard: Receiver<Problems>,
@@ -911,7 +958,7 @@ impl<E: From<Reading>> FrameReader<E> {
             told: None,
             layout,
             last: vec![None; count],
-            problems: vec![None; count],
+            problems: vec![Vec::new(); count],
             heard,
             frame_problem: None,
             failures: 0,
@@ -1015,7 +1062,7 @@ impl<E: From<Reading>> FrameReader<E> {
             }
             match read {
                 Some(Ok(reading)) => changed |= self.record(position, reading, frame.as_ref()),
-                Some(Err(problem)) => self.report(position, problem),
+                Some(Err(problem)) => self.report(position, &problem),
                 None => {},
             }
         }
@@ -1049,28 +1096,34 @@ impl<E: From<Reading>> FrameReader<E> {
     }
 
     /// Reads the value at `position`, or says why it cannot be read.
-    fn read(&self, position: usize, frame: Option<&Frame<'_>>) -> Option<Result<Value, String>> {
+    fn read(
+        &self,
+        position: usize,
+        frame: Option<&Frame<'_>>,
+    ) -> Option<Result<Value, Unreadable>> {
         let value = self.plan.runs.values.get(position)?;
         let at = match self.placed.values.get(position)? {
             Ok(at) => at,
-            Err(unread) => return Some(Err(not_read(*unread))),
+            Err(unread) => return Some(Err(Unreadable::NotRead(*unread))),
         };
         let region = self.layout.packed(position)?;
         let image = frame?.image.crop(region)?;
-        Some(
-            value
-                .check
-                .check(at)
-                .read(&image)
-                .map_err(|error| format!("cannot be read: {error}")),
-        )
+        Some(value.check.check(at).read(&image).map_err(|error| {
+            Unreadable::Check {
+                error,
+                drawn: value
+                    .check
+                    .drawn_sizes()
+                    .any(|size| size == self.placed.size),
+            }
+        }))
     }
 
     /// Keeps a good reading and sends it when it changed; returns whether it
     /// did.
     fn record(&mut self, position: usize, reading: Value, frame: Option<&Frame<'_>>) -> bool {
-        if let Some(slot) = self.problems.get_mut(position) {
-            *slot = None;
+        if let Some(said) = self.problems.get_mut(position) {
+            said.clear();
         }
         let (Some(last), Some(frame)) = (self.last.get_mut(position), frame) else {
             return false;
@@ -1101,12 +1154,22 @@ impl<E: From<Reading>> FrameReader<E> {
         true
     }
 
-    /// Sends a value's problem once until it changes.
-    fn report(&mut self, position: usize, problem: String) {
-        let Some(slot) = self.problems.get_mut(position) else {
+    /// Sends a value's problem unless it was sent since the value was last
+    /// read. A check's problem is the way it fails, not what the region
+    /// shows, so a number that stays unreadable while it counts is said
+    /// once, and so is each of two problems a region flickers between.
+    fn report(&mut self, position: usize, problem: &Unreadable) {
+        let Some(said) = self.problems.get_mut(position) else {
             return;
         };
-        if let Some(problem) = newly(slot, problem) {
+        let (kind, check) = match problem {
+            Unreadable::NotRead(unread) => (not_read(*unread), None),
+            Unreadable::Check { error, drawn } => {
+                (unreadable(&error.stage(), *drawn), Some((error, *drawn)))
+            },
+        };
+        if let Some(kind) = newly(said, kind) {
+            let problem = check.map_or(kind, |(error, drawn)| unreadable(error, drawn));
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "a failed send means the owner stopped this session"
@@ -1170,7 +1233,7 @@ mod tests {
 
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
-    use appytappy_config::signal::SignalName;
+    use appytappy_config::signal::{Number, SignalName};
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{Check, ColorMatch};
     use appytappy_sources::screen::digits::DigitReader;
@@ -1492,7 +1555,7 @@ mod tests {
             told.try_iter().collect::<Vec<_>>(),
             [Control::Resizing {
                 size: SMALL,
-                problems: Some(vec![None])
+                problems: Some(vec![Vec::new()])
             }],
             "the reader is told once, and gets the problems"
         );
@@ -1506,7 +1569,7 @@ mod tests {
         // The reader found that nothing reads at the settled size and says
         // why, once, with no frame needed.
         let small = Placed::new(&job.plan, SMALL);
-        let mut problems_now = vec![None];
+        let mut problems_now = vec![Vec::new()];
         say_unread(&small, &mut problems_now, job.session, &events);
         say_unread(&small, &mut problems_now, job.session, &events);
         assert_eq!(problems(&readings), [format!("value 0 {NOT_DRAWN}")]);
@@ -1552,7 +1615,8 @@ mod tests {
         frames.handle(Ok(frame(&red, WINDOW)));
         assert_eq!(problems(&readings), [format!("value 1 {NOT_DRAWN}")]);
         // A give-back left from an earlier size is dropped when it leaves.
-        said.send(vec![None, None]).expect("the handler listens");
+        said.send(vec![Vec::new(), Vec::new()])
+            .expect("the handler listens");
         frames.handle(Ok(frame(&red, SMALL)));
         let other = Size {
             width: 320,
@@ -1564,7 +1628,7 @@ mod tests {
             [
                 Control::Resizing {
                     size: SMALL,
-                    problems: Some(vec![None, Some(NOT_DRAWN.to_owned())])
+                    problems: Some(vec![Vec::new(), vec![NOT_DRAWN.to_owned()]])
                 },
                 Control::Resizing {
                     size: other,
@@ -1573,13 +1637,15 @@ mod tests {
             ],
             "handed once"
         );
-        // The reader said something else about the value meanwhile, so back
-        // at its size the value says its own reason again.
-        said.send(vec![None, Some(OUTSIDE.to_owned())])
+        // The reader said something else about the value meanwhile. Back at
+        // its size the value keeps both as said, so its own reason is not
+        // said again.
+        let both = vec![NOT_DRAWN.to_owned(), OUTSIDE.to_owned()];
+        said.send(vec![Vec::new(), both.clone()])
             .expect("the handler listens");
         frames.handle(Ok(frame(&red, WINDOW)));
-        assert_eq!(problems(&readings), [format!("value 1 {NOT_DRAWN}")]);
-        assert_eq!(frames.problems, [None, Some(NOT_DRAWN.to_owned())]);
+        assert_eq!(problems(&readings), Vec::<String>::new());
+        assert_eq!(frames.problems, [Vec::new(), both]);
     }
 
     #[test]
@@ -1644,7 +1710,7 @@ mod tests {
             told.try_recv(),
             Ok(Control::Resizing {
                 size: SMALL,
-                problems: Some(vec![None, Some(NOT_DRAWN.to_owned())])
+                problems: Some(vec![Vec::new(), vec![NOT_DRAWN.to_owned()]])
             })
         );
         readings.try_iter().for_each(drop);
@@ -1655,15 +1721,18 @@ mod tests {
             copied(&small),
             [Region::new(4, 6, 2, 2).expect("not empty")]
         );
-        small.carry(&Recovery::new(), vec![Some(NOT_DRAWN.to_owned()), None]);
+        small.carry(
+            &Recovery::new(),
+            vec![vec![NOT_DRAWN.to_owned()], Vec::new()],
+        );
         small.handle(Ok(frame(&red, SMALL)));
         assert_eq!(problems(&readings), Vec::<String>::new());
         let mut fresh =
             frames_at(&job, SMALL, mpsc::channel().0, mpsc::channel().0).expect("a value");
-        fresh.carry(&Recovery::new(), vec![None]);
+        fresh.carry(&Recovery::new(), vec![Vec::new()]);
         assert_eq!(
             fresh.problems,
-            [None, None],
+            [Vec::<String>::new(), Vec::new()],
             "a list for other values is left out"
         );
         let (said, heard) = mpsc::channel::<Reading>();
@@ -1730,7 +1799,7 @@ mod tests {
         let (events, readings) = mpsc::channel::<Reading>();
         // Pinned left at the right edge, it scales past a narrower window.
         let job = job(vec![scaling("edge", 798, 0, WINDOW, SizeChangesDef::Often)]);
-        let mut problems_now = vec![None];
+        let mut problems_now = vec![Vec::new()];
         let narrow = Size {
             width: 400,
             height: 600,
@@ -1752,7 +1821,7 @@ mod tests {
             &events,
         );
         assert_eq!(problems(&readings), Vec::<String>::new(), "said once");
-        assert_eq!(problems_now, [Some(OUTSIDE.to_owned())]);
+        assert_eq!(problems_now, [vec![OUTSIDE.to_owned()]]);
         // A value that reads says nothing.
         say_unread(
             &Placed::new(&plan(vec![red_at("icon", 0, 0)]), WINDOW),
@@ -1779,8 +1848,101 @@ mod tests {
         frames.handle(Ok(frame(&black, WINDOW)));
         assert_eq!(
             problems(&readings),
-            ["value 0 cannot be read: the region's number could not be read"]
+            ["value 0 cannot be read: no pixel in the region has the characters' color"]
         );
+    }
+
+    #[test]
+    fn a_value_unreadable_where_its_region_scales_to_says_to_fix_it_there() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, _control) = mpsc::channel();
+        let mut value = scaling("count", 4, 6, WINDOW, SizeChangesDef::Often);
+        value.check.drawn.check = Check::Number {
+            reader: DigitReader::new(RED, 10),
+            whole: false,
+        };
+        let job = job(vec![value]);
+        let mut frames = frames_at(&job, SMALL, events, control).expect("values to read");
+        let black = frame_image(16, 16, |_, _| false);
+        frames.handle(Ok(frame(&black, SMALL)));
+        assert_eq!(
+            problems(&readings),
+            [
+                "value 0 cannot be read where its region scales to at the window's size now: \
+                 no pixel in the region has the characters' color; if the region is off the \
+                 value there, fix the value at this size in AppyTappy Setup"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_number_that_stays_unreadable_one_way_is_said_once_with_what_it_first_read() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, _control) = mpsc::channel();
+        let mut value = red_at("count", 0, 0);
+        value.check.drawn.region = Region::new(0, 0, 3, 2).expect("not empty");
+        value.check.drawn.check = Check::Number {
+            reader: DigitReader::new(RED, 10),
+            whole: false,
+        };
+        let job = job(vec![value]);
+        let mut frames = frames_at(&job, WINDOW, events, control).expect("values to read");
+        // One character, then two, of a reference that learned none.
+        let one = frame_image(3, 2, |x, _| x == 0);
+        let two = frame_image(3, 2, |x, _| x != 1);
+        let none = frame_image(3, 2, |_, _| false);
+        frames.handle(Ok(frame(&one, WINDOW)));
+        frames.handle(Ok(frame(&two, WINDOW)));
+        assert_eq!(
+            problems(&readings),
+            [
+                "value 0 cannot be read: a character has a shape the reference has not \
+                 learned: it read `?`, and character 1 is unlike any, since it has learned \
+                 none"
+            ]
+        );
+        // Another way to fail is another problem, said once however the
+        // region flickers between the two.
+        for _ in 0..2 {
+            frames.handle(Ok(frame(&none, WINDOW)));
+            frames.handle(Ok(frame(&two, WINDOW)));
+        }
+        assert_eq!(
+            problems(&readings),
+            ["value 0 cannot be read: no pixel in the region has the characters' color"]
+        );
+    }
+
+    #[test]
+    fn a_value_says_a_problem_again_once_it_was_read_in_between() {
+        let (events, readings) = mpsc::channel::<Reading>();
+        let (control, _control) = mpsc::channel();
+        let mut value = red_at("count", 0, 0);
+        value.check.drawn.region = Region::new(0, 0, 2, 1).expect("not empty");
+        // A reader that knows a red pixel as a 1.
+        let mut reader = DigitReader::new(RED, 10);
+        reader
+            .learn(&frame_image(1, 1, |_, _| true), "1")
+            .expect("one character");
+        value.check.drawn.check = Check::Number {
+            reader,
+            whole: false,
+        };
+        let job = job(vec![value]);
+        let mut frames = frames_at(&job, WINDOW, events, control).expect("values to read");
+        let none = frame_image(2, 1, |_, _| false);
+        let one = frame_image(2, 1, |x, _| x == 0);
+        let no_ink = "value 0 cannot be read: no pixel in the region has the characters' color";
+        frames.handle(Ok(frame(&none, WINDOW)));
+        frames.handle(Ok(frame(&none, WINDOW)));
+        assert_eq!(problems(&readings), [no_ink]);
+        frames.handle(Ok(frame(&one, WINDOW)));
+        assert_eq!(
+            flags(&readings),
+            [(0, Value::Number(Number::new(1.0).expect("finite")))]
+        );
+        frames.handle(Ok(frame(&none, WINDOW)));
+        assert_eq!(problems(&readings), [no_ink]);
     }
 
     #[test]

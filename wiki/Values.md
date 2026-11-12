@@ -31,31 +31,42 @@ back to the automation with the value picked.
    press them, or change it in [Settings](Settings.md). F1 to F24, Print Screen,
    and Pause work alone. A letter, a digit, Space, an arrow, Insert, Delete,
    Home, End, Page Up, or Page Down needs Ctrl, Alt, Shift, or Win with it, so
-   it keeps working everywhere else. Other keys can't be the shortcut.
+   it keeps working everywhere else. Other keys can't be the shortcut. Once
+   the region is drawn, AppyTappy can also take the screenshots for you while
+   you use the application: [record them](#record-screenshots).
 3. **Where to read.** Type a **Value name**, such as `Progress`, and choose
    the **Check**, one of the four [checks](#checks) below. On a screenshot,
-   drag to draw a box around what to read. Drag inside the box to move it, or
-   drag a corner to resize it. The **X**, **Y**, **Width**, and **Height**
-   fields set it to the exact pixel, counted in the window's own pixels from
-   its top-left corner. Turn on **This content may move** if the value shows
-   in different places inside the window, as
-   [Content that moves](#content-that-moves) describes. **Stays at** says
-   which side of the window the region keeps to as the window changes size,
-   as [Window size](#window-size) describes; it follows the region, so you
-   can leave it alone. Then select **Next: how to read it**.
+   drag to draw a box around what to read, as
+   [Draw the region](#draw-the-region) describes. The **X**, **Y**,
+   **Width**, and **Height** fields set it to the exact pixel, counted in the
+   window's own pixels from its top-left corner. Turn on
+   **This content may move** if the value shows in different places inside
+   the window, as [Content that moves](#content-that-moves) describes.
+   **Stays at** says which side of the window the region keeps to as the
+   window changes size, as [Window size](#window-size) describes; it follows
+   the region, so you can leave it alone. Then select
+   **Next: how to read it**.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
    box under it then shows what AppyTappy reads on the live window, a few
    times a second. If the check cannot work, such as a bar whose filled and
-   empty colors are the same, it says why there.
+   empty colors are the same, it says why there, and so it does when it
+   can't read the live window, such as a number with a character its
+   reference hasn't learned.
 5. **Save.** Select **Save value**. **Back** returns to the first step.
 
-AppyTappy keeps the screenshots until you select **Change window** or leave
-the new value, and saves only the part inside the box you drew, as
+AppyTappy keeps the screenshots until you remove them, select
+**Change window**, or leave the new value, and saves only the part inside the
+box you drew, as
 [What AppyTappy keeps](Getting-started.md#what-appytappy-keeps) describes.
-Before either drops work you have not saved, it asks first:
-select **Keep this window** or **Stay** to carry on, as
+Before a change of window or leaving drops work you have not saved, it asks
+first: select **Keep this window** or **Stay** to carry on, as
 [Leave before you save](Getting-started.md#leave-before-you-save) describes.
 **Change window** returns to the first step with the same application chosen.
+
+To remove a screenshot, select it in the strip, then select
+**Remove screenshot** with its number. The other screenshots keep their
+numbers. A screenshot stays while the region is drawn on it or a state is taken
+from it: draw the region on another screenshot, or remove the state, first.
 
 ### When the window isn't found
 
@@ -81,6 +92,131 @@ draw is what your automations see.
 - **The applications couldn't be read.** AppyTappy says why. Select
   **Refresh** to read them again.
 
+## Draw the region
+
+The region is the box that a value reads, a reference learns from, or a click
+looks for. You draw it on a screenshot, not on the live window.
+
+- **Draw.** Drag from one corner of the thing to the opposite corner. The
+  drag can start in the empty space around the screenshot, such as above its
+  top edge, so a box that touches an edge is easy to draw: the box holds the
+  part of the screenshot that the drag covers. A drag whose box covers none
+  of the screenshot draws nothing, and so does a click.
+- **Move.** Drag inside the box. It stops at the edges of the screenshot.
+- **Resize.** Drag one of the four squares at its corners.
+
+A click changes nothing, so clicking the box or a corner leaves a region you
+typed in the **X**, **Y**, **Width**, and **Height** fields as it is. The
+squares lie outside the box, so even a very small box can be moved by
+dragging inside it.
+
+The box changes when you let go of the mouse button. A drag that is
+interrupted, such as by a screenshot that arrives while you drag, leaves the
+box as it was, and you can drag again.
+
+The box's outline and its label, which shows the region's size in the
+window's pixels, lie outside the box, so nothing covers what you select. The
+rest of the screenshot is dimmed a little.
+
+To select something small, zoom in. Under the screenshot, **Zoom in** (**+**)
+and **Zoom out** (**−**) change how large the screenshot shows, and the
+percentage between them says how large that is against the window's own
+pixels. **Fit** shows the whole screenshot again. Hold Ctrl and turn the mouse
+wheel to zoom around the pointer. While the screenshot is larger than the
+view, turn the wheel or drag the scroll bars to move around it. The wheel
+also works in the middle of a drag, and the box follows the screenshot as it
+scrolls, to draw a box larger than the view shows.
+Zoom changes only how you see the screenshot: the region keeps its pixels.
+The live window always shows whole, and a screenshot of another size starts
+whole again.
+
+## Record screenshots
+
+A value needs screenshots of the right moments: each look of a **State**, a bar
+partly full, a light while it is on. Catching them by hand while you use the
+other application is hard, so AppyTappy can watch the value's region and take
+them itself.
+
+1. **Draw the region** on a screenshot, as in **Where to read**.
+2. **Start recording.** Select **Start recording** under
+   **Record screenshots**, in either step. The region turns red while it
+   records, and the bar shows how long it has recorded.
+3. **Use the application.** Each time the region shows a look that no
+   screenshot shows yet, AppyTappy keeps a screenshot of the whole window. A
+   look that comes back is not kept again.
+4. **Stop and look through them.** Come back and select **Stop recording**.
+   The recorded screenshots are in the strip with the ones you took, each
+   marked with a red dot and the time it was kept, and the first one shows.
+   They work like any screenshot: add a state from one, pick a color on one,
+   or draw the region on one. Remove the ones you do not need one by one, or
+   select **Remove all recorded** to remove every recorded screenshot that
+   nothing uses. While it records, no screenshot can be removed: stop
+   recording first.
+
+A recording compares the whole region. It keeps a screenshot when the region
+differs from every screenshot you have by more than a tolerance, on average
+over all its pixels. So draw the region close around what changes:
+
+- Where the background behind the thing changes, such as a scene behind an
+  icon, most moments count as new looks, and the recording soon stops at its
+  limit. A recording does not use what you
+  [select in a state](#select-the-thing-in-a-state).
+- Where only a small part of a large region changes, the average barely
+  moves, and the change may never give a screenshot.
+
+For those, take the screenshots by hand.
+
+What a recording gives each check:
+
+- **State.** A screenshot of each look, to add a state from. The tolerance is
+  the check's **Tolerance** as it is when you start recording: lower it first
+  to keep looks that differ less, or raise it to keep fewer. Changing it while
+  a recording runs changes nothing until you record again.
+- **Bar fill.** The bar at different fills. Pick the **Filled color** and the
+  **Empty color** on one that shows both. The tolerance is fixed at 16, on
+  the scale of 0 to 255 that a color's red, green, and blue use, so a bar that
+  moves only a little may not give a new screenshot.
+- **Color.** The region with and without the color. Pick the
+  **Color to look for** on one that shows it. The tolerance is the same fixed
+  16, so a small light in a large region may not give a new screenshot when
+  it turns on.
+- **Number.** A number learns characters, not looks, so it records readings
+  instead. Under **How to read it**, select **Record readings**. The
+  reference you picked opens with its
+  [recording](References.md#record-readings) already running on the value's
+  region. With no reference picked, a new one opens: click the characters on
+  the screenshot to pick their color, then select **Start recording**.
+  **Save reference** brings you back to the value.
+
+When you [edit a value](#edit-a-value), a **State**, a **Bar fill**, or a
+**Color** offers recording as a new value does, to take a state's picture
+again or pick a color again, while the window has the size the value was drawn
+at; at another size it says which size it needs. A **Number** offers
+**Record readings**.
+
+When you [fix a value at one size](#fix-a-value-at-one-size), a **State**
+offers recording, with the tolerance of its first drawing. A **Bar fill** or a
+**Color** does not, because its fix reads with the colors of its first drawing
+and needs no other screenshot.
+
+One recording keeps at most 16 screenshots, then stops and says so: remove the
+ones you do not need and start again to keep more. Something that fades in or
+out can leave a screenshot or two of the fade. Each screenshot is the whole
+window, kept in memory until you remove it, change window, or leave; AppyTappy
+never writes one to disk.
+
+Keep the window the size it was when you took the screenshot you drew the
+region on: at another size, recording pauses and says to resize the window. If
+the window's capture fails for a moment, recording stops and says why; select
+**Start recording** again once the window shows. If the window closes, nothing more can be
+recorded from it, and the screenshots stay until you change window. Recording
+again keeps only looks that no screenshot shows, so nothing is kept twice. A
+look you removed the screenshot of is kept again if the region shows it.
+
+With a large region that shows many looks, AppyTappy compares fewer moments,
+so the rest of AppyTappy Setup stays quick. A look that shows only for an
+instant can then be missed.
+
 ## Checks
 
 - **Number** reads a number, such as `87%` or `-12.5`, with a
@@ -88,7 +224,9 @@ draw is what your automations see.
   characters. Pick one of the application's references, or select
   **New reference from this region** to make one from the region you drew.
   **Edit** changes the picked one, such as to teach it a digit it does not
-  know yet. Turn on **Whole number only** to ignore every digit after the
+  know yet. **Record readings** teaches the picked one, or a new one, from
+  what the region shows while you use the application, as
+  [Record screenshots](#record-screenshots) describes. Turn on **Whole number only** to ignore every digit after the
   decimal point, so `87.5%` reads as 87. The reference still has to know the
   point, so teach it on a screenshot that shows one.
   To read numbers with a thousands separator, such as `1,234`, teach the
@@ -283,6 +421,8 @@ compare the whole region again. You can still adjust the region by hand with
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
 **State** check on the part that matters often works instead.
+[What a reference can't learn](References.md#what-a-reference-cant-learn)
+says what else gets in a number's way, and what to type for it.
 
 ## Content that moves
 
@@ -326,7 +466,10 @@ what AppyTappy reads depends on how often the application's window
   keeps its scaled distance from the side it stays at. A **State** check's
   pictures scale with it: shrinking averages the pixels each new pixel
   covers, and growing repeats the nearest one, so sharp edges stay sharp. A
-  value whose region would reach past the window's edge isn't read.
+  value whose region would reach past the window's edge isn't read. A
+  window's title bar doesn't scale with it, so between windowed and
+  fullscreen a scaled region can land beside its value:
+  [fix the value](#fix-a-value-at-one-size) at the other size.
 - While it changes size **rarely**, the value is read only at the sizes it
   was drawn at.
 
@@ -393,9 +536,9 @@ While you resize the window, AppyTappy waits until the window keeps one size
 for a quarter of a second before it reads at that size. While the window is
 being resized, is closed or is at a size where no value reads, AppyTappy
 reads nothing. Automations neither run nor undo their changes until it can
-read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once
-which values it doesn't read at the window's size and why, and says it again
-only when the reason changes.
+read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says
+which values it doesn't read at the window's size and why, each reason once
+until the value reads again.
 
 ## Edit a value
 

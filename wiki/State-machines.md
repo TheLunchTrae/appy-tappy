@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Ten guards drop such stale messages:
+it was about has gone. Eleven guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -29,20 +29,25 @@ it was about has gone. Ten guards drop such stale messages:
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
   generation is dropped.
-- **Recording IDs.** Each recording gets a new `id`, so text that the text
-  reader sends back for a discarded recording is dropped.
+- **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
+  from one counter, so text that the text reader sends back for a recording
+  that was discarded, or replaced by one of either kind, is dropped.
 - **Overlay numbers.** Each overlay capture gets its own number from
   `Overlays::next`, and a reading from an older capture is dropped.
 - **Detection keys.** The capture screen keys a bar detection by its region,
-  the screenshot the region was drawn on, and the number of screenshots. An
-  answer for any other key than the request under way is dropped. What two
+  the screenshot the region was drawn on, and the indexes of the screenshots
+  there are. An answer for any other key than the request under way is dropped. What two
   colors read is kept under those and the colors, and shows only while they
   are the same.
-- **Trials.** The capture screen keeps each live reading with the trial the
-  owner read it with: the check, or the edit of a saved value, whose set-up
-  last went through (`readingOf` in `apps/setup/src/lib/check.ts`). It shows
-  the reading only while that trial is the one being tried, so a reading
-  never shows under another check or edit than the one that made it.
+- **Pointer IDs.** A region drag keeps the ID of the pointer that started it
+  (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
+  capture of any other pointer is dropped, and so is every event but a press
+  once the drag is over.
+- **Check numbers.** The capture screen gives each check or saved value's
+  edit it tries on the live window a number, which is in force from when the
+  owner took it until the draft changes or it is tried again. An answer to a
+  read asked under another number, or under none, is dropped (`afterRead`
+  in `apps/setup/src/lib/liveCheck.ts`).
 - **Request numbers.** The capture screen numbers each request of its
   matching pixels preview (`apps/setup/src/lib/matchPreview.ts`). An answer
   or a failure that carries another number than the request in flight's, such
@@ -283,10 +288,11 @@ stateDiagram-v2
   and starts again at those regions, once for each settled size. When none
   does, the capture goes on and this thread says why each value is not read
   there (`say_unread`), at once, even when the window draws no more frames.
-  Each value's last problem moves between the two threads over channels:
-  the handler keeps it while frames show the capture's size, hands it to this
-  thread in its first `Resizing` for another size, and takes it back, as this
-  thread said it, on the first frame of its own size again. Nothing moves for
+  The problems said for each value since it was last read move between the
+  two threads over channels: the handler keeps them while frames show the
+  capture's size, hands them to this thread in its first `Resizing` for
+  another size, and takes them back, with what this thread said, on the
+  first frame of its own size again. Nothing moves for
   each frame. A capture started for a new size starts from those problems,
   and one started after a capture ended any other way starts from none. A
   size that settles back at the capture's own size changes nothing. Windows
@@ -315,7 +321,7 @@ stateDiagram-v2
 Its state is `placed` (the window size whose values it reads, and where
 each value reads at it, resolved once), `told` (the other size it last told
 the reader frames show), `last` (each value's last reading), `problems`
-(each value's last problem, handed to the reader while frames show
+(the problems said for each value since it was last read, handed to the reader while frames show
 another size), `heard` (where the reader gives it back), `seen` (whether
 it sent a reading since it last sent `Unseen`), `failures` (frames in a
 row that failed), `restarted` (whether the reader started this capture
@@ -359,7 +365,19 @@ stateDiagram-v2
 - A value that does not read at the capture's own size, such as one whose
   scaled region reaches outside the window, says why once and is not
   copied.
-- Each value's problem leaves the window size out and is carried into the
+- A value whose check fails on a frame keeps its last reading and says why.
+  The handler keeps every problem it said for the value since the value was
+  last read, and says each once: a good read forgets them. A number's check
+  fails one way for each stage of its read, such as a character its
+  reference has not learned, whatever the characters are, so a counter that
+  stays unreadable while it counts is said once, with what its first failed
+  read showed, and a region that flickers between two stages is said twice,
+  not once for each frame
+  ([Why a number is not read](Screen-regions.md#why-a-number-is-not-read)).
+  At a size the value was not drawn at, the problem says its region is
+  scaled there and to fix the value at that size if the region is off,
+  which makes it another problem than the same stage at a drawn size.
+- Each value's problems leave the window size out and are carried into the
   capture started for a new size, so the log says why once for each reason,
   not once for each size or each restart.
 
@@ -1022,8 +1040,8 @@ state, such as a late check during the download, changes nothing.
 The setup app's owner thread (`apps/setup/src-tauri/src/owner.rs`) has one
 capture slot, `session`, shared by the value preview and the automation
 editor's watch. Starting one stops the other. Its other state is `generation`,
-`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`,
-and `watched`.
+`latest` (the newest frame), `failure`, `screenshots`, `check`, `recording`
+(what the capture records, if anything: readings or looks), and `watched`.
 
 ```mermaid
 stateDiagram-v2
@@ -1076,6 +1094,55 @@ stateDiagram-v2
 - The screenshot shortcut is on while the capture view shows, except while the
   user is choosing a new shortcut. Choosing ends with a new shortcut, Esc, a
   second click, or when focus leaves **Change shortcut**.
+
+### Live check
+
+The capture screen tries a trial on the live window (`useLiveCheck` in
+`apps/setup/src/lib/useLiveCheck.ts`): the check being set up, with
+`set_check`, or a saved value's edit, with `try_edit`, as
+[Value edit](#value-edit) describes. Either way the owner reads the window
+with what it took, so the two share this machine and its one guard. Its
+state is `state`, a `CheckState`; `read`, the reading or the problem shown;
+`preview`, what saving an edit would do; `tried`, the number of the newest
+trial; and `inForce`, the number of the trial the owner reads with, or none.
+Below, a check stands for either.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Setting: the draft makes a check
+    Setting --> Set: the owner took the check
+    Setting --> Failed: the owner refused the check
+    Set --> Set: a read answers
+    Setting --> Setting: the check changes
+    Set --> Setting: the check changes
+    Failed --> Setting: the check changes
+    Setting --> Idle: the draft no longer makes a check
+    Set --> Idle: the draft no longer makes a check
+    Failed --> Idle: the draft no longer makes a check
+```
+
+- **Idle.** The draft lacks something, and the box says what. Nothing is
+  shown as read.
+- **Setting** (`pending`). The check waits 250 ms for the draft to hold
+  still, then goes to the owner. Each change of the check, and each time the
+  same edit is tried again, as when the window's size changes,
+  takes the next number, starts the wait again, and leaves no number in
+  force, and the owner's answer for a check the draft has left is ignored.
+  The box says it is trying the check. The last reading is kept, to show
+  until the first read with the new check answers, and a problem is cleared.
+- **Set.** The owner took the check, and its number is in force. The window
+  is read every 120 ms with `read_value`, each read after the last answered.
+  An answer replaces what the box shows: a reading, or why the frame cannot
+  be read.
+- **Failed** (`error`). The owner refused the check, such as a label its
+  reference cannot learn, and the box says why. The owner keeps the check it
+  had, and nothing is read until the check changes.
+- A read notes the number in force when it is asked, and its answer is taken
+  only while that number is still in force. So an answer under an older
+  check is dropped, reading or problem, and so is one asked between a change
+  of the check and the owner taking the new one, which the owner read with
+  the check before (`afterRead`).
 
 ### Matching pixels preview
 
@@ -1158,10 +1225,16 @@ the tint goes, and the line under the switch says so beside the error.
 
 ### Recording
 
-A recording (`apps/setup/src-tauri/src/recording.rs`) keeps each reading a
-region shows once, for the user to review. It is `None` or a `Recording` whose
-`stopped` field says whether it still records, and whose `problem` says why
-it skips frames or why it stopped by itself.
+The owner's `recording` field is `None` or one `Recorder`
+(`apps/setup/src-tauri/src/recording.rs`): a recording of readings or
+[a recording of looks](#recording-looks). The type holds one of them, so the
+two never run together, and starting one replaces the other. Both hold a
+`Lifecycle` (`recording/lifecycle.rs`), whose `stopped` field says whether it
+still records, and whose `problem` says why it skips frames or why it stopped
+by itself.
+
+A recording of readings keeps each reading a region shows once, for the user
+to review.
 
 ```mermaid
 stateDiagram-v2
@@ -1193,12 +1266,163 @@ stateDiagram-v2
   (`Recording::end`). Its problem says to change window, and **Record more**
   and a new **Record** are refused. Its readings stay for review, so a
   reference can still be saved from them.
+- Starting a recording of looks replaces a recording of readings, as a
+  discard would. The UI offers it only in the value flow, which discards the
+  readings when the reference editor closes.
 - A value saves the window size of the screenshot its region was drawn on
   (`drawnOn` in the UI). A number value reads with one of the application's
   references, and saving a reference teaches it from its labeled screenshots
   and the recording. A save or a try whose labeled screenshots, recording, or
   compared screenshot has another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
+
+### Region drag
+
+The region surface (`apps/setup/src/components/RegionSurface.tsx`) draws,
+moves, and resizes the region on a screenshot, on the capture screen and on the
+click target screen. Its drag is a pure machine, `step` in
+`apps/setup/src/lib/drag.ts`. The surface turns pointer events into the
+machine's events and carries out the effects it answers with: capture the
+pointer, free it, hand over a region, or hand over the snap tool's rough box.
+Every point is in the screenshot's own pixels, so the zoom and the size of the
+window never reach the machine.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Drawing: press off the region, or with the snap tool
+    Idle --> Moving: press inside the region with the box tool
+    Idle --> Resizing: press on a corner's handle with the box tool
+    Drawing --> Drawing: move, or the screenshot shifts under the pointer
+    Moving --> Moving: move, or the screenshot shifts under the pointer
+    Resizing --> Resizing: move, or the screenshot shifts under the pointer
+    Drawing --> Idle: release, or a move with the button up, hands over the box drawn
+    Moving --> Idle: release, or a move with the button up, hands over the moved region
+    Resizing --> Idle: release, or a move with the button up, hands over the resized region
+    Drawing --> Idle: cancel, lost or failed capture, or the surface changes
+    Moving --> Idle: cancel, lost or failed capture, or the surface changes
+    Resizing --> Idle: cancel, lost or failed capture, or the surface changes
+```
+
+- **Idle.** Only a press of the main button with the box or the snap tool
+  starts a drag, and it captures the pointer. A click that picks a color or
+  selects with the click tool never enters the machine.
+- **Slop.** In every state, nothing changes until the pointer has traveled 3
+  pixels of the view from the press. A click therefore draws, moves, and
+  resizes nothing, so it leaves a region typed to the exact pixel as it is.
+  Past the slop the drag follows the pointer's whole travel, also back to the
+  press.
+- **Drawing.** The box is the part of the screenshot between the press and the
+  pointer. The press can be in the empty space around the screenshot, and a
+  box that holds none of the screenshot is no box. With the box tool the box
+  becomes the region. With the snap tool it is the rough box, and the region
+  stays as it is.
+- **Moving.** The region as it was at the press moves by the pointer's travel
+  and stops at the screenshot's edges.
+- **Resizing.** The pressed corner moves by the pointer's travel from where it
+  was at the press, so a press that is off the corner's tip does not make it
+  jump. The corner across from it stays where it was at the press, also after
+  the dragged corner passes it. A drag that would leave no box keeps the last
+  one.
+- **Shift.** A scroll or a zoom moves the screenshot under a pointer that
+  stays still, and no pointer event tells of it. The surface then says where
+  on the screenshot the pointer is, and the drag follows as for a move.
+- **Release** carries where the pointer was let go, which the last move may
+  not have reached. The drag follows to there, ends, frees the pointer, and
+  hands over what it made: the region, or the rough box. A drag that drew no
+  box, or left the region where it was, hands over nothing.
+- **A move with the main button up** ends the drag the same way, but with the
+  box as it last was. No release event follows a button that comes up while
+  another is held, and where it came up is not known.
+- **Failures.** A drag is interrupted when the browser cancels the pointer,
+  when the surface loses the pointer's capture, or when the surface changes:
+  another screenshot or another size shows, the tool changes, or a click
+  starts to pick a color. Each ends the drag in **Idle** with the pointer
+  freed and hands over nothing. A capture that cannot be taken, because the
+  pointer is gone already, ends the drag the same way with nothing to free:
+  without it no release would reach the surface. Only letting go changes the
+  region, so the region is as it was before the drag, and the next press
+  starts a new one.
+- A press of the pointer that already drags means its release never arrived:
+  the old drag is dropped without handing anything over, and a new one
+  starts. Events of any other pointer change nothing.
+- Dragging on the view selects no text, and the view refuses the browser's own
+  drag of a selection, which would cancel the pointer in the middle of a drag.
+
+The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
+kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
+the live view shows or a screenshot of another size does. It changes only the
+size the screenshot shows at, so a drag goes on through a zoom or a scroll.
+
+### Recording looks
+
+A recording of looks (`apps/setup/src-tauri/src/recording/looks.rs`, started in
+`owner/looks.rs`) keeps a screenshot each time a value's region shows a look
+that no screenshot shows yet. It has no review and nothing to go on with: a
+stopped one only says what it kept and why it stopped, and **Start recording**
+always starts a new one.
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Recording: Start recording
+    Recording --> Resting: a frame is compared, whether or not it is kept
+    Resting --> Recording: four times as long as that frame took has passed
+    Recording --> Paused: a frame of another window size
+    Paused --> Recording: a frame of the size the region was drawn at
+    Recording --> Stopped: Stop recording
+    Paused --> Stopped: Stop recording
+    Recording --> Stopped: the capture fails, with the failure as its problem
+    Paused --> Stopped: the capture fails, with the failure as its problem
+    Recording --> Stopped: it kept 16 screenshots, with the limit as its problem
+    Stopped --> Recording: Start recording starts a new recording
+    Recording --> Ended: the window closes
+    Paused --> Ended: the window closes
+    Stopped --> Ended: the window closes
+    Recording --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Paused --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Stopped --> None: the reference editor opens or records, a window is picked, or the flow closes
+    Ended --> None: the reference editor opens, a window is picked, or the flow closes
+```
+
+- **Recording** crops each frame to the region and compares the crop with
+  every look it knows: the region on each screenshot of the same window size
+  that the session held when it started, and on each frame it kept. A crop
+  within the tolerance of one of them changes nothing. Any other is a new look:
+  the whole frame goes to the screenshot store, and the recording's `kept` list
+  gets its index.
+- **Resting** is a recording whose `rests_until` is still to come. After each
+  comparison it is set to four times as long as the frame took from arriving
+  to compared (`REST`), counted from the end of the comparison. A frame that
+  the owner handles before then is not compared: it changes nothing in the
+  recording, and a look it shows is kept when a later frame shows it.
+  Comparing so takes at most a fifth of the owner thread's time, whatever the
+  region's size. The time a frame waited for the owner counts toward what it
+  took, so a recording rests longer after the owner was busy, and the UI
+  shows it as recording all the while. **Resting** leaves by every arrow that
+  leaves **Recording**.
+- **Paused** is a recording whose `problem` says the window has another size
+  than the screenshot the region was drawn on. It keeps nothing, and the next
+  frame of the right size clears the problem and records.
+- **Stopped** keeps its `kept` list and its problem for the UI to show. A
+  capture failure stops it as it stops a recording of readings, and its
+  problem names **Start recording** as the way on, where a recording of
+  readings names **Record more** (`Recorder::after_failure`); frames that come
+  again do not restart it. The limit, `MAX_LOOKS`, stops it when it keeps
+  its 16th screenshot. The user recovers from either with **Start recording**,
+  which starts a new recording with a new ID that knows the looks of every
+  screenshot still held.
+- **Ended** is a stopped recording whose capture slot is **Ended**. Its
+  problem says to change window, and a new recording is refused. The
+  screenshots stay until the capture stops.
+- Leaving a recording, by any arrow to **None**, keeps the screenshots it
+  kept: they belong to the capture slot's `screenshots`, which only a removal
+  or a stop of the capture releases. While it records, rests, or is paused,
+  the owner refuses to remove any screenshot, so the looks it knows and the
+  screenshots that show them stay in step.
+- The reference editor records readings, so opening it discards a recording of
+  looks first (`openEditor` in `Capture.tsx`), and the owner replaces one when
+  a recording of readings starts.
 
 ### Value edit
 
@@ -1397,7 +1621,8 @@ stateDiagram-v2
   failed command's message. It is left by detecting again or by a change of
   the region or the screenshots.
 - A detection is keyed by the region, the screenshot it was drawn on, and
-  the number of screenshots. An answer or a failure is taken only in
+  the indexes of the screenshots there are, so taking, recording, or
+  removing one changes the key. An answer or a failure is taken only in
   **Detecting** and only for that request's key, so one for a region or
   screenshots that changed since is dropped, as is one that arrives after
   the user detected again.

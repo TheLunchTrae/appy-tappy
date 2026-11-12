@@ -15,7 +15,7 @@ import {
 const green = { red: 40, green: 210, blue: 60 };
 const gray = { red: 55, green: 55, blue: 70 };
 const red = { red: 255, green: 0, blue: 0 };
-const key: DetectKey = { region: { x: 1, y: 2, width: 30, height: 4 }, drawnOn: 0, shots: 2 };
+const key: DetectKey = { region: { x: 1, y: 2, width: 30, height: 4 }, drawnOn: 0, shots: '0,1' };
 type Proposal = Extract<BarDetection, { readonly kind: 'proposed' }>;
 const proposed: Proposal = {
   kind: 'proposed',
@@ -93,8 +93,10 @@ describe('detectStep', () => {
   test('an answer for a region or screenshots that changed since is dropped', () => {
     const moved = { ...key, region: { ...key.region, x: 5 } };
     const redrawn = { ...key, drawnOn: 1 };
-    const more = { ...key, shots: 3 };
-    for (const now of [moved, redrawn, more]) {
+    const more = { ...key, shots: '0,1,2' };
+    // One removed and one taken: as many as before, but not the same ones.
+    const others = { ...key, shots: '0,2' };
+    for (const now of [moved, redrawn, more, others]) {
       // The region or the screenshots changed, and a new detection may be under way for them.
       const reset = detectStep(detecting, { kind: 'inputs', key: now });
       expect(reset).toEqual({ state: idle, use: null });
@@ -209,7 +211,7 @@ test('a measure shows only for the colors, region, and screenshots it was made f
   const made = { key: measureKey(key, colors), measure: { readings: [], leftOut: 0 }, error: null };
   expect(measuredFor(made, measureKey({ ...key }, { ...colors }))).toBe(made);
   expect(measuredFor(made, measureKey(key, { filled: gray, empty: green }))).toBeNull();
-  expect(measuredFor(made, measureKey({ ...key, shots: 3 }, colors))).toBeNull();
+  expect(measuredFor(made, measureKey({ ...key, shots: '0,2' }, colors))).toBeNull();
   expect(measuredFor(made, measureKey({ ...key, drawnOn: 1 }, colors))).toBeNull();
   expect(measuredFor(made, measureKey({ ...key, region: { ...key.region, width: 31 } }, colors))).toBeNull();
   expect(measuredFor(made, null)).toBeNull();
