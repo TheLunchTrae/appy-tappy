@@ -25,8 +25,8 @@ pub struct Click {
     pub app: String,
     /// Which button, and how many times.
     pub button: ClickButton,
-    /// Whether the window that was in front gets the focus back after.
-    pub return_focus: bool,
+    /// How it reaches the window.
+    pub delivery: ClickDelivery,
     /// Where it clicks.
     pub at: ClickAt,
 }
@@ -40,7 +40,7 @@ impl Click {
     pub fn new(
         app: &str,
         button: ClickButton,
-        return_focus: bool,
+        delivery: ClickDelivery,
         at: ClickAt,
     ) -> Result<Self, InvalidClick> {
         if !is_app_id(app) {
@@ -49,10 +49,28 @@ impl Click {
         Ok(Self {
             app: app.to_owned(),
             button,
-            return_focus,
+            delivery,
             at,
         })
     }
+}
+
+/// How a click reaches its window.
+///
+/// Either way it is input that AppyTappy makes for another program, so the
+/// anti-cheat policy treats both the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickDelivery {
+    /// The window comes to the front, and the real cursor moves to the place
+    /// and presses, as if the user clicked there.
+    Cursor {
+        /// Whether the window that was in front gets the focus back after.
+        return_focus: bool,
+    },
+    /// The click is posted to the window as mouse messages, so neither the
+    /// cursor nor the focus moves. An application may ignore such a click,
+    /// and nothing reports whether it acted on one.
+    Message,
 }
 
 /// Which mouse button a click presses, and how many times.
@@ -288,14 +306,21 @@ mod tests {
     #[test]
     fn a_click_names_an_application_by_its_id() {
         let spot = ClickAt::Spot(Spot::new(Corner::TopLeft, 1, 2).unwrap());
-        let click = Click::new("streaming_app", ClickButton::Right, false, spot.clone()).unwrap();
+        let click = Click::new(
+            "streaming_app",
+            ClickButton::Right,
+            ClickDelivery::Message,
+            spot.clone(),
+        )
+        .unwrap();
         assert_eq!(click.app, "streaming_app");
         assert_eq!(click.button, ClickButton::Right);
-        assert!(!click.return_focus);
+        assert_eq!(click.delivery, ClickDelivery::Message);
         assert_eq!(click.at, spot);
+        let cursor = ClickDelivery::Cursor { return_focus: true };
         for bad in ["", "Streaming App", "../apps"] {
             assert_eq!(
-                Click::new(bad, ClickButton::Left, true, spot.clone()),
+                Click::new(bad, ClickButton::Left, cursor, spot.clone()),
                 Err(InvalidClick::App),
                 "{bad:?}"
             );

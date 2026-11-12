@@ -21,8 +21,13 @@ parts fit.
 - **Check.** How a screen region binding turns a region's pixels into a value:
   a number read with a reference, a bar's fill, a color match, or a match
   with a saved image.
+- **Click delivery.** How a click action reaches its window: with the
+  cursor, which comes to the window and presses, or as mouse messages sent
+  to the window, which move neither the cursor nor the focus.
 - **Cooldown.** How long after firing a rule cannot fire again. It is not a
   hold time: a rule fires on the first value that makes its condition hold.
+- **Edit.** A saved value changed as it was first drawn, under the ID it
+  has, so the automations that watch it stay linked.
 - **Fix.** A screen region value drawn again at one more window size, which
   it reads there exactly instead of scaled from its first drawing.
 - **Pin.** The side of the window, a corner, an edge's middle, or the center,
@@ -31,6 +36,11 @@ parts fit.
 - **Read interval.** The minimum and maximum time between a source's reads.
   The source reads at the minimum while its value moves and backs off toward
   the maximum while it holds still.
+- **Reading area.** A screen region drawn larger than what it reads, to
+  cover every place content that moves inside the window can show. A number
+  or bar fill check reads its content wherever it is in the area; nothing
+  follows the content. A value saves that its region is one, as guidance
+  for the setup app: it reads the same either way.
 - **Re-arm.** Let a rule that fired fire again, once its condition stops
   holding.
 - **Release.** End a fired rule's effect: it re-armed, or the session ended. A

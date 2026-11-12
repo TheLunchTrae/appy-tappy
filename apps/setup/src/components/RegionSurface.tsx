@@ -38,6 +38,8 @@ interface Props {
   readonly region: Rect | null;
   /** Whether the region is being recorded. */
   readonly recording?: boolean;
+  /** Whether the region is a reading area, larger than what it reads, which shows dashed. */
+  readonly area?: boolean;
   readonly label: string;
   /** Whether the user may draw on it, which they may only on a screenshot. */
   readonly editable: boolean;
@@ -71,6 +73,7 @@ export function Marquee({
   scale,
   label,
   recording = false,
+  area = false,
   children,
 }: {
   readonly rect: Rect;
@@ -78,6 +81,7 @@ export function Marquee({
   readonly scale: number;
   readonly label: string;
   readonly recording?: boolean;
+  readonly area?: boolean;
   readonly children?: ReactNode;
 }) {
   const tag = tagPlace(rect, picture, scale, TAG_ROOM);
@@ -90,7 +94,10 @@ export function Marquee({
   return (
     <>
       <div className="dim" style={{ clipPath: rest }} />
-      <div className={recording ? 'marquee recording' : 'marquee'} style={box}>
+      <div
+        className={['marquee', recording ? 'recording' : null, area ? 'area' : null].filter(Boolean).join(' ')}
+        style={box}
+      >
         {children}
         <span className={`tag ${tag.side} ${tag.align}`}>
           {label} · {rect.width} × {rect.height}
@@ -121,6 +128,7 @@ export function RegionSurface({
   screenshot,
   region,
   recording = false,
+  area = false,
   label,
   editable,
   picking,
@@ -275,7 +283,7 @@ export function RegionSurface({
         </div>
       ) : null}
       {boxes.region === null ? null : (
-        <Marquee rect={boxes.region} picture={size} scale={scale} label={label} recording={recording}>
+        <Marquee rect={boxes.region} picture={size} scale={scale} label={label} recording={recording} area={area}>
           {drags && tool === 'box' ? (
             <>
               <span className="grip" />

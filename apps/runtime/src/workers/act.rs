@@ -16,15 +16,18 @@
 //! works. When the jobs stop, every restore still pending gets a last try.
 //!
 //! A click is placed on the screen here, just before it clicks, because
-//! where it lands depends on where its target's window is now.
+//! where it lands depends on where its target's window is now. A click sent
+//! as messages gets a line in the log once it is sent, because nothing
+//! else says whether its application acted on it.
 
 use std::io;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_actions::{ActionError, Actions, Backoff, Controls, Watched};
+use appytappy_actions::{ActionError, Actions, Backoff, Controls, PlacedClick, Watched};
 use appytappy_config::action::Action;
+use appytappy_config::click::{Click, ClickDelivery};
 use appytappy_config::rule::Restore;
 use appytappy_sources::screen::Capture;
 use appytappy_sources::system::System;
@@ -249,7 +252,7 @@ where
                 return Done { notes, failed };
             },
         };
-        let failures = match job {
+        let failed = match job {
             Job::Run {
                 owner,
                 automation,
@@ -259,41 +262,40 @@ where
                 restore,
                 ..
             } => {
-                let failures: Vec<String> = steps
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(position, step)| {
-                        let error = match step {
-                            Action::Click(wanted) => click::place(screen, wanted, &clicks)
-                                .and_then(|placed| {
-                                    actions
-                                        .click(&placed, &watched)
-                                        .map_err(|error| error.to_string())
-                                }),
-                            step => actions
-                                .perform(owner, step, restore, &watched)
-                                .map_err(|error| error.to_string()),
-                        }
-                        .err()?;
-                        Some(format!(
-                            "{automation}: action {} failed: {error}",
-                            position.saturating_add(1)
-                        ))
-                    })
-                    .collect();
-                failures
+                let mut failed = false;
+                for (step, number) in steps.iter().zip(1_usize..) {
+                    let ran = match step {
+                        Action::Click(wanted) => {
+                            click_now(actions, screen, wanted, &clicks, &watched)
+                        },
+                        step => actions
+                            .perform(owner, step, restore, &watched)
+                            .map(|()| None)
+                            .map_err(|error| error.to_string()),
+                    };
+                    match ran {
+                        Ok(Some(did)) => notes.push(format!("{automation}: action {number} {did}")),
+                        Ok(None) => {},
+                        Err(error) => {
+                            failed = true;
+                            notes.push(format!("{automation}: action {number} failed: {error}"));
+                        },
+                    }
+                }
+                failed
             },
             Job::Undo {
                 owner, automation, ..
-            } => actions
-                .release(owner, now)
-                .err()
-                .map(|error| format!("{automation}: undoing failed, so it is tried again: {error}"))
-                .into_iter()
-                .collect(),
+            } => match actions.release(owner, now) {
+                Ok(()) => false,
+                Err(error) => {
+                    notes.push(format!(
+                        "{automation}: undoing failed, so it is tried again: {error}"
+                    ));
+                    true
+                },
+            },
         };
-        let failed = !failures.is_empty();
-        notes.extend(failures);
         notes.extend(given_up(actions.retry_restores(now)));
         Done { notes, failed }
     }
@@ -361,6 +363,37 @@ where
     }
 }
 
+/// Places `wanted` on `screen` with `clicks` and clicks it for `watched`.
+/// Answers what the log says it did, if it says anything, or why it did not
+/// click.
+fn click_now<C: Controls, S: System + Capture>(
+    actions: &mut Actions<Owner, C>,
+    screen: &S,
+    wanted: &Click,
+    clicks: &ClickTargets,
+    watched: &Watched,
+) -> Result<Option<String>, String> {
+    let placed = click::place(screen, wanted, clicks)?;
+    appytappy_actions::click(actions.controls().input(), &placed, watched)
+        .map(|()| sent(&placed))
+        .map_err(|error| error.to_string())
+}
+
+/// What the log says `click` did once it ran without an error, after the
+/// automation and the action's number, or `None` for a click that needs no
+/// line. A click sent as messages was only sent: its application may
+/// ignore it, and nothing reports whether it acted on it, so the log says
+/// so each time.
+fn sent(click: &PlacedClick) -> Option<String> {
+    match click.delivery {
+        ClickDelivery::Cursor { .. } => None,
+        ClickDelivery::Message => Some(format!(
+            "sent its click to {app}'s window; nothing tells AppyTappy whether {app} acted on it",
+            app = click.app
+        )),
+    }
+}
+
 /// The log line for a restore that failed again and is given up.
 fn given_up(retried: Result<(), ActionError>) -> Option<String> {
     let error = retried.err()?;
@@ -375,11 +408,14 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use appytappy_actions::{MEDIA_RETRY, MediaSession, Press, Stroke, Volume};
+    use appytappy_actions::{
+        Input, MEDIA_RETRY, MediaSession, MouseEvent, MouseMessage, Press, Stroke, Volume,
+    };
     use appytappy_config::action::{
         MediaCommand, MediaTarget, Modifier, OpenTarget, VolumeLevel, VolumeTarget,
     };
     use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::click::{ClickAt, ClickButton, Corner, Spot};
 
     use appytappy_sources::system::Unsupported;
 
@@ -398,6 +434,116 @@ mod tests {
         volume: Option<VolumeLevel>,
         /// Whether setting the volume fails, as on a disconnected device.
         unplugged: bool,
+        input: Posts,
+    }
+
+    /// Input with no keyboard and no cursor, whose every window is 200 by
+    /// 100 at (1000, 500) on the screen, has no child, takes every click in
+    /// its client area, and keeps each message posted to it.
+    #[derive(Default)]
+    struct Posts(Vec<(u64, MouseEvent, (i16, i16))>);
+
+    fn no_input<T>() -> io::Result<T> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    impl Input for Posts {
+        fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
+            Ok(None)
+        }
+
+        fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
+            no_input()
+        }
+
+        fn send_strokes(&mut self, _strokes: &[Stroke]) -> io::Result<usize> {
+            no_input()
+        }
+
+        fn front_window(&mut self) -> io::Result<Option<u64>> {
+            no_input()
+        }
+
+        fn window_at(&mut self, _x: i32, _y: i32) -> io::Result<Option<u64>> {
+            no_input()
+        }
+
+        fn bring_to_front(&mut self, _window: u64) -> io::Result<bool> {
+            no_input()
+        }
+
+        fn cursor(&mut self) -> io::Result<(i32, i32)> {
+            no_input()
+        }
+
+        fn move_cursor(&mut self, _x: i32, _y: i32) -> io::Result<()> {
+            no_input()
+        }
+
+        fn buttons_held(&mut self) -> io::Result<bool> {
+            no_input()
+        }
+
+        fn send_presses(&mut self, _presses: &[Press]) -> io::Result<usize> {
+            no_input()
+        }
+
+        fn hold(&mut self, _time: Duration) {}
+
+        fn own_place(&mut self, _window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
+            Ok((x, y))
+        }
+
+        fn client_point(&mut self, _window: u64, x: i32, y: i32) -> io::Result<(i32, i32)> {
+            Ok((
+                x.checked_sub(1000).expect("on the screen"),
+                y.checked_sub(500).expect("on the screen"),
+            ))
+        }
+
+        fn client_size(&mut self, _window: u64) -> io::Result<(i32, i32)> {
+            Ok((200, 100))
+        }
+
+        fn top_child(&mut self, _window: u64) -> io::Result<Option<u64>> {
+            Ok(None)
+        }
+
+        fn below(&mut self, _window: u64) -> io::Result<Option<u64>> {
+            Ok(None)
+        }
+
+        fn style(&mut self, _window: u64) -> io::Result<u32> {
+            // Visible, and not disabled.
+            Ok(0x1000_0000)
+        }
+
+        fn bounds(&mut self, _window: u64) -> io::Result<(i32, i32, i32, i32)> {
+            Ok((1000, 500, 1200, 600))
+        }
+
+        fn hit_test(
+            &mut self,
+            _window: u64,
+            _at: (i16, i16),
+            _wait: Duration,
+        ) -> io::Result<usize> {
+            // The place is in the window's client area.
+            Ok(1)
+        }
+
+        fn now(&mut self) -> Instant {
+            Instant::now()
+        }
+
+        fn class_style(&mut self, _window: u64) -> io::Result<u32> {
+            Ok(0)
+        }
+
+        fn post(&mut self, window: u64, message: MouseMessage) -> io::Result<()> {
+            self.0.push((window, message.event, message.at));
+            Ok(())
+        }
     }
 
     impl OnePlayer {
@@ -408,6 +554,7 @@ mod tests {
                 refusals: 0,
                 volume: None,
                 unplugged: false,
+                input: Posts::default(),
             }
         }
     }
@@ -415,6 +562,11 @@ mod tests {
     impl Controls for OnePlayer {
         type Media = ();
         type Volume = ();
+        type Input = Posts;
+
+        fn input(&mut self) -> &mut Posts {
+            &mut self.input
+        }
 
         fn current_media(&mut self) -> io::Result<Option<MediaSession<()>>> {
             Ok(Some(MediaSession {
@@ -455,48 +607,6 @@ mod tests {
             self.volume = Some(level);
             Ok(true)
         }
-
-        fn focused_process(&mut self) -> io::Result<Option<ProcessId>> {
-            Ok(None)
-        }
-
-        fn held_modifiers(&mut self) -> io::Result<Vec<Modifier>> {
-            Ok(Vec::new())
-        }
-
-        fn send_strokes(&mut self, strokes: &[Stroke]) -> io::Result<usize> {
-            Ok(strokes.len())
-        }
-
-        fn front_window(&mut self) -> io::Result<Option<u64>> {
-            Ok(None)
-        }
-
-        fn window_at(&mut self, _x: i32, _y: i32) -> io::Result<Option<u64>> {
-            Ok(None)
-        }
-
-        fn bring_to_front(&mut self, _window: u64) -> io::Result<bool> {
-            Ok(false)
-        }
-
-        fn cursor(&mut self) -> io::Result<(i32, i32)> {
-            Ok((0, 0))
-        }
-
-        fn move_cursor(&mut self, _x: i32, _y: i32) -> io::Result<()> {
-            Ok(())
-        }
-
-        fn buttons_held(&mut self) -> io::Result<bool> {
-            Ok(false)
-        }
-
-        fn send_presses(&mut self, presses: &[Press]) -> io::Result<usize> {
-            Ok(presses.len())
-        }
-
-        fn hold(&mut self, _time: Duration) {}
 
         fn open(&mut self, _target: &OpenTarget) -> io::Result<()> {
             Ok(())
@@ -920,20 +1030,62 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_click_is_placed_before_it_clicks_and_says_why_it_was_not() {
-        use appytappy_config::click::{Click, ClickAt, ClickButton, Corner, Spot};
-
-        let (commands, _sent) = mpsc::channel();
-        let (mut worker, _notes) = Worker::start(once(OnePlayer::new(commands)), Instant::now());
-        let click = Click::new(
+    /// A click sent as messages to a spot 10 across and 5 down the window
+    /// of the application `target`.
+    fn posted_click() -> Click {
+        Click::new(
             "target",
             ClickButton::Left,
-            true,
-            ClickAt::Spot(Spot::new(Corner::TopLeft, 1, 1).expect("valid")),
+            ClickDelivery::Message,
+            ClickAt::Spot(Spot::new(Corner::TopLeft, 10, 5).expect("valid")),
         )
-        .expect("valid");
-        let steps = Box::new([Action::Click(click), pause()[0].clone()]);
+        .expect("valid")
+    }
+
+    #[test]
+    fn a_click_sent_as_messages_is_logged_as_sent_not_as_done() {
+        let (commands, _sent) = mpsc::channel();
+        let (mut worker, _notes) = Worker::start(once(OnePlayer::new(commands)), Instant::now());
+        let click = posted_click();
+        let targets = crate::click::tests::targets(std::slice::from_ref(&click));
+        let mut job = fire(Box::new([Action::Click(click)]));
+        if let Job::Run { clicks, .. } = &mut job {
+            *clicks = Arc::new(targets);
+        }
+        let done = worker.job(job, &crate::click::tests::Screen::new(), Instant::now());
+        assert_eq!(
+            done.notes,
+            [format!(
+                "{AUTOMATION}: action 1 sent its click to Target App's window; nothing tells \
+                 AppyTappy whether Target App acted on it"
+            )]
+        );
+        assert!(!done.failed, "a click that was sent did not fail");
+        let (left, at) = (appytappy_actions::MouseButton::Left, (10, 5));
+        assert_eq!(
+            controls(&mut worker).input.0,
+            [
+                (9, MouseEvent::Move, at),
+                (9, MouseEvent::Down(left), at),
+                (9, MouseEvent::Up(left), at)
+            ]
+        );
+        let cursor = PlacedClick {
+            window: 9,
+            process: ProcessId::new(8),
+            app: "Target App".to_owned(),
+            at: (0, 0),
+            button: ClickButton::Left,
+            delivery: ClickDelivery::Cursor { return_focus: true },
+        };
+        assert_eq!(sent(&cursor), None, "a click with the cursor needs no line");
+    }
+
+    #[test]
+    fn a_click_is_placed_before_it_clicks_and_says_why_it_was_not() {
+        let (commands, _sent) = mpsc::channel();
+        let (mut worker, _notes) = Worker::start(once(OnePlayer::new(commands)), Instant::now());
+        let steps = Box::new([Action::Click(posted_click()), pause()[0].clone()]);
         assert_eq!(
             worker.job(fire(steps), &Unsupported, Instant::now()).notes,
             [format!(

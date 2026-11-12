@@ -33,13 +33,48 @@ impl<H: Host> Owner<H> {
     pub(crate) fn delete_automation(&mut self, id: &str) -> Result<(), String> {
         self.update_runtime(|stores| automations::delete(stores, id))
     }
+
+    /// Removes the click pictures no saved automation names, as once the
+    /// automation's flow has ended: those of a target set up for an
+    /// automation that was then not saved. The runtime reads none of them, so it is
+    /// not told.
+    pub(crate) fn forget_unsaved_click_pictures(&self) -> Result<(), String> {
+        self.stores().and_then(automations::forget_unsaved_pictures)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use appytappy_config::automation_file::AutomationDef;
 
+    use crate::check_spec::RegionSpec;
     use crate::owner::test_support::with_saved_bar;
+
+    #[test]
+    fn a_click_picture_no_automation_was_saved_with_is_forgotten() {
+        let (mut harness, root) = with_saved_bar("owner-click-pictures");
+        let region = RegionSpec {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        let taken = harness
+            .ask(|owner| owner.add_click_picture(0, region, None))
+            .expect("keeps the picture");
+        let shown = |image: String| {
+            move |owner: &mut crate::owner::Owner<_>| owner.click_picture_pixels(&image, 4).is_ok()
+        };
+        assert!(harness.ask(shown(taken.image.clone())));
+        harness.forget_reloads();
+        assert_eq!(
+            harness.ask(|owner| owner.forget_unsaved_click_pictures()),
+            Ok(())
+        );
+        assert!(!harness.ask(shown(taken.image)), "its file is gone");
+        assert_eq!(harness.reloads(), 0, "the runtime reads none of them");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
 
     #[test]
     fn an_automation_change_that_worked_tells_the_runtime() {

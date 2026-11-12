@@ -244,10 +244,12 @@ impl<H: Host> Owner<H> {
 mod tests {
     use appytappy_config::app_file::WindowDef;
     use appytappy_sources::screen::Size;
+    use tokio::sync::oneshot;
 
-    use crate::check_spec::CheckSpec;
+    use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+    use crate::owner::messages::Run;
     use crate::owner::run;
-    use crate::owner::test_support::{FakeHost, Harness, frame_image, harness};
+    use crate::owner::test_support::{FakeHost, Harness, STATE, frame_image, harness};
     use crate::pixels;
     use crate::window_list::WindowFit;
 
@@ -532,14 +534,47 @@ mod tests {
     }
 
     #[test]
-    fn stopping_closes_the_capture_and_forgets_the_screenshots() {
+    fn stopping_closes_the_capture_and_releases_every_picture_it_held() {
         let mut harness = harness(false);
         let mut handler = harness.pick();
         harness.deliver(&mut handler, Ok(&frame_image()));
         assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-        harness.ask(Owner::stop);
+        let left: RegionSpec =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":2,"height":2}"#).expect("valid JSON");
+        let red: ColorSpec =
+            serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON");
+        harness
+            .ask(|owner| owner.start_recording(left, red, 0, 0, false))
+            .expect("records");
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness
+            .ask(|owner| owner.set_check(&serde_json::from_str(STATE).expect("valid JSON")))
+            .expect("a valid check");
+        // What the page can ask for of the picked window: the newest frame,
+        // a screenshot, a recorded reading, the recording, and what the
+        // check, which holds a state's picture, reads.
+        let held = |owner: &mut Owner<FakeHost>| {
+            [
+                owner.preview(4).expect("no failure").is_some(),
+                owner.screenshot_pixels(0, 4).is_some(),
+                owner.recorded_pixels(0, 4).is_some(),
+                owner.recording_state().is_some(),
+                owner.reading().expect("reads").is_some(),
+            ]
+        };
+        assert_eq!(harness.ask(held), [true; 5]);
+
+        // The page's `stop_capture`, as it reaches the owner when a flow
+        // closes or the user selects Change window.
+        let (reply, mut answer) = oneshot::channel();
+        let stop = Message::Run(Run::new(reply, Owner::stop));
+        assert!(harness.owner.handle(stop).is_continue());
+        assert_eq!(answer.try_recv(), Ok(()));
         assert_eq!(harness.closed.try_recv(), Ok(7));
-        assert_eq!(harness.ask(|owner| owner.screenshot_pixels(0, 100)), None);
+        assert_eq!(harness.ask(held), [false; 5]);
+        // A frame the stopped capture sends late is not kept either.
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(held), [false; 5]);
         assert_eq!(
             harness.ask(Owner::screenshot),
             Err("No frame has arrived from the window yet.".to_owned())

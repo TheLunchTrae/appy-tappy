@@ -48,7 +48,13 @@ app: string,
  */
 button: ClickButtonDef,
 /**
- * Whether the window that was in front gets the focus back after.
+ * How it reaches the window: with the cursor when left out.
+ */
+delivery: ClickDeliveryDef,
+/**
+ * Whether the window that was in front gets the focus back after a
+ * click with the cursor. A click sent as messages moves no focus
+ * and does not read this.
  */
 returnFocus: boolean,
 /**
@@ -377,6 +383,13 @@ tolerance: number, }>;
 export type ClickButtonDef = DeepReadonly<"left" | "right" | "double">;
 
 /**
+ * How a click reaches its window, as the file spells it: with the cursor
+ * when the file names none. A cursor click's return of the focus is the
+ * action's own field.
+ */
+export type ClickDeliveryDef = DeepReadonly<"cursor" | "message">;
+
+/**
  * A click picture just kept, and the size of the window it was taken on.
  */
 export type ClickPictureView = DeepReadonly<{
@@ -392,6 +405,50 @@ windowWidth: number,
  * The window's height when it was taken.
  */
 windowHeight: number, }>;
+
+/**
+ * The window a click sent on request went to.
+ */
+export type ClickSent = DeepReadonly<{
+/**
+ * The window's handle, as picking a window names it.
+ */
+window: number,
+/**
+ * The window's title, which tells an application's windows apart.
+ */
+title: string, }>;
+
+/**
+ * A click to send now, as the click target screen sets it up.
+ */
+export type ClickSpec = DeepReadonly<{
+/**
+ * The ID of the saved application whose value the automation watches,
+ * or nothing before the automation watches one.
+ */
+watched: string | null,
+/**
+ * The ID of the saved application it clicks in.
+ */
+app: string,
+/**
+ * Which button, and how many times.
+ */
+button: ClickButtonDef,
+/**
+ * How it reaches the window.
+ */
+delivery: ClickDeliveryDef,
+/**
+ * Whether the window that was in front gets the focus back after a
+ * click with the cursor.
+ */
+returnFocus: boolean,
+/**
+ * Where it clicks.
+ */
+at: ClickAtDef, }>;
 
 /**
  * A color.
@@ -434,6 +491,77 @@ export type ComparisonDef = DeepReadonly<"below" | "atMost" | "equals" | "notEqu
  * [`Corner`] as the file spells it.
  */
 export type CornerDef = DeepReadonly<"topLeft" | "topRight" | "bottomLeft" | "bottomRight">;
+
+/**
+ * Where an edited value is read and how.
+ */
+export type EditDrawing = DeepReadonly<{ "kind": "kept",
+/**
+ * The check as the file spells it. A state check names the
+ * pictures the value has, in their order, each under the name the
+ * state has now.
+ */
+check: CheckDef, } | { "kind": "drawn",
+/**
+ * The check, with the session's screenshots it names. A state
+ * check takes every state's picture again.
+ */
+check: CheckSpec,
+/**
+ * The screenshot the region was drawn on.
+ */
+screenshot: number, }>;
+
+/**
+ * What saving an edit would do, which the editor shows before the save.
+ */
+export type EditPreview = DeepReadonly<{
+/**
+ * Why the edited value is not read at the window's size now, or `None`
+ * when the live reading reads it there.
+ */
+unread: string | null,
+/**
+ * The window sizes of the fixes the edit removes, since they no longer
+ * suit how the value reads. The save needs the user's word for it.
+ */
+droppedFixes: Array<SizeDef>,
+/**
+ * Why the save is refused: the automations the edit would break.
+ */
+refused: string | null, }>;
+
+/**
+ * A saved value changed in place, as the UI describes it. The value keeps
+ * its ID and the window size it was drawn at.
+ */
+export type EditSpec = DeepReadonly<{
+/**
+ * The saved application.
+ */
+app: string,
+/**
+ * The value's ID.
+ */
+value: string,
+/**
+ * The value's name, the one it has or a new one.
+ */
+valueName: string,
+/**
+ * The side of the window the region stays at as the window changes
+ * size.
+ */
+pin: PinDef,
+/**
+ * Whether the region is a reading area, larger than what it reads.
+ * Only a check that reads anywhere in its region may have one.
+ */
+readingArea: boolean,
+/**
+ * Where the value is read and how.
+ */
+drawing: EditDrawing, }>;
 
 /**
  * [`WindowMatch::fallback`] as the file spells it.
@@ -883,7 +1011,12 @@ screenshot: number,
  * The side of the window the region stays at as the window changes
  * size.
  */
-pin: PinDef, }>;
+pin: PinDef,
+/**
+ * Whether the region was drawn as a reading area, larger than what it
+ * reads. Only a check that reads anywhere in its region may have one.
+ */
+readingArea: boolean, }>;
 
 /**
  * Where a reference was saved.
@@ -939,6 +1072,19 @@ check: CheckDef,
  * size, or `None` for the side [`PinDef::guess`] picks.
  */
 pin?: PinDef,
+/**
+ * Whether the user drew the region as a reading area: larger than what
+ * it reads, to cover every place content that moves inside the window
+ * can show. Left out of the file when it is not.
+ *
+ * Setup guidance only. The setup app shows the region as a reading
+ * area when the value is listed or drawn again. Nothing that places
+ * or reads the region looks at it, so the value reads the same with
+ * and without it. Only a check that
+ * [reads anywhere in its region](CheckDef::reads_anywhere) may have
+ * one.
+ */
+readingArea?: boolean,
 /**
  * The value drawn again at other window sizes, each read exactly at its
  * own size. Always written, even when empty, since the setup app reads
