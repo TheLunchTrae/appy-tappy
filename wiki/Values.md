@@ -48,7 +48,9 @@ back to the automation with the value picked.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
    box under it then shows what AppyTappy reads on the live window, a few
    times a second. If the check cannot work, such as a bar whose filled and
-   empty colors are the same, it says why there.
+   empty colors are the same, it says why there, and so it does when it
+   can't read the live window, such as a number with a character its
+   reference hasn't learned.
 5. **Save.** Select **Save value**. **Back** returns to the first step.
 
 AppyTappy keeps the screenshots until you remove them, select
@@ -294,6 +296,8 @@ compare the whole region again. You can still adjust the region by hand with
 The **Number** check cannot read rotated text, characters that touch each
 other, or text on a background of the same color. For those, a **Color** or
 **State** check on the part that matters often works instead.
+[What a reference can't learn](References.md#what-a-reference-cant-learn)
+says what else gets in a number's way, and what to type for it.
 
 ## Content that moves
 
@@ -337,7 +341,10 @@ what AppyTappy reads depends on how often the application's window
   keeps its scaled distance from the side it stays at. A **State** check's
   pictures scale with it: shrinking averages the pixels each new pixel
   covers, and growing repeats the nearest one, so sharp edges stay sharp. A
-  value whose region would reach past the window's edge isn't read.
+  value whose region would reach past the window's edge isn't read. A
+  window's title bar doesn't scale with it, so between windowed and
+  fullscreen a scaled region can land beside its value:
+  [fix the value](#fix-a-value-at-one-size) at the other size.
 - While it changes size **rarely**, the value is read only at the sizes it
   was drawn at.
 
@@ -404,9 +411,9 @@ While you resize the window, AppyTappy waits until the window keeps one size
 for a quarter of a second before it reads at that size. While the window is
 being resized, is closed or is at a size where no value reads, AppyTappy
 reads nothing. Automations neither run nor undo their changes until it can
-read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says once
-which values it doesn't read at the window's size and why, and says it again
-only when the reason changes.
+read again. [AppyTappy's log](Troubleshooting.md#appytappys-log) says
+which values it doesn't read at the window's size and why, each reason once
+until the value reads again.
 
 ## Edit a value
 

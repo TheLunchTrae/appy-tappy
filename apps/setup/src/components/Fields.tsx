@@ -153,15 +153,17 @@ export function ToleranceField({
   );
 }
 
-/** What the check being set up reads on the live window, or what it still needs. */
+/** What the check being set up reads on the live window, why it cannot be read there now, or what it still needs. */
 export function ReadingBox({
   built,
   state,
   reading,
+  problem,
 }: {
   readonly built: string | null;
   readonly state: CheckState;
   readonly reading: Reading | null;
+  readonly problem: string | null;
 }) {
   if (built !== null) {
     return <p className="reading note">{built}</p>;
@@ -173,6 +175,13 @@ export function ReadingBox({
     case 'error':
       return <p className="reading warn">{state.message}</p>;
     case 'set':
+      if (reading === null && problem !== null) {
+        return (
+          <p className="reading warn" aria-live="polite">
+            {problem}
+          </p>
+        );
+      }
       return (
         <p className="reading" aria-live="polite">
           {reading === null ? (

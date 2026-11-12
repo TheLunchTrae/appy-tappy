@@ -742,4 +742,6 @@ fn recorded_image(
 }
 
 #[cfg(test)]
+mod round_trip;
+#[cfg(test)]
 mod tests;
