@@ -178,7 +178,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.installer.outputs.artifact-id }}
           path: installer
-      # Apart from the signing step, so no install script sees the key.
+      # Runs no package code (wiki/Installer.md#what-guards-the-key).
       - name: Install the setup app's tools
         run: mise run ui:install
       - name: Sign the update
