@@ -143,6 +143,29 @@ This page covers what the user guide leaves out.
   is ignored. The UI gets the
   selection's box and its runs of selected pixels, and shades the rest of the
   region itself.
+- **Bar detection.** **Detect the bar** sends the region and the screenshot
+  it was drawn on (`detect_bar`). The owner cuts the region from that
+  screenshot and from the newest others of its window size that the session
+  still keeps, taken or recorded, at most `MAX_OTHERS` of them
+  (`check_spec/bar.rs`), since the region means another
+  spot at another size and each screenshot costs the owner thread a copy of
+  the region and a few passes over it. It hands them to [the
+  detector](Screen-regions.md#bar-detection), the drawn-on one first, and
+  answers the two colors, the screenshot they were found on, the ones that
+  show the bar and the ones that show neither color, whether it went by only
+  part of the region, and how many older ones it left out; or a sentence
+  that says why none are proposed and names the screenshots concerned.
+  `measure_bar` reads the same screenshots with two colors through the bar
+  reader itself, and answers what each one reads. The UI measures the
+  draft's colors, or the detected ones while it asks whether they replace
+  colors picked by hand, so the list describes hand-picked colors as well.
+  Which pixels count is the matching pixels preview's to show. Colors found
+  go into a draft with no color at once. An edit's region sits on the
+  newest screenshot of the size its value was drawn at, so both commands
+  look at the screenshots of that size whichever one shows, and the UI asks
+  for one while there is none. A fix keeps its value's colors and offers
+  neither. [Bar detection](State-machines.md#bar-detection) covers the
+  request and its stale answers.
 - **Matching pixels.** The preview's tint comes from the owner, never from
   the page: `match_pixels` takes a screenshot's index, a rectangle of it, and
   the rule, and answers the pixels the rule takes (`match_preview.rs`). Each

@@ -26,6 +26,7 @@ use crate::recording::Recording;
 use crate::screenshots::Shots;
 use crate::selection::{self, SelectionSpec};
 
+pub(crate) mod bar;
 mod error;
 
 pub(crate) use error::{Cut, SpecError, sentence};
@@ -57,8 +58,8 @@ impl From<Region> for RegionSpec {
     }
 }
 
-/// A color of a screenshot: one the user picked on it, or one the setup app
-/// read from it for the UI to show.
+/// A color of a screenshot: one the user picked on it, one proposed to them,
+/// or one the setup app read from it for the UI to show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ColorSpec {

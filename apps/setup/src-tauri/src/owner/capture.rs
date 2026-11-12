@@ -9,7 +9,8 @@ use appytappy_config::signal::Value;
 use appytappy_sources::screen::{Crop, Frame, FrameHandler, Image};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 
-use crate::check_spec::{self, CheckSpec, RegionCheck, RegionSpec};
+use crate::check_spec::bar::{self, BarDetection, BarMeasure};
+use crate::check_spec::{self, CheckSpec, ColorSpec, RegionCheck, RegionSpec};
 use crate::match_preview::{self, MatchRule, MatchView};
 use crate::pixels;
 use crate::recording::Recorder;
@@ -225,6 +226,30 @@ impl<H: Host> Owner<H> {
             .ok_or_else(|| check_spec::SpecError::NoScreenshot.to_string())
     }
 
+    /// The colors of the bar in `region`, drawn on screenshot `screenshot`,
+    /// or why none are proposed.
+    pub(crate) fn detect_bar(
+        &self,
+        region: RegionSpec,
+        screenshot: usize,
+    ) -> Result<BarDetection, String> {
+        bar::detect(self.screenshots.slots(), region, screenshot).map_err(|error| error.to_string())
+    }
+
+    /// What a bar of the colors `filled` and `empty` reads in `region`,
+    /// drawn on screenshot `screenshot`, on each screenshot of that one's
+    /// window size.
+    pub(crate) fn measure_bar(
+        &self,
+        region: RegionSpec,
+        screenshot: usize,
+        filled: ColorSpec,
+        empty: ColorSpec,
+    ) -> Result<BarMeasure, String> {
+        bar::measure(self.screenshots.slots(), region, screenshot, filled, empty)
+            .map_err(|error| error.to_string())
+    }
+
     /// The pixels of `area` on screenshot `screenshot` that `rule` takes.
     pub(crate) fn match_pixels(
         &self,
@@ -438,6 +463,56 @@ mod tests {
         assert_eq!(
             harness.ask(select(1, 0)),
             Err("That screenshot is gone. Take a new one and try again.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_bar_is_looked_for_and_measured_on_the_screenshots() {
+        let mut harness = harness(false);
+        let mut handler = harness.pick();
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(0));
+        let region = RegionSpec {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 2,
+        };
+        let detected = harness
+            .ask(move |owner| owner.detect_bar(region, 0))
+            .map(|detection| serde_json::to_value(detection).expect("plain data"));
+        assert_eq!(
+            detected.map(|detection| detection["kind"].clone()),
+            Ok(serde_json::json!("declined")),
+            "four pixels are too few to find a bar in"
+        );
+        let colors = |filled: &str, empty: &str| -> (ColorSpec, ColorSpec) {
+            let color = |text: &str| serde_json::from_str(text).expect("the UI's spelling");
+            (color(filled), color(empty))
+        };
+        let (red, gray) = colors(
+            r#"{"red":255,"green":0,"blue":0}"#,
+            r#"{"red":40,"green":40,"blue":40}"#,
+        );
+        let measure = |screenshot| {
+            move |owner: &mut Owner<FakeHost>| {
+                owner
+                    .measure_bar(region, screenshot, red, gray)
+                    .map(|measure| serde_json::to_value(measure).expect("plain data"))
+            }
+        };
+        assert_eq!(
+            harness.ask(measure(0)),
+            Ok(serde_json::json!({
+                "readings": [{"screenshot": 0, "fill": 50.0}],
+                "leftOut": 0,
+            }))
+        );
+        let gone = "That screenshot is gone. Take a new one and try again.".to_owned();
+        assert_eq!(harness.ask(measure(1)), Err(gone.clone()));
+        assert_eq!(
+            harness.ask(move |owner| owner.detect_bar(region, 1)),
+            Err(gone)
         );
     }
 

@@ -47,6 +47,12 @@ impl Screenshots {
         self.0.clear();
     }
 
+    /// Every index given out so far, in order: the screenshot kept under
+    /// it, or `None` for one that was removed.
+    pub(crate) fn slots(&self) -> &[Option<Image>] {
+        &self.0
+    }
+
     /// The screenshots still kept, in the order they were kept.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Image> {
         self.0.iter().flatten()

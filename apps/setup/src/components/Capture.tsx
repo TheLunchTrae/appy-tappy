@@ -28,6 +28,7 @@ import { discovery } from '../lib/discovery.ts';
 import { agreedFixes, editStart, keepsStates, placedOn, saveable } from '../lib/edit.ts';
 import { TOO_MANY, coverage, startingExpected, tooMany } from '../lib/expected.ts';
 import { knownCharacters, readers } from '../lib/reference.ts';
+import { BarDetect, BarReadings } from './BarFields.tsx';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
 import { FoundMarks, FoundPanel } from './Found.tsx';
@@ -59,6 +60,7 @@ import { background } from '../lib/repeat.ts';
 import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
+import { useBarSetup } from '../lib/useBarSetup.ts';
 import { useFound } from '../lib/useFound.ts';
 import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
 import { useLookRecording } from '../lib/useLookRecording.ts';
@@ -238,6 +240,12 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
   );
   const selection = useStateSelections(draft, setDraft, selected);
   const selecting = draft.kind === 'state' ? tool : 'box';
+  const bar = useBarSetup(
+    draft,
+    setDraft,
+    shots.map((each) => each.index),
+    step === 'how' && editing === null && fixing === null,
+  );
   const review = useReview(recording, draft, setDraft, editingRef);
   // Every text the reference being edited learns from already, which tells a find's letters apart from a misread.
   const savedSamples = editing?.existing?.samples;
@@ -362,6 +370,11 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
       : `Select a screenshot at ${sizeText(edited.screen.windowSize)} to see the matching pixels of its region.`,
   );
   const previewField = <MatchPreviewField preview={preview} region={draft.region} />;
+  // An edited value's region sits on a screenshot of the size it was drawn at, and a bar is looked for on those.
+  const detectBlocked =
+    edited !== null && draft.drawnOn === null
+      ? `Take a screenshot with the window at ${sizeText(edited.screen.windowSize)} to detect the bar: its region was drawn at that size.`
+      : null;
   // Color match is in the inspector while a state's thing is selected with Snap or Click.
   const colorMatched = editing === null && step === 'where' && draft.kind === 'state' && tool !== 'box';
   const selectedPreview = useSelectedPreview(
@@ -1214,14 +1227,20 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                   fix={fixing !== null}
                 />
               ) : (
-                <ColorFields
-                  draft={draft}
-                  picking={picking}
-                  canPick={shownPicture !== null}
-                  preview={previewField}
-                  onDraft={setDraft}
-                  onPicking={setPicking}
-                />
+                <>
+                  {draft.kind === 'barFill' ? (
+                    <BarDetect bar={bar} picked={draft} position={position} blocked={detectBlocked} />
+                  ) : null}
+                  <ColorFields
+                    draft={draft}
+                    picking={picking}
+                    canPick={shownPicture !== null}
+                    preview={previewField}
+                    onDraft={setDraft}
+                    onPicking={setPicking}
+                  />
+                  {draft.kind === 'barFill' ? <BarReadings bar={bar} position={position} /> : null}
+                </>
               )}
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
               {lookPanel}

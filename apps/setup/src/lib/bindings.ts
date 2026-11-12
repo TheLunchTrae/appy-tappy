@@ -235,6 +235,71 @@ automation: AutomationDef,
 problem: string | null, }>;
 
 /**
+ * What looking for a bar in a region found.
+ */
+export type BarDetection = DeepReadonly<{ "kind": "proposed", filled: ColorSpec, empty: ColorSpec,
+/**
+ * The screenshot whose layout gave the colors.
+ */
+foundOn: number,
+/**
+ * The screenshots that show the bar in these colors, full, empty,
+ * or in between.
+ */
+shownOn: Array<number>,
+/**
+ * The screenshots looked at that show neither color.
+ */
+without: Array<number>,
+/**
+ * Whether two screenshots show both colors at different fills.
+ */
+moves: boolean,
+/**
+ * Whether the colors read a screenshot a few points off where the
+ * bar ends on it.
+ */
+rough: boolean,
+/**
+ * Whether the colors were found over only the strips of the
+ * region that show the bar from end to end, past a label, an icon,
+ * or what lies beside the bar.
+ */
+around: boolean,
+/**
+ * How many older screenshots of the window size were not looked
+ * at.
+ */
+leftOut: number, } | { "kind": "declined", message: string, }>;
+
+/**
+ * What two colors measure on the session's screenshots.
+ */
+export type BarMeasure = DeepReadonly<{
+/**
+ * What each screenshot looked at reads, in the order they were taken.
+ */
+readings: Array<BarReading>,
+/**
+ * How many older screenshots of the window size were not looked at.
+ */
+leftOut: number, }>;
+
+/**
+ * What a screenshot's region reads with two colors.
+ */
+export type BarReading = DeepReadonly<{
+/**
+ * The screenshot, by index.
+ */
+screenshot: number,
+/**
+ * How full the bar reads, from 0 to 100, or `None` when no pixel of
+ * the region is near either color.
+ */
+fill: number | null, }>;
+
+/**
  * One build of an application, as its executable file tells it apart.
  *
  * Many applications keep the same file version across updates, so the
@@ -468,8 +533,8 @@ green: number,
 blue: number, }>;
 
 /**
- * A color of a screenshot: one the user picked on it, or one the setup app
- * read from it for the UI to show.
+ * A color of a screenshot: one the user picked on it, one proposed to them,
+ * or one the setup app read from it for the UI to show.
  */
 export type ColorSpec = DeepReadonly<{ red: number, green: number, blue: number, }>;
 
