@@ -40,6 +40,7 @@ import { PinPicker } from './PinPicker.tsx';
 import { PinGuides } from './PinGuides.tsx';
 import { MovingContentField } from './MovingContentField.tsx';
 import { Hint } from './Hint.tsx';
+import { MatchOverlay, MatchPreviewField, SelectedPixelsField } from './MatchPreview.tsx';
 import { AREA_DRAW_HINT, fixNote, isReadingArea, movingContent, regionLabel } from '../lib/moving.ts';
 import { pinChoiceAfterRegion, pinOfView, pinView } from '../lib/pin.ts';
 import { FIX_HINT, READ_WITH_HINT, sameSize, sizeText } from '../lib/sizes.ts';
@@ -53,6 +54,7 @@ import { type Made, savedNote } from '../lib/flow.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { trialOf, useLiveCheck } from '../lib/useLiveCheck.ts';
+import { useMatchPreview, useSelectedPreview } from '../lib/useMatchPreview.ts';
 import { useRecording } from '../lib/useRecording.ts';
 import { useReview } from '../lib/useReview.ts';
 import { useScreenshotShortcut } from '../lib/useScreenshotShortcut.ts';
@@ -316,6 +318,28 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
     edited !== null && editing === null && native !== undefined && !sameSize(native, edited.screen.windowSize)
       ? native
       : null;
+  // The preview is for the color fields the inspector shows now.
+  const colorFields = step === 'how' && fixing === null && (draft.kind === 'barFill' || draft.kind === 'color');
+  const preview = useMatchPreview(
+    editing !== null ? 'ink' : colorFields ? draft.kind : null,
+    draft,
+    selected,
+    shownPicture,
+    // An edited value's region is in the pixels of the size it was drawn at, and shows on no other.
+    otherSize === null || edited === null
+      ? null
+      : `Select a screenshot at ${sizeText(edited.screen.windowSize)} to see the matching pixels of its region.`,
+  );
+  const previewField = <MatchPreviewField preview={preview} region={draft.region} />;
+  // Color match is in the inspector while a state's thing is selected with Snap or Click.
+  const colorMatched = editing === null && step === 'where' && draft.kind === 'state' && tool !== 'box';
+  const selectedPreview = useSelectedPreview(
+    colorMatched,
+    draft,
+    selection.selections,
+    selected,
+    selection.error !== null,
+  );
 
   // What Save sends, or null while something is missing.
   const sends = (): (() => Promise<Made>) | null => {
@@ -651,6 +675,9 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
             ) : shownPicture === null ? null : (
               <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
             )}
+            {shownPicture === null ? null : (
+              <MatchOverlay painted={selectedPreview.painted ?? preview.painted} size={shownPicture} />
+            )}
             {native === undefined ? null : (
               <RegionSurface
                 size={native}
@@ -838,6 +865,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                   tool={tool}
                   colorMatch={draft.colorMatch}
                   canSelect={shownPicture !== null}
+                  preview={<SelectedPixelsField preview={selectedPreview} />}
                   onTool={(next) => {
                     setTool(next);
                     setPicking(null);
@@ -990,6 +1018,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                   draft={draft}
                   picking={picking}
                   canPick={shownPicture !== null}
+                  preview={previewField}
                   onDraft={setDraft}
                   onPicking={setPicking}
                 />
@@ -1065,6 +1094,7 @@ export function Capture({ choice, mode, trail, onCancel, onChangeWindow, onSaved
                 setDraft((current) => ({ ...current, labels: new Map(current.labels).set(selected, text) }));
               }
             }}
+            preview={previewField}
             record={
               <RecordPanel
                 view={recording}
