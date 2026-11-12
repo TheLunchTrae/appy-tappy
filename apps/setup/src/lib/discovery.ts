@@ -18,7 +18,7 @@ export interface Discovery {
   readonly unchecked: readonly string[];
   /** The characters the reference knows or a reading the user checked shows, the needed ones first. */
   readonly found: readonly string[];
-  /** How many of the recording's shapes no kept reading's text names. */
+  /** How many of the recording's shapes no reading's text names, kept or left out. */
   readonly unnamed: number;
 }
 
@@ -40,13 +40,16 @@ export function discovery(
   const namedShapes = new Set<number>();
   readings.forEach((reading, index) => {
     const entry = entries[index];
-    const characters = entry?.keep === true ? named(reading, entry.text) : null;
+    const characters = entry === undefined ? null : named(reading, entry.text);
     if (characters === null) {
       return;
     }
-    (checked.has(index) ? sure : guessed).push(...characters);
     for (const shape of reading.shapes) {
       namedShapes.add(shape);
+    }
+    // Only a kept reading finds its characters: one left out teaches nothing.
+    if (entry?.keep === true) {
+      (checked.has(index) ? sure : guessed).push(...characters);
     }
   });
   const have = knownCharacters([...learned, ...sure]);

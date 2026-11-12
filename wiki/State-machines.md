@@ -762,21 +762,27 @@ stateDiagram-v2
 A recording (`apps/setup/src-tauri/src/recording.rs`) keeps a reading for
 each shape a region shows, for the user to review. It is `None` or a
 `Recording` whose `stopped` field says whether it still records, and whose
-`problem` says why it skips frames or why it stopped by itself. While it
-records it is **Full** or not, which its shapes and readings decide
-(`Sightings::full`) and no field holds.
+`problem` says why it skips frames or why it stopped by itself. Its
+`Sightings` hold `full`, which says why it takes no more once a frame did
+not fit.
 
 ```mermaid
 stateDiagram-v2
     [*] --> None
     None --> Recording: Record
+    Recording --> Full: a frame shows more shapes or readings than fit
     Recording --> Stopped: Stop
     Recording --> Stopped: the capture fails, with the failure as its problem
+    Full --> Stopped: Stop
+    Full --> Stopped: the capture fails, with the failure as its problem
     Stopped --> Recording: Record more, with the same settings
+    Stopped --> Full: Record more, when it was full
     Stopped --> Recording: Record with other settings starts a new recording
     Recording --> Ended: the window closes
+    Full --> Ended: the window closes
     Stopped --> Ended: the window closes
     Recording --> None: Discard, a window is picked, or the flow closes
+    Full --> None: Discard, a window is picked, or the flow closes
     Stopped --> None: Discard, a window is picked, or the flow closes
     Ended --> None: Discard, a window is picked, or the flow closes
 ```
@@ -787,13 +793,17 @@ stateDiagram-v2
   as does a crop that reads. A capture failure stops the recording, and its
   problem says why.
 - A crop that shows a shape no kept reading has is kept and sent to the text
-  reader. A crop of shapes that all showed before is counted and not kept.
-- A recording is **Full** once it found `MAX_SHAPES` different shapes or
-  counted `MAX_READINGS` different readings. It still records, and each
-  frame still sets or clears the problem, but it keeps and counts nothing
-  more, and its view says why in `full`. A full recording stays full:
-  **Stop** and review what it found, or **Discard** it to start a new one.
-  **Record more** goes on with it, still full.
+  reader, and so is the first crop to carry cleanly a shape that no kept
+  reading carries so ([Recording](Setup-app.md#recording)). Any other crop
+  is counted and not kept.
+- **Full** is a recording that still records but takes no more. A frame with
+  more new shapes than fit in `MAX_SHAPES`, or with one more different
+  reading than `MAX_READINGS`, is not counted and makes it full
+  (`Sightings::count`). Each frame still sets or clears the problem, but
+  nothing is kept or counted, and its view says why in `full`. A full
+  recording stays full when it stops and when **Record more** goes on with
+  it: **Stop** and review what it found, or **Discard** it to start a new
+  one.
 - **Record more** needs the same region, ink, tolerance, and window size, and
   clears the problem. When any of them differs (`settingsDiffer`), **Use its
   settings** shows and puts all of them back, with the region on a screenshot

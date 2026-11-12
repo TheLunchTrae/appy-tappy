@@ -93,9 +93,16 @@ shows many values. A reference can record its region instead, while you use
 the application, and collect the characters it shows.
 
 A recording keeps a reading when it shows a character shape that no kept
-reading has. A counter that runs from `0` to `100` shows about a hundred
-readings but only eleven shapes, so it leaves about ten readings to review.
-Every other reading is counted, not kept.
+reading has. A counter that runs from `0%` to `100%` shows 101 readings but
+only eleven characters, the digits `0` to `9` and the `%`, so it leaves about
+ten readings to review, or a few more where a character shows as more than
+one shape. Every other reading is counted, not kept.
+
+A shape can first show beside something that is no character, such as a `7`
+caught while the digit next to it was half drawn. No text fits that reading,
+so the recording keeps one more reading for the `7`: the next one whose
+other shapes have all shown elsewhere too. **Record more** does the same, so
+recording on gets you a reading you can label.
 
 1. **Start recording.** Draw the region and pick the **Characters' color**
    first. Then select **Start recording** under **Record readings**. The
@@ -107,12 +114,14 @@ Every other reading is counted, not kept.
      has shown yet. Make the application show these. It shows when you
      [chose what the reference needs](#choose-what-it-needs).
    - **Found, not checked yet** shows the characters AppyTappy read in the
-     kept readings. They are its guess until you keep their readings in
-     review.
+     kept readings. They are its guess until you check their readings in
+     review: type in a reading's text, set its **Keep**, or select
+     **Keep all** or the button that keeps them. **Keep all** counts every
+     reading as checked, so read the texts first.
    - **Found** shows the characters the reference knows already, and the ones
-     in readings you kept.
-   - **Without text** counts the shapes that no kept reading's text names,
-     such as while a reading is still being read.
+     in readings you checked.
+   - **Without text** counts the shapes that no reading's text names, such as
+     while a reading is still being read.
 
    The newest kept readings show below. Moments when the region shows none of
    the characters' color, such as while a menu covers it, are skipped.
@@ -127,13 +136,29 @@ Every other reading is counted, not kept.
      with how often its shape showed, such as `seen 214 times in 37
      readings`. The counts say how much the recording saw of a shape. They do
      not say that its character is right: only the text you check does.
+   - **Would add** lists the same for a reading that is left out: what
+     keeping it would teach.
+   - **Shows 2 shapes no kept reading has**, with the number of shapes,
+     stands in for either list while the reading's text does not have one
+     character for each of its shapes, so the shapes have no characters to
+     show yet.
    - **Adds nothing** marks a reading whose characters other kept readings
      all show. It starts with **Keep** cleared, and you can leave it out.
-   - A reading whose text gives one shape two different characters, such as
-     a `1` typed as `l`, is flagged: fix it or leave it out.
+   - A reading whose text gives a shape another character than another
+     reading's text gives it, such as a `1` read as `l`, is flagged, and so
+     is the other reading, whether they are kept or left out. Neither starts
+     left out. Fix the text that is wrong. While both are kept, **Keep**
+     waits.
+
+   A reading's **Keep** is set once, when review first shows the reading
+   with its text read, and after that only you change it. A reading still
+   being read says **Reading…** and gets its **Keep** when its text arrives.
 
    The same lists as while recording show above the readings, and follow
-   what you type and keep.
+   what you type and keep. When the only readings that could teach a
+   character are left out, a notice there says **No kept reading teaches**
+   it and offers a button for each reading to keep for it, such as
+   **Keep 12, first at 0:02**.
 
 4. **Keep them.** Select the button that says how many you keep, such as
    **Keep 12 readings**. The kept readings teach the reference like labeled
@@ -164,12 +189,20 @@ readings you want, then select **Save reference**, which still works after
 the window closed: **Change window** drops everything you have not saved. To
 record more, open the window again and **Edit** the reference.
 
-A recording is full once it has found 256 different shapes, as many as a
-reference learns, and says so. That many shapes mean the region shows more
-than the value, such as a picture behind it: draw the region around the value
-alone and record again. A recording is also full once it has counted more
-than a million different readings, which takes hours of a timer that changes
-many times a second.
+A recording finds its shapes with the characters' color and tolerance it was
+started with, and a reference learns the kept readings with the ones it has
+when you save. Keep them as they were until you save. With another color or
+tolerance a kept reading can show other shapes than the recording counted:
+its text may not fit it anymore, which review and the save flag, and a shape
+the recording took for one it had may be in no kept reading. **Use its
+settings** puts the recording's own back.
+
+A recording is full once its region has shown more than 256 different shapes,
+more than a reference learns, and says so. It keeps nothing more. That many
+shapes mean the region shows more than the value, such as a picture behind
+it: draw the region around the value alone and record again. A recording is
+also full once it has shown more than a million different readings, which
+takes hours of a timer that changes many times a second.
 
 If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.

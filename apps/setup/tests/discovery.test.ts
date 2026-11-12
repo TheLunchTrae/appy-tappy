@@ -46,13 +46,14 @@ describe('what a recording found', () => {
   test('a reading left out, or whose text does not name its shapes, finds nothing', () => {
     const readings = [reading(0), reading(1, 2), reading(3)];
     const entries = [{ keep: false, text: '1' }, kept('2'), kept('')];
+    // The reading left out still names its shape, so only the other three are without text.
     expect(discovery(['1', '2'], [], readings, entries, new Set([0, 1, 2]), 4)).toEqual({
       missing: ['1', '2'],
       unchecked: [],
       found: [],
-      unnamed: 4,
+      unnamed: 3,
     });
-    // A shape counts as named once any kept reading names it.
+    // A shape counts as named once any reading names it.
     expect(discovery([], [], readings, [kept('1'), kept('12'), kept('')], new Set(), 4).unnamed).toBe(1);
   });
 

@@ -1545,6 +1545,28 @@ select {
   align-items: flex-start;
 }
 
+/* What only readings that are left out could teach, with the readings to keep for it. */
+.untaught {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  max-width: 70ch;
+}
+
+.untaught p {
+  color: var(--warn);
+}
+
+.untaught .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* Characters only the text reader's guess shows: outlined, since the user has yet to check them. */
 .glyphs.unchecked .glyph {
   border: 1px dashed var(--muted);

@@ -7,13 +7,17 @@ import { errorText, reviewProblems } from './api.ts';
 import { type Draft, reviewSpec } from './check.ts';
 import {
   type ReviewEntry,
+  type Untaught,
   checkedReadings,
+  decide,
+  disagreements,
   editAll,
   entries,
   flaggedReadings,
   keepBlocked,
   keptAdditions,
   keptLabels,
+  untaught,
 } from './review.ts';
 
 /** How long review waits after the last edit before it asks which readings the check cannot learn. */
@@ -47,6 +51,10 @@ export function useReview(
   readonly checked: ReadonlySet<number>;
   /** For each reading, the places in it of the shapes no other kept reading teaches. */
   readonly adds: readonly (readonly number[])[];
+  /** The readings whose text and another's give one shape two characters, each by its index with what to say. */
+  readonly clashes: ReadonlyMap<number, string>;
+  /** The characters only readings that are left out could teach, and those readings. */
+  readonly untaught: Untaught;
   /** The readings Keep would keep, with their text. */
   readonly keeping: readonly RecordedLabel[];
   /** Why the check cannot learn each flagged reading, by its index. */
@@ -67,6 +75,8 @@ export function useReview(
 } {
   const [reviewing, setReviewing] = useState(false);
   const [edits, setEdits] = useState<ReadonlyMap<number, ReviewEntry>>(new Map());
+  // Each reading's start, decided once review shows it with its text read, so its Keep changes only by the user.
+  const [decided, setDecided] = useState<ReadonlyMap<number, ReviewEntry>>(new Map());
   // Why the check cannot learn each flagged reading, for the review spec they were found on.
   const [problems, setProblems] = useState<{ readonly spec: string; readonly found: ReadonlyMap<number, string> }>({
     spec: '',
@@ -75,13 +85,20 @@ export function useReview(
   // Clears only when asking review's problems next succeeds, or on a discard.
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (reviewing) {
+      setDecided((current) => decide(current, recording?.readings ?? [], edits, draft.recorded));
+    }
+  }, [reviewing, recording, edits, draft.recorded]);
   const all = useMemo(
-    () => entries(recording?.readings ?? [], edits, draft.recorded),
-    [recording, edits, draft.recorded],
+    () => entries(recording?.readings ?? [], edits, draft.recorded, decided),
+    [recording, edits, draft.recorded, decided],
   );
   const keeping = useMemo(() => keptLabels(all), [all]);
   const userChecked = useMemo(() => checkedReadings(all, edits, draft.recorded), [all, edits, draft.recorded]);
   const adds = useMemo(() => keptAdditions(recording?.readings ?? [], all), [recording, all]);
+  const clashes = useMemo(() => disagreements(recording?.readings ?? [], all), [recording, all]);
+  const left = useMemo(() => untaught(recording?.readings ?? [], all, adds), [recording, all, adds]);
   const toReview = useMemo(() => reviewSpec(draft, keeping, reference), [draft, keeping, reference]);
   const reviewKey = toReview === null ? '' : JSON.stringify(toReview);
   // The effect below runs when the spec's contents change, not on each new
@@ -149,6 +166,7 @@ export function useReview(
 
   const forget = (): void => {
     setEdits(new Map());
+    setDecided(new Map());
     setDraft((current) => ({ ...current, recorded: new Map() }));
   };
 
@@ -159,6 +177,8 @@ export function useReview(
     entries: all,
     checked: userChecked,
     adds,
+    clashes,
+    untaught: left,
     keeping,
     flagged,
     keepBlocked: keepBlocked(keeping, flagged, checked),

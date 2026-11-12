@@ -68,7 +68,7 @@ function viewHint(
     return liveError;
   }
   if (recording && selected === null) {
-    return 'Recording. Use the application; each different character is kept.';
+    return 'Recording. Use the application; a reading is kept for each new shape.';
   }
   if (selected === null) {
     return shotCount === 0
@@ -513,7 +513,9 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 type="button"
                 className="btn primary"
                 disabled={review.keepBlocked !== null}
-                aria-describedby={review.keepBlocked === null ? undefined : 'keep-blocked'}
+                aria-describedby={
+                  review.keepBlocked === null && review.untaught.readings.length === 0 ? undefined : 'keep-blocked'
+                }
                 onClick={review.keep}
               >
                 {review.keeping.length === 1 ? 'Keep 1 reading' : `Keep ${review.keeping.length} readings`}
@@ -589,6 +591,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             entries={review.entries}
             problems={review.flagged}
             crops={recorder.crops}
+            clashes={review.clashes}
+            untaught={review.untaught}
             blocked={review.keepBlocked}
             error={recordError}
             onEntry={review.edit}

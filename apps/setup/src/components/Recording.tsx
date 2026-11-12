@@ -5,7 +5,17 @@ import { PictureCanvas } from './canvas.tsx';
 import { CharacterChips, MissingChips } from './CharacterChips.tsx';
 import type { Discovery } from '../lib/discovery.ts';
 import { type Color, type Picture, hex } from '../lib/pixels.ts';
-import { type ReviewEntry, addedShapes, clock, reviewOrder, seen, sighted, tileNote } from '../lib/review.ts';
+import {
+  type ReviewEntry,
+  type Untaught,
+  addedShapes,
+  clock,
+  reviewOrder,
+  seen,
+  sighted,
+  tileNote,
+  untaughtNote,
+} from '../lib/review.ts';
 
 /** How many of the newest readings the panel lists while recording. */
 const LISTED = 6;
@@ -90,8 +100,8 @@ function Discovered({
           <dt>Without text</dt>
           <dd className="note">
             {found.unnamed === 1
-              ? '1 shape has no character yet. It gets one from the text of a kept reading that shows it.'
-              : `${found.unnamed} shapes have no character yet. Each gets one from the text of a kept reading that shows it.`}
+              ? '1 shape has no character yet. Type the text of the reading that shows it.'
+              : `${found.unnamed} shapes have no character yet. Type the text of the readings that show them.`}
           </dd>
         </div>
       )}
@@ -198,10 +208,12 @@ export function RecordPanel(props: PanelProps) {
             })}
           </ul>
         )}
-        <p className="note">
-          Recording goes on while you use {appName}.{' '}
-          {found.missing.length > 0 ? 'Make it show what is still missing, then come' : 'Come'} back here to stop.
-        </p>
+        {view.full === null ? (
+          <p className="note">
+            Recording goes on while you use {appName}.{' '}
+            {found.missing.length > 0 ? 'Make it show what is still missing, then come' : 'Come'} back here to stop.
+          </p>
+        ) : null}
         <div className="row">
           <button type="button" className="btn primary" ref={stopButton} onClick={props.onStop}>
             Stop and review
@@ -313,6 +325,10 @@ interface SheetProps {
   readonly entries: readonly ReviewEntry[];
   /** Why the check cannot learn a kept reading, by reading index. */
   readonly problems: ReadonlyMap<number, string>;
+  /** The readings whose text and another's give one shape two characters, by reading index with what to say. */
+  readonly clashes: ReadonlyMap<number, string>;
+  /** The characters only readings that are left out could teach, and those readings. */
+  readonly untaught: Untaught;
   readonly crops: ReadonlyMap<number, Picture>;
   /** Why Keep is not available yet, or null when it is. */
   readonly blocked: string | null;
@@ -323,7 +339,8 @@ interface SheetProps {
 
 /** Every reading of a stopped recording, to keep or leave out and to correct. */
 export function ReviewSheet(props: SheetProps) {
-  const { view, found, needs, adds, entries, problems, crops, blocked, error, onEntry, onKeepAll } = props;
+  const { view, found, needs, adds, entries, problems, clashes, untaught, crops, blocked, error } = props;
+  const { onEntry, onKeepAll } = props;
   // Opening review removes the button that had focus, so focus moves here.
   const head = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -341,9 +358,39 @@ export function ReviewSheet(props: SheetProps) {
             characters, like labeled screenshots. A reading is kept for the characters no other kept reading shows.
           </p>
           {view.readings.length === 0 ? null : <Discovered found={found} needs={needs} ink={view.settings.ink} />}
-          <p id="keep-blocked" className={blocked === null ? 'note' : 'note pending'} aria-live="polite">
+          {/* Keep is described by why it waits, or else by what keeping now would leave untaught. */}
+          <p
+            id={blocked === null && untaught.readings.length > 0 ? undefined : 'keep-blocked'}
+            className={blocked === null ? 'note' : 'note pending'}
+            aria-live="polite"
+          >
             {blocked ?? ''}
           </p>
+          {untaught.readings.length === 0 ? null : (
+            <div className="untaught" role="status">
+              <p id={blocked === null ? 'keep-blocked' : undefined}>
+                {untaughtNote(untaught.characters)} To teach {untaught.characters.length === 1 ? 'it' : 'them'}, keep:
+              </p>
+              <div className="row">
+                {untaught.readings.map((index) => {
+                  const entry = entries[index];
+                  const reading = view.readings[index];
+                  return entry === undefined || reading === undefined ? null : (
+                    <button
+                      key={index}
+                      type="button"
+                      className="btn small"
+                      onClick={() => {
+                        onEntry(index, { ...entry, keep: true });
+                      }}
+                    >
+                      Keep {entry.text.trim()}, first at {clock(reading.firstMs)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {error === null ? null : <p className="warn">{error}</p>}
         </div>
         <div className="end">
@@ -381,8 +428,9 @@ export function ReviewSheet(props: SheetProps) {
             const entry = entries[index] ?? { keep: false, text: '' };
             const when = clock(reading.firstMs);
             const problem = problems.get(index);
-            const note = tileNote(reading, entry, problem);
-            const flagged = problem !== undefined && entry.keep;
+            const clash = clashes.get(index);
+            const note = tileNote(reading, entry, problem, clash);
+            const flagged = (problem !== undefined && entry.keep) || clash !== undefined;
             const noteId = `reading-${index}-note`;
             return (
               <li key={index} className={entry.keep ? 'tile kept' : 'tile off'}>
