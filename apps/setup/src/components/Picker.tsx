@@ -180,7 +180,7 @@ export function Picker({
                     <small>
                       {each.class} · {each.executable}
                     </small>
-                    {step.reads === each.handle ? <small className="ok">Would be read now</small> : <small />}
+                    {step.reads === each.handle ? <small className="ok">Read if it starts now</small> : <small />}
                   </button>
                 </li>
               ))}

@@ -699,7 +699,9 @@ stateDiagram-v2
     NoApplications --> [*]: Add application
     Choosing --> [*]: Add application
     Choosing --> Resolving: an application is chosen
-    Missing --> Resolving: Refresh, or another application is chosen
+    Missing --> Missing: Refresh, until the look answers
+    Missing --> Resolving: the look finds the application again, or another application is chosen
+    Missing --> LookFailed: the look fails
     Resolving --> One: the look finds one window that fits best
     Resolving --> Several: the look finds several that fit equally well
     Resolving --> None: the look finds no window to capture
@@ -735,10 +737,12 @@ stateDiagram-v2
   reaches them.
 - **Missing** is a chosen application that the look does not find: the flow's
   own, one handed over by the application flow, or the last choice. The
-  picker says so instead of asking for a choice as if none had been made. A
-  flow with its own application leaves it by **Cancel**, or by a **Refresh**
-  that finds the application again; otherwise
-  choosing another application or **Add application** leaves it.
+  picker says so instead of asking for a choice as if none had been made.
+  **Refresh** keeps it until the new look answers, since the last answer
+  still lacks the application, and leaves it only if that look finds the
+  application again. Choosing another application or **Add application**
+  leaves it too; a flow with its own application has neither, so apart from
+  such a look only **Cancel** leaves it.
 - **Resolving** resolves the chosen application's window: at once from a
   look that has answered, and otherwise when the look under way answers.
   While a look is under way after one answered, a picker with no application
