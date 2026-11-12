@@ -222,10 +222,14 @@ The environment's branch limit is the main guard: a run reaches the secrets
 only when it runs on `main`, so no other branch or pull request run can. Only
 the sign job reads the secrets, and the sign and release jobs run only when a
 run publishes, so a test build on `main` skips both. A new job that names the
-environment needs the same condition. The sign job installs the setup app's
-packages with lifecycle scripts off, so no package code runs before the Tauri
-CLI signs with the key. A step added to that job before the signing step must
-not run package code either.
+environment needs the same condition.
+
+No package code runs in the sign job before the Tauri CLI signs with the key,
+so no dependency can read the key or change the CLI. `mise run ui:install`
+installs the setup app's packages with lifecycle scripts off, and
+`mise run update:sign` runs the CLI by its own path rather than a command that
+another package could also install. A step added to that job before the
+signing step must not run package code either.
 
 These repository settings, set by hand, decide what reaches `main` and who can
 start the release:

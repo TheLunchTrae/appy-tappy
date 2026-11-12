@@ -89,11 +89,11 @@ run = '''
 set -eu
 # The release workflow runs this on a release's installer, in a job of its
 # own that alone gets the update key's private half
-# (wiki/Installer.md#updates). It signs with the Tauri CLI from the setup
-# app's packages, which that job installs with lifecycle scripts off, so no
-# package code runs before the CLI signs with the key. The signature binds
-# the version, which the setup app's updater requires, and latest.json,
-# beside the installer, tells the updater where the release is.
+# (wiki/Installer.md#updates). It runs the Tauri CLI by its own path, not
+# through node_modules/.bin, so no other package can stand in for it
+# (wiki/Installer.md#what-guards-the-key). The signature binds the version,
+# which the setup app's updater requires, and latest.json, beside the
+# installer, tells the updater where the release is.
 installer=${UPDATE_INSTALLER:?set UPDATE_INSTALLER to the installer to sign}
 tag=${INSTALLER_TAG:?set INSTALLER_TAG to the release tag}
 : "${UPDATER_PUBLIC_KEY:?set UPDATER_PUBLIC_KEY to the update key public half}"
@@ -101,7 +101,7 @@ tag=${INSTALLER_TAG:?set INSTALLER_TAG to the release tag}
 version=${tag#v}
 dir=$(cd "$(dirname "$installer")" && pwd)
 name=$(basename "$installer")
-(cd apps/setup && bun run tauri signer sign --app-version "$version" "$dir/$name") >/dev/null
+(cd apps/setup && bun node_modules/@tauri-apps/cli/tauri.js signer sign --app-version "$version" "$dir/$name") >/dev/null
 signature=$(cat "$dir/$name.sig")
 # Both halves carry the key's 8-byte ID after a 2-byte algorithm, in the second
 # line of their base64 text. A signature from another key would fail every
