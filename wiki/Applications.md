@@ -1,7 +1,8 @@
 # Applications
 
-An application is a program whose window AppyTappy watches. Add it before you
-[make its values](Values.md#make-a-value), since every value belongs to one.
+An application is a program whose window AppyTappy watches. Every value
+belongs to one, so add it here first, or while you
+[make its first value](Values.md#make-a-value).
 
 The **Applications** page in AppyTappy Setup lists each saved application:
 how AppyTappy finds its window, its anti-cheat setting, its
@@ -49,7 +50,9 @@ The executable always has to match. Tick **Must match** beside the title or
 the class when a window has to match that too to count. At first neither is
 ticked, so a title that changes doesn't matter. When several windows count,
 AppyTappy uses the one that matches the most of the three, and on a tie the
-title counts most, then the class.
+title counts most, then the class. When windows still tie, AppyTappy keeps the
+one it already reads while that window shows, and otherwise takes the first
+one Windows lists that isn't minimized, usually the one in front.
 
 **If no window qualifies** shows once the title or the class is ticked. It
 says what AppyTappy does when the program is running but none of its windows
