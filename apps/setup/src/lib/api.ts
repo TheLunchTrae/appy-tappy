@@ -7,6 +7,7 @@ import type {
   AntiCheatDef,
   AppSpec,
   AppSummary,
+  AppWindows,
   AutomationDef,
   AutomationSummary,
   CheckSpec,
@@ -160,7 +161,7 @@ export async function addClickPicture(screenshot: number, region: RegionSpec, se
   return invoke<ClickPictureView>('add_click_picture', { screenshot, region, selection });
 }
 
-/** Removes the click pictures no saved automation names, for when the automation editor closes. */
+/** Removes the click pictures no saved automation names, for when no automation is being made or changed. */
 export async function forgetUnsavedClickPictures(): Promise<void> {
   await invoke('forget_unsaved_click_pictures');
 }
@@ -177,6 +178,14 @@ export async function findClick(at: ClickAtDef): Promise<FoundClick> {
 
 export async function listApps(): Promise<ReadonlyArray<AppSummary>> {
   return invoke<ReadonlyArray<AppSummary>>('list_apps');
+}
+
+/**
+ * The saved applications and the open windows, with the windows each application's match takes, from
+ * one listing of the desktop, so the three agree. Rejects when the windows cannot be listed.
+ */
+export async function listAppWindows(): Promise<AppWindows> {
+  return invoke<AppWindows>('list_app_windows');
 }
 
 /** Saves `spec` over the application `existing`, or as a new one; returns its ID. */

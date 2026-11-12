@@ -34,9 +34,9 @@ impl<H: Host> Owner<H> {
         self.update_runtime(|stores| automations::delete(stores, id))
     }
 
-    /// Removes the click pictures no saved automation names, as when the
-    /// automation editor closes: those of a target set up for an automation
-    /// that was then not saved. The runtime reads none of them, so it is
+    /// Removes the click pictures no saved automation names, as once the
+    /// automation's flow has ended: those of a target set up for an
+    /// automation that was then not saved. The runtime reads none of them, so it is
     /// not told.
     pub(crate) fn forget_unsaved_click_pictures(&self) -> Result<(), String> {
         self.stores().and_then(automations::forget_unsaved_pictures)

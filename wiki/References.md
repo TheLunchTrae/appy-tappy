@@ -14,9 +14,12 @@ the ones it learned from still reads.
 
 ## Make a reference
 
-Select **New reference** on the References page and pick the application's
-window, or select **New reference from this region** while you
-[make a value](Values.md#make-a-value).
+Select **New reference** on the References page, or select
+**New reference from this region** while you
+[make a value](Values.md#make-a-value). From the References page, first choose
+the application the reference belongs to, or select **Add application**, then
+select **Capture this window**, as the first step of
+[making a value](Values.md#make-a-value) describes.
 
 1. **Name it,** such as `Percent font`.
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
