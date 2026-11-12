@@ -14,7 +14,7 @@ import type {
 import { type Built, type Draft, buildSpec, fixDraft } from './check.ts';
 import { andList } from './reference.ts';
 import { sameRect } from './region.ts';
-import { guessPin, sizeText } from './sizes.ts';
+import { guessPin, sameSize, sizeText } from './sizes.ts';
 import { sameContent } from './unsaved.ts';
 
 /**
@@ -24,6 +24,15 @@ import { sameContent } from './unsaved.ts';
  */
 export function editDraft(screen: ScreenDef): Draft {
   return { ...fixDraft(screen.check), region: screen.region };
+}
+
+/**
+ * `draft` with an edited value's region on the screenshot `shot`, of window size `size`, when `saved` was drawn at
+ * that size and the region sits on no screenshot yet; unchanged otherwise. The capture opens an edit on a screenshot
+ * it takes itself, so what this makes of the opening draft is what leaving the edit loses nothing of.
+ */
+export function placedOn(draft: Draft, saved: ScreenDef, shot: number, size: SizeDef): Draft {
+  return draft.drawnOn === null && sameSize(size, saved.windowSize) ? { ...draft, drawnOn: shot } : draft;
 }
 
 /** The side `screen`'s region stays at when the user picked it by hand, or null while it is the guess from where
@@ -63,17 +72,18 @@ export function droppedFixesText(dropped: readonly SizeDef[]): string {
 }
 
 /**
- * Whether saving the edit that answered `preview` removes fixes with the user's word for it: the user agreed to
- * lose the fixes at `lost`, and those are exactly the ones the edit removes.
+ * The window sizes of the fixes the save of the edit that answered `preview` removes with the user's word for it:
+ * the ones the edit removes, once the user agreed to lose the fixes at `lost` and those are exactly them. None
+ * otherwise, so an edit that comes to remove other fixes asks again.
  */
-export function dropsFixes(preview: EditPreview | null, lost: readonly SizeDef[]): boolean {
-  return preview !== null && preview.droppedFixes.length > 0 && sameContent(lost, preview.droppedFixes);
+export function agreedFixes(preview: EditPreview | null, lost: readonly SizeDef[]): readonly SizeDef[] {
+  return preview !== null && sameContent(lost, preview.droppedFixes) ? preview.droppedFixes : [];
 }
 
 /** Whether the edit that answered `preview` can be saved: no automation stops it, and the user agreed to lose the
  * fixes it removes, if any. Null is an edit not tried yet. */
 export function saveable(preview: EditPreview | null, lost: readonly SizeDef[]): boolean {
-  return preview?.refused === null && (preview.droppedFixes.length === 0 || dropsFixes(preview, lost));
+  return preview?.refused === null && agreedFixes(preview, lost).length === preview.droppedFixes.length;
 }
 
 function missing(next: string): { readonly ok: false; readonly next: string } {

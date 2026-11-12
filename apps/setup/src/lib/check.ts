@@ -381,6 +381,15 @@ export function fixDraft(check: CheckDef): Draft {
   }
 }
 
+/**
+ * `draft`, a fix's, with its region at `region` on the screenshot `shot`, where the value reads at that screenshot's
+ * size; unchanged when it reads nowhere there, or a region is drawn already. The capture opens a fix on a
+ * screenshot it takes itself, so what this makes of the opening draft is what leaving the fix loses nothing of.
+ */
+export function withFixRegion(draft: Draft, region: Rect | null, shot: number): Draft {
+  return region === null || draft.region !== null ? draft : { ...draft, region, drawnOn: shot };
+}
+
 /** `draft` switched to `kind`, with that kind's starting tolerance. */
 export function withKind(draft: Draft, kind: CheckKind): Draft {
   return { ...draft, kind, tolerance: DEFAULT_TOLERANCE[kind] };

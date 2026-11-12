@@ -4,7 +4,7 @@
 //! automation's condition is refused, and one that leaves the value's fixes
 //! unusable removes them only with the user's word for it.
 
-use appytappy_config::app_file::{CheckDef, ScreenDef, SizeDef, ValueDef};
+use appytappy_config::app_file::{CheckDef, FixDef, PinDef, ScreenDef, SizeDef, ValueDef};
 use appytappy_sources::screen::Image;
 
 use crate::automations;
@@ -45,6 +45,29 @@ impl<H: Host> Owner<H> {
     /// Returns what to fix when the edit cannot be saved as it is, other
     /// than for the fixes and automations the answer names.
     pub(crate) fn try_edit(&mut self, spec: &EditSpec) -> Result<EditPreview, String> {
+        let tried = self.tried(spec);
+        // An edit that cannot be tried reads nothing, rather than what the
+        // edit before it read.
+        if tried.is_err() {
+            self.check = None;
+        }
+        tried
+    }
+
+    /// The size of the picked window on its newest frame, which an edit is
+    /// tried at, or `None` before a frame arrived.
+    pub(crate) fn window_size(&self) -> Option<SizeDef> {
+        self.latest.as_ref().map(|frame| {
+            let size = frame.size();
+            SizeDef {
+                width: size.width,
+                height: size.height,
+            }
+        })
+    }
+
+    /// Tries `spec` as [`Owner::try_edit`] describes.
+    fn tried(&mut self, spec: &EditSpec) -> Result<EditPreview, String> {
         let found = self.stores()?.app(&spec.app)?;
         let edited = self.edited(spec, &found)?;
         let value = read_back(&edited.value.screen, &found, &edited.pictures)?;
@@ -76,20 +99,22 @@ impl<H: Host> Owner<H> {
     }
 
     /// Saves the value as `spec` edits it over the saved one, under the same
-    /// ID, and answers where it was saved, or what to fix. With
-    /// `drop_fixes`, the user agreed to lose the fixes the edit leaves
-    /// unusable; without it, such an edit is refused. An edit that changes
-    /// nothing saves nothing and tells no one.
+    /// ID, and answers where it was saved, or what to fix. `drop_fixes` is
+    /// the window sizes of the fixes the user agreed to lose; an edit that
+    /// leaves other fixes unusable than exactly those is refused. An edit
+    /// that changes nothing saves nothing and tells no one.
     pub(crate) fn edit_value(
         &mut self,
         spec: &EditSpec,
-        drop_fixes: bool,
+        drop_fixes: &[SizeDef],
     ) -> Result<SavedValue, String> {
         self.update_app(&spec.app, Changed::Values, |owner, found| {
             let edited = owner.edited(spec, found)?;
             edited.automations?;
-            if !drop_fixes && !edited.dropped.is_empty() {
-                return Err(unconfirmed(&edited.value.name, &edited.dropped));
+            let agreed = drop_fixes.len() == edited.dropped.len()
+                && edited.dropped.iter().all(|size| drop_fixes.contains(size));
+            if !agreed {
+                return Err(unagreed(&edited.value.name, &edited.dropped));
             }
             read_back(&edited.value.screen, found, &edited.pictures)?;
             let answer = SavedValue {
@@ -160,7 +185,7 @@ impl<H: Host> Owner<H> {
             },
         };
         let (fixes, dropped) = if fixes_suit(&saved.screen.check, &check) {
-            (saved.screen.fixes.clone(), Vec::new())
+            (kept_fixes(&saved.screen, &check), Vec::new())
         } else {
             let dropped = saved
                 .screen
@@ -170,6 +195,14 @@ impl<H: Host> Owner<H> {
                 .collect();
             (Vec::new(), dropped)
         };
+        // A value saved without a pin stays at the side guessed from where
+        // its region is, and goes on doing so while the edit names that
+        // side.
+        let pin = if saved.screen.pin.is_none() && spec.pin == PinDef::guess(region, drawn) {
+            None
+        } else {
+            Some(spec.pin)
+        };
         let value = ValueDef {
             id: saved.id.clone(),
             name: name.to_owned(),
@@ -177,7 +210,7 @@ impl<H: Host> Owner<H> {
                 window_size: drawn,
                 region,
                 check,
-                pin: Some(spec.pin),
+                pin,
                 fixes,
             },
         };
@@ -233,22 +266,50 @@ fn fixes_suit(saved: &CheckDef, edited: &CheckDef) -> bool {
     }
 }
 
-/// What to say when an edit leaves the fixes of the value `name` at the
-/// window sizes `dropped` unusable and the user has not agreed to lose them.
-fn unconfirmed(name: &str, dropped: &[SizeDef]) -> String {
+/// The fixes of `screen` for an edit that makes its check `check`, which
+/// they still suit, each reading as it did. A fix of a number names a
+/// reference only when it is not its value's, so when the value's reference
+/// changes, a fix that read with the old one names it, and a fix that named
+/// the new one names none.
+fn kept_fixes(screen: &ScreenDef, check: &CheckDef) -> Vec<FixDef> {
+    let mut fixes = screen.fixes.clone();
+    if let (CheckDef::Number { reference: old, .. }, CheckDef::Number { reference: new, .. }) =
+        (&screen.check, check)
+        && old != new
+    {
+        for fix in &mut fixes {
+            fix.reference = match fix.reference.take() {
+                None => Some(old.clone()),
+                Some(own) if own == *new => None,
+                own @ Some(_) => own,
+            };
+        }
+    }
+    fixes
+}
+
+/// What to say when the user agreed to lose other fixes of the value `name`
+/// than the ones at the window sizes `dropped`, which the edit leaves
+/// unusable.
+fn unagreed(name: &str, dropped: &[SizeDef]) -> String {
     let sizes: Vec<String> = dropped
         .iter()
         .map(|size| format!("{} × {}", size.width, size.height))
         .collect();
     let sizes: Vec<&str> = sizes.iter().map(String::as_str).collect();
-    let (fixes, they) = if sizes.len() == 1 {
-        ("fix", "it")
-    } else {
-        ("fixes", "them")
+    let (fixes, they) = match sizes.len() {
+        0 => {
+            return format!(
+                "This change removes no fix of {name}, so there is none to agree to lose. Check \
+                 the change and save again."
+            );
+        },
+        1 => ("fix", "it"),
+        _ => ("fixes", "them"),
     };
     format!(
         "This change leaves the {fixes} of {name} at {} unusable, so saving removes {they}. \
-         Agree to that in the editor to save.",
+         Agree to exactly that in the editor to save.",
         and_list(&sizes)
     )
 }

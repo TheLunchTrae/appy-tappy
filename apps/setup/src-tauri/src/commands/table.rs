@@ -88,10 +88,13 @@ macro_rules! with_commands {
             /// Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
             /// now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.
             commands::try_edit(spec: EditSpec) -> EditPreview;
-            /// Saves a saved value as `spec` edits it, under the ID it has. With `dropFixes`, the fixes the edit
-            /// leaves unusable go with it; without it, such an edit is refused, as is one that would break an
-            /// automation.
-            commands::edit_value(spec: EditSpec, drop_fixes: bool) -> SavedValue;
+            /// Saves a saved value as `spec` edits it, under the ID it has. `dropFixes` is the window sizes of the fixes
+            /// the user agreed to lose: an edit that leaves other fixes unusable than exactly those is refused, as is
+            /// one that would break an automation.
+            commands::edit_value(spec: EditSpec, drop_fixes: Vec<SizeDef>) -> SavedValue;
+            /// The size of the picked window on its newest frame, which an edit is tried at, or null before one
+            /// arrives.
+            commands::window_size() -> Option<SizeDef>;
             /// Where the saved value starts on a window of `width` by `height` in the fix flow, or null when it would
             /// not fit.
             commands::place_value(

@@ -41,7 +41,10 @@ This page covers what the user guide leaves out.
   (`lib/unsaved.ts`): nothing while what it shows has the same content as
   what it started with, unsaved work otherwise, or a save under way. A
   capture counts its screenshots and recording too, since only the session
-  has them. The page tabs, the page already shown included, ask before they
+  has them. A fix and an edit open on a screenshot the capture takes
+  itself, and start from what they show once the region is placed on it
+  (`withFixRegion`, `placedOn`), so leaving one that nobody touched asks
+  nothing. The page tabs, the page already shown included, ask before they
   drop unsaved work, and **Change window** asks the same. While a save runs,
   the tabs, **Change window**, the questions' answers, and **Discard** or
   **Cancel** wait. A save closes its flow only while that flow is still open,
@@ -95,17 +98,27 @@ This page covers what the user guide leaves out.
   it at the newest frame's size, so the editor's reading is the runtime's at
   the window's size now, and answers an `EditPreview`: why the value is not
   read at that size, the fixes the edit removes, and the automations that
-  refuse it. The page tries the edit again when the live view changes
-  size. `edit_value` saves the same value over the saved one, under its ID,
-  and leaves the application's `checked` build alone. It refuses an edit
-  when an automation's condition suits the saved value but not the edited
-  one (`TargetDef::suits`), or when the edit removes fixes and the page did
-  not send `dropFixes`. An edit removes a value's fixes when the check's
-  kind changes or a state check's states no longer line up with the fixes'
-  pictures: each state has to keep its picture or its name, in the same
-  place. An edit that changes nothing writes nothing. A value keeps its ID
-  when renamed, and a new value named like a renamed one's old name gets
-  that ID with a number.
+  refuse it. An edit that cannot be tried clears the live check, so nothing
+  reads with the edit before it. The page asks the owner for the window's
+  size twice a second (`window_size`, the newest frame's own size, not the
+  scaled live view's) and tries the edit again when it changes, and after a
+  save the owner refused. `edit_value` saves the same value over the saved
+  one, under its ID, and leaves the application's `checked` build alone. It
+  refuses an edit when an automation's condition suits the saved value but
+  not the edited one (`TargetDef::suits`). The page sends the window sizes
+  of the fixes the user agreed to lose as `dropFixes`, and the owner
+  refuses the save, listing the fixes it would remove, unless those are
+  exactly the ones the edit removes. An edit removes a value's fixes when
+  the check's kind changes or a state check's states no longer line up with
+  the fixes' pictures: each state has to keep its picture or its name, in
+  the same place. A fix that stays reads as it did: when a number value's
+  reference changes, a fix that read with the old one names it, and a fix
+  that named the new one names none, so a fix still names a reference only
+  when it differs from the value's. A fix has no `whole` of its own and
+  follows the value's. A value saved without a `pin` keeps none while the
+  edit names the side guessed from its region, so an edit that changes
+  nothing writes nothing. A value keeps its ID when renamed, and a new
+  value named like a renamed one's old name gets that ID with a number.
 - **References.** A number value names a reference of its own application
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the

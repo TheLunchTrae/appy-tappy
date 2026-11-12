@@ -659,7 +659,9 @@ stateDiagram-v2
 ```
 
 The unsaved work of a flow, such as its screenshots and recording, lives in the
-flow's components and in the owner thread. Each flow reports what leaving it
+flow's components and in the owner thread. A fix and an edit start from the
+screenshot the capture takes when they open, so that screenshot is not
+unsaved work. Each flow reports what leaving it
 would lose (`apps/setup/src/lib/unsaved.ts`), and the tabs and **Change window**
 ask before they drop unsaved work. While a save runs, both are disabled. A save closes
 its flow only while that flow is still open (`saved` in `App.tsx`), so a save
@@ -857,10 +859,12 @@ stateDiagram-v2
   was drawn at, as for a new value, and takes the next saved name.
 
 Each change to the edit is tried on the owner thread after a quarter of a
-second (`try_edit`, through `useLiveCheck`), and again when the live view
-changes size. The owner makes the edited value its `check`, placed where the
-value reads at the newest frame's size, or clears `check` when the value is
-not read at that size, and answers what a save would do. An answer for an
+second (`try_edit`, through `useLiveCheck`). The same edit is tried again
+when the window's size changes, which the page asks the owner for twice a
+second (`window_size`), and after a save the owner refused. The owner makes
+the edited value its `check`, placed where the value reads at the newest
+frame's size, or clears `check` when the value is not read at that size or
+the edit cannot be tried, and answers what a save would do. An answer for an
 edit that has changed since is dropped, as a late check's is.
 
 - **The edit cannot be built or read back.** The reading box says why, such
@@ -873,10 +877,12 @@ edit that has changed since is dropped, as a late check's is.
 - **It removes fixes.** The answer lists their window sizes, and **Save
   changes** waits until the user turns on **Remove its fix**. The agreement
   holds the sizes agreed to, and counts only while the answer lists exactly
-  those, so an edit that later removes other fixes asks again. `edit_value`
-  refuses an edit that removes fixes without the user's word.
-- **The save fails.** The editor shows why and stays open with the draft, and
-  the saved value is as it was.
+  those, so an edit that later removes other fixes asks again. The save
+  carries those sizes, and `edit_value` refuses it unless they are exactly
+  the fixes the edit removes when it runs.
+- **The save fails.** The editor shows why and stays open with the draft, the
+  saved value is as it was, and the edit is tried again, so the answer shows
+  what the saved files say now.
 
 ### Text reader
 

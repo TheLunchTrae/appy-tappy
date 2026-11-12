@@ -38,12 +38,12 @@ export function trialOf(check: Built, edit: Built<EditSpec> | null): Trial {
 
 /**
  * Tries `trial` on the live window once it has not changed for a moment, and reads the window with it while it is
- * set. It is tried again when `again` changes: the owner places an edit where the value reads at the window's size
- * when it is tried, so the capture screen passes the live view's size.
+ * set. It is tried again when `again` changes, which says that the same trial may answer otherwise now, as an edit
+ * does once the window has another size.
  */
 export function useLiveCheck(
   trial: Trial,
-  again: unknown,
+  again: string | null,
 ): {
   readonly state: CheckState;
   readonly reading: Reading | null;

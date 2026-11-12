@@ -3,13 +3,14 @@ import { describe, expect, test } from 'bun:test';
 import type { ValueDef } from '../src/lib/bindings.ts';
 import { DEFAULT_TOLERANCE, EMPTY_DRAFT, withKind, withState, withStateAt } from '../src/lib/check.ts';
 import {
+  agreedFixes,
   buildEdit,
   droppedFixesText,
-  dropsFixes,
   editDraft,
   keepsStates,
   otherSizeText,
   pickedPin,
+  placedOn,
   saveable,
 } from '../src/lib/edit.ts';
 
@@ -55,6 +56,15 @@ describe('editDraft', () => {
   });
 });
 
+test('the region sits on the first screenshot only when it has the size the value was drawn at', () => {
+  const draft = editDraft(bar.screen);
+  expect(placedOn(draft, bar.screen, 0, windowSize)).toEqual({ ...draft, drawnOn: 0 });
+  expect(placedOn(draft, bar.screen, 0, { width: 800, height: 600 })).toBe(draft);
+  // A region that sits on a screenshot already stays there.
+  const placed = { ...draft, drawnOn: 3 };
+  expect(placedOn(placed, bar.screen, 4, windowSize)).toBe(placed);
+});
+
 test('a pin shows as picked by hand only when it is not the guess', () => {
   // The region's center is in the window's top left third.
   expect(pickedPin(bar.screen)).toBeNull();
@@ -89,13 +99,17 @@ test('an edit is saved once nothing stops it and the user agreed to lose exactly
   expect(saveable({ ...clean, refused: 'Pause music uses Status.' }, [])).toBe(false);
   expect(saveable(drops, [])).toBe(false);
   expect(saveable(drops, [{ ...larger }])).toBe(true);
-  expect(dropsFixes(drops, [{ ...larger }])).toBe(true);
+  // The save carries the sizes agreed to, which the owner checks again.
+  expect(agreedFixes(drops, [{ ...larger }])).toEqual([larger]);
+  expect(agreedFixes(drops, [])).toEqual([]);
   // Agreeing to lose one fix is not agreeing to lose another, or more.
   expect(saveable(drops, [windowSize])).toBe(false);
   expect(saveable({ ...clean, droppedFixes: [larger, windowSize] }, [larger])).toBe(false);
+  expect(agreedFixes({ ...clean, droppedFixes: [larger, windowSize] }, [larger])).toEqual([]);
   // An edit that removes none drops none, whatever was agreed to before.
-  expect(dropsFixes(clean, [])).toBe(false);
-  expect(dropsFixes(null, [])).toBe(false);
+  expect(agreedFixes(clean, [larger])).toEqual([]);
+  expect(saveable(clean, [larger])).toBe(true);
+  expect(agreedFixes(null, [])).toEqual([]);
 });
 
 describe('buildEdit', () => {

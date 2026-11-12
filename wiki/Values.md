@@ -199,7 +199,8 @@ headed **Fix** and saves with **Save fix**.
    colors, the states' names, or the **Tolerance**. The box under them shows
    what the value would read on the live window once saved.
 4. Select **Save changes**. **Discard**, or leaving the editor, keeps the
-   value as it was saved.
+   value as it was saved. Leaving asks first only once you changed
+   something.
 
 ### The window's size while you edit
 
@@ -252,7 +253,13 @@ back, while the region is where it was saved.
   the names they had. Any other change leaves the fixes unusable. The editor
   then lists them, such as
   **Saving this removes its fix at 3440 × 1440**, and saves only once you
-  turn on **Remove its fix**.
+  turn on **Remove its fix**. If the fixes it would remove are not the ones
+  you agreed to lose, the save is refused and lists them again.
+- **What a fix reads with.** A fix that stays reads as it did. When you pick
+  another reference for a **Number** value, a fix that read with the old
+  reference keeps reading with it, so the old reference still cannot be
+  deleted while that fix uses it. **Whole number only** is the value's
+  setting at every size, so its fixes follow it.
 
 ## When an application updates
 

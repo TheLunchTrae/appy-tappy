@@ -39,7 +39,7 @@ use appytappy_config::action::{
     OpenTarget, SoundFile,
 };
 use appytappy_config::app_file::{
-    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, WindowDef,
+    AntiCheatDef, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef,
 };
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, CornerDef, MAX_COOLDOWN_MS,

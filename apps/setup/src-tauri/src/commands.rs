@@ -251,15 +251,23 @@ pub(crate) async fn try_edit(app: AppHandle, spec: EditSpec) -> Result<EditPrevi
     ask(&app, move |owner| owner.try_edit(&spec)).await?
 }
 
-/// Saves a saved value as `spec` edits it, under the ID it has. With
-/// `drop_fixes`, the fixes the edit leaves unusable go with it.
+/// Saves a saved value as `spec` edits it, under the ID it has, and
+/// removes the fixes at the window sizes `drop_fixes`, which must be
+/// exactly the ones the edit leaves unusable.
 #[tauri::command]
 pub(crate) async fn edit_value(
     app: AppHandle,
     spec: EditSpec,
-    drop_fixes: bool,
+    drop_fixes: Vec<SizeDef>,
 ) -> Result<SavedValue, String> {
-    ask(&app, move |owner| owner.edit_value(&spec, drop_fixes)).await?
+    ask(&app, move |owner| owner.edit_value(&spec, &drop_fixes)).await?
+}
+
+/// The size of the picked window on its newest frame, or `None` before one
+/// arrived.
+#[tauri::command]
+pub(crate) async fn window_size(app: AppHandle) -> Result<Option<SizeDef>, String> {
+    ask(&app, |owner| owner.window_size()).await
 }
 
 /// Where the saved value `value` of the application `application` starts

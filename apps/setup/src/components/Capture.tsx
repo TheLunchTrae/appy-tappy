@@ -19,10 +19,11 @@ import {
   regionScreenshot,
   settingsDiffer,
   toReference,
+  withFixRegion,
   withKind,
   withState,
 } from '../lib/check.ts';
-import { dropsFixes, editDraft, keepsStates, pickedPin, saveable } from '../lib/edit.ts';
+import { agreedFixes, editDraft, keepsStates, pickedPin, placedOn, saveable } from '../lib/edit.ts';
 import { readers } from '../lib/reference.ts';
 import { type ColorTarget, ColorFields, SelectFields } from './CheckFields.tsx';
 import { ReadingBox, RegionFields } from './Fields.tsx';
@@ -125,8 +126,9 @@ interface Props {
 }
 
 export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHeld }: Props) {
-  // What the capture shows before the user does anything, which leaving it loses nothing of.
-  const [start] = useState(() => {
+  // What the capture shows before the user does anything, which leaving it loses nothing of. A fix and an edit
+  // open on a screenshot the capture takes itself, and start from there.
+  const [start, setStart] = useState(() => {
     const editing: Editing | null =
       mode.kind === 'reference'
         ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
@@ -225,22 +227,26 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const firstShot = shots[0]?.index ?? null;
   const firstPicture = firstShot === null ? undefined : full.get(firstShot);
   useEffect(() => {
-    if (fixing === null || firstShot === null || firstPicture === undefined || fixShot.current === 'placed') {
+    if (opened === null || firstShot === null || firstPicture === undefined || fixShot.current === 'placed') {
       return;
     }
     fixShot.current = 'placed';
+    const size = { width: firstPicture.width, height: firstPicture.height };
     const place = async (): Promise<void> => {
       try {
-        const region = await placeValue(appId, fixing.id, firstPicture.width, firstPicture.height);
-        if (region !== null) {
-          setDraft((current) => (current.region === null ? { ...current, region, drawnOn: firstShot } : current));
-        }
+        const region = fixing === null ? null : await placeValue(appId, fixing.id, size.width, size.height);
+        const placed = (current: Draft): Draft =>
+          edited === null
+            ? withFixRegion(current, region, firstShot)
+            : placedOn(current, edited.screen, firstShot, size);
+        setDraft(placed);
+        setStart((began) => ({ ...began, screenshots: 1, draft: placed(began.draft) }));
       } catch (error: unknown) {
         setSaveError(errorText(error));
       }
     };
     background(place());
-  }, [fixing, firstShot, firstPicture, appId]);
+  }, [opened, fixing, edited, firstShot, firstPicture, appId]);
 
   const shownOn = regionScreenshot(selected, draft.drawnOn, full, shots.at(-1)?.index ?? null);
   const native = shownOn === null ? undefined : full.get(shownOn);
@@ -284,8 +290,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     sizes: full,
   });
   const trial = useMemo(() => trialOf(built, edit.built), [built, edit.built]);
-  const check = useLiveCheck(trial, edited === null ? null : liveSize);
-  const dropFixes = dropsFixes(check.preview, edit.lost);
+  const check = useLiveCheck(trial, edit.again);
+  const dropFixes = agreedFixes(check.preview, edit.lost);
   // The size of the screenshot the region would show over, when an edited value was drawn at another: its region
   // is in the pixels of the size it was drawn at, so it shows and moves on screenshots of that size only.
   const otherSize =
@@ -320,6 +326,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       onSaved();
     } catch (error: unknown) {
       setSaveError(errorText(error));
+      edit.refused();
     } finally {
       setSaving(false);
     }
@@ -953,7 +960,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 <ReadingBox built={trial.ok ? null : trial.next} state={check.state} reading={check.reading} />
               )}
               {edit.built === null || check.preview === null ? null : (
-                <EditOutcome preview={check.preview} agreed={dropFixes} onAgree={edit.agree} />
+                <EditOutcome preview={check.preview} agreed={dropFixes.length > 0} onAgree={edit.agree} />
               )}
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}

@@ -6,10 +6,11 @@ use appytappy_config::app_file::{
 };
 use appytappy_config::automation_file::AutomationDef;
 use appytappy_config::window_match::WindowFacts;
+use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::{FrameHandler, Size};
 
 use crate::applications::AppSpec;
-use crate::owner::messages::{FixSpec, Reading};
+use crate::owner::messages::{FixSpec, Reading, ReferenceSaveSpec};
 use crate::owner::test_support::{
     BAR, Harness, NO_STORE, add_example_app, frame_image, harness, harness_with, scratch_store,
     spec, with_saved_bar,
@@ -17,16 +18,16 @@ use crate::owner::test_support::{
 
 use super::*;
 
+/// A frame of `size`, all red.
+fn red_image(size: SizeDef) -> Image {
+    let (width, height) = (size.width, size.height);
+    let pixels = usize::try_from(width.checked_mul(height).expect("small")).expect("fits");
+    Image::new(Size { width, height }, [0, 0, 255, 0].repeat(pixels)).expect("matching length")
+}
+
 /// An 8 by 4 frame, twice the size of [`frame_image`], all red.
 fn larger_image() -> Image {
-    Image::new(
-        Size {
-            width: 8,
-            height: 4,
-        },
-        [0, 0, 255, 0].repeat(32),
-    )
-    .expect("matching length")
+    red_image(LARGER)
 }
 
 /// A frame of [`frame_image`]'s size, all gray.
@@ -44,6 +45,11 @@ fn gray_image() -> Image {
 const LARGER: SizeDef = SizeDef {
     width: 8,
     height: 4,
+};
+
+const WIDER: SizeDef = SizeDef {
+    width: 12,
+    height: 6,
 };
 
 /// The red square of screenshot 0 as `Shown` and the gray one of screenshot
@@ -195,8 +201,13 @@ fn set_size_changes(harness: &mut Harness, changes: SizeChangesDef) {
         .expect("saves");
 }
 
-/// Saves `spec`, with the user's word for losing fixes when `drop_fixes`.
-fn save(harness: &mut Harness, spec: &EditSpec, drop_fixes: bool) -> Result<SavedValue, String> {
+/// Saves `spec`, with the user's word for losing the fixes at the window
+/// sizes `drop_fixes`.
+fn save(
+    harness: &mut Harness,
+    spec: &EditSpec,
+    drop_fixes: &[SizeDef],
+) -> Result<SavedValue, String> {
     harness.ask(|owner| owner.edit_value(spec, drop_fixes))
 }
 
@@ -218,7 +229,7 @@ fn a_rename_keeps_the_id_the_pictures_and_the_automation_that_watches_it() {
     );
     renamed.pin = PinDef::BottomRight;
     assert_eq!(
-        save(&mut harness, &renamed, false),
+        save(&mut harness, &renamed, &[]),
         Ok(SavedValue {
             app: "example".to_owned(),
             value: "icon_visible".to_owned(),
@@ -262,7 +273,7 @@ fn a_rename_keeps_the_id_the_pictures_and_the_automation_that_watches_it() {
 
     // Saved again as it is, nothing is written and no one is told.
     "Icon".clone_into(&mut renamed.value_name);
-    assert!(save(&mut harness, &renamed, false).is_ok());
+    assert!(save(&mut harness, &renamed, &[]).is_ok());
     assert_eq!(harness.reloads(), 0);
 
     // The name it has now is taken, and the old one is free again: a new
@@ -281,11 +292,7 @@ fn a_rename_keeps_the_id_the_pictures_and_the_automation_that_watches_it() {
     // A value keeps its own name, and cannot take another's.
     let files = folder_files(&harness);
     assert_eq!(
-        save(
-            &mut harness,
-            &edit("icon_visible_2", "ICON", KEPT_BAR),
-            false
-        ),
+        save(&mut harness, &edit("icon_visible_2", "ICON", KEPT_BAR), &[]),
         Err("Example App already has a value named like \"ICON\". Pick another name.".to_owned())
     );
     assert_eq!(
@@ -294,7 +301,7 @@ fn a_rename_keeps_the_id_the_pictures_and_the_automation_that_watches_it() {
         "a refused edit changes nothing"
     );
     let own = edit("icon_visible_2", "icon VISIBLE", KEPT_BAR);
-    assert!(save(&mut harness, &own, false).is_ok());
+    assert!(save(&mut harness, &own, &[]).is_ok());
     assert_eq!(saved_file(&harness).values[1].name, "icon VISIBLE");
     std::fs::remove_dir_all(root).expect("clean up");
 }
@@ -344,7 +351,7 @@ fn an_edit_that_would_break_an_automation_is_refused_and_changes_nothing() {
                   \"Hidden\" of Icon visible, which this change renames or removes. Change or \
                   delete it first."
         .to_owned();
-    assert_eq!(save(&mut harness, &renamed, false), Err(states.clone()));
+    assert_eq!(save(&mut harness, &renamed, &[]), Err(states.clone()));
     assert_eq!(
         harness.ask(|owner| owner.try_edit(&renamed)),
         Ok(EditPreview {
@@ -356,7 +363,7 @@ fn an_edit_that_would_break_an_automation_is_refused_and_changes_nothing() {
     );
     let color = edit("icon_visible", "Icon visible", KEPT_COLOR);
     assert_eq!(
-        save(&mut harness, &color, false),
+        save(&mut harness, &color, &[]),
         Err(
             "Pause, Mute, Stop and Rest use Icon visible as a state, and this change makes it \
              read yes or no. Change or delete them first."
@@ -372,11 +379,11 @@ fn an_edit_that_would_break_an_automation_is_refused_and_changes_nothing() {
         "Status",
         &kept_states(["Shown", "Hidden"], 3),
     );
-    assert!(save(&mut harness, &named, false).is_ok());
+    assert!(save(&mut harness, &named, &[]).is_ok());
     // One state renamed stops only the automations that name it.
     let hidden = edit("icon_visible", "Status", &kept_states(["Shown", "Away"], 3));
     assert_eq!(
-        save(&mut harness, &hidden, false),
+        save(&mut harness, &hidden, &[]),
         Err(
             "Stop uses the state \"Hidden\" of Status, which this change renames or removes. \
              Change or delete it first."
@@ -395,7 +402,7 @@ fn a_number_that_would_read_yes_or_no_names_the_automations_that_compare_it() {
     );
     let color = edit("progress_bar", "Progress bar", KEPT_COLOR);
     assert_eq!(
-        save(&mut harness, &color, false),
+        save(&mut harness, &color, &[]),
         Err(
             "Low uses Progress bar as a number, and this change makes it read yes or no. Change \
              or delete it first."
@@ -404,7 +411,7 @@ fn a_number_that_would_read_yes_or_no_names_the_automations_that_compare_it() {
     );
     // Another check that reads a number keeps it.
     let green = edit("progress_bar", "Progress bar", KEPT_GREEN_BAR);
-    assert!(save(&mut harness, &green, false).is_ok());
+    assert!(save(&mut harness, &green, &[]).is_ok());
     std::fs::remove_dir_all(root).expect("clean up");
 }
 
@@ -453,7 +460,7 @@ fn fixes_stay_while_they_suit_the_edit_and_go_only_once_the_user_agrees() {
         "Icon visible",
         &kept_states(["Seen", "Away"], 0),
     );
-    assert!(save(&mut harness, &renamed, false).is_ok());
+    assert!(save(&mut harness, &renamed, &[]).is_ok());
     assert_eq!(fixes_of(&harness), fix);
 
     // Taken again under the names they have, they still are. The new
@@ -464,7 +471,7 @@ fn fixes_stay_while_they_suit_the_edit_and_go_only_once_the_user_agrees() {
         &drawn_states(1, ["Seen", "Away"]),
     );
     assert_eq!(dropped(&mut harness, &moved), Ok(Vec::new()));
-    assert!(save(&mut harness, &moved, false).is_ok());
+    assert!(save(&mut harness, &moved, &[]).is_ok());
     assert_eq!(fixes_of(&harness), fix);
     let value = saved_file(&harness).values.swap_remove(0);
     assert_eq!(
@@ -510,10 +517,10 @@ fn fixes_stay_while_they_suit_the_edit_and_go_only_once_the_user_agrees() {
     );
     assert_eq!(dropped(&mut harness, &other), Ok(vec![LARGER]));
     assert_eq!(
-        save(&mut harness, &other, false),
+        save(&mut harness, &other, &[]),
         Err(
             "This change leaves the fix of Icon visible at 8 × 4 unusable, so saving removes \
-             it. Agree to that in the editor to save."
+             it. Agree to exactly that in the editor to save."
                 .to_owned()
         )
     );
@@ -527,11 +534,11 @@ fn fixes_stay_while_they_suit_the_edit_and_go_only_once_the_user_agrees() {
     assert_eq!(dropped(&mut harness, &one), Ok(vec![LARGER]));
     let color = edit("icon_visible", "Icon visible", KEPT_COLOR);
     assert_eq!(dropped(&mut harness, &color), Ok(vec![LARGER]));
-    assert!(save(&mut harness, &color, false).is_err());
+    assert!(save(&mut harness, &color, &[]).is_err());
     assert_eq!(folder_files(&harness), files, "nothing was written");
     assert_eq!(harness.reloads(), 0, "and no one was told");
 
-    assert!(save(&mut harness, &other, true).is_ok());
+    assert!(save(&mut harness, &other, &[LARGER]).is_ok());
     assert_eq!(fixes_of(&harness), []);
     assert_eq!(
         names(&folder_files(&harness)),
@@ -542,28 +549,244 @@ fn fixes_stay_while_they_suit_the_edit_and_go_only_once_the_user_agrees() {
 }
 
 #[test]
-fn agreeing_to_lose_fixes_removes_none_that_still_suits() {
+fn the_user_s_word_names_exactly_the_fixes_the_edit_removes() {
     let (mut harness, root) = with_saved_bar("edit-bar-fix");
     let mut handler = harness.pick();
-    harness.deliver(&mut handler, Ok(&larger_image()));
-    assert_eq!(harness.ask(Owner::screenshot), Ok(0));
-    let fix = FixSpec {
-        app: "example".to_owned(),
-        value: "progress_bar".to_owned(),
-        check: serde_json::from_str(
-            r#"{"kind":"barFill","region":{"x":1,"y":1,"width":6,"height":2},
+    for (screenshot, size) in [LARGER, WIDER].into_iter().enumerate() {
+        harness.deliver(&mut handler, Ok(&red_image(size)));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(screenshot));
+        let fix = FixSpec {
+            app: "example".to_owned(),
+            value: "progress_bar".to_owned(),
+            check: serde_json::from_str(
+                r#"{"kind":"barFill","region":{"x":1,"y":1,"width":6,"height":2},
                 "filled":{"red":0,"green":255,"blue":0},"empty":{"red":0,"green":0,"blue":0}}"#,
-        )
-        .expect("valid JSON"),
-        screenshot: 0,
-    };
-    harness.ask(|owner| owner.save_fix(&fix)).expect("saves");
+            )
+            .expect("valid JSON"),
+            screenshot,
+        };
+        harness.ask(|owner| owner.save_fix(&fix)).expect("saves");
+    }
+    let files = folder_files(&harness);
+    // A bar's fixes suit a bar, so agreeing to lose one is agreeing to more
+    // than the edit removes.
     let green = edit("progress_bar", "Progress", KEPT_GREEN_BAR);
-    assert!(save(&mut harness, &green, true).is_ok());
-    assert_eq!(fixes_of(&harness).len(), 1, "a bar's fix suits a bar");
+    assert_eq!(
+        save(&mut harness, &green, &[LARGER]),
+        Err(
+            "This change removes no fix of Progress, so there is none to agree to lose. Check \
+             the change and save again."
+                .to_owned()
+        )
+    );
+    assert_eq!(folder_files(&harness), files, "nothing was written");
+    assert!(save(&mut harness, &green, &[]).is_ok());
+    assert_eq!(fixes_of(&harness).len(), 2);
+
+    // Read as yes or no, it loses both, once the user agreed to exactly
+    // those two.
+    let files = folder_files(&harness);
     let color = edit("progress_bar", "Progress", KEPT_COLOR);
-    assert!(save(&mut harness, &color, true).is_ok());
+    let both = "This change leaves the fixes of Progress at 8 × 4 and 12 × 6 unusable, so saving \
+                removes them. Agree to exactly that in the editor to save.";
+    let other = SizeDef {
+        width: 1,
+        height: 1,
+    };
+    for agreed in [
+        Vec::new(),
+        vec![LARGER],
+        vec![LARGER, LARGER],
+        vec![LARGER, other],
+        vec![LARGER, WIDER, other],
+    ] {
+        assert_eq!(
+            save(&mut harness, &color, &agreed),
+            Err(both.to_owned()),
+            "{agreed:?}"
+        );
+    }
+    assert_eq!(folder_files(&harness), files, "nothing was written");
+    assert!(save(&mut harness, &color, &[WIDER, LARGER]).is_ok());
     assert_eq!(fixes_of(&harness), []);
+    std::fs::remove_dir_all(root).expect("clean up");
+}
+
+/// A number check of `region`, as JSON, read with the reference `reference`
+/// of `Example App`.
+fn number(region: &str, reference: &str) -> String {
+    format!(
+        r#"{{"kind":"number","region":{region},
+            "reference":{{"app":"example","id":"{reference}"}},"whole":true}}"#
+    )
+}
+
+/// An edit's drawing that keeps the region and reads a number with the
+/// reference `reference`.
+fn kept_number(reference: &str, whole: bool) -> String {
+    format!(
+        r#"{{"kind":"kept","check":{{"kind":"number","reference":"{reference}","whole":{whole}}}}}"#
+    )
+}
+
+/// The check the saved value reads with on a window of each of `sizes`, as
+/// the runtime builds it.
+fn checks_at(harness: &Harness, sizes: &[SizeDef]) -> Vec<Check> {
+    let app = harness
+        .owner
+        .stores()
+        .expect("stores")
+        .app("example")
+        .expect("saved");
+    let value = read_back(&app.file.values[0].screen, &app, &Vec::new()).expect("reads back");
+    sizes
+        .iter()
+        .map(|size| {
+            let at = value
+                .at(Size {
+                    width: size.width,
+                    height: size.height,
+                })
+                .expect("reads there");
+            value.check(&at).clone()
+        })
+        .collect()
+}
+
+#[test]
+fn a_number_s_fixes_keep_the_reference_they_read_with_when_the_value_s_changes() {
+    let (stores, root) = scratch_store("edit-number-fixes");
+    let mut harness = harness_with(false, Ok(stores));
+    add_example_app(&mut harness);
+    let mut handler = harness.pick();
+    for (index, image) in [frame_image(), red_image(LARGER), red_image(WIDER)]
+        .iter()
+        .enumerate()
+    {
+        harness.deliver(&mut handler, Ok(image));
+        assert_eq!(harness.ask(Owner::screenshot), Ok(index));
+    }
+    // Two references that read the red square of screenshot 0 differently.
+    for (name, text) in [("Digits", "1"), ("Small", "7")] {
+        let reference = ReferenceSaveSpec {
+            app: "example".to_owned(),
+            reference_name: name.to_owned(),
+            check: serde_json::from_str(&format!(
+                r#"{{"kind":"characters","region":{{"x":0,"y":0,"width":2,"height":2}},
+                    "screenshot":0,"reference":null,"ink":{{"red":255,"green":0,"blue":0}},
+                    "tolerance":0,"labels":[{{"screenshot":0,"text":"{text}"}}]}}"#
+            ))
+            .expect("valid JSON"),
+        };
+        harness
+            .ask(|owner| owner.save_reference(&reference))
+            .expect("saves");
+    }
+    let drawn = number(r#"{"x":0,"y":0,"width":2,"height":2}"#, "digits");
+    harness
+        .ask(|owner| owner.save(&spec("example", "Progress", &drawn)))
+        .expect("saves");
+    // One fix reads with the value's reference, and one with its own.
+    for (screenshot, reference) in [(1, "digits"), (2, "small")] {
+        let fix = FixSpec {
+            app: "example".to_owned(),
+            value: "progress".to_owned(),
+            check: serde_json::from_str(&number(
+                r#"{"x":0,"y":0,"width":4,"height":4}"#,
+                reference,
+            ))
+            .expect("valid JSON"),
+            screenshot,
+        };
+        harness.ask(|owner| owner.save_fix(&fix)).expect("saves");
+    }
+    let references = |harness: &Harness| -> Vec<Option<String>> {
+        fixes_of(harness)
+            .into_iter()
+            .map(|fix| fix.reference)
+            .collect()
+    };
+    let own = [None, Some("small".to_owned())];
+    assert_eq!(references(&harness), own);
+    let sizes = [LARGER, WIDER];
+    let before = checks_at(&harness, &sizes);
+    assert_ne!(before[0], before[1], "the two references read differently");
+
+    // The value reads with the other reference, and each fix as it did.
+    let small = edit("progress", "Progress", &kept_number("small", true));
+    assert_eq!(
+        harness.ask(|owner| owner.try_edit(&small)),
+        Ok(EditPreview {
+            unread: None,
+            dropped_fixes: Vec::new(),
+            refused: None,
+        })
+    );
+    assert!(save(&mut harness, &small, &[]).is_ok());
+    assert_eq!(
+        references(&harness),
+        [Some("digits".to_owned()), None],
+        "each fix names a reference only when it is not the value's"
+    );
+    assert_eq!(checks_at(&harness, &sizes), before);
+    assert_eq!(
+        harness.ask(|owner| owner.delete_reference("example", "digits")),
+        Err("Progress reads with Digits. Change or remove it first.".to_owned()),
+        "a fix still reads with it"
+    );
+    let digits = edit("progress", "Progress", &kept_number("digits", true));
+    assert!(save(&mut harness, &digits, &[]).is_ok());
+    assert_eq!(references(&harness), own);
+    assert_eq!(checks_at(&harness, &sizes), before);
+
+    // A fix has no setting of its own for the whole part, so it follows the
+    // value's.
+    let fraction = edit("progress", "Progress", &kept_number("digits", false));
+    assert!(save(&mut harness, &fraction, &[]).is_ok());
+    assert_eq!(references(&harness), own, "the same reference pins none");
+    for check in checks_at(&harness, &sizes) {
+        assert!(
+            matches!(check, Check::Number { whole: false, .. }),
+            "{check:?}"
+        );
+    }
+    std::fs::remove_dir_all(root).expect("clean up");
+}
+
+#[test]
+fn a_value_saved_without_a_pin_keeps_none_while_the_edit_names_the_guess() {
+    let (mut harness, _handler, root) = with_saved_states("edit-pin");
+    harness
+        .ask(|owner| {
+            let stores = owner.stores()?;
+            let mut file = stores.app("example")?.file;
+            file.values[0].screen.pin = None;
+            stores
+                .apps
+                .save("example", &file, &[])
+                .map_err(|error| error.to_string())
+        })
+        .expect("a value saved with no pin");
+    let files = folder_files(&harness);
+    harness.forget_reloads();
+    // The region is in the left third and the middle third down.
+    let mut same = edit(
+        "icon_visible",
+        "Icon visible",
+        &kept_states(["Shown", "Hidden"], 0),
+    );
+    same.pin = PinDef::MiddleLeft;
+    assert!(save(&mut harness, &same, &[]).is_ok());
+    assert_eq!(folder_files(&harness), files, "nothing was written");
+    assert_eq!(harness.reloads(), 0, "and no one was told");
+    let pin = |harness: &Harness| saved_file(harness).values[0].screen.pin;
+    // A side picked by hand is saved, and stays once it is the guess again.
+    let mut picked = same.clone();
+    picked.pin = PinDef::BottomRight;
+    assert!(save(&mut harness, &picked, &[]).is_ok());
+    assert_eq!(pin(&harness), Some(PinDef::BottomRight));
+    assert!(save(&mut harness, &same, &[]).is_ok());
+    assert_eq!(pin(&harness), Some(PinDef::MiddleLeft));
     std::fs::remove_dir_all(root).expect("clean up");
 }
 
@@ -583,7 +806,7 @@ fn the_region_moves_only_on_a_screenshot_of_the_size_the_value_was_drawn_at() {
     };
     let files = folder_files(&harness);
     assert_eq!(
-        save(&mut harness, &drawn(2), true),
+        save(&mut harness, &drawn(2), &[]),
         Err(
             "Icon visible was drawn at 4 × 2, and this screenshot is 8 × 4. Resize the window \
              to 4 × 2 to move its region, or fix it at this size instead."
@@ -591,15 +814,15 @@ fn the_region_moves_only_on_a_screenshot_of_the_size_the_value_was_drawn_at() {
         )
     );
     assert_eq!(
-        save(&mut harness, &drawn(9), true),
+        save(&mut harness, &drawn(9), &[]),
         Err("Take a screenshot first.".to_owned())
     );
     assert_eq!(
-        save(&mut harness, &edit("icon_visible", " ", KEPT_COLOR), true),
+        save(&mut harness, &edit("icon_visible", " ", KEPT_COLOR), &[]),
         Err("Name the value first.".to_owned())
     );
     assert_eq!(
-        save(&mut harness, &edit("gone", "Gone", KEPT_COLOR), true),
+        save(&mut harness, &edit("gone", "Gone", KEPT_COLOR), &[]),
         Err("Example App no longer has that value.".to_owned())
     );
     // An edit is read back as the runtime will read it, like a new value.
@@ -609,7 +832,7 @@ fn the_region_moves_only_on_a_screenshot_of_the_size_the_value_was_drawn_at() {
         r#"{"kind":"kept","check":{"kind":"number","reference":"gone","whole":false}}"#,
     );
     assert_eq!(
-        save(&mut harness, &unread, true),
+        save(&mut harness, &unread, &[]),
         Err(
             "AppyTappy could not read this value as saved: its reference gone is not saved."
                 .to_owned()
@@ -618,12 +841,12 @@ fn the_region_moves_only_on_a_screenshot_of_the_size_the_value_was_drawn_at() {
     let mut elsewhere = edit("icon_visible", "Icon visible", KEPT_COLOR);
     "gone".clone_into(&mut elsewhere.app);
     assert_eq!(
-        save(&mut harness, &elsewhere, true),
+        save(&mut harness, &elsewhere, &[]),
         Err("That application is no longer saved.".to_owned())
     );
     assert_eq!(folder_files(&harness), files, "nothing was written");
 
-    assert!(save(&mut harness, &drawn(0), true).is_ok());
+    assert!(save(&mut harness, &drawn(0), &[]).is_ok());
     let screen = saved_file(&harness).values.swap_remove(0).screen;
     assert_eq!(
         (screen.window_size, screen.region),
@@ -672,18 +895,18 @@ fn a_state_keeps_its_saved_picture_only_in_its_saved_place() {
             {"name":"Hidden","image":"icon_visible-2.png"},
             {"name":"Shown","image":"icon_visible-1.png"}],"tolerance":0}}"#,
     );
-    assert_eq!(save(&mut harness, &swapped, true), Err(refused.to_owned()));
+    assert_eq!(save(&mut harness, &swapped, &[]), Err(refused.to_owned()));
     assert_eq!(folder_files(&harness), files);
     // Another kind of check on the same region needs no picture.
     let color = edit("icon_visible", "Icon visible", KEPT_COLOR);
-    assert!(save(&mut harness, &color, true).is_ok());
+    assert!(save(&mut harness, &color, &[]).is_ok());
     // It has no saved picture to keep any more.
     let back = edit(
         "icon_visible",
         "Icon visible",
         &kept_states(["Shown", "Hidden"], 0),
     );
-    assert_eq!(save(&mut harness, &back, true), Err(refused.to_owned()));
+    assert_eq!(save(&mut harness, &back, &[]), Err(refused.to_owned()));
     std::fs::remove_dir_all(root).expect("clean up");
 }
 
@@ -716,9 +939,23 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
         Ok(Some(Reading::Flag(false))),
         "the right half of the frame is gray"
     );
+    assert_eq!(
+        harness.ask(|owner| owner.window_size()),
+        Some(SizeDef {
+            width: 4,
+            height: 2
+        })
+    );
+    // An edit that cannot be tried leaves no check from the one before it.
+    assert_eq!(
+        harness.ask(|owner| owner.try_edit(&edit("icon_visible", "", KEPT_COLOR))),
+        Err("Name the value first.".to_owned())
+    );
+    assert_eq!(read(&mut harness), Ok(None));
     // At another size, it is read where the runtime reads it there: scaled
     // while the window changes size often.
     harness.deliver(&mut handler, Ok(&larger_image()));
+    assert_eq!(harness.ask(|owner| owner.window_size()), Some(LARGER));
     let kept = edit(
         "icon_visible",
         "Icon visible",
@@ -745,10 +982,6 @@ fn trying_an_edit_reads_the_live_frame_as_the_runtime_would_and_saves_nothing() 
         })
     );
     assert_eq!(read(&mut harness), Ok(None), "the check before it is gone");
-    assert_eq!(
-        harness.ask(|owner| owner.try_edit(&edit("icon_visible", "", KEPT_COLOR))),
-        Err("Name the value first.".to_owned())
-    );
     // Only the application's own save, above, changed its file.
     let pictures = |mut files: BTreeMap<String, Vec<u8>>| {
         files.remove("app.json");
@@ -769,6 +1002,7 @@ fn before_a_frame_arrives_an_edit_is_tried_at_the_size_it_was_drawn_at() {
     let (mut harness, root) = with_saved_bar("edit-try-unseen");
     // Another capture, such as after Change window, has shown no frame yet.
     drop(harness.pick());
+    assert_eq!(harness.ask(|owner| owner.window_size()), None);
     set_size_changes(&mut harness, SizeChangesDef::Rarely);
     assert_eq!(
         harness
@@ -787,5 +1021,5 @@ fn without_a_store_an_edit_says_why() {
         harness.ask(|owner| owner.try_edit(&spec)),
         Err(NO_STORE.to_owned())
     );
-    assert_eq!(save(&mut harness, &spec, false), Err(NO_STORE.to_owned()));
+    assert_eq!(save(&mut harness, &spec, &[]), Err(NO_STORE.to_owned()));
 }
