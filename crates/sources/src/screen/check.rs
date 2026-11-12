@@ -477,6 +477,49 @@ mod tests {
         assert_eq!(bar.percent(&solid(4, WHITE)), Err(CheckError::NoBar));
     }
 
+    /// Rows of colors, each as long as the first, as an image.
+    fn rows(rows: &[&[Rgb]]) -> Image {
+        let bgra = rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .flat_map(|color| [color.blue, color.green, color.red, 255])
+            .collect();
+        Image::new(
+            Size {
+                width: u32::try_from(rows[0].len()).unwrap(),
+                height: u32::try_from(rows.len()).unwrap(),
+            },
+            bgra,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_bar_reads_the_same_fill_wherever_it_sits_in_a_larger_region() {
+        let bar = BarFill::new(GREEN, GRAY).unwrap();
+        // Three filled pixels and one empty one, in a region of white: at
+        // its top left, in its middle, and at its bottom right.
+        let blank = [WHITE; 8];
+        let left = [GREEN, GREEN, GREEN, GRAY, WHITE, WHITE, WHITE, WHITE];
+        let middle = [WHITE, WHITE, GREEN, GREEN, GREEN, GRAY, WHITE, WHITE];
+        let right = [WHITE, WHITE, WHITE, WHITE, GREEN, GREEN, GREEN, GRAY];
+        for region in [
+            [&left, &blank, &blank],
+            [&blank, &middle, &blank],
+            [&blank, &blank, &right],
+        ] {
+            let region: Vec<&[Rgb]> = region.iter().map(|row| row.as_slice()).collect();
+            assert_eq!(bar.percent(&rows(&region)), Ok(Number::new(75.0).unwrap()));
+        }
+        // Another pixel of the empty color in the region counts with the
+        // bar's.
+        let stray = [GRAY, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE];
+        assert_eq!(
+            bar.percent(&rows(&[&blank, &middle, &stray])),
+            Ok(Number::new(60.0).unwrap())
+        );
+    }
+
     #[test]
     fn bar_fill_counts_a_pixel_exactly_at_half_the_colors_distance() {
         let red = |red| Rgb {
