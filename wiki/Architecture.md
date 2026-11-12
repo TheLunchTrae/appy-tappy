@@ -586,7 +586,9 @@ changing.
   - `%LOCALAPPDATA%\AppyTappy\` holds what belongs to this machine, such as
     the installed programs, as [Installer](Installer.md#what-it-does)
     describes, the runtime's log in `logs\`, the
-    [runtime trace](Trace.md)'s files in `traces\`, and `enabled.txt`.
+    [runtime trace](Trace.md)'s files in `traces\`, `enabled.txt`, and the
+    setup app's [drafts](Setup-app.md#drafts) in `drafts\`, which the
+    runtime never reads.
 - **Writing.** Only the setup app writes the saved files, through
   `crates/config/src/store.rs`. Each write goes to a uniquely named temporary
   file beside the old one, is flushed to disk with `sync_all`, and is renamed

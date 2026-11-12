@@ -9,6 +9,7 @@
 - [Values](Values.md)
 - [References](References.md)
 - [Automations](Automations.md)
+- [Drafts](Drafts.md)
 - [Settings](Settings.md)
 - [The tray icon](The-tray-icon.md)
 - [Troubleshooting](Troubleshooting.md)

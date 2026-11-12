@@ -9,7 +9,6 @@ import {
   buildCharacters,
   buildSpec,
   CHECK_KINDS,
-  type Drawn,
   EMPTY_DRAFT,
   fixDraft,
   fromReference,
@@ -38,7 +37,17 @@ import { Hint } from './Hint.tsx';
 import { FIX_HINT, READ_WITH_HINT, guessPin, sizeText } from '../lib/sizes.ts';
 import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
-import { CHECK_HINT } from '../lib/hints.ts';
+import { CHECK_HINT, DRAFT_HINT } from '../lib/hints.ts';
+import {
+  type CaptureKept,
+  type CaptureSetup,
+  type Editing,
+  type Step,
+  captureMissing,
+  restoreSetup,
+  storeSetup,
+} from '../lib/captureDraft.ts';
+import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { background } from '../lib/repeat.ts';
 import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
@@ -94,76 +103,99 @@ export type CaptureMode =
   | { readonly kind: 'reference'; readonly existing: ReferenceDef | null }
   | { readonly kind: 'fix'; readonly value: ValueDef };
 
-/** The reference being made or changed, and its name as typed. */
-interface Editing {
-  readonly existing: ReferenceDef | null;
-  readonly name: string;
-  /** The value's region when the editor opened from a value, to put back when it closes. */
-  readonly valueRegion: Drawn;
+/** The name a draft of the capture lists under: what was typed, or else what it makes or fixes. */
+function draftName(mode: CaptureMode, setup: CaptureSetup): string {
+  switch (mode.kind) {
+    case 'fix':
+      return mode.value.name;
+    case 'reference': {
+      const typed = setup.editing?.name.trim() ?? '';
+      return typed === '' ? (mode.existing?.name ?? 'New reference') : typed;
+    }
+    case 'value':
+      return setup.valueName.trim() === '' ? 'New value' : setup.valueName.trim();
+  }
 }
 
-/** The value's two steps: where it shows, then how to read it. */
-type Step = 'where' | 'how';
+/** A draft the capture finishes: the draft, and how many of its screenshots are this session's again. */
+export interface Restored {
+  readonly resumed: Resumed;
+  /** Null once the window changed, which starts the capture again without what the draft kept. */
+  readonly screenshots: number | null;
+}
 
 interface Props {
   readonly choice: Choice;
   readonly mode: CaptureMode;
+  /** The draft the capture finishes, or null. */
+  readonly restored: Restored | null;
   readonly onCancel: () => void;
   readonly onChangeWindow: () => void;
+  /** Closes the flow once its item or its draft is saved. */
   readonly onSaved: () => void;
   /** Hears what leaving the capture would lose. */
   readonly onHeld: (held: Held) => void;
+  /** Hears how to save the capture's draft. */
+  readonly onDraft: ReportDraft;
 }
 
-export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHeld }: Props) {
+/** What the capture starts with: what `restored` kept, or else what `mode` makes. */
+function startSetup(mode: CaptureMode, restored: Restored | null): CaptureSetup {
+  const kept = restored?.screenshots === null ? null : (restored?.resumed.def.state ?? null);
+  if (kept !== null && isKept<CaptureKept>(kept, mode.kind)) {
+    const setup = restoreSetup(kept.state);
+    // A reference's draft changes the reference as it is saved now.
+    return mode.kind === 'reference' && setup.editing !== null
+      ? { ...setup, editing: { ...setup.editing, existing: mode.existing } }
+      : setup;
+  }
+  const editing: Editing | null =
+    mode.kind === 'reference'
+      ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
+      : null;
+  return {
+    valueName: '',
+    step: 'where',
+    pinned: null,
+    editing,
+    draft:
+      mode.kind === 'fix'
+        ? fixDraft(mode.value.screen.check)
+        : editing === null
+          ? EMPTY_DRAFT
+          : toReference(EMPTY_DRAFT, editing.existing),
+  };
+}
+
+export function Capture({ choice, mode, restored, onCancel, onChangeWindow, onSaved, onHeld, onDraft }: Props) {
   // What the capture shows before the user does anything, which leaving it loses nothing of.
-  const [start] = useState(() => {
-    const editing: Editing | null =
-      mode.kind === 'reference'
-        ? { existing: mode.existing, name: mode.existing?.name ?? '', valueRegion: { region: null, drawnOn: null } }
-        : null;
-    return {
-      screenshots: 0,
-      recording: false,
-      valueName: '',
-      editing,
-      draft:
-        mode.kind === 'fix'
-          ? fixDraft(mode.value.screen.check)
-          : editing === null
-            ? EMPTY_DRAFT
-            : toReference(EMPTY_DRAFT, editing.existing),
-    };
-  });
+  const [start] = useState(() => ({
+    ...startSetup(mode, restored),
+    screenshots: restored?.screenshots ?? 0,
+    recording: false,
+  }));
   const [draft, setDraft] = useState<Draft>(start.draft);
   // The saved application the value or reference belongs to.
   const appId = choice.app;
   const appFile = useAppFile(appId);
   const { file } = appFile;
-  const [step, setStep] = useState<Step>('where');
+  const [step, setStep] = useState<Step>(start.step);
   const [editing, setEditing] = useState<Editing | null>(start.editing);
   const [picking, setPicking] = useState<ColorTarget | null>(null);
   const [tool, setTool] = useState<SelectTool>('box');
   const [valueName, setValueName] = useState(start.valueName);
   // The side the value stays at as the user picked it, or null to follow the guess from where its region is.
-  const [pinned, setPinned] = useState<PinDef | null>(null);
+  const [pinned, setPinned] = useState<PinDef | null>(start.pinned);
   const fixing = mode.kind === 'fix' ? mode.value : null;
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const screenshots = useScreenshots();
+  const screenshots = useScreenshots(start.screenshots);
   const { shots, full, selected, setSelected, position } = screenshots;
   const shortcut = useScreenshotShortcut(screenshots.take);
   const recorder = useRecording();
   const recording = recorder.view;
 
-  const holds = held(saving, start, {
-    screenshots: shots.length,
-    recording: recording !== null,
-    valueName,
-    editing,
-    draft,
-  });
-  useReportHeld(onHeld, holds);
+  const setup: CaptureSetup = { valueName, step, pinned, editing, draft };
   const [leavingWindow, setLeavingWindow] = useState(false);
   const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
 
@@ -182,6 +214,55 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
     [isEditing, draft, editingRef, appId],
   );
   const check = useLiveCheck(built);
+  const missing = captureMissing(setup, built, fixing !== null);
+  const drafting = useDraft(
+    restored?.resumed ?? null,
+    () => ({
+      kind: mode.kind,
+      app: appId,
+      changes: mode.kind === 'fix' ? mode.value.id : mode.kind === 'reference' ? (mode.existing?.id ?? null) : null,
+      name: draftName(mode, setup),
+      missing,
+      pictures: [],
+      state: keep(mode.kind, storeSetup(setup)),
+    }),
+    true,
+    onDraft,
+    onSaved,
+  );
+  const holds = held(saving || drafting.saving, start, {
+    ...setup,
+    screenshots: shots.length,
+    recording: recording !== null,
+  });
+  useReportHeld(onHeld, holds);
+  // Readings live with the recording, which a draft cannot keep.
+  const losesRecording = recording !== null || draft.recorded.size > 0;
+  const draftButton = (
+    <span className="with-hint">
+      <button
+        type="button"
+        className="btn"
+        disabled={holds !== 'unsaved'}
+        aria-describedby="hint-draft"
+        onClick={() => {
+          background(drafting.saveAndClose());
+        }}
+      >
+        Save as draft
+      </button>
+      <Hint topic="Save as draft" id="hint-draft">
+        {DRAFT_HINT}
+        {losesRecording ? ' A draft keeps the screenshots, but not the recording or the readings kept from it.' : ''}
+      </Hint>
+    </span>
+  );
+  const draftError =
+    drafting.error === null ? null : (
+      <p className="warn" role="alert">
+        {drafting.error}
+      </p>
+    );
   const selection = useStateSelections(draft, setDraft, selected);
   const selecting = draft.kind === 'state' ? tool : 'box';
   const review = useReview(recording, draft, setDraft, editingRef);
@@ -199,7 +280,8 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   }, []);
 
   // A fix opens on a screenshot of the window as it is now, with the region where the value would be read there.
-  const fixShot = useRef<'none' | 'taken' | 'placed'>('none');
+  // A draft's fix already has its screenshots and region.
+  const fixShot = useRef<'none' | 'taken' | 'placed'>(start.screenshots > 0 ? 'placed' : 'none');
   const take = screenshots.take;
   useEffect(() => {
     if (fixing === null || liveSize === null || fixShot.current !== 'none') {
@@ -274,6 +356,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       } else {
         await saveFix({ app: choice.app, value: fixing.id, check: built.spec, screenshot: draft.drawnOn });
       }
+      await drafting.finished();
       onSaved();
     } catch (error: unknown) {
       setSaveError(errorText(error));
@@ -375,6 +458,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
       });
       setSaveError(null);
       if (mode.kind === 'reference') {
+        await drafting.finished();
         onSaved();
         return;
       }
@@ -389,9 +473,10 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   };
 
   const named = fixing !== null || valueName.trim().length > 0;
-  const canSave = named && built.ok && draft.drawnOn !== null && check.state.kind === 'set' && !saving;
+  const busy = saving || drafting.saving;
+  const canSave = named && built.ok && draft.drawnOn !== null && check.state.kind === 'set' && !busy;
   const canSaveRef =
-    editing !== null && editing.name.trim().length > 0 && built.ok && check.state.kind === 'set' && !saving;
+    editing !== null && editing.name.trim().length > 0 && built.ok && check.state.kind === 'set' && !busy;
   const whereDone = named && draft.region !== null;
   const fixName = fixing === null ? null : `Fix ${fixing.name}`;
   // The saved reference a fix of a number shares with its first drawing.
@@ -683,10 +768,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
               />
               <div className="sep" />
               {saveError === null ? null : <p className="warn">{saveError}</p>}
+              {draftError}
               <div className="actions">
-                <button type="button" className="btn" disabled={saving} onClick={onCancel}>
+                <button type="button" className="btn" disabled={busy} onClick={onCancel}>
                   Discard
                 </button>
+                {draftButton}
                 <button
                   type="button"
                   className="btn primary"
@@ -767,10 +854,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 here; how to read it comes next.
               </p>
               <div className="sep" />
+              {draftError}
               <div className="actions">
-                <button type="button" className="btn" disabled={saving} onClick={onCancel}>
+                <button type="button" className="btn" disabled={busy} onClick={onCancel}>
                   Discard
                 </button>
+                {draftButton}
                 <button
                   type="button"
                   className="btn primary"
@@ -887,6 +976,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   ? `Saved values show on the Values page, under ${choice.name}.`
                   : `The fix shows on the Values page, beside ${fixing.name}.`}
               </p>
+              {draftError}
               <div className="actions">
                 <button
                   type="button"
@@ -897,6 +987,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                 >
                   Back
                 </button>
+                {draftButton}
                 <button
                   type="button"
                   className="btn primary"
@@ -973,11 +1064,12 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
           <ReadingBox built={built.ok ? null : built.next} state={check.state} reading={check.reading} />
           <div className="sep" />
           {saveError === null ? null : <p className="warn">{saveError}</p>}
+          {draftError}
           <div className="actions">
             <button
               type="button"
               className="btn"
-              disabled={saving}
+              disabled={busy}
               onClick={() => {
                 if (mode.kind === 'reference') {
                   onCancel();
@@ -988,6 +1080,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
             >
               Discard
             </button>
+            {draftButton}
             <button
               type="button"
               className="btn primary"

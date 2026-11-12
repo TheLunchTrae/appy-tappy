@@ -19,20 +19,34 @@ import {
   liveAnnouncement,
   liveText,
   newAction,
+  draftPictures,
   readsState,
   readsText,
   toDraft,
   undoText,
+  unfinished,
   valueChoices,
   withSource,
 } from '../lib/automation.ts';
 import { clickApps, targetSummary } from '../lib/click.ts';
-import { ACTIONS_HINT, COOLDOWN_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
+import { ACTIONS_HINT, COOLDOWN_HINT, DRAFT_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ClickPictureThumb, ClickTarget } from '../components/ClickTarget.tsx';
 import { Hint } from '../components/Hint.tsx';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
+import { type Kept, type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
 import { actionKeys } from '../lib/shortcut.ts';
+
+/** What a draft of an automation keeps: the editor's state. */
+type AutomationKept = Kept<'automation', Draft>;
+
+/** The editor's state as `resumed` keeps it, or else as `existing` is saved, or a new automation's. */
+function startDraft(existing: AutomationDef | null, resumed: Resumed | null): Draft {
+  if (resumed !== null && isKept<AutomationKept>(resumed.def.state, 'automation')) {
+    return resumed.def.state.state;
+  }
+  return existing === null ? EMPTY_DRAFT : toDraft(existing);
+}
 
 /** The action menu's choices: each media command, then setting a volume, pressing keys, opening, and playing a sound. */
 type ActionChoice = MediaCommandDef | Exclude<ActionDraft['kind'], 'media'>;
@@ -464,20 +478,25 @@ interface Props {
   readonly apps: readonly AppSummary[];
   /** The saved automation to change, or null for a new one. */
   readonly existing: AutomationDef | null;
+  /** The draft the editor finishes, or null. */
+  readonly draft: Resumed | null;
   readonly onCancel: () => void;
+  /** Closes the editor once the automation or its draft is saved. */
   readonly onSaved: () => void;
   /** Hears what leaving the editor would lose. */
   readonly onHeld: (held: Held) => void;
+  /** Hears how to save the editor's draft. */
+  readonly onDraft: ReportDraft;
 }
 
 /** Making or changing an automation: the value it watches, the actions it runs, and whether it undoes them. */
-export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: Props) {
-  const [start] = useState<Draft>(() => (existing === null ? EMPTY_DRAFT : toDraft(existing)));
+export function AutomationEditor({ apps, existing, draft: resumed, onCancel, onSaved, onHeld, onDraft }: Props) {
+  const [start] = useState<Draft>(() => startDraft(existing, resumed));
   const [draft, setDraft] = useState<Draft>(start);
-  const [nextKey, setNextKey] = useState(() => draft.actions.length);
+  // Each action's key is new to the editor, so the next one goes past the highest a draft kept.
+  const [nextKey, setNextKey] = useState(() => Math.max(-1, ...draft.actions.map((action) => action.key)) + 1);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  useReportHeld(onHeld, held(saving, start, draft));
   const [executables, setExecutables] = useState<readonly string[]>([]);
   // The click action whose target is being set up, by its key, or null while the editor shows.
   const [targeting, setTargeting] = useState<number | null>(null);
@@ -504,6 +523,24 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
   const choices = useMemo(() => valueChoices(apps), [apps]);
   const choice = draft.source === null ? null : findValue(choices, draft.source);
   const built = buildAutomation(draft, choices, existing?.id ?? '', apps);
+  const missing = unfinished(draft, choices, apps);
+  const drafting = useDraft(
+    resumed,
+    () => ({
+      kind: 'automation',
+      app: null,
+      changes: existing?.id ?? null,
+      name: draft.name.trim() === '' ? (existing?.name ?? 'New automation') : draft.name.trim(),
+      missing,
+      pictures: draftPictures(draft),
+      state: keep('automation', draft),
+    }),
+    false,
+    onDraft,
+    onSaved,
+  );
+  const holds = held(saving || drafting.saving, start, draft);
+  useReportHeld(onHeld, holds);
   const typedWhen = choice === null ? null : buildWhen(draft, choice);
   const liveWhen = typeof typedWhen === 'string' ? null : typedWhen;
   const undoWords = built.ok ? undoText(built.automation.actions) : null;
@@ -533,6 +570,7 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
     setSaving(true);
     try {
       await saveAutomation(existing?.id ?? null, built.automation);
+      await drafting.finished();
       onSaved();
     } catch (error: unknown) {
       setSaveError(errorText(error));
@@ -831,20 +869,49 @@ export function AutomationEditor({ apps, existing, onCancel, onSaved, onHeld }: 
         </section>
 
         <div className="editor-foot">
-          {/* Both regions stay mounted, so a screen reader announces each change of their text. */}
-          <span className="note" role="status">
-            {saveError === null ? (built.ok ? 'Ready to save.' : built.next) : ''}
-          </span>
+          {/* The regions stay mounted, so a screen reader announces each change of their text. */}
+          <div className="missing-list" role="status">
+            {saveError !== null ? null : built.ok ? (
+              <span className="note">Ready to save.</span>
+            ) : (
+              <>
+                <span className="note">Save it as a draft to finish later. Before it can run:</span>
+                <ul>
+                  {missing.map((part) => (
+                    <li key={part} className="warn">
+                      {part}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
           <span className="warn" role="alert">
-            {saveError ?? ''}
+            {saveError ?? drafting.error ?? ''}
           </span>
-          <button type="button" className="btn" disabled={saving} onClick={onCancel}>
+          <button type="button" className="btn" disabled={saving || drafting.saving} onClick={onCancel}>
             Cancel
           </button>
+          <span className="with-hint">
+            <button
+              type="button"
+              className="btn"
+              disabled={holds !== 'unsaved'}
+              aria-describedby="hint-draft"
+              onClick={() => {
+                background(drafting.saveAndClose());
+              }}
+            >
+              Save as draft
+            </button>
+            <Hint topic="Save as draft" id="hint-draft">
+              {DRAFT_HINT}
+            </Hint>
+          </span>
           <button
             type="button"
             className="btn primary"
-            disabled={!built.ok || saving}
+            disabled={!built.ok || saving || drafting.saving}
             onClick={() => {
               background(save());
             }}

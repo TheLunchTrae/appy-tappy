@@ -1999,3 +1999,53 @@ select {
   align-items: center;
   color: var(--text);
 }
+
+/* A draft's mark: dashed, since it doesn't run until it is finished. Changes to a saved item take the capture color. */
+.pill.draft {
+  background: transparent;
+  border: 1px dashed var(--muted);
+  color: var(--muted);
+}
+
+.pill.changes {
+  background: transparent;
+  border: 1px dashed var(--capture);
+  color: var(--capture);
+}
+
+tr.draft-row > td:not(.end):not(.row-actions) {
+  opacity: 0.85;
+}
+
+.draft-missing {
+  display: block;
+  margin-top: 2px;
+}
+
+/* What an unfinished item still needs, beside its save buttons. */
+.missing-list {
+  margin: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.missing-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Drafts that cannot be read, listed under the automations. */
+.draft-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-list > li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}

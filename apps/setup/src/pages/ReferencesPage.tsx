@@ -1,11 +1,14 @@
 import { useState } from 'react';
 
-import type { AppSummary } from '../lib/bindings.ts';
+import type { AppSummary, DraftSummary } from '../lib/bindings.ts';
 import { deleteReference, errorText } from '../lib/api.ts';
 import { andList, readers, referenceCharacters } from '../lib/reference.ts';
 import { background } from '../lib/repeat.ts';
 import { CharacterChips } from '../components/CharacterChips.tsx';
 import type { SavedRef } from './ReferenceFlow.tsx';
+import { type Resumed, draftOfSaved, draftProblem, draftsOf } from '../lib/drafts.ts';
+import { labeledCharacters } from '../lib/captureDraft.ts';
+import { CaptureDraftRow, DraftPill } from '../components/Drafts.tsx';
 
 interface Props {
   readonly apps: readonly AppSummary[] | null;
@@ -13,10 +16,15 @@ interface Props {
   readonly onChanged: () => Promise<void>;
   readonly onNew: () => void;
   readonly onEdit: (reference: SavedRef) => void;
+  /** Every saved draft, or null before they are read. */
+  readonly drafts: readonly DraftSummary[] | null;
+  readonly onFinish: (resumed: Resumed) => void;
+  /** Deletes a draft; the page shows why when it fails. */
+  readonly onDeleteDraft: (id: string) => Promise<void>;
 }
 
-/** Each application's references: the characters its number values read with. */
-export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Props) {
+/** Each application's references: the characters its number values read with. Drafts follow each application's. */
+export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit, drafts, onFinish, onDeleteDraft }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -31,7 +39,49 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
     }
   };
 
-  const withReferences = (apps ?? []).filter((app) => app.file !== null && app.file.references.length > 0);
+  const removeDraft = async (id: string): Promise<void> => {
+    try {
+      await onDeleteDraft(id);
+      setDeleteError(null);
+    } catch (error: unknown) {
+      setDeleteError(errorText(error));
+    }
+  };
+  // Drafts of new references, and of changes to ones no longer saved, which then make a new reference.
+  const fresh = draftsOf(drafts, 'reference').filter((resumed) => {
+    const file = (apps ?? []).find((app) => app.id === resumed.def.app)?.file ?? null;
+    return resumed.def.changes === null || file?.references.every((each) => each.id !== resumed.def.changes) !== false;
+  });
+  const savedApp = (id: string | null): boolean => (apps ?? []).some((app) => app.id === id && app.file !== null);
+  const draftsOfApp = (id: string | null): readonly Resumed[] =>
+    fresh.filter((resumed) => (id === null ? !savedApp(resumed.def.app) : resumed.def.app === id));
+  const draftRows = (list: readonly Resumed[]) =>
+    list.map((resumed) => (
+      <CaptureDraftRow
+        key={resumed.id}
+        resumed={resumed}
+        problem={draftProblem(resumed.def, apps ?? [])}
+        cells={(setup) => {
+          const characters = setup === null ? '' : labeledCharacters(setup);
+          return (
+            <>
+              <td className="note">{characters === '' ? 'No characters yet' : characters}</td>
+              <td className="note">Can&apos;t be used until finished</td>
+            </>
+          );
+        }}
+        onFinish={() => {
+          onFinish(resumed);
+        }}
+        onDelete={async () => {
+          await removeDraft(resumed.id);
+        }}
+      />
+    ));
+  const orphans = draftsOfApp(null);
+  const withReferences = (apps ?? []).filter(
+    (app) => app.file !== null && (app.file.references.length > 0 || draftsOfApp(app.id).length > 0),
+  );
 
   return (
     <main className="page">
@@ -56,7 +106,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
           {deleteError}
         </p>
       )}
-      {apps !== null && withReferences.length === 0 ? (
+      {apps !== null && withReferences.length === 0 && orphans.length === 0 ? (
         <div className="empty">
           <h2>No references yet</h2>
           <p>
@@ -68,7 +118,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
           </button>
         </div>
       ) : null}
-      {withReferences.length === 0 ? null : (
+      {withReferences.length === 0 && orphans.length === 0 ? null : (
         <table className="table">
           <thead>
             <tr>
@@ -93,9 +143,18 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
                 ...file.references.map((reference) => {
                   const key = `${app.id}/${reference.id}`;
                   const used = readers(file, reference.id);
+                  const changes = draftOfSaved(drafts, 'reference', reference.id, app.id);
                   return (
                     <tr key={key}>
-                      <td>{reference.name}</td>
+                      <td>
+                        {reference.name}
+                        {changes === null ? null : (
+                          <>
+                            {' '}
+                            <DraftPill changes />
+                          </>
+                        )}
+                      </td>
                       <td>
                         <CharacterChips characters={referenceCharacters(reference)} ink={reference.ink} />
                       </td>
@@ -124,6 +183,17 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
                           </span>
                         ) : (
                           <span className="confirm">
+                            {changes === null ? null : (
+                              <button
+                                type="button"
+                                className="btn small"
+                                onClick={() => {
+                                  onFinish(changes);
+                                }}
+                              >
+                                Finish draft<span className="visually-hidden"> of {reference.name}</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="btn small"
@@ -131,7 +201,7 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
                                 onEdit({ app: app.id, reference });
                               }}
                             >
-                              Edit
+                              Edit<span className="visually-hidden"> {reference.name}</span>
                             </button>
                             <button
                               type="button"
@@ -149,8 +219,20 @@ export function ReferencesPage({ apps, loadError, onChanged, onNew, onEdit }: Pr
                     </tr>
                   );
                 }),
+                ...draftRows(draftsOfApp(app.id)),
               ];
             })}
+            {orphans.length === 0 ? null : (
+              <>
+                <tr className="group">
+                  <td colSpan={4}>
+                    Drafts
+                    <small className="warn">Their application is no longer saved.</small>
+                  </td>
+                </tr>
+                {draftRows(orphans)}
+              </>
+            )}
           </tbody>
         </table>
       )}

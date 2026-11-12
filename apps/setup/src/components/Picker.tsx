@@ -23,7 +23,8 @@ interface Props {
   readonly lockedApp: string | null;
   readonly initial: Choice | null;
   readonly onCancel: () => void;
-  readonly onPick: (choice: Choice) => void;
+  /** Takes the picked window; the Picker shows why when it fails. */
+  readonly onPick: (choice: Choice) => Promise<void>;
   /** Leaves to add an application, for when the one wanted is not saved yet. */
   readonly onAddApplication: () => void;
 }
@@ -79,7 +80,7 @@ export function Picker({ apps, heading, lockedApp, initial, onCancel, onPick, on
     setBusy(true);
     try {
       await pickWindow(selected.handle);
-      onPick({ window: selected, app: target, name: app.name });
+      await onPick({ window: selected, app: target, name: app.name });
     } catch (error: unknown) {
       setPickError(errorText(error));
     } finally {

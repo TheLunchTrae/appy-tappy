@@ -111,6 +111,16 @@ macro_rules! with_commands {
             /// Records the build of `application` that runs now as the one its values were checked against.
             commands::mark_checked(application: String) -> ();
             commands::list_automations() -> Vec<AutomationSummary>;
+            /// Every saved draft, oldest first, including those whose file cannot be read.
+            commands::list_drafts() -> Vec<DraftSummary>;
+            /// Saves `draft` over the draft `id`, or as a new one, and returns its ID. With `screenshots`, it keeps the
+            /// capture's screenshots with it. Another draft of the same saved item goes, so each has one at most.
+            commands::save_draft(id: Option<String>, draft: DraftDef, screenshots: bool) -> String;
+            /// Makes the screenshots of the draft `id` the capture's, in place of any it took, so each has the index it
+            /// had when the draft was saved; returns how many there are.
+            commands::restore_draft_screenshots(id: String) -> usize;
+            /// Deletes the draft `id` with its screenshots. One already gone is fine.
+            commands::delete_draft(id: String) -> ();
             /// Saves `automation` over the automation `existing`, or as a new one; returns its ID.
             commands::save_automation(existing: Option<String>, automation: AutomationDef) -> String;
             commands::set_automation_enabled(id: String, enabled: bool) -> ();

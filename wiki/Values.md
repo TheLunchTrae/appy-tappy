@@ -38,7 +38,9 @@ On the Values page, select **New value**.
    box under it then shows what AppyTappy reads on the live window, a few
    times a second. If the check cannot work, such as a bar whose filled and
    empty colors are the same, it says why there.
-5. **Save.** Select **Save value**. **Back** returns to the first step.
+5. **Save.** Select **Save value**. **Back** returns to the first step. To
+   finish it later, select **Save as draft** on either step
+   ([Drafts](Drafts.md)).
 
 AppyTappy keeps the screenshots until you select **Change window** or leave
 the new value. Before either drops work you have not saved, it asks first:

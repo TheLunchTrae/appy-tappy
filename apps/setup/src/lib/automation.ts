@@ -679,3 +679,31 @@ export function buildAutomation(
     },
   };
 }
+
+/**
+ * What `draft` still needs before it can be saved, a sentence each: a name, a value and an action, or else the
+ * first thing {@link buildAutomation} asks for. Empty once it can be saved.
+ */
+export function unfinished(
+  draft: Draft,
+  choices: readonly ValueChoice[],
+  apps: readonly AppSummary[],
+): readonly string[] {
+  const missing = [
+    draft.name.trim() === '' ? 'Name the automation.' : null,
+    draft.source === null || findValue(choices, draft.source) === null ? 'Pick the value to watch.' : null,
+    draft.actions.length === 0 ? 'Add an action.' : null,
+  ].filter((part) => part !== null);
+  if (missing.length > 0) {
+    return missing;
+  }
+  const built = buildAutomation(draft, choices, '', apps);
+  return built.ok ? [] : [built.next];
+}
+
+/** The click pictures `draft`'s actions click on, which a draft of it keeps. */
+export function draftPictures(draft: Draft): readonly string[] {
+  return draft.actions.flatMap((action) =>
+    action.kind === 'click' && action.at?.kind === 'picture' ? [action.at.image] : [],
+  );
+}

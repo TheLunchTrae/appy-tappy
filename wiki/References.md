@@ -27,7 +27,8 @@ window, or select **New reference from this region** while you
    character from what you type. Label screenshots until
    **Characters it knows** shows every digit the numbers need, or
    [record the region](#record-readings) to collect them as they show.
-4. **Save.** Select **Save reference**.
+4. **Save.** Select **Save reference**, or **Save as draft** to finish it later
+   ([Drafts](Drafts.md)). A draft doesn't keep a recording.
 
 To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;

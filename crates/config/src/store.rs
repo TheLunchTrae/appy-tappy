@@ -282,15 +282,17 @@ impl AutomationStore {
         Ok(name)
     }
 
-    /// Removes the click pictures that no automation in `file` names, such
-    /// as one taken for a target the user did not keep. A folder that does
-    /// not exist yet holds none.
+    /// Removes the click pictures that no automation in `file` names and
+    /// `keep` does not hold, such as one taken for a target the user did not
+    /// keep. `keep` holds those that something other than the file still
+    /// needs. A folder that does not exist yet holds none.
     ///
     /// # Errors
     ///
     /// Returns the error from listing the folder or removing a picture.
-    pub fn prune_pictures(&self, file: &AutomationsFile) -> io::Result<()> {
-        let named = file.images();
+    pub fn prune_pictures(&self, file: &AutomationsFile, keep: &[String]) -> io::Result<()> {
+        let mut named = file.images();
+        named.extend(keep.iter().map(String::as_str));
         let entries = match fs::read_dir(self.pictures()) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             entries => entries?,
@@ -484,7 +486,7 @@ pub fn new_app_id(executable: &str, taken: &[&str]) -> String {
 ///
 /// Returns the error from writing the temporary file, or from the last
 /// rename, after removing the temporary file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
@@ -928,7 +930,7 @@ mod tests {
         let store = AutomationStore::new(root.join("automations.json"));
         let empty = AutomationsFile::default();
         store
-            .prune_pictures(&empty)
+            .prune_pictures(&empty, &[])
             .expect("no folder holds no pictures");
         assert_eq!(store.add_picture(b"one").expect("adds"), "click-1.png");
         assert_eq!(store.add_picture(b"two").expect("adds"), "click-2.png");
@@ -937,7 +939,14 @@ mod tests {
         let json = r#"{"format":1,"automations":[{"id":"a","name":"A","enabled":true,"when":{"app":"app","value":"v","is":"atLeast","target":1},"actions":[{"kind":"click","app":"other","button":"left","at":{"kind":"picture","image":"click-2.png","windowSize":{"width":100,"height":100},"search":{"x":0,"y":0,"width":10,"height":10},"press":{"x":1,"y":1},"tolerance":20}}],"undo":false,"cooldownMs":0}]}"#;
         let file = AutomationsFile::parse(json).expect("valid");
         assert_eq!(file.images(), ["click-2.png"]);
-        store.prune_pictures(&file).expect("prunes");
+        store
+            .prune_pictures(&file, &["click-1.png".to_owned()])
+            .expect("prunes");
+        assert!(
+            store.pictures().join("click-1.png").exists(),
+            "one that is kept stays"
+        );
+        store.prune_pictures(&file, &[]).expect("prunes");
         assert!(!store.pictures().join("click-1.png").exists());
         assert!(store.pictures().join("click-2.png").exists());
         assert!(store.pictures().join("notes.txt").exists());
@@ -974,7 +983,11 @@ mod tests {
         fs::create_dir_all(&root).expect("folder");
         // A file where the folder should be cannot be listed.
         fs::write(store.pictures(), b"not a folder").expect("write");
-        assert!(store.prune_pictures(&AutomationsFile::default()).is_err());
+        assert!(
+            store
+                .prune_pictures(&AutomationsFile::default(), &[])
+                .is_err()
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 

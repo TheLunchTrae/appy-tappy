@@ -23,6 +23,7 @@ use tokio::sync::oneshot;
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::{CheckSpec, ColorSpec, RegionSpec};
+use crate::drafts::{DraftDef, DraftSummary};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, ClickPictureView, Desktop, FixSpec, FoundClick, Live, Message, Owner, Reading,
@@ -530,4 +531,38 @@ pub(crate) async fn starts_with_windows(app: AppHandle) -> Result<bool, String> 
 #[tauri::command]
 pub(crate) async fn set_starts_with_windows(app: AppHandle, on: bool) -> Result<(), String> {
     ask(&app, move |owner| owner.set_starts_with_windows(on)).await?
+}
+
+/// Every saved draft.
+#[tauri::command]
+pub(crate) async fn list_drafts(app: AppHandle) -> Result<Vec<DraftSummary>, String> {
+    ask(&app, |owner| owner.list_drafts()).await?
+}
+
+/// Saves `draft` over the draft `id`, or as a new one, with this session's
+/// screenshots when `screenshots` is set, and answers its ID.
+#[tauri::command]
+pub(crate) async fn save_draft(
+    app: AppHandle,
+    id: Option<String>,
+    draft: DraftDef,
+    screenshots: bool,
+) -> Result<String, String> {
+    ask(&app, move |owner| {
+        owner.save_draft(id.as_deref(), &draft, screenshots)
+    })
+    .await?
+}
+
+/// Makes the screenshots of the draft `id` this session's, and answers how
+/// many there are.
+#[tauri::command]
+pub(crate) async fn restore_draft_screenshots(app: AppHandle, id: String) -> Result<usize, String> {
+    ask(&app, move |owner| owner.restore_draft_screenshots(&id)).await?
+}
+
+/// Deletes the draft `id` with its screenshots.
+#[tauri::command]
+pub(crate) async fn delete_draft(app: AppHandle, id: String) -> Result<(), String> {
+    ask(&app, move |owner| owner.delete_draft(&id)).await?
 }

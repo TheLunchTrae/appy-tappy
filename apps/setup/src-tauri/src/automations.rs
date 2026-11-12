@@ -234,15 +234,19 @@ pub(crate) fn save(
     Ok(id)
 }
 
-/// Removes the click pictures no automation in `file` names, such as those
-/// taken for a target the user did not keep.
+/// Removes the click pictures that no automation in `file` and no draft
+/// names, such as those taken for a target the user did not keep. When the
+/// drafts cannot be listed, it removes none, since a draft may name any.
 fn prune_pictures(stores: &Stores, file: &AutomationsFile) {
+    let Ok(drafted) = stores.drafts.pictures() else {
+        return;
+    };
     // A picture left behind costs a little disk until the next save.
     #[expect(
         clippy::let_underscore_must_use,
         reason = "the save worked; an unused picture that stays is harmless"
     )]
-    let _ = stores.automations.prune_pictures(file);
+    let _ = stores.automations.prune_pictures(file, &drafted);
 }
 
 /// Turns the automation `id` on or off. One that cannot run as saved stays
@@ -353,6 +357,7 @@ mod tests {
     use appytappy_sources::screen::{Image, Size};
 
     use super::*;
+    use crate::drafts::{DraftDef, DraftKind};
     use crate::stores;
 
     /// Fresh stores for one test, holding the application `example` with a
@@ -828,6 +833,35 @@ mod tests {
         delete(&stores, &id).expect("deletes");
         assert!(stores.automations.picture(&kept).is_err(), "pruned");
         assert!(stores.automations.picture(&another).is_err(), "pruned");
+        fs::remove_dir_all(folder).expect("clean up");
+    }
+
+    #[test]
+    fn a_picture_a_draft_names_stays() {
+        let (stores, folder) = stores("click-drafted");
+        let drafted = stores.automations.add_picture(&png(1)).expect("adds");
+        let draft = DraftDef {
+            kind: DraftKind::Automation,
+            app: None,
+            changes: None,
+            name: "Click".to_owned(),
+            missing: vec!["Pick a value to watch".to_owned()],
+            pictures: vec![drafted.clone()],
+            state: serde_json::Value::Null,
+        };
+        let id = stores
+            .drafts
+            .save(None, &draft, &[])
+            .expect("saves the draft");
+        let kept = stores.automations.add_picture(&png(2)).expect("adds");
+        save(&stores, None, clicking(&stores, "Click", &kept)).expect("saves");
+        assert!(
+            stores.automations.picture(&drafted).is_ok(),
+            "the draft keeps it"
+        );
+        stores.drafts.delete(&id).expect("deletes the draft");
+        save(&stores, None, clicking(&stores, "Another", &kept)).expect("saves");
+        assert!(stores.automations.picture(&drafted).is_err(), "pruned");
         fs::remove_dir_all(folder).expect("clean up");
     }
 

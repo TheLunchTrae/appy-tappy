@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   type AppSummary,
   type AutomationSummary,
+  type DraftSummary,
   NO_STATE,
   type SizeDef,
   type ValueDef,
@@ -29,6 +30,57 @@ import {
 } from '../lib/sizes.ts';
 import { type LiveApp, useLiveValues } from '../lib/useLiveValues.ts';
 import type { Fixing } from './NewValue.tsx';
+import { type Resumed, draftProblem, draftsOf } from '../lib/drafts.ts';
+import { KIND_NAMES } from '../lib/check.ts';
+import { CaptureDraftRow } from '../components/Drafts.tsx';
+
+/** What a page's draft rows need: every draft, the saved applications, and what Finish and Delete do. */
+interface DraftRows {
+  readonly apps: readonly AppSummary[];
+  readonly onFinish: (resumed: Resumed) => void;
+  readonly onDelete: (id: string) => Promise<void>;
+}
+
+/** The value and fix drafts, the first belonging to `app`, or with null to no saved application. */
+function valueDrafts(drafts: readonly DraftSummary[] | null, apps: readonly AppSummary[], app: string | null) {
+  const saved = (id: string | null): boolean => apps.some((each) => each.id === id && each.file !== null);
+  return [...draftsOf(drafts, 'value'), ...draftsOf(drafts, 'fix')].filter((resumed) =>
+    app === null ? !saved(resumed.def.app) : resumed.def.app === app,
+  );
+}
+
+/** A value or fix draft's rows, with as many cells as the table has columns. */
+function ValueDraftRows({
+  list,
+  nowColumn,
+  rows,
+}: {
+  readonly list: readonly Resumed[];
+  readonly nowColumn: boolean;
+  readonly rows: DraftRows;
+}) {
+  return list.map((resumed) => (
+    <CaptureDraftRow
+      key={resumed.id}
+      resumed={resumed}
+      problem={draftProblem(resumed.def, rows.apps)}
+      cells={(setup) => (
+        <>
+          <td className="note">{setup === null ? '' : KIND_NAMES[setup.draft.kind]}</td>
+          <td className="note">{setup?.draft.region === null || setup === null ? 'No region yet' : 'Region drawn'}</td>
+          {nowColumn ? <td className="note">Doesn&apos;t read</td> : null}
+          <td className="note">Can&apos;t be used until finished</td>
+        </>
+      )}
+      onFinish={() => {
+        rows.onFinish(resumed);
+      }}
+      onDelete={async () => {
+        await rows.onDelete(resumed.id);
+      }}
+    />
+  ));
+}
 
 interface AppRowsProps {
   readonly app: AppSummary;
@@ -43,6 +95,9 @@ interface AppRowsProps {
   readonly onMarkChecked: () => void;
   readonly onFix: (value: ValueDef) => void;
   readonly onRemoveFix: (value: string, size: SizeDef) => void;
+  /** Its value and fix drafts. */
+  readonly drafts: readonly Resumed[];
+  readonly rows: DraftRows;
 }
 
 /** What a value's cell for the window's size now says, in a few words. */
@@ -128,6 +183,8 @@ function AppRows({
   onMarkChecked,
   onFix,
   onRemoveFix,
+  drafts,
+  rows,
 }: AppRowsProps) {
   const running = app.windows.length > 0;
   const columns = nowColumn ? 6 : 5;
@@ -142,7 +199,7 @@ function AppRows({
     );
   }
   const { file } = app;
-  if (file.values.length === 0) {
+  if (file.values.length === 0 && drafts.length === 0) {
     return null;
   }
   const build = buildState(file, app.running);
@@ -254,6 +311,7 @@ function AppRows({
           </tr>
         );
       })}
+      <ValueDraftRows list={drafts} nowColumn={nowColumn} rows={rows} />
     </>
   );
 }
@@ -266,6 +324,11 @@ interface Props {
   readonly onNew: () => void;
   /** Opens the flow that draws a saved value again at its window's size now. */
   readonly onFix: (fixing: Fixing) => void;
+  /** Every saved draft, or null before they are read. */
+  readonly drafts: readonly DraftSummary[] | null;
+  readonly onFinish: (resumed: Resumed) => void;
+  /** Deletes a draft; the page shows why when it fails. */
+  readonly onDeleteDraft: (id: string) => Promise<void>;
 }
 
 /** The column's heading for what values read now: the window's size when every running window has the same. */
@@ -279,7 +342,17 @@ function nowHeading(live: ReadonlyMap<string, LiveApp>): string {
     : "At the window's size now";
 }
 
-export function ValuesPage({ apps, automations, loadError, onChanged, onNew, onFix }: Props) {
+export function ValuesPage({
+  apps,
+  automations,
+  loadError,
+  onChanged,
+  onNew,
+  onFix,
+  drafts,
+  onFinish,
+  onDeleteDraft,
+}: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const live = useLiveValues(apps);
@@ -316,7 +389,23 @@ export function ValuesPage({ apps, automations, loadError, onChanged, onNew, onF
     }
   };
 
-  const total = apps?.reduce((sum, app) => sum + (app.file?.values.length ?? 0), 0) ?? 0;
+  const rows: DraftRows = {
+    apps: apps ?? [],
+    onFinish,
+    onDelete: async (id) => {
+      try {
+        await onDeleteDraft(id);
+        setActionError(null);
+      } catch (error: unknown) {
+        setActionError(errorText(error));
+      }
+    },
+  };
+  const orphans = valueDrafts(drafts, apps ?? [], null);
+  const total =
+    (apps?.reduce((sum, app) => sum + (app.file?.values.length ?? 0), 0) ?? 0) +
+    draftsOf(drafts, 'value').length +
+    draftsOf(drafts, 'fix').length;
 
   return (
     <main className="page">
@@ -393,8 +482,21 @@ export function ValuesPage({ apps, automations, loadError, onChanged, onNew, onF
                 onRemoveFix={(value, size) => {
                   background(unfix(app.id, value, size));
                 }}
+                drafts={valueDrafts(drafts, apps, app.id)}
+                rows={rows}
               />
             ))}
+            {orphans.length === 0 ? null : (
+              <>
+                <tr className="group">
+                  <td colSpan={nowColumn ? 6 : 5}>
+                    Drafts
+                    <small className="warn">Their application is no longer saved.</small>
+                  </td>
+                </tr>
+                <ValueDraftRows list={orphans} nowColumn={nowColumn} rows={rows} />
+              </>
+            )}
           </tbody>
         </table>
       ) : null}

@@ -40,7 +40,8 @@ On the Automations page, select **New automation**. To change one, select
    condition stops being true, and how long to wait before the automation can
    run again. See [Undo and running again](#undo-and-running-again).
 5. **Save automation.** Until the automation is complete, the editor says
-   what is still missing.
+   what is still missing. To finish it later, select **Save as draft**
+   ([Drafts](Drafts.md)).
 
 Saving, deleting, or switching an automation takes effect at once, and so
 does any other change that affects an application's automations, such as

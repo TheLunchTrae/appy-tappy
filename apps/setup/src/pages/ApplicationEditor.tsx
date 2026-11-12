@@ -4,6 +4,8 @@ import type { AppSummary, FallbackDef, SizeChangesDef, WindowChoice, WindowDef, 
 import { errorText, listWindows, saveApp } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
 import {
+  type AppKept,
+  type AppSetup,
   EXECUTABLE_NOTE,
   FALLBACK_HINT,
   FALLBACK_NAMES,
@@ -18,20 +20,36 @@ import {
   fitCount,
   requires,
   sentence,
+  unfinishedApp,
   withMustMatch,
 } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
 import { SIZE_CHANGES, SIZE_CHANGES_HINT, SIZE_CHANGE_TEXT } from '../lib/sizes.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
+import { type ReportDraft, type Resumed, isKept, keep, useDraft } from '../lib/drafts.ts';
+import { DRAFT_HINT } from '../lib/hints.ts';
 import { WindowsPanel, useWindowFits } from '../components/WindowsPanel.tsx';
+
+/** The setup as `resumed` keeps it, or else as `saved` has it, or a new application's. */
+function startAppSetup(saved: AppSummary['file'], resumed: Resumed | null): AppSetup {
+  if (resumed !== null && isKept<AppKept>(resumed.def.state, 'application')) {
+    return resumed.def.state.state;
+  }
+  return { name: saved?.name ?? '', window: saved?.window ?? null, sizeChanges: saved?.sizeChanges ?? 'often' };
+}
 
 interface Props {
   /** The application to change, or null to add one. */
   readonly existing: AppSummary | null;
+  /** The draft the editor finishes, or null. */
+  readonly draft: Resumed | null;
   readonly onCancel: () => void;
+  /** Closes the editor once the application or its draft is saved. */
   readonly onSaved: () => void;
   /** Hears what leaving the editor would lose. */
   readonly onHeld: (held: Held) => void;
+  /** Hears how to save the editor's draft. */
+  readonly onDraft: ReportDraft;
 }
 
 /** How a screen reader names the answer `option` to the size-change question, with its note. */
@@ -41,26 +59,38 @@ function choiceLabel(option: SizeChangesDef): string {
 }
 
 /** Adding an application, or changing one's name, how its window is found and how often that window changes size. */
-export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props) {
+export function ApplicationEditor({ existing, draft: resumed, onCancel, onSaved, onHeld, onDraft }: Props) {
   const saved = existing?.file ?? null;
+  const [start] = useState<AppSetup>(() => startAppSetup(saved, resumed));
   const [list, setList] = useState<WindowList | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [listed, setListed] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
-  const [name, setName] = useState(saved?.name ?? '');
-  const [window, setWindow] = useState<WindowDef | null>(saved?.window ?? null);
-  const [sizeChanges, setSizeChanges] = useState<SizeChangesDef>(saved?.sizeChanges ?? 'often');
+  const [name, setName] = useState(start.name);
+  const [window, setWindow] = useState<WindowDef | null>(start.window);
+  const [sizeChanges, setSizeChanges] = useState<SizeChangesDef>(start.sizeChanges);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { fits, error: fitError } = useWindowFits(window, listed);
-  useReportHeld(
-    onHeld,
-    held(
-      busy,
-      { name: saved?.name ?? '', window: saved?.window ?? null, sizeChanges: saved?.sizeChanges ?? 'often' },
-      { name, window, sizeChanges },
-    ),
+  const setup: AppSetup = { name, window, sizeChanges };
+  const missing = unfinishedApp(setup);
+  const drafting = useDraft(
+    resumed,
+    () => ({
+      kind: 'application',
+      app: null,
+      changes: existing?.id ?? null,
+      name: name.trim() === '' ? (saved?.name ?? 'New application') : name.trim(),
+      missing,
+      pictures: [],
+      state: keep('application', setup),
+    }),
+    false,
+    onDraft,
+    onSaved,
   );
+  const holds = held(busy || drafting.saving, start, setup);
+  useReportHeld(onHeld, holds);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -92,7 +122,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
     setWindow((current) => (current === null ? null : { ...current, [field]: text }));
   };
 
-  const ready = window !== null && name.trim().length > 0 && !busy;
+  const ready = window !== null && name.trim().length > 0 && !busy && !drafting.saving;
 
   const save = async (): Promise<void> => {
     if (window === null) {
@@ -101,6 +131,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
     setBusy(true);
     try {
       await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges });
+      await drafting.finished();
       onSaved();
     } catch (error: unknown) {
       setSaveError(errorText(error));
@@ -264,15 +295,43 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
               </p>
             </>
           )}
-          {saveError === null ? null : (
+          {missing.length === 0 ? null : (
+            <div className="missing-list" role="status">
+              <span className="note">Save it as a draft to finish later. Before it can be saved:</span>
+              <ul>
+                {missing.map((part) => (
+                  <li key={part} className="warn">
+                    {part}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {saveError === null && drafting.error === null ? null : (
             <p className="warn" role="alert">
-              {saveError}
+              {saveError ?? drafting.error}
             </p>
           )}
           <div className="actions">
-            <button type="button" className="btn" disabled={busy} onClick={onCancel}>
+            <button type="button" className="btn" disabled={busy || drafting.saving} onClick={onCancel}>
               Cancel
             </button>
+            <span className="with-hint">
+              <button
+                type="button"
+                className="btn"
+                disabled={holds !== 'unsaved'}
+                aria-describedby="hint-draft"
+                onClick={() => {
+                  background(drafting.saveAndClose());
+                }}
+              >
+                Save as draft
+              </button>
+              <Hint topic="Save as draft" id="hint-draft">
+                {DRAFT_HINT}
+              </Hint>
+            </span>
             <button
               type="button"
               className="btn primary"

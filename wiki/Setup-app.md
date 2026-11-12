@@ -194,6 +194,9 @@ changes.
 
 ## Saved files
 
+Drafts are kept apart from these files, in `%LOCALAPPDATA%\AppyTappy\drafts\`,
+so the runtime never reads them ([Drafts](#drafts)).
+
 Each application is a folder in `%APPDATA%\AppyTappy\apps\`, named by an ID
 made from its executable, such as `example`. The folder holds `app.json`
 and the pictures it needs: each reference's labeled screenshots, cropped to
@@ -362,6 +365,34 @@ runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
 actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+
+## Drafts
+
+A draft is an item the user saved before it was finished
+([Drafts](Drafts.md) in the user guide). The setup app keeps each in its own
+folder under `%LOCALAPPDATA%\AppyTappy\drafts\`, named by an ID made from the
+time it was first saved (`apps/setup/src-tauri/src/drafts.rs`). The folder
+holds `draft.json` and, for a value, fix, or reference, the session's
+screenshots as `shot-0.png`, `shot-1.png` and so on, in the order they were
+taken. The runtime never reads this folder, so a draft never runs and the
+authoring files never hold an unfinished item.
+
+`draft.json` names the kind of flow that finishes it, the application it
+belongs to, the saved item it changes (null for a new one), the name and the
+sentences the lists show, the click pictures it names, and `state`: what the
+flow had set up. Only the page reads `state`, marked with its own format and
+kind (`apps/setup/src/lib/drafts.ts`). A draft whose `state` has another
+format was saved by another version and can only be deleted. A value,
+reference, or fix keeps its labels, but not a recording or the readings kept
+from one, which live with the recording.
+
+A save writes the screenshots first and `draft.json` last, so a save that stops
+halfway leaves a folder the list skips. A draft of changes replaces any other
+draft of the same saved item. Finishing a draft opens its flow; a value, fix,
+or reference asks for the window again, and once it is picked, the draft's
+screenshots replace the session's, so each keeps the index the draft's state
+refers to. Saving the item deletes the draft. Saving the automations keeps the
+click pictures a draft names, so finishing it later still finds them.
 
 ## Page types
 

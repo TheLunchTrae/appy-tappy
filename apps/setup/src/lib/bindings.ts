@@ -408,6 +408,60 @@ export type ComparisonDef = DeepReadonly<"below" | "atMost" | "equals" | "notEqu
 export type CornerDef = DeepReadonly<"topLeft" | "topRight" | "bottomLeft" | "bottomRight">;
 
 /**
+ * A draft as the page saves it.
+ */
+export type DraftDef = DeepReadonly<{ kind: DraftKind,
+/**
+ * The ID of the saved application a value, fix, or reference belongs
+ * to, or null.
+ */
+app: string | null,
+/**
+ * The ID of the saved item it changes: an automation, an application, a
+ * value a fix is of, or a reference. Null for a new one. A saved item
+ * has one draft at most.
+ */
+changes: string | null,
+/**
+ * What the lists call it.
+ */
+name: string,
+/**
+ * What is still to do before it can be saved, a sentence each.
+ */
+missing: Array<string>,
+/**
+ * The click pictures it names, which saving the automations keeps.
+ */
+pictures: Array<string>,
+/**
+ * What the flow had set up, which only the page reads.
+ */
+state: unknown, }>;
+
+/**
+ * What a draft is of, which says which flow finishes it.
+ */
+export type DraftKind = DeepReadonly<"automation" | "application" | "value" | "fix" | "reference">;
+
+/**
+ * A saved draft, as the lists show it.
+ */
+export type DraftSummary = DeepReadonly<{ id: string,
+/**
+ * The draft, or null when its file cannot be read.
+ */
+draft: DraftDef | null,
+/**
+ * Why its file cannot be read, or null.
+ */
+problem: string | null,
+/**
+ * How many screenshots it keeps.
+ */
+screenshots: number, }>;
+
+/**
  * [`WindowMatch::fallback`] as the file spells it.
  */
 export type FallbackDef = DeepReadonly<"none" | "executable">;

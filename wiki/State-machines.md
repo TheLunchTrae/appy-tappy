@@ -654,8 +654,13 @@ stateDiagram-v2
     Flow --> Asking: a tab is clicked with unsaved work
     Asking --> Page: the user agrees to lose the work
     Asking --> Flow: the user stays
+    Flow --> SavingDraft: Save as draft
+    Asking --> SavingDraft: Save as draft
+    SavingDraft --> Page: the draft is saved, the asked page or the page that lists it opens
+    SavingDraft --> Flow: the draft save fails, the flow or the question shows why
     Saving --> Saving: the tabs are disabled until the save ends
     Flow --> Flow: Add application in the value or reference flow opens the application flow
+    Page --> Flow: Finish or Finish draft opens the draft's flow where it left off
 ```
 
 The unsaved work of a flow, such as its screenshots and recording, lives in the
@@ -666,6 +671,17 @@ its flow only while that flow is still open (`saved` in `App.tsx`), so a save
 that finishes after the user moved on leaves the next flow alone. Leaving the
 value or reference flow unmounts it and stops its capture, which clears its screenshots and
 recording.
+
+Each open flow reports how to save its draft to `App.tsx` (`useDraft` in
+`apps/setup/src/lib/drafts.ts`), which the question to leave offers as
+**Save as draft**. Saving a draft counts as a save, so the tabs and the
+question's answers wait for it. A flow that finishes a draft deletes the draft
+once its item is saved; a draft that stays because that delete failed shows on
+its page, where it can be deleted. A value, fix, or reference flow that
+finishes a draft brings the draft's screenshots back only after its window is
+picked, since picking a window clears the session's. **Change window** after
+that starts the capture over without what the draft kept, but a draft saved
+then still replaces the same draft.
 
 ### Update notice
 

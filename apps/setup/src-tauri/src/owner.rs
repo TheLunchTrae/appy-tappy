@@ -16,6 +16,7 @@
 mod automations;
 mod capture;
 mod clicks;
+mod drafts;
 mod fixes;
 mod host;
 mod messages;

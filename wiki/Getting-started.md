@@ -105,6 +105,7 @@ cancel, the background part stays closed until you next sign in.
 While you make or change an application, a value, a reference, or an
 automation, selecting a page, even the one it opened from, first asks whether
 to leave without saving when you have changed something, because what you have
-not saved is lost. Select **Stay** to carry on, or **Leave** to drop it. While a
-save is still under way, the pages, **Leave**, **Change window**, and
-**Discard** or **Cancel** wait for it to finish.
+not saved is lost. Select **Stay** to carry on, **Save as draft** to keep it as a
+[draft](Drafts.md) and finish it later, or **Leave** to drop it. While a save is
+still under way, the pages, **Leave**, **Change window**, and **Discard** or
+**Cancel** wait for it to finish.

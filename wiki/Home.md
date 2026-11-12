@@ -16,6 +16,7 @@ fills up. New to it? Start with [Getting started](Getting-started.md).
 - [References](References.md): how AppyTappy knows an application's
   characters, which its number values read with.
 - [Automations](Automations.md): what to do, and when.
+- [Drafts](Drafts.md): keep something unfinished and finish it later.
 - [Settings](Settings.md): starting with Windows, the screenshot shortcut, and
   how often values are read.
 - [The tray icon](The-tray-icon.md): turn automations off and on, and see

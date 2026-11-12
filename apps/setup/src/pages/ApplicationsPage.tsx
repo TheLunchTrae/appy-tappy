@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react';
 
-import type { AntiCheatDef, AppSummary, OverlayModeDef } from '../lib/bindings.ts';
+import type { AntiCheatDef, AppSummary, DraftSummary, OverlayModeDef } from '../lib/bindings.ts';
 import { Question, useQuestion } from '../components/Question.tsx';
 import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
 import { ANTI_CHEAT_NAMES } from '../lib/describe.ts';
 import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
-import { matchSummary } from '../lib/matching.ts';
+import { type AppKept, matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
+import { type Resumed, draftOfSaved, draftProblem, isKept, newDrafts } from '../lib/drafts.ts';
+import { DraftActions, DraftNote, DraftPill } from '../components/Drafts.tsx';
 
 /**
  * The anti-cheat menu's choices: not set first, since every application starts there, and none last,
@@ -155,9 +157,63 @@ interface Props {
   readonly onChanged: () => Promise<void>;
   readonly onAdd: () => void;
   readonly onEdit: (app: AppSummary) => void;
+  /** Every saved draft, or null before they are read. */
+  readonly drafts: readonly DraftSummary[] | null;
+  readonly onFinish: (resumed: Resumed) => void;
+  /** Deletes a draft; the page shows why when it fails. */
+  readonly onDeleteDraft: (id: string) => Promise<void>;
 }
 
-export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: Props) {
+/** A new application saved as a draft: how it would be found, and that nothing is set or watched yet. */
+function DraftRow({
+  resumed,
+  onFinish,
+  onDelete,
+}: {
+  readonly resumed: Resumed;
+  readonly onFinish: () => void;
+  readonly onDelete: () => Promise<void>;
+}) {
+  const { def } = resumed;
+  const problem = draftProblem(def, []);
+  const window = isKept<AppKept>(def.state, 'application') ? def.state.state.window : null;
+  const summary = window === null ? null : matchSummary(window);
+  return (
+    <tr className="draft-row">
+      <td>
+        {def.name} <DraftPill />
+        <DraftNote missing={def.missing} problem={problem} />
+      </td>
+      <td className="recog">
+        {summary === null ? (
+          <span className="note">No window picked yet</span>
+        ) : (
+          <>
+            <span>{summary.must}</span>
+            {summary.then === null ? null : <span className="note">{summary.then}</span>}
+          </>
+        )}
+      </td>
+      <td className="note">Not set</td>
+      <td className="note">Off</td>
+      <td className="note">Not watched</td>
+      <td className="row-actions">
+        <DraftActions name={def.name} problem={problem} onFinish={onFinish} onDelete={onDelete} />
+      </td>
+    </tr>
+  );
+}
+
+export function ApplicationsPage({
+  apps,
+  loadError,
+  onChanged,
+  onAdd,
+  onEdit,
+  drafts,
+  onFinish,
+  onDeleteDraft,
+}: Props) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -205,6 +261,20 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
     }
   };
 
+  const removeDraft = async (id: string): Promise<void> => {
+    try {
+      await onDeleteDraft(id);
+      setSetError(null);
+    } catch (error: unknown) {
+      setSetError(errorText(error));
+    }
+  };
+  const fresh = newDrafts(
+    drafts,
+    'application',
+    (id) => apps?.some((app) => app.id === id && app.file !== null) ?? false,
+  );
+
   const removeCell = (app: AppSummary, name: string) => (
     <RemoveCell
       name={name}
@@ -240,13 +310,13 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
           {setError}
         </p>
       )}
-      {apps?.length === 0 ? (
+      {apps?.length === 0 && fresh.length === 0 ? (
         <div className="empty">
           <h2>No applications yet</h2>
           <p>Add the application whose screen AppyTappy should read, then give it values on the Values page.</p>
         </div>
       ) : null}
-      {apps !== null && apps.length > 0 ? (
+      {apps !== null && (apps.length > 0 || fresh.length > 0) ? (
         <table className="table">
           <thead>
             <tr>
@@ -288,9 +358,18 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
               }
               const file = app.file;
               const summary = matchSummary(file.window);
+              const changes = draftOfSaved(drafts, 'application', app.id);
               return (
                 <tr key={app.id}>
-                  <td>{file.name}</td>
+                  <td>
+                    {file.name}
+                    {changes === null ? null : (
+                      <>
+                        {' '}
+                        <DraftPill changes />
+                      </>
+                    )}
+                  </td>
                   <td className="recog">
                     <span>{summary.must}</span>
                     {summary.then === null ? null : <span className="note">{summary.then}</span>}
@@ -338,6 +417,17 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
                     )}
                   </td>
                   <td className="row-actions">
+                    {removing === app.id || changes === null ? null : (
+                      <button
+                        type="button"
+                        className="btn small"
+                        onClick={() => {
+                          onFinish(changes);
+                        }}
+                      >
+                        Finish draft<span className="visually-hidden"> of {file.name}</span>
+                      </button>
+                    )}
                     {removing === app.id ? null : (
                       <button
                         type="button"
@@ -355,6 +445,18 @@ export function ApplicationsPage({ apps, loadError, onChanged, onAdd, onEdit }: 
                 </tr>
               );
             })}
+            {fresh.map((resumed) => (
+              <DraftRow
+                key={resumed.id}
+                resumed={resumed}
+                onFinish={() => {
+                  onFinish(resumed);
+                }}
+                onDelete={async () => {
+                  await removeDraft(resumed.id);
+                }}
+              />
+            ))}
           </tbody>
         </table>
       ) : null}

@@ -13,6 +13,8 @@ import type {
   ClickAtDef,
   ClickPictureView,
   ColorSpec,
+  DraftDef,
+  DraftSummary,
   FixSpec,
   FoundClick,
   Live,
@@ -245,6 +247,32 @@ export async function markChecked(application: string): Promise<void> {
 
 export async function listAutomations(): Promise<ReadonlyArray<AutomationSummary>> {
   return invoke<ReadonlyArray<AutomationSummary>>('list_automations');
+}
+
+/** Every saved draft, oldest first, including those whose file cannot be read. */
+export async function listDrafts(): Promise<ReadonlyArray<DraftSummary>> {
+  return invoke<ReadonlyArray<DraftSummary>>('list_drafts');
+}
+
+/**
+ * Saves `draft` over the draft `id`, or as a new one, and returns its ID. With `screenshots`, it keeps the
+ * capture's screenshots with it. Another draft of the same saved item goes, so each has one at most.
+ */
+export async function saveDraft(id: string | null, draft: DraftDef, screenshots: boolean): Promise<string> {
+  return invoke<string>('save_draft', { id, draft, screenshots });
+}
+
+/**
+ * Makes the screenshots of the draft `id` the capture's, in place of any it took, so each has the index it
+ * had when the draft was saved; returns how many there are.
+ */
+export async function restoreDraftScreenshots(id: string): Promise<number> {
+  return invoke<number>('restore_draft_screenshots', { id });
+}
+
+/** Deletes the draft `id` with its screenshots. One already gone is fine. */
+export async function deleteDraft(id: string): Promise<void> {
+  await invoke('delete_draft', { id });
 }
 
 /** Saves `automation` over the automation `existing`, or as a new one; returns its ID. */

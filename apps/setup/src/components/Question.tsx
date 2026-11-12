@@ -52,16 +52,23 @@ interface Props {
   readonly busy?: boolean;
   readonly onKeep: () => void;
   readonly onAct: () => void;
+  /** A third answer between the two, the one to pick most often, such as keeping the work for later. */
+  readonly middle?: { readonly label: string; readonly onPress: () => void } | undefined;
   /** The warning, read with the question. */
   readonly children: ReactNode;
 }
 
-/** A question in a control's place: a warning and two answers, the safe one first. Escape is the same as keep. */
-export function Question({ refs, label, keepLabel, actLabel, busy = false, onKeep, onAct, children }: Props) {
+/**
+ * A question in a control's place: a warning and two answers, the safe one first, or three with `middle` between
+ * them. Escape is the same as keep.
+ */
+export function Question({ refs, label, keepLabel, actLabel, busy = false, onKeep, onAct, middle, children }: Props) {
   const warning = useId();
-  const answer = (act: boolean): void => {
+  const answer = (act: (() => void) | boolean): void => {
     refs.hadFocus.current = refs.question.current?.contains(document.activeElement) ?? false;
-    if (act) {
+    if (typeof act === 'function') {
+      act();
+    } else if (act) {
       onAct();
     } else {
       onKeep();
@@ -91,6 +98,19 @@ export function Question({ refs, label, keepLabel, actLabel, busy = false, onKee
         >
           {keepLabel}
         </button>
+        {middle === undefined ? null : (
+          <button
+            type="button"
+            className="btn small primary"
+            disabled={busy}
+            onKeyDown={escape}
+            onClick={() => {
+              answer(middle.onPress);
+            }}
+          >
+            {middle.label}
+          </button>
+        )}
         <button
           type="button"
           className="btn small danger"

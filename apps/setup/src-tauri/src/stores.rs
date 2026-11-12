@@ -1,6 +1,6 @@
 //! Where the setup app keeps what the user saves: the applications' folders,
-//! the automations' file and the settings file, and where the runtime writes
-//! its traces.
+//! the automations' file, the settings file and the drafts, and where the
+//! runtime writes its traces.
 
 use std::fs;
 use std::io;
@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use appytappy_config::app_file::AppFile;
 use appytappy_config::paths::Locations;
 use appytappy_config::store::{AppStore, AutomationStore, SettingsStore};
+
+use crate::drafts::DraftStore;
 
 /// Where the authoring files live.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +21,8 @@ pub(crate) struct Stores {
     pub(crate) automations: AutomationStore,
     /// The settings file.
     pub(crate) settings: SettingsStore,
+    /// The drafts, which only the setup app reads.
+    pub(crate) drafts: DraftStore,
     /// The folder the runtime writes its trace files to.
     pub(crate) traces: PathBuf,
 }
@@ -29,6 +33,7 @@ impl From<Locations> for Stores {
             apps: AppStore::new(locations.apps()),
             automations: AutomationStore::new(locations.automations()),
             settings: SettingsStore::new(locations.settings()),
+            drafts: DraftStore::new(locations.drafts()),
             traces: locations.traces(),
         }
     }
