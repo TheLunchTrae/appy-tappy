@@ -70,9 +70,15 @@ export function FoundPanel(props: PanelProps) {
             ref={find}
             type="button"
             className="btn"
-            disabled={findBlocked !== null || searching}
+            disabled={findBlocked !== null}
+            // Not disabled while searching, so focus stays on it when a search fails.
+            aria-disabled={searching}
             aria-describedby={findBlocked === null ? 'hint-find-like' : 'hint-find-like find-blocked'}
-            onClick={props.onFind}
+            onClick={() => {
+              if (!searching) {
+                props.onFind();
+              }
+            }}
           >
             {searching ? 'Finding…' : 'Find more like it'}
           </button>
@@ -85,7 +91,11 @@ export function FoundPanel(props: PanelProps) {
             {findBlocked}
           </p>
         )}
-        {error === null ? null : <p className="warn">{error}</p>}
+        {error === null ? null : (
+          <p className="warn" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     );
   }

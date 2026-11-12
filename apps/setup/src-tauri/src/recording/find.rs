@@ -74,6 +74,12 @@ impl Bounds {
             && region.y() < self.bottom
     }
 
+    fn centered_in(self, region: Region) -> bool {
+        let x = self.left.midpoint(self.right);
+        let y = self.top.midpoint(self.bottom);
+        (region.x()..region.right()).contains(&x) && (region.y()..region.bottom()).contains(&y)
+    }
+
     fn join(self, other: Self) -> Self {
         Self {
             left: self.left.min(other.left),
@@ -330,10 +336,11 @@ pub(crate) fn like(
     let mask = Mask::of(image, reader);
     let line = mask.line_height(region)?;
     let blobs = mask.blobs(line.saturating_mul(2));
-    // Measured as each run is: by its tallest character.
+    // Measured as each run is, by its tallest character, among those centered
+    // in the region, so a taller one the region's edge catches does not count.
     let sample = blobs
         .iter()
-        .filter(|blob| blob.meets(region))
+        .filter(|blob| blob.centered_in(region))
         .map(|blob| blob.height())
         .max()
         .unwrap_or(line);
@@ -609,5 +616,7 @@ mod tests {
         assert!(!bounds.meets(region(2, 8, 1, 1)));
         assert!(!bounds.meets(region(0, 0, 2, 9)));
         assert!(!bounds.meets(region(0, 0, 9, 3)));
+        assert!(bounds.centered_in(region(4, 5, 1, 1)));
+        assert!(!bounds.centered_in(region(5, 7, 1, 1)));
     }
 }
