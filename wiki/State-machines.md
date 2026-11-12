@@ -854,7 +854,10 @@ stateDiagram-v2
   the owner handles before then is not compared: it changes nothing in the
   recording, and a look it shows is kept when a later frame shows it.
   Comparing so takes at most a fifth of the owner thread's time, whatever the
-  region's size. **Resting** leaves by every arrow that leaves **Recording**.
+  region's size. The time a frame waited for the owner counts toward what it
+  took, so a recording rests longer after the owner was busy, and the UI
+  shows it as recording all the while. **Resting** leaves by every arrow that
+  leaves **Recording**.
 - **Paused** is a recording whose `problem` says the window has another size
   than the screenshot the region was drawn on. It keeps nothing, and the next
   frame of the right size clears the problem and records.

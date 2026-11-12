@@ -200,10 +200,11 @@ a frame is compared; the whole frame is copied only when it is kept.
   from arriving to compared (`REST`), and a frame that comes meanwhile only
   becomes the preview. So comparing takes at most a fifth of the owner
   thread's time, whatever the region's size and the number of looks, and less
-  while the thread is behind, since a frame that waited took longer. Frames
-  cannot pile up behind it, and a command waits for one comparison at most: a
-  pass over the region for each look known, several milliseconds each when
-  the region covers a 1920 by 1080 window. A small region has every frame
+  while the thread is behind, since a frame that waited took longer. A frame's
+  wait behind a slow command counts too, so a recording rests longer after
+  the owner was busy, while the panel still says it records. Frames
+  cannot pile up behind it, and a command waits for one comparison at most:
+  one pass over the region for each look known. A small region has every frame
   compared. A large one that shows many looks has fewer frames compared, so
   it can miss a look that shows only briefly.
 - **Review.** There is no review sheet: the UI lists each kept screenshot in

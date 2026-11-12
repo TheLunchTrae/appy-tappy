@@ -330,15 +330,41 @@ impl Harness {
         frame: io::Result<(Size, &Image)>,
         interval: Duration,
     ) {
+        let message = self.sent(handler, frame, interval);
+        assert!(self.owner.handle(message).is_continue());
+    }
+
+    /// Runs `handler` on `frame`, a whole window's frame, and applies what
+    /// it sent the owner only once `waited` more has passed on the owner's
+    /// clock, as if the owner were busy that long while the frame waited.
+    pub(super) fn deliver_late(
+        &mut self,
+        handler: &mut FrameHandler,
+        frame: &Image,
+        waited: Duration,
+    ) {
+        let message = self.sent(handler, Ok((frame.size(), frame)), PREVIEW_INTERVAL);
+        self.wait(waited);
+        assert!(self.owner.handle(message).is_continue());
+    }
+
+    /// Runs `handler` on `frame`, which arrives at the time on the owner's
+    /// clock, checks the wait it answers, and returns what it sent the
+    /// owner.
+    fn sent(
+        &self,
+        handler: &mut FrameHandler,
+        frame: io::Result<(Size, &Image)>,
+        interval: Duration,
+    ) -> Message<FakeHost> {
         let frame = frame.map(|(window_size, image)| Frame {
             window_size,
             image,
-            received: Instant::now(),
+            received: self.owner.host.clock,
             delay: Duration::ZERO,
         });
         assert_eq!(handler(frame), interval);
-        let message = self.messages.try_recv().expect("handler sent");
-        assert!(self.owner.handle(message).is_continue());
+        self.messages.try_recv().expect("handler sent")
     }
 }
 

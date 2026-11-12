@@ -272,12 +272,11 @@ mod tests {
     fn a_frame_that_took_long_makes_the_recording_rest_and_compare_none_meanwhile() {
         let (mut harness, mut handler) = Harness::with_screenshot();
         harness.ask(start_looks).expect("records");
-        // The owner handles this frame ten seconds after it arrived, as if
-        // it were that far behind, so the recording rests four times that.
-        harness.wait(Duration::from_secs(10));
-        harness.deliver(&mut handler, Ok(&shade(100)));
+        // The owner gets to this frame ten seconds after it arrived, so the
+        // recording rests four times that, until fifty seconds in.
+        harness.deliver_late(&mut handler, &shade(100), Duration::from_secs(10));
         assert_eq!(harness.kept(), [1]);
-        harness.wait(Duration::from_secs(30));
+        harness.wait(Duration::from_secs(39));
         harness.deliver(&mut handler, Ok(&shade(150)));
         assert_eq!(
             harness.kept(),
@@ -289,7 +288,7 @@ mod tests {
             Ok(Some(pixels::rgba(&shade(150), 4))),
             "the frame still shows in the preview"
         );
-        harness.wait(Duration::from_secs(20));
+        harness.wait(Duration::from_secs(1));
         harness.deliver(&mut handler, Ok(&shade(150)));
         assert_eq!(harness.kept(), [1, 2], "it records again once rested");
     }
