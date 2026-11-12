@@ -28,10 +28,11 @@ On the Values page, select **New value**.
    it keeps working everywhere else. Other keys can't be the shortcut.
 3. **Where to read.** Type a **Value name**, such as `Progress`, and choose
    the **Check**, one of the four [checks](#checks) below. On a screenshot,
-   drag to draw a box around what to read. Drag inside the box to move it, or
-   drag a corner to resize it. The **X**, **Y**, **Width**, and **Height**
-   fields set it to the exact pixel, counted in the window's own pixels from
-   its top-left corner. **Stays at** picks the side of the window the value
+   drag to draw a box around what to read, as
+   [Draw the region](#draw-the-region) describes. The **X**, **Y**,
+   **Width**, and **Height** fields set it to the exact pixel, counted in the
+   window's own pixels from its top-left corner. **Stays at** picks the side
+   of the window the value
    keeps to as the window changes size, as [Window size](#window-size)
    describes. Then select **Next: how to read it**.
 4. **How to read it.** Set up the check, as [Checks](#checks) describes. The
@@ -44,6 +45,38 @@ AppyTappy keeps the screenshots until you select **Change window** or leave
 the new value. Before either drops work you have not saved, it asks first:
 select **Keep this window** or **Stay** to carry on, as
 [Leave before you save](Getting-started.md#leave-before-you-save) describes.
+
+## Draw the region
+
+The region is the box that a value reads, a reference learns from, or a click
+looks for. You draw it on a screenshot, not on the live window.
+
+- **Draw.** Drag from one corner of the thing to the opposite corner. The
+  drag can start in the empty space around the screenshot, such as above its
+  top edge, so a box that touches an edge is easy to draw: the box holds the
+  part of the screenshot that the drag covers. A drag that stays outside the
+  screenshot draws nothing, and so does a click.
+- **Move.** Drag inside the box. It stops at the edges of the screenshot.
+- **Resize.** Drag one of the four squares at its corners.
+
+The box changes when you let go of the mouse button. A drag that is
+interrupted, such as by a screenshot that arrives while you drag, leaves the
+box as it was, and you can drag again.
+
+The box's outline and its label, which shows the region's size in the
+window's pixels, lie outside the box, so nothing covers what you select. The
+rest of the screenshot is dimmed a little.
+
+To select something small, zoom in. Under the screenshot, **Zoom in** (**+**)
+and **Zoom out** (**−**) change how large the screenshot shows, and the
+percentage between them says how large that is against the window's own
+pixels. **Fit** shows the whole screenshot again. Hold Ctrl and turn the mouse
+wheel to zoom around the pointer. While the screenshot is larger than the
+view, turn the wheel or drag the scroll bars to move around it. The wheel
+also works in the middle of a drag, to draw a box larger than the view shows.
+Zoom changes only how you see the screenshot: the region keeps its pixels.
+The live window always shows whole, and a screenshot of another size starts
+whole again.
 
 ## Checks
 

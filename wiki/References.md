@@ -22,7 +22,8 @@ window, or select **New reference from this region** while you
 2. **Pick the color.** Next to **Characters' color**, select **Pick**, then
    click the characters on a screenshot. **Tolerance** says how far a pixel's
    color may be from it and still count: drag the slider or type a number.
-3. **Teach it the characters.** Draw a region around text on a screenshot,
+3. **Teach it the characters.**
+   [Draw a region](Values.md#draw-the-region) around text on a screenshot,
    then type what it shows, such as `87%`. AppyTappy learns the shape of each
    character from what you type. Label screenshots until
    **Characters it knows** shows every digit the numbers need, or

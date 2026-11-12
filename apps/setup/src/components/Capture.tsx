@@ -31,8 +31,9 @@ import type { Choice } from './Picker.tsx';
 import { colorAt } from '../lib/pixels.ts';
 import { RecordPanel, ReviewSheet } from './Recording.tsx';
 import { clock } from '../lib/review.ts';
-import { type Point, type Size, fit } from '../lib/region.ts';
+import type { Point, Size } from '../lib/region.ts';
 import { RegionSurface } from './RegionSurface.tsx';
+import { ZoomView } from './ZoomView.tsx';
 import { PinPicker } from './PinPicker.tsx';
 import { Hint } from './Hint.tsx';
 import { FIX_HINT, READ_WITH_HINT, guessPin, sizeText } from '../lib/sizes.ts';
@@ -40,7 +41,6 @@ import type { SelectTool } from '../lib/selection.ts';
 import { StatesField } from './StatesField.tsx';
 import { CHECK_HINT } from '../lib/hints.ts';
 import { background } from '../lib/repeat.ts';
-import { useSize } from '../lib/size.ts';
 import { type Held, held, useReportHeld } from '../lib/unsaved.ts';
 import { useAppFile } from '../lib/useAppFile.ts';
 import { useLiveCheck } from '../lib/useLiveCheck.ts';
@@ -167,9 +167,6 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const [leavingWindow, setLeavingWindow] = useState(false);
   const leaveQuestion = useQuestion<HTMLButtonElement>(leavingWindow);
 
-  const view = useRef<HTMLDivElement>(null);
-  const space = useSize(view);
-
   // The saved reference the editor adds to, or null for a new one or while no editor is open.
   const existingId = editing?.existing?.id ?? null;
   const editingRef = useMemo(
@@ -235,13 +232,6 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
   const drawnSize = drawnPicture === undefined ? null : { width: drawnPicture.width, height: drawnPicture.height };
   const shownPicture = selected === null ? null : (full.get(selected) ?? null);
   const layoutSize: Size | null = selected === null ? liveSize : shownPicture;
-  const shown = layoutSize === null ? { width: 0, height: 0 } : fit(layoutSize, space);
-  const frameStyle = {
-    left: (space.width - shown.width) / 2,
-    top: (space.height - shown.height) / 2,
-    width: shown.width,
-    height: shown.height,
-  };
 
   const pick = (point: Point): void => {
     if (picking === null || shownPicture === null) {
@@ -537,6 +527,7 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
         {shortcut.error === null ? null : <p className="warn">{shortcut.error}</p>}
         {shortcut.saveError === null ? null : <p className="warn">{shortcut.saveError}</p>}
         {screenshots.error === null ? null : <p className="warn">{screenshots.error}</p>}
+        {selection.error === null ? null : <p className="warn">{selection.error}</p>}
         {reviewing && recording !== null ? (
           <ReviewSheet
             view={recording}
@@ -550,53 +541,58 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
           />
         ) : null}
         {/* Hidden rather than removed during review, so the view keeps its measured size. */}
-        <div className="view" ref={view} hidden={reviewing}>
-          <div className="frame" style={frameStyle}>
-            {reviewing ? null : selected === null ? (
-              <LiveCanvas
-                maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
-                onFrame={onFrame}
-                onError={onLiveError}
-              />
-            ) : shownPicture === null ? null : (
-              <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
-            )}
-            {native === undefined ? null : (
-              <RegionSurface
-                size={native}
-                shown={shown}
-                region={draft.region}
-                recording={recording?.recording === true && selected === null}
-                label={editing !== null ? editedName : valueName.trim() === '' ? 'Region' : valueName.trim()}
-                editable={shownPicture !== null}
-                picking={picking !== null}
-                tool={selecting}
-                ignored={selection.ignored}
-                onRegion={(region) => {
-                  setDraft((current) => ({ ...current, region, drawnOn: selected }));
-                }}
-                onPick={pick}
-                onSnap={(rough, combine) => {
-                  selection.addStep({ kind: 'snap', region: rough, combine });
-                }}
-                onSelectAt={(point, combine) => {
-                  selection.addStep({ kind: 'click', x: point.x, y: point.y, combine });
-                }}
-              />
-            )}
-          </div>
-          <p className="hint">
-            {viewHint(
-              recording?.recording === true,
-              selected,
-              shots.length,
-              picking !== null,
-              liveError,
-              shortcut.label,
-              selecting,
-            )}
-          </p>
-        </div>
+        <ZoomView
+          picture={layoutSize}
+          zoomable={shownPicture !== null}
+          hidden={reviewing}
+          hint={viewHint(
+            recording?.recording === true,
+            selected,
+            shots.length,
+            picking !== null,
+            liveError,
+            shortcut.label,
+            selecting,
+          )}
+        >
+          {({ space, shown }) => (
+            <>
+              {reviewing ? null : selected === null ? (
+                <LiveCanvas
+                  maxWidth={Math.min(LIVE_MAX_WIDTH, Math.max(1, Math.round(space.width * devicePixelRatio)))}
+                  onFrame={onFrame}
+                  onError={onLiveError}
+                />
+              ) : shownPicture === null ? null : (
+                <PictureCanvas picture={shownPicture} label={`Screenshot ${position(selected)}`} />
+              )}
+              {native === undefined ? null : (
+                <RegionSurface
+                  size={native}
+                  shown={shown}
+                  screenshot={selected}
+                  region={draft.region}
+                  recording={recording?.recording === true && selected === null}
+                  label={editing !== null ? editedName : valueName.trim() === '' ? 'Region' : valueName.trim()}
+                  editable={shownPicture !== null}
+                  picking={picking !== null}
+                  tool={selecting}
+                  ignored={selection.ignored}
+                  onRegion={(region) => {
+                    setDraft((current) => ({ ...current, region, drawnOn: selected }));
+                  }}
+                  onPick={pick}
+                  onSnap={(rough, combine) => {
+                    selection.addStep({ kind: 'snap', region: rough, combine });
+                  }}
+                  onSelectAt={(point, combine) => {
+                    selection.addStep({ kind: 'click', x: point.x, y: point.y, combine });
+                  }}
+                />
+              )}
+            </>
+          )}
+        </ZoomView>
         <div className="strip" hidden={reviewing}>
           <button
             type="button"
@@ -747,7 +743,6 @@ export function Capture({ choice, mode, onCancel, onChangeWindow, onSaved, onHel
                   }}
                 />
               ) : null}
-              {selection.error === null ? null : <p className="warn">{selection.error}</p>}
               <RegionFields
                 region={draft.region}
                 onRegion={(region) => {
