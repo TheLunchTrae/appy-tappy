@@ -29,7 +29,8 @@ interface Props {
   /** The application to change, or null to add one. */
   readonly existing: AppSummary | null;
   readonly onCancel: () => void;
-  readonly onSaved: () => void;
+  /** Hears the saved application's ID. */
+  readonly onSaved: (id: string) => void;
   /** Hears what leaving the editor would lose. */
   readonly onHeld: (held: Held) => void;
 }
@@ -100,8 +101,7 @@ export function ApplicationEditor({ existing, onCancel, onSaved, onHeld }: Props
     }
     setBusy(true);
     try {
-      await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges });
-      onSaved();
+      onSaved(await saveApp(existing?.id ?? null, { name: name.trim(), window, sizeChanges }));
     } catch (error: unknown) {
       setSaveError(errorText(error));
     } finally {

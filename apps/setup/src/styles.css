@@ -466,6 +466,30 @@ select {
   font-weight: 600;
 }
 
+/* A flow that knows its application has only that application's window to find. */
+.picker.alone {
+  grid-template-columns: minmax(0, 480px);
+}
+
+/* The windows that fit an application equally well, listed in the side panel only as tall as they are. */
+.side .window-list {
+  flex: none;
+}
+
+.side > .btn {
+  align-self: flex-start;
+}
+
+.window-list button:disabled {
+  cursor: default;
+}
+
+/* Adding an application is a choice among the saved applications, marked as the one that makes something. */
+.window-list button.add .title::before {
+  content: '+ ';
+  color: var(--capture);
+}
+
 .actions {
   margin-top: auto;
   display: flex;

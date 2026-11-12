@@ -486,7 +486,8 @@ mod tests {
             Ok(vec![WindowFit {
                 handle: 7,
                 fallback: false,
-                best: true
+                best: true,
+                tied: true,
             }])
         );
         assert_eq!(harness.ask(|owner| owner.read_window(&window)), Ok(Some(7)));
@@ -510,10 +511,12 @@ mod tests {
             class: "ExampleWindow",
             executable: "Example.exe",
         });
+        // The two copies fit equally well, so each ties with the one read.
         let fit = |handle, best| WindowFit {
             handle,
             fallback: false,
             best,
+            tied: true,
         };
         assert_eq!(
             harness.ask(|owner| owner.match_windows(&window)),

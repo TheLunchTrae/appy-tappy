@@ -14,12 +14,27 @@ This page covers what the user guide leaves out.
 
 ## Behavior the guide leaves out
 
-- **Picker.** A value's picker only chooses a saved application; the
-  Applications page adds, edits, and removes them. Picking a window a saved
-  application finds chooses that application. Capture stays off until the
-  open windows are matched, and then only allows a window that fits the
-  application's match as well as any other, since the runtime reads one of
-  those.
+- **Picker.** The picker of a value or reference chooses a saved application
+  and then resolves that application's window with its own match
+  (`lib/picker.ts`); [Picker](State-machines.md#picker) lists its states. One
+  look (`lib/useAppWindows.ts`) is one `list_app_windows` command: the owner
+  reads the saved applications and lists the desktop once, and answers the
+  applications, the open windows, and the windows each application's match
+  takes, so the three agree. The picker shows the applications from that
+  answer, not from the pages' list, so **Refresh** reads them again and a
+  failed read shows with its reason. `window_list::matching` marks the window
+  a new session would read as `best`, and every offered window that fits as
+  well as it as `tied`. `tied` covers only offered windows: one the list
+  filters out, untitled, without a size, or of a desktop class, ties with
+  none even where the runtime could read it, and when the runtime reads such
+  a window no offered window is tied. Capture allows only a tied window,
+  since the runtime reads one of those: the only one without asking, or the
+  one the user picks among several. A window the match takes with a worse fit
+  is never offered. The chosen application's ID travels with the captured
+  window as the `Choice`, and every save names it, so nothing reads the owner
+  back from the window. **Add application** and **Change how it's found**
+  open the application flow for the picker's flow, as
+  [Pages and flows](State-machines.md#pages-and-flows) describes.
 - **Application editor.** A new application's match starts from the picked
   window's title, class, and executable and requires only the executable, with
   no fallback. An application that an automation uses cannot be removed.
