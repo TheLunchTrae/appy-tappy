@@ -87,8 +87,8 @@ bun run tauri build --ci \
 description = "Sign a release installer for the updater and write the latest.json that announces it"
 run = '''
 set -eu
-# The release workflow runs this on the installer of a v* tag, in a job of
-# its own that alone gets the update key's private half
+# The release workflow runs this on a release's installer, in a job of its
+# own that alone gets the update key's private half
 # (wiki/Installer.md#updates). It signs with the Tauri CLI that
 # `mise run ui:install` installs; that install runs in a step of its own, so
 # no install script sees the key. The signature binds the version, which

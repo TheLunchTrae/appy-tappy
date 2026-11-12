@@ -59,8 +59,8 @@ the first time.
 Every build has a version:
 
 - **A release build** has the workspace version from `Cargo.toml`, such as
-  `0.1.0`. The release workflow makes one only for a tag that names that
-  version, such as `v0.1.0`.
+  `0.1.0`. The release workflow makes one only when it publishes that
+  version's release, `v0.1.0`.
 - **A test build** has the workspace version marked as a development version
   of the commit it was built from, such as `0.1.0-dev+27585e8`, with `.dirty`
   after the commit when the tree had uncommitted or untracked changes. A
@@ -69,26 +69,35 @@ Every build has a version:
   whether to downgrade; either answer installs it.
 
 The release workflow, `.github/workflows/release.yml`, builds the installer on
-a Windows runner:
+a Windows runner. Only a manual run starts it, from the workflow's
+**Run workflow** button, so pull requests, pushes, and tags build no
+installer. The run has two options:
 
-- **A pushed `v*` tag** publishes a GitHub release of that tag with the
-  installer attached and generated notes. The build fails when the tag does not
-  name the workspace version. Before publishing, the release job attests the
-  installer's build provenance.
-- **A manual run** on any branch or tag, from the workflow's **Run workflow**
-  button, makes a test build.
+- **Publish**, off by default. Off makes a test build of the branch the run
+  starts on; its installer is in the run's artifacts for 14 days. On releases
+  the workspace version from `Cargo.toml`, and only from `main`: the run
+  builds the installer, [signs it for the updater](#the-update-key), attests
+  it, tags the built commit with `v` and the version, such as `v0.1.0`, and
+  publishes the GitHub release of that tag with the installer, `latest.json`,
+  and generated notes.
+- **Pre-release**, off by default, for a published release only. On marks
+  the release as a pre-release. The updater reads the newest full release, so
+  installed copies are not offered a pre-release. A test build ignores it.
 
-Nothing else starts it, so pull requests and pushes to branches build no
-installer.
-
-A test build's installer is in its run's artifacts for 14 days.
+To release, merge a pull request that sets the new workspace version in
+`Cargo.toml`, then run the workflow on `main` with **Publish** on. The
+workflow never commits, so the version only changes through a pull request.
+Before it builds, a publishing run stops when the run is not on `main`, when
+that version is already released, or when its tag is already on another
+commit. Releases from different runs wait for each other, so two runs cannot
+publish one version.
 
 ## Attestation
 
 A release's installer has a
 [build provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds):
-a signed record of the workflow run, commit, and tag that built it, stored on
-the repository. Because the installer is not signed, this is the way to check
+a signed record of the workflow run, commit, and branch that built it, stored
+on the repository. Because the installer is not signed, this is the way to check
 that a download came from this repository's release workflow. It does not
 change the SmartScreen warning.
 
@@ -98,10 +107,10 @@ Check a downloaded installer with the [GitHub CLI](https://cli.github.com/):
 gh attestation verify AppyTappy_0.1.0_x64-setup.exe -R TheLunchTrae/appy-tappy
 ```
 
-Only the release job attests, and only for a pushed `v*` tag. Test builds have
-no attestation, so a passing check means the installer came from a release
-tag. Add `--source-ref refs/tags/v0.1.0` to check that it came from one
-release in particular, and
+Only the release job attests, and only in a publishing run on `main`. Test
+builds have no attestation, so a passing check means the installer came from a
+release run. Add `--source-digest` with the commit that the release's tag
+names to check that it came from one release in particular, and
 `--signer-workflow TheLunchTrae/appy-tappy/.github/workflows/release.yml` to
 reject an attestation that any other workflow might add later. The attesting
 job alone gets the `id-token` and `attestations` permissions, so the build
@@ -174,8 +183,8 @@ bun run tauri signer generate -w ~/.tauri/appytappy-update.key
 Then, in the repository's **Settings**:
 
 1. Under **Environments**, create `update-signing`. Give it no required
-   reviewers, turn off admin bypass, and limit its deployments to the tag
-   pattern `v*`, with no branches. Add the contents of `appytappy-update.key`
+   reviewers, turn off admin bypass, and limit its deployments to the branch
+   `main`, with no tags. Add the contents of `appytappy-update.key`
    as its `TAURI_SIGNING_PRIVATE_KEY` secret and the password as its
    `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret.
 2. Under **Secrets and variables** and **Actions**, add the contents of
@@ -187,39 +196,44 @@ another update; a new key needs every user to install one release by hand.
 
 #### What guards the key
 
-The environment's tag limit is the main guard: a run reaches the secrets only
-when its ref is a `v*` tag, so no branch or pull request run can. The limit
-checks the ref, not the event, so a manual run started on a `v*` tag would
-pass it. Only the sign job names the environment, and it runs only for a tag
-push, so a manual run of the release workflow skips it. A new job that names
-the environment needs the same condition. These repository settings, set by
-hand, decide who can make such a tag and which workflows run:
+The environment's branch limit is the main guard: a run reaches the secrets
+only when it runs on `main`, so no other branch or pull request run can. Only
+the sign job names the environment, and it runs only when a run publishes, so
+a test build on `main` skips it. A new job that names the environment needs
+the same condition. These repository settings, set by hand, decide what
+reaches `main` and who can start the release:
 
+- **Branch rulesets.** The `Main:` rulesets let changes reach `main` only
+  through a pull request, and block force pushes and deleting the branch.
 - **Tag rulesets.** "Tags: Restrict creation" blocks every tag outside `v*`,
-  "Release tags: Restrict creation" blocks `v*` tags for everyone but
-  repository admins, and "Tags: Restrict updates and deletion" stops anyone
-  from moving or deleting a tag once it exists.
+  and "Tags: Restrict updates and deletion" stops anyone from moving or
+  deleting a tag once it exists. No ruleset limits creating `v*` tags, because
+  the release job creates the release's tag with the workflow's token, and a
+  ruleset cannot list GitHub Actions as an actor that bypasses it. The release
+  workflow tags only the commit it built, and only for a version that has no
+  tag yet.
 - **Actions settings.** The default workflow token can only read, workflows
   cannot approve or create pull requests, and a pull request from any outside
   contributor waits for approval before its workflows run.
 - **Actions policies.** "Release: Restrict runs" and "Wiki: Restrict runs" let
-  only the repository owner start `release.yml` and `wiki.yml`, by a push or a
-  manual run. "Quality: Restrict events" lets `quality.yml` run only on pull
-  requests, pushes, the merge queue and manual runs. "Other workflows: Restrict
-  runs" covers every other workflow file, which only the owner can start, and
-  only by hand.
+  only the repository owner start `release.yml` and `wiki.yml`. "Quality:
+  Restrict events" lets `quality.yml` run only on pull requests, pushes, the
+  merge queue and manual runs. "Other workflows: Restrict runs" covers every
+  other workflow file, which only the owner can start, and only by hand.
 
 A new workflow file falls under "Other workflows: Restrict runs", so it runs
 automatically only once it has a policy of its own and is left out of that
 one.
 
-Tags cannot be moved or deleted, so a test tag would stay for good, and no
-test build can exercise signing: the first run that signs is a real release.
-If that run fails on a setting, such as a missing environment secret, fix the
-setting and re-run the failed jobs, which reuse the same tag and commit. After
-14 days the installer artifact is gone, so re-run all jobs instead. If the fix
-needs a code change, that version is used up: bump the version and push a new
-tag.
+No test build exercises signing: the first run that signs is a real release.
+If a publishing run fails on a setting, such as a missing environment secret
+or a ruleset that blocks its tag, fix the setting and re-run the failed jobs,
+which reuse the same commit. After 14 days the installer artifact is gone, so
+re-run all jobs instead. A run that failed after it created the tag publishes
+that tag when re-run, because the tag is on the commit it builds. Tags cannot
+be moved or deleted, so if the fix needs a code change, that version is used
+up: bump the version in a pull request and release the new one. A failed
+publish can leave a draft release behind; delete the draft before the re-run.
 
 ## winget
 
