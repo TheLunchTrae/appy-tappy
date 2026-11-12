@@ -151,9 +151,9 @@ Uninstall AppyTappy from the **Apps** section of Windows Settings, like any
 other program. The uninstaller closes the background part and stops it
 from starting at sign-in.
 
-Your applications, values, and automations stay on your PC, so a later
-install finds them. To remove them too, select **Delete the application data**
-in the uninstaller.
+Your applications, values, automations, and [drafts](Drafts.md) stay on your
+PC, so a later install finds them. To remove them too, with the screenshots
+your drafts keep, select **Delete the application data** in the uninstaller.
 
 If the installer or the uninstaller asks you to close AppyTappy Setup and you
 cancel, the background part stays closed until you next sign in.

@@ -27,8 +27,10 @@ The uninstaller stops the runtime the same way, turns autostart off, and
 removes both programs. Canceling it when it asks to close a running setup app
 leaves the runtime stopped until the next sign-in; installing has the same
 step. Its **Delete the application data** box also removes the
-saved applications, values, and automations in `%APPDATA%\AppyTappy` and the
-runtime's logs.
+saved applications, values, and automations in `%APPDATA%\AppyTappy`, and
+the logs and the setup app's [drafts](Setup-app.md#drafts), with their
+screenshots, in `%LOCALAPPDATA%\AppyTappy`. No test covers the hooks: they
+run only in the installer on Windows.
 
 The installer also holds the setup app's text reader model,
 `models\text-recognition.onnx` beside the setup app, which
