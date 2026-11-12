@@ -193,8 +193,8 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
   };
 
   const choices = apps === null ? [] : valueChoices(apps);
-  const hasValues = choices.length > 0;
-  const canCreate = hasValues && loadError === null;
+  // A new automation leads to adding its application and making its value when none is saved yet.
+  const canCreate = apps !== null && loadError === null;
   const head = (
     <div className="page-head">
       <h1 ref={headingRef} tabIndex={-1}>
@@ -217,15 +217,14 @@ export function AutomationsPage({ apps, automations, loadError, onChanged, onNew
       return (
         <div className="empty">
           <h2>No automations yet</h2>
-          {hasValues ? (
+          <p>
+            An automation watches one of your values and runs actions in order when it becomes true, such as pausing
+            music when a number on screen reaches 90 or lowering an application&apos;s volume while an icon shows.
+          </p>
+          {choices.length > 0 ? null : (
             <p>
-              An automation watches one of your values and runs actions in order when it becomes true, such as pausing
-              music when a number on screen reaches 90 or lowering an application&apos;s volume while an icon shows.
-            </p>
-          ) : (
-            <p>
-              An automation watches a value, so save a value first on the Values page. Then come back here to say what
-              happens when it changes.
+              No value is saved yet. New automation takes you through adding the application and making the value to
+              watch, then back to say what happens when it changes.
             </p>
           )}
           {canCreate ? (
