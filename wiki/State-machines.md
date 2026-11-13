@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Thirteen guards drop such stale messages:
+it was about has gone. Fourteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -86,6 +86,10 @@ it was about has gone. Thirteen guards drop such stale messages:
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
   once the drag is over.
+- **Removed screenshots.** The capture screen remembers the screenshots the
+  user removed (`apps/setup/src/lib/useScreenshots.ts`). Pixels that arrive
+  for one afterward, or a failure to load them, are dropped, so a removed
+  screenshot is never listed again.
 - **Press numbers.** A drag over the live window numbers each press, which
   starts taking a screenshot (`apps/setup/src/lib/liveDraw.ts`). A screenshot
   that arrives with another press's number is dropped.
@@ -1936,6 +1940,33 @@ The zoom of the view (`apps/setup/src/components/ZoomView.tsx`) is one number
 kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
 the live view shows or a screenshot of another size does. It changes only the
 size the screenshot shows at, so a drag goes on through a zoom or a scroll.
+
+### Draft screenshot pixels
+
+The capture screen's screenshots (`apps/setup/src/lib/useScreenshots.ts`)
+list a screenshot taken or recorded this session only once its thumbnail and
+its own pixels arrive, so its tile is never blank. A screenshot that a draft
+brings back is listed from the start, under the index the draft refers to
+it by, and its tile (`Thumb`) has its own states:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Loading: the draft's screenshots come back
+    Loading --> Loaded: its thumbnail and pixels arrive
+    Loading --> Failed: either does not arrive, or the fetch fails
+    Failed --> Loading: it is shown
+```
+
+- **Loading** shows an empty tile. **Loaded** shows the thumbnail, and the
+  screenshot can be drawn on.
+- **Failed** says **Not loaded. Select to load again.** in its tile, and the
+  screenshots' error says why. Showing it, by selecting its tile or by any
+  step that shows it, loads it again (`loadsAgain`). It stays listed, so the
+  draft's states, boxes, and region keep the screenshot they refer to.
+- **Removed.** A screenshot the user removes leaves the list. Pixels or a
+  failure that arrive for it afterward are dropped (`withThumb` changes no
+  tile that is not listed), as the [guard](#how-to-read-this-page) for
+  removed screenshots says.
 
 ### Live draw
 
