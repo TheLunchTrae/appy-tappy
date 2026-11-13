@@ -685,6 +685,32 @@ mod tests {
     }
 
     #[test]
+    fn a_watch_whose_capture_cannot_start_again_says_why() {
+        let (mut harness, root) = with_saved_bar("watch-restart-refused");
+        let (watch, mut handler) = watch_bar(&mut harness);
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the pick's capture");
+        // The window settles at a size where the bar's region is another,
+        // and the capture for that region cannot start.
+        let large = Size {
+            width: 8,
+            height: 4,
+        };
+        let red = Image::new(large, [0, 0, 255, 0].repeat(32)).expect("matching length");
+        harness.deliver_at(&mut handler, Ok((large, &red)), WATCH_INTERVAL);
+        harness.wait(SETTLE);
+        harness.owner.host.refuse = true;
+        assert_eq!(
+            harness.ask(watched(watch, None)),
+            Ok(Live::Lost {
+                message: "Progress bar cannot be read: no capture here.".to_owned()
+            })
+        );
+        assert_eq!(harness.closed.try_recv(), Ok(7), "the old capture closes");
+        assert!(harness.handlers.try_recv().is_err(), "no capture started");
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn a_watch_whose_capture_stopped_is_not_started_again() {
         let (mut harness, root) = with_saved_bar("watch-lost");
         let (watch, mut handler) = watch_bar(&mut harness);
