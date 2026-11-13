@@ -111,7 +111,12 @@ overlay?: OverlayDef,
  * The build of the application its values were last checked against,
  * or `None` before the setup app saved a value of it.
  */
-checked?: CheckedDef, }>;
+checked?: CheckedDef,
+/**
+ * How the definition was made, which the setup app shows beside
+ * `checked`. [`OriginDef::ByHand`] when the file leaves it out.
+ */
+origin: OriginDef, }>;
 
 /**
  * A saved application with the open windows its match takes.
@@ -984,6 +989,25 @@ set: number,
 matches: boolean, }>;
 
 /**
+ * What the user chose for an import.
+ */
+export type ImportSpec = DeepReadonly<{
+/**
+ * The application's name.
+ */
+name: string,
+/**
+ * The anti-cheat class the user confirmed, which is saved whatever the
+ * file holds.
+ */
+antiCheat: AntiCheatDef,
+/**
+ * The name of the file the bytes came from, kept as where the
+ * application was imported from.
+ */
+from: string, }>;
+
+/**
  * What one screenshot's region shows, typed by the user so a reference
  * learns its characters.
  */
@@ -1108,6 +1132,21 @@ title: boolean,
  * The class has to match.
  */
 class: boolean, }>;
+
+/**
+ * How an application's definition was made: its provenance.
+ *
+ * Setup guidance only. The setup app shows it, so whoever reads a
+ * definition can tell where its values came from. Nothing that finds the
+ * window or reads a value looks at it, and no rule of the file covers it,
+ * whatever file name it holds.
+ */
+export type OriginDef = DeepReadonly<{ "kind": "byHand" } | { "kind": "recording" } | { "kind": "imported",
+/**
+ * The name of the file it was imported from, such as
+ * `appytappy-example.zip`.
+ */
+file: string, }>;
 
 /**
  * One saved value in a [`CaptureOutline`].
@@ -1837,6 +1876,21 @@ settings: SettingsFile,
 problem: string | null, }>;
 
 /**
+ * A shared file as the import dialog shows it, before anything is saved.
+ */
+export type SharedView = DeepReadonly<{
+/**
+ * The application's file as the shared file holds it, with the
+ * anti-cheat class its maker set.
+ */
+file: AppFile,
+/**
+ * The name to offer: the file's, or that with a number when a saved
+ * application has it already.
+ */
+name: string, }>;
+
+/**
  * One character of a picture.
  */
 export type ShownCharacter = DeepReadonly<{
@@ -2446,6 +2500,7 @@ export const LIMITS = {
   "maxCooldownMs": 86400000,
   "maxExpectedCharacters": 128,
   "maxSearchPixels": 160000,
+  "maxSharedBytes": 16777216,
   "maxStates": 16,
   "maxTargetBytes": 2048,
   "maxTolerance": 255,

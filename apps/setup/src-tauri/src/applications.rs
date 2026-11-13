@@ -6,9 +6,9 @@
 //! values; the Values page adds them to an application saved here.
 
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, FORMAT, SizeChangesDef, WindowDef, WindowDefError,
+    AntiCheatDef, AppFile, FORMAT, OriginDef, SizeChangesDef, WindowDef, WindowDefError,
 };
-use appytappy_config::store::new_app_id;
+use appytappy_config::store::{StoredApp, new_app_id};
 use serde::Deserialize;
 
 use crate::automations;
@@ -53,18 +53,7 @@ pub(crate) fn apply(
         .to_owned()
     })?;
     let loaded = stores.apps.load().map_err(|error| error.to_string())?;
-    if let Some(other) = loaded.iter().find(|app| {
-        Some(app.id.as_str()) != existing
-            && app
-                .file
-                .as_ref()
-                .is_ok_and(|file| file.name.trim().eq_ignore_ascii_case(name))
-    }) {
-        return Err(format!(
-            "Another application is already called {name}. Pick another name or edit {}.",
-            other.file.as_ref().map_or(name, |file| file.name.as_str())
-        ));
-    }
+    check_name_free(&loaded, existing, name)?;
     let (id, mut file) = if let Some(id) = existing {
         let file = loaded
             .into_iter()
@@ -82,6 +71,7 @@ pub(crate) fn apply(
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values: Vec::new(),
             references: Vec::new(),
         };
@@ -100,6 +90,47 @@ pub(crate) fn apply(
     file.window = spec.window;
     file.size_changes = spec.size_changes;
     Ok((id, file))
+}
+
+/// Fails when a saved application other than `own` is already called `name`,
+/// whatever its capitals: two applications with one name could not be told
+/// apart where a value's application is picked.
+pub(crate) fn check_name_free(
+    saved: &[StoredApp],
+    own: Option<&str>,
+    name: &str,
+) -> Result<(), String> {
+    match named(saved, own, name) {
+        Some(other) => Err(format!(
+            "Another application is already called {name}. Pick another name or edit {other}."
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The name of the saved application other than `own` that is called `name`,
+/// if one is.
+fn named<'saved>(saved: &'saved [StoredApp], own: Option<&str>, name: &str) -> Option<&'saved str> {
+    saved
+        .iter()
+        .filter(|app| Some(app.id.as_str()) != own)
+        .filter_map(|app| app.file.as_ref().ok())
+        .map(|file| file.name.as_str())
+        .find(|other| other.trim().eq_ignore_ascii_case(name))
+}
+
+/// `name`, or `name` with ` 2`, ` 3` and so on, whichever comes first that
+/// no saved application is called.
+pub(crate) fn free_name(saved: &[StoredApp], name: &str) -> String {
+    let name = name.trim();
+    if named(saved, None, name).is_none() {
+        return name.to_owned();
+    }
+    // `saved` is finite, so one of its length plus one numbers is free.
+    (2_usize..=saved.len().saturating_add(2))
+        .map(|number| format!("{name} {number}"))
+        .find(|candidate| named(saved, None, candidate).is_none())
+        .unwrap_or_else(|| name.to_owned())
 }
 
 /// Checks that the application `app` is saved and that no automation

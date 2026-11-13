@@ -45,6 +45,7 @@ test('readers names the number values that read with a reference, in a check or 
     },
     sizeChanges: 'often',
     antiCheat: 'unknown',
+    origin: { kind: 'byHand' },
     references: [],
     values: [
       {

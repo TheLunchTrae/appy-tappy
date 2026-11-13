@@ -101,7 +101,7 @@ pub(crate) fn scratch(name: &str) -> (Stores, PathBuf) {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{AntiCheatDef, FORMAT, SizeChangesDef, WindowDef};
+    use appytappy_config::app_file::{AntiCheatDef, FORMAT, OriginDef, SizeChangesDef, WindowDef};
     use appytappy_config::window_match::WindowFacts;
 
     use super::*;
@@ -125,6 +125,7 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values: Vec::new(),
             references: Vec::new(),
         };

@@ -784,8 +784,8 @@ mod tests {
 
     use super::*;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, ReferenceDef, RegionDef, SampleDef,
-        ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef, sample_name,
+        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, OriginDef, ReferenceDef, RegionDef,
+        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef, sample_name,
     };
     use crate::window_match::WindowFacts;
 
@@ -830,6 +830,7 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values: vec![
                 value(
                     "progress",

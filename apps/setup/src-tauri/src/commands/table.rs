@@ -139,6 +139,15 @@ macro_rules! with_commands {
             /// The removal worked when this resolves; the answer is why an overlay window could not open or close, or
             /// null.
             commands::remove_app(application: String) -> Option<String>;
+            /// The saved application `application` as the bytes of a zip file to share: its file and the pictures it
+            /// names, without its overlay. Rejects when a picture is missing or a value cannot be read.
+            commands::export_app(application: String) -> Bytes;
+            /// What the shared file `bytes`, named `from`, holds, and a name for it that no saved application has.
+            /// Nothing is saved. Rejects with why the file cannot be imported.
+            commands::read_shared_app(bytes: Vec<u8>, from: String) -> SharedView;
+            /// Saves the shared file `bytes` as a new application with the name and the anti-cheat class `spec`
+            /// gives, whatever class the file holds; returns its ID. It never replaces an application.
+            commands::import_app(bytes: Vec<u8>, spec: ImportSpec) -> String;
             commands::save_value(spec: SaveSpec) -> SavedValue;
             /// Reads the live frame with a saved value as `spec` edits it, as it would be read at the window's size
             /// now, and answers what saving the edit would do. Nothing is saved. Rejects with what to fix first.

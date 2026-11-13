@@ -112,8 +112,8 @@ const fn region_def(region: Region) -> RegionDef {
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT, ScreenDef, SizeChangesDef, SizeDef, ValueDef,
-        WindowDef,
+        AntiCheatDef, CheckDef, ColorDef, FORMAT, OriginDef, ScreenDef, SizeChangesDef, SizeDef,
+        ValueDef, WindowDef,
     };
     use appytappy_config::window_match::WindowFacts;
 
@@ -171,6 +171,7 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             references: Vec::new(),
             values,
         }

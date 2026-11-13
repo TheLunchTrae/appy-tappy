@@ -44,6 +44,7 @@ const apps: readonly AppSummary[] = [
       },
       sizeChanges: 'often',
       antiCheat: 'unknown',
+      origin: { kind: 'byHand' },
       values: [
         {
           id: 'progress',

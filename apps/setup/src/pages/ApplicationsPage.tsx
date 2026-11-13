@@ -4,10 +4,13 @@ import type { AntiCheatDef, AppSummary, DraftSummary, OverlayModeDef } from '../
 import { Question, useQuestion } from '../components/Question.tsx';
 import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
-import { ANTI_CHEAT_NAMES } from '../lib/describe.ts';
+import { ANTI_CHEAT_CHOICES, ANTI_CHEAT_NAMES } from '../lib/describe.ts';
 import { ANTI_CHEAT_HINT, OVERLAY_HINT } from '../lib/hints.ts';
 import { type AppKept, matchSummary } from '../lib/matching.ts';
 import { background } from '../lib/repeat.ts';
+import { originText } from '../lib/sharing.ts';
+import { ExportApp } from '../components/ExportApp.tsx';
+import { ImportApp } from '../components/ImportApp.tsx';
 import {
   type Resumed,
   draftOfSaved,
@@ -18,12 +21,6 @@ import {
   removalLoses,
 } from '../lib/drafts.ts';
 import { DraftActions, DraftNote, DraftPill } from '../components/Drafts.tsx';
-
-/**
- * The anti-cheat menu's choices: not set first, since every application starts there, and none last,
- * so stepping through the menu with the arrow keys reaches every other choice before the one that asks.
- */
-const ANTI_CHEAT_CHOICES: readonly AntiCheatDef[] = ['unknown', 'userMode', 'kernelLevel', 'none'];
 
 interface AntiCheatCellProps {
   readonly name: string;
@@ -221,6 +218,8 @@ export function ApplicationsPage({
   const [setError, setSetError] = useState<string | null>(null);
   // The application whose anti-cheat is saving.
   const [settingAntiCheat, setSettingAntiCheat] = useState<string | null>(null);
+  // The application whose export dialog is open.
+  const [exporting, setExporting] = useState<{ readonly id: string; readonly name: string } | null>(null);
 
   const set = async (app: string, antiCheat: AntiCheatDef): Promise<void> => {
     setSettingAntiCheat(app);
@@ -303,6 +302,7 @@ export function ApplicationsPage({
           its live values show on top of it while this app is open.
         </span>
         <div className="end">
+          <ImportApp onImported={onChanged} />
           <button ref={add} type="button" className="btn primary" onClick={onAdd}>
             Add application
           </button>
@@ -317,7 +317,10 @@ export function ApplicationsPage({
       {apps?.length === 0 && fresh.length === 0 ? (
         <div className="empty">
           <h2>No applications yet</h2>
-          <p>Add the application whose screen AppyTappy should read, then give it values on the Values page.</p>
+          <p>
+            Add the application whose screen AppyTappy should read, then give it values on the Values page. Or import an
+            application that someone exported, with its values.
+          </p>
         </div>
       ) : null}
       {apps !== null && (apps.length > 0 || fresh.length > 0) ? (
@@ -373,6 +376,9 @@ export function ApplicationsPage({
                         <DraftPill changes />
                       </>
                     )}
+                    {file.origin.kind === 'imported' ? (
+                      <span className="note origin">{originText(file.origin)}</span>
+                    ) : null}
                   </td>
                   <td className="recog">
                     <span>{summary.must}</span>
@@ -445,6 +451,18 @@ export function ApplicationsPage({
                         Edit
                       </button>
                     )}
+                    {removing === app.id ? null : (
+                      <button
+                        type="button"
+                        className="btn small"
+                        aria-label={`Export ${file.name}`}
+                        onClick={() => {
+                          setExporting({ id: app.id, name: file.name });
+                        }}
+                      >
+                        Export
+                      </button>
+                    )}
                     {removeCell(app, file.name)}
                   </td>
                 </tr>
@@ -465,6 +483,15 @@ export function ApplicationsPage({
           </tbody>
         </table>
       ) : null}
+      {exporting === null ? null : (
+        <ExportApp
+          app={exporting.id}
+          name={exporting.name}
+          onClose={() => {
+            setExporting(null);
+          }}
+        />
+      )}
     </main>
   );
 }

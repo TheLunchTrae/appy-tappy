@@ -367,8 +367,8 @@ mod tests {
 
     use appytappy_config::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
-        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef,
-        WindowDef, sample_name,
+        OriginDef, ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
+        StateDef, ValueDef, WindowDef, sample_name,
     };
     use appytappy_config::automation_file::{
         ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
@@ -428,6 +428,7 @@ mod tests {
             anti_cheat: AntiCheatDef::None,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values,
             references: Vec::new(),
         }

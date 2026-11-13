@@ -455,6 +455,7 @@ describe('a draft opens the flow that finishes it', () => {
       },
       sizeChanges: 'often',
       antiCheat: 'unknown',
+      origin: { kind: 'byHand' },
       values: [progress],
       references: [percent],
     },

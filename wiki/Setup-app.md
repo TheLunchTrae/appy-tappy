@@ -740,6 +740,7 @@ saved file still names.
     "build": { "version": "1.4.2.0", "size": 48234496, "modified": 1762500000 },
     "at": 1762600000
   },
+  "origin": { "kind": "imported", "file": "appytappy-example-app.zip" },
   "values": [
     {
       "id": "progress",
@@ -814,6 +815,15 @@ build was of the values or the executable that are gone. The Values page shows
 the runtime's log, as [Build detection](Architecture.md#build-detection)
 describes.
 
+An application's `origin` is how its definition was made, and is `byHand`
+when the file leaves it out. Its `kind` is `byHand` for a new application,
+`recording` once a reference of it was saved with a recorded reading, or
+`imported` with the name of the `file` it was imported from. A recording of
+looks leaves it alone, since the screenshots it keeps are labeled by hand
+like any other. An imported application stays `imported` whatever is changed
+in it later. Only the setup app reads it, to show where an application came
+from, so no rule covers it and a file loads whatever it holds.
+
 The settings live in `%APPDATA%\AppyTappy\settings.json`. A setting the
 file leaves out takes its default:
 
@@ -880,6 +890,10 @@ the `clicks` folder beside `automations.json`, named `click-{n}.png`.
 [Pictures kept](#pictures-kept) says what each picture holds and when it is
 removed.
 
+`AppFile::parse` reads a file's `format` before anything else, so a file of
+another format says which format it has instead of naming a field this
+format lacks.
+
 `appytappy-config` owns the formats (`app_file.rs`, `automation_file.rs`,
 `settings_file.rs`) and the files (`store.rs`). Each save writes a temporary
 file and renames it over the old one, so a crash never leaves half a file; a
@@ -906,6 +920,72 @@ runtime will, and refuses it if the runtime could not read it. A new
 application's anti-cheat class starts as `unknown`, which blocks key press
 actions until the user sets it
 ([#11](https://github.com/TheLunchTrae/appy-tappy/issues/11)).
+
+## Sharing
+
+The Applications page exports an application as one file and imports such a
+file as a new application
+([Share an application](Applications.md#share-an-application)).
+`src-tauri/src/sharing.rs` owns the file, and `owner/sharing.rs` the three
+commands: `export_app`, `read_shared_app`, and `import_app`.
+
+A shared file is a zip file with the application's folder in it, flat:
+`app.json` and each picture that file names, under the names they have in the
+folder. `Shared` is an application in that form. It has no overlay, which
+holds where a panel is on one machine's screens, and it keeps `checked` and
+`origin`. `ZipPack` in `zip_pack.rs` packs it, as it packs the
+[debug bundle](#debug-page).
+
+An imported file is a trust boundary, so `Shared::unpack` holds it to what a
+saved file is held to and takes nothing else from it:
+
+- It reads only `app.json` and the pictures that file names. Any other entry
+  is ignored, so nothing else in the zip file reaches the disk. A picture's
+  name passed `AppFile::check`, so it has no separator and cannot leave the
+  application's folder.
+- It reads no file larger than `MAX_SHARED_BYTES`, 16 MB, and unpacks no more
+  than that in all. Each entry is read only as far as what is left of that
+  budget, whatever size the entry claims.
+- `AppFile::parse` checks `app.json` as it checks a saved file, so a file of
+  another format, or one that breaks a rule, is refused with the same reason.
+- A picture the file names and the zip file lacks is refused by name.
+- `saved::build` reads each value and `saved::reader` each reference from the
+  pictures, as the runtime does and as saving a value does, so a file with a
+  value the runtime could not read is refused.
+
+`Shared::of` holds an application to the same rules before `pack`, so an
+application that AppyTappy exports is one it imports; a property test packs
+and unpacks generated definitions.
+
+`import_app` unpacks the bytes again and saves the application through
+`Owner::write_app`. It takes a new ID from `new_app_id`, so it cannot write
+into a saved application's folder, and refuses a name that a saved
+application has. It saves the anti-cheat class the user picked, never the
+file's, and sets `origin` to `imported` with the picked file's name, without
+control characters and at most 120 characters long. The page offers the
+file's class in the dialog unless it is `none`, which only the user's own
+pick sets (`classToConfirm` in `src/lib/sharing.ts`).
+
+The page reads the picked file and sends its bytes with both
+`read_shared_app` and `import_app`. The owner keeps nothing between the two,
+so there is no pending import to go stale, and the import checks the same
+bytes it saves.
+
+Three choices shape the file:
+
+- **No automations in a shared file.** An automation names its value by
+  application ID, which an import changes, and its actions act on the
+  machine: they press keys, open programs, and play files by path. A file
+  that brought one would make an import something that can act. A file of
+  values only reads.
+- **A zip file, not one JSON file with the pictures inside.** The zip file
+  is the application's folder as it is on disk, a person can open it and
+  look at `app.json` and the pictures, and the setup app already packs zip
+  files with the `zip` crate, which reads them too. One JSON file would need
+  the pictures as base64 text, a third larger and unreadable, and an encoder
+  the workspace does not have.
+- **No checksum and no signature.** A checksum catches only a damaged file,
+  which the checks above catch, and a signature needs keys and a trust model.
 
 ## Drafts
 

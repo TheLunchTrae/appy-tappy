@@ -80,6 +80,35 @@ pub struct AppFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub checked: Option<CheckedDef>,
+    /// How the definition was made, which the setup app shows beside
+    /// `checked`. [`OriginDef::ByHand`] when the file leaves it out.
+    #[serde(default)]
+    pub origin: OriginDef,
+}
+
+/// How an application's definition was made: its provenance.
+///
+/// Setup guidance only. The setup app shows it, so whoever reads a
+/// definition can tell where its values came from. Nothing that finds the
+/// window or reads a value looks at it, and no rule of the file covers it,
+/// whatever file name it holds.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum OriginDef {
+    /// The user drew its values and labeled its references' pictures in the
+    /// setup app.
+    #[default]
+    ByHand,
+    /// Made in the setup app, where a recording taught at least one of its
+    /// references.
+    Recording,
+    /// Imported from a file that someone exported.
+    Imported {
+        /// The name of the file it was imported from, such as
+        /// `appytappy-example.zip`.
+        file: String,
+    },
 }
 
 /// The build of an application that its values were checked against, and
@@ -870,12 +899,23 @@ impl AppFile {
     ///
     /// # Errors
     ///
-    /// Returns an [`AppFileError`] naming the first problem: JSON that does
-    /// not fit the format, another format version, or a value that breaks a
-    /// rule in [`AppFile::check`].
+    /// Returns an [`AppFileError`] naming the first problem: another format
+    /// version, JSON that does not fit the format, or a value that breaks a
+    /// rule in [`AppFile::check`]. The version is read first, so a file of
+    /// another format says so rather than naming whichever of its fields
+    /// this format lacks.
     pub fn parse(json: &str) -> Result<Self, AppFileError> {
-        let file: Self =
-            serde_json::from_str(json).map_err(|error| AppFileError::Json(error.to_string()))?;
+        /// Any file's format version, whatever else it holds.
+        #[derive(Deserialize)]
+        struct Versioned {
+            format: u32,
+        }
+        let invalid = |error: serde_json::Error| AppFileError::Json(error.to_string());
+        let Versioned { format } = serde_json::from_str(json).map_err(invalid)?;
+        if format != FORMAT {
+            return Err(AppFileError::Format(format));
+        }
+        let file: Self = serde_json::from_str(json).map_err(invalid)?;
         file.check()?;
         Ok(file)
     }
@@ -1240,6 +1280,7 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "progress".to_owned(),
                 name: "Progress".to_owned(),
@@ -1641,6 +1682,33 @@ mod tests {
             checked.build.version = Some("1.4.2.0".to_owned());
         }
         assert_eq!(AppFile::parse(&file.to_json()), Ok(file));
+    }
+
+    #[test]
+    fn how_it_was_made_round_trips_and_reads_as_by_hand_when_left_out() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(json.contains("\"origin\": {\n    \"kind\": \"byHand\"\n  }"));
+        let left_out = json.replace(",\n  \"origin\": {\n    \"kind\": \"byHand\"\n  }", "");
+        assert_ne!(left_out, json, "the origin was written last");
+        assert_eq!(AppFile::parse(&left_out), Ok(file.clone()));
+        for origin in [
+            OriginDef::Recording,
+            OriginDef::Imported {
+                file: "appytappy-example.zip".to_owned(),
+            },
+        ] {
+            file.origin = origin;
+            assert_eq!(AppFile::parse(&file.to_json()), Ok(file.clone()));
+        }
+    }
+
+    #[test]
+    fn another_format_says_so_whatever_else_the_file_holds() {
+        let newer = dash()
+            .to_json()
+            .replace("\"format\": 1", "\"format\": 2, \"added\": true");
+        assert_eq!(AppFile::parse(&newer), Err(AppFileError::Format(2)));
     }
 
     #[test]

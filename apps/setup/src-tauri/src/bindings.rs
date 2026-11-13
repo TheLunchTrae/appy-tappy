@@ -77,14 +77,15 @@ use crate::overlay::OverlayView;
 use crate::overlay::window::label;
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, EditPreview, EditSpec, FixSpec,
-    FoundClick, FoundView, Live, Reading, RecordSpec, ReferenceSaveSpec, ReferenceTrial, SaveSpec,
-    SavedReferenceId, SavedValue, TrialSpec,
+    FoundClick, FoundView, ImportSpec, Live, Reading, RecordSpec, ReferenceSaveSpec,
+    ReferenceTrial, SaveSpec, SavedReferenceId, SavedValue, SharedView, TrialSpec,
 };
 use crate::pixels::{self, HEADER_BYTES};
 use crate::recording::RecordingView;
 use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::SettingsView;
+use crate::sharing::MAX_SHARED_BYTES;
 use crate::updates::UpdateOffer;
 use crate::window_list::{WindowFit, WindowList, WindowScore};
 use crate::{commands, updates};
@@ -926,6 +927,7 @@ fn constants() -> String {
         "slowestReadMs": SLOWEST_READ_MS,
         "maxTolerance": max_tolerance(),
         "maxSearchPixels": MAX_SEARCH_PIXELS,
+        "maxSharedBytes": MAX_SHARED_BYTES,
     });
     let shortcut = json!({
         "modifiers": SHORTCUT_MODIFIERS,

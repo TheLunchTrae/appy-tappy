@@ -432,8 +432,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use appytappy_config::app_file::{
-        AntiCheatDef, AppFile, CheckDef, ColorDef, FORMAT, RegionDef, ScreenDef, SizeChangesDef,
-        SizeDef, ValueDef, WindowDef,
+        AntiCheatDef, AppFile, CheckDef, ColorDef, FORMAT, OriginDef, RegionDef, ScreenDef,
+        SizeChangesDef, SizeDef, ValueDef, WindowDef,
     };
     use appytappy_config::automation_file::{
         ActionDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef,
@@ -488,6 +488,7 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             references: Vec::new(),
             values: vec![
                 value(

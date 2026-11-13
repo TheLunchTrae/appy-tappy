@@ -23,6 +23,7 @@ mod recording;
 mod screenshots;
 mod selection;
 mod settings;
+mod sharing;
 mod stores;
 mod updates;
 mod window_list;

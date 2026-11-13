@@ -595,8 +595,8 @@ mod tests {
 
     use super::*;
     use crate::app_file::{
-        AntiCheatDef, CheckDef, FORMAT, RegionDef, ScreenDef, SizeChangesDef, SizeDef, StateDef,
-        ValueDef, WindowDef,
+        AntiCheatDef, CheckDef, FORMAT, OriginDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef,
+        StateDef, ValueDef, WindowDef,
     };
     use crate::window_match::WindowFacts;
 
@@ -624,6 +624,7 @@ mod tests {
             anti_cheat: AntiCheatDef::Unknown,
             overlay: None,
             checked: None,
+            origin: OriginDef::ByHand,
             values: vec![ValueDef {
                 id: "icon_visible".to_owned(),
                 name: "Icon visible".to_owned(),

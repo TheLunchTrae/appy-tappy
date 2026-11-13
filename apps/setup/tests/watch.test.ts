@@ -43,6 +43,7 @@ function app(id: string, name: string, values: readonly ValueDef[]): AppSummary 
       },
       sizeChanges: 'often',
       antiCheat: 'none',
+      origin: { kind: 'byHand' },
       values,
       references: [],
     },

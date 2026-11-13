@@ -36,8 +36,9 @@ use crate::match_preview::{MatchRule, MatchView};
 use crate::overlay::{Card, OverlayView};
 use crate::owner::{
     AppSummary, AppWindows, ClickPictureView, ClickSent, ClickSpec, Desktop, EditPreview, EditSpec,
-    FixSpec, FoundClick, FoundView, Live, Message, Owner, Reading, RecordSpec, ReferenceSaveSpec,
-    ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, TrialSpec,
+    FixSpec, FoundClick, FoundView, ImportSpec, Live, Message, Owner, Reading, RecordSpec,
+    ReferenceSaveSpec, ReferenceTrial, Run, SaveSpec, SavedReferenceId, SavedValue, SharedView,
+    TrialSpec,
 };
 use crate::recording::RecordingView;
 use crate::recording::looks::LookRecordingView;
@@ -427,6 +428,43 @@ pub(crate) async fn remove_app(
 ) -> Result<Option<String>, String> {
     try_ask(&app, "remove_app", move |owner| {
         owner.remove_app(&application)
+    })
+    .await
+}
+
+/// The saved application `application` as the bytes of a zip file to share.
+#[tauri::command]
+pub(crate) async fn export_app(app: AppHandle, application: String) -> Result<Response, String> {
+    try_ask(&app, "export_app", move |owner| {
+        owner.export_app(&application)
+    })
+    .await
+    .map(Response::new)
+}
+
+/// What the shared file `bytes`, named `from`, holds. Nothing is saved.
+#[tauri::command]
+pub(crate) async fn read_shared_app(
+    app: AppHandle,
+    bytes: Vec<u8>,
+    from: String,
+) -> Result<SharedView, String> {
+    try_ask(&app, "read_shared_app", move |owner| {
+        owner.read_shared(&bytes, &from)
+    })
+    .await
+}
+
+/// Saves the shared file `bytes` as a new application, as `spec` names and
+/// classes it; answers its ID.
+#[tauri::command]
+pub(crate) async fn import_app(
+    app: AppHandle,
+    bytes: Vec<u8>,
+    spec: ImportSpec,
+) -> Result<String, String> {
+    try_ask(&app, "import_app", move |owner| {
+        owner.import_app(&bytes, spec)
     })
     .await
 }
