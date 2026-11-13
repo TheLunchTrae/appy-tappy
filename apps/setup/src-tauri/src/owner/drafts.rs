@@ -218,7 +218,7 @@ mod tests {
         )
         .expect("matching length");
         harness.deliver(&mut handler, Ok(&red));
-        harness.ask(Owner::stop_recording);
+        harness.stop_recording();
         let id = harness
             .ask(|owner| owner.save_draft(None, &value_draft(), true))
             .expect("saves");

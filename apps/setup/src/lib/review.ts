@@ -491,6 +491,48 @@ export function keepBlocked(
   return checked ? null : 'Checking the readings…';
 }
 
+/** The readings of recording `id` whose pixels were asked for, so each is asked for once while its ask stands. */
+export interface CropAsks {
+  readonly id: number;
+  readonly readings: ReadonlySet<number>;
+}
+
+/** No reading's pixels asked for. */
+export const NO_CROP_ASKS: CropAsks = { id: -1, readings: new Set() };
+
+/**
+ * The readings of recording `id`, of its `count`, whose pixels to ask for now: each one `asks` holds no ask for, which
+ * is all of them for another recording than `asks`'s; and `asks` with their asks.
+ */
+export function cropsToAsk(
+  asks: CropAsks,
+  id: number,
+  count: number,
+): { readonly asks: CropAsks; readonly indexes: readonly number[] } {
+  const readings = new Set(asks.id === id ? asks.readings : []);
+  const indexes: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    if (!readings.has(index)) {
+      readings.add(index);
+      indexes.push(index);
+    }
+  }
+  return { asks: { id, readings }, indexes };
+}
+
+/**
+ * `asks` without its ask for reading `index` of recording `of`, which failed, so the next `cropsToAsk` asks for it
+ * again. A failure of another recording's ask leaves `asks` as it is.
+ */
+export function cropAskFailed(asks: CropAsks, of: number, index: number): CropAsks {
+  if (asks.id !== of || !asks.readings.has(index)) {
+    return asks;
+  }
+  const readings = new Set(asks.readings);
+  readings.delete(index);
+  return { id: of, readings };
+}
+
 /** Each recorded reading's pixels, by its index, for the recording `id`. */
 export interface Crops {
   readonly id: number;
