@@ -56,14 +56,16 @@ impl Line {
 
 /// The rows of the line of text in `ink`: the rows the number reader takes,
 /// [`Ink::line`], with the nearest mark on each side of them. A mark is a
-/// block of inked rows no taller than half the letters' height, at most a
-/// quarter of their height of blank rows from them, and at least one row.
-/// Those hold the dots of an i or a j and the accents, which the number
-/// reader has no use for and the text reader needs to tell the letters
-/// apart. A dot sits about a tenth to a fifth of the letters' height from
-/// them. A line of text nearby is taller, and only the nearest mark joins,
-/// so neither another line nor a column of stray pixels stretches the line.
-/// `None` without ink.
+/// block of inked rows no taller than half the letters' height, with at
+/// most a quarter of their height of blank rows, and at least one, between
+/// it and them. Those hold the dots of an i or a j and the accents, which
+/// the number reader has no use for and the text reader needs to tell the
+/// letters apart. A dot sits about a tenth to a fifth of the letters'
+/// height from them. Only the nearest mark joins, so a column of stray
+/// pixels adds at most one. A line of text nearby is usually taller and
+/// further away, so it stays out; one that is short and close enough, such
+/// as a line the region cuts to a few rows, joins like a mark, since the
+/// region is meant to hold one line. `None` without ink.
 fn rows(ink: &Ink) -> Option<Range<u32>> {
     let size = ink.size();
     let letters = ink.line(0..size.width, 0..size.height)?;
