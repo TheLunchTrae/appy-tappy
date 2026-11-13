@@ -174,12 +174,6 @@ impl ReadInterval {
     }
 }
 
-impl Default for ReadInterval {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 /// How often the runtime reads a value: as often as `fastest_ms` allows while
 /// it changes, and at least every `slowest_ms` while it holds still.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
