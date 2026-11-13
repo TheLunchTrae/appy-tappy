@@ -342,8 +342,7 @@ The value takes its number from the characters it reads alone. A character
 it does not read, and its reference knows, is text to it: it ends the number
 or comes before it, and is never part of it. So **Digits** reads `87%` as 87
 and `Lv.5` as 5. It also reads `87.5%` as 87 and `1,234` as 1, since the `.`
-and the `,` end the number: add the `.` to read 87.5, and the `,` to read
-1234.
+and the `,` end the number: add the `.` to read 87.5, and the `,` to read 1234.
 
 A digit is the exception. The value reads nothing while its region shows a
 digit it does not read before the number, inside it, or right after it, and
