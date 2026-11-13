@@ -55,7 +55,7 @@ pub(crate) const REST: u32 = 4;
 #[derive(Debug)]
 pub(crate) struct LookRecording {
     /// Its number in the session, so the UI tells it from one it replaced.
-    id: Ticket,
+    pub(crate) id: Ticket,
     /// The region of the window it records.
     region: Region,
     /// How far, on average, a crop may be from a look and still be that

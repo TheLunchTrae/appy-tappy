@@ -721,8 +721,9 @@ design enforces the block in three places:
    `ReferenceDef` the first time a value reads with it, so loading an
    application decodes a reference's pictures once however many values read
    with it. `CheckDef::check` in `config` owns how many states a state
-   check has, that their names differ, and that a bar's two colors differ,
-   so a file that breaks one does not load; `saved::build` and the setup
+   check has, that each name passes `StateName::new` and no two are alike,
+   and that a bar's two colors differ, so a file that breaks one does not
+   load; `saved::build` and the setup
    app's check editor report its error. A value that breaks a rule that
    `saved::build` checks itself, such as a region that fits or a picture of
    the region's size, stops only itself.

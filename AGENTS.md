@@ -33,7 +33,9 @@ also `rust:bench` on pushes to main and manual runs. `footprint` runs
 `rust:footprint` on Windows. `quality`, `windows`, and `footprint` restore a
 Rust build cache that only pushes to main save, once for each set of
 manifests, `Cargo.lock` and toolchain; the `mutants` jobs read the `quality`
-job's cache.
+job's cache. `.github/workflows/mutation-sweep.yml` runs `rust:mutants` in
+shards on Linux, from that cache too, and only a manual run starts it: a
+final check before a release, not a gate.
 
 - Inline mise tasks are POSIX `sh`. `[task_config] shell` in
   `.config/mise/config.toml` runs them with `sh` on every platform, so tasks
@@ -372,7 +374,8 @@ coarser configuration exclusions require human approval. Carry classifications
 and their reasons into the handoff.
 
 Mutation evidence in CI covers the code each pull request and each push to
-main changes; `rust:mutants` covers the whole workspace on demand.
+main changes; the mutation sweep workflow runs `rust:mutants` over the whole
+workspace on demand, before a release.
 `.cargo/mutants.toml` excludes the Windows `win.rs` adapters with the owner's
 approval, because the Linux gate compiles them out.
 Read [mutation operation](wiki/Rust-standards.md#mutation-testing)

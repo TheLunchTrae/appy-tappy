@@ -18,7 +18,7 @@ use appytappy_config::app_file::{
     CheckDef, CheckDefError, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef, ScreenDef,
     SizeChangesDef, SizeDef, StateDef,
 };
-use appytappy_config::signal::{InvalidStateName, StateName};
+use appytappy_config::signal::StateName;
 
 use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
 use super::digits::{DigitReader, LearnError};
@@ -267,6 +267,24 @@ impl<'app> Readers<'app> {
             None => Ok(built.insert(reader(reference, picture)?)),
         }
     }
+
+    /// These readers, with `learned` as the reader of the reference `id`,
+    /// which must be what [`reader`] learns from that reference's pictures.
+    /// A value that reads with it then learns nothing again, and its
+    /// pictures are never asked for. An `id` the application has no
+    /// reference for changes nothing.
+    #[must_use]
+    pub fn learned(mut self, id: &str, learned: DigitReader) -> Self {
+        if let Some((_, built)) = self
+            .references
+            .iter()
+            .zip(&mut self.built)
+            .find(|(known, _)| known.id == id)
+        {
+            *built = Some(learned);
+        }
+        self
+    }
 }
 
 /// Rebuilds the value `screen` describes, with its application's `readers`,
@@ -285,11 +303,11 @@ impl<'app> Readers<'app> {
 /// Returns a [`SavedError`] when the check breaks a rule of
 /// [`CheckDef::check`], a region is empty or does not fit the window size it
 /// was drawn at, a picture cannot be read or decoded or a state's picture is
-/// not its region's size, a state's name is invalid or two states share a
-/// picture, a number's reference is missing or cannot learn from one of its
-/// pictures or knows none of the characters the number reads, or the value
-/// has too many fixes, two drawings at one size, or a fix whose pictures or
-/// reference do not suit its check.
+/// not its region's size, two states share a picture, a number's reference
+/// is missing or cannot learn from one of its pictures or knows none of the
+/// characters the number reads, or the value has too many fixes, two
+/// drawings at one size, or a fix whose pictures or reference do not suit
+/// its check.
 pub fn build(
     screen: &ScreenDef,
     readers: &mut Readers<'_>,
@@ -456,7 +474,9 @@ fn state_match(
         .iter()
         .zip(images)
         .map(|(state, image)| {
-            let name = StateName::new(&state.name).map_err(SavedError::StateName)?;
+            // `CheckDef::check` refused the names `StateName::new` refuses.
+            let name = StateName::new(&state.name)
+                .map_err(|invalid| SavedError::Check(CheckDefError::StateName(invalid)))?;
             Ok((name, state_picture(image, size, tolerance, picture)?))
         })
         .collect::<Result<_, SavedError>>()?;
@@ -610,8 +630,6 @@ pub enum SavedError {
     },
     /// Two states use this picture.
     SamePicture(String),
-    /// A state's name breaks the naming rules.
-    StateName(InvalidStateName),
     /// A number reads with a reference the application does not have.
     NoReference {
         /// The reference's ID.
@@ -680,7 +698,6 @@ impl fmt::Display for SavedError {
             Self::SamePicture(name) => {
                 write!(formatter, "two of its states use the picture {name}")
             },
-            Self::StateName(error) => write!(formatter, "its {error}"),
             Self::NoReference { id } => {
                 write!(formatter, "its reference {id} is not saved")
             },
@@ -714,7 +731,6 @@ impl Error for SavedError {
             | Self::FixPictures { .. }
             | Self::FixReference
             | Self::SamePicture(_)
-            | Self::StateName(_)
             | Self::NoReference { .. }
             | Self::NoCharacters { .. } => None,
         }
@@ -1361,6 +1377,31 @@ mod tests {
         };
         assert_eq!(built, ["0", "O", "O0"].map(alone));
         assert_ne!(built[0], built[1]);
+    }
+
+    #[test]
+    fn a_reader_learned_already_is_read_with_and_its_pictures_are_not_asked_for() {
+        let references = [counter("O0")];
+        let files = pictures(&[(&sample_name("counter", 1), &rings(&[10, 11]))]);
+        let learned = reader(&references[0], from(&files)).expect("learns");
+        let number = screen(CheckDef::Number {
+            reference: "counter".to_owned(),
+            whole: false,
+            characters: None,
+        });
+        let from_pictures =
+            build(&number, &mut Readers::new(&references), OFTEN, from(&files)).expect("builds");
+        let mut readers = Readers::new(&references).learned("counter", learned);
+        let built = build(&number, &mut readers, OFTEN, from(&BTreeMap::new()))
+            .expect("read with the reader handed in, with no picture");
+        assert_eq!(built, from_pictures);
+        // A reader for no reference the application has is not kept.
+        let mut unknown =
+            Readers::new(&references).learned("other", DigitReader::new(RED.into(), 10));
+        assert!(matches!(
+            build(&number, &mut unknown, OFTEN, from(&BTreeMap::new())),
+            Err(SavedError::Missing { .. })
+        ));
     }
 
     #[test]
