@@ -365,9 +365,8 @@ mod tests {
     #[test]
     fn a_stop_of_an_older_capture_leaves_the_newer_one() {
         let mut harness = harness(false);
-        let _replaced = harness.pick();
-        let older = harness.ask(|owner| owner.generation);
-        let mut handler = harness.pick();
+        let (older, _replaced) = harness.pick_numbered();
+        let (newest, mut handler) = harness.pick_numbered();
         harness.deliver(&mut handler, Ok(&frame_image()));
         let preview = |owner: &mut Owner<FakeHost>| owner.preview(100);
         harness.ask(move |owner| owner.stop_capture(older));
@@ -375,7 +374,6 @@ mod tests {
             harness.ask(preview).expect("running").is_some(),
             "the newer capture keeps its frame"
         );
-        let newest = harness.ask(|owner| owner.generation);
         harness.ask(move |owner| owner.stop_capture(newest));
         assert_eq!(harness.ask(preview), Ok(None));
     }
@@ -726,8 +724,9 @@ mod tests {
         };
         assert_eq!(harness.ask(held), [true; 5]);
 
-        // The page's `stop_capture`, as it reaches the owner when a flow
-        // closes or the user selects Change window.
+        // The stop that `stop_capture` runs for the capture that still
+        // runs, sent as a command reaches the owner when a flow closes or
+        // the user selects Change window.
         let (reply, mut answer) = oneshot::channel();
         let stop = Message::Run(Run::new(reply, Owner::stop));
         assert!(harness.owner.handle(stop).is_continue());
