@@ -11,7 +11,9 @@ import {
   keepAll,
   keptFound,
   keptState,
+  rereadable,
   rowFlags,
+  withoutFlagged,
 } from '../src/lib/found.ts';
 
 const at = (x: number) => ({ x, y: 10, width: 30, height: 12 });
@@ -164,5 +166,45 @@ describe('adding found text', () => {
   test('a flag on a row left out is no flag', () => {
     const rows = foundRows(view, new Map([[1, { keep: false, text: '12O5', typed: false }]]), [], []);
     expect(rowFlags(rows, new Map([[1, 'Nope.']])).has(1)).toBe(false);
+  });
+});
+
+describe('flagged finds', () => {
+  // Find 0 is ticked and fine, 1 is ticked with a typed text the reference refuses, 2 is ticked and read as a
+  // letter, and 3, which the reader could not read, is left out.
+  const read: FoundView = {
+    ...view,
+    finds: view.finds.with(2, { region: at(80), text: { kind: 'read', text: 'O' } }),
+  };
+  const edits = new Map([
+    [0, { keep: true, text: '', typed: false }],
+    [1, { keep: true, text: '1205', typed: true }],
+    [2, { keep: true, text: '', typed: false }],
+  ]);
+  const rows = foundRows(read, edits, [], []);
+  const flags = rowFlags(rows, new Map([[1, 'The region shows 1 characters but the text has 4.']]));
+
+  test("Deselect flagged leaves out each ticked find with a flag, its own or the reference's, and keeps its text", () => {
+    expect([...flags.keys()]).toEqual([1, 2]);
+    expect([...withoutFlagged(rows, flags)]).toEqual([
+      [1, { keep: false, text: '1205', typed: true }],
+      [2, { keep: false, text: 'O', typed: false }],
+    ]);
+    const after = foundRows(read, new Map([...edits, ...withoutFlagged(rows, flags)]), [], []);
+    expect(after.map((row) => row.keep)).toEqual([true, false, false, false]);
+    expect(addBlocked(after, rowFlags(after, new Map()), true)).toBeNull();
+    expect(withoutFlagged(after, rowFlags(after, new Map())).size).toBe(0);
+  });
+
+  test('Reread takes the finds the reader failed on and the flagged guesses, not typed text', () => {
+    // 1 is flagged but typed; 2 is a flagged guess; 3 failed, ticked or not.
+    expect(rereadable(rows, flags)).toEqual([2, 3]);
+    expect(rereadable(foundRows(view, new Map(), [], []), new Map())).toEqual([3]);
+    const typedOver = foundRows(view, new Map([[3, { keep: true, text: '7', typed: true }]]), [], []);
+    expect(rereadable(typedOver, new Map())).toEqual([]);
+    // A find that shows characters the reference does not need is not listed, so it is not read again.
+    const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    const unlisted = foundRows(view, new Map(), [], digits);
+    expect(rereadable(unlisted, new Map([[0, 'Nope.']]))).toEqual([3]);
   });
 });

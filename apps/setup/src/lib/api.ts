@@ -224,6 +224,14 @@ export async function foundPicture(search: number, index: number, maxWidth: numb
   return decodePicture(await invoke<ArrayBuffer>('found_picture', { search, index, maxWidth }));
 }
 
+/**
+ * Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
+ * and answers the search, or null when that search was replaced or forgotten.
+ */
+export async function rereadFound(search: number, indexes: ReadonlyArray<number>, ink: ColorSpec, tolerance: number): Promise<FoundView | null> {
+  return invoke<FoundView | null>('reread_found', { search, indexes, ink, tolerance });
+}
+
 /** Forgets the search. */
 export async function forgetFound(): Promise<void> {
   await invoke('forget_found');

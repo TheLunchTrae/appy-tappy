@@ -39,13 +39,13 @@ select **Capture this window**, as the first step of
 3. **Choose the characters it needs.** Under **Characters it needs**, turn on
    what the numbers can show. A new reference starts with **Digits** on.
    [Choose what it needs](#choose-what-it-needs) describes the choices.
-4. **Teach it the characters.**
-   [Draw a region](Values.md#draw-the-region) around text on a screenshot,
-   then type what it shows, such as `87%`. AppyTappy learns the shape of each
-   character from what you type. Label screenshots until
+4. **Teach it the characters.** On a screenshot, drag to draw a box tightly
+   around some characters, then type what the box shows, such as `87%`, in
+   its row under **Boxes**. AppyTappy learns the shape of each character from
+   what you type. [Boxes](#boxes) describes the boxes. Draw boxes until
    **Characters still missing** says it knows every character it needs,
    [find more like it](#find-more-like-it) on the same screenshot, or
-   [record the region](#record-readings) to collect them as they show.
+   [record readings](#record-readings) to collect them as they show.
 5. **Save.** Select **Save reference**. A reference with characters still
    missing saves too: the editor says so next to the button, and you can
    teach them later. To finish it later instead, select **Save as draft**
@@ -62,8 +62,36 @@ value wasn't drawn at, it reads where the region
 
 To teach a saved reference more, select **Edit** next to it on the References
 page, or **Edit** while you pick it for a value. What it learned before stays;
-new labels and readings add to it. Changing its color or tolerance changes how
+new boxes and readings add to it. Changing its color or tolerance changes how
 every value that reads with it reads, and the editor names them.
+
+## Boxes
+
+A box is a part of a screenshot that shows some characters, with the text you
+type for it. A reference learns from every box that has text. Draw as many as
+you like, on any screenshot, and several on one screenshot too.
+
+- **Draw.** Drag on a screenshot, away from the boxes there. The new box is
+  selected, and its row under **Boxes** takes what it shows.
+- **Select.** Press a box on the screenshot, or its number under **Boxes**,
+  which also shows the screenshot the box is on. Each row says which
+  screenshot that is, such as **On screenshot 2**.
+- **Move and resize.** Drag the selected box to move it, or drag one of the
+  squares at its corners to resize it, as
+  [Draw the region](Values.md#draw-the-region) describes.
+- **Type what it shows.** Type exactly what the box shows in its row. A box
+  with no text teaches nothing.
+- **Delete.** Select **Delete** in the box's row, or press Delete while the
+  box is selected on the screenshot.
+
+Every box goes on a screenshot of one window size, the size the reference
+reads at: the size of the screenshot its first box is on, or, while you teach
+a reference for a value, the size the value's region is drawn at. On a
+screenshot of another size, the editor says which size the boxes go on.
+
+While you teach a reference for a value, the screenshots show the boxes, not
+the value's region. The region is as you drew it when you go back to the
+value.
 
 ## Choose what it needs
 
@@ -92,7 +120,8 @@ in **Other characters**, where you can remove each. Select the choice to turn
 all of it on, and again to turn all of it off.
 
 The editor compares the list with what the reference learned, and keeps up as
-you type labels, add found text, keep recorded readings, or correct them:
+you type what boxes show, add found text, keep recorded readings, or correct
+them:
 
 - **Characters still missing** shows each needed character it has yet to
   learn, outlined. This is what is left to teach. Once it has them all, it
@@ -101,9 +130,9 @@ you type labels, add found text, keep recorded readings, or correct them:
   it learned that are not on the list show below them. They are fine to keep:
   the list says what you need, not what is allowed.
 
-The list only guides you. AppyTappy learns a character from a label, found
-text you add, or a kept reading, never because it is on the list, and a number reads the same way
-whatever you turn on. [Checks](Values.md#checks) says how a number reads its
+The list only guides you. AppyTappy learns a character from a box, found
+text you add, or a kept reading, never because it is on the list, and a
+number reads the same way whatever you turn on. [Checks](Values.md#checks) says how a number reads its
 `.` and `,`.
 
 A reference saved without a list shows every character it knows under
@@ -112,62 +141,80 @@ it needs to see what is left to teach.
 
 ## Find more like it
 
-A screen often shows more numbers in the same font than the one you drew the
-region around, such as a stats panel. After you draw the region and pick the
-**Characters' color**, select **Find more like it** under the text you typed.
-AppyTappy looks on the screenshot for other text in that color and as tall as
-the text in the region, and reads each as text.
+A screen often shows more numbers in the same font than the one you drew a
+box around, such as a stats panel. Pick the **Characters' color**, select a
+box, and then select **Find more like it**. AppyTappy looks on the box's
+screenshot for other text in that color and as tall as the text in the box,
+away from the boxes that are there already, and reads each as text.
 
-1. **Check what it found.** Each find shows numbered on the screenshot and in
-   the list, with the text AppyTappy read. Fix any text it got wrong, and clear
-   the box beside any find that is not in the font, such as a label. When
-   AppyTappy reads a letter while the reference has learned none, such as a `0`
-   read as `O`, the find is flagged until you type its text, and so is text
-   that gives one shape two different characters: fix it or leave it out.
-2. **Add them.** Select the button that says how many you add, such as
-   **Add 3 to the reference**. They teach the reference like labeled
-   screenshots, and **Characters it knows** outlines the characters only the
-   finds would teach until you add them. Until then they still count under
-   **Characters still missing**. **Not these** closes the list without
-   adding any, and **Remove found text** takes the added finds back out.
+The list holds only the finds that may show the characters the reference
+[needs](#choose-what-it-needs). A letter that is often read in place of a
+digit counts as that digit, so a reference that needs digits still lists a
+find read as `12O5`, whose `O` may be a `0`. The list says how many finds it
+skipped. A reference with no list of what it needs lists every find.
 
-Draw the region tightly around the text first, since the finds' characters
-must be about as tall as the text in it; a comma or a mark below them does not
+1. **Tick the ones to add.** Each find shows numbered on the screenshot and in
+   the list, with the text AppyTappy read. A find starts unticked: tick the
+   ones to add, or **Select all**, which also clears every tick. Fix any text
+   it got wrong; typing a find's text ticks it.
+2. **Deal with the flagged ones.** A ticked find is flagged when it can't be
+   added as it is: it has no text, AppyTappy read a letter while the reference
+   has learned none, such as a `0` read as `O`, or its text gives one shape
+   two different characters. Type what it shows, or leave it out.
+   **Deselect flagged**, which shows while a ticked find is flagged, clears
+   the tick of every flagged find at once, so you can add the rest.
+3. **Reread, if the color was off.** **Reread** shows while AppyTappy could
+   not read a find, or while a flagged find still has the text AppyTappy read.
+   It reads those finds again with the **Characters' color** and
+   **Tolerance** as they are set now, and keeps your ticks and the text you
+   typed. The same color and tolerance read the same text, so change one of
+   them first, such as a tolerance that left parts of the characters out.
+4. **Add them.** Select the button that says how many you add, such as
+   **Add 3 to the reference**. Each becomes a [box](#boxes), which you can
+   move, retype, or delete like one you drew. Until you add them,
+   **Characters it knows** outlines the characters only the finds would
+   teach, and they still count under **Characters still missing**.
+   **Not these** closes the list without adding any.
+
+Draw the box tightly around the text first, since the finds' characters must
+be about as tall as the text in it; a comma or a mark below them does not
 count. Text of another size is skipped, and the list says how much. One search
 lists at most 12 finds; add those, then select **Find more like it** again, and
 it lists the rest, leaving out what you added.
 
 ## What a reference can't learn
 
-A label has one character for each character the region shows, and AppyTappy
-says so when the two differ:
+A box's text has one character for each character the box shows, and
+AppyTappy says so when the two differ:
 
-- **The region shows fewer characters than you typed.** Characters that touch
+- **The box shows fewer characters than you typed.** Characters that touch
   count as one, and a reference can't learn them.
-- **The region shows more characters than you typed.** A character counts once
+- **The box shows more characters than you typed.** A character counts once
   for each of its marks that has blank space on both sides. Some percent
   signs are three such marks: a ring, a slash, and a ring. Type a character
   for each mark, such as `87o/o`; the number still reads as 87. Anything else
-  in the characters' color counts too, so draw the region around the number
+  in the characters' color counts too, so draw the box around the number
   alone.
 
-A reference knows a character as it looked beside the others in the region.
+A reference knows a character as it looked beside the others in its box.
 A sign that reaches above or below the digits, such as the `,` in `1,234`,
-changes how every character beside it looks to AppyTappy. Label readings
-that show the sign until they show every digit, and readings without it
-too.
+changes how every character beside it looks to AppyTappy. Draw boxes around
+readings that show the sign until they show every digit, and around readings
+without it too.
 
-Small text takes more labels. Where the characters are less than about 16
-pixels tall, label several readings of each character, or
+Small text takes more boxes. Where the characters are less than about 16
+pixels tall, draw boxes around several readings of each character, or
 [record](#record-readings) them.
 
 ## Record readings
 
 Typing what a counter shows on screenshot after screenshot is slow when it
-shows many values. A reference can record its region instead, while you use
-the application, and collect the characters it shows. While you make a
-**Number** value, **Record readings** under **How to read it** opens this
-recording on the value's region. The other checks
+shows many values. A reference can record instead, while you use the
+application, and collect the characters one place in the window shows: the
+value's region while you teach a reference for a value, or else the
+reference's first box. While you make a **Number** value,
+**Record readings** under **Characters** opens this recording on the value's
+region. The other checks
 [record screenshots](Values.md#record-screenshots) instead.
 
 A recording keeps a reading when it shows a character shape that no kept
@@ -186,12 +233,12 @@ shows in two different readings counts as a character, so an in-between
 shape that a counter draws at every change passes for one. The recording
 then keeps no cleaner reading, however long it records, and review cannot
 offer one. If a character stays under **Still missing**, or its only reading
-cannot be labeled, take a screenshot that shows the character without the
-stray shape and label that instead.
+cannot be typed, take a screenshot that shows the character without the
+stray shape and draw a box around it instead.
 
-1. **Start recording.** Draw the region and pick the **Characters' color**
-   first. Then select **Start recording** under **Record readings**. The
-   region turns red while it records.
+1. **Start recording.** Draw a box around the characters and pick the
+   **Characters' color** first. Then select **Start recording** under
+   **Record readings**. The region turns red while it records.
 2. **Use the application.** Go on in it until the region has shown the
    characters you need. AppyTappy reads each kept reading's text for you, and
    **Recording** says what that gives so far:
@@ -246,8 +293,8 @@ stray shape and label that instead.
    **Keep 12, first at 0:02**.
 
 4. **Keep them.** Select the button that says how many you keep, such as
-   **Keep 12 readings**. The kept readings teach the reference like labeled
-   screenshots. **Review recording** opens them again with your choices, and
+   **Keep 12 readings**. The kept readings teach the reference like boxes
+   do. **Review recording** opens them again with your choices, and
    **Record more** goes on with the same recording. **Back** leaves review
    without keeping, and your changes stay for next time. To record more, keep
    the region, the characters' color, and the tolerance as they were, on a
@@ -265,10 +312,10 @@ a reference cannot learn it as one character:
 [What a reference can't learn](#what-a-reference-cant-learn) says what to
 type for it.
 
-Keep the window the size it was when you took the screenshot you drew the
-region on: at another size, recording pauses and says to resize the window.
-Every screenshot you label, and the recording, must have that size too, and
-the reference says which one does not. What a reference learned still reads
+Keep the window the size it was when you took the screenshot the recorded
+region is on: at another size, recording pauses and says to resize the
+window. Every screenshot with a box, and the recording, must have that size
+too, and the reference says which one does not. What a reference learned still reads
 at other sizes. If the window's capture fails for a moment, recording stops
 and says why; select **Record more** once the window shows again. If the
 window closes, nothing more can be recorded from it. Review and keep the
@@ -295,12 +342,14 @@ If AppyTappy cannot read a reading's text, review leaves its text empty for
 you to type.
 
 The text in review comes from a separate text reader that only fills in the
-labels for you to check. It doesn't show what the reference reads: the box
+text for you to check. It doesn't show what the reference reads: the box
 at the bottom of the panel does, on the live window.
 
 To remove a screenshot, select it, then select **Remove screenshot** with its
-number. One the region is drawn on, or that you labeled, stays: draw the
-region on another screenshot or clear its label first.
+number. One the value's region is drawn on, or that a box is on, stays: draw
+the region on another screenshot or delete its boxes first. A screenshot
+whose found text is listed stays until you add the finds or select
+**Not these**.
 
 ## Delete a reference
 

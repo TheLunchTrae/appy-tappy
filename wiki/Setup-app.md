@@ -66,9 +66,9 @@ This page covers what the user guide leaves out.
   Removing one releases its pixels and leaves its index empty, so the indexes
   the draft holds stay right, and the strip numbers a screenshot by its index
   so its number never changes. The UI refuses to remove a screenshot the draft
-  uses: the one its region is drawn on, one a state is taken from, a labeled
-  one, and the value's own while the reference editor is open over it
-  (`lib/looks.ts`). A check that names a removed screenshot is refused like
+  uses: the one its region is drawn on, one a state is taken from, and one a
+  reference's box is on (`lib/looks.ts`), and one whose found text is
+  listed. A check that names a removed screenshot is refused like
   one that names a screenshot of another session. The draft keeps
   the screenshot its region was drawn on, and a value saves that screenshot's
   window size. The owner refuses a check or a save that cuts the region from
@@ -488,7 +488,8 @@ review without keeping, and review's edits stay for the next one.
 ### Finding more like it
 
 [Find more like it](References.md#find-more-like-it) searches the screenshot
-the user labels for more text like the region shows (`recording/find.rs`). It
+the selected box is on for more text like the box shows
+(`recording/find.rs`). It
 marks each pixel as ink with the reference's color and tolerance, as
 `DigitReader` does, and takes the band of inked rows with the most ink in the
 region, as the reader segments it. It joins touching ink, corners included,
@@ -513,11 +514,17 @@ forgets it; reads already
 queued for a forgotten search still run, and their text is dropped. Pictures
 of finds are asked for by the search's number, so an answer for a replaced
 search is empty. The UI lists
-the finds, polls while text is still being read, and asks which kept finds the
-reference cannot learn (`found_problems`), learning them after the draft's own
-labels the way review learns recorded readings. Added finds become labels with
-a `region` of their own on their screenshot, which the reference cuts instead
-of the spec's region, so they save as samples like any labeled screenshot.
+the finds that may show the characters the reference needs (`fitsNeeds` in
+`lib/found.ts`), polls while text is still being read, and asks which kept
+finds the reference cannot learn (`found_problems`), learning them after the
+draft's own boxes the way review learns recorded readings. **Reread**
+(`reread_found`) cuts the named finds' ink again from the pixels the search
+kept, with the color and tolerance the draft has now, and sends it to the
+text reader; the reader is deterministic, so only a changed color or
+tolerance changes what it reads. Added finds become boxes of the draft
+(`lib/boxes.ts`), each a label with a `region` of its own on its screenshot,
+which the reference cuts instead of the spec's region, so they save as
+samples like any box the user drew.
 
 ### Recording looks
 
