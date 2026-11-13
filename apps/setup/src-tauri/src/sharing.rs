@@ -64,10 +64,7 @@ pub(crate) struct Shared {
 /// cannot be read, when packing fails, or when [`Shared::unpack`] would
 /// refuse the file, such as one that holds more than [`MAX_SHARED_BYTES`].
 pub(crate) fn pack(app: &SavedApp) -> Result<Vec<u8>, ShareError> {
-    // No picture past what a whole export holds is read in full; the
-    // budget in `pack_with` refuses it from the byte past that.
-    let most = u64::try_from(MAX_SHARED_BYTES).unwrap_or(u64::MAX);
-    pack_with(app.file.clone(), |name| {
+    pack_with(app.file.clone(), |name, most| {
         app.picture_within(name, most).map_err(|source| {
             if source.kind() == io::ErrorKind::NotFound {
                 ShareError::NoPicture(name.to_owned())
@@ -79,13 +76,15 @@ pub(crate) fn pack(app: &SavedApp) -> Result<Vec<u8>, ShareError> {
 }
 
 /// The bytes of the zip file that shares `file` with the pictures `picture`
-/// answers, packed as they are read. A file past [`MAX_SHARED_BYTES`] is
-/// refused at the picture that takes it there, so no picture after it is
-/// read.
+/// answers, packed as they are read. `picture` is told the most bytes a
+/// whole export holds, so it reads no picture past one byte more than that.
+/// A file past [`MAX_SHARED_BYTES`] is refused at the picture that takes it
+/// there, so no picture after it is read.
 fn pack_with(
     mut file: AppFile,
-    picture: impl FnMut(&str) -> Result<Vec<u8>, ShareError>,
+    mut picture: impl FnMut(&str, u64) -> Result<Vec<u8>, ShareError>,
 ) -> Result<Vec<u8>, ShareError> {
+    let most = u64::try_from(MAX_SHARED_BYTES).unwrap_or(u64::MAX);
     let mut zip = ZipPack::new();
     let mut budget = MAX_SHARED_BYTES;
     let mut add = |name: &str, bytes: &[u8]| {
@@ -94,7 +93,11 @@ fn pack_with(
             .ok_or(ShareError::TooLarge)?;
         zip.add(name, bytes).map_err(ShareError::Pack)
     };
-    share(&mut file, picture, |name, bytes| add(&name, &bytes))?;
+    share(
+        &mut file,
+        |name| picture(name, most),
+        |name, bytes| add(&name, &bytes),
+    )?;
     add(APP_FILE, file.to_json().as_bytes())?;
     let packed = zip.finish().map_err(ShareError::Pack)?;
     Shared::unpack(&packed).map(|_read| packed)
@@ -806,7 +809,7 @@ mod tests {
         };
         Shared::new(file.clone(), held).expect("each value reads");
         assert_eq!(
-            pack_with(file, held)
+            pack_with(file, |name, _most| held(name))
                 .expect_err("too large to import")
                 .to_string(),
             "it holds more than 16 MB"
@@ -827,7 +830,8 @@ mod tests {
             pictures.insert(image, padded(&png(2, 2, [0, 0, 255, 255]), more));
         }
         let mut asked = Vec::new();
-        let refused = pack_with(file, |name| {
+        let refused = pack_with(file, |name, most| {
+            assert_eq!(most, 16 * 1024 * 1024, "no picture is read past the most");
             asked.push(name.to_owned());
             Ok(pictures[name].clone())
         })
@@ -1077,7 +1081,7 @@ mod tests {
         fn what_is_packed_unpacks_as_it_is_shared((file, held) in shared()) {
             let shared = Shared::new(file.clone(), |name| Ok(held[name].clone()))
                 .expect("every value reads");
-            let packed = pack_with(file, |name| Ok(held[name].clone())).expect("packs");
+            let packed = pack_with(file, |name, _most| Ok(held[name].clone())).expect("packs");
             prop_assert_eq!(Shared::unpack(&packed).expect("unpacks"), shared);
         }
     }
