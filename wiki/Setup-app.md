@@ -1356,7 +1356,8 @@ The [Debug page](Debug-page.md) shows only while `showDebug` in
   save with the WebView's save picker first, then saves the returned bytes
   there, as [Application import](State-machines.md#application-import) says
   of the export dialogs. Pictures are stored, everything else is deflated,
-  with the `zip` crate and its pure-Rust deflate backend. `setup.log` records the whole time, packing included.
+  with the `zip` crate and its pure-Rust deflate backend. `setup.log` records
+  the whole time, packing included.
 
 The same setting adds debug details to the editors. The page asks for them
 only while `showDebug` is true, so with it off they cost nothing:

@@ -1366,12 +1366,14 @@ read while the dialog asks, changes nothing.
 
 The export dialog (`ExportApp.tsx`) and the debug bundle dialog
 (`ExportBundle.tsx`) have no states beyond busy while the file is made and
-saved. Each asks where to save first, while the page still has the click that
-the picker needs, then makes the file and writes it (`saveZip`). The picker
-makes the file it picks, empty, so a file that fails to be made or written is
-removed: a failure leaves no file behind, shows in the dialog, and
-**Save file** or **Save bundle** tries again. Closing the picker makes
-nothing.
+saved. Each asks where to save first, then makes the file and writes it
+(`saveZip`): the click lets the page open the picker for only about 5
+seconds, and a slow build would otherwise never reach it. The picker makes
+the file it picks, or empties one that was there, so the old content is gone
+from the pick on. A file that fails to be made or written is removed: a
+failure leaves no file there, not even the one the user picked to replace,
+shows in the dialog, and **Save file** or **Save bundle** tries again. Closing
+the picker makes nothing.
 
 ### Capture slot
 
