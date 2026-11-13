@@ -34,8 +34,9 @@ use appytappy_sources::screen::{
 use appytappy_sources::system::WindowPlace;
 use serde::Serialize;
 
-use crate::owner::{Host, Message, Reading, at_size};
+use crate::owner::{Event, Host, Message, Reading, at_size};
 use crate::stores::SavedApp;
+use crate::ticket::{Running, Ticket, Tickets};
 
 /// The shortest time between two frames an overlay reads: often enough for
 /// readings it shows about four times a second.
@@ -158,9 +159,6 @@ pub(crate) struct OverlayWindow {
 /// One application's overlay.
 #[derive(Debug)]
 struct Overlay<S> {
-    /// Counts this overlay's captures, so a frame from an earlier one is
-    /// dropped.
-    generation: u64,
     /// The application's name.
     name: String,
     /// Where the readings show.
@@ -178,8 +176,8 @@ struct Overlay<S> {
     now: Option<Size>,
     /// How to find the window.
     window_match: appytappy_config::window_match::WindowMatch,
-    /// The running capture.
-    session: Option<S>,
+    /// The running capture, with the ticket its readings carry.
+    capture: Option<Running<S>>,
     /// The captured window's handle.
     window: Option<u64>,
     /// What the newest frame read.
@@ -207,8 +205,6 @@ type Values = Arc<[(String, Result<SavedValue, String>)]>;
 pub(crate) struct Overlays<S> {
     /// Who its captures read for.
     purpose: Purpose,
-    /// The next capture's generation.
-    next: u64,
     open: BTreeMap<String, Overlay<S>>,
     /// Overlays that could not open, why, and the polls left before they
     /// try again.
@@ -224,7 +220,6 @@ impl<S: CaptureSession> Overlays<S> {
     pub(crate) const fn new(purpose: Purpose) -> Self {
         Self {
             purpose,
-            next: 0,
             open: BTreeMap::new(),
             failed: BTreeMap::new(),
             cards: BTreeMap::new(),
@@ -240,7 +235,7 @@ impl<S: CaptureSession> Overlays<S> {
     pub(crate) fn view<H: Host<Session = S>>(
         &mut self,
         host: &H,
-        messages: &Sender<Message<H>>,
+        (messages, tickets): (&Sender<Message<H>>, &mut Tickets),
         app: &str,
         file: impl FnOnce() -> Result<SavedApp, String>,
     ) -> Result<OverlayView, String> {
@@ -266,20 +261,17 @@ impl<S: CaptureSession> Overlays<S> {
                 },
             }
         }
-        let generation = self.next;
         let overlay = self
             .open
             .get_mut(app)
             .ok_or_else(|| "The overlay closed.".to_owned())?;
         settled(overlay, host.now());
-        if overlay.session.is_none() {
+        if overlay.capture.is_none() {
             if overlay.wait == 0 {
-                match start(host, messages, self.purpose, app, generation, overlay) {
-                    Ok(()) => self.next = self.next.wrapping_add(1),
-                    Err(message) => {
-                        overlay.message = Some(message);
-                        overlay.wait = RETRY_POLLS;
-                    },
+                let ticket = tickets.next();
+                if let Err(message) = start(host, messages, (self.purpose, app, ticket), overlay) {
+                    overlay.message = Some(message);
+                    overlay.wait = RETRY_POLLS;
                 }
             } else {
                 overlay.wait = overlay.wait.saturating_sub(1);
@@ -320,22 +312,23 @@ impl<S: CaptureSession> Overlays<S> {
         self.open.get(app).map(|overlay| overlay.mode)
     }
 
-    /// Keeps what `app`'s capture with `generation` read at `time`, or why
-    /// it stopped. A stopped capture closes, and a poll about a second later
-    /// looks for the window again. A window of another size shows no
-    /// readings until its size settles; a poll then places the values there.
+    /// The ticket of `app`'s capture, while it has one.
+    pub(crate) fn ticket(&self, app: &str) -> Option<Ticket> {
+        let running = self.open.get(app)?.capture.as_ref()?;
+        Some(running.ticket)
+    }
+
+    /// Keeps what `app`'s capture read at `time`, or why it stopped. A
+    /// stopped capture closes, and a poll about a second later looks for
+    /// the window again. A window of another size shows no readings until
+    /// its size settles; a poll then places the values there.
     pub(crate) fn read(
         &mut self,
         app: &str,
-        generation: u64,
         read: Result<FrameRead, String>,
         time: Instant,
     ) -> io::Result<()> {
-        let Some(overlay) = self
-            .open
-            .get_mut(app)
-            .filter(|overlay| overlay.generation == generation && overlay.session.is_some())
-        else {
+        let Some(overlay) = self.open.get_mut(app) else {
             return Ok(());
         };
         match read {
@@ -366,7 +359,7 @@ impl<S: CaptureSession> Overlays<S> {
                 overlay.window = None;
                 overlay.message = Some(format!("{} cannot be read: {error}.", overlay.name));
                 overlay.wait = RETRY_POLLS;
-                overlay.session.take().map_or(Ok(()), CaptureSession::close)
+                overlay.capture.take().map_or(Ok(()), Running::close)
             },
         }
     }
@@ -421,8 +414,8 @@ impl<S: CaptureSession> Overlays<S> {
                 }
                 self.open.remove(closed)
             })
-            .filter_map(|overlay| overlay.session)
-            .map(CaptureSession::close)
+            .filter_map(|overlay| overlay.capture)
+            .map(Running::close)
             .fold(Ok(()), Result::and)
     }
 }
@@ -461,7 +454,6 @@ fn open<S>(
         })
         .collect();
     Ok(Overlay {
-        generation: 0,
         name: file.name.clone(),
         mode,
         values,
@@ -469,7 +461,7 @@ fn open<S>(
         size: None,
         now: None,
         window_match: file.window.to_match(),
-        session: None,
+        capture: None,
         window: None,
         latest: None,
         message: None,
@@ -513,13 +505,13 @@ fn settled<S: CaptureSession>(overlay: &mut Overlay<S>, now: Instant) {
     overlay.window = None;
     overlay.wait = 0;
     overlay.settle = None;
-    if let Some(session) = overlay.session.take() {
+    if let Some(running) = overlay.capture.take() {
         #[expect(
             clippy::let_underscore_must_use,
             reason = "a capture that ends badly is replaced at once, which shows any problem it \
                       had"
         )]
-        let _ = session.close();
+        let _ = running.close();
     }
 }
 
@@ -537,13 +529,12 @@ fn place(values: &[(String, Result<SavedValue, String>)], size: Size) -> Placed 
     )
 }
 
-/// Finds `overlay`'s window and starts reading it with `generation`.
+/// Finds `overlay`'s window and starts reading it for `purpose` under
+/// `ticket`, as the capture of the application `app`.
 fn start<H: Host>(
     host: &H,
     messages: &Sender<Message<H>>,
-    purpose: Purpose,
-    app: &str,
-    generation: u64,
+    (purpose, app, ticket): (Purpose, &str, Ticket),
     overlay: &mut Overlay<H::Session>,
 ) -> Result<(), String> {
     let no_values = || format!("{} has no values to show yet.", overlay.name);
@@ -576,21 +567,22 @@ fn start<H: Host>(
             clippy::let_underscore_must_use,
             reason = "a failed send means the owner stopped and will close this capture"
         )]
-        let _ = messages.send(Message::Overlay {
-            purpose,
-            app: app.clone(),
-            generation,
-            read: read_all(&placed, &values, frame),
+        let _ = messages.send(Message::Sent {
+            ticket,
+            event: Event::Overlay {
+                purpose,
+                app: app.clone(),
+                read: read_all(&placed, &values, frame),
+            },
         });
         OVERLAY_INTERVAL
     });
     let session = host
         .capture(window, Crop::Layout(layout), OVERLAY_INTERVAL, handler)
         .map_err(|error| error.to_string())?;
-    overlay.generation = generation;
     overlay.size = Some(size);
     overlay.settle = Some(Settle::new(size));
-    overlay.session = Some(session);
+    overlay.capture = Some(Running { ticket, session });
     overlay.window = Some(window);
     overlay.latest = None;
     overlay.now = None;
@@ -768,7 +760,6 @@ mod tests {
         }))
         .expect("the file's spelling");
         Overlay {
-            generation: 0,
             name: "Example App".to_owned(),
             mode: OverlayModeDef::Overlay,
             ids: values.iter().map(|_| "dot".to_owned()).collect(),
@@ -776,7 +767,7 @@ mod tests {
             size: Some(size),
             now: Some(size),
             window_match: window.to_match(),
-            session: None,
+            capture: None,
             window: Some(7),
             latest: None,
             message: None,

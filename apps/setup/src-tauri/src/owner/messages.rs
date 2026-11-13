@@ -15,6 +15,7 @@ use tokio::sync::oneshot;
 use crate::check_spec::{CharactersSpec, CheckSpec, ColorSpec, RegionSpec};
 use crate::overlay::{FrameRead, Purpose};
 use crate::recording::{Scope, Text, look};
+use crate::ticket::Ticket;
 use crate::window_list::{WindowFit, WindowList};
 
 use super::{Desktop, Host, Owner};
@@ -421,72 +422,13 @@ impl<H: Host> fmt::Debug for Run<H> {
 pub(crate) enum Message<H: Host = Desktop> {
     /// Work from a command or an overlay window.
     Run(Run<H>),
-    /// The capture with this generation sent a frame.
-    Frame {
-        /// Which capture sent it; frames from an earlier one are dropped.
-        generation: u64,
-        /// The window's whole frame.
-        image: Image,
-        /// When it arrived.
-        received: Instant,
-    },
-    /// The text reader read reading `index` of recording `recording`.
-    Recognized {
-        /// Which recording it belongs to; text for an earlier one is
-        /// dropped.
-        recording: u64,
-        /// The reading's index.
-        index: usize,
-        /// What it read.
-        text: Text,
-    },
-    /// The frame that arrived at `at` was looked over for recording
-    /// `recording`.
-    Looked {
-        /// Which recording it belongs to; a look for an earlier one is
-        /// dropped.
-        recording: u64,
-        /// When the frame it looked over arrived.
-        at: Instant,
-        /// Each run of text it found, or `None` when the look failed.
-        seen: Option<Vec<look::Seen>>,
-    },
-    /// The text reader read find `index` of search `search`.
-    FoundText {
-        /// Which search it belongs to; text for an earlier one is dropped.
-        search: u64,
-        /// The find's index.
-        index: usize,
-        /// What it read.
-        text: Text,
-    },
-    /// The watch with this generation saw a frame, or stopped and why.
-    Watch {
-        /// Which capture sent it; frames from an earlier one are dropped.
-        generation: u64,
-        /// What the frame showed, or why the capture stopped.
-        seen: Result<Seen, String>,
-    },
-    /// The capture with this generation stopped, such as when the window
-    /// closed.
-    CaptureFailed {
-        /// Which capture stopped.
-        generation: u64,
-        /// Why, and whether the capture ended.
-        failure: CaptureFailure,
-    },
-    /// An application's overlay, or the Values page's reading of its
-    /// values, read them, or stopped and why.
-    Overlay {
-        /// Who the capture reads for.
-        purpose: Purpose,
-        /// The application's ID.
-        app: String,
-        /// Which of its captures sent it; readings from an earlier one are
-        /// dropped.
-        generation: u64,
-        /// What the frame read, or why the capture stopped.
-        read: Result<FrameRead, String>,
+    /// A capture or a worker thread sent `event` about the work `ticket`
+    /// names. The owner drops it unless that work still holds the ticket.
+    Sent {
+        /// The ticket of the capture, recording, or search it is about.
+        ticket: Ticket,
+        /// What happened.
+        event: Event,
     },
     /// The user moved or resized an application's picture-in-picture
     /// panel.
@@ -498,6 +440,53 @@ pub(crate) enum Message<H: Host = Desktop> {
     },
     /// The app is closing.
     Shutdown,
+}
+
+/// What a capture or a worker thread tells the owner about its work.
+#[derive(Debug)]
+pub(crate) enum Event {
+    /// The picked window's capture sent a frame.
+    Frame {
+        /// The window's whole frame.
+        image: Image,
+        /// When it arrived.
+        received: Instant,
+    },
+    /// The picked window's capture failed, such as when the window closed.
+    CaptureFailed(CaptureFailure),
+    /// The watch's capture saw a frame, or stopped and why.
+    Watch(Result<Seen, String>),
+    /// The text reader read reading `index` of a recording.
+    Recognized {
+        /// The reading's index.
+        index: usize,
+        /// What it read.
+        text: Text,
+    },
+    /// The frame that arrived at `at` was looked over for a recording.
+    Looked {
+        /// When the frame it looked over arrived.
+        at: Instant,
+        /// Each run of text it found, or `None` when the look failed.
+        seen: Option<Vec<look::Seen>>,
+    },
+    /// The text reader read find `index` of a search.
+    FoundText {
+        /// The find's index.
+        index: usize,
+        /// What it read.
+        text: Text,
+    },
+    /// An application's overlay, or the Values page's reading of its
+    /// values, read them, or stopped and why.
+    Overlay {
+        /// Who the capture reads for.
+        purpose: Purpose,
+        /// The application's ID.
+        app: String,
+        /// What the frame read, or why the capture stopped.
+        read: Result<FrameRead, String>,
+    },
 }
 
 #[cfg(test)]

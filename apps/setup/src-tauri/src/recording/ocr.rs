@@ -19,7 +19,8 @@ use ocrs::{ImageSource, OcrEngine, OcrEngineParams};
 use rten::Model;
 use rten_imageproc::{Point, Rect, RotatedRect};
 
-use crate::owner::Message;
+use crate::owner::{Event, Message};
+use crate::ticket::Ticket;
 
 use super::Text;
 use super::ink::Line;
@@ -31,12 +32,12 @@ pub(crate) const MODEL_FILE: &str = "text-recognition.onnx";
 /// What a job's line belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Source {
-    /// A recording, by its number; text for one the user discarded is
+    /// A recording, by its ticket; text for one the user discarded is
     /// dropped.
-    Recording(u64),
-    /// A search for text like a reference's sample, by its number; text for
+    Recording(Ticket),
+    /// A search for text like a reference's sample, by its ticket; text for
     /// one the user dismissed or replaced is dropped.
-    Search(u64),
+    Search(Ticket),
 }
 
 /// One line for the text reader.
@@ -54,22 +55,22 @@ pub(crate) struct Job {
 /// ones still worth reading.
 #[derive(Debug, Default, Clone, Copy)]
 struct Newest {
-    recording: u64,
-    search: u64,
+    recording: Option<Ticket>,
+    search: Option<Ticket>,
 }
 
 impl Newest {
     fn see(&mut self, source: Source) {
         match source {
-            Source::Recording(recording) => self.recording = self.recording.max(recording),
-            Source::Search(search) => self.search = self.search.max(search),
+            Source::Recording(recording) => self.recording = self.recording.max(Some(recording)),
+            Source::Search(search) => self.search = self.search.max(Some(search)),
         }
     }
 
-    const fn is_stale(self, source: Source) -> bool {
+    fn is_stale(self, source: Source) -> bool {
         match source {
-            Source::Recording(recording) => recording < self.recording,
-            Source::Search(search) => search < self.search,
+            Source::Recording(recording) => Some(recording) < self.recording,
+            Source::Search(search) => Some(search) < self.search,
         }
     }
 }
@@ -131,16 +132,15 @@ pub(crate) fn run(jobs: &Receiver<Job>, messages: &Sender<Message>, model: &Path
                 }),
             Err(why) => Text::Failed(why.clone()),
         };
+        let index = job.index;
         let recognized = match job.source {
-            Source::Recording(recording) => Message::Recognized {
-                recording,
-                index: job.index,
-                text,
+            Source::Recording(ticket) => Message::Sent {
+                ticket,
+                event: Event::Recognized { index, text },
             },
-            Source::Search(search) => Message::FoundText {
-                search,
-                index: job.index,
-                text,
+            Source::Search(ticket) => Message::Sent {
+                ticket,
+                event: Event::FoundText { index, text },
             },
         };
         if messages.send(recognized).is_err() {
@@ -219,7 +219,7 @@ mod tests {
         let model = std::env::temp_dir().join("appytappy-no-model.onnx");
         for index in 0..2 {
             jobs.send(Job {
-                source: Source::Recording(4),
+                source: Source::Recording(Ticket::numbered(4)),
                 index,
                 line: Line {
                     width: 1,
@@ -233,12 +233,15 @@ mod tests {
         run(&inbox, &messages, &model);
         for expected in 0..2 {
             match outbox.try_recv().expect("one answer per reading") {
-                Message::Recognized {
-                    recording: 4,
-                    index,
-                    text: Text::Failed(why),
+                Message::Sent {
+                    ticket,
+                    event:
+                        Event::Recognized {
+                            index,
+                            text: Text::Failed(why),
+                        },
                 } => {
-                    assert_eq!(index, expected);
+                    assert_eq!((ticket.number(), index), (4, expected));
                     assert!(why.contains("appytappy-no-model.onnx"), "{why}");
                 },
                 other => panic!("unexpected {other:?}"),
@@ -253,7 +256,7 @@ mod tests {
         let model = std::env::temp_dir().join("appytappy-no-model.onnx");
         for (recording, index) in [(1, 0), (1, 1), (2, 0), (1, 2)] {
             jobs.send(Job {
-                source: Source::Recording(recording),
+                source: Source::Recording(Ticket::numbered(recording)),
                 index,
                 line: Line {
                     width: 1,
@@ -268,9 +271,10 @@ mod tests {
         let answered: Vec<(u64, usize)> = outbox
             .try_iter()
             .map(|message| match message {
-                Message::Recognized {
-                    recording, index, ..
-                } => (recording, index),
+                Message::Sent {
+                    ticket,
+                    event: Event::Recognized { index, .. },
+                } => (ticket.number(), index),
                 other => panic!("unexpected {other:?}"),
             })
             .collect();
@@ -283,10 +287,10 @@ mod tests {
         let (messages, outbox) = mpsc::channel();
         let model = std::env::temp_dir().join("appytappy-no-model.onnx");
         let sources = [
-            Source::Search(1),
-            Source::Recording(5),
-            Source::Search(2),
-            Source::Search(1),
+            Source::Search(Ticket::numbered(1)),
+            Source::Recording(Ticket::numbered(5)),
+            Source::Search(Ticket::numbered(2)),
+            Source::Search(Ticket::numbered(1)),
         ];
         for (index, source) in sources.into_iter().enumerate() {
             jobs.send(Job {
@@ -305,10 +309,14 @@ mod tests {
         let answered: Vec<String> = outbox
             .try_iter()
             .map(|message| match message {
-                Message::Recognized {
-                    recording, index, ..
-                } => format!("recording {recording} reading {index}"),
-                Message::FoundText { search, index, .. } => format!("search {search} find {index}"),
+                Message::Sent {
+                    ticket,
+                    event: Event::Recognized { index, .. },
+                } => format!("recording {} reading {index}", ticket.number()),
+                Message::Sent {
+                    ticket,
+                    event: Event::FoundText { index, .. },
+                } => format!("search {} find {index}", ticket.number()),
                 other => panic!("unexpected {other:?}"),
             })
             .collect();

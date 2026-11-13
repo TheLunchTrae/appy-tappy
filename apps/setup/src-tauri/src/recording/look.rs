@@ -15,16 +15,17 @@ use std::time::Instant;
 use appytappy_sources::screen::digits::{DigitReader, Shape};
 use appytappy_sources::screen::{Image, Region};
 
-use crate::owner::Message;
+use crate::owner::{Event, Message};
+use crate::ticket::Ticket;
 
 use super::find::{self, Sizes, TextSize};
 
 /// One frame to look over.
 #[derive(Debug)]
 pub(crate) struct Job {
-    /// The recording it is for, by its number; a look for one the user
+    /// The recording it is for, by its ticket; a look for one the user
     /// discarded is dropped.
-    pub(crate) recording: u64,
+    pub(crate) recording: Ticket,
     /// The window's whole frame.
     pub(crate) frame: Image,
     /// When the frame arrived.
@@ -77,10 +78,9 @@ pub(crate) fn run(
 ) {
     while let Ok(job) = jobs.recv() {
         let seen = panic::catch_unwind(AssertUnwindSafe(|| look(&job))).ok();
-        let looked = Message::Looked {
-            recording: job.recording,
-            at: job.at,
-            seen,
+        let looked = Message::Sent {
+            ticket: job.recording,
+            event: Event::Looked { at: job.at, seen },
         };
         if messages.send(looked).is_err() {
             break;
@@ -109,7 +109,7 @@ mod tests {
             height: 2,
         };
         let job = |recording| Job {
-            recording,
+            recording: Ticket::numbered(recording),
             frame: Image::new(size, [40, 40, 40, 0].repeat(4)).expect("matching length"),
             at: Instant::now(),
             sizes: Sizes::of(2),
@@ -122,15 +122,16 @@ mod tests {
         jobs.send(job(2)).expect("open");
         drop(jobs);
         run(&inbox, &sender, |job| {
-            assert_ne!(job.recording, 1, "a look that fails");
+            assert_ne!(job.recording.number(), 1, "a look that fails");
             Vec::new()
         });
         let answers: Vec<(u64, Option<usize>)> = messages
             .try_iter()
             .map(|message| match message {
-                Message::Looked {
-                    recording, seen, ..
-                } => (recording, seen.map(|seen| seen.len())),
+                Message::Sent {
+                    ticket,
+                    event: Event::Looked { seen, .. },
+                } => (ticket.number(), seen.map(|seen| seen.len())),
                 _ => panic!("only looks are answered"),
             })
             .collect();
@@ -159,7 +160,7 @@ mod tests {
         let (jobs, inbox) = mpsc::channel();
         let (sender, messages) = mpsc::channel();
         jobs.send(Job {
-            recording: 7,
+            recording: Ticket::numbered(7),
             frame,
             at,
             sizes: Sizes::of(4),
@@ -169,15 +170,18 @@ mod tests {
         .expect("open");
         drop(jobs);
         run(&inbox, &sender, look);
-        let Ok(Message::Looked {
-            recording,
-            at: answered,
-            seen: Some(seen),
+        let Ok(Message::Sent {
+            ticket: recording,
+            event:
+                Event::Looked {
+                    at: answered,
+                    seen: Some(seen),
+                },
         }) = messages.try_recv()
         else {
             panic!("the look is answered");
         };
-        assert_eq!((recording, answered), (7, at));
+        assert_eq!((recording.number(), answered), (7, at));
         let [seen] = seen.as_slice() else {
             panic!("one run of text");
         };

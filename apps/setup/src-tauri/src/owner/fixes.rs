@@ -34,10 +34,10 @@ impl<H: Host> Owner<H> {
     pub(crate) fn save_fix(&mut self, spec: &FixSpec) -> Result<SavedValue, String> {
         // Without the stores, nothing else the user could fix matters.
         self.stores()?;
-        if self.screenshots.get(spec.screenshot).is_none() {
+        if self.capture.screenshots().get(spec.screenshot).is_none() {
             return Err("Take a screenshot first.".to_owned());
         }
-        let size = check_spec::drawn_size(&spec.check, &self.screenshots, spec.screenshot)
+        let size = check_spec::drawn_size(&spec.check, self.capture.screenshots(), spec.screenshot)
             .map_err(|error| error.to_string())?;
         self.update_app(&spec.app, Changed::Values, |owner, found| {
             let file = &found.file;
@@ -64,7 +64,7 @@ impl<H: Host> Owner<H> {
             let number = free_picture_number(&value.id, value.screen.images());
             let saved = check_spec::to_saved_fix(
                 &spec.check,
-                &owner.screenshots,
+                owner.capture.screenshots(),
                 &spec.app,
                 &value.id,
                 Some(number),

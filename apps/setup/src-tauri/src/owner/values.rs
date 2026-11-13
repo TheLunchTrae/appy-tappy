@@ -119,12 +119,12 @@ impl<H: Host> Owner<H> {
         if name.is_empty() {
             return Err("Name the value first.".to_owned());
         }
-        if self.screenshots.get(spec.screenshot).is_none() {
+        if self.capture.screenshots().get(spec.screenshot).is_none() {
             return Err("Take a screenshot first.".to_owned());
         }
         // The value keeps the window size its region was drawn at, which
         // any screenshot it cuts at the region must have too.
-        let size = check_spec::drawn_size(&spec.check, &self.screenshots, spec.screenshot)
+        let size = check_spec::drawn_size(&spec.check, self.capture.screenshots(), spec.screenshot)
             .map_err(|error| error.to_string())?;
         self.update_app(&spec.app, Changed::Values, |owner, found| {
             named_apart(&found.file, None, name)?;
@@ -135,8 +135,9 @@ impl<H: Host> Owner<H> {
                 .map(|value| value.id.as_str())
                 .collect();
             let id = new_value_id(name, &taken);
-            let saved = check_spec::to_saved(&spec.check, &owner.screenshots, &spec.app, &id)
-                .map_err(|error| error.to_string())?;
+            let saved =
+                check_spec::to_saved(&spec.check, owner.capture.screenshots(), &spec.app, &id)
+                    .map_err(|error| error.to_string())?;
             let screen = ScreenDef {
                 window_size: SizeDef {
                     width: size.width,

@@ -11,26 +11,88 @@
 
 use std::collections::BTreeMap;
 use std::io;
+use std::mem;
 use std::time::Instant;
 
 use appytappy_config::automation_file::WhenDef;
 use appytappy_config::signal::SignalName;
 use appytappy_sources::screen::saved::{self, AtSize, SavedValue, Unread};
 use appytappy_sources::screen::settle::Settle;
-use appytappy_sources::screen::{Crop, Frame, FrameMeaning, Layout, OutsideWindow, Size};
+use appytappy_sources::screen::{
+    CaptureSession, Crop, Frame, FrameMeaning, Layout, OutsideWindow, Size,
+};
 
 use crate::debug::workings::{self, ReadingDetails};
+use crate::ticket::{Running, Ticket};
 
+use super::capture::{self, Capture};
 use super::host::Host;
-use super::messages::{Live, Message, Seen, at_size};
+use super::messages::{Event, Live, Seen, at_size};
 use super::{Owner, WATCH_INTERVAL};
+
+/// The automation editor's watch of a saved value.
+#[derive(Debug)]
+pub(super) struct Watching<S> {
+    /// The value and what its frames showed.
+    watched: Watched,
+    /// The capture of the value's region, or why it stopped.
+    capture: WatchCapture<S>,
+}
+
+/// A watch's capture.
+#[derive(Debug)]
+enum WatchCapture<S> {
+    /// It runs.
+    Running(Running<S>),
+    /// It stopped, and why. Nothing starts it again: the editor shows why
+    /// and watches the value again.
+    Lost(String),
+}
+
+impl<S: CaptureSession> Watching<S> {
+    /// The ticket of the capture, while it runs.
+    pub(super) const fn ticket(&self) -> Option<Ticket> {
+        match &self.capture {
+            WatchCapture::Running(running) => Some(running.ticket),
+            WatchCapture::Lost(_) => None,
+        }
+    }
+
+    /// Stops the capture, if it runs.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error the capture's thread ended with.
+    pub(super) fn close(self) -> io::Result<()> {
+        match self.capture {
+            WatchCapture::Running(running) => running.close(),
+            WatchCapture::Lost(_) => Ok(()),
+        }
+    }
+
+    /// Stops the capture, if it runs, and keeps `error` as why it stopped,
+    /// for the editor to show.
+    fn lose(&mut self, error: String) {
+        if let WatchCapture::Running(running) =
+            mem::replace(&mut self.capture, WatchCapture::Lost(error))
+        {
+            // Nothing needs this capture, even if it would go on: the editor
+            // watches again, or another takes its place.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the watch says why its capture stopped, whatever its thread ended with"
+            )]
+            let _ = running.close();
+        }
+    }
+}
 
 /// The saved value the automation editor watches.
 #[derive(Debug)]
-pub(super) struct Watched {
-    /// The watch's number: the generation of its first capture, which it
-    /// keeps when its capture starts again for another window size.
-    id: u64,
+struct Watched {
+    /// The watch's number: the ticket of its first capture, which it keeps
+    /// when its capture starts again for another window size.
+    id: Ticket,
     /// Its application's ID.
     app: String,
     /// Its ID.
@@ -50,18 +112,15 @@ pub(super) struct Watched {
     unread: Option<(Size, Unread)>,
     /// The window size frames show, settled.
     settle: Settle,
-    /// What the newest frame showed, or `None` before one arrived.
-    pub(super) seen: Option<Seen>,
-    /// When the newest frame was seen.
-    seen_at: Option<Instant>,
-    /// Why the capture stopped, once it has.
-    pub(super) failure: Option<String>,
+    /// What the newest frame showed and when it was seen, or `None` before
+    /// one arrived.
+    seen: Option<(Seen, Instant)>,
 }
 
-/// A watch's message for one frame. A window too small for the region is
+/// A watch's event for one frame. A window too small for the region is
 /// a frame without pixels, not a stopped capture: the capture goes on.
-fn watch_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Message<H> {
-    let seen = match frame {
+fn watch_event(frame: io::Result<Frame<'_>>) -> Event {
+    Event::Watch(match frame {
         Ok(frame) => Ok(Seen {
             window_size: frame.window_size,
             image: Some(frame.image.clone()),
@@ -72,8 +131,7 @@ fn watch_message<H: Host>(generation: u64, frame: io::Result<Frame<'_>>) -> Mess
                 image: None,
             })
             .ok_or_else(|| error.to_string()),
-    };
-    Message::Watch { generation, seen }
+    })
 }
 
 impl<H: Host> Owner<H> {
@@ -103,40 +161,51 @@ impl<H: Host> Owner<H> {
         // at, until frames settle at another size.
         let size = check.drawn.window_size;
         let at = check.first();
-        let watch = self.start(
-            window,
-            Crop::Layout(Layout::one(at.region)),
+        self.stop();
+        let capture = capture::start(
+            &self.host,
+            &mut self.tickets,
+            &self.messages,
+            (window, Crop::Layout(Layout::one(at.region))),
             WATCH_INTERVAL,
-            watch_message,
+            watch_event,
         )?;
-        self.watched = Some(Watched {
-            id: watch,
-            app: app.to_owned(),
-            value: value.to_owned(),
-            name: saved.name.clone(),
-            window,
-            check,
-            reads: (size, at),
-            unread: None,
-            settle: Settle::new(size),
-            seen: None,
-            seen_at: None,
-            failure: None,
-        });
-        Ok(watch)
+        let id = capture.ticket;
+        self.capture = Capture::Watching(Box::new(Watching {
+            watched: Watched {
+                id,
+                app: app.to_owned(),
+                value: value.to_owned(),
+                name: saved.name.clone(),
+                window,
+                check,
+                reads: (size, at),
+                unread: None,
+                settle: Settle::new(size),
+                seen: None,
+            },
+            capture: WatchCapture::Running(capture),
+        }));
+        Ok(id.number())
     }
 
-    /// Keeps what a frame of the watched value's window showed, and acts on
-    /// the size its frames settled at, as [`Owner::settle_watch`] does.
-    pub(super) fn watch_seen(&mut self, seen: Seen) {
+    /// Takes what the watch's capture sent: keeps what a frame of the
+    /// watched value's window showed, and acts on the size its frames
+    /// settled at, as [`Owner::settle_watch`] does, or stops the capture
+    /// that failed and keeps why.
+    pub(super) fn watch_sent(&mut self, seen: Result<Seen, String>) {
         let now = self.host.now();
-        let Some(watched) = self.watched.as_mut() else {
+        let Some(watching) = self.capture.watching_mut() else {
             return;
         };
-        watched.settle.saw(seen.window_size, now);
-        watched.seen = Some(seen);
-        watched.seen_at = Some(now);
-        self.settle_watch(now);
+        match seen {
+            Ok(seen) => {
+                watching.watched.settle.saw(seen.window_size, now);
+                watching.watched.seen = Some((seen, now));
+                self.settle_watch(now);
+            },
+            Err(error) => watching.lose(error),
+        }
     }
 
     /// Places the watched value at the size its frames settled at by `now`,
@@ -146,9 +215,10 @@ impl<H: Host> Owner<H> {
     /// one copied, keeping the watch's number. Where it does not, the
     /// capture goes on, and the watch says why while frames show that size.
     fn settle_watch(&mut self, now: Instant) {
-        let Some(mut watched) = self.watched.take() else {
+        let Some(watching) = self.capture.watching_mut() else {
             return;
         };
+        let watched = &mut watching.watched;
         let placed = watched
             .settle
             .settled(now)
@@ -161,21 +231,38 @@ impl<H: Host> Owner<H> {
                 watched.unread = None;
                 if moved {
                     // Starting again drops the old capture's frames, which
-                    // are of the old region.
+                    // are of the old region. The old capture stops first,
+                    // so the window has one at a time.
                     watched.seen = None;
-                    let started = self.start(
-                        watched.window,
-                        Crop::Layout(Layout::one(watched.reads.1.region)),
+                    let region = watched.reads.1.region;
+                    let copied = (watched.window, Crop::Layout(Layout::one(region)));
+                    watching.lose("its capture is starting again".to_owned());
+                    let started = capture::start(
+                        &self.host,
+                        &mut self.tickets,
+                        &self.messages,
+                        copied,
                         WATCH_INTERVAL,
-                        watch_message,
+                        watch_event,
                     );
-                    watched.failure = started.err().or(watched.failure);
+                    watching.capture = match started {
+                        Ok(running) => WatchCapture::Running(running),
+                        Err(error) => WatchCapture::Lost(error),
+                    };
                 }
             },
             Some((size, Err(unread))) => watched.unread = Some((size, unread)),
             None => {},
         }
-        self.watched = Some(watched);
+    }
+
+    /// The watch numbered `watch`, or an error once it was stopped or
+    /// replaced.
+    fn watching(&self, watch: u64) -> Result<&Watching<H::Session>, String> {
+        self.capture
+            .watching()
+            .filter(|watching| watching.watched.id.number() == watch)
+            .ok_or_else(|| "No value is watched.".to_owned())
     }
 
     /// What the watched value reads on the newest frame, and whether `when`
@@ -188,18 +275,15 @@ impl<H: Host> Owner<H> {
         when: Option<&WhenDef>,
     ) -> Result<Live, String> {
         self.settle_watch(self.host.now());
-        let watched = self
-            .watched
-            .as_ref()
-            .filter(|watched| watched.id == watch)
-            .ok_or_else(|| "No value is watched.".to_owned())?;
+        let watching = self.watching(watch)?;
+        let watched = &watching.watched;
         let name = &watched.name;
-        if let Some(error) = &watched.failure {
+        if let WatchCapture::Lost(error) = &watching.capture {
             return Ok(Live::Lost {
                 message: format!("{name} cannot be read: {error}."),
             });
         }
-        let Some(seen) = &watched.seen else {
+        let Some((seen, _seen_at)) = &watched.seen else {
             return Ok(Live::Waiting);
         };
         let (reads_at, at) = &watched.reads;
@@ -252,14 +336,15 @@ impl<H: Host> Owner<H> {
     /// [`Owner::watched_reading`] explains; an error once the watch was
     /// stopped or replaced.
     pub(crate) fn explain_watched(&self, watch: u64) -> Result<Option<ReadingDetails>, String> {
-        let watched = self
-            .watched
-            .as_ref()
-            .filter(|watched| watched.id == watch)
-            .ok_or_else(|| "No value is watched.".to_owned())?;
-        let (reads_at, at) = &watched.reads;
-        let (Some(seen), Some(seen_at), None) = (&watched.seen, watched.seen_at, &watched.failure)
+        let Watching {
+            watched,
+            capture: WatchCapture::Running(_),
+        } = self.watching(watch)?
         else {
+            return Ok(None);
+        };
+        let (reads_at, at) = &watched.reads;
+        let Some((seen, seen_at)) = &watched.seen else {
             return Ok(None);
         };
         let FrameMeaning::Readable(image) =
@@ -267,17 +352,13 @@ impl<H: Host> Owner<H> {
         else {
             return Ok(None);
         };
-        let age = self.host.now().saturating_duration_since(seen_at);
+        let age = self.host.now().saturating_duration_since(*seen_at);
         Ok(Some(workings::details(watched.check.check(at), image, age)))
     }
 
     /// Stops watch `watch`, unless another capture took its place.
     pub(crate) fn stop_watching(&mut self, watch: u64) {
-        if self
-            .watched
-            .as_ref()
-            .is_some_and(|watched| watched.id == watch)
-        {
+        if self.watching(watch).is_ok() {
             self.stop();
         }
     }
@@ -294,6 +375,7 @@ const fn advice(unread: Unread) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::time::Duration;
 
     use appytappy_config::app_file::WindowDef;
@@ -305,8 +387,8 @@ mod tests {
     use crate::debug::workings::WorkingsView;
     use crate::owner::messages::Reading;
     use crate::owner::test_support::{
-        FakeHost, Harness, STATE, WINDOW, add_example_app, example_build, frame_image,
-        harness_with, scratch_store, spec, with_saved_bar,
+        BAR, FakeHost, Harness, STATE, WINDOW, add_example_app, capturing, example_build,
+        frame_image, harness_with, scratch_store, spec, with_saved_bar,
     };
 
     use super::*;
@@ -596,6 +678,26 @@ mod tests {
     }
 
     #[test]
+    fn a_watch_takes_the_place_of_the_picked_window_and_what_it_kept() {
+        let (mut harness, mut handler, root) = capturing("watch-replaces-pick");
+        harness
+            .ask(|owner| owner.save(&spec("example", "Progress bar", BAR)))
+            .expect("saves");
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert!(harness.ask(Owner::screenshot).is_ok());
+        let (watch, _watching) = watch_bar(&mut harness);
+        let kept = |owner: &mut Owner<FakeHost>| {
+            (owner.preview(4), owner.screenshot_pixels(0, 4).is_some())
+        };
+        assert_eq!(harness.ask(kept), (Ok(None), false));
+        // The pick's capture sends a frame late.
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        assert_eq!(harness.ask(kept), (Ok(None), false));
+        assert_eq!(harness.ask(watched(watch, None)), Ok(Live::Waiting));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
     fn the_editor_takes_the_window_and_build_the_runtime_reads() {
         let (mut harness, root) = with_saved_bar("watch-twin");
         // Another copy's window fits as well and is listed first, but it is
@@ -699,7 +801,7 @@ mod tests {
             Err("no capture here".to_owned())
         );
         assert_eq!(
-            harness.ask(watched(harness.owner.generation, None)),
+            harness.ask(watched(1, None)),
             Err("No value is watched.".to_owned())
         );
         std::fs::remove_dir_all(root).expect("clean up");

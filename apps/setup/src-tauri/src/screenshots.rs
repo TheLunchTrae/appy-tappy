@@ -59,11 +59,6 @@ impl Screenshots {
         Self(slots)
     }
 
-    /// Releases every screenshot; the next one kept is index 0 again.
-    pub(crate) fn clear(&mut self) {
-        self.0.clear();
-    }
-
     /// Every index given out so far, in order: the screenshot kept under
     /// it, or `None` for one that was removed.
     pub(crate) fn slots(&self) -> &[Option<Image>] {
@@ -120,9 +115,6 @@ mod tests {
             3,
             "a removed index is not reused"
         );
-        screenshots.clear();
-        assert_eq!(screenshots.get(0), None);
-        assert_eq!(screenshots.push(pixel(5)), 0);
     }
 
     #[test]

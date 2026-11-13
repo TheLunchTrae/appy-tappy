@@ -25,11 +25,14 @@ impl<H: Host> Owner<H> {
     /// shows to the text reader, or keeps it as a screenshot when it shows
     /// a new look.
     pub(super) fn record(&mut self, frame: &Image, received: Instant) {
-        let recording = match &mut self.recording {
+        let Some(picked) = self.capture.picked_mut() else {
+            return;
+        };
+        let recording = match &mut picked.recording {
             Some(Recorder::Readings(recording)) => recording,
             Some(Recorder::Looks(recording)) => {
                 let host = &self.host;
-                recording.offer(frame, received, || host.now(), &mut self.screenshots);
+                recording.offer(frame, received, || host.now(), &mut picked.screenshots);
                 return;
             },
             None => return,
@@ -45,15 +48,11 @@ impl<H: Host> Owner<H> {
         self.read_new(new);
     }
 
-    /// Takes the answer to a look for recording `recording`, of the frame
-    /// that arrived at `at`: sends each new reading it `seen` to the text
-    /// reader. An answer for a recording that was discarded or replaced is
-    /// dropped.
-    pub(super) fn looked(&mut self, recording: u64, at: Instant, seen: Option<Vec<look::Seen>>) {
-        let Some(current) = self
-            .readings_mut()
-            .filter(|current| current.id == recording)
-        else {
+    /// Takes the answer to a look for the recording of readings, of the
+    /// frame that arrived at `at`: sends each new reading it `seen` to the
+    /// text reader.
+    pub(super) fn looked(&mut self, at: Instant, seen: Option<Vec<look::Seen>>) {
+        let Some(current) = self.readings_mut() else {
             return;
         };
         let new = current.looked(at, seen, Instant::now());
@@ -62,7 +61,7 @@ impl<H: Host> Owner<H> {
 
     /// Sends each of the recording's `new` readings to the text reader.
     fn read_new(&mut self, new: impl IntoIterator<Item = NewReading>) {
-        let Some(Recorder::Readings(recording)) = &mut self.recording else {
+        let Some(Recorder::Readings(recording)) = self.capture.recording_mut() else {
             return;
         };
         for new in new {
@@ -81,25 +80,19 @@ impl<H: Host> Owner<H> {
     }
 
     /// The recording of readings, if that is what the capture records.
-    pub(super) const fn readings(&self) -> Option<&Recording> {
-        match &self.recording {
+    pub(super) fn readings(&self) -> Option<&Recording> {
+        match self.capture.recording() {
             Some(Recorder::Readings(recording)) => Some(recording),
             Some(Recorder::Looks(_)) | None => None,
         }
     }
 
     /// The recording of readings, to change it.
-    pub(super) const fn readings_mut(&mut self) -> Option<&mut Recording> {
-        match &mut self.recording {
+    pub(super) fn readings_mut(&mut self) -> Option<&mut Recording> {
+        match self.capture.recording_mut() {
             Some(Recorder::Readings(recording)) => Some(recording),
             Some(Recorder::Looks(_)) | None => None,
         }
-    }
-
-    /// The next recording's number.
-    pub(super) const fn next_recording_id(&mut self) -> u64 {
-        self.recording_id = self.recording_id.wrapping_add(1);
-        self.recording_id
     }
 
     /// The region `region` describes and the size of the window it was
@@ -110,21 +103,22 @@ impl<H: Host> Owner<H> {
         region: RegionSpec,
         screenshot: usize,
     ) -> Result<(Region, Size), String> {
-        if self.session.is_none() {
+        let Some(picked) = self.capture.picked() else {
             return Err("Pick a window to record.".to_owned());
-        }
+        };
         // A closed window sends no more frames, so a recording would count
         // up with nothing in it.
-        if let Some(failure) = self.failure.as_ref().filter(|failure| failure.ended) {
+        if let Some(failure) = picked.failure.as_ref().filter(|failure| failure.ended) {
             return Err(format!(
                 "{} Change window to pick it again.",
                 check_spec::sentence(&failure.error)
             ));
         }
-        if self.screenshots.get(screenshot).is_none() {
+        if self.capture.screenshots().get(screenshot).is_none() {
             return Err("Take a screenshot first.".to_owned());
         }
-        check_spec::drawn(&self.screenshots, region, screenshot).map_err(|error| error.to_string())
+        check_spec::drawn(self.capture.screenshots(), region, screenshot)
+            .map_err(|error| error.to_string())
     }
 
     /// Records what `spec` names of the picked window, keeping each reading
@@ -150,7 +144,7 @@ impl<H: Host> Owner<H> {
             Scope::Place => Vec::new(),
             Scope::Window => self.example_heights(&spec.examples, window_size, &reader),
         };
-        match &mut self.recording {
+        match self.capture.recording_mut() {
             Some(Recorder::Readings(recording))
                 if more && recording.records(region, settings, window_size, spec.scope) =>
             {
@@ -180,14 +174,14 @@ impl<H: Host> Owner<H> {
                     Scope::Place => None,
                     Scope::Window => Some(self.sample_height(region, spec.screenshot, &reader)?),
                 };
-                let id = self.next_recording_id();
+                let id = self.tickets.next();
                 let mut recording =
                     Recording::new(id, region, settings, (window_size, follows), now);
                 if let Some(sample) = sample {
                     recording = recording.across_window(sample);
                     recording.look_for(examples);
                 }
-                self.recording = Some(Recorder::Readings(recording));
+                self.record_with(Recorder::Readings(recording));
             },
         }
         Ok(())
@@ -202,7 +196,8 @@ impl<H: Host> Owner<H> {
         screenshot: usize,
         reader: &DigitReader,
     ) -> Result<u32, String> {
-        self.screenshots
+        self.capture
+            .screenshots()
             .get(screenshot)
             .and_then(|image| find::sample_heights(image, &[region], reader).pop()?)
             .ok_or_else(|| {
@@ -240,7 +235,8 @@ impl<H: Host> Owner<H> {
             .into_iter()
             .filter_map(|(screenshot, regions)| {
                 let image = self
-                    .screenshots
+                    .capture
+                    .screenshots()
                     .get(screenshot)
                     .filter(|image| image.size() == window_size)?;
                 Some(find::sample_heights(image, &regions, reader))
@@ -253,7 +249,7 @@ impl<H: Host> Owner<H> {
     /// Stops the recording, of readings or of looks, which keeps what it
     /// recorded.
     pub(crate) fn stop_recording(&mut self) {
-        if let Some(recording) = &mut self.recording {
+        if let Some(recording) = self.capture.recording_mut() {
             recording.stop(Instant::now());
         }
     }
@@ -261,7 +257,17 @@ impl<H: Host> Owner<H> {
     /// Forgets the recording, of readings or of looks. The screenshots a
     /// recording of looks kept stay.
     pub(crate) fn discard_recording(&mut self) {
-        self.recording = None;
+        if let Some(picked) = self.capture.picked_mut() {
+            picked.recording = None;
+        }
+    }
+
+    /// Makes `recorder` what the picked window's capture records, in place
+    /// of any recording.
+    pub(super) fn record_with(&mut self, recorder: Recorder) {
+        if let Some(picked) = self.capture.picked_mut() {
+            picked.recording = Some(recorder);
+        }
     }
 
     /// The recording of readings as the interface shows it, or `None`
@@ -274,9 +280,17 @@ impl<H: Host> Owner<H> {
         let placed = self
             .readings_mut()
             .is_some_and(|recording| recording.settled(now));
-        if placed && let Some(frame) = self.latest.take() {
-            self.record(&frame, now);
-            self.latest = Some(frame);
+        let newest = self
+            .capture
+            .picked_mut()
+            .and_then(|picked| picked.latest.take());
+        if let Some((frame, arrived)) = newest {
+            if placed {
+                self.record(&frame, now);
+            }
+            if let Some(picked) = self.capture.picked_mut() {
+                picked.latest = Some((frame, arrived));
+            }
         }
         self.readings()
             .map(|recording| recording.view(Instant::now()))
@@ -311,13 +325,14 @@ mod tests {
     use appytappy_sources::screen::settle::SETTLE;
 
     use crate::check_spec::ColorSpec;
-    use crate::owner::messages::{ExampleSpec, Message};
+    use crate::owner::messages::{Event, ExampleSpec, Message};
     use crate::owner::test_support::{
-        FakeHost, Harness, capturing, characters_in, example_app, frame_image, harness, teaching,
-        with_example_app,
+        FakeHost, Harness, capturing, characters_in, example_app, frame_image, harness, recognized,
+        teaching, with_example_app,
     };
     use crate::pixels;
     use crate::recording::RecordingView;
+    use crate::ticket::Ticket;
 
     use super::*;
 
@@ -389,29 +404,28 @@ mod tests {
         ] {
             harness.deliver(&mut handler, Ok(&frame));
         }
+        let id = harness.recording().expect("a recording").id;
         let jobs: Vec<(u64, usize)> = harness
             .jobs
             .try_iter()
             .map(|job| match job.source {
-                ocr::Source::Recording(recording) => (recording, job.index),
+                ocr::Source::Recording(recording) => (recording.number(), job.index),
                 ocr::Source::Search(_) => panic!("no search was made"),
             })
             .collect();
-        assert_eq!(jobs, [(1, 0), (1, 1)], "one job per new reading");
+        assert_eq!(jobs, [(id, 0), (id, 1)], "one job per new reading");
         assert_eq!(
             harness.readings(),
             [(2, Text::Pending), (1, Text::Pending)],
             "a frame with no ink is skipped"
         );
-        for (recording, text) in [(0, "stale"), (1, "1")] {
+        // Text under another ticket than the recording's, here its
+        // capture's, is dropped.
+        for (recording, text) in [(id - 1, "stale"), (id, "1")] {
             assert!(
                 harness
                     .owner
-                    .handle(Message::Recognized {
-                        recording,
-                        index: 0,
-                        text: Text::Read(text.to_owned()),
-                    })
+                    .handle(recognized(recording, 0, Text::Read(text.to_owned())))
                     .is_continue()
             );
         }
@@ -602,20 +616,18 @@ mod tests {
         assert_eq!(looks.len(), 1, "one frame goes to be looked over");
         let job = &looks[0];
         // A look for a recording that was discarded or replaced is dropped.
-        let stale = Message::Looked {
-            recording: job.recording.wrapping_sub(1),
-            at: job.at,
-            seen: Some(look::look(job)),
+        let looked = |ticket| Message::Sent {
+            ticket,
+            event: Event::Looked {
+                at: job.at,
+                seen: Some(look::look(job)),
+            },
         };
+        let stale = looked(Ticket::numbered(job.recording.number() - 1));
         assert!(harness.owner.handle(stale).is_continue());
         assert_eq!(harness.recording().expect("a recording").spots, []);
         assert_eq!(harness.jobs.try_iter().count(), 0);
-        let answer = Message::Looked {
-            recording: job.recording,
-            at: job.at,
-            seen: Some(look::look(job)),
-        };
-        assert!(harness.owner.handle(answer).is_continue());
+        assert!(harness.owner.handle(looked(job.recording)).is_continue());
         assert_eq!(harness.jobs.try_iter().count(), 1, "read as text");
         let view = harness.recording().expect("a recording");
         assert_eq!(view.settings.scope, Scope::Window);
@@ -915,20 +927,18 @@ mod tests {
             "recording more never replaces the recording"
         );
         assert_eq!(harness.readings().len(), 2, "kept as it was");
+        let replaced = harness.recording().expect("a recording").id;
         harness
             .ask(start_recording(200, false))
             .expect("records other ink");
         assert_eq!(harness.readings().len(), 0, "a new recording");
         let jobs: Vec<ocr::Source> = harness.jobs.try_iter().map(|job| job.source).collect();
-        assert_eq!(jobs, [ocr::Source::Recording(1), ocr::Source::Recording(1)]);
+        let source = ocr::Source::Recording(Ticket::numbered(replaced));
+        assert_eq!(jobs, [source, source]);
         assert!(
             harness
                 .owner
-                .handle(Message::Recognized {
-                    recording: 1,
-                    index: 0,
-                    text: Text::Read("1".to_owned()),
-                })
+                .handle(recognized(replaced, 0, Text::Read("1".to_owned())))
                 .is_continue()
         );
         assert_eq!(
