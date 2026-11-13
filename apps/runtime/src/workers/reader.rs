@@ -54,12 +54,16 @@
 //! [`Reader::set_trace`]. The reader hands it to the capture's handler,
 //! which records to it from its next frame, so the capture goes on and no
 //! value is read again for it.
+//!
+//! However the thread ends, a panic included, the last it sends is
+//! [`Reading::Ended`], so the owner starts another reader for a session
+//! that still runs.
 
 use std::fmt;
 use std::io;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use appytappy_actions::Watched;
@@ -74,7 +78,7 @@ use appytappy_sources::screen::{
 };
 use appytappy_sources::system::{Pick, SessionWindow, System, session_window, shows};
 
-use crate::model::SessionId;
+use crate::model::{ReaderNumber, SessionId};
 use crate::plan::AppPlan;
 use crate::trace::{Record, Trace, What};
 
@@ -96,6 +100,8 @@ pub(crate) const RESTART_WAIT_MAX: Duration = Duration::from_secs(30);
 pub(crate) struct Job {
     /// The session the readings belong to.
     pub(crate) session: SessionId,
+    /// Which of the session's readers this is, which it says when it ends.
+    pub(crate) reader: ReaderNumber,
     /// The application's values and window.
     pub(crate) plan: Arc<AppPlan>,
     /// The process the session follows, whose window the reader reads, and
@@ -112,6 +118,8 @@ pub(crate) enum Reading {
     Sample {
         /// The session.
         session: SessionId,
+        /// Which of the session's readers read it.
+        reader: ReaderNumber,
         /// The value's position among the application's values.
         position: usize,
         /// What it read.
@@ -153,6 +161,17 @@ pub(crate) enum Reading {
     Unseen {
         /// The session.
         session: SessionId,
+        /// Which of the session's readers no longer sees them.
+        reader: ReaderNumber,
+    },
+    /// The reader thread ended, and reads nothing more. It is the last the
+    /// thread sends, however it ends: stopped by its session, or by a
+    /// panic.
+    Ended {
+        /// The session.
+        session: SessionId,
+        /// Which of the session's readers ended.
+        reader: ReaderNumber,
     },
 }
 
@@ -305,9 +324,12 @@ impl Reader {
     {
         let (control, received) = mpsc::channel();
         let lost = control.clone();
-        let thread = thread::Builder::new()
-            .name(format!("reader {}", job.session.0))
-            .spawn(move || {
+        let ended = E::from(Reading::Ended {
+            session: job.session,
+            reader: job.reader,
+        });
+        let thread = super::spawn(&format!("reader {}", job.session.0), move || {
+            let reading = || {
                 read(
                     system.as_ref(),
                     &job,
@@ -317,7 +339,9 @@ impl Reader {
                     &lost,
                     &events,
                 );
-            })?;
+            };
+            super::tell_end(reading, &events, ended);
+        })?;
         Ok(Self { control, thread })
     }
 
@@ -326,12 +350,15 @@ impl Reader {
     pub(crate) fn set_trace(&self, trace: Trace) {
         #[expect(
             clippy::let_underscore_must_use,
-            reason = "a failed send means the thread already ended, and its stop says how"
+            reason = "a failed send means the thread already ended, which it told the owner itself"
         )]
         let _ = self.control.send(Control::Trace(trace));
     }
 
-    /// Stops the reader and its capture, and waits for both.
+    /// Stops the reader and waits for it. A reader that ends on a stop
+    /// closes its capture first and waits for it. One that panicked dropped
+    /// its capture, which stops without being waited for, so what that
+    /// capture read can still arrive after this returns.
     ///
     /// # Errors
     ///
@@ -356,7 +383,7 @@ impl Reader {
     /// stand-in that sees what the reader is told.
     pub(crate) fn stand_in() -> (Self, StandIn) {
         let (control, received) = mpsc::channel();
-        let thread = thread::spawn(|| {});
+        let thread = std::thread::spawn(|| {});
         (Self { control, thread }, StandIn(received))
     }
 }
@@ -524,6 +551,7 @@ fn read<S: System + Capture, E: From<Reading> + Send + 'static>(
                 // no reading from it can follow.
                 let unseen = Reading::Unseen {
                     session: job.session,
+                    reader: job.reader,
                 };
                 if !report(&mut reported, problem) || !send(events, unseen) {
                     return;
@@ -891,6 +919,7 @@ fn not_read(unread: Unread) -> String {
 /// size from a frame and sends what changed.
 struct FrameReader<E> {
     session: SessionId,
+    reader: ReaderNumber,
     plan: Arc<AppPlan>,
     /// Where each value reads at the window size it reads.
     placed: Placed,
@@ -954,6 +983,7 @@ impl<E: From<Reading>> FrameReader<E> {
         let count = job.plan.runs.values.len();
         Some(Self {
             session: job.session,
+            reader: job.reader,
             plan: Arc::clone(&job.plan),
             placed,
             told: None,
@@ -1148,6 +1178,7 @@ impl<E: From<Reading>> FrameReader<E> {
         )]
         let _ = self.events.send(E::from(Reading::Sample {
             session: self.session,
+            reader: self.reader,
             position,
             value: reading,
             at: frame.received,
@@ -1195,6 +1226,7 @@ impl<E: From<Reading>> FrameReader<E> {
             )]
             let _ = self.events.send(E::from(Reading::Unseen {
                 session: self.session,
+                reader: self.reader,
             }));
         }
     }
@@ -1231,6 +1263,7 @@ fn frame_problem(error: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc::{SyncSender, TryRecvError};
+    use std::thread;
 
     use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
@@ -1373,6 +1406,7 @@ mod tests {
     fn job(values: Vec<ValuePlan>) -> Job {
         Job {
             session: SessionId(3),
+            reader: ReaderNumber(2),
             plan: plan(values),
             watched: Watched {
                 process: ProcessId::new(43),
@@ -1418,9 +1452,10 @@ mod tests {
                 Reading::Sample {
                     position, value, ..
                 } => Some((position, value)),
-                Reading::Problem { .. } | Reading::ValueProblem { .. } | Reading::Unseen { .. } => {
-                    None
-                },
+                Reading::Problem { .. }
+                | Reading::ValueProblem { .. }
+                | Reading::Unseen { .. }
+                | Reading::Ended { .. } => None,
             })
             .collect()
     }
@@ -1433,7 +1468,7 @@ mod tests {
                 Reading::ValueProblem { value, problem, .. } => {
                     Some(format!("value {value} {problem}"))
                 },
-                Reading::Sample { .. } | Reading::Unseen { .. } => None,
+                Reading::Sample { .. } | Reading::Unseen { .. } | Reading::Ended { .. } => None,
             })
             .collect()
     }
@@ -1563,7 +1598,8 @@ mod tests {
         assert_eq!(
             readings.try_iter().collect::<Vec<_>>(),
             [Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             }],
             "nothing is read before the size settles"
         );
@@ -2009,7 +2045,8 @@ mod tests {
                     problem: "a frame cannot be read: the copy failed".to_owned()
                 },
                 Reading::Unseen {
-                    session: SessionId(3)
+                    session: SessionId(3),
+                    reader: ReaderNumber(2),
                 },
             ]
         );
@@ -2311,10 +2348,10 @@ mod tests {
         ]
     }
 
-    /// Stops `reader` and checks its thread ended, which drops its senders.
-    /// The desk goes first, so a reader that waits on it cannot hang, and a
-    /// reader that does not end within `PATIENCE` fails the test rather than
-    /// hanging it.
+    /// Stops `reader` and checks its thread ended, which says so last and
+    /// drops its senders. The desk goes first, so a reader that waits on it
+    /// cannot hang, and a reader that does not end within `PATIENCE` fails
+    /// the test rather than hanging it.
     fn stopped(reader: Reader, desk: Desk, readings: &Receiver<Reading>) {
         drop(desk);
         let (done, ended) = mpsc::channel();
@@ -2324,7 +2361,11 @@ mod tests {
             .expect("the reader ends when the session stops")
             .expect("stop");
         let left: Vec<Reading> = readings.try_iter().collect();
-        assert_eq!(left, [], "nothing more was sent");
+        let ended = Reading::Ended {
+            session: SessionId(3),
+            reader: ReaderNumber(2),
+        };
+        assert_eq!(left, [ended], "it said it ended, and nothing more");
         assert_eq!(readings.try_recv(), Err(TryRecvError::Disconnected));
     }
 
@@ -2369,6 +2410,7 @@ mod tests {
                 &sample,
                 Reading::Sample {
                     session: SessionId(3),
+                    reader: ReaderNumber(2),
                     value: Value::Flag(true),
                     ..
                 }
@@ -2388,7 +2430,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             }),
             "the values it read are out of sight"
         );
@@ -2456,7 +2499,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         // The other window came in front meanwhile.
@@ -2490,7 +2534,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         // Once the size settles, the reader says why the value is not read,
@@ -2547,7 +2592,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         desk.answer(Ok(desktop()));
@@ -2936,7 +2982,8 @@ mod tests {
         assert_eq!(
             readings.recv_timeout(PATIENCE),
             Ok(Reading::Unseen {
-                session: SessionId(3)
+                session: SessionId(3),
+                reader: ReaderNumber(2),
             })
         );
         desk.answer(Ok(better()));
@@ -3036,7 +3083,8 @@ mod tests {
             [
                 problem("a frame cannot be read: the copy failed"),
                 Reading::Unseen {
-                    session: SessionId(3)
+                    session: SessionId(3),
+                    reader: ReaderNumber(2),
                 },
                 problem(
                     "5 frames in a row cannot be read, so its capture starts again: the copy \

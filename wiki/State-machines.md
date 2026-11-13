@@ -21,11 +21,17 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Thirteen guards drop such stale messages:
+it was about has gone. Fourteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
+- **Reader numbers.** A session numbers its readers with a `ReaderNumber`,
+  which each reader sends with every value it reads, when its values can no
+  longer be seen, and when it ends. The owner drops each of those unless it
+  carries the number of the session's newest reader and that reader has not
+  ended (`Model::read_by`): what a reader that the session replaced still
+  sent, and what the capture of a reader that panicked still read.
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
   generation is dropped.
@@ -130,7 +136,9 @@ stateDiagram-v2
   `DetectionEnded` however it ends, a panic included (`workers::tell_end`),
   and a send to detection that fails has the owner send itself the same
   event, so the owner stops either way; the join at the end reports the
-  panic.
+  panic. A reader also tells the owner when it ends, and the owner starts
+  another in the same session, as
+  [Per-application run state](#per-application-run-state) describes.
 - **Undoing.** `model.set_enabled(false)` stops every running application and
   queues the undo of what its automations changed. The owner then drops the
   job sender and joins the action thread, which runs the queued undos before
@@ -217,7 +225,10 @@ automations run while all of these hold:
 - The plan has automations for it.
 
 When they all hold, the application has an entry in `running`, keyed by its
-reader's `SessionId`, with its engine session and its newest plan. The model
+reader's `SessionId`, with its engine session and its newest plan. The entry
+also says whether a reader reads the application's values: `read_again` is
+empty while the reader with the entry's `ReaderNumber` reads, and holds the
+time the next reader starts while the last one ended. The model
 holds no channel and no trace: each change returns `Order`s, the model's own
 type, and the owner turns each into a message for a reader or the action
 thread.
@@ -231,6 +242,7 @@ stateDiagram-v2
     Running --> Attached: disabled, or a reload drops it
     Running --> Running: a reload changes what it runs, so it stops and starts again
     Running --> Running: a reload changes only its names, which it takes as it runs
+    Running --> Running: its reader ends, and after a wait the next one starts
     Running --> Detached: Exited
     Attached --> Detached: Exited
 ```
@@ -253,10 +265,32 @@ stateDiagram-v2
 - **A new read interval.** `restart_readers` stops each running
   application's reader that reads at another interval and starts it again in
   the same session, and calls `forget_values` first, as for `Unseen`, because
-  the new reader sends its first readings whether or not they changed. A
-  reading the old reader sent just before it stopped can still arrive after
-  that, a few milliseconds old. A new trace restarts nothing: it reaches each
-  reader as a message, as [Runtime trace](#runtime-trace) describes.
+  the new reader sends its first readings whether or not they changed. What
+  the old reader sent just before it stopped carries its number, so it is
+  dropped. A new trace restarts nothing: it reaches each reader as a
+  message, as [Runtime trace](#runtime-trace) describes.
+- **A reader that ended.** A reader thread sends `Reading::Ended` with its
+  `ReaderNumber` as the last thing it does, however it ends
+  (`workers::tell_end`). When the number is that of the session's newest
+  reader, nothing stopped the reader, such as when it panicked:
+  `reader_ended` calls `forget_values`, as for `Unseen`, and sets
+  `read_again`, and the owner logs that the application's reader ended and
+  joins the thread, which logs its panic. The session keeps running, with
+  its rule state, and reads nothing until `read_again`: a panic drops the
+  reader's capture without waiting for it, so the capture can still send
+  what it read, which is dropped like a replaced reader's. Then the owner
+  wakes with `Due`, and `recheck` starts the session's next reader, with the
+  next number. The wait is 1 second (`READ_AGAIN`) the first time and
+  doubles each time a reader of the session ends, up to 30 seconds
+  (`READ_AGAIN_MAX`), so a reader that panics each time it starts costs one
+  thread and three log lines for each wait. A reader that ends after it ran
+  for `READ_AGAIN_MAX` waits 1 second again. A new read interval while the
+  session waits starts no reader: the next one reads at it. An `Ended` with
+  any other number, or for a session that no longer runs, comes from a
+  reader that the session stopped, and is dropped.
+- **A reader that cannot start.** When the reader's thread cannot start, the
+  owner logs it and sends itself that reader's `Ended`, so the session
+  starts its next reader after the same wait.
 
 ### Reader thread
 
@@ -287,6 +321,8 @@ stateDiagram-v2
     Waiting --> [*]: Stop
     Backoff --> [*]: Stop
 ```
+
+The thread can also panic in any state, which ends it.
 
 - **Finding.** `find_window` lists the processes and windows and takes the one
   `session_window` picks among the session's process's (`Job::watched`), as
@@ -347,12 +383,20 @@ stateDiagram-v2
   state changes for it.
 - Each problem, such as no window fitting yet, is sent once until a different
   problem or a working capture replaces it.
+- **Ending.** `Reader::start` runs the thread inside `workers::tell_end`, so
+  the last thing the thread sends is `Reading::Ended`, with its session and
+  its `ReaderNumber`, whether a `Stop` ended it or a panic. A panic drops the
+  capture, which stops it without waiting. The thread does not start itself
+  again: the owner starts the session's next reader after a wait, as
+  [Per-application run state](#per-application-run-state) describes, and a
+  reader that the session stopped has its `Ended` dropped there.
 
 #### Open problems
 
-- [#298](https://github.com/TheLunchTrae/appy-tappy/issues/298): a reader that
-  panics stops its application's readings without telling the owner, until
-  the session ends.
+- [#318](https://github.com/TheLunchTrae/appy-tappy/issues/318): a panic in
+  the capture's frame handler runs on the capture thread, so the reader keeps
+  waiting for frames and its values stop reading until it closes the
+  capture, which it does when the window changes or the session stops.
 
 ### Frame handler
 
