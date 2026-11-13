@@ -178,6 +178,12 @@ mod tests {
             Ok(Vec::new()),
             "a draft without screenshots leaves none"
         );
+        // With no window picked, there is no session to give them back to.
+        harness.ask(Owner::stop);
+        assert_eq!(
+            harness.ask(|owner| owner.restore_draft_screenshots(&id)),
+            Err("Pick the window first.".to_owned())
+        );
 
         harness
             .ask(|owner| owner.delete_draft(&id))
