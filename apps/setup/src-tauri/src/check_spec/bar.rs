@@ -10,14 +10,14 @@
 
 use std::iter;
 
-use appytappy_config::app_file::CheckDefError;
+use appytappy_config::app_file::{CheckDefError, ColorDef, RegionDef};
 use appytappy_config::signal::Number;
 use appytappy_sources::screen::check::BarFill;
 use appytappy_sources::screen::detect::{MIN_LENGTH, NoBar, detect_bar};
 use appytappy_sources::screen::{Image, Region};
 use serde::Serialize;
 
-use super::{ColorDef, RegionDef, SpecError, to_region};
+use super::{SpecError, to_region};
 
 /// The most screenshots looked at besides the one the region was drawn on.
 /// Each one costs a copy of the region and a few passes over it.

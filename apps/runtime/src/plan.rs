@@ -368,19 +368,16 @@ mod tests {
     use std::env;
     use std::process;
 
+    use appytappy_config::action::MediaCommand;
+    use appytappy_config::anti_cheat::AntiCheatClass;
     use appytappy_config::app_file::{
         CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, OriginDef, ReferenceDef, RegionDef,
         SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
-
-    use appytappy_config::anti_cheat::AntiCheatClass;
-
-    use appytappy_config::action::MediaCommand;
     use appytappy_config::automation_file::{ActionDef, AutomationDef, FORMAT, TargetDef, WhenDef};
     use appytappy_config::names::sample_name;
     use appytappy_config::rule::Comparison;
-    use appytappy_config::window_match::MustMatch;
-    use appytappy_config::window_match::Pattern;
+    use appytappy_config::window_match::{MustMatch, Pattern};
     use appytappy_sources::screen::{Image, Size};
 
     use super::*;

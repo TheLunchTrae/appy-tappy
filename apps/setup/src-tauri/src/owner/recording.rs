@@ -5,11 +5,10 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+use appytappy_config::app_file::{ColorDef, PinDef, RegionDef};
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region, Rgb, Size};
 use serde::Deserialize;
-
-use appytappy_config::app_file::{ColorDef, RegionDef};
 
 use crate::check_spec::{self, CharactersSpec};
 use crate::pixels;
@@ -18,7 +17,6 @@ use crate::recording::{
     NewReading, Recorder, Recording, RecordingView, Scope, Text, find, look, ocr,
 };
 use crate::words::sentence;
-use appytappy_config::app_file::PinDef;
 
 use super::Owner;
 use super::host::Host;

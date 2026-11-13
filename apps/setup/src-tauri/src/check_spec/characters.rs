@@ -10,7 +10,9 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use appytappy_config::app_file::{OriginDef, ReferenceDef, SampleDef, is_label_character};
+use appytappy_config::app_file::{
+    ColorDef, OriginDef, ReferenceDef, RegionDef, SampleDef, is_label_character,
+};
 use appytappy_config::names::sample_name;
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::saved::{self, SavedError};
@@ -21,10 +23,7 @@ use crate::recording::Recording;
 use crate::screenshots::Shots;
 use crate::words::sentence;
 
-use super::{
-    ColorDef, Cut, Pictures, ReferenceRef, RegionDef, SpecError, cut, drawn, same_size, size_of,
-    to_region,
-};
+use super::{Cut, Pictures, ReferenceRef, SpecError, cut, drawn, same_size, size_of, to_region};
 
 /// The most characters a reference is saved as expecting: room for the
 /// digits, both cases of the English letters, and every other printable
