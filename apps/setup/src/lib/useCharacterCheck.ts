@@ -152,9 +152,12 @@ export interface KeptReading {
  * draft never kept, which review alone keeps or leaves out. `recorded` has the readings the draft keeps, and
  * `leftOut` the ones the open check took from it, each with its text there.
  *
- * The draft's text gets only what the edit changed, so that saving learns what the check wrote and nothing else:
- * `place` has review's text, and what review changed there stays review's until its Keep. A reading the edit leaves
- * out goes from the draft with its text remembered, and one it keeps again comes back with that text.
+ * The draft gets only what the edit changed, so that saving learns what the check wrote and nothing else: `place`
+ * has review's text and keep, and what review changed there stays review's until its Keep. So the draft's text gets
+ * the characters the edit changed, and the draft keeps the reading or not as before unless the edit changes
+ * `place`'s keep: an answer that only rewrites the text of a reading review left out without Keep leaves it on the
+ * draft. A reading the edit leaves out goes from the draft with its text remembered, and one it keeps again comes
+ * back with that text.
  */
 export function editedReading(
   recorded: ReadonlyMap<number, string>,
@@ -163,7 +166,13 @@ export function editedReading(
   entry: ReviewEntry,
 ): KeptReading | null {
   const text = recorded.get(place.index) ?? leftOut.get(place.index);
-  return text === undefined ? null : { text: withEdit(text, place.text, entry.text), leftOut: !entry.keep };
+  if (text === undefined) {
+    return null;
+  }
+  return {
+    text: withEdit(text, place.text, entry.text),
+    leftOut: entry.keep === place.keep ? !recorded.has(place.index) : !entry.keep,
+  };
 }
 
 /** What the capture screen holds of the check of the reference being taught. */

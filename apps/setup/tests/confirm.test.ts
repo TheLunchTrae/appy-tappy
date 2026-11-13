@@ -371,6 +371,26 @@ describe('a reading the draft keeps already', () => {
       text: '7 8 %',
       leftOut: false,
     });
+    // A draft text of another length than review's does not line up with the edit, so it takes none of review's.
+    expect(editedReading(new Map([[1, '185']]), none, reviewed, entryOf(again.changes))).toEqual({
+      text: '185',
+      leftOut: false,
+    });
+  });
+
+  test('stays on the draft when an answer rewrites its text while review has it left out without Keep', () => {
+    // Review cleared its tick, and the user did not press Keep, so the check does not ask about it.
+    const unticked = { ...reading, keep: false, asks: false };
+    const asked = place('find', 0, 's', '1');
+    const both = [asked, unticked];
+    const fixed = turn(openGuide(both, []), { kind: 'retype', shape: 's', character: '7' }, both, []);
+    expect(entryOf(fixed.changes)).toEqual({ keep: false, text: '78' });
+    expect(editedReading(kept, none, unticked, entryOf(fixed.changes))).toEqual({ text: '78', leftOut: false });
+    // One the check itself left out stays off the draft through such an edit.
+    expect(editedReading(none, new Map([[1, '18']]), unticked, entryOf(fixed.changes))).toEqual({
+      text: '78',
+      leftOut: true,
+    });
   });
 
   test('is none of the readings review alone keeps, which stay off the draft', () => {

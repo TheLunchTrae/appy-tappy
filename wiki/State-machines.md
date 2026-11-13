@@ -2316,8 +2316,11 @@ stateDiagram-v2
   texts and ticks they wrote stay with the boxes, the finds, and review.
 - **A reading the draft keeps already** takes the check's edit on the draft
   too, so that saving learns what the check wrote (`editedReading`). Its
-  kept text gets only the characters the edit changed, so what review
-  changed without **Keep** stays review's. A reading left out goes from the
+  kept text gets only the characters the edit changed, and the draft keeps
+  it or not as before unless the edit changes its keep, so what review
+  changed without **Keep**, a text or a cleared tick, stays review's. A
+  draft text of another length than review's does not line up with the
+  edit and stays as it is. A reading left out goes from the
   draft, and `leftOut` remembers the text the draft kept it with;
   **It is a character**, or its tick on the `Unfitted` stop, puts it back
   with that text. A reading the draft never kept stays off it. Closing

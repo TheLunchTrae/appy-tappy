@@ -255,13 +255,21 @@ function rewritten(text: string, characters: readonly (string | null | undefined
 
 /**
  * `text` after the edit that made `from` into `to`, for a text that may differ from `from`: the same place's text as
- * another list holds it. Only the characters the edit changed change in it, while all three have as many
- * characters; otherwise it becomes `to`, the whole text the edit wrote.
+ * another list holds it. While it has as many characters as `from`, the two line up: only the characters the edit
+ * changed change in it, or it becomes `to` when the edit wrote a text of another length, which is a whole text and
+ * no change of some characters. A text that does not line up with `from` stays as it is, since nothing says which
+ * of its characters the edit is about.
  */
 export function withEdit(text: string, from: string, to: string): string {
+  if (text === from) {
+    return to;
+  }
   const before = labelCharacters(from);
   const after = labelCharacters(to);
-  if (text === from || before.length !== after.length || labelCharacters(text).length !== after.length) {
+  if (labelCharacters(text).length !== before.length) {
+    return text;
+  }
+  if (before.length !== after.length) {
     return to;
   }
   return rewritten(
