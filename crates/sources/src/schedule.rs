@@ -12,47 +12,7 @@
 
 use std::time::{Duration, Instant};
 
-/// The bounds on the time between two reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReadInterval {
-    min: Duration,
-    max: Duration,
-}
-
-impl ReadInterval {
-    /// The bounds the settings start with: at most about 60 reads a
-    /// second, and while the value holds still, a wait of at most half a
-    /// second before the next frame is read.
-    pub const DEFAULT: Self = Self {
-        min: Duration::from_millis(16),
-        max: Duration::from_millis(500),
-    };
-
-    /// Waits between reads of at least `min` and at most `max`, or `None`
-    /// when `min` is longer than `max`.
-    #[must_use]
-    pub fn new(min: Duration, max: Duration) -> Option<Self> {
-        (min <= max).then_some(Self { min, max })
-    }
-
-    /// The shortest time between two reads.
-    #[must_use]
-    pub const fn min(self) -> Duration {
-        self.min
-    }
-
-    /// The longest time between two reads.
-    #[must_use]
-    pub const fn max(self) -> Duration {
-        self.max
-    }
-}
-
-impl Default for ReadInterval {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
+use appytappy_config::settings_file::ReadInterval;
 
 /// What the last read showed about its signal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,19 +44,19 @@ impl ReadSchedule {
     pub const fn new(interval: ReadInterval) -> Self {
         Self {
             interval,
-            wait: interval.min,
+            wait: interval.min(),
         }
     }
 
     /// The wait until the next read, given what the read just taken showed.
     pub fn after_read(&mut self, activity: Activity) -> Duration {
         self.wait = match activity {
-            Activity::Changed => self.interval.min,
+            Activity::Changed => self.interval.min(),
             Activity::Steady => self
                 .wait
                 .saturating_mul(2)
                 .max(FIRST_BACKOFF)
-                .clamp(self.interval.min, self.interval.max),
+                .clamp(self.interval.min(), self.interval.max()),
         };
         self.wait
     }
@@ -218,13 +178,6 @@ mod tests {
         assert_eq!(frame_interval(millis(100), millis(200)), millis(200));
         let slow = LONGEST_WAIT.checked_mul(2).unwrap();
         assert_eq!(frame_interval(Duration::MAX, slow), slow);
-    }
-
-    #[test]
-    fn the_minimum_cannot_exceed_the_maximum() {
-        assert_eq!(ReadInterval::new(millis(2), millis(1)), None);
-        let interval = ReadInterval::new(millis(1), millis(1)).unwrap();
-        assert_eq!((interval.min(), interval.max()), (millis(1), millis(1)));
     }
 
     #[test]
