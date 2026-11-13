@@ -687,7 +687,10 @@ mod tests {
             [
                 owner.preview(4).expect("no failure").is_some(),
                 owner.screenshot_pixels(0, 4).is_some(),
-                owner.recorded_pixels(0, 4).is_some(),
+                owner
+                    .recording_state()
+                    .and_then(|recording| owner.recorded_pixels(recording.id, 0, 4))
+                    .is_some(),
                 owner.recording_state().is_some(),
                 owner.reading().expect("reads").is_some(),
             ]

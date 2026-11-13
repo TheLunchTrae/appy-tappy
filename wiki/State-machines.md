@@ -38,7 +38,12 @@ it was about has gone. Sixteen guards drop such stale messages:
 - **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
   from one counter, so text that the text reader sends back for a recording
   that was discarded, or replaced by one of either kind, is dropped, and so
-  is what a [window look](#window-look) found for one. Within one recording,
+  is what a [window look](#window-look) found for one. A reading's picture
+  is asked for with its recording's ID: the owner answers nothing for a
+  recording that was discarded or replaced (`recorded_pixels` in
+  `apps/setup/src-tauri/src/owner/recording.rs`), and the page drops a
+  picture that arrives for another recording than the newest it asked for
+  (`withCrop` in `apps/setup/src/lib/review.ts`). Within one recording,
   the look's gate drops the answer to a look from before **Record more** or
   from before a frame showed the window at another size than the recording
   is placed at (`Gate::Abandoned`). The

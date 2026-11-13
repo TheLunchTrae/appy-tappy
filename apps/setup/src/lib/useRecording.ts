@@ -7,6 +7,7 @@ import { discardRecording, errorText, recordedReading, recordingState, startReco
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
 import { useNewest } from './request.ts';
+import { type Crops, NO_CROPS, withCrop } from './review.ts';
 
 /** How long the recording's state waits between reads, while it records or text is still being read. */
 const RECORDING_PAUSE_MS = 250;
@@ -24,15 +25,6 @@ type Recordable = Omit<RecordingSettings, 'windowSize'> & {
   readonly drawnOn: number;
   readonly examples: readonly ExampleSpec[];
 };
-
-/** Each recorded reading's pixels, by its index, for the recording `id`. */
-interface Crops {
-  readonly id: number;
-  readonly pictures: ReadonlyMap<number, Picture>;
-}
-
-/** No recording's pixels. */
-const NO_CROPS: Crops = { id: -1, pictures: new Map() };
 
 /**
  * The session's recording, kept current while it records or its text is still being read, with each reading's
@@ -107,14 +99,10 @@ export function useRecording(): {
       }
       asked.current.readings.add(index);
       background(
-        recordedReading(index, CROP_WIDTH).then((picture) => {
-          if (picture === null) {
-            return;
+        recordedReading(recordingId, index, CROP_WIDTH).then((picture) => {
+          if (picture !== null) {
+            setCrops((current) => withCrop(current, asked.current.id, recordingId, index, picture));
           }
-          setCrops((current) => {
-            const pictures = current.id === recordingId ? new Map(current.pictures) : new Map<number, Picture>();
-            return { id: recordingId, pictures: pictures.set(index, picture) };
-          });
         }),
       );
     }

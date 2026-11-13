@@ -782,16 +782,17 @@ pub(crate) async fn look_recording_state(
     .await
 }
 
-/// A recorded reading, at most `max_width` wide; no bytes for an unknown
-/// index.
+/// A reading of recording `recording`, at most `max_width` wide; no bytes
+/// for an unknown index or a recording that was replaced.
 #[tauri::command]
 pub(crate) async fn recorded_reading(
     app: AppHandle,
+    recording: u64,
     index: usize,
     max_width: u32,
 ) -> Result<Response, String> {
     ask(&app, "recorded_reading", move |owner| {
-        owner.recorded_pixels(index, max_width)
+        owner.recorded_pixels(recording, index, max_width)
     })
     .await
     .map(pixels)
