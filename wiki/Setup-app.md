@@ -970,11 +970,12 @@ application whose pictures hold more than an import reads. So an application
 that AppyTappy exports is one it imports; a property test packs and unpacks
 generated definitions.
 
-`import_app` unpacks the bytes again and saves the application through
-`Owner::write_app` with `AppStore::create`, which makes the folder, never
-writes into one that is there, and removes it again when the save fails. It
-takes a new ID from `new_app_id`, and refuses a name that a saved
-application has. It saves the anti-cheat class the user picked, never the
+`import_app` unpacks the bytes again and saves the application with
+`AppStore::create`. It makes the folder under a new ID from `new_app_id`,
+never writes into one that is there, and removes it again when the save
+fails. When the ID's name is taken by something the store does not list, a
+file or on Windows a folder that differs only in case, it takes the next
+ID. The import refuses a name that a saved application has. It saves the anti-cheat class the user picked, never the
 file's, and sets `origin` to `imported` with the picked file's name, without
 control characters and the format characters that reorder or hide text,
 which can turn a name around on screen, and at most 60 characters long. The page offers the

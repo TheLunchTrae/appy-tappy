@@ -350,7 +350,6 @@ impl<H: Host> Owner<H> {
         let apps = &self.stores()?.apps;
         let written = match write {
             Write::Save(file, pictures) => apps.save(app, file, pictures),
-            Write::New(file, pictures) => apps.create(app, file, pictures),
             Write::Remove => apps.remove(app),
         }
         .map_err(|error| error.to_string());
@@ -444,9 +443,6 @@ pub(super) enum Edit<T> {
 pub(super) enum Write<'a> {
     /// The application's file, with its new pictures.
     Save(&'a AppFile, &'a Pictures),
-    /// A new application's file and pictures, in a folder the write makes
-    /// and removes again should it fail.
-    New(&'a AppFile, &'a Pictures),
     /// The removal of the whole folder, with everything in it.
     Remove,
 }

@@ -165,35 +165,47 @@ impl AppStore {
     }
 
     /// Saves a new application as [`AppStore::save`] does, in a folder this
-    /// call makes, and removes that folder again when the save fails, so a
-    /// failed save leaves no folder of pictures without a file. It never
-    /// writes into a folder that is there.
+    /// call makes, and answers its ID, which [`new_app_id`] makes from the
+    /// executable its window match names. It never writes into a folder
+    /// that is there, and it removes its folder again when the save fails,
+    /// so a failed save leaves no folder of pictures without a file.
+    ///
+    /// A name can be taken though no application the store lists has it:
+    /// by a file, or on Windows by a folder whose name differs only in
+    /// case. The user cannot see or settle that, so the next free ID is
+    /// tried.
     ///
     /// # Errors
     ///
-    /// Returns what [`AppStore::save`] does, and an error when the folder
-    /// `id` exists already or cannot be made.
-    pub fn create(
-        &self,
-        id: &str,
-        file: &AppFile,
-        pictures: &[(String, Vec<u8>)],
-    ) -> io::Result<()> {
-        if !is_app_id(id) {
-            return Err(invalid(format!("{id:?} is not a valid application ID")));
-        }
+    /// Returns what [`AppStore::save`] and [`AppStore::load`] do, and an
+    /// error when no folder can be made.
+    pub fn create(&self, file: &AppFile, pictures: &[(String, Vec<u8>)]) -> io::Result<String> {
         fs::create_dir_all(&self.root)?;
-        let folder = self.folder(id);
-        fs::create_dir(&folder)?;
-        let saved = self.save(id, file, pictures);
-        if saved.is_err() {
+        let mut taken: Vec<String> = self.load()?.into_iter().map(|app| app.id).collect();
+        let (id, folder) = loop {
+            let known: Vec<&str> = taken.iter().map(String::as_str).collect();
+            let id = new_app_id(&file.window.executable, &known);
+            if taken.contains(&id) {
+                // No number is left for this name, which takes as many
+                // clashes as an ID has numbers.
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
+            let folder = self.folder(&id);
+            match fs::create_dir(&folder) {
+                Ok(()) => break (id, folder),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => taken.push(id),
+                Err(error) => return Err(error),
+            }
+        };
+        if let Err(error) = self.save(&id, file, pictures) {
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "the save's own error is the one to report; the folder is only cleanup"
             )]
             let _ = fs::remove_dir_all(&folder);
+            return Err(error);
         }
-        saved
+        Ok(id)
     }
 
     /// Removes the application `id`'s folder with everything in it. An
@@ -802,29 +814,43 @@ mod tests {
             ("icon_visible.png".to_owned(), vec![1]),
             ("../x.png".to_owned(), Vec::new()),
         ];
-        store
-            .save("kept", &good, &pictures[..1])
-            .expect("the first picture alone saves");
         // The first picture is written before the second is refused.
-        let failed = store.create("app", &good, &pictures).expect_err("refused");
+        let failed = store.create(&good, &pictures).expect_err("refused");
         assert!(failed.to_string().contains("not a valid picture name"));
-        assert!(!store.folder("app").exists(), "nothing of it stays");
-        store.create("app", &good, &pictures[..1]).expect("creates");
+        assert_eq!(names_in(&root), [""; 0], "nothing of it stays");
         assert_eq!(
-            names_in(&store.folder("app")),
-            [APP_FILE, "icon_visible.png"]
+            store.create(&good, &pictures[..1]).expect("creates"),
+            "example"
         );
-        let taken = store
-            .create("app", &good, &pictures)
-            .expect_err("the folder is there");
-        assert_eq!(taken.kind(), io::ErrorKind::AlreadyExists);
+        let first = [APP_FILE, "icon_visible.png"];
+        assert_eq!(names_in(&store.folder("example")), first);
+        assert_eq!(store.create(&good, &[]).expect("creates"), "example-2");
         assert_eq!(
-            names_in(&store.folder("app")),
-            [APP_FILE, "icon_visible.png"],
+            names_in(&store.folder("example")),
+            first,
             "the application that was there stays"
         );
-        let bad_id = store.create("../up", &good, &[]).expect_err("bad id");
-        assert_eq!(bad_id.kind(), io::ErrorKind::InvalidInput);
+        store.create(&good, &pictures).expect_err("refused again");
+        assert_eq!(names_in(&root), ["example", "example-2"]);
+        fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_new_application_takes_the_next_id_when_something_unlisted_has_its_name() {
+        let root = scratch("create-clash");
+        let store = AppStore::new(root.clone());
+        let good = file("icon_visible.png");
+        // Neither is an application the store lists: a file, and a folder
+        // that holds a file where the next ID's folder would be.
+        fs::create_dir_all(&root).expect("creates the root");
+        fs::write(root.join("example"), "not a folder").expect("writes");
+        fs::write(root.join("example-2"), "nor this").expect("writes");
+        assert_eq!(store.load().expect("lists"), []);
+        assert_eq!(store.create(&good, &[]).expect("creates"), "example-3");
+        assert_eq!(
+            fs::read_to_string(root.join("example")).expect("still there"),
+            "not a folder"
+        );
         fs::remove_dir_all(root).expect("clean up");
     }
 

@@ -7,14 +7,13 @@
 //! reads its values for an action until the user makes one.
 
 use appytappy_config::app_file::{AntiCheatDef, AppFile, OriginDef};
-use appytappy_config::store::new_app_id;
 use serde::{Deserialize, Serialize};
 
 use crate::applications;
 use crate::sharing::{ShareError, Shared};
 
 use super::host::Host;
-use super::{Changed, Owner, Write};
+use super::{Changed, Owner};
 
 /// The longest file name an import keeps as where it came from, in
 /// characters.
@@ -87,9 +86,12 @@ impl<H: Host> Owner<H> {
         name.clone_into(&mut file.name);
         file.anti_cheat = spec.anti_cheat;
         file.origin = OriginDef::Imported { file: from };
-        let taken: Vec<&str> = saved.iter().map(|app| app.id.as_str()).collect();
-        let id = new_app_id(&file.window.executable, &taken);
-        self.write_app(&id, Changed::Values, Write::New(&file, &pictures))?;
+        let id = self
+            .stores()?
+            .apps
+            .create(&file, &pictures)
+            .map_err(|error| error.to_string())?;
+        self.tell(Changed::Values);
         Ok(id)
     }
 }
