@@ -117,7 +117,6 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
 run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --cargo-arg=--locked
 run_mutants_task_child sh scripts/verify-mutants.sh full mutants.out
@@ -191,9 +190,9 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# When the diff or this shard selects no mutants, cargo-mutants writes a
-# report with no outcomes, which verification rejects, so the lane lists the
-# mutants first. Listing builds nothing.
+# When this shard selects no mutants, cargo-mutants writes a report without
+# outcomes.json, which verification rejects, so the lane lists the mutants
+# first and stops when there are none. Listing builds nothing.
 selected="$(cargo mutants --list --workspace --all-features --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file")"
 if [ -z "$selected" ]; then
   echo "The diff selects no mutants${MUTANTS_SHARD:+ in shard $MUTANTS_SHARD}; nothing to test."
@@ -203,7 +202,6 @@ fi
 if [ "${MUTANTS_COPY_TARGET:-false}" = true ]; then
   run_mutants_task_child cargo test --no-run --workspace --all-features --locked
 fi
-# cargo-mutants leaves an existing report untouched when it selects no mutants.
 rm -rf mutants.out
 run_mutants_task_child cargo mutants --output=. --workspace --all-features --test-workspace=true --jobs=2 --copy-target="${MUTANTS_COPY_TARGET:-false}" --cargo-arg=--locked ${MUTANTS_SHARD:+"--shard=$MUTANTS_SHARD"} --in-diff "$diff_file"
 run_mutants_task_child sh scripts/verify-mutants.sh diff mutants.out
