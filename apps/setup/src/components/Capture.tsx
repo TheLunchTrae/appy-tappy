@@ -920,7 +920,7 @@ export function Capture({
     tried: check.state.kind === 'set',
     busy,
     overLimit,
-    reviewing: reviewing && recording !== null,
+    reviewing: reviewed !== null,
   });
   const whereDone = named && draft.region !== null;
   const fixName = fixing === null ? null : `Fix ${fixing.name}`;
