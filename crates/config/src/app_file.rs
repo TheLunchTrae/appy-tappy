@@ -655,6 +655,18 @@ pub enum CheckDef {
         /// Whether only the whole part counts: every digit after the decimal
         /// point is ignored, so `87.5%` reads as 87.
         whole: bool,
+        /// The characters the value reads, such as `0123456789%`, or `None`
+        /// for every character its reference knows.
+        ///
+        /// The value matches what it sees against these characters alone,
+        /// so a value that shows only digits cannot read a `0` as an `O`
+        /// its reference also knows. Whitespace does not count, as in a
+        /// label, and neither does a character the reference has yet to
+        /// learn. A fix that reads with its own reference reads these
+        /// characters of it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        characters: Option<String>,
     },
     /// How full a bar is, as the share of pixels nearer `filled` than
     /// `empty`.
@@ -750,7 +762,9 @@ impl CheckDef {
     }
 
     /// Checks the rules the check's own settings can break: a state check's
-    /// states, as [`check_states`] says, and that a bar's two colors differ.
+    /// states, as [`check_states`] says, that a bar's two colors differ, and
+    /// that a number check told which characters to read reads at least
+    /// one.
     ///
     /// # Errors
     ///
@@ -762,6 +776,10 @@ impl CheckDef {
                 let names: Vec<&str> = states.iter().map(|state| state.name.as_str()).collect();
                 check_states(&names)
             },
+            Self::Number {
+                characters: Some(characters),
+                ..
+            } if !characters.chars().any(is_label_character) => Err(CheckDefError::NoCharacters),
             Self::Number { .. } | Self::Color { .. } => Ok(()),
         }
     }
@@ -811,6 +829,8 @@ pub enum CheckDefError {
     SameStateName(String),
     /// The bar's filled and empty colors are the same.
     SameColors,
+    /// A number check is told which characters to read, and reads none.
+    NoCharacters,
 }
 
 impl fmt::Display for CheckDefError {
@@ -827,6 +847,7 @@ impl fmt::Display for CheckDefError {
             Self::SameColors => {
                 formatter.write_str("its bar's filled and empty colors are the same")
             },
+            Self::NoCharacters => formatter.write_str("its number check reads no characters"),
         }
     }
 }
@@ -1236,6 +1257,7 @@ mod tests {
                     check: CheckDef::Number {
                         reference: "percent".to_owned(),
                         whole: true,
+                        characters: None,
                     },
                     pin: Some(PinDef::TopCenter),
                     reading_area: false,
@@ -1298,6 +1320,22 @@ mod tests {
         file.references[0].expects = Some("0123456789.%Aa".to_owned());
         let json = file.to_json();
         assert!(json.contains("\"expects\": \"0123456789.%Aa\""), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file));
+    }
+
+    #[test]
+    fn a_number_check_s_characters_are_left_out_until_chosen_and_round_trip() {
+        let mut file = dash();
+        let json = file.to_json();
+        assert!(!json.contains("characters"), "{json}");
+        assert_eq!(AppFile::parse(&json), Ok(file.clone()));
+        file.values[0].screen.check = CheckDef::Number {
+            reference: "percent".to_owned(),
+            whole: true,
+            characters: Some("0123456789 %".to_owned()),
+        };
+        let json = file.to_json();
+        assert!(json.contains("\"characters\": \"0123456789 %\""), "{json}");
         assert_eq!(AppFile::parse(&json), Ok(file));
     }
 
@@ -1624,6 +1662,7 @@ mod tests {
             CheckDef::Number {
                 reference: "percent".to_owned(),
                 whole: false,
+                characters: None,
             },
         ];
         for check in checks {
@@ -1708,6 +1747,11 @@ mod tests {
             filled: RED,
             empty: RED,
         });
+        let no_characters = with(CheckDef::Number {
+            reference: "percent".to_owned(),
+            whole: false,
+            characters: Some(" \t".to_owned()),
+        });
         let mut broad = dash();
         broad.window.executable = "*".to_owned();
         let cases = [
@@ -1741,6 +1785,10 @@ mod tests {
             (
                 one_color,
                 "value \"progress\": its bar's filled and empty colors are the same",
+            ),
+            (
+                no_characters,
+                "value \"progress\": its number check reads no characters",
             ),
             (
                 broad,

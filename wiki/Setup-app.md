@@ -270,8 +270,8 @@ This page covers what the user guide leaves out.
   the same place. A fix that stays keeps the reference it reads with: when a number value's
   reference changes, a fix that read with the old one names it, and a fix
   that named the new one names none, so a fix still names a reference only
-  when it differs from the value's. A fix has no `whole` of its own and
-  follows the value's. A value saved without a `pin` keeps none while the
+  when it differs from the value's. A fix has no `whole` and no
+  `characters` of its own and follows the value's. A value saved without a `pin` keeps none while the
   edit names the side guessed from its region, so an edit that changes
   nothing writes nothing. A value keeps its ID when renamed, and a new
   value named like a renamed one's old name gets that ID with a number.
@@ -769,6 +769,16 @@ check may have it, and it changes nothing the value reads. Each of its `fixes` h
 region; a state check's fix lists `images`, a picture for each state in the
 check's order, and a number check's fix may name its own `reference`.
 
+A number check's `characters` is the characters the value reads of its
+reference, such as `"0123456789%"`, and is left out when it reads every
+character the reference knows. Whitespace in it does not count, and neither
+does a character the reference has yet to learn. A check that names
+characters names at least one, or the file does not load; a value whose
+reference, or whose fix's reference, knows none of them is not read. The
+setup app writes each character once, the digits first, then the rest by
+code point. Its live check builds the same glyphs the runtime reads with
+(`check_spec::build`).
+
 A reference's `expects` is the characters the user says it needs to know,
 and is left out when the user chose none. Only the setup app reads it, to
 show which characters a reference has yet to learn, so no rule covers it and
@@ -855,11 +865,11 @@ format was saved by another version and can only be deleted.
 
 What each kind keeps in `state`:
 
-| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                                | What it does not keep                                                                                                                  |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                                  | A value or application flow the editor had opened, and what such a flow would hand back                                                |
-| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                             | The window picked in the list                                                                                                          |
-| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference and **Whole number only**), the reference being edited with the characters it needs, and which screenshots a recording kept | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
+| Kind                     | What it keeps                                                                                                                                                                                                                                                                                                                                                                                                         | What it does not keep                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation               | `AutomationSetup` (`lib/flow.ts`): the editor's whole draft, with each click's application, button, way of clicking, focus choice, and target, and the application chosen for the condition                                                                                                                                                                                                                           | A value or application flow the editor had opened, and what such a flow would hand back                                                |
+| Application              | `AppSetup` (`lib/matching.ts`): the name, how the window is found, and how often it changes size                                                                                                                                                                                                                                                                                                                      | The window picked in the list                                                                                                          |
+| Value, fix, or reference | `CaptureSetup` (`lib/captureDraft.ts`): the name, the step, whether the content may move, the check's whole draft (region, the screenshot it is drawn on, **Stays at**, tolerances, colors, states and their selections, labels, added found text, the reference, the characters it reads and **Whole number only**), the reference being edited with the characters it needs, and which screenshots a recording kept | A recording that runs or waits for review, the readings kept from one, an open **Find more like it** list, and the zoom of the picture |
 
 Screenshots follow one rule, however they were kept: every screenshot the
 capture holds when the draft is saved goes into the draft, those a

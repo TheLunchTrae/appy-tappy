@@ -12,6 +12,7 @@ import {
   type StateSpec,
 } from './bindings.ts';
 import { type Box, boxLabels } from './boxes.ts';
+import { savedCharacters } from './charactersRead.ts';
 import { AUTOMATIC, type PinChoice } from './pin.ts';
 import type { Color } from './pixels.ts';
 import { type Rect, type Size, sameRect } from './region.ts';
@@ -82,6 +83,8 @@ export interface Draft {
   readonly reference: string | null;
   /** Whether a number check ignores every digit after the decimal point. */
   readonly whole: boolean;
+  /** The characters a number check reads of its reference, each once, or null for every character it knows. */
+  readonly characters: readonly string[] | null;
 }
 
 export const EMPTY_DRAFT: Draft = {
@@ -102,6 +105,7 @@ export const EMPTY_DRAFT: Draft = {
   colorMatch: DEFAULT_COLOR_MATCH,
   ignoreBackground: true,
   whole: false,
+  characters: null,
 };
 
 /** Where the region is: its rectangle and the screenshot it was drawn on. */
@@ -282,10 +286,11 @@ export function buildSpec(draft: Draft, app: string): Built {
       if (draft.reference === null) {
         return missing('Pick a reference to read the number with, or make one from this region.');
       }
-      return {
-        ok: true,
-        spec: { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole },
-      };
+      if (draft.characters?.length === 0) {
+        return missing('Choose at least one character for the value to read.');
+      }
+      const spec = { kind: 'number', region, reference: { app, id: draft.reference }, whole: draft.whole } as const;
+      return { ok: true, spec: draft.characters === null ? spec : { ...spec, characters: draft.characters.join('') } };
     }
     case 'barFill': {
       if (draft.filled === null) {
@@ -411,7 +416,12 @@ export function fixDraft(check: CheckDef): Draft {
   const start = { ...EMPTY_DRAFT, kind: check.kind, tolerance: DEFAULT_TOLERANCE[check.kind] };
   switch (check.kind) {
     case 'number':
-      return { ...start, reference: check.reference, whole: check.whole };
+      return {
+        ...start,
+        reference: check.reference,
+        whole: check.whole,
+        characters: savedCharacters(check.characters),
+      };
     case 'barFill':
       return { ...start, filled: check.filled, empty: check.empty };
     case 'color':

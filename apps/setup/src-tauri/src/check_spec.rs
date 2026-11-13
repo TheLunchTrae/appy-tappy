@@ -144,6 +144,11 @@ pub(crate) enum CheckSpec {
         reference: ReferenceRef,
         /// Whether digits after the decimal point are ignored.
         whole: bool,
+        /// The characters the value reads, or `None` for every character
+        /// the reference knows, as [`CheckDef::Number`] saves them.
+        #[serde(default)]
+        #[cfg_attr(test, ts(optional))]
+        characters: Option<String>,
     },
     /// Reads a number with the characters a reference is being taught: the
     /// saved samples of `reference`, when it is saved, then `labels`, then
@@ -292,7 +297,10 @@ pub(crate) fn to_saved_fix(
     let mut pictures = Vec::new();
     let check = match spec {
         CheckSpec::Number {
-            reference, whole, ..
+            reference,
+            whole,
+            characters,
+            ..
         } => {
             if app != reference.app {
                 return Err(SpecError::OtherApplication);
@@ -300,6 +308,7 @@ pub(crate) fn to_saved_fix(
             CheckDef::Number {
                 reference: reference.id.clone(),
                 whole: *whole,
+                characters: characters.clone(),
             }
         },
         CheckSpec::Characters { .. } => return Err(SpecError::NotAValue),
@@ -529,8 +538,9 @@ pub(crate) fn drawn_size(
 /// Returns a [`SpecError`] that tells the user what to fix: an empty region,
 /// a region, screenshot, recorded reading, or saved reference that does not
 /// exist, a rule of the application's file that the check's settings break,
-/// such as two bar colors that are the same, or a label the reference
-/// cannot learn from.
+/// such as two bar colors that are the same, a number that reads no
+/// character its reference knows, or a label the reference cannot learn
+/// from.
 pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionCheck, SpecError> {
     let region = match spec {
         CheckSpec::Number { region, .. }
@@ -541,11 +551,23 @@ pub(crate) fn build(spec: &CheckSpec, session: Session<'_>) -> Result<RegionChec
     };
     let check = match spec {
         CheckSpec::Number {
-            reference, whole, ..
+            reference,
+            whole,
+            characters,
+            ..
         } => {
             let saved = (session.references)(reference).map_err(SpecError::Reference)?;
+            let all = saved_reader(&saved.reference, &saved.pictures, None)?;
+            // The glyphs the runtime reads the saved value with, as
+            // `saved::build` chooses them.
+            let reader = match characters {
+                Some(characters) => all
+                    .reading_only(characters)
+                    .ok_or(SpecError::NoCharacters)?,
+                None => all,
+            };
             Check::Number {
-                reader: saved_reader(&saved.reference, &saved.pictures, None)?,
+                reader,
                 whole: *whole,
             }
         },

@@ -1,6 +1,7 @@
 // How saved settings read on the Values and Applications pages.
 
 import type { AntiCheatDef, CheckDef, ReferenceDef } from './bindings.ts';
+import { savedCharacters } from './charactersRead.ts';
 import type { Color } from './pixels.ts';
 
 /** A saved check, in a few words, with its application's `references`. */
@@ -15,7 +16,9 @@ export function checkSummary(
         return { name: 'Number, its reference is missing', colors: [] };
       }
       return {
-        name: `Number, read with ${reference.name}${check.whole ? ', whole only' : ''}`,
+        name:
+          `Number, read with ${reference.name}${check.whole ? ', whole only' : ''}` +
+          (check.characters === undefined ? '' : `, reading ${savedCharacters(check.characters)?.join('') ?? ''}`),
         colors: [reference.ink],
       };
     }

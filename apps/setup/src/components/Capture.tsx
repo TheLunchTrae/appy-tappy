@@ -1480,6 +1480,7 @@ export function Capture({
                 selected={draft.reference}
                 hasRegion={draft.region !== null}
                 whole={draft.whole}
+                characters={draft.characters}
                 onSelect={(reference) => {
                   setDraft((current) => ({ ...current, reference }));
                 }}
@@ -1495,6 +1496,9 @@ export function Capture({
                 }}
                 onWhole={(whole) => {
                   setDraft((current) => ({ ...current, whole }));
+                }}
+                onCharacters={(characters) => {
+                  setDraft((current) => ({ ...current, characters }));
                 }}
               />
               {appFile.error === null ? null : <p className="warn">{appFile.error}</p>}
@@ -1586,6 +1590,7 @@ export function Capture({
                   selected={draft.reference}
                   hasRegion={draft.region !== null}
                   whole={draft.whole}
+                  characters={draft.characters}
                   onSelect={(reference) => {
                     setDraft((current) => ({ ...current, reference }));
                   }}
@@ -1601,6 +1606,9 @@ export function Capture({
                   }}
                   onWhole={(whole) => {
                     setDraft((current) => ({ ...current, whole }));
+                  }}
+                  onCharacters={(characters) => {
+                    setDraft((current) => ({ ...current, characters }));
                   }}
                 />
               ) : edited !== null && keepsStates(draft, edited.screen) ? (

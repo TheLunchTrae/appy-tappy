@@ -237,8 +237,9 @@ impl From<ColorDef> for Rgb {
 /// was drawn at, a picture cannot be read or decoded or a state's picture is
 /// not its region's size, a state's name is invalid or two states share a
 /// picture, a number's reference is missing or cannot learn from one of its
-/// pictures, or the value has too many fixes, two drawings at one size, or a
-/// fix whose pictures or reference do not suit its check.
+/// pictures or knows none of the characters the number reads, or the value
+/// has too many fixes, two drawings at one size, or a fix whose pictures or
+/// reference do not suit its check.
 pub fn build(
     screen: &ScreenDef,
     references: &[ReferenceDef],
@@ -249,10 +250,17 @@ pub fn build(
     screen.check.check().map_err(SavedError::Check)?;
     let mut images = state_images(screen.check.states())?;
     let check = match &screen.check {
-        CheckDef::Number { reference, whole } => Check::Number {
-            reader: reader(find(references, reference)?, &mut picture)?,
-            whole: *whole,
-        },
+        CheckDef::Number {
+            reference,
+            whole,
+            characters,
+        } => number_check(
+            references,
+            reference,
+            *whole,
+            characters.as_deref(),
+            &mut picture,
+        )?,
         // `CheckDef::check` refused the same colors, the one thing
         // `BarFill::new` refuses.
         CheckDef::BarFill { filled, empty } => Check::BarFill(
@@ -321,15 +329,32 @@ fn place(region: RegionDef, size: SizeDef) -> Result<(Region, Size), SavedError>
     }
 }
 
-/// The reference `id` among `references`.
-fn find<'refs>(
-    references: &'refs [ReferenceDef],
+/// A number check that reads with the reference `id` among `references`:
+/// with only its glyphs for `characters`, or with all of them for `None`.
+/// The glyphs are chosen here, once, so a read matches against no others.
+fn number_check(
+    references: &[ReferenceDef],
     id: &str,
-) -> Result<&'refs ReferenceDef, SavedError> {
-    references
+    whole: bool,
+    characters: Option<&str>,
+    picture: impl FnMut(&str) -> io::Result<Vec<u8>>,
+) -> Result<Check, SavedError> {
+    let reference = references
         .iter()
         .find(|known| known.id == id)
-        .ok_or_else(|| SavedError::NoReference { id: id.to_owned() })
+        .ok_or_else(|| SavedError::NoReference { id: id.to_owned() })?;
+    let all = reader(reference, picture)?;
+    let reader = match characters {
+        Some(characters) => {
+            all.reading_only(characters)
+                .ok_or_else(|| SavedError::NoCharacters {
+                    id: id.to_owned(),
+                    characters: characters.to_owned(),
+                })?
+        },
+        None => all,
+    };
+    Ok(Check::Number { reader, whole })
 }
 
 /// The fix `fix` of a value whose first drawing's check is `check`.
@@ -348,10 +373,18 @@ fn build_fix(
         });
     }
     let own = match (check, &fix.reference) {
-        (CheckDef::Number { whole, .. }, Some(reference)) => Some(Check::Number {
-            reader: reader(find(references, reference)?, &mut *picture)?,
-            whole: *whole,
-        }),
+        (
+            CheckDef::Number {
+                whole, characters, ..
+            },
+            Some(reference),
+        ) => Some(number_check(
+            references,
+            reference,
+            *whole,
+            characters.as_deref(),
+            &mut *picture,
+        )?),
         (CheckDef::State { states, tolerance }, None) => {
             let images: Vec<&str> = fix.images.iter().map(String::as_str).collect();
             Some(state_match(
@@ -548,6 +581,13 @@ pub enum SavedError {
         /// The reference's ID.
         id: String,
     },
+    /// A number reads only characters that its reference knows none of.
+    NoCharacters {
+        /// The reference's ID.
+        id: String,
+        /// The characters the number reads.
+        characters: String,
+    },
     /// A reference cannot learn from one of its pictures.
     Learn {
         /// The picture's file name.
@@ -601,6 +641,10 @@ impl fmt::Display for SavedError {
             Self::NoReference { id } => {
                 write!(formatter, "its reference {id} is not saved")
             },
+            Self::NoCharacters { id, characters } => write!(
+                formatter,
+                "its reference {id} knows none of the characters it reads, {characters:?}"
+            ),
             Self::Learn { name, source } => {
                 write!(
                     formatter,
@@ -628,7 +672,8 @@ impl Error for SavedError {
             | Self::FixReference
             | Self::SamePicture(_)
             | Self::StateName(_)
-            | Self::NoReference { .. } => None,
+            | Self::NoReference { .. }
+            | Self::NoCharacters { .. } => None,
         }
     }
 }
@@ -898,6 +943,7 @@ mod tests {
         let number = CheckDef::Number {
             reference: "counter".to_owned(),
             whole: false,
+            characters: None,
         };
         let plain = build(
             &screen(number.clone()),
@@ -982,6 +1028,7 @@ mod tests {
             check: CheckDef::Number {
                 reference: "percent".to_owned(),
                 whole: false,
+                characters: None,
             },
             pin: None,
             fixes: Vec::new(),
@@ -1027,6 +1074,7 @@ mod tests {
         let number = CheckDef::Number {
             reference: "counter".to_owned(),
             whole: false,
+            characters: None,
         };
         let bar = CheckDef::BarFill {
             filled: RED,
@@ -1055,6 +1103,7 @@ mod tests {
         let number = CheckDef::Number {
             reference: "counter".to_owned(),
             whole: true,
+            characters: None,
         };
         let built = build(
             &screen(number.clone()),
@@ -1085,6 +1134,7 @@ mod tests {
             &screen(CheckDef::Number {
                 reference: "counter".to_owned(),
                 whole: false,
+                characters: None,
             }),
             &[counter("111")],
             OFTEN,
@@ -1101,6 +1151,7 @@ mod tests {
             &screen(CheckDef::Number {
                 reference: "digits".to_owned(),
                 whole: false,
+                characters: None,
             }),
             &[counter("11")],
             OFTEN,
@@ -1109,6 +1160,91 @@ mod tests {
         .expect_err("no such reference");
         assert_eq!(error.to_string(), "its reference digits is not saved");
         assert!(error.source().is_none());
+    }
+
+    /// Rings in the reference's color, 16 pixels tall and each as wide as
+    /// `widths` says, a blank column apart.
+    fn rings(widths: &[usize]) -> Image {
+        let line = |fill: &str| {
+            let rings: Vec<String> = widths
+                .iter()
+                .map(|width| format!("#{}#", fill.repeat(width.saturating_sub(2))))
+                .collect();
+            rings.join(".")
+        };
+        let (edge, middle) = (line("#"), line("."));
+        let mut rows = vec![middle.as_str(); 16];
+        rows[0] = &edge;
+        rows[15] = &edge;
+        let bgra = rows
+            .concat()
+            .chars()
+            .flat_map(|cell| {
+                if cell == '#' {
+                    [0, 0, 255, 255]
+                } else {
+                    [40, 40, 40, 255]
+                }
+            })
+            .collect();
+        let size = Size {
+            width: u32::try_from(edge.len()).expect("small"),
+            height: 16,
+        };
+        Image::new(size, bgra).expect("matching length")
+    }
+
+    #[test]
+    fn a_number_reads_only_the_characters_it_is_told_to() {
+        // The reference knows a letter and the digit that looks like it, a
+        // column wider, so each shape matches both and the letter's own
+        // glyph is closer.
+        let files = pictures(&[
+            (&sample_name("counter", 1), &rings(&[10, 11])),
+            ("ref-letters-1.png", &rings(&[10])),
+        ]);
+        let number = |characters: Option<&str>| {
+            screen(CheckDef::Number {
+                reference: "counter".to_owned(),
+                whole: false,
+                characters: characters.map(str::to_owned),
+            })
+        };
+        let read = |characters: Option<&str>| {
+            build(&number(characters), &[counter("O0")], OFTEN, from(&files))
+                .expect("builds")
+                .drawn
+                .check
+                .read(&rings(&[10]))
+        };
+        let zero = Ok(Value::Number(Number::new(0.0).expect("finite")));
+        assert!(read(None).is_err());
+        assert!(read(Some("O")).is_err());
+        // Characters the reference has yet to learn are passed over.
+        assert_eq!(read(Some("0123456789")), zero);
+        let error = build(&number(Some("%")), &[counter("O0")], OFTEN, from(&files))
+            .expect_err("it knows none of them");
+        assert_eq!(
+            error.to_string(),
+            "its reference counter knows none of the characters it reads, \"%\""
+        );
+        assert!(error.source().is_none());
+        // A fix that reads with its own reference reads the same characters
+        // of it.
+        let mut fixed = number(Some("0"));
+        fixed.fixes = vec![FixDef {
+            reference: Some("letters".to_owned()),
+            ..fix_at(1000, 500, (5, 5, 2, 2), &[])
+        }];
+        let mut letters = counter("O");
+        letters.id = "letters".to_owned();
+        letters.samples[0].image = "ref-letters-1.png".to_owned();
+        let error = build(&fixed, &[counter("O0"), letters], OFTEN, from(&files))
+            .expect_err("the fix's reference knows no digit");
+        assert_eq!(
+            error.to_string(),
+            "at 1000x500, its reference letters knows none of the characters it reads, \"0\""
+        );
     }
 
     #[test]
@@ -1338,6 +1474,7 @@ mod tests {
         let mut screen = screen(CheckDef::Number {
             reference: "counter".to_owned(),
             whole: true,
+            characters: None,
         });
         screen.fixes = vec![
             FixDef {
