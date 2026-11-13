@@ -22,6 +22,7 @@ import {
 } from './found.ts';
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
+import { ask, useNewest } from './request.ts';
 
 /** How long the search's state waits between reads while text is still being read. */
 const FOUND_PAUSE_MS = 250;
@@ -83,8 +84,8 @@ export function useFound(
   const [edits, setEdits] = useState<ReadonlyMap<number, FoundEntry>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
-  // Bumped by each search, reread and dismissal, so an answer sent before one is ignored.
-  const turn = useRef(0);
+  // Each search, reread and dismissal begins a turn, so an answer sent before one is ignored.
+  const turn = useNewest();
   const [crops, setCrops] = useState<{ readonly id: number; readonly pictures: ReadonlyMap<number, Picture> }>({
     id: -1,
     pictures: new Map(),
@@ -102,18 +103,18 @@ export function useFound(
   );
 
   const poll = useCallback(async (): Promise<void> => {
-    const sent = turn.current;
+    const current = turn.join();
     try {
       const state = await foundState();
-      if (sent === turn.current) {
+      if (current()) {
         setView(state);
       }
     } catch (error: unknown) {
-      if (sent === turn.current) {
+      if (current()) {
         setError(errorText(error));
       }
     }
-  }, []);
+  }, [turn]);
   const reading = view?.finds.some((find) => find.text.kind === 'pending') ?? false;
   useRepeat(poll, FOUND_PAUSE_MS, reading);
 
@@ -155,28 +156,20 @@ export function useFound(
     if (key === '' || toCheck === null) {
       return undefined;
     }
-    let current = true;
-    const timer = setTimeout(() => {
-      foundProblems(toCheck, toLearn)
-        .then((answers) => {
-          if (current) {
-            setProblems({ key, found: flaggedFinds(rowsAsked, answers) });
-            setError(null);
-          }
-        })
-        .catch((error: unknown) => {
-          if (current) {
-            // Saving learns the text again, so a failed check flags none
-            // rather than leaving Add waiting for an answer that never comes.
-            setProblems({ key, found: new Map() });
-            setError(errorText(error));
-          }
-        });
-    }, CHECK_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+    return ask(
+      async () => foundProblems(toCheck, toLearn),
+      (answers) => {
+        setProblems({ key, found: flaggedFinds(rowsAsked, answers) });
+        setError(null);
+      },
+      (error) => {
+        // Saving learns the text again, so a failed check flags none
+        // rather than leaving Add waiting for an answer that never comes.
+        setProblems({ key, found: new Map() });
+        setError(errorText(error));
+      },
+      CHECK_DELAY_MS,
+    );
   }, [key]);
   const checked = key === '' || problems.key === key;
   const flags = rowFlags(rows, checked ? problems.found : new Map());
@@ -184,7 +177,7 @@ export function useFound(
   const offer = rereadOffer(rows, flags, draft.ink, draft.tolerance);
 
   const forget = (): void => {
-    turn.current += 1;
+    turn.begin();
     setView(null);
     setEdits(new Map());
     setError(null);
@@ -205,18 +198,17 @@ export function useFound(
     const added = boxesOn(boxes, screenshot)
       .filter((box) => box.id !== sample.id)
       .map((box) => box.region);
-    turn.current += 1;
-    const sent = turn.current;
+    const current = turn.begin();
     setSearching(true);
     try {
       const result = await findLike(screenshot, region, added, ink, tolerance);
-      if (sent === turn.current) {
+      if (current()) {
         setView(result);
         setEdits(new Map());
         setError(null);
       }
     } catch (error: unknown) {
-      if (sent === turn.current) {
+      if (current()) {
         setView(null);
         setError(errorText(error));
       }
@@ -250,16 +242,15 @@ export function useFound(
         return;
       }
       // The search's state read before this would show the finds as they were, and end the wait for their text.
-      turn.current += 1;
-      const sent = turn.current;
+      const current = turn.begin();
       try {
         const result = await rereadFound(view.id, again, draft.ink, draft.tolerance);
-        if (sent === turn.current && result !== null) {
+        if (current() && result !== null) {
           setView(result);
           setError(null);
         }
       } catch (error: unknown) {
-        if (sent === turn.current) {
+        if (current()) {
           setError(errorText(error));
         }
       }

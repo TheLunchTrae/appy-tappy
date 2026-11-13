@@ -5,6 +5,7 @@ import { type Dispatch, type RefObject, type SetStateAction, useEffect, useMemo,
 import type { RecordedLabel, RecordingView, ReferenceRef } from './bindings.ts';
 import { errorText, reviewProblems } from './api.ts';
 import { type Draft, reviewSpec } from './check.ts';
+import { ask } from './request.ts';
 import {
   type ReviewEntry,
   type Untaught,
@@ -130,29 +131,20 @@ export function useReview(
     if (!reviewing || toReview === null) {
       return undefined;
     }
-    let current = true;
-    const timer = setTimeout(() => {
-      reviewProblems(toReview)
-        .then((answers) => {
-          if (!current) {
-            return;
-          }
-          setProblems({ spec: reviewKey, found: flaggedReadings(toReview.recorded, answers) });
-          setError(null);
-        })
-        .catch((error: unknown) => {
-          if (current) {
-            // Saving checks the readings again, so a failed check flags none
-            // rather than leaving Keep waiting for an answer that never comes.
-            setProblems({ spec: reviewKey, found: new Map() });
-            setError(errorText(error));
-          }
-        });
-    }, REVIEW_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+    return ask(
+      async () => reviewProblems(toReview),
+      (answers) => {
+        setProblems({ spec: reviewKey, found: flaggedReadings(toReview.recorded, answers) });
+        setError(null);
+      },
+      (error) => {
+        // Saving checks the readings again, so a failed check flags none
+        // rather than leaving Keep waiting for an answer that never comes.
+        setProblems({ spec: reviewKey, found: new Map() });
+        setError(errorText(error));
+      },
+      REVIEW_DELAY_MS,
+    );
   }, [reviewing, reviewKey]);
   // Flags found on another spec are stale: none show, and Keep waits for the answer.
   const checked = problems.spec === reviewKey;

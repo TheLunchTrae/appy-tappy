@@ -5,6 +5,7 @@ import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useStat
 import { LIMITS, type SelectStep } from './bindings.ts';
 import { errorText, select } from './api.ts';
 import { type Draft, stateOn, withStateStep } from './check.ts';
+import { ask } from './request.ts';
 import { type Fitted, type Masking, type Selection, ignoredPixels, keptCount, madeFor, refit } from './selection.ts';
 
 /** How long a selection waits after the last change before it is made, so a dragged slider asks once. */
@@ -44,46 +45,38 @@ export function useStateSelections(
     if (stale.length === 0) {
       return undefined;
     }
-    let current = true;
-    const timer = setTimeout(() => {
-      Promise.all(
-        stale.map(async (state) => ({
-          state,
-          view: await select(state.screenshot, { tolerance: colorMatch, steps: state.steps }),
-        })),
-      )
-        .then((made) => {
-          if (!current) {
-            return;
-          }
-          setError(null);
-          const next = new Map(selections);
-          for (const { state, view } of made) {
-            next.set(state.screenshot, { steps: state.steps, colorMatch, view });
-          }
-          setSelections(next);
-          const every = states.flatMap((state) => {
-            const selection = madeFor(next, state, colorMatch);
-            return selection === null ? [] : [selection];
-          });
-          const fit = refit(every, fitted.current, shownRegion.current);
-          fitted.current = fit.fitted;
-          const { region } = fit;
-          if (region !== null) {
-            const on = made[0]?.state.screenshot ?? null;
-            setDraft((latest) => ({ ...latest, region, drawnOn: latest.drawnOn ?? on }));
-          }
-        })
-        .catch((error: unknown) => {
-          if (current) {
-            setError(errorText(error));
-          }
+    return ask(
+      async () =>
+        Promise.all(
+          stale.map(async (state) => ({
+            state,
+            view: await select(state.screenshot, { tolerance: colorMatch, steps: state.steps }),
+          })),
+        ),
+      (made) => {
+        setError(null);
+        const next = new Map(selections);
+        for (const { state, view } of made) {
+          next.set(state.screenshot, { steps: state.steps, colorMatch, view });
+        }
+        setSelections(next);
+        const every = states.flatMap((state) => {
+          const selection = madeFor(next, state, colorMatch);
+          return selection === null ? [] : [selection];
         });
-    }, SELECT_DELAY_MS);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
+        const fit = refit(every, fitted.current, shownRegion.current);
+        fitted.current = fit.fitted;
+        const { region } = fit;
+        if (region !== null) {
+          const on = made[0]?.state.screenshot ?? null;
+          setDraft((latest) => ({ ...latest, region, drawnOn: latest.drawnOn ?? on }));
+        }
+      },
+      (error) => {
+        setError(errorText(error));
+      },
+      SELECT_DELAY_MS,
+    );
   }, [states, colorMatch, selections, setDraft]);
 
   const { masks, ignored } = useMemo(() => {

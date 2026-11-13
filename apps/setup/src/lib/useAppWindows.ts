@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { errorText, listAppWindows } from './api.ts';
 import { type Look, known, seen } from './picker.ts';
+import { ask } from './request.ts';
 
 /**
  * The newest look at the saved applications and the open windows. One is made when the picker opens and whenever
@@ -13,23 +14,17 @@ export function useAppWindows(): { readonly look: Look; readonly refresh: () => 
   const [look, setLook] = useState<Look>({ kind: 'looking', before: null });
   const [again, setAgain] = useState(0);
   useEffect(() => {
-    // An answer to a look that another one replaced is dropped.
-    let current = true;
     setLook((last) => ({ kind: 'looking', before: known(last) }));
-    listAppWindows()
-      .then((answer) => {
-        if (current) {
-          setLook({ kind: 'seen', seen: seen(answer) });
-        }
-      })
-      .catch((error: unknown) => {
-        if (current) {
-          setLook((last) => ({ kind: 'failed', error: errorText(error), before: known(last) }));
-        }
-      });
-    return () => {
-      current = false;
-    };
+    // An answer to a look that another one replaced is dropped.
+    return ask(
+      listAppWindows,
+      (answer) => {
+        setLook({ kind: 'seen', seen: seen(answer) });
+      },
+      (error) => {
+        setLook((last) => ({ kind: 'failed', error: errorText(error), before: known(last) }));
+      },
+    );
   }, [again]);
   const refresh = useCallback((): void => {
     setAgain((count) => count + 1);

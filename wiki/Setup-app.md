@@ -43,7 +43,8 @@ This page covers what the user guide leaves out.
   (`lib/flow.ts`). `save_value` answers the saved value's application and ID,
   which the editor picks once the pages' lists show it, so nothing is looked
   up by name. Until then the draft has no value and cannot be saved. The
-  pages' lists are read every three seconds and after each save; the reads
+  pages' lists are read every three seconds, except while a screen holds
+  the capture (`lib/capture.ts`), and after each save; the reads
   are numbered, so an answer that arrives after a newer one is dropped
   (`lib/reads.ts`), and the editor can tell what is still on its way from
   what a newer read shows to be gone. When a flow shows because another

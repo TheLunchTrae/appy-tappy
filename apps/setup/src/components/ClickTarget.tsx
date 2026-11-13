@@ -1,15 +1,6 @@
 import { type PointerEvent, useEffect, useReducer, useRef, useState } from 'react';
 
-import {
-  addClickPicture,
-  clickNow,
-  errorText,
-  findClick,
-  pickWindow,
-  readWindow,
-  select,
-  stopCapture,
-} from '../lib/api.ts';
+import { addClickPicture, clickNow, errorText, findClick, pickWindow, readWindow, select } from '../lib/api.ts';
 import {
   type AppSummary,
   type ClickAtDef,
@@ -39,7 +30,9 @@ import {
 } from '../lib/click.ts';
 import { IDLE, tryStep } from '../lib/clickTry.ts';
 import { type Point, type Rect, type Size, contains, pixelAt, toPicture } from '../lib/region.ts';
+import { useCapture } from '../lib/capture.ts';
 import { background } from '../lib/repeat.ts';
+import { useNewest } from '../lib/request.ts';
 import { DEFAULT_COLOR_MATCH, type SelectTool } from '../lib/selection.ts';
 import { ScreenshotStage, useScreenshotStage } from './capture/ScreenshotStage.tsx';
 import { SelectFields } from './CheckFields.tsx';
@@ -162,6 +155,7 @@ function TargetStage({
   const [step, setStep] = useState<PictureStep>('picture');
   const [tool, setTool] = useState<SelectTool>('box');
   const [colorMatch, setColorMatch] = useState(DEFAULT_COLOR_MATCH);
+  const selecting = useNewest();
   // What Find it now and Click it now are doing or answered. Each try has a number, so a late answer is dropped.
   const [tried, tryNext] = useReducer(tryStep, IDLE);
   const attempts = useRef(0);
@@ -169,14 +163,11 @@ function TargetStage({
   const [error, setError] = useState<string | null>(null);
   // The picture kept for a drawn region, so finding and using it keep it once.
   const kept = useRef<{ readonly key: string; readonly at: ClickAtDef } | null>(null);
-  // Whether the screen still shows this stage, so a target finished after it closed is not used.
-  const mounted = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  // The stage's one pick of its window. What finishes after the stage closed, a pick or a target, is not used.
+  const picks = useNewest();
+  // The stage holds the capture until it goes: when the screen closes, or another stage opens, which may find no
+  // window to pick in its place. Its screenshots go with it.
+  useCapture();
 
   // What trying the target answered shows below the buttons, which may be past the end of a short window.
   const answer = useRef<HTMLDivElement>(null);
@@ -200,9 +191,7 @@ function TargetStage({
 
   // Picks the window the runtime clicks in, which it finds by the application's rules without the fallback.
   useEffect(() => {
-    let current = true;
-    // A function, because the check after an await must see a cleanup made meanwhile.
-    const isCurrent = (): boolean => current;
+    const isOpen = picks.begin();
     const file = latestFile.current;
     if (file === null) {
       setWindow({ kind: 'missing', message: 'Pick an application to click in.' });
@@ -214,7 +203,7 @@ function TargetStage({
         try {
           const read = await readWindow({ ...file.window, fallback: 'none' });
           if (read === null) {
-            if (isCurrent()) {
+            if (isOpen()) {
               setWindow({
                 kind: 'missing',
                 message: `No open window matches ${file.name}'s window rules. Open it, then look again.`,
@@ -223,29 +212,24 @@ function TargetStage({
             return;
           }
           // A screen closed meanwhile has stopped capture, which a pick now would start again.
-          if (!isCurrent()) {
+          if (!isOpen()) {
             return;
           }
           await pickWindow(read);
-          if (isCurrent()) {
+          if (isOpen()) {
             setWindow({ kind: 'picked', handle: read });
           }
         } catch (caught: unknown) {
-          if (isCurrent()) {
+          if (isOpen()) {
             setWindow({ kind: 'missing', message: errorText(caught) });
           }
         }
       })(),
     );
-    return () => {
-      current = false;
-      // The stage's capture ends with it, whether the screen closes, so the editor's live reading can watch again,
-      // or another stage opens, which may find no window to pick in its place. Its screenshots go with it.
-      background(stopCapture());
-    };
+    return undefined;
     // The window rules are read when the stage opens, and looking again opens a new one, not each time the lists
     // are read again.
-  }, []);
+  }, [picks]);
 
   // The window's own size: a screenshot's, since the live view may be scaled down.
   const newest = shots.at(-1);
@@ -278,9 +262,14 @@ function TargetStage({
     }
     const on = selected;
     const selection: SelectionSpec = { tolerance: colorMatch, steps };
+    // A selection that a newer one overtook marks nothing.
+    const current = selecting.begin();
     background(
       select(on, selection)
         .then((view_) => {
+          if (!current()) {
+            return;
+          }
           if (view_ === null) {
             setError('Nothing was selected there. Try a bigger box or a higher color match.');
             return;
@@ -289,7 +278,9 @@ function TargetStage({
           setStep('press');
         })
         .catch((caught: unknown) => {
-          setError(errorText(caught));
+          if (current()) {
+            setError(errorText(caught));
+          }
         }),
     );
   };
@@ -412,8 +403,9 @@ function TargetStage({
   };
 
   const use = (): void => {
+    const isOpen = picks.join();
     run((at) => {
-      if (mounted.current) {
+      if (isOpen()) {
         onUse({ app, button, delivery, at });
       }
     });

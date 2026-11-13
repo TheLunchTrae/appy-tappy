@@ -6,6 +6,7 @@ import type { LookRecordingView } from './bindings.ts';
 import { discardRecording, errorText, lookRecordingState, startLookRecording, stopRecording } from './api.ts';
 import type { Rect } from './region.ts';
 import { background, useRepeat } from './repeat.ts';
+import { useNewest } from './request.ts';
 
 /** How long the recording's state waits between reads, while it records. */
 const RECORDING_PAUSE_MS = 250;
@@ -38,8 +39,8 @@ export function useLookRecording(adopt: (index: number) => void): {
   // discard, or reading the recording's state.
   const [commandError, setCommandError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
-  // Bumped by each start, stop, or discard, so a poll sent before one is ignored.
-  const turn = useRef(0);
+  // Each start, stop, and discard begins a turn, so a poll sent before one is ignored.
+  const turn = useNewest();
 
   useEffect(
     () => () => {
@@ -49,17 +50,17 @@ export function useLookRecording(adopt: (index: number) => void): {
   );
 
   const poll = useCallback(async (): Promise<void> => {
-    const sent = turn.current;
+    const current = turn.join();
     try {
       const state = await lookRecordingState();
-      if (sent === turn.current) {
+      if (current()) {
         setView(state);
         setPollError(null);
       }
     } catch (error: unknown) {
       setPollError(errorText(error));
     }
-  }, []);
+  }, [turn]);
   useRepeat(poll, RECORDING_PAUSE_MS, view?.recording === true);
 
   // Hands each kept screenshot over once. The session never gives an index twice.
@@ -75,7 +76,7 @@ export function useLookRecording(adopt: (index: number) => void): {
   }, [kept, adopt]);
 
   const start = async (settings: Recordable, onStarted: () => void): Promise<void> => {
-    turn.current += 1;
+    turn.begin();
     try {
       await startLookRecording(settings.region, settings.tolerance, settings.drawnOn);
       setCommandError(null);
@@ -87,7 +88,7 @@ export function useLookRecording(adopt: (index: number) => void): {
   };
 
   const stop = async (): Promise<LookRecordingView | null> => {
-    turn.current += 1;
+    turn.begin();
     try {
       await stopRecording();
       const stopped = await lookRecordingState();
@@ -104,7 +105,7 @@ export function useLookRecording(adopt: (index: number) => void): {
     if (view === null) {
       return;
     }
-    turn.current += 1;
+    turn.begin();
     try {
       await discardRecording();
       setView(null);

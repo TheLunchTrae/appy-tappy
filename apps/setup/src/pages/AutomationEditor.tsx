@@ -38,6 +38,7 @@ import { type AutomationFlow, automationDraft, startOf } from '../lib/flow.ts';
 import { ACTIONS_HINT, COOLDOWN_HINT, DRAFT_HINT, UNDO_HINT, WHEN_HINT } from '../lib/hints.ts';
 import { editorLanding, useLanding } from '../lib/landing.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
+import { ask, useMounted } from '../lib/request.ts';
 import { ClickPictureThumb } from '../components/ClickPictureThumb.tsx';
 import { ClickTarget } from '../components/ClickTarget.tsx';
 import { DeleteDraft } from '../components/Drafts.tsx';
@@ -409,19 +410,16 @@ function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly 
   const [live, setLive] = useState<LiveState>(null);
   const watch = useRef<number | null>(null);
   const retryAt = useRef(0);
-  const mounted = useRef(true);
-  // A function, because the check after an await must see an unmount made meanwhile.
-  const isMounted = (): boolean => mounted.current;
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
+  const isMounted = useMounted();
+  useEffect(
+    () => () => {
       if (watch.current !== null) {
         background(stopWatching(watch.current));
         watch.current = null;
       }
-    };
-  }, []);
+    },
+    [],
+  );
   useRepeat(
     async () => {
       if (watch.current !== null) {
@@ -562,23 +560,19 @@ export function AutomationEditor({
   const [targeting, setTargeting] = useState<number | null>(null);
 
   // The running applications' executables, offered as the applications an action can target.
-  useEffect(() => {
-    let current = true;
-    background(
-      listWindows()
-        .then((list) => {
-          if (current) {
-            setExecutables([...new Set(list.windows.map((window) => window.executable))].toSorted());
-          }
-        })
-        .catch(() => {
+  useEffect(
+    () =>
+      ask(
+        listWindows,
+        (list) => {
+          setExecutables([...new Set(list.windows.map((window) => window.executable))].toSorted());
+        },
+        () => {
           // Typing the executable works without the suggestions.
-        }),
-    );
-    return () => {
-      current = false;
-    };
-  }, []);
+        },
+      ),
+    [],
+  );
 
   const choices = useMemo(() => valueChoices(apps), [apps]);
   const saved = useMemo(() => watchApps(apps), [apps]);
