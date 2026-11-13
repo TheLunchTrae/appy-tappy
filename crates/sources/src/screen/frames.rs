@@ -23,10 +23,10 @@ use crate::system::Bounds;
 /// device works.
 const HEALTH_CHECK: Duration = Duration::from_secs(2);
 
-/// The wait a frame handler returns when it wants no more frames, such as
-/// once it has the one frame it started the capture for. The capture waits
-/// [`LONGEST_WAIT`] before it reads another, longer than any capture that
-/// asks for none runs.
+/// The wait a frame handler returns when it wants no more frames.
+///
+/// A one-frame grab returns it once it has its frame. The capture then waits
+/// [`LONGEST_WAIT`] before it reads another, longer than such a capture runs.
 pub const NO_MORE_FRAMES: Duration = Duration::MAX;
 
 /// The longest wait a capture keeps; a longer one, such as
