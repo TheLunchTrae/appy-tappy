@@ -481,12 +481,7 @@ function TargetStage({
         hint={(shortcut) =>
           selected === null && liveError !== null ? liveError : hintText(window, mode, step, selected, shortcut, tool)
         }
-        strip={{
-          shots: null,
-          removal: null,
-          note: 'Screenshots last until you change the application.',
-          onSelect: null,
-        }}
+        strip={{ note: 'Screenshots last until you change the application.' }}
       >
         {({ shown }) => {
           const scale = nativeSize === null || nativeSize.width === 0 ? 0 : shown.width / nativeSize.width;
