@@ -72,9 +72,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use appytappy_actions::Watched;
+use appytappy_config::settings_file::ReadInterval;
 use appytappy_config::settings_file::TraceCategory;
 use appytappy_config::signal::Value;
-use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
+use appytappy_sources::schedule::{Activity, ReadSchedule};
 use appytappy_sources::screen::check::CheckError;
 use appytappy_sources::screen::saved::Unread;
 use appytappy_sources::screen::settle::Settle;

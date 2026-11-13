@@ -3,6 +3,7 @@
 //! quits.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io;
 use std::mem;
 use std::sync::Arc;
@@ -13,13 +14,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use appytappy_actions::Watched;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::paths::Locations;
-use appytappy_config::settings_file::{ReadIntervalDef, SettingsFile, TraceCategory};
+use appytappy_config::settings_file::{ReadInterval, SettingsFile, TraceCategory};
 use appytappy_config::store::{AppStore, AutomationStore, EnabledStore, SettingsStore};
 use appytappy_platform::{
     Log, RELOAD, ReloadRequest, ReloadWatch, Tray, TrayEvent, TrayMenu, WindowWatch,
 };
 use appytappy_sources::HostSystem;
-use appytappy_sources::schedule::ReadInterval;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
@@ -839,12 +839,11 @@ fn read_saved(
     let mut orders = Vec::new();
     if read.settings {
         match read_settings(&stores.settings) {
-            Ok(settings) => {
+            Ok((settings, interval)) => {
                 if settings.remember_enabled && !reloads.had_settings && !reloads.picked {
                     orders = remembered(&stores.enabled, model, log);
                 }
                 reloads.had_settings = true;
-                let interval = read_interval(settings.read_interval);
                 if interval != model.interval() {
                     note(log, &interval_line(interval));
                 }
@@ -954,22 +953,19 @@ fn failed(
     retry
 }
 
-/// Reads the settings.
+/// Reads the settings and the read interval they ask for.
 ///
 /// # Errors
 ///
 /// Returns why the settings cannot be read, as a line for the log.
-fn read_settings(store: &SettingsStore) -> Result<SettingsFile, String> {
-    store
-        .load()
-        .map_err(|error| format!("the settings cannot be read: {error}"))
-}
-
-/// The read interval `saved` asks for. A saved file is checked, so its
-/// fastest read is never slower than its slowest; were it, the default
-/// stands in.
-fn read_interval(saved: ReadIntervalDef) -> ReadInterval {
-    ReadInterval::new(saved.fastest(), saved.slowest()).unwrap_or_default()
+fn read_settings(store: &SettingsStore) -> Result<(SettingsFile, ReadInterval), String> {
+    let unreadable = |error: &dyn fmt::Display| format!("the settings cannot be read: {error}");
+    let settings = store.load().map_err(|error| unreadable(&error))?;
+    let interval = settings
+        .read_interval
+        .checked()
+        .map_err(|error| unreadable(&error))?;
+    Ok((settings, interval))
 }
 
 /// The log line for a new read interval.

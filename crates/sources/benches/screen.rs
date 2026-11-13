@@ -9,7 +9,7 @@
 //! The live capture runs only when `APPYTAPPY_BENCH_WINDOW` names part of a
 //! visible window's title. `APPYTAPPY_BENCH_REGION` sets the region as
 //! `x,y,width,height` (default `0,0,64,64`), and `APPYTAPPY_BENCH_MIN_MS` and
-//! `APPYTAPPY_BENCH_MAX_MS` set the read interval (defaults 16 and 500).
+//! `APPYTAPPY_BENCH_MAX_MS` set the read interval (the settings' defaults).
 
 use std::env;
 use std::error::Error;
@@ -17,7 +17,8 @@ use std::hint::black_box;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
-use appytappy_sources::schedule::{Activity, ReadInterval, ReadSchedule};
+use appytappy_config::settings_file::ReadInterval;
+use appytappy_sources::schedule::{Activity, ReadSchedule};
 use appytappy_sources::screen::check::{BarFill, ColorMatch, ImageMatch};
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::find::PictureSearch;
@@ -198,8 +199,8 @@ mod live {
         };
         let region = parse_region(env::var("APPYTAPPY_BENCH_REGION").ok().as_deref())?;
         let interval = ReadInterval::new(
-            millis("APPYTAPPY_BENCH_MIN_MS", 16)?,
-            millis("APPYTAPPY_BENCH_MAX_MS", 500)?,
+            millis("APPYTAPPY_BENCH_MIN_MS", ReadInterval::DEFAULT.min())?,
+            millis("APPYTAPPY_BENCH_MAX_MS", ReadInterval::DEFAULT.max())?,
         )
         .ok_or_else(|| io::Error::other("the minimum interval exceeds the maximum"))?;
         let system = HostSystem::new();
@@ -266,11 +267,11 @@ mod live {
         .ok_or_else(|| format!("{text:?} is not x,y,width,height").into())
     }
 
-    fn millis(name: &str, default: u64) -> Result<Duration, Box<dyn std::error::Error>> {
-        let value = env::var(name)
-            .ok()
-            .map_or(Ok(default), |value| value.parse())?;
-        Ok(Duration::from_millis(value))
+    fn millis(name: &str, default: Duration) -> Result<Duration, Box<dyn std::error::Error>> {
+        let Ok(value) = env::var(name) else {
+            return Ok(default);
+        };
+        Ok(Duration::from_millis(value.parse()?))
     }
 }
 
