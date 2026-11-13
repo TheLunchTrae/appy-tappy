@@ -18,6 +18,7 @@ import {
   recordBlocked,
   recordedPlace,
   regionScreenshot,
+  firstWithPixels,
   reviewSpec,
   settingsDiffer,
   stateOn,
@@ -453,6 +454,31 @@ test('the region shows over the screenshot shown, else the one it was drawn on, 
   expect(regionScreenshot(null, 2, full, 3)).toBe(2);
   expect(regionScreenshot(null, 4, full, 3)).toBe(3);
   expect(regionScreenshot(null, null, new Map(), null)).toBeNull();
+});
+
+test('a fix places its region on the first screenshot whose pixels arrived', () => {
+  const shots = [{ index: 0 }, { index: 2 }, { index: 5 }];
+  // The first screenshot's pixels never came, so the second one is the first that can carry the region.
+  expect(
+    firstWithPixels(
+      shots,
+      new Map([
+        [2, 'two'],
+        [5, 'five'],
+      ]),
+    ),
+  ).toEqual({ index: 2, picture: 'two' });
+  expect(
+    firstWithPixels(
+      shots,
+      new Map([
+        [0, 'zero'],
+        [2, 'two'],
+      ]),
+    ),
+  ).toEqual({ index: 0, picture: 'zero' });
+  // Pixels of a screenshot the strip does not list do not count.
+  expect(firstWithPixels(shots, new Map([[1, 'one']]))).toBeNull();
 });
 
 test("recording waits for a place to read and the characters' color", () => {

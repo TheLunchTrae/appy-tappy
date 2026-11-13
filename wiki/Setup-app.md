@@ -238,8 +238,9 @@ This page covers what the user guide leaves out.
   closes (`live_values`, `stop_live_values`). The automation editor's
   reading follows its window to each size the same way and keeps its watch's
   number, so the editor's poll goes on. **Fix at this size** opens the
-  capture locked to the value's application. Its first screenshot sets the
-  size, and its region starts where the value reads at that size: its fix
+  capture locked to the value's application. Its first screenshot whose
+  pixels arrive sets the size, and its region starts where the value reads
+  at that size: its fix
   there, or its first drawing scaled (`place_value`). The owner refuses a
   fix at the size of the first drawing, of another kind of check, or with
   other states than the value's, and saves it over any fix at the same size

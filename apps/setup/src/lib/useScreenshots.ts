@@ -22,15 +22,36 @@ const THUMB_WIDTH = 224;
 /** Wide enough for any window, so a screenshot arrives at its own pixels. */
 const FULL_WIDTH = 16_384;
 
-/** A screenshot taken: its index, and its window size, or null when its pixels did not arrive. */
+/** A screenshot taken: its index, and its window size. */
 export interface Taken {
   readonly index: number;
-  readonly size: Size | null;
+  readonly size: Size;
+}
+
+/** A screenshot's pixels: small for its thumbnail, and at its own size. */
+export interface Pixels {
+  readonly thumb: Picture;
+  readonly picture: Picture;
 }
 
 /** Fetches the screenshot `index` small for its thumbnail and at its own pixels. */
 async function fetchShot(index: number): Promise<readonly [Picture | null, Picture | null]> {
   return Promise.all([screenshot(index, THUMB_WIDTH), screenshot(index, FULL_WIDTH)]);
+}
+
+/**
+ * The pixels of the screenshot `index`, as `fetch` gets them. Rejects when either does not arrive, so a screenshot
+ * is listed only once it has them.
+ */
+export async function arrive(
+  index: number,
+  fetch: (index: number) => Promise<readonly [Picture | null, Picture | null]> = fetchShot,
+): Promise<Pixels> {
+  const [thumb, picture] = await fetch(index);
+  if (thumb === null || picture === null) {
+    throw new Error("The screenshot's pixels did not arrive.");
+  }
+  return { thumb, picture };
 }
 
 /**
@@ -76,17 +97,21 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
       setFull((current) => new Map(current).set(index, picture));
     }
   }, []);
-  // Lists the screenshot `index` and fetches its pixels.
-  const list = useCallback(
-    async (index: number, recorded: boolean): Promise<Picture | null> => {
-      const time = new Date().toLocaleTimeString();
-      setShots((current) => withShot(current, { index, time, thumb: null, recorded }));
-      const [thumb, picture] = await fetchShot(index);
-      keep(index, thumb, picture);
-      return picture;
-    },
-    [keep],
-  );
+  // Fetches the pixels of the screenshot `index` and then lists it. One whose pixels do not arrive is released and
+  // never listed, so the strip shows no blank tile for it.
+  const list = useCallback(async (index: number, recorded: boolean): Promise<Picture> => {
+    const time = new Date().toLocaleTimeString();
+    const { thumb, picture } = await arrive(index).catch((failure: unknown) => {
+      removed.current.add(index);
+      background(removeScreenshots([index]));
+      throw failure;
+    });
+    if (!removed.current.has(index)) {
+      setShots((current) => withShot(current, { index, time, thumb, recorded }));
+      setFull((current) => new Map(current).set(index, picture));
+    }
+    return picture;
+  }, []);
 
   // A draft's screenshots are this session's again; their pixels load once.
   const [first] = useState(restored);
@@ -110,12 +135,12 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
     async (how: 'show' | 'hold' = 'show'): Promise<Taken | null> => {
       try {
         const index = await takeScreenshot();
+        const picture = await list(index, false);
         if (how === 'show') {
           setSelected(index);
         }
         setError(null);
-        const picture = await list(index, false);
-        return { index, size: picture === null ? null : { width: picture.width, height: picture.height } };
+        return { index, size: { width: picture.width, height: picture.height } };
       } catch (error: unknown) {
         setError(errorText(error));
         return null;
