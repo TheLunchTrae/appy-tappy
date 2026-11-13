@@ -722,12 +722,15 @@ cut to the rows the number reader takes as the line of text
 (`Ink::line`) and the nearest mark on each side of them (`recording/ink.rs`).
 A mark is a short block of inked rows, such as the dot of an i or an accent
 that the text reader needs to tell letters apart: no taller than half the
-line's height, and no more than a quarter of the line's height, and at least
-one row, of blank rows away. Only the nearest mark on each side joins, so
-another line of text or a column of stray pixels does not stretch the line.
-Text for a recording or a search the user discarded or
+letters' height, with at most a quarter of their height of blank rows, and at
+least one, between it and them. Only the nearest mark on each side joins, so a
+column of stray pixels adds at most one block on each side. Another line of
+text is usually taller and further away, so it stays out, but one that the
+region cuts to a few rows close to the letters joins like a mark, since the
+region is meant to hold one line. Text for a recording or a search the user discarded or
 replaced is dropped by its number, and a queued job of a recording or search
-that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
+that a newer one of the same kind replaced is skipped without reading it. Only
+the setup app uses it; the runtime reads
 numbers with the shapes the user's labels and kept readings taught it ([Screen
 regions](Screen-regions.md#checks)).
 
