@@ -7,6 +7,7 @@ use appytappy_config::app_file::{
 use appytappy_config::automation_file::AutomationDef;
 use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::screen::check::Check;
+use appytappy_sources::screen::saved::Readers;
 use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::applications::AppSpec;
@@ -716,7 +717,13 @@ fn checks_at(harness: &Harness, sizes: &[SizeDef]) -> Vec<Check> {
         .expect("stores")
         .app("example")
         .expect("saved");
-    let value = read_back(&app.file.values[0].screen, &app, &Vec::new()).expect("reads back");
+    let value = read_back(
+        &app.file.values[0].screen,
+        &app,
+        Readers::new(&app.file.references),
+        &Vec::new(),
+    )
+    .expect("reads back");
     sizes
         .iter()
         .map(|size| {

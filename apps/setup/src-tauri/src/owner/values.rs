@@ -83,7 +83,12 @@ impl<H: Host> Owner<H> {
                 reading_area: spec.reading_area,
                 fixes: Vec::new(),
             };
-            read_back(&screen, found, &saved.pictures)?;
+            read_back(
+                &screen,
+                found,
+                saved::Readers::new(&found.file.references),
+                &saved.pictures,
+            )?;
             let file = &mut found.file;
             let first = file.values.is_empty();
             file.values.push(ValueDef {
@@ -158,11 +163,11 @@ pub(super) fn named_apart(file: &AppFile, own: Option<&str>, name: &str) -> Resu
     Ok(())
 }
 
-/// Reads `screen` back as the runtime will, with the references and size
-/// changes of `app`'s file, from `pictures`, about to be saved, and those
-/// already in its folder. It is the one judge of a value's check: one that
-/// reads back is one the runtime can read, whether it is being tried on the
-/// live window or saved.
+/// Reads `screen` back as the runtime will, with `readers`, those of the
+/// references of `app`'s file, and its size changes, from `pictures`, about
+/// to be saved, and those already in its folder. It is the one judge of a
+/// value's check: one that reads back is one the runtime can read, whether
+/// it is being tried on the live window or saved.
 ///
 /// # Errors
 ///
@@ -171,20 +176,16 @@ pub(super) fn named_apart(file: &AppFile, own: Option<&str>, name: &str) -> Resu
 pub(super) fn read_back(
     screen: &ScreenDef,
     app: &SavedApp,
+    mut readers: saved::Readers<'_>,
     pictures: &Pictures,
 ) -> Result<saved::SavedValue, String> {
     let file = &app.file;
-    saved::build(
-        screen,
-        &mut saved::Readers::new(&file.references),
-        file.size_changes,
-        |picture| {
-            pictures
-                .iter()
-                .find(|(name, _)| name == picture)
-                .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
-        },
-    )
+    saved::build(screen, &mut readers, file.size_changes, |picture| {
+        pictures
+            .iter()
+            .find(|(name, _)| name == picture)
+            .map_or_else(|| app.picture(picture), |(_, png)| Ok(png.clone()))
+    })
     .map_err(|error| match error {
         SavedError::NoReference { .. } => format!("{} no longer has that reference.", file.name),
         SavedError::NoCharacters { id, characters } => {
@@ -263,11 +264,23 @@ mod tests {
         std::fs::write(app.folder.join("old.png"), &png).expect("writes");
         let new = vec![("new.png".to_owned(), png)];
         assert_eq!(
-            read_back(&screen(["new.png", "old.png"]), &app, &new).map(drop),
+            read_back(
+                &screen(["new.png", "old.png"]),
+                &app,
+                saved::Readers::new(&app.file.references),
+                &new
+            )
+            .map(drop),
             Ok(())
         );
         assert_eq!(
-            read_back(&screen(["new.png", "gone.png"]), &app, &new).map(drop),
+            read_back(
+                &screen(["new.png", "gone.png"]),
+                &app,
+                saved::Readers::new(&app.file.references),
+                &new
+            )
+            .map(drop),
             Err(
                 "AppyTappy could not read this value as saved: its picture gone.png cannot be \
                  read."
@@ -275,7 +288,13 @@ mod tests {
             )
         );
         assert!(
-            read_back(&screen(["old.png", "new.png"]), &app, &Vec::new()).is_err(),
+            read_back(
+                &screen(["old.png", "new.png"]),
+                &app,
+                saved::Readers::new(&app.file.references),
+                &Vec::new()
+            )
+            .is_err(),
             "a new picture is not on disk yet"
         );
         std::fs::remove_dir_all(root).expect("clean up");
