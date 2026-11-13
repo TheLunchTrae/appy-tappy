@@ -246,17 +246,18 @@ impl DigitReader {
     ///
     /// A character the reader's value leaves out, as
     /// [`DigitReader::reading`] describes, is text: it ends the number, or
-    /// comes before it, whatever it is. So a value of digits reads `53%` as
-    /// 53, `87.5` as 87, and `Lv.5` as 5. A digit is the exception, since
-    /// the number beside it would read without it.
+    /// comes before it. So a value of digits reads `53%` as 53 and `Lv.5`
+    /// as 5. The read fails when the text is a part of the number, which
+    /// would be another number with it: a value of digits reads neither
+    /// `-5`, `.5`, `87.5`, nor `1,234`.
     ///
     /// # Errors
     ///
     /// Returns a [`ReadError`] when the image has no ink, too many
-    /// characters, a character that matches no learned glyph, a digit the
-    /// value leaves out, or no digits. The last three carry the characters
-    /// the read made out, so a number is never made of only the characters
-    /// that matched.
+    /// characters, a character that matches no learned glyph, a character
+    /// the value leaves out that its number holds, or no digits. The last
+    /// three carry the characters the read made out, so a number is never
+    /// made of only the characters that matched.
     pub fn read(&self, image: &Image, whole: bool) -> Result<Number, ReadError> {
         let mut spans = [Span::default(); MAX_CHARACTERS];
         let (line, count) = self
@@ -265,43 +266,41 @@ impl DigitReader {
                 Segmentation::NoInk => ReadError::NoInk,
                 Segmentation::TooMany => ReadError::TooManyCharacters,
             })?;
-        let mut number = NumberText {
-            point: Point::for_whole(whole),
-            ..NumberText::default()
-        };
+        let mut number = NumberText::new(whole);
+        // The number as it reads with the characters the value leaves out
+        // too. Where it is another number than `number`, one of them is a
+        // part of it, and the read fails.
+        let mut with_left_out = NumberText::new(whole);
         let mut read = ReadText::default();
         // The first character that matched no glyph, and the glyph closest
         // to it. The read then fails, whatever `number` holds; the
         // characters after it are still matched, for the error, up to
         // where a number among them ends.
         let mut unknown = None;
-        // The first digit the value leaves out, which fails the read too.
-        let mut digit_left_out = None;
         for (position, span) in spans.iter().take(count).enumerate() {
             let shape = self.shape(image, line, *span);
-            let closest = closest(&self.glyphs, &shape);
-            if let Some(closest) = closest.filter(|closest| closest.matches) {
-                read.push(closest.character);
-                number.push(closest.character);
+            let kept = closest(&self.glyphs, &shape);
+            if let Some(kept) = kept.filter(|kept| kept.matches) {
+                read.push(kept.character);
+                number.push(kept.character);
+                with_left_out.push(kept.character);
                 continue;
             }
             // Text after a finished number, such as the "HP" in "37% HP",
             // needs no glyphs.
-            if number.ended {
+            if with_left_out.ended {
                 break;
             }
-            let left_out = self::closest(&self.left_out, &shape);
-            if let Some(Closest { character, .. }) = left_out.filter(|closest| closest.matches) {
+            let left_out = closest(&self.left_out, &shape);
+            if let Some(Closest { character, .. }) = left_out.filter(|left_out| left_out.matches) {
                 read.push(character);
                 number.push_text(character);
-                if character.is_ascii_digit() {
-                    digit_left_out.get_or_insert(character);
-                }
+                with_left_out.push(character);
                 continue;
             }
             read.push(ReadText::UNKNOWN);
             if unknown.is_none() {
-                unknown = Some((position, closest.map(|closest| closest.character)));
+                unknown = Some((position, kept.map(|kept| kept.character)));
             }
         }
         if let Some((position, closest)) = unknown {
@@ -311,10 +310,11 @@ impl DigitReader {
                 read,
             });
         }
-        if let Some(digit) = digit_left_out {
-            return Err(ReadError::DigitLeftOut { digit, read });
+        let parsed = number.parse();
+        if parsed != with_left_out.parse() {
+            return Err(ReadError::LeftOut { read });
         }
-        number.parse().ok_or(ReadError::NoNumber { read })
+        parsed.ok_or(ReadError::NoNumber { read })
     }
 
     /// Whether `pixel`, as `[blue, green, red, unused]` like
@@ -493,21 +493,18 @@ impl DigitReader {
     }
 
     /// The closest glyph to `shape`, and the closest of another character.
-    /// Of equals, the glyph learned first, as in [`DigitReader::read`].
+    /// Of equals, the glyph learned first. As [`DigitReader::read`] does, it
+    /// scores a shape that matches no glyph the value reads against the
+    /// glyphs the value leaves out, and takes the closest of those when it
+    /// matches.
     fn score(&self, shape: &Shape) -> CharacterScore {
-        let around = grown(shape);
-        let mut ranked: Vec<GlyphScore> = self
-            .glyphs
-            .iter()
-            .map(|glyph| GlyphScore::of(shape, &around, glyph))
-            .collect();
-        ranked.sort_by_key(|score| score.distance());
-        let best = ranked.first().copied();
-        let runner_up = ranked
-            .iter()
-            .find(|score| best.is_some_and(|best| best.character != score.character))
-            .copied();
-        CharacterScore { best, runner_up }
+        let kept = CharacterScore::among(&self.glyphs, shape, false);
+        if kept.matches() {
+            return kept;
+        }
+        Some(CharacterScore::among(&self.left_out, shape, true))
+            .filter(CharacterScore::matches)
+            .unwrap_or(kept)
     }
 }
 
@@ -533,6 +530,38 @@ pub struct CharacterScore {
     /// The closest glyph of another character, or `None` when the reader
     /// knows no other character.
     pub runner_up: Option<GlyphScore>,
+    /// Whether the glyphs are of characters the value leaves out: the
+    /// character matches one of them and none the value reads, so a read
+    /// takes it as text.
+    pub left_out: bool,
+}
+
+impl CharacterScore {
+    /// How `shape` scores among `glyphs`, the glyphs the value leaves out
+    /// when `left_out`.
+    fn among(glyphs: &[Glyph], shape: &Shape, left_out: bool) -> Self {
+        let around = grown(shape);
+        let mut ranked: Vec<GlyphScore> = glyphs
+            .iter()
+            .map(|glyph| GlyphScore::of(shape, &around, glyph))
+            .collect();
+        ranked.sort_by_key(|score| score.distance());
+        let best = ranked.first().copied();
+        let runner_up = ranked
+            .iter()
+            .find(|score| best.is_some_and(|best| best.character != score.character))
+            .copied();
+        Self {
+            best,
+            runner_up,
+            left_out,
+        }
+    }
+
+    /// Whether the character reads as its closest glyph.
+    fn matches(&self) -> bool {
+        self.best.is_some_and(GlyphScore::matches)
+    }
 }
 
 /// How close a character is to one learned glyph.
@@ -656,6 +685,14 @@ impl Point {
 }
 
 impl NumberText {
+    /// No characters yet, of a number that ends at its point when `whole`.
+    fn new(whole: bool) -> Self {
+        Self {
+            point: Point::for_whole(whole),
+            ..Self::default()
+        }
+    }
+
     /// Takes `character` as text that is no part of a number, whatever it
     /// is: a character the value leaves out. A letter still tells a `.`
     /// after it that it is not the number's, as in `Lv.5`.
@@ -904,10 +941,9 @@ pub enum ReadError {
         /// Every character the read made out.
         read: ReadText,
     },
-    /// A digit matched a glyph of a character the value does not read.
-    DigitLeftOut {
-        /// The digit. It is the first such digit.
-        digit: char,
+    /// A character the value does not read is a part of the number: with
+    /// it, the characters hold another number.
+    LeftOut {
         /// Every character the read made out.
         read: ReadText,
     },
@@ -930,7 +966,7 @@ impl ReadError {
             Self::UnknownCharacter { .. } => {
                 "a character has a shape the reference has not learned"
             },
-            Self::DigitLeftOut { .. } => "the value does not read a digit its reference knows",
+            Self::LeftOut { .. } => "the value leaves out a character its number holds",
             Self::NoNumber { .. } => "the characters hold no number",
         }
     }
@@ -957,11 +993,9 @@ impl fmt::Display for ReadError {
                     None => formatter.write_str("unlike any, since it has learned none"),
                 }
             },
-            Self::DigitLeftOut { digit, read } => write!(
-                formatter,
-                ": it read `{read}`, and its characters lack the `{digit}`"
-            ),
-            Self::NoNumber { read } => write!(formatter, ": it read `{read}`"),
+            Self::LeftOut { read } | Self::NoNumber { read } => {
+                write!(formatter, ": it read `{read}`")
+            },
         }
     }
 }
@@ -1060,12 +1094,11 @@ mod tests {
                 ": it read `?`, and character 1 is unlike any, since it has learned none",
             ),
             (
-                ReadError::DigitLeftOut {
-                    digit: '7',
+                ReadError::LeftOut {
                     read: read_text("17"),
                 },
-                "the value does not read a digit its reference knows",
-                ": it read `1 7`, and its characters lack the `7`",
+                "the value leaves out a character its number holds",
+                ": it read `1 7`",
             ),
             (
                 ReadError::NoNumber {
@@ -1791,7 +1824,8 @@ mod tests {
             reader_of(&[]).score(&far),
             CharacterScore {
                 best: None,
-                runner_up: None
+                runner_up: None,
+                left_out: false,
             }
         );
     }
@@ -1947,15 +1981,46 @@ mod tests {
         let read = |text, whole| digits.read(&drawn(text, 28, 3.3), whole);
         assert_eq!(read("53%", false), Ok(Number::new(53.0).unwrap()));
         assert_eq!(read("87.5%", true), Ok(Number::new(87.0).unwrap()));
-        // The point is not the value's, so it ends the number as the
-        // percent sign does.
-        assert_eq!(read("87.5%", false), Ok(Number::new(87.0).unwrap()));
         assert_eq!(
             read("%", false),
             Err(ReadError::NoNumber {
                 read: read_text("%")
             })
         );
+    }
+
+    #[test]
+    fn a_character_the_value_leaves_out_fails_a_number_it_is_part_of() {
+        // A comma hangs below the line, so the characters beside one are
+        // learned beside one.
+        let mut all = taught(28, &LABELS);
+        for text in ["-12", "12,345"] {
+            all.learn(&drawn(text, 28, 3.3), text).unwrap();
+        }
+        let digits = all.clone().reading(Some("0123456789")).unwrap();
+        for (text, with_it) in [
+            ("-5", -5.0),
+            (".5", 0.5),
+            ("87.5%", 87.5),
+            ("1,234", 1234.0),
+            ("12,345", 12345.0),
+        ] {
+            let image = drawn(text, 28, 3.3);
+            assert_eq!(all.read(&image, false), Ok(Number::new(with_it).unwrap()));
+            let shown: String = text.chars().collect();
+            assert_eq!(
+                digits.read(&image, false),
+                Err(ReadError::LeftOut {
+                    read: read_text(&shown)
+                }),
+                "{text}"
+            );
+        }
+        // A comma that separates no groups of three ends the number for a
+        // value that reads it too.
+        let twelve = Ok(Number::new(12.0).unwrap());
+        assert_eq!(all.read(&drawn("12,5", 28, 3.3), false), twelve);
+        assert_eq!(digits.read(&drawn("12,5", 28, 3.3), false), twelve);
     }
 
     #[test]
@@ -1971,10 +2036,16 @@ mod tests {
         assert_eq!(point.read(&label, false), five);
         let digit = reader.clone().reading(Some("5")).unwrap();
         assert_eq!(digit.read(&label, false), five);
-        // A point the value leaves out starts no number: ".5" reads as 5.
+        // Without the letter the point is the number's, so a value that
+        // leaves it out does not read ".5" as 5.
         let pointed = draw(&["..###", "..#..", "#.###"]);
         assert_eq!(reader.read(&pointed, false), Ok(Number::new(0.5).unwrap()));
-        assert_eq!(digit.read(&pointed, false), five);
+        assert_eq!(
+            digit.read(&pointed, false),
+            Err(ReadError::LeftOut {
+                read: read_text(".5")
+            })
+        );
     }
 
     #[test]
@@ -1986,20 +2057,17 @@ mod tests {
         let ones = reader.reading(Some("1.")).unwrap();
         assert_eq!(
             ones.read(&label, false),
-            Err(ReadError::DigitLeftOut {
-                digit: '5',
+            Err(ReadError::LeftOut {
                 read: read_text("1.5"),
             })
         );
         // A whole number ends at its point, and what follows is not read.
         assert_eq!(ones.read(&label, true), Ok(Number::new(1.0).unwrap()));
-        // "5", a blank, "1": the digit before the number fails it too, and
-        // the first one left out is the one named.
+        // "5", a blank, "1": the digit before the number fails it too.
         let led = draw(&["###.#.###", "#...#.#..", "###.#.###"]);
         assert_eq!(
             ones.read(&led, false),
-            Err(ReadError::DigitLeftOut {
-                digit: '5',
+            Err(ReadError::LeftOut {
                 read: read_text("515"),
             })
         );
@@ -2014,6 +2082,36 @@ mod tests {
                 read: read_text("5?"),
             })
         );
+    }
+
+    #[test]
+    fn the_workings_show_a_character_the_value_leaves_out_as_text() {
+        let digits = taught(28, &LABELS).reading(Some("0123456789")).unwrap();
+        let image = drawn("53%", 28, 3.3);
+        assert_eq!(digits.read(&image, false), Ok(Number::new(53.0).unwrap()));
+        let scores = digits.explain(&image).unwrap();
+        let shown: Vec<_> = scores
+            .iter()
+            .map(|score| {
+                let best = score.best.unwrap();
+                (best.character, best.matches(), score.left_out)
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [('5', true, false), ('3', true, false), ('%', true, true)]
+        );
+        // The other glyphs the value leaves out are what it is ranked
+        // among.
+        assert_eq!(scores[2].runner_up.map(|score| score.character), Some('.'));
+        // A shape that matches no glyph at all scores against the glyphs
+        // the value reads, as a read's error names the closest of them.
+        let no_eight = taught(28, &["12.34%", "56.79%", "0%"])
+            .reading(Some("0123456789"))
+            .unwrap();
+        let unread = no_eight.explain(&drawn("8", 28, 3.3)).unwrap();
+        assert!(!unread[0].left_out);
+        assert!(unread[0].best.is_some_and(|best| !best.matches()));
     }
 
     #[test]

@@ -389,7 +389,12 @@ best: GlyphView | null,
 /**
  * The closest glyph of another character, if the reference has one.
  */
-runnerUp: GlyphView | null, }>;
+runnerUp: GlyphView | null,
+/**
+ * Whether the value leaves the character out, so it reads as text and
+ * not as a part of the number.
+ */
+leftOut: boolean, }>;
 
 /**
  * The characters a reference is being taught, as the UI describes them:

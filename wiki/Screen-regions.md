@@ -55,11 +55,17 @@ the same answer on every system, and allocate nothing per read.
   digits cannot read a `0` as the `O` its font also has. A shape that
   matches none of them is matched against the reference's other glyphs, the
   ones the value leaves out, and one that matches is text: it ends the
-  number or comes before it, as an unnamed character of a kind no number
-  holds would, so a value of digits reads `53%` as 53 and `87.5` as 87. A
+  number or comes before it, so a value of digits reads `53%` as 53. A
   letter left out still keeps a `.` after it out of the number, as in
-  `Lv.5`. A digit left out fails the read, since the number beside it would
-  read without it. `DigitReader::reading` sorts the glyphs once, when
+  `Lv.5`. The read also takes the number as it is with the left-out
+  characters, and fails when that is another number: a left-out `-`, `.`,
+  `,`, or digit that is a part of the number, as in `-5`, `.5`, `87.5`, and
+  `1,234` for a value of digits, is never dropped without a word. A
+  character the value reads that is drawn far enough off to match only a
+  left-out lookalike is text too, so `105` whose `0` matches only a
+  left-out `O` reads as 1; that takes a shape more than 1 cell in 32 from
+  every glyph of its own character and within that of another's, which is
+  rare. `DigitReader::reading` sorts the glyphs once, when
   `saved::build` builds the check, so a read matches a character the value
   reads against those glyphs alone. Characters the
   reference has yet to learn are passed over, and a value whose reference
@@ -121,8 +127,9 @@ runtime's log:
   shows every character the read made out, with a `?` for each unlearned
   one, such as `8 7 ?`, and names the learned character the first of them is
   closest to. No number is made of the characters that did match.
-- **A digit left out.** A digit matched a glyph the reference knows and the
-  value does not read. The message shows the characters and names the digit.
+- **A character left out.** A character the value does not read is a part
+  of the number: with it, the characters hold another number. The message
+  shows the characters.
 - **No number.** Every character matched, and those the value reads hold no
   digits, such as `%` alone. The message shows them.
 
