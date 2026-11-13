@@ -48,13 +48,15 @@ it was about has gone. Thirteen guards drop such stale messages:
   work to the UI: a stop that carries the number of another capture than
   the picked window's is dropped (`Owner::stop_capture`), and so is a stop
   that carries the number of another recording than the one the capture
-  records (`Owner::stop_recording`). The page sends picks one at a time and
-  drops a pick whose screen went before its turn (`screenCaptures` in
-  `apps/setup/src/lib/capture.ts`), so the capture a stop names is never one
-  that a closed screen's late pick put in place of the next screen's. The
-  owner answers nothing for a picture asked of another search than the one
-  it holds and rereads nothing for one
-  (`apps/setup/src-tauri/src/owner/found.rs`), and
+  records (`Owner::stop_recording`). The page sends the screens' picks one
+  at a time and drops a pick whose screen went before its turn
+  (`screenCaptures` in `apps/setup/src/lib/capture.ts`), so a closed
+  screen's late pick never takes the slot from the next screen's pick. The
+  automation editor's watch takes the slot outside that line
+  (`Owner::watch`), so such a pick can still replace a watch; the owner then
+  refuses the watch, and the editor watches again. The owner answers nothing
+  for a picture asked of another search than the one it holds and rereads
+  nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
   an ask about another watch than the one it holds is refused. A reading's
   picture is asked for with its recording's number: the owner answers
   nothing for a recording that was discarded or replaced (`recorded_pixels`
