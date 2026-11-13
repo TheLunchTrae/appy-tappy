@@ -276,6 +276,9 @@ export function Capture({
   const [mayMove, setMayMove] = useState(start.mayMove);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Why the reference being taught was not saved. It is the editor's own, and goes when the editor closes, so it
+  // never shows as the value's.
+  const [referenceError, setReferenceError] = useState<string | null>(null);
   const stage = useScreenshotStage(opening.shots);
   const { screenshots, liveSize, liveError, shownPicture } = stage;
   const { shots, full, selected, setSelected, position } = screenshots;
@@ -785,6 +788,7 @@ export function Capture({
     boxes.select(null);
     setPicking(null);
     setSaveError(null);
+    setReferenceError(null);
     await looks.discard();
   };
 
@@ -816,6 +820,7 @@ export function Capture({
       background(discard());
     }
     setEditing(null);
+    setReferenceError(null);
     setPicking(null);
     boxes.select(null);
     finder.dismiss();
@@ -835,7 +840,7 @@ export function Capture({
         characters: characters.spec,
         expects: editing.expects.join(''),
       });
-      setSaveError(null);
+      setReferenceError(null);
       if (mode.kind === 'reference') {
         await drafting.finished();
         onSaved({ app: saved.app, value: null });
@@ -852,7 +857,7 @@ export function Capture({
           : { ...current, kind: 'number', reference: saved.reference },
       );
     } catch (error: unknown) {
-      setSaveError(errorText(error));
+      setReferenceError(errorText(error));
     } finally {
       setSaving(false);
     }
@@ -1573,7 +1578,7 @@ export function Capture({
           {/* Keyed by the check's kind, so scores of the last kind never show under a new one. */}
           <ReadingDetailsBox key={builtKind} ask={check.state.kind === 'set' ? explainReading : null} />
           <div className="sep" />
-          {saveError === null ? null : <p className="warn">{saveError}</p>}
+          {referenceError === null ? null : <p className="warn">{referenceError}</p>}
           {overLimit ? <p className="warn">{TOO_MANY}</p> : null}
           {refSave.waits === null ? null : (
             <p id={SAVE_WAITS_ID} className="note">

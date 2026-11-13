@@ -13,6 +13,7 @@ import {
   keepBlocked,
   keptAdditions,
   keptLabels,
+  keptNote,
   named,
   reviewOrder,
   seen,
@@ -464,4 +465,13 @@ describe('reviewing the kept readings', () => {
       [2, false],
     ]);
   });
+});
+
+test('the recording part counts kept readings, and says the reference learns them', () => {
+  // Nothing is learned before the reference is saved, and the References page has no value.
+  expect(keptNote(12, 0, null)).toBe('12 readings recorded, none kept yet.');
+  expect(keptNote(1, 0, null)).toBe('1 reading recorded, none kept yet.');
+  expect(keptNote(12, 3, null)).toBe('3 of 12 readings kept.');
+  expect(keptNote(1, 1, null)).toBe('1 of 1 reading kept.');
+  expect(keptNote(12, 3, 5)).toBe('5 of 12 readings will be kept. The reference learns only the readings you keep.');
 });

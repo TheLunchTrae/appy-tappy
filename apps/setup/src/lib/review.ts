@@ -463,6 +463,19 @@ export function editAll(
 }
 
 /**
+ * What the recording part says of a stopped recording's `count` readings, of which the reference keeps `kept`, or
+ * while review is open would keep `keeping`. The reference keeps readings and learns them when it is saved, so the
+ * line counts what is kept and does not call it learned; the value, where there is one, saves none of them.
+ */
+export function keptNote(count: number, kept: number, keeping: number | null): string {
+  const readings = count === 1 ? '1 reading' : `${count} readings`;
+  if (keeping !== null) {
+    return `${keeping} of ${readings} will be kept. The reference learns only the readings you keep.`;
+  }
+  return kept === 0 ? `${readings} recorded, none kept yet.` : `${kept} of ${readings} kept.`;
+}
+
+/**
  * Why Keep waits, or null when it can keep `kept`: a flagged reading is kept, or the readings were not checked yet
  * for what review shows now.
  */
