@@ -76,7 +76,7 @@ export function useLookRecording(adopt: (index: number) => void): {
   }, [kept, adopt]);
 
   const start = async (settings: Recordable, onStarted: () => void): Promise<void> => {
-    turn.begin();
+    turn.drop();
     try {
       await startLookRecording(settings.region, settings.tolerance, settings.drawnOn);
       setCommandError(null);
@@ -88,7 +88,7 @@ export function useLookRecording(adopt: (index: number) => void): {
   };
 
   const stop = async (): Promise<LookRecordingView | null> => {
-    turn.begin();
+    turn.drop();
     try {
       await stopRecording();
       const stopped = await lookRecordingState();
@@ -105,7 +105,7 @@ export function useLookRecording(adopt: (index: number) => void): {
     if (view === null) {
       return;
     }
-    turn.begin();
+    turn.drop();
     try {
       await discardRecording();
       setView(null);

@@ -67,6 +67,38 @@ describe('ask', () => {
     expect(heard).toEqual(['no window']);
   });
 
+  test("hands what the answer's callback throws to the failure's", async () => {
+    const reply = pending<string>();
+    const heard: unknown[] = [];
+    ask(
+      reply.request,
+      () => {
+        throw new Error('does not fit');
+      },
+      (error) => heard.push(error),
+    );
+    reply.resolve('fits');
+    await after();
+    expect(heard).toEqual([new Error('does not fit')]);
+  });
+
+  test('drops the answer of a delayed request cancelled after it was sent', async () => {
+    const reply = pending<string>();
+    const heard: string[] = [];
+    const cancel = ask(
+      reply.request,
+      (answer) => heard.push(answer),
+      () => heard.push('failed'),
+      10,
+    );
+    await after(40);
+    expect(reply.sent()).toBe(1);
+    cancel();
+    reply.resolve('late');
+    await after();
+    expect(heard).toEqual([]);
+  });
+
   test('waits out its delay, and a cancel meanwhile sends nothing', async () => {
     const first = pending<string>();
     const cancel = ask(
@@ -107,8 +139,11 @@ describe('newest', () => {
   test('a drop makes every ask stale and leaves the next one current', () => {
     const asks = newest();
     const before = asks.begin();
+    // A read that joined counts with the ask it joined, such as a box drawn by hand over a selection still asked.
+    const joined = asks.join();
     asks.drop();
     expect(before()).toBe(false);
+    expect(joined()).toBe(false);
     expect(asks.begin()()).toBe(true);
   });
 

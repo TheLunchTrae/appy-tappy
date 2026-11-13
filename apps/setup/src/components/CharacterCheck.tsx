@@ -152,6 +152,7 @@ function Retype({
       aria-label={label}
       aria-describedby={describedBy}
       data-it-is={checked ? 'checked' : 'open'}
+      data-typing={typed === null ? undefined : ''}
       onFocus={(event) => {
         event.target.select();
       }}
@@ -278,10 +279,13 @@ function keyFocus(target: EventTarget | null, sheet: Element): KeyFocus {
   if (!(target instanceof HTMLElement) || target === document.body) {
     return 'step';
   }
+  if (target.matches('[data-typing]')) {
+    return 'typing';
+  }
   if (!sheet.contains(target) || target.matches('input:not([type=checkbox]), textarea, select')) {
     return 'field';
   }
-  return target.matches('button, a, input') ? 'control' : 'step';
+  return target.matches('button, a') ? 'control' : 'step';
 }
 
 /**
@@ -327,7 +331,12 @@ function StepAnswers({
         return;
       }
       event.preventDefault();
-      if (answer.kind === 'primary') {
+      if (answer.kind === 'commit') {
+        // Leaving the field makes what was typed there the answer, as a press on a button does.
+        if (event.target instanceof HTMLElement) {
+          event.target.blur();
+        }
+      } else if (answer.kind === 'primary') {
         onPrimary();
       } else if (answer.kind === 'back') {
         back?.();

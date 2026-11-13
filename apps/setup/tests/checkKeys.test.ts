@@ -2,12 +2,19 @@ import { expect, test } from 'bun:test';
 
 import { type KeyFocus, type StepKeys, checkKey } from '../src/lib/checkKeys.ts';
 
-const PLAIN = { altKey: false, ctrlKey: false, metaKey: false, repeat: false, defaultPrevented: false };
+const PLAIN = { code: '', altKey: false, ctrlKey: false, metaKey: false, repeat: false, defaultPrevented: false };
 /** A step for the character 7 that shows every button. */
 const STEP: StepKeys = { back: true, skip: true, character: '7' };
 
-function pressed(key: string, focus: KeyFocus = 'step', step: StepKeys = STEP, held: Partial<typeof PLAIN> = {}) {
-  return checkKey({ ...PLAIN, ...held, key }, focus, step)?.kind ?? null;
+function pressed(
+  key: string,
+  focus: KeyFocus = 'step',
+  step: StepKeys = STEP,
+  held: Partial<typeof PLAIN> & { readonly altGr?: boolean } = {},
+) {
+  const { altGr = false, ...modifiers } = held;
+  const event = { ...PLAIN, ...modifiers, key, getModifierState: (name: string) => name === 'AltGraph' && altGr };
+  return checkKey(event, focus, step)?.kind ?? null;
 }
 
 test('Enter presses the default button unless a field or a control has focus', () => {
@@ -24,9 +31,24 @@ test('Alt with B or S presses Back or Skip from anywhere, when the step shows th
   expect(pressed('s', 'control', STEP, { altKey: true })).toBe('skip');
   expect(pressed('b', 'step', { ...STEP, back: false }, { altKey: true })).toBeNull();
   expect(pressed('s', 'step', { ...STEP, skip: false }, { altKey: true })).toBeNull();
+  // A keyboard that types no Latin letter presses the button by the key's place.
+  expect(pressed('и', 'step', STEP, { altKey: true, code: 'KeyB' })).toBe('back');
+  expect(pressed('ы', 'step', STEP, { altKey: true, code: 'KeyS' })).toBe('skip');
+  // The letter a key types counts before its place, as on a keyboard that puts S elsewhere.
+  expect(pressed('s', 'step', STEP, { altKey: true, code: 'KeyB' })).toBe('skip');
   // Alt never types a character or presses the default button.
   expect(pressed('1', 'step', STEP, { altKey: true })).toBeNull();
   expect(pressed('Enter', 'step', STEP, { altKey: true })).toBeNull();
+});
+
+test('Alt with B or S answers with a character typed and not committed, and stays at the step', () => {
+  expect(pressed('s', 'typing', STEP, { altKey: true })).toBe('commit');
+  expect(pressed('b', 'typing', STEP, { altKey: true })).toBe('commit');
+  // A key whose button the step does not show is still not the check's.
+  expect(pressed('s', 'typing', { ...STEP, skip: false }, { altKey: true })).toBeNull();
+  // The field keeps Enter, which commits there, and the characters typed in it.
+  expect(pressed('Enter', 'typing')).toBeNull();
+  expect(pressed('1', 'typing')).toBeNull();
 });
 
 test('a typed character goes to the shape unless a field has focus', () => {
@@ -52,9 +74,13 @@ test('a key that would retype nothing is left alone', () => {
 test("a shortcut, a repeated key, and a key something else took are not the check's", () => {
   expect(pressed('s', 'step', STEP, { ctrlKey: true })).toBeNull();
   expect(pressed('1', 'step', STEP, { metaKey: true })).toBeNull();
-  // AltGr reports Ctrl and Alt together and types a character, so it presses no button.
-  expect(pressed('s', 'field', STEP, { ctrlKey: true, altKey: true })).toBeNull();
-  expect(pressed('@', 'step', STEP, { ctrlKey: true, altKey: true })).toBe('retype');
+  // AltGr reports Ctrl and Alt too and types a character, so it presses no button.
+  const altGr = { ctrlKey: true, altKey: true, altGr: true };
+  expect(pressed('s', 'field', STEP, altGr)).toBeNull();
+  expect(pressed('@', 'step', STEP, altGr)).toBe('retype');
+  // Ctrl and Alt held by hand are a shortcut, and no button's.
+  expect(pressed('s', 'step', STEP, { ctrlKey: true, altKey: true })).toBeNull();
+  expect(pressed('1', 'step', STEP, { ctrlKey: true, altKey: true })).toBeNull();
   expect(pressed('Enter', 'step', STEP, { repeat: true })).toBeNull();
   expect(pressed('Enter', 'step', STEP, { defaultPrevented: true })).toBeNull();
   expect(pressed('b', 'step', STEP, { altKey: true, defaultPrevented: true })).toBeNull();
