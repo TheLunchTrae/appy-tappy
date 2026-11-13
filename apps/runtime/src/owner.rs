@@ -872,7 +872,7 @@ fn read_saved(
             },
         }
     }
-    orders.extend(model.restart_readers());
+    orders.extend(model.restart_readers(now));
     for (id, plan) in model.sessions() {
         tracing.name(id, plan);
     }

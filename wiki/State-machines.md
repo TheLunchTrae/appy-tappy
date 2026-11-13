@@ -284,10 +284,11 @@ stateDiagram-v2
   doubles each time a reader of the session ends, up to 30 seconds
   (`READ_AGAIN_MAX`), so a reader that panics each time it starts costs one
   thread and three log lines for each wait. A reader that ends after it ran
-  for `READ_AGAIN_MAX` waits 1 second again. A new read interval while the
-  session waits starts no reader: the next one reads at it. An `Ended` with
-  any other number, or for a session that no longer runs, comes from a
-  reader that the session stopped, and is dropped.
+  for `READ_AGAIN_MAX` waits 1 second again; that time counts from when the
+  session started that reader, after a wait or for a new read interval. A
+  new read interval while the session waits starts no reader: the next one
+  reads at it. An `Ended` with any other number, or for a session that no
+  longer runs, comes from a reader that the session stopped, and is dropped.
 - **A reader that cannot start.** When the reader's thread cannot start, the
   owner logs it and sends itself that reader's `Ended`, so the session
   starts its next reader after the same wait.
@@ -396,7 +397,8 @@ The thread can also panic in any state, which ends it.
 - [#318](https://github.com/TheLunchTrae/appy-tappy/issues/318): a panic in
   the capture's frame handler runs on the capture thread, so the reader keeps
   waiting for frames and its values stop reading until it closes the
-  capture, which it does when the window changes or the session stops.
+  capture, which it does when the window changes, the read interval changes,
+  or the session stops.
 
 ### Frame handler
 
