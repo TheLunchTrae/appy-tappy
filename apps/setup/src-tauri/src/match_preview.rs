@@ -13,8 +13,7 @@
 use appytappy_config::app_file::CheckDefError;
 use appytappy_sources::screen::check::{BarFill, BarPixel, ColorMatch, average};
 use appytappy_sources::screen::digits::DigitReader;
-use appytappy_sources::screen::{Image, Region};
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{Image, Region, Rgb};
 use serde::{Deserialize, Serialize};
 
 use crate::check_spec::{ColorSpec, RegionSpec, SpecError};
@@ -112,8 +111,7 @@ pub(crate) fn find(
     area: RegionSpec,
     rule: MatchRule,
 ) -> Result<MatchView, SpecError> {
-    let area =
-        Region::new(area.x, area.y, area.width, area.height).ok_or(SpecError::EmptyRegion)?;
+    let area = Region::try_from(area).map_err(|_empty| SpecError::EmptyRegion)?;
     // The one place that decides whether the rectangle lies on the picture.
     let cropped = image.crop(area).ok_or(SpecError::Outside)?;
     let pixels = cropped.pixels().iter().copied();
@@ -138,15 +136,16 @@ pub(crate) fn find(
                 color: color.into(),
                 tolerance,
             };
-            let [near] =
-                layers(pixels.map(|[blue, green, red, _]| {
-                    check.near(Rgb { red, green, blue }).then_some(0)
-                }));
+            let [near] = layers(pixels.map(|[blue, green, red, _]| {
+                Rgb { red, green, blue }
+                    .near(check.color, check.tolerance)
+                    .then_some(0)
+            }));
             let average = average(&cropped);
             MatchView::Color {
                 near,
                 average: average.into(),
-                distance: check.farthest_channel(average),
+                distance: average.farthest_channel(check.color),
                 matches: check.matches(&cropped),
             }
         },

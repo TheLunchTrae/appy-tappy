@@ -646,11 +646,12 @@ fn place_of(window: WindowPlace, card: Card) -> Option<Place> {
         return None;
     }
     let bounds = window.bounds;
+    let Size { width, height } = bounds.size()?;
     Some(Place {
         x: bounds.left,
         y: bounds.top,
-        width: u32::try_from(bounds.right.checked_sub(bounds.left)?).ok()?,
-        height: u32::try_from(bounds.bottom.checked_sub(bounds.top)?).ok()?,
+        width,
+        height,
         card,
     })
 }
@@ -691,10 +692,7 @@ fn view<S>(overlay: &Overlay<S>, minimized: bool) -> OverlayView {
         name: overlay.name.clone(),
         mode: overlay.mode,
         message,
-        window_size: overlay.now.map(|size| SizeDef {
-            width: size.width,
-            height: size.height,
-        }),
+        window_size: overlay.now.map(SizeDef::from),
         values,
     }
 }

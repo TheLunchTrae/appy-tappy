@@ -25,8 +25,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::BOOL;
 
-use crate::screen::{Size, content_on_screen};
-use crate::system::{Bounds, ProcessEntry, Rgb, System, WindowEntry, WindowPlace};
+use crate::screen::{Rgb, Size, content_on_screen};
+use crate::system::{Bounds, ProcessEntry, System, WindowEntry, WindowPlace};
 
 mod build;
 mod capture;

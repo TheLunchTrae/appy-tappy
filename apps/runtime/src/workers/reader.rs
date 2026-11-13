@@ -1321,9 +1321,9 @@ mod tests {
     use appytappy_sources::screen::saved::{SavedCheck, SavedFix, SavedValue};
     use appytappy_sources::screen::settle::SETTLE;
     use appytappy_sources::screen::{
-        FrameHandler, Image, OutsideWindow, Placement, Region, run_capture,
+        FrameHandler, Image, OutsideWindow, Placement, Region, Rgb, run_capture,
     };
-    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
     use super::*;
     use crate::plan::{Labels, Runs, ValuePlan};

@@ -56,13 +56,7 @@ impl<H: Host> Owner<H> {
     /// The size of the picked window on its newest frame, which an edit is
     /// tried at, or `None` before a frame arrived.
     pub(crate) fn window_size(&self) -> Option<SizeDef> {
-        self.latest.as_ref().map(|frame| {
-            let size = frame.size();
-            SizeDef {
-                width: size.width,
-                height: size.height,
-            }
-        })
+        self.latest.as_ref().map(|frame| frame.size().into())
     }
 
     /// Tries `spec` as [`Owner::try_edit`] describes.

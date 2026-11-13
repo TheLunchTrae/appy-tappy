@@ -15,8 +15,8 @@ use std::fmt;
 use std::io;
 
 use appytappy_config::app_file::{
-    CheckDef, CheckDefError, ColorDef, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef,
-    ScreenDef, SizeChangesDef, SizeDef, StateDef,
+    CheckDef, CheckDefError, FixDef, MAX_FIXES, PinDef, ReferenceDef, RegionDef, ScreenDef,
+    SizeChangesDef, SizeDef, StateDef,
 };
 use appytappy_config::signal::{InvalidStateName, StateName};
 
@@ -24,8 +24,7 @@ use super::check::{BarFill, Check, ColorMatch, ImageMatch, StateMatch};
 use super::digits::{DigitReader, LearnError};
 use super::mask::Mask;
 use super::scale::scaled;
-use super::{Image, ImageError, Region, Size};
-use crate::system::Rgb;
+use super::{EmptyRegion, Image, ImageError, Region, Size};
 
 /// A saved value's first drawing: the window size it was drawn at, its
 /// region, and its check.
@@ -219,16 +218,6 @@ impl SavedValue {
     }
 }
 
-impl From<ColorDef> for Rgb {
-    fn from(color: ColorDef) -> Self {
-        Self {
-            red: color.red,
-            green: color.green,
-            blue: color.blue,
-        }
-    }
-}
-
 /// Rebuilds the value `screen` describes, with the application's
 /// `references`, read as its window's `size_changes` say.
 ///
@@ -295,10 +284,7 @@ pub fn build(
         .iter()
         .map(|fix| {
             let in_fix = |source: SavedError| SavedError::Fix {
-                window_size: Size {
-                    width: fix.window_size.width,
-                    height: fix.window_size.height,
-                },
+                window_size: fix.window_size.into(),
                 source: Box::new(source),
             };
             if !sizes.insert((fix.window_size.width, fix.window_size.height)) {
@@ -326,12 +312,8 @@ pub fn build(
 
 /// The region `region` of a window of `size`, once it is not empty and fits.
 fn place(region: RegionDef, size: SizeDef) -> Result<(Region, Size), SavedError> {
-    let window_size = Size {
-        width: size.width,
-        height: size.height,
-    };
-    let region = Region::new(region.x, region.y, region.width, region.height)
-        .ok_or(SavedError::EmptyRegion)?;
+    let window_size = Size::from(size);
+    let region = Region::try_from(region).map_err(|EmptyRegion| SavedError::EmptyRegion)?;
     if region.fits(window_size) {
         Ok((region, window_size))
     } else {
@@ -694,7 +676,7 @@ impl Error for SavedError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use appytappy_config::app_file::{RegionDef, SampleDef, SizeDef, StateDef, sample_name};
+    use appytappy_config::app_file::{ColorDef, SampleDef, StateDef, sample_name};
     use appytappy_config::signal::{Number, Value};
 
     use super::*;

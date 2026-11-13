@@ -260,8 +260,7 @@ pub(crate) mod examples {
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{BarFill, Check};
     use appytappy_sources::screen::saved::{SavedCheck, SavedValue};
-    use appytappy_sources::screen::{Region, Size};
-    use appytappy_sources::system::Rgb;
+    use appytappy_sources::screen::{Region, Rgb, Size};
 
     use super::*;
 

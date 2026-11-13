@@ -53,10 +53,10 @@ mod sightings;
 
 use std::time::{Duration, Instant};
 
+use appytappy_config::app_file::{ColorDef, RegionDef, SizeDef};
 use appytappy_sources::screen::digits::{DigitReader, ReadError, Shape};
 use appytappy_sources::screen::settle::Settle;
-use appytappy_sources::screen::{FrameMeaning, Image, Region, Size};
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{FrameMeaning, Image, Region, Rgb, Size};
 use serde::{Deserialize, Serialize};
 
 use self::character::CharacterView;
@@ -663,33 +663,19 @@ impl Recording {
                 .map(|full| full_message(full, self.scope())),
             problem: self.life.problem().map(str::to_owned),
             settings: Settings {
-                region: RegionView::of(self.region),
-                ink: ColorView {
-                    red: self.ink.red,
-                    green: self.ink.green,
-                    blue: self.ink.blue,
-                },
+                region: self.region.into(),
+                ink: self.ink.into(),
                 tolerance: self.tolerance,
-                window_size: SizeView {
-                    width: self.window_size.width,
-                    height: self.window_size.height,
-                },
+                window_size: self.window_size.into(),
                 scope: self.scope(),
             },
-            at: SizeView {
-                width: self.placed.0.width,
-                height: self.placed.0.height,
-            },
+            at: self.placed.0.into(),
             sizes: match &self.looking {
                 Looking::Window(scan) => scan.sizes.heights(),
                 Looking::Place => Vec::new(),
             },
             spots: match &self.looking {
-                Looking::Window(scan) => scan
-                    .spots
-                    .iter()
-                    .map(|&spot| RegionView::of(spot))
-                    .collect(),
+                Looking::Window(scan) => scan.spots.iter().copied().map(RegionDef::from).collect(),
                 Looking::Place => Vec::new(),
             },
             readings: self
@@ -763,7 +749,7 @@ pub(crate) struct RecordingView {
     /// The window size it is placed at: the size the region was drawn at,
     /// or the one frames settled at since. The region and the sizes of
     /// text are scaled from the one to the other where they differ.
-    pub(crate) at: SizeView,
+    pub(crate) at: SizeDef,
     /// How tall the characters are that a recording of the whole window
     /// looks for, smallest first, in pixels of the window the region was
     /// drawn on: one size for each example of text that differs from the
@@ -772,7 +758,7 @@ pub(crate) struct RecordingView {
     /// Where a recording of the whole window found text like its region's
     /// the last time it looked, on a window of the size it is placed at,
     /// while it records; empty otherwise.
-    pub(crate) spots: Vec<RegionView>,
+    pub(crate) spots: Vec<RegionDef>,
     /// The readings it kept, in the order they first showed.
     pub(crate) readings: Vec<ReadingView>,
     /// Every different shape its frames showed, in the order they first
@@ -788,53 +774,15 @@ pub(crate) struct RecordingView {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Settings {
     /// The region of the window.
-    pub(crate) region: RegionView,
+    pub(crate) region: RegionDef,
     /// The characters' color.
-    pub(crate) ink: ColorView,
+    pub(crate) ink: ColorDef,
     /// How far a pixel may be from the characters' color and still be ink.
     pub(crate) tolerance: u8,
     /// The window's size when the region was drawn.
-    pub(crate) window_size: SizeView,
+    pub(crate) window_size: SizeDef,
     /// Where it looks for characters.
     pub(crate) scope: Scope,
-}
-
-/// A window's size as the UI describes one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub(crate) struct SizeView {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-}
-
-/// A region as the UI describes one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub(crate) struct RegionView {
-    pub(crate) x: u32,
-    pub(crate) y: u32,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-}
-
-impl RegionView {
-    fn of(region: Region) -> Self {
-        Self {
-            x: region.x(),
-            y: region.y(),
-            width: region.size().width,
-            height: region.size().height,
-        }
-    }
-}
-
-/// A color as the UI describes one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub(crate) struct ColorView {
-    pub(crate) red: u8,
-    pub(crate) green: u8,
-    pub(crate) blue: u8,
 }
 
 /// One reading as the UI shows it.
@@ -1315,7 +1263,7 @@ mod tests {
         );
         assert_eq!(
             view.at,
-            SizeView {
+            SizeDef {
                 width: 9,
                 height: 4
             }
@@ -1329,7 +1277,7 @@ mod tests {
         assert_eq!(view.problem, None, "a frame it records clears it");
         assert_eq!(
             view.at,
-            SizeView {
+            SizeDef {
                 width: 8,
                 height: 4
             }
@@ -1381,7 +1329,7 @@ mod tests {
         assert_eq!(view.problem, None);
         assert_eq!(
             view.at,
-            SizeView {
+            SizeDef {
                 width: 32,
                 height: 64
             }
@@ -1686,7 +1634,7 @@ mod tests {
             .collect();
         assert_eq!(shapes, [&[0][..], &[1]]);
         // Each run with a margin of a quarter of the 8 pixels around it.
-        let spot = |x, y, width, height| RegionView {
+        let spot = |x, y, width, height| RegionDef {
             x,
             y,
             width,
@@ -1992,7 +1940,7 @@ mod tests {
         assert_eq!(view.sizes, [8, 16], "as they were drawn");
         assert_eq!(
             view.at,
-            SizeView {
+            SizeDef {
                 width: 120,
                 height: 80
             }
@@ -2001,7 +1949,7 @@ mod tests {
         // as it is.
         assert_eq!(
             view.spots,
-            [RegionView {
+            [RegionDef {
                 x: 0,
                 y: 0,
                 width: 14,

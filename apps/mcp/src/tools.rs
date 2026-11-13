@@ -125,8 +125,8 @@ mod tests {
     use std::io;
 
     use appytappy_config::anti_cheat::ProcessId;
-    use appytappy_sources::screen::Size;
-    use appytappy_sources::system::{Bounds, ProcessEntry, Rgb, WindowEntry, WindowPlace};
+    use appytappy_sources::screen::{Rgb, Size};
+    use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
     use super::*;
 
