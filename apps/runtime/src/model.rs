@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use appytappy_actions::Watched;
 use appytappy_config::action::Action;
@@ -30,6 +30,22 @@ use crate::plan::{AppPlan, RulePlan};
 /// is told apart and dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct SessionId(pub(crate) u64);
+
+/// One of a session's readers, counted from 0. A session starts its next
+/// reader when its read interval changes or its reader ended, so a reader
+/// that says it ended after the session started another is told apart and
+/// dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReaderNumber(pub(crate) u32);
+
+/// How long a session waits before it starts a reader again, the first time
+/// its reader ended. The wait doubles each time a reader of the session
+/// ends, so a reader that ends as often as it starts cannot keep the owner
+/// and the log busy.
+pub(crate) const READ_AGAIN: Duration = Duration::from_secs(1);
+
+/// The longest wait before a session starts a reader again.
+pub(crate) const READ_AGAIN_MAX: Duration = Duration::from_secs(30);
 
 /// Names a fired automation: its session and its rule's position, so two
 /// sessions' changes are never mixed up.
@@ -64,6 +80,8 @@ pub(crate) enum Order {
     Read {
         /// The session the readings belong to.
         session: SessionId,
+        /// Which of the session's readers this starts.
+        reader: ReaderNumber,
         /// The application's values and window.
         plan: Arc<AppPlan>,
         /// The process the session follows, whose window is read.
@@ -116,6 +134,33 @@ struct Running {
     watched: Watched,
     /// How often its reader reads.
     interval: ReadInterval,
+    /// The reader that reads its values, or the last that did while
+    /// `read_again` waits.
+    reader: ReaderNumber,
+    /// When the session starts a reader again, while its last one ended
+    /// and none reads its values.
+    read_again: Option<Instant>,
+    /// How long the session waits before it starts a reader again, the
+    /// next time one ends.
+    wait: Duration,
+}
+
+impl Running {
+    /// The order that starts the next reader of this session, `id`. The
+    /// values are forgotten first, as when a reader can no longer see them,
+    /// because a new reader sends each value as it first reads it.
+    fn next_reader(&mut self, id: SessionId) -> Order {
+        self.session.forget_values();
+        self.reader = ReaderNumber(self.reader.0.wrapping_add(1));
+        self.read_again = None;
+        Order::Read {
+            session: id,
+            reader: self.reader,
+            plan: Arc::clone(&self.plan),
+            watched: self.watched.clone(),
+            interval: self.interval,
+        }
+    }
 }
 
 /// The owner thread's state.
@@ -307,29 +352,53 @@ impl Model {
 
     /// Starts over each running app's reader that reads at another interval
     /// than the model's, in the same session, so its automations keep their
-    /// state and nothing is undone. Its values are forgotten first, as when
-    /// a reader can no longer see them, because the new reader sends each
-    /// value as it first reads it. A reading the old reader sent just before
-    /// it stopped can still arrive after that, a few milliseconds old.
+    /// state and nothing is undone. A reading the old reader sent just before
+    /// it stopped can still arrive after that, a few milliseconds old. A
+    /// session whose reader ended starts no reader here: the one it starts
+    /// when its wait passes reads at the new interval.
     pub(crate) fn restart_readers(&mut self) -> Vec<Order> {
         let interval = self.interval;
-        self.running
-            .iter_mut()
-            .filter(|(_, running)| running.interval != interval)
-            .flat_map(|(id, running)| {
-                running.interval = interval;
-                running.session.forget_values();
-                [
-                    Order::StopReading(*id, running.plan.labels.name.clone()),
-                    Order::Read {
-                        session: *id,
-                        plan: Arc::clone(&running.plan),
-                        watched: running.watched.clone(),
-                        interval,
-                    },
-                ]
-            })
-            .collect()
+        let mut orders = Vec::new();
+        for (id, running) in &mut self.running {
+            if running.interval == interval {
+                continue;
+            }
+            running.interval = interval;
+            if running.read_again.is_none() {
+                orders.push(Order::StopReading(*id, running.plan.labels.name.clone()));
+                orders.push(running.next_reader(*id));
+            }
+        }
+        orders
+    }
+
+    /// Notes at `now` that reader `reader` of session `id` ended though
+    /// nothing stopped it, such as when it panicked. The session keeps
+    /// running: its values are forgotten, as when a reader can no longer
+    /// see them, and [`Model::recheck`] starts its next reader after a wait
+    /// that starts at [`READ_AGAIN`] and doubles each time a reader of the
+    /// session ends, up to [`READ_AGAIN_MAX`]. The order joins the reader
+    /// that ended, which says why it did.
+    ///
+    /// A reader also says it ended once the session stopped it. That comes
+    /// from a session that ended, or from a reader that is not the
+    /// session's newest, and is dropped: no order.
+    pub(crate) fn reader_ended(
+        &mut self,
+        id: SessionId,
+        reader: ReaderNumber,
+        now: Instant,
+    ) -> Vec<Order> {
+        let Some(running) = self.running.get_mut(&id) else {
+            return Vec::new();
+        };
+        if running.reader != reader {
+            return Vec::new();
+        }
+        running.session.forget_values();
+        running.read_again = Some(now.checked_add(running.wait).unwrap_or(now));
+        running.wait = running.wait.saturating_mul(2).min(READ_AGAIN_MAX);
+        vec![Order::StopReading(id, running.plan.labels.name.clone())]
     }
 
     /// Records the value at `position` among the values that session `id`
@@ -354,23 +423,32 @@ impl Model {
         acts(id, &running.plan, &running.watched, effects, Some(at))
     }
 
-    /// When a running automation that its cooldown held back is next due,
-    /// across every app. See [`Model::recheck`].
+    /// When [`Model::recheck`] next has something to do, across every app:
+    /// a running automation that its cooldown held back is due, or a
+    /// session whose reader ended starts one again.
     pub(crate) fn next_due(&self) -> Option<Instant> {
         self.running
             .values()
-            .filter_map(|running| running.session.next_due())
+            .flat_map(|running| [running.session.next_due(), running.read_again])
+            .flatten()
             .min()
     }
 
-    /// Fires, at `at`, the automations whose cooldown held them back while
-    /// their condition held, and whose cooldown has passed.
+    /// Does what is due at `at`: starts a reader again for each session
+    /// whose reader ended and whose wait has passed, and fires the
+    /// automations whose cooldown held them back while their condition
+    /// held, and whose cooldown has passed.
     pub(crate) fn recheck(&mut self, at: Instant) -> Vec<Order> {
         self.running
             .iter_mut()
             .flat_map(|(id, running)| {
+                let read = running
+                    .read_again
+                    .is_some_and(|due| due <= at)
+                    .then(|| running.next_reader(*id));
                 let effects = running.session.recheck(at);
-                acts(*id, &running.plan, &running.watched, effects, None)
+                read.into_iter()
+                    .chain(acts(*id, &running.plan, &running.watched, effects, None))
             })
             .collect()
     }
@@ -409,8 +487,10 @@ impl Model {
             .iter()
             .map(|rule| rule.rule.clone())
             .collect();
+        let reader = ReaderNumber(0);
         let order = Order::Read {
             session: id,
+            reader,
             plan: Arc::clone(plan),
             watched: watched.clone(),
             interval: self.interval,
@@ -423,6 +503,9 @@ impl Model {
                 session: Session::new(rules),
                 watched: watched.clone(),
                 interval: self.interval,
+                reader,
+                read_again: None,
+                wait: READ_AGAIN,
             },
         );
         vec![order]
@@ -883,6 +966,144 @@ mod tests {
             }),
             "both read at the new interval"
         );
+    }
+
+    /// `now` and `millis` more.
+    fn after(now: Instant, millis: u64) -> Instant {
+        now.checked_add(Duration::from_millis(millis))
+            .expect("a test time fits in an Instant")
+    }
+
+    /// The reader each read order starts, and the interval it reads at.
+    fn readers(orders: &[Order]) -> Vec<(SessionId, ReaderNumber, ReadInterval)> {
+        orders
+            .iter()
+            .filter_map(|order| match order {
+                Order::Read {
+                    session,
+                    reader,
+                    interval,
+                    ..
+                } => Some((*session, *reader, *interval)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_reader_that_ended_starts_again_in_its_session_after_a_wait() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[(
+            "a",
+            &plan_with_cooldown("A", Duration::from_millis(500)),
+        )]));
+        let read = model.apply(started("a", 7));
+        assert_eq!(
+            readers(&read),
+            [(SessionId(0), ReaderNumber(0), ReadInterval::DEFAULT)]
+        );
+        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), 0, number(10.0), now);
+        model.sample(SessionId(0), 0, number(95.0), now);
+        assert_eq!(model.next_due(), Some(after(now, 500)), "held back");
+
+        let ended = model.reader_ended(SessionId(0), ReaderNumber(0), now);
+        assert_eq!(
+            kinds(&ended),
+            ["stop 0 A"],
+            "the reader that ended is joined"
+        );
+        assert_eq!(model.active_automations(), ["Pause A"], "the session runs");
+        assert_eq!(model.next_due(), Some(after(now, 1000)));
+        assert_eq!(
+            model.recheck(after(now, 999)),
+            [],
+            "the wait has not passed, and nothing fires on values nothing reads"
+        );
+        let again = model.recheck(after(now, 1000));
+        assert_eq!(kinds(&again), ["read 0 A"]);
+        assert_eq!(
+            readers(&again),
+            [(SessionId(0), ReaderNumber(1), ReadInterval::DEFAULT)],
+            "the same session's next reader"
+        );
+        assert_eq!(model.next_due(), None);
+        assert_eq!(model.recheck(after(now, 5000)), [], "it starts once");
+    }
+
+    #[test]
+    fn each_reader_of_a_session_that_ends_waits_twice_as_long_up_to_a_limit() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7));
+        let waits: Vec<Option<Instant>> = (0..7)
+            .map(|reader| {
+                model.reader_ended(SessionId(0), ReaderNumber(reader), now);
+                let due = model.next_due();
+                model.recheck(after(now, 30_000));
+                due
+            })
+            .collect();
+        let expected = [1000, 2000, 4000, 8000, 16_000, 30_000, 30_000];
+        assert_eq!(waits, expected.map(|millis| Some(after(now, millis))));
+    }
+
+    #[test]
+    fn a_reader_that_says_it_ended_is_dropped_unless_it_is_its_sessions_newest() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7));
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        model.set_interval(slower);
+        assert_eq!(
+            readers(&model.restart_readers()),
+            [(SessionId(0), ReaderNumber(1), slower)]
+        );
+        assert_eq!(
+            model.reader_ended(SessionId(0), ReaderNumber(0), now),
+            [],
+            "the reader the session stopped"
+        );
+        assert_eq!(
+            model.reader_ended(SessionId(9), ReaderNumber(1), now),
+            [],
+            "no such session"
+        );
+        assert_eq!(model.next_due(), None, "no reader starts for either");
+        assert_eq!(
+            kinds(&model.reader_ended(SessionId(0), ReaderNumber(1), now)),
+            ["stop 0 A"],
+            "the reader that reads"
+        );
+        model.apply(exited("a", 7));
+        assert_eq!(
+            model.reader_ended(SessionId(0), ReaderNumber(1), now),
+            [],
+            "a session that ended"
+        );
+    }
+
+    #[test]
+    fn a_new_read_interval_while_a_reader_waits_to_start_again_starts_none_early() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7));
+        model.reader_ended(SessionId(0), ReaderNumber(0), now);
+        let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
+            .expect("in order");
+        model.set_interval(slower);
+        assert_eq!(model.restart_readers(), [], "no reader runs to start over");
+        assert_eq!(
+            readers(&model.recheck(after(now, 1000))),
+            [(SessionId(0), ReaderNumber(1), slower)],
+            "the reader that starts after the wait reads at the new interval"
+        );
+        assert_eq!(model.restart_readers(), []);
     }
 
     #[test]

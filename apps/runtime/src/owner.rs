@@ -23,7 +23,7 @@ use appytappy_sources::schedule::ReadInterval;
 use appytappy_sources::system::{System, shows};
 
 use crate::lifecycle::{Change, Input, Lifecycle, Watchlist};
-use crate::model::{Model, Order, Owner, SessionId};
+use crate::model::{Model, Order, Owner, ReaderNumber, SessionId};
 use crate::trace::switch::Switch;
 use crate::trace::writer::TraceReport;
 use crate::trace::{Detail, Record, Trace, What};
@@ -43,7 +43,7 @@ enum Event {
     DetectionEnded,
     /// The setup app saved, so the settings and automations are read again.
     Reload,
-    /// A reader read a value or met a problem.
+    /// A reader read a value, met a problem, or ended.
     Reading(Reading),
     /// The action thread noted something for the log, or said whether
     /// actions can run.
@@ -273,12 +273,14 @@ impl Crew {
     fn reader_job(
         &self,
         session: SessionId,
+        reader: ReaderNumber,
         plan: Arc<plan::AppPlan>,
         watched: Watched,
         interval: ReadInterval,
     ) -> (reader::Job, Trace) {
         let job = reader::Job {
             session,
+            reader,
             plan,
             watched,
             interval,
@@ -968,13 +970,14 @@ fn carry(orders: Vec<Order>, crew: &mut Crew, log: &mut Log) {
         match order {
             Order::Read {
                 session,
+                reader,
                 plan,
                 watched,
                 interval,
             } => {
                 let name = plan.labels.name.clone();
                 crew.tracing.name(session, &plan);
-                let (job, trace) = crew.reader_job(session, plan, watched, interval);
+                let (job, trace) = crew.reader_job(session, reader, plan, watched, interval);
                 let system = Arc::clone(&crew.system);
                 match Reader::start(system, job, trace, crew.events.clone()) {
                     Ok(reader) => {
@@ -1157,6 +1160,20 @@ fn handle(model: &mut Model, log: &mut Log, enabled: &EnabledStore, event: Event
             }
             model.forget(session);
             Step::Carry(Vec::new())
+        },
+        Event::Reading(Reading::Ended { session, reader }) => {
+            let orders = model.reader_ended(session, reader, Instant::now());
+            // No order means the session stopped that reader itself.
+            if let Some(name) = model.app_name(session).filter(|_| !orders.is_empty()) {
+                note(
+                    log,
+                    &format!(
+                        "{name}: its reader ended, so nothing reads its values until a new \
+                         reader starts after a wait"
+                    ),
+                );
+            }
+            Step::Carry(orders)
         },
         Event::Actions(ActionReport::Note(message)) => {
             note(log, &message);
@@ -1532,6 +1549,61 @@ mod tests {
                 .get(1)
                 .is_some_and(|line| line.ends_with("Renamed: Health cannot be read: too dark")),
             "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_reader_that_ended_is_logged_and_joined_unless_its_session_stopped_it() {
+        let folder = env::temp_dir().join(format!("appytappy-reader-ended-{}", process::id()));
+        let mut log = Log::open(&folder, "runtime", LOG_LIMIT).expect("open");
+        let enabled = EnabledStore::new(folder.join("enabled.txt"));
+        let mut model = Model::default();
+        model.replan(BTreeMap::from([(
+            "example".to_owned(),
+            app_plan("Example App", &["Pause"]),
+        )]));
+        let started = Event::from(Change::Started {
+            app: "example".to_owned(),
+            process: ProcessId::new(7),
+            executable: "Example.exe".to_owned(),
+        });
+        handle(&mut model, &mut log, &enabled, started);
+        let ended = |reader| {
+            Event::from(Reading::Ended {
+                session: SessionId(0),
+                reader: ReaderNumber(reader),
+            })
+        };
+        assert_eq!(
+            handle(&mut model, &mut log, &enabled, ended(4)),
+            Step::Carry(Vec::new()),
+            "not the session's newest reader, so the session stopped it"
+        );
+        assert_eq!(
+            handle(&mut model, &mut log, &enabled, ended(0)),
+            Step::Carry(vec![Order::StopReading(
+                SessionId(0),
+                "Example App".to_owned()
+            )]),
+            "the reader that ended is joined, which logs why it ended"
+        );
+        assert!(
+            model.next_due().is_some(),
+            "a new reader starts after a wait"
+        );
+        let written = fs::read_to_string(folder.join("runtime.log")).expect("read");
+        fs::remove_dir_all(&folder).expect("clean up");
+        let said: Vec<&str> = written
+            .lines()
+            .filter(|line| line.contains("its reader ended"))
+            .collect();
+        assert_eq!(said.len(), 1, "{written:?}");
+        assert!(
+            said.first().is_some_and(|line| line.ends_with(
+                "Example App: its reader ended, so nothing reads its values until a new \
+                 reader starts after a wait"
+            )),
+            "{said:?}"
         );
     }
 
@@ -2040,13 +2112,19 @@ mod tests {
             executable: "Example.exe".to_owned(),
         };
         let interval = ReadInterval::default();
-        let (job, started) =
-            crew.reader_job(SessionId(3), Arc::clone(&plan), watched.clone(), interval);
+        let (job, started) = crew.reader_job(
+            SessionId(3),
+            ReaderNumber(1),
+            Arc::clone(&plan),
+            watched.clone(),
+            interval,
+        );
         assert_eq!(started, trace);
         assert_eq!(
             job,
             reader::Job {
                 session: SessionId(3),
+                reader: ReaderNumber(1),
                 plan,
                 watched,
                 interval,
@@ -2396,6 +2474,7 @@ mod tests {
         let orders = [
             Order::Read {
                 session: SessionId(1),
+                reader: ReaderNumber(0),
                 plan,
                 watched: watched.clone(),
                 interval: ReadInterval::DEFAULT,
