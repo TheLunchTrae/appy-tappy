@@ -892,7 +892,8 @@ in a [shared file](#sharing).
   set up on: the one its region is drawn on, or one a state's picture is
   taken from (`check_spec::origin`). `Screenshots` in `screenshots.rs` holds
   which screenshots a recording kept, and a [draft](#drafts) keeps that with
-  them, so a value finished from a draft is `recording` too.
+  them, so a value finished from a draft on such a screenshot is
+  `recording` too.
 - An edit that keeps a value's region keeps its `origin`, and one that draws
   the region again sets it as for a new value. A fix leaves it alone.
 - A reference is `recording` once a recorded reading, or a box on a

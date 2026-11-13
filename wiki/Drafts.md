@@ -37,8 +37,9 @@ automation and pick the value in it.
   tolerances, the reference it reads with, the labels, the characters a
   reference needs, and the text you added with **Find more like it**.
   Screenshots that **Record screenshots** kept stay marked as recorded, so a
-  value or reference you finish from the draft still says it was
-  [made with a recording](Values.md#how-a-value-was-made).
+  [value](Values.md#how-a-value-was-made) or
+  [reference](References.md#how-a-reference-was-made) you finish on one of
+  them still says it was made with a recording.
 
 A draft doesn't keep these, so finish them before you save it:
 
