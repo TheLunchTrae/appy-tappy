@@ -26,13 +26,19 @@ use appytappy_config::action::{
 };
 use appytappy_config::process::ProcessId;
 use appytappy_config::rule::Restore;
-use appytappy_sources::system::{System, executables};
+use appytappy_sources::system::System;
 use appytappy_sources::win::WindowsSystem;
 
 /// The controls, naming audio sessions from the system's process list.
 fn connect() -> io::Result<WindowsControls> {
     let system = WindowsSystem::new();
-    WindowsControls::new(Box::new(move || system.processes().map(executables)))
+    WindowsControls::new(Box::new(move || {
+        let processes = system.processes()?;
+        Ok(processes
+            .into_iter()
+            .map(|process| (process.id, process.executable))
+            .collect())
+    }))
 }
 
 /// How long a player takes to report a new playback state.
