@@ -2407,8 +2407,12 @@ mod tests {
             Ok(self.framed.map(|size| Bounds {
                 left: 100,
                 top: 50,
-                right: 100_i32.checked_add_unsigned(size.width).unwrap(),
-                bottom: 50_i32.checked_add_unsigned(size.height).unwrap(),
+                right: 100_i32
+                    .checked_add_unsigned(size.width)
+                    .expect("test sizes fit an i32"),
+                bottom: 50_i32
+                    .checked_add_unsigned(size.height)
+                    .expect("test sizes fit an i32"),
             }))
         }
 
