@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { FoundView, RecordingView } from './bindings.ts';
-import { type Change, type Guide, type Place, type Turn, openGuide, settle, turn } from './confirm.ts';
+import { type Change, type Guide, type Place, type Turn, join, openGuide, settle, turn } from './confirm.ts';
 import { type FoundRow, listed } from './found.ts';
 import type { Picture } from './pixels.ts';
-import type { ReviewEntry } from './review.ts';
+import { type ReviewEntry, startEntry } from './review.ts';
 import type { Finder } from './useFound.ts';
 import type { useRecording } from './useRecording.ts';
 import type { useReview } from './useReview.ts';
@@ -34,6 +34,7 @@ export function checkPlaces(
             characters: find.characters,
             width: find.region.width,
             text: row.text,
+            typed: row.typed,
             keep: row.keep,
             reading: row.reading,
             asks: true,
@@ -51,6 +52,7 @@ export function checkPlaces(
             characters: reading.characters,
             width: reading.width,
             text: entry.text,
+            typed: entry.text !== startEntry(reading, undefined).text,
             keep: entry.keep,
             reading: reading.text.kind === 'pending' && entry.text === '',
             asks: entry.keep,
@@ -125,6 +127,18 @@ export function useCharacterCheck(
       }
     }
   };
+
+  // A place that shows while the check is open, or whose text arrives then, gets the answers that stand.
+  useEffect(() => {
+    if (held === null) {
+      return;
+    }
+    const next = join(held, places);
+    if (next.guide !== held) {
+      apply(next.changes);
+      setHeld(next.guide);
+    }
+  });
 
   // Escape closes the check, or review when the check is not open over it. One listener decides for both, so the
   // two never both close. It hears the key last, as it reaches the window, after whatever has focus took its own.

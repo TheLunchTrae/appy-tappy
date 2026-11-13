@@ -237,9 +237,11 @@ When a text you typed gives a character another answer than you gave in the
 check, the check asks about that character again.
 
 A find that AppyTappy is still reading has no text to check. The last
-screen says how many are still being read. Their characters join the steps
-once the text arrives: go **Back** to them, or select **Check characters**
-again.
+screen says how many are still being read. Once its text arrives, it gets
+the answers you gave already, **Not a character** included, and any other
+character it shows joins the steps: go **Back** to them, or select
+**Check characters** again. The same holds for a find or a reading that
+first shows while the check is open.
 
 ## What a reference can't learn
 

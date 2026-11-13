@@ -7,9 +7,10 @@
 //
 // The places' texts stay the one record of what each place shows. The check holds only the answers given so far, by
 // shape, and where it is. Every change it makes is an edit of a place's text or its tick, the same edit the user
-// makes by hand in the list of finds or in review, and it makes them only in the turn that gives the answer. A text
-// that disagrees with an answer afterward, because the user typed over it or the text reader's text arrived late, is
-// left as it is, and the shape counts as not answered again, so its step asks once more.
+// makes by hand in the list of finds or in review. It makes them in the turn that gives the answer, and once more
+// for each place that joins afterward: one that first shows, or whose text the reader sends, while the check is
+// open gets the answers that stand for its shapes. Text the user typed is theirs. Where it disagrees with an answer
+// it is left as it is, and the shape counts as not answered again, so its step asks once more.
 //
 // A place whose text has another number of characters than the place has shapes gives its shapes no characters. It
 // joins no step. Once every one of its shapes has an answer from the other places, its text is written from the
@@ -29,6 +30,8 @@ export interface Place {
   /** How wide its picture is, in the pixels the characters are placed in. */
   readonly width: number;
   readonly text: string;
+  /** Whether its text is the user's, typed by hand or written by an answer, and not the text reader's guess. */
+  readonly typed: boolean;
   /** Whether it is ticked or kept, so the reference learns from it. */
   readonly keep: boolean;
   /** Whether the text reader is still reading it, so it has no text to ask about yet. */
@@ -86,6 +89,11 @@ export interface Guide {
    * that answer back keeps them again, and until then they stay in the steps, so the answer can be taken back.
    */
   readonly left: ReadonlySet<string>;
+  /**
+   * The places, as {@link placeKey} names them, that have joined the check: their text was read, and they got the
+   * answers that stood then. One that is not among them yet gets the answers when it joins.
+   */
+  readonly seen: ReadonlySet<string>;
 }
 
 /** What the user does in a step. */
@@ -292,10 +300,58 @@ function firstOpen(places: readonly Place[], given: Given, needs: readonly strin
   return unfittedStop(places, given) ?? { at: 'done' };
 }
 
+/** The names of the places of `places` whose text is read, so they are part of a check. */
+function readKeys(places: readonly Place[]): ReadonlySet<string> {
+  return new Set(places.flatMap((place) => (place.reading ? [] : [placeKey(place)])));
+}
+
 /** A check of `places` that starts at its first step, for a reference that needs the characters `needs`. */
 export function openGuide(places: readonly Place[], needs: readonly string[]): Guide {
   const given: Given = { answers: new Map(), left: new Set() };
-  return { cursor: firstOpen(places, given, needs), ...given };
+  return { cursor: firstOpen(places, given, needs), ...given, seen: readKeys(places) };
+}
+
+/**
+ * `guide` after the places of `places` that are new to it join, and the edits that follow: a place that first shows
+ * while the check is open, or whose text the reader sends then, gets every answer that stands for its shapes, as
+ * the turn that gave the answer would have written it. Its text takes the answered characters, it is left out for a
+ * shape that is no character, and it is kept once every one of its shapes has an answer. Text the user typed stays
+ * as it is, so such a place is only left out. A place joins once, so what the user changes afterward stays; one that
+ * is gone or being read again joins anew. The same `guide` comes back when nothing joined or left.
+ */
+export function join(
+  guide: Guide,
+  places: readonly Place[],
+): { readonly guide: Guide; readonly changes: readonly Change[] } {
+  const seen = readKeys(places);
+  const fresh = places.filter((place) => !place.reading && !guide.seen.has(placeKey(place)));
+  if (fresh.length === 0 && seen.size === guide.seen.size) {
+    return { guide, changes: [] };
+  }
+  const left = new Set(guide.left);
+  for (const place of fresh) {
+    if (place.keep && asked(place, left) && setAside(place, guide.answers)) {
+      left.add(placeKey(place));
+    }
+  }
+  const given: Given = { answers: guide.answers, left };
+  const standing = new Set(guide.answers.keys());
+  const none = new Set([...standing].filter((shape) => guide.answers.get(shape) === null));
+  return {
+    guide: { ...guide, left, seen },
+    changes: [
+      ...changes(
+        fresh.filter((place) => !place.typed),
+        given,
+        standing,
+      ),
+      ...changes(
+        fresh.filter((place) => place.typed),
+        given,
+        none,
+      ),
+    ],
+  };
 }
 
 /**
@@ -325,7 +381,8 @@ export function listed(cursor: Cursor, places: readonly Place[]): readonly numbe
  * answers one shape with another character and stays at the step while it has shapes left; otherwise it goes to the
  * stop that took its place. Set aside answers that a shape is no character and leaves out the kept places that show
  * it; restore takes that back and keeps those places again. Both stay at the step. Skip and back move without
- * answering, and neither moves past the ends.
+ * answering, and neither moves past the ends. A place that shows afterward gets these answers when it joins, as
+ * {@link join} says.
  */
 export function turn(
   guide: Guide,
@@ -391,7 +448,7 @@ export function turn(
     }
   }
   const given: Given = { answers, left };
-  const next: Guide = { cursor, ...given };
+  const next: Guide = { ...guide, ...given };
   const edits = [...changes(places, given, touched), ...kept];
   // Where the check goes follows from the places as this turn leaves them, such as a text it just filled in.
   const then = places.map((place) => {
