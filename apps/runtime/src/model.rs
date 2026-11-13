@@ -32,9 +32,8 @@ use crate::plan::{AppPlan, RulePlan};
 pub(crate) struct SessionId(pub(crate) u64);
 
 /// One of a session's readers, counted from 0. A session starts its next
-/// reader when its read interval changes or its reader ended, so a reader
-/// that says it ended after the session started another is told apart and
-/// dropped.
+/// reader when its read interval changes or its reader ended, so what an
+/// earlier reader read, or that it ended, is told apart and dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReaderNumber(pub(crate) u32);
 
@@ -143,6 +142,8 @@ struct Running {
     /// How long the session waits before it starts a reader again, the
     /// next time one ends.
     wait: Duration,
+    /// When the session last started a reader again after one ended.
+    read_again_at: Option<Instant>,
 }
 
 impl Running {
@@ -352,10 +353,10 @@ impl Model {
 
     /// Starts over each running app's reader that reads at another interval
     /// than the model's, in the same session, so its automations keep their
-    /// state and nothing is undone. A reading the old reader sent just before
-    /// it stopped can still arrive after that, a few milliseconds old. A
-    /// session whose reader ended starts no reader here: the one it starts
-    /// when its wait passes reads at the new interval.
+    /// state and nothing is undone. What the old reader sent just before it
+    /// stopped carries its number, so it is dropped. A session whose reader
+    /// ended starts no reader here: the one it starts when its wait passes
+    /// reads at the new interval.
     pub(crate) fn restart_readers(&mut self) -> Vec<Order> {
         let interval = self.interval;
         let mut orders = Vec::new();
@@ -377,8 +378,9 @@ impl Model {
     /// running: its values are forgotten, as when a reader can no longer
     /// see them, and [`Model::recheck`] starts its next reader after a wait
     /// that starts at [`READ_AGAIN`] and doubles each time a reader of the
-    /// session ends, up to [`READ_AGAIN_MAX`]. The order joins the reader
-    /// that ended, which says why it did.
+    /// session ends, up to [`READ_AGAIN_MAX`]. A reader that ends after it
+    /// ran for [`READ_AGAIN_MAX`] waits [`READ_AGAIN`] again. The order
+    /// joins the reader that ended, which says why it did.
     ///
     /// A reader also says it ended once the session stopped it. That comes
     /// from a session that ended, or from a reader that is not the
@@ -389,11 +391,12 @@ impl Model {
         reader: ReaderNumber,
         now: Instant,
     ) -> Vec<Order> {
-        let Some(running) = self.running.get_mut(&id) else {
+        let Some(running) = self.read_by(id, reader) else {
             return Vec::new();
         };
-        if running.reader != reader {
-            return Vec::new();
+        let ran_long = |started| now.saturating_duration_since(started) >= READ_AGAIN_MAX;
+        if running.read_again_at.is_some_and(ran_long) {
+            running.wait = READ_AGAIN;
         }
         running.session.forget_values();
         running.read_again = Some(now.checked_add(running.wait).unwrap_or(now));
@@ -401,17 +404,29 @@ impl Model {
         vec![Order::StopReading(id, running.plan.labels.name.clone())]
     }
 
+    /// Session `id` while `reader` reads its values: the session runs,
+    /// `reader` is its newest reader, and it has not ended. What any other
+    /// reader sent is dropped with this: one of a session that ended, one
+    /// the session replaced, and one that ended, whose capture can still
+    /// send what it read after the reader said it ended.
+    fn read_by(&mut self, id: SessionId, reader: ReaderNumber) -> Option<&mut Running> {
+        self.running
+            .get_mut(&id)
+            .filter(|running| running.reader == reader && running.read_again.is_none())
+    }
+
     /// Records the value at `position` among the values that session `id`
-    /// reads, as its reader read it at `at`. A reading from a session that
-    /// ended is dropped.
+    /// reads, as its reader `reader` read it at `at`. A reading from any
+    /// reader but the one that reads the session's values is dropped.
     pub(crate) fn sample(
         &mut self,
         id: SessionId,
+        reader: ReaderNumber,
         position: usize,
         value: Value,
         at: Instant,
     ) -> Vec<Order> {
-        let Some(running) = self.running.get_mut(&id) else {
+        let Some(running) = self.read_by(id, reader) else {
             return Vec::new();
         };
         // The session reads the values of its plan, which a reload replaces
@@ -442,10 +457,10 @@ impl Model {
         self.running
             .iter_mut()
             .flat_map(|(id, running)| {
-                let read = running
-                    .read_again
-                    .is_some_and(|due| due <= at)
-                    .then(|| running.next_reader(*id));
+                let read = running.read_again.is_some_and(|due| due <= at).then(|| {
+                    running.read_again_at = Some(at);
+                    running.next_reader(*id)
+                });
                 let effects = running.session.recheck(at);
                 read.into_iter()
                     .chain(acts(*id, &running.plan, &running.watched, effects, None))
@@ -453,13 +468,15 @@ impl Model {
             .collect()
     }
 
-    /// Forgets the values a session's reader can no longer see. Each rule
-    /// keeps its state, so an automation that ran stays run, and nothing
-    /// fires or is undone until the values read next decide its condition.
-    pub(crate) fn forget(&mut self, id: SessionId) {
-        if let Some(running) = self.running.get_mut(&id) {
-            running.session.forget_values();
-        }
+    /// Forgets the values that `reader`, which reads session `id`'s
+    /// values, can no longer see, and returns whether it did: not for any
+    /// other reader. Each rule keeps its state, so an automation that ran
+    /// stays run, and nothing fires or is undone until the values read next
+    /// decide its condition.
+    pub(crate) fn forget(&mut self, id: SessionId, reader: ReaderNumber) -> bool {
+        self.read_by(id, reader)
+            .map(|running| running.session.forget_values())
+            .is_some()
     }
 
     /// The session that runs `app`'s automations, if any.
@@ -506,6 +523,7 @@ impl Model {
                 reader,
                 read_again: None,
                 wait: READ_AGAIN,
+                read_again_at: None,
             },
         );
         vec![order]
@@ -670,17 +688,17 @@ mod tests {
         assert_eq!(model.active_automations(), ["Pause A"]);
         assert_eq!(model.app_name(SessionId(0)), Some("A"));
         assert_eq!(model.app_name(SessionId(9)), None);
-        let fired = model.sample(SessionId(0), 0, number(95.0), now);
+        let fired = model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         assert_eq!(kinds(&fired), ["run 0 Pause A"]);
-        let again = model.sample(SessionId(0), 0, number(96.0), now);
+        let again = model.sample(SessionId(0), ReaderNumber(0), 0, number(96.0), now);
         assert_eq!(again, [], "it fires once until it rearms");
-        let released = model.sample(SessionId(0), 0, number(10.0), now);
+        let released = model.sample(SessionId(0), ReaderNumber(0), 0, number(10.0), now);
         assert_eq!(kinds(&released), ["undo 0 Pause A"]);
-        let other = model.sample(SessionId(5), 0, number(95.0), now);
+        let other = model.sample(SessionId(5), ReaderNumber(0), 0, number(95.0), now);
         assert_eq!(other, [], "a reading of another session is dropped");
-        let nowhere = model.sample(SessionId(0), 1, number(95.0), now);
+        let nowhere = model.sample(SessionId(0), ReaderNumber(0), 1, number(95.0), now);
         assert_eq!(nowhere, [], "a reading of no value of the plan is dropped");
-        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         let ended = model.apply(exited("a", 7));
         assert_eq!(kinds(&ended), ["stop 0 A", "undo 0 Pause A"]);
         assert_eq!(model.active_automations(), Vec::<&str>::new());
@@ -719,28 +737,28 @@ mod tests {
         model.replan(plans(&[("a", &a)]));
         model.apply(started("a", 7));
         assert_eq!(
-            model.sample(SessionId(0), flag, Value::Flag(false), now),
+            model.sample(SessionId(0), ReaderNumber(0), flag, Value::Flag(false), now),
             []
         );
-        let fired = model.sample(SessionId(0), progress, number(95.0), now);
+        let fired = model.sample(SessionId(0), ReaderNumber(0), progress, number(95.0), now);
         assert_eq!(kinds(&fired), ["run 0 Pause A"]);
-        model.forget(SessionId(9));
-        let other = model.sample(SessionId(0), progress, number(10.0), now);
+        model.forget(SessionId(9), ReaderNumber(0));
+        let other = model.sample(SessionId(0), ReaderNumber(0), progress, number(10.0), now);
         assert_eq!(
             kinds(&other),
             ["undo 0 Pause A"],
             "another session's forget"
         );
-        let again = model.sample(SessionId(0), progress, number(95.0), now);
+        let again = model.sample(SessionId(0), ReaderNumber(0), progress, number(95.0), now);
         assert_eq!(kinds(&again), ["run 0 Pause A"]);
-        model.forget(SessionId(0));
-        let low = model.sample(SessionId(0), progress, number(10.0), now);
+        model.forget(SessionId(0), ReaderNumber(0));
+        let low = model.sample(SessionId(0), ReaderNumber(0), progress, number(10.0), now);
         assert_eq!(
             low,
             [],
             "the forgotten flag might be set, so the pause is not undone yet"
         );
-        let released = model.sample(SessionId(0), flag, Value::Flag(false), now);
+        let released = model.sample(SessionId(0), ReaderNumber(0), flag, Value::Flag(false), now);
         assert_eq!(kinds(&released), ["undo 0 Pause A"]);
     }
 
@@ -773,10 +791,10 @@ mod tests {
         model.apply(started("a", 7));
         model.apply(started("b", 8));
         assert_eq!(model.next_due(), None);
-        model.sample(SessionId(0), 0, number(95.0), now);
-        model.sample(SessionId(0), 0, number(10.0), later(1));
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(10.0), later(1));
         assert_eq!(
-            model.sample(SessionId(0), 0, number(95.0), later(2)),
+            model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), later(2)),
             [Order::Held((SessionId(0), RuleIndex(0)), Some(later(2)))],
             "held, for the trace"
         );
@@ -799,7 +817,7 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0))]));
         model.apply(started("a", 7));
-        let orders = model.sample(SessionId(0), 0, number(95.0), now);
+        let orders = model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         assert_eq!(
             orders,
             [Order::Run {
@@ -827,13 +845,13 @@ mod tests {
         )]));
         model.apply(started("a", 7));
         assert_eq!(
-            kinds(&model.sample(SessionId(0), 0, number(95.0), now)),
+            kinds(&model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now)),
             ["run 0 Pause A"]
         );
-        model.sample(SessionId(0), 0, number(10.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(10.0), now);
         let later = now + Duration::from_secs(1);
         assert_eq!(
-            model.sample(SessionId(0), 0, number(95.0), later),
+            model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), later),
             [Order::Held((SessionId(0), RuleIndex(0)), Some(later))]
         );
     }
@@ -844,7 +862,7 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0))]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         assert_eq!(
             kinds(&model.set_enabled(false)),
             ["stop 0 A", "undo 0 Pause A"]
@@ -865,7 +883,7 @@ mod tests {
         model.replan(plans(&[("a", &a), ("b", &plan("B", 90.0))]));
         model.apply(started("a", 7));
         model.apply(started("b", 8));
-        model.sample(SessionId(1), 0, number(95.0), now);
+        model.sample(SessionId(1), ReaderNumber(0), 0, number(95.0), now);
         let b = plan("B", 50.0);
         let orders = model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &b)]));
         assert_eq!(kinds(&orders), ["stop 1 B", "undo 1 Pause B", "read 2 B"]);
@@ -891,7 +909,7 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0)), ("b", &plan("B", 90.0))]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         model.set_interval(ReadInterval::DEFAULT);
         assert_eq!(
             model.restart_readers(),
@@ -929,9 +947,9 @@ mod tests {
             &plan_with_cooldown("A", Duration::from_secs(60)),
         )]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), 0, number(95.0), now);
-        model.sample(SessionId(0), 0, number(10.0), now);
-        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(10.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         assert!(model.next_due().is_some(), "held back by its cooldown");
         let slower = ReadInterval::new(Duration::from_millis(100), Duration::from_secs(1))
             .expect("in order");
@@ -1003,9 +1021,9 @@ mod tests {
             readers(&read),
             [(SessionId(0), ReaderNumber(0), ReadInterval::DEFAULT)]
         );
-        model.sample(SessionId(0), 0, number(95.0), now);
-        model.sample(SessionId(0), 0, number(10.0), now);
-        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(10.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         assert_eq!(model.next_due(), Some(after(now, 500)), "held back");
 
         let ended = model.reader_ended(SessionId(0), ReaderNumber(0), now);
@@ -1030,6 +1048,63 @@ mod tests {
         );
         assert_eq!(model.next_due(), None);
         assert_eq!(model.recheck(after(now, 5000)), [], "it starts once");
+    }
+
+    #[test]
+    fn what_a_reader_that_ended_or_was_replaced_read_is_dropped() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[(
+            "a",
+            &plan_with_cooldown("A", Duration::from_millis(500)),
+        )]));
+        model.apply(started("a", 7));
+        let (session, first, second) = (SessionId(0), ReaderNumber(0), ReaderNumber(1));
+        model.sample(session, first, 0, number(95.0), now);
+        model.sample(session, first, 0, number(10.0), now);
+        model.reader_ended(session, first, now);
+        // The capture of the reader that ended can still send what it read.
+        assert_eq!(model.sample(session, first, 0, number(95.0), now), []);
+        assert_eq!(
+            model.next_due(),
+            Some(after(now, 1000)),
+            "only the next reader is due: no value was recorded to hold a rule back on"
+        );
+        assert!(!model.forget(session, first), "nor does it forget");
+        assert_eq!(kinds(&model.recheck(after(now, 1000))), ["read 0 A"]);
+        assert_eq!(
+            model.sample(session, first, 0, number(95.0), now),
+            [],
+            "replaced by the session's next reader"
+        );
+        assert_eq!(model.next_due(), None);
+        assert!(!model.forget(session, first));
+        assert_eq!(
+            kinds(&model.sample(session, second, 0, number(95.0), after(now, 1000))),
+            ["run 0 Pause A"],
+            "the reader that reads is heard"
+        );
+        assert!(model.forget(session, second));
+    }
+
+    #[test]
+    fn a_reader_that_ends_after_it_ran_long_waits_as_the_first_did() {
+        let mut model = Model::default();
+        let now = Instant::now();
+        model.replan(plans(&[("a", &plan("A", 90.0))]));
+        model.apply(started("a", 7));
+        model.reader_ended(SessionId(0), ReaderNumber(0), now);
+        model.recheck(after(now, 1000));
+        // It ran for a millisecond less than the longest wait.
+        model.reader_ended(SessionId(0), ReaderNumber(1), after(now, 30_999));
+        assert_eq!(model.next_due(), Some(after(now, 32_999)), "twice as long");
+        model.recheck(after(now, 32_999));
+        model.reader_ended(SessionId(0), ReaderNumber(2), after(now, 62_999));
+        assert_eq!(
+            model.next_due(),
+            Some(after(now, 63_999)),
+            "it ran for the longest wait, so the wait starts over"
+        );
     }
 
     #[test]
@@ -1112,7 +1187,7 @@ mod tests {
         let now = Instant::now();
         model.replan(plans(&[("a", &plan("A", 90.0))]));
         model.apply(started("a", 7));
-        model.sample(SessionId(0), 0, number(95.0), now);
+        model.sample(SessionId(0), ReaderNumber(0), 0, number(95.0), now);
         let mut renamed = plan("A", 90.0);
         let parts = Arc::get_mut(&mut renamed).expect("unshared");
         parts.labels.name = "Renamed".to_owned();
@@ -1135,7 +1210,7 @@ mod tests {
             "the trace's names too"
         );
         assert_eq!(
-            kinds(&model.sample(SessionId(0), 0, number(50.0), now)),
+            kinds(&model.sample(SessionId(0), ReaderNumber(0), 0, number(50.0), now)),
             ["undo 0 Pause renamed"]
         );
     }

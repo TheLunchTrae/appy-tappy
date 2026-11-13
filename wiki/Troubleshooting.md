@@ -53,7 +53,7 @@ line when you report the problem.
 If the log says an application's reader ended and that a reader thread
 panicked, AppyTappy has a bug too. It reads the application's values again
 after a wait, which starts at 1 second and gets longer, up to 30 seconds,
-each time it happens while the application runs. Its automations stay as
+each time it happens again soon after. Its automations stay as
 they were meanwhile. Include both log lines when you report the problem.
 
 ## A number reads in setup but the automation does nothing

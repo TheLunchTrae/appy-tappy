@@ -27,9 +27,11 @@ it was about has gone. Twelve guards drop such stale messages:
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
   longer runs.
 - **Reader numbers.** A session numbers its readers with a `ReaderNumber`,
-  and each reader says its number when it ends. The owner drops an end that
-  does not carry the number of the session's newest reader, which is how a
-  reader that the session stopped ends (`Model::reader_ended`).
+  which each reader sends with every value it reads, when its values can no
+  longer be seen, and when it ends. The owner drops each of those unless it
+  carries the number of the session's newest reader and that reader has not
+  ended (`Model::read_by`): what a reader that the session replaced still
+  sent, and what the capture of a reader that panicked still read.
 - **Generations.** The setup app's owner thread adds 1 to `generation` each
   time it starts or stops a capture. A frame or a failure from an older
   generation is dropped.
@@ -255,34 +257,32 @@ stateDiagram-v2
 - **A new read interval.** `restart_readers` stops each running
   application's reader that reads at another interval and starts it again in
   the same session, and calls `forget_values` first, as for `Unseen`, because
-  the new reader sends its first readings whether or not they changed. A
-  reading the old reader sent just before it stopped can still arrive after
-  that, a few milliseconds old. A new trace restarts nothing: it reaches each
-  reader as a message, as [Runtime trace](#runtime-trace) describes.
+  the new reader sends its first readings whether or not they changed. What
+  the old reader sent just before it stopped carries its number, so it is
+  dropped. A new trace restarts nothing: it reaches each reader as a
+  message, as [Runtime trace](#runtime-trace) describes.
 - **A reader that ended.** A reader thread sends `Reading::Ended` with its
   `ReaderNumber` as the last thing it does, however it ends
   (`workers::tell_end`). When the number is that of the session's newest
-  reader, nothing stopped the reader, so it panicked: `reader_ended` calls
-  `forget_values`, as for `Unseen`, and sets `read_again`, and the owner logs
-  that the application's reader ended and joins the thread, which logs the
-  panic. The session keeps running, with its rule state, and reads nothing
-  until `read_again`. Then the owner wakes with `Due`, and `recheck` starts
-  the session's next reader, with the next number. The wait is 1 second
-  (`READ_AGAIN`) the first time and doubles each time a reader of the session
-  ends, up to 30 seconds (`READ_AGAIN_MAX`), so a reader that panics each
-  time it starts costs one thread and two log lines for each wait. The wait
-  does not shorten again within the session. A new read interval while the
+  reader, nothing stopped the reader, such as when it panicked:
+  `reader_ended` calls `forget_values`, as for `Unseen`, and sets
+  `read_again`, and the owner logs that the application's reader ended and
+  joins the thread, which logs its panic. The session keeps running, with
+  its rule state, and reads nothing until `read_again`: a panic drops the
+  reader's capture without waiting for it, so the capture can still send
+  what it read, which is dropped like a replaced reader's. Then the owner
+  wakes with `Due`, and `recheck` starts the session's next reader, with the
+  next number. The wait is 1 second (`READ_AGAIN`) the first time and
+  doubles each time a reader of the session ends, up to 30 seconds
+  (`READ_AGAIN_MAX`), so a reader that panics each time it starts costs one
+  thread and three log lines for each wait. A reader that ends after it ran
+  for `READ_AGAIN_MAX` waits 1 second again. A new read interval while the
   session waits starts no reader: the next one reads at it. An `Ended` with
   any other number, or for a session that no longer runs, comes from a
   reader that the session stopped, and is dropped.
 - **A reader that cannot start.** When the reader's thread cannot start, the
-  owner logs it, and the session runs with no reader until it ends.
-
-#### Open problems
-
-- [#317](https://github.com/TheLunchTrae/appy-tappy/issues/317): a reader
-  whose thread cannot start leaves its session running with nothing reading
-  until the session ends.
+  owner logs it and sends itself that reader's `Ended`, so the session
+  starts its next reader after the same wait.
 
 ### Reader thread
 
@@ -387,7 +387,8 @@ The thread can also panic in any state, which ends it.
 
 - [#318](https://github.com/TheLunchTrae/appy-tappy/issues/318): a panic in
   the capture's frame handler runs on the capture thread, so the reader keeps
-  waiting for frames and its values stop reading until it closes the capture.
+  waiting for frames and its values stop reading until it closes the
+  capture, which it does when the window changes or the session stops.
 
 ### Frame handler
 
