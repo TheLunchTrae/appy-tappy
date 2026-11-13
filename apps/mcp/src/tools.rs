@@ -125,7 +125,7 @@ mod tests {
     use std::io;
 
     use appytappy_config::anti_cheat::ProcessId;
-    use appytappy_sources::screen::{Rgb, Size};
+    use appytappy_sources::screen::Rgb;
     use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 
     use super::*;
@@ -161,10 +161,6 @@ mod tests {
         }
 
         fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
-        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 

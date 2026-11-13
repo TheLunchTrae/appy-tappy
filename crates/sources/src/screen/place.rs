@@ -87,7 +87,9 @@ pub fn place<S: System + Capture>(
         .content_bounds(window.handle)
         .map_err(failed)?
         .ok_or_else(|| format!("{name}'s window closed"))?;
-    let size = size(bounds).ok_or_else(|| format!("{name}'s window has no size"))?;
+    let size = bounds
+        .size()
+        .ok_or_else(|| format!("{name}'s window has no size"))?;
     let (x, y) = match target {
         Target::Spot(spot) => spot
             .place(size.width, size.height)
@@ -129,13 +131,6 @@ pub fn place<S: System + Capture>(
         process: window.process,
         at,
     })
-}
-
-/// The size of `bounds`, or `None` when it is empty.
-fn size(bounds: Bounds) -> Option<Size> {
-    let width = u32::try_from(bounds.right.checked_sub(bounds.left)?).ok()?;
-    let height = u32::try_from(bounds.bottom.checked_sub(bounds.top)?).ok()?;
-    (width > 0 && height > 0).then_some(Size { width, height })
 }
 
 /// The screen place of (`x`, `y`) in a window at `bounds`.
@@ -266,10 +261,6 @@ mod tests {
                 shown: self.shown,
                 front: false,
             }))
-        }
-
-        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
         }
 
         fn content_bounds(&self, _window: u64) -> io::Result<Option<Bounds>> {
@@ -474,9 +465,6 @@ mod tests {
             fn window_place(&self, _window: u64) -> io::Result<Option<WindowPlace>> {
                 Ok(None)
             }
-            fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-                Ok(None)
-            }
             fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
                 Err(io::Error::from(io::ErrorKind::Unsupported))
             }
@@ -506,23 +494,13 @@ mod tests {
     }
 
     #[test]
-    fn a_window_s_size_and_screen_place_come_from_its_bounds() {
+    fn a_window_s_screen_place_comes_from_its_bounds() {
         let bounds = |left, top, right, bottom| Bounds {
             left,
             top,
             right,
             bottom,
         };
-        assert_eq!(
-            size(bounds(10, 20, 30, 60)),
-            Some(Size {
-                width: 20,
-                height: 40
-            })
-        );
-        assert_eq!(size(bounds(10, 20, 10, 60)), None);
-        assert_eq!(size(bounds(10, 20, 30, 20)), None);
-        assert_eq!(size(bounds(30, 20, 10, 60)), None);
         assert_eq!(on_screen(bounds(-100, 50, 0, 0), 30, 4), Some((-70, 54)));
         assert_eq!(on_screen(bounds(i32::MAX, 0, 0, 0), 1, 0), None);
         assert_eq!(on_screen(bounds(0, i32::MAX, 0, 0), 0, 1), None);

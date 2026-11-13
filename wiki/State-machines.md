@@ -355,7 +355,7 @@ The thread can also panic in any state, which ends it.
   When the process owns none of the windows that fit best, such as while
   another process's window fits better, it waits, and detection follows the
   other process or keeps this one for its grace. Before the capture starts,
-  `framed_at` asks `System::content_size` for the size the window's frames
+  `framed_at` asks `System::content_bounds` for the size the window's frames
   will have, the size of its
   [content](Screen-regions.md#window-content), and places the values there
   when some value reads there, so a window that is not at the first value's

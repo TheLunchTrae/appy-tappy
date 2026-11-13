@@ -232,10 +232,6 @@ pub(crate) mod tests {
             }))
         }
 
-        fn content_size(&self, _window: u64) -> io::Result<Option<Size>> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
-        }
-
         fn executable_build(&self, _process: ProcessId) -> io::Result<BuildDef> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
