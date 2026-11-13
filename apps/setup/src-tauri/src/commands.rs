@@ -17,7 +17,7 @@ pub(crate) use upload::Upload;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef, SizeDef, WindowDef};
+use appytappy_config::app_file::{AntiCheatDef, AppFile, OverlayModeDef, SizeDef, WindowDef};
 use appytappy_config::automation_file::{AutomationDef, ClickAtDef, WhenDef};
 use appytappy_config::settings_file::SettingsFile;
 use tauri::ipc::Response;
@@ -398,6 +398,19 @@ pub(crate) async fn click_now(app: AppHandle, click: ClickSpec) -> Result<ClickS
 #[tauri::command]
 pub(crate) async fn list_apps(app: AppHandle) -> Result<Vec<AppSummary>, String> {
     try_ask(&app, "list_apps", Owner::apps).await
+}
+
+/// The file of the saved application `application`, read alone; `None`
+/// when it is no longer saved.
+#[tauri::command]
+pub(crate) async fn app_file(
+    app: AppHandle,
+    application: String,
+) -> Result<Option<AppFile>, String> {
+    try_ask(&app, "app_file", move |owner| {
+        owner.stores()?.file(&application)
+    })
+    .await
 }
 
 /// The saved applications and the open windows, with the windows each

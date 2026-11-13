@@ -364,6 +364,16 @@ failure as its problem, and a closed window ends it. Starting one kind
 replaces a recording of the other. Recordings of both kinds are numbered from
 one counter.
 
+On the page, the two kinds share one hook for the recording's state, its
+errors, and its commands (`useRecorder` in `lib/useRecorder.ts`), under
+`useRecording` for readings and `useLookRecording` for looks. The capture
+screen (`components/Capture.tsx`) owns the value and its steps. Teaching a
+reference is `useReferenceTeaching` in `lib/useReferenceTeaching.ts`, which
+holds the recording of readings, its review, the finds, and the character
+check, and `components/ReferenceInspector.tsx` shows it. One flow page,
+`pages/CaptureFlow.tsx`, picks the window and opens the capture screen for a
+value and for a reference.
+
 [Recording readings](References.md#record-readings) runs in the reference
 editor. A number value's **Record readings** opens that editor on the value's
 region, for the reference picked or a new one. A saved reference has its
@@ -633,6 +643,9 @@ A step's keys send the same turns as its buttons: `checkKey` in
 `lib/checkKeys.ts` says what a key answers with, given what has focus and
 which buttons the step shows, and `StepAnswers` in `CharacterCheck.tsx`
 renders the buttons and listens for the keys.
+A character typed in **It is** but not entered is committed first, by Alt+S
+or Alt+B as by a click on **Skip** or **Back**, and the check stays on the
+step.
 
 ### Recording looks
 
