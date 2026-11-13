@@ -236,6 +236,22 @@ so one answer also fixes a box you drew by hand.
    **It is a character** keeps it again.
 
 **Skip** goes on without answering, and **Back** returns to the step before.
+
+You can answer from the keyboard. The **?** beside the buttons lists the
+keys:
+
+| Key         | What it does                                                                              |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| Enter       | Presses the highlighted button: the **Yes** answer, **Next**, or **Done**                 |
+| A character | Goes in **It is** under the first shape not checked yet; Enter there makes it your answer |
+| Alt+S       | **Skip**                                                                                  |
+| Alt+B       | **Back**                                                                                  |
+| Escape      | Closes the check                                                                          |
+
+A text field that has focus keeps the characters you type and Enter, and a
+button that has focus keeps Enter, as anywhere in Windows. Typing the
+character the step already asks about does nothing.
+
 A find whose characters you all answered for is ticked, and you can clear
 the tick afterward. A reading that review leaves out is not asked about and
 stays left out, and its text gets your answers too.

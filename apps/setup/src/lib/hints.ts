@@ -96,6 +96,10 @@ export const FOUND_HINT =
 export const CHECK_CHARACTERS_HINT =
   'Goes through the characters one at a time, across the boxes, the finds listed, and the readings a recording keeps. Each step shows one character and every place it appears, and asks once whether that is what it is. Your answer fixes the text of every place that shows it, so a character the text reader misread the same way everywhere needs one fix. You can still change any text by hand.';
 
+/** The keys that answer a step of Check characters. */
+export const CHECK_KEYS_HINT =
+  'Enter presses the highlighted button: Yes, Next, or Done. To fix a shape, type the right character: it goes in It is under the first shape not checked yet, and Enter there makes it your answer. Alt+S skips the step, Alt+B goes back, and Escape closes the check. A text field or a button that has focus keeps Enter for itself.';
+
 /** Why the reference editor offers Check characters before a save, and that the save does not wait for it. */
 export const CHECK_OFFER_HINT =
   'AppyTappy read these in text you added or kept without typing it, and keeping a text does not confirm its characters. It tends to misread a character the same way everywhere, and a reference that learns one wrong reads its values wrong. Check characters asks about each once. Saving does not wait for it.';

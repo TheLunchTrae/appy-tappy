@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+
+import { type KeyFocus, checkKey } from '../lib/checkKeys.ts';
 
 import {
   type Guide,
@@ -14,10 +16,12 @@ import {
   steps,
   unfitted,
 } from '../lib/confirm.ts';
+import { CHECK_KEYS_HINT } from '../lib/hints.ts';
 import type { Picture } from '../lib/pixels.ts';
 import { andList, labelCharacters } from '../lib/reference.ts';
 import type { ReviewEntry } from '../lib/review.ts';
 import { PictureCanvas } from './canvas.tsx';
+import { Hint } from './Hint.tsx';
 
 /** How many places one shape's tile shows before it counts the rest. */
 const SHOWN_PLACES = 6;
@@ -122,11 +126,14 @@ function Retype({
   character,
   label,
   describedBy,
+  checked,
   onRetype,
 }: {
   readonly character: string;
   readonly label: string;
   readonly describedBy: string;
+  /** Whether the shape has its answer, so a character typed outside a field goes to another shape first. */
+  readonly checked: boolean;
   readonly onRetype: (character: string) => void;
 }) {
   // What the user typed and has not committed; null shows the step's character.
@@ -144,6 +151,7 @@ function Retype({
       value={typed ?? character}
       aria-label={label}
       aria-describedby={describedBy}
+      data-it-is={checked ? 'checked' : 'open'}
       onFocus={(event) => {
         event.target.select();
       }}
@@ -240,6 +248,7 @@ function ShapeTile({
               character={step.character}
               label={`The character ${name} is`}
               describedBy={noteId}
+              checked={use.answered}
               onRetype={(character) => {
                 onTurn({ kind: 'retype', shape: use.shape, character });
               }}
@@ -258,6 +267,103 @@ function ShapeTile({
         </span>
       )}
     </li>
+  );
+}
+
+/**
+ * What has focus for `checkKey`. Something outside the check counts as a field: it keeps every key but the Alt ones,
+ * so typing with focus on the panel beside the check never answers a step.
+ */
+function keyFocus(target: EventTarget | null, sheet: Element): KeyFocus {
+  if (!(target instanceof HTMLElement) || target === document.body) {
+    return 'step';
+  }
+  if (!sheet.contains(target) || target.matches('input:not([type=checkbox]), textarea, select')) {
+    return 'field';
+  }
+  return target.matches('button, a, input') ? 'control' : 'step';
+}
+
+/**
+ * A step's buttons, the keys that press them, and the hint that names the keys. `back` is null where the step has
+ * none before it, and left out where the step shows no Back; `skip` is null where there is nothing to skip.
+ * `character` is the step's while a shape of it can be retyped, so a typed character goes to that shape's field.
+ */
+function StepAnswers({
+  back,
+  skip,
+  primary,
+  onPrimary,
+  character,
+}: {
+  readonly back?: (() => void) | null;
+  readonly skip: (() => void) | null;
+  readonly primary: ReactNode;
+  readonly onPrimary: () => void;
+  readonly character: string | null;
+}) {
+  const end = useRef<HTMLDivElement>(null);
+  // Hears a key last, as it reaches the window, after whatever has focus took its own. It listens anew at each
+  // render, so it always answers for the step that shows.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const sheet = end.current?.closest('.check-sheet') ?? null;
+      if (sheet === null) {
+        return;
+      }
+      const answer = checkKey(event, keyFocus(event.target, sheet), {
+        back: typeof back === 'function',
+        skip: skip !== null,
+        character,
+      });
+      if (answer === null) {
+        return;
+      }
+      if (answer.kind === 'retype') {
+        // The key is left to type into the field that now has focus, which selects its text and so replaces it.
+        (
+          sheet.querySelector<HTMLElement>('[data-it-is="open"]') ?? sheet.querySelector<HTMLElement>('[data-it-is]')
+        )?.focus();
+        return;
+      }
+      event.preventDefault();
+      if (answer.kind === 'primary') {
+        onPrimary();
+      } else if (answer.kind === 'back') {
+        back?.();
+      } else {
+        skip?.();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  });
+  return (
+    <div ref={end} className="end with-hint">
+      <Hint topic="the keys that answer a step">{CHECK_KEYS_HINT}</Hint>
+      {back === undefined ? null : (
+        <button
+          type="button"
+          className="btn"
+          title="Back (Alt+B)"
+          aria-keyshortcuts="Alt+B"
+          disabled={back === null}
+          onClick={back ?? undefined}
+        >
+          Back
+        </button>
+      )}
+      {skip === null ? null : (
+        <button type="button" className="btn" title="Skip (Alt+S)" aria-keyshortcuts="Alt+S" onClick={skip}>
+          Skip
+        </button>
+      )}
+      <button type="button" className="btn primary" aria-keyshortcuts="Enter" onClick={onPrimary}>
+        {primary}
+      </button>
+    </div>
   );
 }
 
@@ -283,38 +389,29 @@ function CharacterStep({ step, ...props }: Props & { readonly step: Step }) {
             and press Enter.
           </p>
         </div>
-        <div className="end">
-          <button
-            type="button"
-            className="btn"
-            disabled={at === null || at.step === 1}
-            onClick={() => {
-              onTurn({ kind: 'back' });
-            }}
-          >
-            Back
-          </button>
-          {open === 0 ? null : (
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                onTurn({ kind: 'skip' });
-              }}
-            >
-              Skip
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => {
-              onTurn({ kind: open === 0 ? 'skip' : 'confirm' });
-            }}
-          >
-            {open === 0 ? 'Next' : several ? `Yes, they are all ${step.character}` : `Yes, it is ${step.character}`}
-          </button>
-        </div>
+        <StepAnswers
+          back={
+            at === null || at.step === 1
+              ? null
+              : () => {
+                  onTurn({ kind: 'back' });
+                }
+          }
+          skip={
+            open === 0
+              ? null
+              : () => {
+                  onTurn({ kind: 'skip' });
+                }
+          }
+          primary={
+            open === 0 ? 'Next' : several ? `Yes, they are all ${step.character}` : `Yes, it is ${step.character}`
+          }
+          onPrimary={() => {
+            onTurn({ kind: open === 0 ? 'skip' : 'confirm' });
+          }}
+          character={step.shapes.some((use) => !use.aside) ? step.character : null}
+        />
       </div>
       <ul className="sheet shapes" aria-label={`Shapes read as ${step.character}`}>
         {step.shapes.map((use, index) => (
@@ -350,26 +447,17 @@ function UnfittedStep({ guide, places, picture, onTurn, onEdit }: Props) {
             characters. A box with no text teaches nothing.
           </p>
         </div>
-        <div className="end">
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              onTurn({ kind: 'back' });
-            }}
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => {
-              onTurn({ kind: 'confirm' });
-            }}
-          >
-            Next
-          </button>
-        </div>
+        <StepAnswers
+          back={() => {
+            onTurn({ kind: 'back' });
+          }}
+          skip={null}
+          primary="Next"
+          onPrimary={() => {
+            onTurn({ kind: 'confirm' });
+          }}
+          character={null}
+        />
       </div>
       <ul className="sheet" aria-label="Text to type">
         {left.map((at) => {
@@ -447,6 +535,7 @@ export function CharacterCheckSheet(props: Props) {
   const left = unfitted(places, guide).length;
   const unread = beingRead(places);
   const skipped = all.filter((each) => each.shapes.some((use) => !use.answered)).map((each) => each.character);
+  const nothing = all.length === 0 && left === 0 && unread === 0;
   return (
     <div ref={sheet} className="check-sheet">
       {step !== undefined ? (
@@ -460,14 +549,14 @@ export function CharacterCheckSheet(props: Props) {
         <div className="sheet-head">
           <div>
             <h2 tabIndex={-1} data-check-head>
-              {all.length === 0 && left === 0 && unread === 0
+              {nothing
                 ? 'Nothing to check yet'
                 : skipped.length === 0 && left === 0 && unread === 0
                   ? 'Every character is checked'
                   : 'That was the last one'}
             </h2>
             <p>
-              {all.length === 0 && left === 0 && unread === 0
+              {nothing
                 ? 'No box, find, or kept reading shows characters to check. Draw a box around some characters, find more like it, or record the reference, first.'
                 : [
                     skipped.length === 0
@@ -484,22 +573,19 @@ export function CharacterCheckSheet(props: Props) {
                     .join(' ')}
             </p>
           </div>
-          <div className="end">
-            {all.length === 0 && left === 0 && unread === 0 ? null : (
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  props.onTurn({ kind: 'back' });
-                }}
-              >
-                Back
-              </button>
-            )}
-            <button type="button" className="btn primary" onClick={onClose}>
-              Done
-            </button>
-          </div>
+          <StepAnswers
+            {...(nothing
+              ? {}
+              : {
+                  back: () => {
+                    props.onTurn({ kind: 'back' });
+                  },
+                })}
+            skip={null}
+            primary="Done"
+            onPrimary={onClose}
+            character={null}
+          />
         </div>
       )}
     </div>

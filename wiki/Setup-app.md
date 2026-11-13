@@ -628,6 +628,10 @@ wrote. An answer edits only the shapes it is about, in the turn that gives
 it and in each place whose text is read afterward, so a text typed by hand
 afterward stays and reopens the question instead.
 [Character check](State-machines.md#character-check) has its states.
+A step's keys send the same turns as its buttons: `checkKey` in
+`lib/checkKeys.ts` says what a key answers with, given what has focus and
+which buttons the step shows, and `StepAnswers` in `CharacterCheck.tsx`
+renders the buttons and listens for the keys.
 
 ### Recording looks
 
