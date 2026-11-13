@@ -524,7 +524,7 @@ mod tests {
 
         // A recording of looks takes its place, and the stop the readings'
         // screen sends as it goes leaves the looks alone.
-        let region: RegionSpec =
+        let region: RegionDef =
             serde_json::from_str(r#"{"x":0,"y":0,"width":4,"height":2}"#).expect("valid JSON");
         let looks = harness
             .ask(move |owner| owner.start_look_recording(region, 0, 0))
