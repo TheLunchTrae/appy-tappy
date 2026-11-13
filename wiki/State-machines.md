@@ -2713,15 +2713,17 @@ they tell who reads what it changed, as its `Changed` kind says:
 A save that failed changed nothing anyone reads, so it tells neither, and an
 overlay that was reading goes on reading. A delete tells them once it has
 written the application's file, and removing an application tells them even
-when the removal fails partway. After each save of an application's file,
-whether it worked or failed, the setup app removes the pictures in its folder
-that the file as saved does not name, of those AppyTappy named. So a save that
-fails after it wrote some pictures takes them back, and pictures that a save
-left when the program ended in the middle of it go with the application's
-next save. That removal is best effort: one that fails does not fail the
-save, and the next save tries again. Deleting a reference that is already
-gone saves nothing and tells no one, but still removes the pictures an
-earlier delete left behind. An edit that leaves a value as it was saved
+when the removal fails partway. Each save of an application's file that
+starts writing, whether it works or fails, ends with `AppStore::save`
+removing the pictures in the application's folder that the file on disk does
+not name, of those AppyTappy named. So a save that fails after it wrote some
+pictures takes them back, and pictures that a save left when the program
+ended in the middle of it go with the application's next save. A save that
+the store refuses before it writes anything, such as one with a bad picture
+name, removes nothing. The removal is best effort: one that fails does not
+fail the save, and the next save tries again. Deleting a reference that is
+already gone saves nothing and tells no one; pictures an earlier delete left
+behind go with the next save. An edit that leaves a value as it was saved
 writes nothing and tells no one. Moving a panel writes the application's
 file without telling anyone.
 
