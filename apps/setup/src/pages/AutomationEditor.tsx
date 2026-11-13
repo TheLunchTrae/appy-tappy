@@ -39,6 +39,7 @@ import { ACTIONS_HINT, COOLDOWN_HINT, DRAFT_HINT, UNDO_HINT, WHEN_HINT } from '.
 import { editorLanding, useLanding } from '../lib/landing.ts';
 import { background, useRepeat } from '../lib/repeat.ts';
 import { ask, useMounted } from '../lib/request.ts';
+import { type LiveWatchEvent, NOT_WATCHING, liveWatchStep } from '../lib/liveWatch.ts';
 import { ClickPictureThumb } from '../components/ClickPictureThumb.tsx';
 import { ClickTarget } from '../components/ClickTarget.tsx';
 import { DeleteDraft } from '../components/Drafts.tsx';
@@ -398,70 +399,62 @@ function ActionRow({ action, position, count, apps, onTarget, onChange, onMove, 
 /** The pause between two live readings: often enough to follow a value as it changes. */
 const LIVE_PAUSE_MS = 500;
 
-/** How long the live reading waits before it looks for the window again, as the runtime does. */
-const RETRY_MS = 1000;
-
 /**
- * What the watched value reads on its window now, and whether `when` holds
- * for it. It watches again once the window closes, and stops its watch when
- * it goes away.
+ * What the watched value reads on its window now, and whether `when` holds for it. Its watch is `liveWatchStep`'s:
+ * it watches again once the window closes or another capture takes its place, and stops when it goes away.
  */
 function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly when: WhenDef | null }) {
   const [live, setLive] = useState<LiveState>(null);
-  const watch = useRef<number | null>(null);
-  const retryAt = useRef(0);
+  const state = useRef(NOT_WATCHING);
+  const send = (event: LiveWatchEvent): void => {
+    const next = liveWatchStep(state.current, event);
+    state.current = next.state;
+    if (next.shows !== undefined) {
+      setLive(next.shows);
+    }
+  };
   const isMounted = useMounted();
   useEffect(
     () => () => {
-      if (watch.current !== null) {
-        background(stopWatching(watch.current));
-        watch.current = null;
+      const { watch } = state.current;
+      if (watch !== null) {
+        background(stopWatching(watch));
+        state.current = NOT_WATCHING;
       }
     },
     [],
   );
+  // Reads watch `watch`, and hears whether it answered a reading.
+  const read = async (watch: number): Promise<void> => {
+    try {
+      send({ kind: 'read', live: await watchedReading(watch, when), now: Date.now() });
+    } catch (error: unknown) {
+      send({ kind: 'refused', message: errorText(error), now: Date.now() });
+    }
+  };
   useRepeat(
     async () => {
-      if (watch.current !== null) {
-        try {
-          const read = await watchedReading(watch.current, when);
-          if (read.kind === 'lost') {
-            watch.current = null;
-            retryAt.current = Date.now() + RETRY_MS;
-          }
-          setLive(read);
-          return;
-        } catch {
-          // Another capture replaced the watch: watch again now.
-          watch.current = null;
-        }
+      if (state.current.watch !== null) {
+        await read(state.current.watch);
       }
-      if (!isMounted() || Date.now() < retryAt.current) {
+      // A watch that was refused starts again in the same turn; one that read is done.
+      if (state.current.watch !== null || !isMounted() || Date.now() < state.current.retryAt) {
         return;
       }
       let started: number;
       try {
         started = await watchValue(choice.app, choice.value.id);
-        if (!isMounted()) {
-          // The editor closed while the capture started.
-          await stopWatching(started);
-          return;
-        }
-        watch.current = started;
       } catch (error: unknown) {
-        watch.current = null;
-        retryAt.current = Date.now() + RETRY_MS;
-        setLive({ kind: 'error', message: errorText(error) });
+        send({ kind: 'unstarted', message: errorText(error), now: Date.now() });
         return;
       }
-      try {
-        setLive(await watchedReading(started, when));
-      } catch {
-        // Another capture replaced the watch already: watch again next time.
-        if (watch.current === started) {
-          watch.current = null;
-        }
+      if (!isMounted()) {
+        // The editor closed while the capture started.
+        await stopWatching(started);
+        return;
       }
+      send({ kind: 'started', watch: started });
+      await read(started);
     },
     LIVE_PAUSE_MS,
     true,
@@ -469,7 +462,8 @@ function LiveReading({ choice, when }: { readonly choice: ValueChoice; readonly 
   const holds = live?.kind === 'read' && live.holds === true;
   // Reads the watch the live reading holds now, which can change between reads.
   const askDetails = useCallback(
-    async (): Promise<ReadingDetails | null> => (watch.current === null ? null : explainWatched(watch.current)),
+    async (): Promise<ReadingDetails | null> =>
+      state.current.watch === null ? null : explainWatched(state.current.watch),
     [],
   );
   return (

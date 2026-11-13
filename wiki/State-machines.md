@@ -1331,6 +1331,15 @@ stateDiagram-v2
   goes, on **Change window**, and when a click's target screen looks for
   its window again. While one holds it, the pages' lists are read only
   after a save.
+- The automation editor's watch (`liveWatchStep` in
+  `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the
+  time before which it starts no new watch, and why its last reading was
+  refused, if nothing was read since. A watch that reads **Lost**, or that
+  cannot start, shows why and starts again a second later. The owner
+  refuses to read a watch that another capture replaced: the editor then
+  watches again at once and says nothing. When the watch that follows is
+  refused too, with no reading between, the refusal is a failure: the
+  editor shows it and tries again each second.
 - **Failed** sets `failure`, a `CaptureFailure`. Preview answers with its
   error, a screenshot is refused, and a recording stops with the error as its
   problem. The next good frame clears it.
