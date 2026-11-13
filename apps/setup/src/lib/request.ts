@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Asks `request`, at once or once `delayMs` passed, and hands what it answers to `answered`, or why it failed to
- * `failed`. The function it returns cancels the ask: a request not yet sent is never sent, and the answer to one
+ * `failed`, which also hears what `answered` throws. The function it returns cancels the ask: a request not yet sent is never sent, and the answer to one
  * that was is dropped. It is what an effect returns, so an ask ends when what it asked about changes or its
  * component goes; the delay makes a run of changes, such as a dragged slider, ask once.
  */
@@ -17,18 +17,18 @@ export function ask<Answer>(
 ): () => void {
   let wanted = true;
   const send = (): void => {
-    request().then(
-      (answer) => {
+    request()
+      .then((answer) => {
         if (wanted) {
           answered(answer);
         }
-      },
-      (error: unknown) => {
+      })
+      // Hears what `answered` throws too, so a screen's error shows a failure to use the answer.
+      .catch((error: unknown) => {
         if (wanted) {
           failed(error);
         }
-      },
-    );
+      });
   };
   if (delayMs <= 0) {
     send();
@@ -76,10 +76,10 @@ export function newest(): Newest {
 
 /**
  * Asks where only the newest counts, for asks an event starts rather than an effect. Each `begin` makes the asks
- * started before it stale, as does unmounting, and gives the new ask its check: whether it is still the newest, to
- * ask between steps and before showing what it answered.
+ * started before it stale, as do `drop` and unmounting, and gives the new ask its check: whether it is still the
+ * newest, to ask between steps and before showing what it answered.
  */
-export function useNewest(): Pick<Newest, 'begin' | 'join'> {
+export function useNewest(): Newest {
   const [asks] = useState(newest);
   useEffect(() => asks.drop, [asks]);
   return asks;

@@ -256,6 +256,9 @@ function TargetStage({
     setDrawn({ screenshot: selected, region, selection, press: middle(region) });
   };
 
+  // A selection asked for on one screenshot marks nothing once another shows.
+  useEffect(() => selecting.drop, [selected, selecting]);
+
   const selectWith = (steps: SelectionSpec['steps']): void => {
     if (selected === null || sending) {
       return;
@@ -513,6 +516,8 @@ function TargetStage({
                   editable={!sending}
                   tool={tool}
                   onRegion={(region) => {
+                    // A box drawn by hand is newer than a selection still asked for, whose answer would replace it.
+                    selecting.drop();
                     setRegion(region, null);
                   }}
                   onSnap={(rough) => {
