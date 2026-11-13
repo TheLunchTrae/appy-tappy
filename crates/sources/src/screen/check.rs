@@ -1,20 +1,20 @@
 //! The checks that read a value from a region's image.
 //!
-//! Each check is one pass of integer arithmetic over the region's pixels,
-//! with no allocation, so it costs microseconds and gives the same answer on
-//! every platform. `wiki/Screen-regions.md` explains when to use which.
+//! Each check is integer arithmetic over the region's pixels, so it costs
+//! microseconds and gives the same answer on every platform. Only a number
+//! allocates as it reads: a byte for each pixel, for which of them are ink.
+//! `wiki/Screen-regions.md` explains when to use which.
 
 use std::error::Error;
 use std::fmt;
-use std::ops::Range;
 
 use appytappy_config::signal::{Number, StateName, Value};
 
 use super::digits::{DigitReader, ReadError};
 use super::mask::{Mask, MaskError};
+use super::masked::{MaskedPicture, most_within};
 use super::resample::resample;
-use super::{Image, Size};
-use crate::system::Rgb;
+use super::{Image, Rgb, Size};
 
 /// A check that reads one value from a region.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,8 +117,8 @@ impl BarFill {
     /// within half their distance of it, the empty color on a tie, and
     /// neither otherwise.
     #[must_use]
-    pub fn classify(self, [blue, green, red, _]: [u8; 4]) -> BarPixel {
-        let color = Rgb { red, green, blue };
+    pub fn classify(self, pixel: [u8; 4]) -> BarPixel {
+        let color = Rgb::of_pixel(pixel);
         let to_filled = distance(color, self.filled);
         let to_empty = distance(color, self.empty);
         // Squared distances, so half the distance is a quarter of the
@@ -198,25 +198,7 @@ impl ColorMatch {
     /// Whether the average color of `image` is within the tolerance.
     #[must_use]
     pub fn matches(self, image: &Image) -> bool {
-        self.near(average(image))
-    }
-
-    /// Whether each of `color`'s red, green, and blue is within the
-    /// tolerance of the looked-for color's.
-    #[must_use]
-    pub fn near(self, color: Rgb) -> bool {
-        self.farthest_channel(color) <= self.tolerance
-    }
-
-    /// How far `color` is from the looked-for color: the largest difference
-    /// among their red, green, and blue, which the tolerance bounds.
-    #[must_use]
-    pub fn farthest_channel(self, color: Rgb) -> u8 {
-        color
-            .red
-            .abs_diff(self.color.red)
-            .max(color.green.abs_diff(self.color.green))
-            .max(color.blue.abs_diff(self.color.blue))
+        average(image).near(self.color, self.tolerance)
     }
 }
 
@@ -246,12 +228,10 @@ pub fn average(image: &Image) -> Rgb {
 /// a results screen appearing.
 ///
 /// A [`Mask`] limits the comparison to the pixels of the thing itself, so a
-/// changing background behind it does not count. The runs of compared pixels
-/// are worked out once, when the check is made.
+/// changing background behind it does not count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageMatch {
-    picture: Image,
-    spans: Box<[Range<usize>]>,
+    picture: MaskedPicture,
     pub(super) tolerance: u8,
 }
 
@@ -266,19 +246,8 @@ impl ImageMatch {
     /// Returns [`MaskError::SizeMismatch`] when the mask's size differs from
     /// the picture's.
     pub fn new(picture: Image, mask: Option<&Mask>, tolerance: u8) -> Result<Self, MaskError> {
-        let spans = match mask {
-            Some(mask) if mask.size() != picture.size() => {
-                return Err(MaskError::SizeMismatch {
-                    image: picture.size(),
-                    mask: mask.size(),
-                });
-            },
-            Some(mask) => mask.spans(),
-            None => return Ok(Self::whole(picture, tolerance)),
-        };
         Ok(Self {
-            picture,
-            spans: spans.into_boxed_slice(),
+            picture: MaskedPicture::new(picture, mask)?,
             tolerance,
         })
     }
@@ -287,18 +256,10 @@ impl ImageMatch {
     /// takes no mask, so it cannot fail.
     #[must_use]
     pub fn whole(picture: Image, tolerance: u8) -> Self {
-        let spans = std::iter::once(0..picture.pixels().len()).collect();
         Self {
-            picture,
-            spans,
+            picture: MaskedPicture::whole(picture),
             tolerance,
         }
-    }
-
-    /// The region as the setup screenshot showed it.
-    #[must_use]
-    pub const fn picture(&self) -> &Image {
-        &self.picture
     }
 
     /// This check for a region of `size`, with its picture and mask redrawn,
@@ -309,11 +270,7 @@ impl ImageMatch {
     /// the pixels it covers are, and takes the color of only those.
     #[must_use]
     pub fn resized(&self, size: Size) -> Option<Self> {
-        let mut kept = vec![false; self.picture.pixels().len()];
-        for span in &self.spans {
-            kept.get_mut(span.clone()).unwrap_or_default().fill(true);
-        }
-        let (picture, kept) = resample(&self.picture, &kept, size)?;
+        let (picture, kept) = resample(self.picture.picture(), &self.picture.kept(), size)?;
         let mask = Mask::new(size, kept).ok()?;
         Self::new(picture, Some(&mask), self.tolerance).ok()
     }
@@ -326,8 +283,24 @@ impl ImageMatch {
     /// Returns [`CheckError::SizeMismatch`] when the sizes differ, which
     /// means the region changed after the picture was taken.
     pub fn matches(&self, image: &Image) -> Result<bool, CheckError> {
-        self.difference(image)
-            .map(|difference| difference.within(self.tolerance))
+        self.within(image).map(|difference| difference.is_some())
+    }
+
+    /// How far `image` is from the picture over the compared pixels when
+    /// that is within the tolerance, and `None` when it is not. The
+    /// comparison stops as soon as the difference passes the tolerance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CheckError::SizeMismatch`] when the sizes differ.
+    fn within(&self, image: &Image) -> Result<Option<Difference>, CheckError> {
+        let channels = self.picture.channels();
+        let limit = most_within(channels, self.tolerance);
+        self.same_size(image)?;
+        Ok(self
+            .picture
+            .difference(image, 0, 0, limit)
+            .map(|total| Difference { total, channels }))
     }
 
     /// How far `image` is from the picture over the compared pixels.
@@ -336,29 +309,28 @@ impl ImageMatch {
     ///
     /// Returns [`CheckError::SizeMismatch`] when the sizes differ.
     pub(super) fn difference(&self, image: &Image) -> Result<Difference, CheckError> {
-        if image.size() != self.picture.size() {
-            return Err(CheckError::SizeMismatch {
+        self.same_size(image)?;
+        Ok(Difference {
+            // An image of the picture's size holds every compared pixel,
+            // and no sum of bytes passes this limit.
+            total: self
+                .picture
+                .difference(image, 0, 0, u64::MAX)
+                .unwrap_or(u64::MAX),
+            channels: self.picture.channels(),
+        })
+    }
+
+    /// Checks that `image` has the picture's size.
+    fn same_size(&self, image: &Image) -> Result<(), CheckError> {
+        if image.size() == self.picture.size() {
+            Ok(())
+        } else {
+            Err(CheckError::SizeMismatch {
                 expected: self.picture.size(),
                 found: image.size(),
-            });
+            })
         }
-        let mut difference = 0_u64;
-        let mut channels = 0_u64;
-        for span in &self.spans {
-            let found = image.pixels().get(span.clone()).unwrap_or_default();
-            let wanted = self.picture.pixels().get(span.clone()).unwrap_or_default();
-            for (pixel, expected) in found.iter().zip(wanted) {
-                for (&found, &wanted) in pixel.iter().zip(expected).take(3) {
-                    // At most 3 * 8192² channels of 255 each, far below u64::MAX.
-                    difference = difference.wrapping_add(u64::from(found.abs_diff(wanted)));
-                }
-                channels = channels.wrapping_add(3);
-            }
-        }
-        Ok(Difference {
-            total: difference,
-            channels,
-        })
     }
 }
 
@@ -372,8 +344,8 @@ pub(super) struct Difference {
 
 impl Difference {
     /// Whether the average difference per channel is at most `tolerance`.
-    pub(super) fn within(self, tolerance: u8) -> bool {
-        self.total <= self.channels.saturating_mul(u64::from(tolerance))
+    pub(super) const fn within(self, tolerance: u8) -> bool {
+        self.total <= most_within(self.channels, tolerance)
     }
 
     /// Whether the average difference is smaller than `other`'s. Both totals
@@ -429,9 +401,9 @@ impl StateMatch {
     pub fn read(&self, image: &Image) -> Result<StateName, CheckError> {
         let mut best: Option<(&StateName, Difference)> = None;
         for (name, picture) in &self.states {
-            let difference = picture.difference(image)?;
-            let closer = best.is_none_or(|(_, closest)| difference.closer_than(closest));
-            if difference.within(picture.tolerance) && closer {
+            if let Some(difference) = picture.within(image)?
+                && best.is_none_or(|(_, closest)| difference.closer_than(closest))
+            {
                 best = Some((name, difference));
             }
         }
@@ -715,25 +687,6 @@ mod tests {
     }
 
     #[test]
-    fn a_color_is_as_far_as_its_farthest_channel() {
-        let red = ColorMatch {
-            color: Rgb {
-                red: 200,
-                green: 20,
-                blue: 20,
-            },
-            tolerance: 10,
-        };
-        let color = |red, green, blue| Rgb { red, green, blue };
-        assert_eq!(red.farthest_channel(color(197, 25, 20)), 5);
-        assert_eq!(red.farthest_channel(color(200, 20, 13)), 7);
-        assert_eq!(red.farthest_channel(color(209, 20, 20)), 9);
-        // Exactly the tolerance is near; one more is not.
-        assert!(red.near(color(210, 10, 30)));
-        assert!(!red.near(color(210, 9, 30)));
-    }
-
-    #[test]
     fn the_average_color_is_each_channels_mean_rounded_down() {
         let dark = Rgb {
             red: 10,
@@ -897,7 +850,7 @@ mod tests {
             unmasked.matches(&row(&[GRAY, GREEN, GREEN, GRAY])),
             Ok(false)
         );
-        assert_eq!(check.picture(), &picture);
+        assert_eq!(check.picture.picture(), &picture);
     }
 
     #[test]
@@ -910,7 +863,7 @@ mod tests {
             height: 1,
         };
         let resized = check.resized(wide).expect("keeps pixels");
-        assert_eq!(resized.picture().size(), wide);
+        assert_eq!(resized.picture.size(), wide);
         // The background left out at both ends stays out at twice the size.
         let changed = row(&[GRAY, GRAY, GREEN, GREEN, GREEN, GREEN, GRAY, GRAY]);
         assert_eq!(resized.matches(&changed), Ok(true));

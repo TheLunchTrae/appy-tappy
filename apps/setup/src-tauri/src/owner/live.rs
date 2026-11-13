@@ -15,7 +15,7 @@
 
 use std::time::Instant;
 
-use appytappy_config::app_file::{PinDef, RegionDef, ScreenDef, SizeDef};
+use appytappy_config::app_file::{PinDef, ScreenDef};
 use appytappy_config::signal::Value;
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::saved::{AtSize, SavedCheck, SavedValue, Unread};
@@ -152,10 +152,7 @@ impl<H: Host> Owner<H> {
         let saved = check_spec::to_saved(&trial.check, &self.screenshots, &trial.app, TRIED)
             .map_err(|error| error.to_string())?;
         let screen = ScreenDef {
-            window_size: SizeDef {
-                width: size.width,
-                height: size.height,
-            },
+            window_size: size.into(),
             region: saved.region,
             check: saved.check,
             pin: trial.pin,
@@ -186,25 +183,12 @@ impl<H: Host> Owner<H> {
             }
             .to_string()
         })?;
-        let size = taught.window_size;
-        let region = taught.region.size();
-        let pin = trial.pin.unwrap_or_else(|| {
-            PinDef::guess(
-                RegionDef {
-                    x: taught.region.x(),
-                    y: taught.region.y(),
-                    width: region.width,
-                    height: region.height,
-                },
-                SizeDef {
-                    width: size.width,
-                    height: size.height,
-                },
-            )
-        });
+        let pin = trial
+            .pin
+            .unwrap_or_else(|| PinDef::guess(taught.region.into(), taught.window_size.into()));
         self.go_live(SavedValue {
             drawn: SavedCheck {
-                window_size: size,
+                window_size: taught.window_size,
                 region: taught.region,
                 check: Check::Number {
                     reader,
@@ -409,10 +393,9 @@ mod tests {
     const CHARGE: &str = r#"{"kind":"number","region":{"x":6,"y":2,"width":18,"height":9},
         "reference":{"app":"example","id":"percent"},"whole":false}"#;
 
-    /// What the live box says of `379%` read with the digits alone.
-    const DIGITS_ONLY: &str = "Not read on the live window now: a character has a shape the \
-        reference has not learned: it read `3 7 9 ?`, and character 4 is closest to the `3` it \
-        learned.";
+    /// What the live box says of `379%` read without the `7`.
+    const NO_SEVEN: &str = "Not read on the live window now: the value leaves out a character \
+        its number holds: it read `3 7 9 %`.";
 
     /// A harness whose application `example` changes size as `size_changes`
     /// say, with a window that shows `379%` at [`DRAWN`] on screenshot 0 and
@@ -457,9 +440,12 @@ mod tests {
     /// the frame's size, and read from its region there.
     fn as_the_runtime_reads(app: &SavedApp, value: &ValueDef, frame: &Image) -> Option<Value> {
         let file = &app.file;
-        let built = saved::build(&value.screen, &file.references, file.size_changes, |name| {
-            app.picture(name)
-        })
+        let built = saved::build(
+            &value.screen,
+            &mut saved::Readers::new(&file.references),
+            file.size_changes,
+            |name| app.picture(name),
+        )
         .expect("the runtime reads the saved value");
         let at = built.at(frame.size()).ok()?;
         built.check(&at).read(&frame.crop(at.region)?).ok()
@@ -537,12 +523,20 @@ mod tests {
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        // Read with the digits alone, the percent sign is a shape the value
-        // does not know, as it is for the runtime.
+        // Read with the digits alone, the percent sign ends the number, as
+        // it does for the runtime.
         harness
             .ask(|owner| owner.set_check(&reading("0123456789")))
             .expect("the reference knows three of them");
-        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
+        assert_eq!(
+            harness.ask(Owner::reading),
+            Ok(Some(Reading::Number(379.0)))
+        );
+        // A digit the value leaves out is not read around.
+        harness
+            .ask(|owner| owner.set_check(&reading("39%")))
+            .expect("the reference knows them");
+        assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_check(&reading("2"))),
             Err(
@@ -663,10 +657,9 @@ mod tests {
 
     #[test]
     fn settling_where_a_fix_reads_forgets_the_size_it_was_not_read_at() {
-        use appytappy_sources::screen::Region;
         use appytappy_sources::screen::check::ColorMatch;
         use appytappy_sources::screen::saved::SavedFix;
-        use appytappy_sources::system::Rgb;
+        use appytappy_sources::screen::{Region, Rgb};
 
         let size = |width| Size { width, height: 4 };
         let (drawn, fixed, unread) = (size(8), size(10), size(12));
@@ -739,16 +732,16 @@ mod tests {
             harness.ask(Owner::reading),
             Ok(Some(Reading::Number(379.0)))
         );
-        let digits = ReferenceTrial {
-            reads: Some("0123456789".to_owned()),
+        let no_seven = ReferenceTrial {
+            reads: Some("39%".to_owned()),
             ..teaching(taught.clone())
         };
-        // Made for a value that reads only digits, it reads as that value
-        // will: the percent sign is a shape it does not know.
+        // Made for a value that reads only some characters, it reads as
+        // that value will: not around a digit the value leaves out.
         harness
-            .ask(|owner| owner.set_characters(&digits))
-            .expect("learns the digits");
-        assert_eq!(harness.ask(Owner::reading), Err(DIGITS_ONLY.to_owned()));
+            .ask(|owner| owner.set_characters(&no_seven))
+            .expect("learns them");
+        assert_eq!(harness.ask(Owner::reading), Err(NO_SEVEN.to_owned()));
         assert_eq!(
             harness.ask(|owner| owner.set_characters(&ReferenceTrial {
                 reads: Some("2".to_owned()),

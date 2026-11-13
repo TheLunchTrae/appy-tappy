@@ -121,12 +121,6 @@ impl Layout {
     pub fn packed(&self, index: usize) -> Option<Region> {
         self.slots.get(index).copied().flatten()
     }
-
-    /// Whether every copy lies inside a frame of `size`.
-    #[must_use]
-    pub fn fits(&self, size: Size) -> bool {
-        self.copies.iter().all(|copy| copy.from.fits(size))
-    }
 }
 
 /// The smallest region that holds both.
@@ -270,17 +264,6 @@ mod tests {
     #[test]
     fn no_region_makes_no_layout() {
         assert_eq!(Layout::new([None, None]), None);
-    }
-
-    #[test]
-    fn a_layout_fits_a_frame_only_when_every_copy_does() {
-        let layout = Layout::new([Some(region(0, 0, 4, 4)), Some(region(96, 96, 4, 4))]).unwrap();
-        let size = |side| Size {
-            width: side,
-            height: side,
-        };
-        assert!(layout.fits(size(100)));
-        assert!(!layout.fits(size(99)));
     }
 
     #[test]

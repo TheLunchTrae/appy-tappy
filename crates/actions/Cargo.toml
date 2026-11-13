@@ -10,6 +10,9 @@ publish.workspace = true
 
 [dependencies]
 appytappy-config.workspace = true
+# Provides `#[mutants::skip]` for functions no test can reach; it expands to
+# nothing.
+mutants.workspace = true
 
 # Microsoft's Windows API bindings; the features select the APIs the adapter
 # in `win.rs` calls: media sessions, Core Audio, COM, `SendInput` for key
