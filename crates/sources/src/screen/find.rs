@@ -13,29 +13,17 @@
 use std::ops::Range;
 
 use super::mask::{Mask, MaskError};
+use super::masked::{MaskedPicture, most_within};
 use super::{Image, Size};
 
 /// A picture to look for, with the pixels it compares.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PictureSearch {
-    picture: Image,
-    /// The kept pixels of each row as column ranges, so a place's pixels
-    /// are read row by row.
-    rows: Box<[Span]>,
-    /// How many red, green, and blue channels a comparison adds up.
-    channels: u64,
+    picture: MaskedPicture,
+    /// The blue, green, and red of each of the picture's runs, each summed,
+    /// in the runs' order.
+    sums: Box<[[u32; 3]]>,
     tolerance: u8,
-}
-
-/// A run of kept pixels in one row of the picture.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Span {
-    /// The row it is in.
-    row: usize,
-    /// Its columns.
-    columns: Range<usize>,
-    /// Its blue, green, and red channels, each summed.
-    sums: [u32; 3],
 }
 
 /// Running sums of each row of an image's blue, green, and red: entry
@@ -115,44 +103,20 @@ impl PictureSearch {
     /// Returns [`MaskError::SizeMismatch`] when the mask's size differs from
     /// the picture's.
     pub fn new(picture: Image, mask: Option<&Mask>, tolerance: u8) -> Result<Self, MaskError> {
-        let width = usize::try_from(picture.size().width).unwrap_or(usize::MAX);
-        let spans = match mask {
-            Some(mask) if mask.size() != picture.size() => {
-                return Err(MaskError::SizeMismatch {
-                    image: picture.size(),
-                    mask: mask.size(),
-                });
-            },
-            Some(mask) => mask.spans(),
-            None => std::iter::once(0..picture.pixels().len()).collect(),
-        };
-        // A span runs on across row ends, so it is cut at each one.
-        let mut rows = Vec::new();
-        let mut kept = 0_u64;
-        for span in spans {
-            let mut start = span.start;
-            while start < span.end {
-                let row = start.checked_div(width).unwrap_or_default();
-                let row_end = row.saturating_add(1).saturating_mul(width);
-                let end = span.end.min(row_end);
-                let column = start.saturating_sub(row.saturating_mul(width));
-                let columns = column..column.saturating_add(end.saturating_sub(start));
-                let sums = picture
-                    .pixels()
-                    .get(start..end)
-                    .unwrap_or_default()
+        let picture = MaskedPicture::new(picture, mask)?;
+        let sums = picture
+            .runs()
+            .iter()
+            .map(|run| {
+                picture
+                    .pixels(run)
                     .iter()
-                    .fold([0; 3], |sum, pixel| add_channels(sum, *pixel));
-                rows.push(Span { row, columns, sums });
-                kept = kept
-                    .saturating_add(u64::try_from(end.saturating_sub(start)).unwrap_or(u64::MAX));
-                start = end;
-            }
-        }
+                    .fold([0; 3], |sum, pixel| add_channels(sum, *pixel))
+            })
+            .collect();
         Ok(Self {
             picture,
-            rows: rows.into_boxed_slice(),
-            channels: kept.saturating_mul(3),
+            sums,
             tolerance,
         })
     }
@@ -171,15 +135,18 @@ impl PictureSearch {
     pub fn find(&self, image: &Image) -> Option<Found> {
         let across = image.size().width.checked_sub(self.size().width)?;
         let down = image.size().height.checked_sub(self.size().height)?;
-        let mut limit = self.channels.saturating_mul(u64::from(self.tolerance));
+        let mut limit = most_within(self.picture.channels(), self.tolerance);
         let sums = RowSums::new(image)?;
         let mut best = None;
         for y in 0..=down {
             for x in 0..=across {
-                if !self.may_match(&sums, x, y, limit) {
+                let (Ok(column), Ok(row)) = (usize::try_from(x), usize::try_from(y)) else {
+                    continue;
+                };
+                if !self.may_match(&sums, column, row, limit) {
                     continue;
                 }
-                let Some(total) = self.difference(image, x, y, limit) else {
+                let Some(total) = self.picture.difference(image, column, row, limit) else {
                     continue;
                 };
                 best = Some((x, y, total));
@@ -194,24 +161,20 @@ impl PictureSearch {
     }
 
     /// Whether the place at (`x`, `y`) may be within `limit`, by the
-    /// difference of each row's summed channels: a lower bound on the
+    /// difference of each run's summed channels: a lower bound on the
     /// summed difference of its pixels' channels.
-    fn may_match(&self, sums: &RowSums, x: u32, y: u32, limit: u64) -> bool {
-        let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
-            return false;
-        };
+    fn may_match(&self, sums: &RowSums, x: usize, y: usize, limit: u64) -> bool {
         let mut bound = 0_u64;
-        for span in &self.rows {
-            let found = y.checked_add(span.row).and_then(|row| {
-                let columns =
-                    x.checked_add(span.columns.start)?..x.checked_add(span.columns.end)?;
+        for (run, wanted) in self.picture.runs().iter().zip(&self.sums) {
+            let found = y.checked_add(run.row).and_then(|row| {
+                let columns = x.checked_add(run.columns.start)?..x.checked_add(run.columns.end)?;
                 sums.run(row, &columns)
             });
             let Some(found) = found else {
                 return false;
             };
-            for (found, wanted) in found.iter().zip(span.sums) {
-                bound = bound.wrapping_add(u64::from(found.abs_diff(wanted)));
+            for (found, wanted) in found.iter().zip(wanted) {
+                bound = bound.wrapping_add(u64::from(found.abs_diff(*wanted)));
             }
             if bound > limit {
                 return false;
@@ -220,45 +183,10 @@ impl PictureSearch {
         true
     }
 
-    /// The summed difference of the compared channels at (`x`, `y`) of
-    /// `image`, or `None` once it passes `limit`.
-    fn difference(&self, image: &Image, x: u32, y: u32, limit: u64) -> Option<u64> {
-        let width = usize::try_from(image.size().width).ok()?;
-        let x = usize::try_from(x).ok()?;
-        let y = usize::try_from(y).ok()?;
-        let picture_width = usize::try_from(self.size().width).ok()?;
-        let mut total = 0_u64;
-        for Span { row, columns, .. } in &self.rows {
-            let start = y.checked_add(*row)?.checked_mul(width)?.checked_add(x)?;
-            let found = image
-                .pixels()
-                .get(start.checked_add(columns.start)?..start.checked_add(columns.end)?)?;
-            let picture_start = row.checked_mul(picture_width)?;
-            let wanted = self.picture.pixels().get(
-                picture_start.checked_add(columns.start)?
-                    ..picture_start.checked_add(columns.end)?,
-            )?;
-            // A row holds at most 16384 pixels of three channels of 255
-            // each, far below u32::MAX.
-            let mut row_total = 0_u32;
-            for (pixel, expected) in found.iter().zip(wanted) {
-                for (channel, want) in pixel.iter().zip(expected).take(3) {
-                    row_total = row_total.wrapping_add(u32::from(channel.abs_diff(*want)));
-                }
-            }
-            // At most 3 * 16384² channels of 255 each, far below u64::MAX.
-            total = total.wrapping_add(u64::from(row_total));
-            if total > limit {
-                return None;
-            }
-        }
-        Some(total)
-    }
-
     /// The place at (`x`, `y`) whose difference is `total`, with its
     /// likeness.
     fn found(&self, (x, y, total): (u32, u32, u64)) -> Found {
-        let most = self.channels.saturating_mul(255);
+        let most = self.picture.channels().saturating_mul(255);
         let unlike = total
             .saturating_mul(100)
             .checked_div(most)
@@ -433,20 +361,12 @@ mod tests {
     }
 
     #[test]
-    fn spans_are_cut_at_row_ends() {
+    fn each_run_of_a_row_has_its_summed_channels() {
         let picture = picture();
         // The kept run goes from the end of the first row into the second.
         let mask = Mask::new(picture.size(), vec![false, false, true, true, false, false]).unwrap();
         let search = PictureSearch::new(picture.clone(), Some(&mask), 0).unwrap();
-        let runs = |search: &PictureSearch| {
-            search
-                .rows
-                .iter()
-                .map(|span| (span.row, span.columns.clone(), span.sums))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(runs(&search), [(0, 2..3, [100; 3]), (1, 0..1, [140; 3])]);
-        assert_eq!(search.channels, 6);
+        assert_eq!(*search.sums, [[100; 3], [140; 3]]);
         let kept_only = image(10, 6, |x, y| match (x, y) {
             (6, 1) => gray_of(2, 0),
             (4, 2) => gray_of(0, 1),
@@ -454,8 +374,7 @@ mod tests {
         });
         assert_eq!(place(&search, &kept_only), Some((4, 1)));
         let whole = PictureSearch::new(picture, None, 0).unwrap();
-        assert_eq!(runs(&whole), [(0, 0..3, [180; 3]), (1, 0..3, [540; 3])]);
-        assert_eq!(whole.channels, 18);
+        assert_eq!(*whole.sums, [[180; 3], [540; 3]]);
     }
 
     #[test]

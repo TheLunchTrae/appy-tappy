@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 use appytappy_actions::Watched;
 use appytappy_config::action::Action;
 use appytappy_config::rule::Restore;
+use appytappy_config::settings_file::ReadInterval;
 use appytappy_config::signal::Value;
 use appytappy_engine::{Effect, RuleIndex, Session};
-use appytappy_sources::schedule::ReadInterval;
 
 use crate::click::ClickTargets;
 use crate::lifecycle::Change;

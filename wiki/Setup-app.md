@@ -43,7 +43,8 @@ This page covers what the user guide leaves out.
   (`lib/flow.ts`). `save_value` answers the saved value's application and ID,
   which the editor picks once the pages' lists show it, so nothing is looked
   up by name. Until then the draft has no value and cannot be saved. The
-  pages' lists are read every three seconds and after each save; the reads
+  pages' lists are read every three seconds, except while a screen holds
+  the capture (`lib/capture.ts`), and after each save; the reads
   are numbered, so an answer that arrives after a newer one is dropped
   (`lib/reads.ts`), and the editor can tell what is still on its way from
   what a newer read shows to be gone. When a flow shows because another
@@ -148,7 +149,8 @@ This page covers what the user guide leaves out.
   and drops only its own work.
 - **Selection.** Each state of a state check has its own selection, which travels as the steps the user
   took: snap boxes and clicks, each replacing, adding to, or taking from the
-  selection, with one color match for all of them (`selection.rs`). The owner
+  selection, with one color match for all of them (`selection.rs`, with the
+  snap and the grow themselves in `selection/select.rs`). The owner
   replays a state's steps on the screenshot the state is taken from, both to
   answer the UI's `select` command and to build and save the check, so moving
   the slider remakes every selection from the same steps. A new step fits the
@@ -186,7 +188,7 @@ This page covers what the user guide leaves out.
   the rule, and answers the pixels the rule takes (`match_preview.rs`). Each
   rule asks the function its reader asks, so the tint and the reading agree
   at the tolerance's edge: `DigitReader::is_ink` for a reference's
-  characters, `BarFill::classify` for a bar, and `ColorMatch::near` for a
+  characters, `BarFill::classify` for a bar, and `Rgb::near` for a
   color check, which the check itself asks about the region's average color.
   A color check's answer carries that average, its distance from the color,
   and what the check reads on the rectangle. The answer holds each kind of
@@ -361,6 +363,16 @@ region was drawn on is skipped, a capture failure stops the recording with the
 failure as its problem, and a closed window ends it. Starting one kind
 replaces a recording of the other. Recordings of both kinds are numbered from
 one counter.
+
+On the page, the two kinds share one hook for the recording's state, its
+errors, and its commands (`useRecorder` in `lib/useRecorder.ts`), under
+`useRecording` for readings and `useLookRecording` for looks. The capture
+screen (`components/Capture.tsx`) owns the value and its steps. Teaching a
+reference is `useReferenceTeaching` in `lib/useReferenceTeaching.ts`, which
+holds the recording of readings, its review, the finds, and the character
+check, and `components/ReferenceInspector.tsx` shows it. One flow page,
+`pages/CaptureFlow.tsx`, picks the window and opens the capture screen for a
+value and for a reference.
 
 [Recording readings](References.md#record-readings) runs in the reference
 editor. A number value's **Record readings** opens that editor on the value's
@@ -570,12 +582,12 @@ review without keeping, and review's edits stay for the next one.
 
 [Find more like it](References.md#find-more-like-it) searches the screenshot
 the selected box is on for more text like the box shows
-(`recording/find.rs`). It
-marks each pixel as ink with the reference's color and tolerance, as
-`DigitReader` does, and takes the band of inked rows with the most ink in the
-region, as the reader segments it. It joins touching ink, corners included,
-into blobs, leaving out blobs over twice that band's height, such as a panel in
-the same color. The sample's height is its tallest blob centered in the region,
+(`recording/find.rs`). It reads the screenshot's ink with `DigitReader::ink`,
+the ink a read works from, and takes the band of inked rows with the most ink
+in the region with `Ink::line`, the rule a read finds its line by, so the two
+cannot differ. It joins touching ink, corners included, into blobs, leaving
+out blobs over twice that band's height, such as a panel in the same color.
+The sample's height is its tallest blob centered in the region,
 and a run's is its tallest blob, so a comma or a mark below the characters
 measures neither. Blobs whose rows meet and that start no further than the
 sample's height past each other join into a run of text; runs are looked up by
@@ -627,6 +639,13 @@ wrote. An answer edits only the shapes it is about, in the turn that gives
 it and in each place whose text is read afterward, so a text typed by hand
 afterward stays and reopens the question instead.
 [Character check](State-machines.md#character-check) has its states.
+A step's keys send the same turns as its buttons: `checkKey` in
+`lib/checkKeys.ts` says what a key answers with, given what has focus and
+which buttons the step shows, and `StepAnswers` in `CharacterCheck.tsx`
+renders the buttons and listens for the keys.
+A character typed in **It is** but not entered is committed first, by Alt+S
+or Alt+B as by a click on **Skip** or **Back**, and the check stays on the
+step.
 
 ### Recording looks
 
@@ -700,7 +719,7 @@ a read takes tens of milliseconds and the owner answers the UI in microseconds,
 and only for new readings, a few times a recording. It gets each reading's ink
 as black text on white with a margin, whatever the application's colors,
 cut to the rows the number reader takes as the line of text
-(`DigitReader::line_rows`), so a stray pixel above or below the text does
+(`Ink::line`), so a stray pixel above or below the text does
 not stretch the line (`recording/ink.rs`). Text for a recording or a search the user discarded or
 replaced is dropped by its number, and a queued job of a recording or search
 that a newer one of the same kind replaced is skipped without reading it. Only the setup app uses it; the runtime reads
@@ -1008,11 +1027,10 @@ saved file is held to and takes nothing else from it:
   of a window hold. A picture without a PNG header, or larger than AppyTappy
   reads, is refused with the value or reference that names it, in the words
   a saved file's would be.
-- Reading the values decodes no more than `MAX_DECODED_PIXELS`, four pictures
-  of `LARGEST_PICTURE`, in all. `saved::build` decodes a reference's pictures
-  again for each value and fix that reads with it, so a file that holds few
-  pixels can still ask for many. A reference's text is small, so many values
-  can read with it.
+- Reading the values decodes each picture once, so the pixels the pictures
+  hold are the pixels it decodes. Each picture has one place that names it,
+  and one `saved::Readers` builds each reference's reader once, however many
+  values and fixes read with it.
 - Each picture takes the name the setup app gives it: `sample_name` for a
   reference's samples in order, and `state_image_name` for a value's states,
   with each fix's pictures in the set of its place among the fixes. The file's
@@ -1020,9 +1038,9 @@ saved file is held to and takes nothing else from it:
   picture for two values, or name a value's picture as another value's next
   one, which a later save would overwrite; after the renaming each picture
   has one owner, and `AppStore::save` knows every name it may remove.
-- `saved::build` reads each value and `saved::reader` each reference from the
-  pictures, as the runtime does and as saving a value does, so a file with a
-  value the runtime could not read is refused.
+- `saved::build` reads each value from the pictures, and `saved::Readers`
+  each reference, as the runtime does and as saving a value does, so a file
+  with a value the runtime could not read is refused.
 
 `Shared::of` holds an application to the same rules, and `pack` reads back
 what it packed with `unpack` and refuses what that refuses, such as an
@@ -1396,6 +1414,16 @@ and `PICTURES` how a picture a command answers starts, with a sample picture
 that `apps/setup/tests/pixels.test.ts` decodes. The UI's formatting and lint
 checks skip both generated files, and its unused-type check skips
 `bindings.ts`.
+
+What the page knows of each kind of check is one entry of `CHECKS` in
+`apps/setup/src/lib/check.ts`: its name, the tolerance it starts with, the
+kind of value it reads, how a draft builds it, how a saved one reads on the
+Values page, and what a fix keeps of it. The table's keys are the generated
+`CheckDef` kinds, and so are those of the capture screen's fields for each
+kind (`howFields` in `Capture.tsx`). What a kind does about content that
+moves is a switch over the same kinds that must cover each
+(`lib/moving.ts`). A kind the Rust side adds does not compile until it has
+all three.
 
 The page reads a typed path, link, key press, screenshot shortcut, or app name
 itself, so the user sees what to fix as they type, and places a click's spot

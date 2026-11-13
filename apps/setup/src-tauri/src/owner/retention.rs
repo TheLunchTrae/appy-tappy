@@ -169,7 +169,7 @@ fn read_back(stores: &Stores, id: &str) -> SavedValue {
         .expect("a saved value");
     saved::build(
         &value.screen,
-        &app.file.references,
+        &mut saved::Readers::new(&app.file.references),
         app.file.size_changes,
         |name| app.picture(name),
     )

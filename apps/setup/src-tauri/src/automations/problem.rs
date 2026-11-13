@@ -7,7 +7,7 @@ use std::fs;
 use appytappy_config::app_file::AppFile;
 use appytappy_config::automation_file::{ActionDef, AutomationDef};
 use appytappy_config::store::StoredApp;
-use appytappy_sources::automation::{Problem, Runnable};
+use appytappy_sources::automation::{AppReaders, Problem, Runnable};
 use appytappy_sources::screen::click::ClickPictureError;
 
 use crate::stores::Stores;
@@ -27,10 +27,11 @@ pub(super) fn apps(stores: &Stores) -> Result<Vec<StoredApp>, String> {
 /// too. An application it watches or clicks in whose file does not read is
 /// named first, with why, since this app read the file and `Runnable::new`
 /// takes only the applications whose files read.
-pub(super) fn problem(
+pub(super) fn problem<'apps>(
     automation: &AutomationDef,
-    apps: &[StoredApp],
+    apps: &'apps [StoredApp],
     stores: &Stores,
+    readers: &mut AppReaders<'apps>,
 ) -> Option<String> {
     let unreadable = |id: &str| {
         apps.iter()
@@ -60,6 +61,7 @@ pub(super) fn problem(
     let problem = Runnable::new(
         automation,
         &readable,
+        readers,
         |app, name| fs::read(stores.apps.folder(app).join(name)),
         |name| stores.automations.picture(name),
     )
@@ -88,11 +90,12 @@ pub(super) fn problem(
 pub(crate) fn watched_values(stores: &Stores, app: &str) -> Result<BTreeSet<String>, String> {
     let file = load(stores)?;
     let apps = apps(stores)?;
+    let mut readers = AppReaders::new();
     Ok(file
         .automations
         .iter()
         .filter(|automation| automation.enabled && automation.when.app == app)
-        .filter(|automation| problem(automation, &apps, stores).is_none())
+        .filter(|automation| problem(automation, &apps, stores, &mut readers).is_none())
         .map(|automation| automation.when.value.clone())
         .collect())
 }

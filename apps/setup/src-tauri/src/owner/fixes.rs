@@ -3,8 +3,8 @@
 //! fix flow's region starts.
 
 use appytappy_config::app_file::{CheckDef, FixDef, ScreenDef, SizeDef, ValueDef};
+use appytappy_sources::screen::Region;
 use appytappy_sources::screen::scale::scaled;
-use appytappy_sources::screen::{Region, Size};
 use serde::Deserialize;
 
 use crate::check_spec::{self, CheckSpec, RegionSpec};
@@ -67,10 +67,7 @@ impl<H: Host> Owner<H> {
                 .values
                 .get(position)
                 .ok_or_else(|| format!("{} no longer has that value.", file.name))?;
-            let window_size = SizeDef {
-                width: size.width,
-                height: size.height,
-            };
+            let window_size = SizeDef::from(size);
             if window_size == value.screen.window_size {
                 return Err(format!(
                     "{} was drawn at this size, so it needs no fix here. Resize the window first.",
@@ -176,32 +173,15 @@ fn find<'file>(values: &'file [ValueDef], id: &str, name: &str) -> Result<&'file
 /// window changes size often.
 fn start_region(screen: &ScreenDef, size: SizeDef) -> Option<RegionSpec> {
     if let Some(fix) = screen.fixes.iter().find(|fix| fix.window_size == size) {
-        return Some(RegionSpec {
-            x: fix.region.x,
-            y: fix.region.y,
-            width: fix.region.width,
-            height: fix.region.height,
-        });
+        return Some(fix.region.into());
     }
-    let drawn = screen.region;
-    let region = scaled(
-        Region::new(drawn.x, drawn.y, drawn.width, drawn.height)?,
-        Size {
-            width: screen.window_size.width,
-            height: screen.window_size.height,
-        },
-        Size {
-            width: size.width,
-            height: size.height,
-        },
+    scaled(
+        Region::try_from(screen.region).ok()?,
+        screen.window_size.into(),
+        size.into(),
         screen.pin(),
-    )?;
-    Some(RegionSpec {
-        x: region.x(),
-        y: region.y(),
-        width: region.size().width,
-        height: region.size().height,
-    })
+    )
+    .map(RegionSpec::from)
 }
 
 /// Checks that `spec` reads a value whose first drawing's check is `check`

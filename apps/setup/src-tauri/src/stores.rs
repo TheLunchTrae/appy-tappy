@@ -48,17 +48,25 @@ impl From<Locations> for Stores {
 }
 
 impl Stores {
+    /// The file of the saved application `app`, read without the other
+    /// applications, or `None` when no application has that ID. Fails with
+    /// the read error when its folder or its file cannot be read.
+    pub(crate) fn file(&self, app: &str) -> Result<Option<AppFile>, String> {
+        self.apps
+            .load_one(app)
+            .map_err(|error| error.to_string())?
+            .map(|stored| stored.file)
+            .transpose()
+    }
+
     /// The saved application `app`. Fails with "That application is no
     /// longer saved." when no application has that ID, and with the read
     /// error when its folder or its file cannot be read.
     pub(crate) fn app(&self, app: &str) -> Result<SavedApp, String> {
-        let stored = self
-            .apps
-            .load_one(app)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "That application is no longer saved.".to_owned())?;
         Ok(SavedApp {
-            file: stored.file?,
+            file: self
+                .file(app)?
+                .ok_or_else(|| "That application is no longer saved.".to_owned())?,
             folder: self.apps.folder(app),
         })
     }
@@ -109,6 +117,7 @@ mod tests {
     #[test]
     fn an_application_loads_with_its_pictures_or_says_why_it_cannot() {
         let (stores, root) = scratch("stores-app");
+        assert_eq!(stores.file("example"), Ok(None));
         assert_eq!(
             stores.app("example"),
             Err("That application is no longer saved.".to_owned())
@@ -135,14 +144,18 @@ mod tests {
             .expect("saves");
         let saved = stores.app("example").expect("loads");
         assert_eq!(saved.file, file);
+        assert_eq!(stores.file("example"), Ok(Some(file)));
         assert_eq!(saved.picture("shown.png").expect("reads"), [1, 2]);
         fs::write(saved.folder.join("app.json"), "{").expect("breaks the file");
-        assert!(
-            stores
-                .app("example")
-                .is_err_and(|error| error.starts_with("the file is not valid")),
-            "a broken file says why"
-        );
+        for read in [
+            stores.app("example").map(drop),
+            stores.file("example").map(drop),
+        ] {
+            assert!(
+                read.is_err_and(|error| error.starts_with("the file is not valid")),
+                "a broken file says why"
+            );
+        }
         fs::remove_dir_all(root).expect("clean up");
     }
 }
