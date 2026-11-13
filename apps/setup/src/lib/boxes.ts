@@ -56,6 +56,11 @@ export interface BoxState {
   readonly boxes: readonly Box[];
   /** The selected box's ID, or null when none is selected. */
   readonly selectedId: number | null;
+  /**
+   * The ID of the box the stopped recording read at, which Use its settings puts back, or null when there is no
+   * recording or that box was deleted. A box drawn later may take a deleted box's ID, so deleting the box clears it.
+   */
+  readonly recordedId: number | null;
 }
 
 /** What changes a reference's boxes or which one is selected. */
@@ -75,18 +80,21 @@ export type BoxEvent =
   | { readonly type: 'retype'; readonly id: number; readonly text: string }
   | { readonly type: 'remove'; readonly id: number }
   | { readonly type: 'select'; readonly id: number | null }
+  /** A new recording started at box `id`, or at none. */
+  | { readonly type: 'recorded'; readonly id: number | null }
   /**
-   * The box the reference reads at goes back where a recording read: box `id` moves to `region` on `screenshot` and
-   * to the top of the list, where the reading box is. When that box is gone, a new one with no text takes its place.
+   * The box the reference reads at goes back where the recording read: the recorded box moves to `region` on
+   * `screenshot` and to the top of the list, where the reading box is. When that box was deleted, a new one with no
+   * text takes its place.
    */
-  | { readonly type: 'restore'; readonly id: number | null; readonly screenshot: number; readonly region: Rect };
+  | { readonly type: 'restore'; readonly screenshot: number; readonly region: Rect };
 
 /**
  * The boxes and the selection after `event`. A new box takes an ID past every ID in `state`, so the ID belongs to
  * the boxes the event is applied to.
  */
 export function boxStep(state: BoxState, event: BoxEvent): BoxState {
-  const { boxes, selectedId } = state;
+  const { boxes, selectedId, recordedId } = state;
   switch (event.type) {
     case 'region': {
       if (event.shown === null) {
@@ -94,31 +102,38 @@ export function boxStep(state: BoxState, event: BoxEvent): BoxState {
       }
       const adjusted = event.made === 'adjusted' ? boxOf(boxesOn(boxes, event.shown), selectedId) : null;
       if (adjusted !== null) {
-        return { boxes: changedBox(boxes, adjusted.id, { region: event.region }), selectedId };
+        return { ...state, boxes: changedBox(boxes, adjusted.id, { region: event.region }) };
       }
       const added = withBoxes(boxes, [{ screenshot: event.shown, region: event.region, text: '' }]);
-      return { boxes: added.boxes, selectedId: added.first };
+      return { ...state, boxes: added.boxes, selectedId: added.first };
     }
     case 'add':
-      return { boxes: withBoxes(boxes, event.boxes).boxes, selectedId };
+      return { ...state, boxes: withBoxes(boxes, event.boxes).boxes };
     case 'retype':
-      return { boxes: changedBox(boxes, event.id, { text: event.text }), selectedId };
+      return { ...state, boxes: changedBox(boxes, event.id, { text: event.text }) };
     case 'remove':
       return {
         boxes: boxes.filter((box) => box.id !== event.id),
         selectedId: selectedId === event.id ? null : selectedId,
+        recordedId: recordedId === event.id ? null : recordedId,
       };
     case 'select':
-      return { boxes, selectedId: event.id };
+      return { ...state, selectedId: event.id };
+    case 'recorded':
+      return { ...state, recordedId: event.id };
     case 'restore': {
       const place = { screenshot: event.screenshot, region: event.region };
-      const kept = boxOf(boxes, event.id);
+      const kept = boxOf(boxes, recordedId);
       if (kept === null) {
         const added = withBoxes(boxes, [{ ...place, text: '' }]);
         const made = added.boxes.filter((box) => box.id === added.first);
-        return { boxes: [...made, ...boxes], selectedId: added.first };
+        return { boxes: [...made, ...boxes], selectedId: added.first, recordedId: added.first };
       }
-      return { boxes: [{ ...kept, ...place }, ...boxes.filter((box) => box.id !== kept.id)], selectedId: kept.id };
+      return {
+        boxes: [{ ...kept, ...place }, ...boxes.filter((box) => box.id !== kept.id)],
+        selectedId: kept.id,
+        recordedId: kept.id,
+      };
     }
   }
 }

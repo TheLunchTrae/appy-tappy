@@ -362,8 +362,8 @@ describe('a stopped recording', () => {
       place === null
         ? draft
         : boxStep(
-            { boxes: draft.boxes, selectedId: null },
-            { type: 'restore', id: boxId, screenshot: place, region: settings.region },
+            { boxes: draft.boxes, selectedId: null, recordedId: boxId },
+            { type: 'restore', screenshot: place, region: settings.region },
           );
     return withRecordedInk({ ...draft, boxes }, settings);
   }

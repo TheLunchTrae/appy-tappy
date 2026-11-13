@@ -3,15 +3,15 @@ import { describe, expect, test } from 'bun:test';
 import { type BoxEvent, type BoxState, boxLabels, boxNumber, boxOf, boxStep, boxesOn } from '../src/lib/boxes.ts';
 
 const at = (x: number) => ({ x, y: 0, width: 10, height: 8 });
-const NONE: BoxState = { boxes: [], selectedId: null };
+const NONE: BoxState = { boxes: [], selectedId: null, recordedId: null };
 
 /** The boxes and the selection after `events`, from `state`. */
 function after(state: BoxState, ...events: readonly BoxEvent[]): BoxState {
   return events.reduce(boxStep, state);
 }
 
-/** Boxes 0 and 1 on screenshot 0 and box 2 on screenshot 1, with `selectedId` selected. */
-function three(selectedId: number | null): BoxState {
+/** Boxes 0 and 1 on screenshot 0 and box 2 on screenshot 1, with `selectedId` selected and `recordedId` recorded. */
+function three(selectedId: number | null, recordedId: number | null = null): BoxState {
   return {
     boxes: [
       { id: 0, screenshot: 0, region: at(0), text: '1' },
@@ -19,6 +19,7 @@ function three(selectedId: number | null): BoxState {
       { id: 2, screenshot: 1, region: at(40), text: '3' },
     ],
     selectedId,
+    recordedId,
   };
 }
 
@@ -50,6 +51,7 @@ describe("a reference's boxes", () => {
     expect(after(three(1), { type: 'remove', id: 1 })).toEqual({
       boxes: three(1).boxes.filter((box) => box.id !== 1),
       selectedId: null,
+      recordedId: null,
     });
     expect(after(three(1), { type: 'remove', id: 0 }).selectedId).toBe(1);
   });
@@ -86,21 +88,39 @@ describe("a reference's boxes", () => {
   });
 
   test('restoring puts the box a recording read at back there, first in the list, with its text', () => {
-    const restored = after(three(null), { type: 'restore', id: 1, screenshot: 1, region: at(90) });
+    const restored = after(
+      three(null),
+      { type: 'recorded', id: 1 },
+      { type: 'restore', screenshot: 1, region: at(90) },
+    );
     expect(restored.boxes).toEqual([
       { id: 1, screenshot: 1, region: at(90), text: '2' },
       { id: 0, screenshot: 0, region: at(0), text: '1' },
       { id: 2, screenshot: 1, region: at(40), text: '3' },
     ]);
     expect(restored.selectedId).toBe(1);
+    expect(restored.recordedId).toBe(1);
   });
 
-  test('restoring a box that was deleted puts a new one with no text first', () => {
-    for (const id of [9, null]) {
-      const restored = after(three(0), { type: 'restore', id, screenshot: 1, region: at(90) });
-      expect(restored.boxes).toEqual([{ id: 3, screenshot: 1, region: at(90), text: '' }, ...three(0).boxes]);
-      expect(restored.selectedId).toBe(3);
-    }
+  test('restoring with no recorded box puts a new one with no text first, and records it', () => {
+    const restored = after(three(0), { type: 'restore', screenshot: 1, region: at(90) });
+    expect(restored.boxes).toEqual([{ id: 3, screenshot: 1, region: at(90), text: '' }, ...three(0).boxes]);
+    expect(restored.selectedId).toBe(3);
+    expect(restored.recordedId).toBe(3);
+  });
+
+  test('a box drawn after the recorded box was deleted is not the one restoring moves back', () => {
+    // Box 2 has the highest ID, so the box drawn after deleting it takes ID 2 again.
+    const redrawn = after(
+      three(null, 2),
+      { type: 'remove', id: 2 },
+      { type: 'region', shown: 1, region: at(60), made: 'drawn' },
+      { type: 'retype', id: 2, text: '34' },
+    );
+    expect(redrawn.recordedId).toBeNull();
+    const restored = after(redrawn, { type: 'restore', screenshot: 1, region: at(90) });
+    expect(restored.boxes[0]).toEqual({ id: 3, screenshot: 1, region: at(90), text: '' });
+    expect(boxOf(restored.boxes, 2)).toEqual({ id: 2, screenshot: 1, region: at(60), text: '34' });
   });
 
   test('finds one box by its ID, and the boxes on one screenshot', () => {

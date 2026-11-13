@@ -1405,8 +1405,9 @@ stateDiagram-v2
 - **Record more** needs the same region, ink, tolerance, and window size, and
   clears the problem. When any of them differs (`settingsDiffer`), **Use its
   settings** shows and puts the ink and the tolerance back
-  (`withRecordedInk`). A reference taught by itself read at a box, and the UI
-  keeps the ID of the box each new recording starts at. **Use its settings**
+  (`withRecordedInk`). A reference taught by itself read at a box, and the
+  [Reference boxes](#reference-boxes) machine keeps the ID of the box each
+  new recording starts at (`recorded`). **Use its settings**
   puts that box back where the recording read, first in the list
   ([Reference boxes](#reference-boxes)), on its own screenshot when that has
   the recording's size or else on the newest that has (`recordedPlace`). A
@@ -1668,11 +1669,14 @@ stateDiagram-v2
   (`boxBlocked`). While the editor is open, the stage shows the boxes and
   not the value's region, and nothing in the editor changes the draft's
   `region`.
+- **A new recording** of a reference taught by itself sends `recorded` with
+  the ID of the box it reads at. Deleting that box clears the ID, because a
+  box drawn later can take a deleted box's ID.
 - **Use its settings** after a [recording](#recording) of a reference taught
-  by itself sends `restore`: the box the recording read at moves back to
-  where it read and to the top of the list, and is selected. When that box
-  was deleted, a new box with no text takes its place, which reads there and
-  teaches nothing.
+  by itself sends `restore`: the recorded box moves back to where it read and
+  to the top of the list, and is selected. When that box was deleted, a new
+  box with no text takes its place, which reads there and teaches nothing,
+  and becomes the recorded box.
 - Opening and closing the reference editor drops the boxes (`toReference`,
   `fromReference`); a draft of a reference keeps them.
 

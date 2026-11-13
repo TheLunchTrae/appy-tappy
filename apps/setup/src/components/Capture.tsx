@@ -266,7 +266,6 @@ export function Capture({
   const shortcut = useScreenshotShortcut(async () => takeShotRef.current());
   const boxes = useBoxes(draft, setDraft, selected);
   // The box the reference taught by itself read at when its recording started, which Use its settings puts back.
-  const [recordedBox, setRecordedBox] = useState<number | null>(null);
   const recorder = useRecording();
   const recording = recorder.view;
   const looks = useLookRecording(screenshots.adopt);
@@ -654,7 +653,7 @@ export function Capture({
       setPicking(null);
       if (!more) {
         review.forget();
-        setRecordedBox(readAt);
+        boxes.recorded(readAt);
       }
     });
   };
@@ -686,9 +685,9 @@ export function Capture({
     }
     // A reference taught by itself reads at a box, so that box goes back where the recording read; the value's
     // region is the value's, and stays.
-    const place = recordedPlace(draft, settings, boxOf(draft.boxes, recordedBox)?.screenshot ?? null, [...full]);
+    const place = recordedPlace(draft, settings, boxOf(draft.boxes, boxes.recordedId)?.screenshot ?? null, [...full]);
     if (place !== null) {
-      boxes.restore(recordedBox, place, settings.region);
+      boxes.restore(place, settings.region);
     }
     setDraft((current) => withRecordedInk(current, settings));
     recorder.clearCommandError();

@@ -32,24 +32,33 @@ export function useBoxes(
   readonly remove: (id: number) => void;
   /** Adds found text, each find as a box. */
   readonly add: (added: readonly NewBox[]) => void;
-  /** Puts the reading box back at `region` on `screenshot`, where a recording read; `id` is the box it read at. */
-  readonly restore: (id: number | null, screenshot: number, region: Rect) => void;
+  /** The box a new recording reads at, or null when it reads at none. */
+  readonly recordedId: number | null;
+  /** Notes that a new recording started at box `id`, or at none. */
+  readonly recorded: (id: number | null) => void;
+  /** Puts the box the recording read at back at `region` on `screenshot`, where the recording read. */
+  readonly restore: (screenshot: number, region: Rect) => void;
 } {
   const [selectedId, setSelected] = useState<number | null>(null);
+  const [recordedId, setRecorded] = useState<number | null>(null);
   const { boxes } = draft;
   // The boxes and the selection as the last event left them, which the next event before a render goes on from.
-  const latest = useRef<BoxState>({ boxes, selectedId });
-  latest.current = { boxes, selectedId };
+  const latest = useRef<BoxState>({ boxes, selectedId, recordedId });
+  latest.current = { boxes, selectedId, recordedId };
   const send = (event: BoxEvent): BoxState => {
-    const before = latest.current.selectedId;
+    const { selectedId: selectedBefore, recordedId: recordedBefore } = latest.current;
     const next = boxStep(latest.current, event);
     latest.current = next;
     // The draft's own boxes take the event, so a change still queued is kept.
     setDraft((current) => {
-      const changed = boxStep({ boxes: current.boxes, selectedId: before }, event).boxes;
+      const changed = boxStep(
+        { boxes: current.boxes, selectedId: selectedBefore, recordedId: recordedBefore },
+        event,
+      ).boxes;
       return changed === current.boxes ? current : { ...current, boxes: changed };
     });
     setSelected(next.selectedId);
+    setRecorded(next.recordedId);
     return next;
   };
   const onShown = boxOf(boxesOn(boxes, shown), selectedId);
@@ -77,8 +86,12 @@ export function useBoxes(
     add: (added) => {
       send({ type: 'add', boxes: added });
     },
-    restore: (id, screenshot, region) => {
-      send({ type: 'restore', id, screenshot, region });
+    recordedId,
+    recorded: (id) => {
+      send({ type: 'recorded', id });
+    },
+    restore: (screenshot, region) => {
+      send({ type: 'restore', screenshot, region });
     },
   };
 }
