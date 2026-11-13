@@ -71,7 +71,8 @@ that each value still reads right on your screen.
 AppyTappy imports a file only when it can read all of it: a file made by a
 newer AppyTappy, a file that lacks one of its pictures, or one with a value
 that can't be read is refused with the reason, and nothing is imported. A file
-can be up to 16 MB.
+can be up to 16 MB, and **Export** refuses an application whose pictures
+would make a larger one.
 
 ## How AppyTappy finds the window
 

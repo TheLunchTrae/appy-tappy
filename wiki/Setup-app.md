@@ -818,7 +818,8 @@ describes.
 An application's `origin` is how its definition was made, and is `byHand`
 when the file leaves it out. Its `kind` is `byHand` for a new application,
 `recording` once a reference of it was saved with a recorded reading, or
-`imported` with the name of the `file` it was imported from. A recording of
+`imported` with the name of the `file` it was imported from, which is empty
+in a [shared file](#sharing). A recording of
 looks leaves it alone, since the screenshots it keeps are labeled by hand
 like any other. An imported application stays `imported` whatever is changed
 in it later. Only the setup app reads it, to show where an application came
@@ -930,10 +931,11 @@ file as a new application
 commands: `export_app`, `read_shared_app`, and `import_app`.
 
 A shared file is a zip file with the application's folder in it, flat:
-`app.json` and each picture that file names, under the names they have in the
-folder. `Shared` is an application in that form. It has no overlay, which
-holds where a panel is on one machine's screens, and it keeps `checked` and
-`origin`. `ZipPack` in `zip_pack.rs` packs it, as it packs the
+`app.json` and each picture that file names. `Shared` is an application in
+that form. It has no overlay, which holds where a panel is on one machine's
+screens, and it keeps `checked` and `origin`, with an empty `file` for an
+application that was itself imported, since that names a file on its maker's
+machine. `ZipPack` in `zip_pack.rs` packs it, as it packs the
 [debug bundle](#debug-page).
 
 An imported file is a trust boundary, so `Shared::unpack` holds it to what a
@@ -949,20 +951,30 @@ saved file is held to and takes nothing else from it:
 - `AppFile::parse` checks `app.json` as it checks a saved file, so a file of
   another format, or one that breaks a rule, is refused with the same reason.
 - A picture the file names and the zip file lacks is refused by name.
+- Each picture takes the name the setup app gives it: `sample_name` for a
+  reference's samples in order, and `state_image_name` for a value's states,
+  with each fix's pictures in the set of its place among the fixes. The file's
+  own names only find the entries. A file made elsewhere could name one
+  picture for two values, or name a value's picture as another value's next
+  one, which a later save would overwrite; after the renaming each picture
+  has one owner, and `AppStore::prune` knows every name.
 - `saved::build` reads each value and `saved::reader` each reference from the
   pictures, as the runtime does and as saving a value does, so a file with a
   value the runtime could not read is refused.
 
-`Shared::of` holds an application to the same rules before `pack`, so an
-application that AppyTappy exports is one it imports; a property test packs
-and unpacks generated definitions.
+`Shared::of` holds an application to the same rules, and `pack` reads back
+what it packed with `unpack` and refuses what that refuses, such as an
+application whose pictures hold more than an import reads. So an application
+that AppyTappy exports is one it imports; a property test packs and unpacks
+generated definitions.
 
 `import_app` unpacks the bytes again and saves the application through
 `Owner::write_app`. It takes a new ID from `new_app_id`, so it cannot write
 into a saved application's folder, and refuses a name that a saved
 application has. It saves the anti-cheat class the user picked, never the
 file's, and sets `origin` to `imported` with the picked file's name, without
-control characters and at most 120 characters long. The page offers the
+control characters and Unicode's format characters, which can turn a name
+around on screen, and at most 60 characters long. The page offers the
 file's class in the dialog unless it is `none`, which only the user's own
 pick sets (`classToConfirm` in `src/lib/sharing.ts`).
 

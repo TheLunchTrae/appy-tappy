@@ -25,7 +25,8 @@ export function originText(origin: OriginDef): string {
     case 'recording':
       return 'Made with a recording';
     case 'imported':
-      return `Imported from ${origin.file}`;
+      // A shared file says that its maker imported it, and not from which file of theirs.
+      return origin.file === '' ? 'Imported from a file' : `Imported from ${origin.file}`;
   }
 }
 

@@ -18,7 +18,7 @@ use super::{Changed, Owner, Write};
 
 /// The longest file name an import keeps as where it came from, in
 /// characters.
-const MAX_FROM_CHARS: usize = 120;
+const MAX_FROM_CHARS: usize = 60;
 
 /// A shared file as the import dialog shows it, before anything is saved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -52,12 +52,10 @@ impl<H: Host> Owner<H> {
     /// The saved application `app` as the bytes of a file to share.
     pub(crate) fn export_app(&self, app: &str) -> Result<Vec<u8>, String> {
         let saved = self.stores()?.app(app)?;
-        let cannot = |error: &dyn std::fmt::Display| {
-            format!("AppyTappy cannot export {}: {error}.", saved.file.name)
-        };
+        let cannot =
+            |error: &ShareError| format!("AppyTappy cannot export {}: {error}.", saved.file.name);
         Shared::of(&saved)
-            .map_err(|error| cannot(&error))?
-            .pack()
+            .and_then(|shared| shared.pack())
             .map_err(|error| cannot(&error))
     }
 
@@ -103,13 +101,32 @@ fn unpack(bytes: &[u8], from: &str) -> Result<Shared, String> {
         .map_err(|error: ShareError| format!("AppyTappy cannot import {from}: {error}."))
 }
 
-/// The file name `name` as it is shown and kept: without control characters
-/// or the space around it, and no longer than [`MAX_FROM_CHARS`]. A name
-/// with nothing to show reads as `the file`.
+/// Whether `character` shows nothing itself and changes how the text
+/// around it shows: a control character, or one of Unicode's format
+/// characters, such as U+202E, which turns the text after it around so
+/// that `piz.exe` can read as `exe.zip`.
+const fn is_unseen(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{ad}'
+                | '\u{61c}'
+                | '\u{180e}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{feff}'
+                | '\u{fff9}'..='\u{fffb}'
+        )
+}
+
+/// The file name `name` as it is shown and kept: without the characters
+/// [`is_unseen`] names or the space around it, and no longer than
+/// [`MAX_FROM_CHARS`]. A name with nothing to show reads as `the file`.
 fn file_label(name: &str) -> String {
     let shown: String = name
         .chars()
-        .filter(|character| !character.is_control())
+        .filter(|character| !is_unseen(*character))
         .collect();
     let shown: String = shown.trim().chars().take(MAX_FROM_CHARS).collect();
     if shown.trim().is_empty() {
@@ -215,6 +232,20 @@ mod tests {
                 exported.picture(picture).expect("the picture"),
             );
         }
+        let again = harness
+            .ask(|owner| owner.export_app("example-2"))
+            .expect("exports");
+        assert_eq!(
+            harness
+                .ask(|owner| owner.read_shared(&again, "again.zip"))
+                .expect("reads")
+                .file
+                .origin,
+            OriginDef::Imported {
+                file: String::new()
+            },
+            "the name of the user's own file stays with them"
+        );
         assert_eq!(
             harness.ask(import(&bytes, "friend's APP", AntiCheatDef::Unknown)),
             Err(
@@ -255,9 +286,10 @@ mod tests {
     }
 
     #[test]
-    fn an_application_missing_a_picture_is_not_exported() {
+    fn an_application_that_could_not_be_imported_is_not_exported() {
         let (mut harness, root) = with_values("share-missing");
         let app = saved(&mut harness, "example");
+        let kept = app.picture("icon_visible-1.png").expect("its picture");
         std::fs::remove_file(app.folder.join("icon_visible-1.png")).expect("removes the picture");
         assert_eq!(
             harness.ask(|owner| owner.export_app("example")),
@@ -265,6 +297,15 @@ mod tests {
                 "AppyTappy cannot export Example App: the picture icon_visible-1.png is missing."
                     .to_owned()
             )
+        );
+        // Larger than an import reads, though each value still reads.
+        let other = app.folder.join("icon_visible-1.png");
+        let mut large = kept;
+        large.resize(crate::sharing::MAX_SHARED_BYTES, 0);
+        std::fs::write(&other, large).expect("writes the picture");
+        assert_eq!(
+            harness.ask(|owner| owner.export_app("example")),
+            Err("AppyTappy cannot export Example App: it holds more than 16 MB.".to_owned())
         );
         assert_eq!(
             harness.ask(|owner| owner.export_app("gone")),
@@ -278,6 +319,11 @@ mod tests {
         assert_eq!(file_label(" example.zip\n"), "example.zip");
         assert_eq!(file_label("\u{1b}[2J \t"), "[2J");
         assert_eq!(file_label(" \u{0} "), "the file");
+        assert_eq!(
+            file_label("appytappy-\u{202e}piz.exe\u{200b}\u{feff}"),
+            "appytappy-piz.exe",
+            "as it is spelled, not turned around"
+        );
         let long = "é".repeat(MAX_FROM_CHARS.saturating_add(5));
         assert_eq!(file_label(&long), "é".repeat(MAX_FROM_CHARS));
     }

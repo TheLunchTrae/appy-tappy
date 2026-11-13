@@ -2,26 +2,31 @@
 //! pictures that file names, which another user imports.
 //!
 //! The file is the application's folder, packed: `app.json` and each
-//! picture, by the names they have there, with nothing else. It keeps the
-//! build the values were checked against and how the definition was made,
-//! and leaves out the overlay, which belongs to the machine it was set on.
-//! No automation is in it, so nothing an imported file holds runs until the
-//! user makes an automation of their own.
+//! picture, with nothing else. It keeps the build the values were checked
+//! against and how the definition was made, and leaves out the overlay and
+//! the name of a file it was imported from, which belong to the machine
+//! they were set on. No automation is in it, so nothing an imported file
+//! holds runs until the user makes an automation of their own.
 //!
 //! An imported file is a trust boundary. [`Shared::unpack`] takes only what
 //! `app.json` names, reads no more than [`MAX_SHARED_BYTES`], and holds the
 //! file to the rules a saved file is held to: [`AppFile::parse`], then
 //! `saved::build` for each value and `saved::reader` for each reference, as
-//! the runtime reads them. [`Shared::of`] holds an application to the same
-//! rules before it is exported, so a file AppyTappy exports is one it
-//! imports.
+//! the runtime reads them. Each picture takes the name the setup app gives
+//! it, whatever the file calls it, so no two values or references share a
+//! picture and a later save in the setup app replaces only its own.
+//! [`Shared::of`] holds an application to the same rules before it is
+//! exported, and [`Shared::pack`] reads back what it packed, so a file
+//! AppyTappy exports is one it imports.
 
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Cursor, Read as _};
 
-use appytappy_config::app_file::{AppFile, AppFileError};
+use appytappy_config::app_file::{
+    AppFile, AppFileError, CheckDef, OriginDef, sample_name, state_image_name,
+};
 use appytappy_config::store::APP_FILE;
 use appytappy_sources::screen::saved::{self, SavedError};
 use zip::ZipArchive;
@@ -37,7 +42,8 @@ use crate::zip_pack::ZipPack;
 pub(crate) const MAX_SHARED_BYTES: usize = 16 * 1024 * 1024;
 
 /// An application as it is shared: its file, without an overlay, and every
-/// picture the file names, each of which the runtime can read.
+/// picture the file names, each of which the runtime can read and each
+/// named as a saved file names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Shared {
     file: AppFile,
@@ -53,18 +59,15 @@ impl Shared {
     /// Returns a [`ShareError`] when a picture its file names is missing or
     /// cannot be read, or a value or a reference cannot be read as saved.
     pub(crate) fn of(app: &SavedApp) -> Result<Self, ShareError> {
-        let mut pictures = BTreeMap::new();
-        for name in app.file.images() {
-            let bytes = app.picture(name).map_err(|source| {
+        Self::new(app.file.clone(), |name| {
+            app.picture(name).map_err(|source| {
                 if source.kind() == io::ErrorKind::NotFound {
                     ShareError::NoPicture(name.to_owned())
                 } else {
                     ShareError::Read(source)
                 }
-            })?;
-            pictures.insert(name.to_owned(), bytes);
-        }
-        Self::new(app.file.clone(), pictures)
+            })
+        })
     }
 
     /// Reads a shared file's bytes.
@@ -85,28 +88,61 @@ impl Shared {
         let json = String::from_utf8(json)
             .map_err(|error| ShareError::File(AppFileError::Json(error.to_string())))?;
         let file = AppFile::parse(&json).map_err(ShareError::File)?;
-        let mut pictures = BTreeMap::new();
-        for name in file.images() {
-            let bytes = entry(&mut archive, name, &mut budget)?
-                .ok_or_else(|| ShareError::NoPicture(name.to_owned()))?;
-            pictures.insert(name.to_owned(), bytes);
-        }
-        Self::new(file, pictures)
+        Self::new(file, |name| {
+            entry(&mut archive, name, &mut budget)?
+                .ok_or_else(|| ShareError::NoPicture(name.to_owned()))
+        })
     }
 
-    /// `file`, which passed [`AppFile::check`], without its overlay, and
-    /// `pictures`, once every value and reference reads from them as the
-    /// runtime would read it.
-    fn new(mut file: AppFile, pictures: BTreeMap<String, Vec<u8>>) -> Result<Self, ShareError> {
+    /// `file`, which passed [`AppFile::check`], as it is shared, with the
+    /// pictures `picture` answers for the names in it, once every value and
+    /// reference reads from them as the runtime would read it.
+    ///
+    /// Each picture is asked for once for each place that names it and
+    /// takes that place's own name: a sample's as [`sample_name`] numbers
+    /// them, a state's as [`state_image_name`] does, with a fix's pictures
+    /// in the set of its place among the fixes. A file made elsewhere can
+    /// name a picture anything a folder can hold, such as another value's
+    /// next picture, which a later save would overwrite.
+    fn new(
+        mut file: AppFile,
+        mut picture: impl FnMut(&str) -> Result<Vec<u8>, ShareError>,
+    ) -> Result<Self, ShareError> {
         file.overlay = None;
-        let picture = |name: &str| {
+        if let OriginDef::Imported { file: from } = &mut file.origin {
+            from.clear();
+        }
+        let mut pictures = BTreeMap::new();
+        let mut take = |image: &mut String, name: String| {
+            pictures.insert(name.clone(), picture(image)?);
+            *image = name;
+            Ok(())
+        };
+        for reference in &mut file.references {
+            for (sample, number) in reference.samples.iter_mut().zip(1..) {
+                take(&mut sample.image, sample_name(&reference.id, number))?;
+            }
+        }
+        for value in &mut file.values {
+            if let CheckDef::State { states, .. } = &mut value.screen.check {
+                for (state, number) in states.iter_mut().zip(1..) {
+                    take(&mut state.image, state_image_name(&value.id, None, number))?;
+                }
+            }
+            for (fix, set) in value.screen.fixes.iter_mut().zip(1..) {
+                for (image, number) in fix.images.iter_mut().zip(1..) {
+                    take(image, state_image_name(&value.id, Some(set), number))?;
+                }
+            }
+        }
+        let saved = |name: &str| {
             pictures
                 .get(name)
                 .cloned()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
         };
         for value in &file.values {
-            saved::build(&value.screen, &file.references, file.size_changes, picture).map_err(
+            saved::build(&value.screen, &file.references, file.size_changes, saved).map_err(
                 |source| ShareError::Value {
                     name: value.name.clone(),
                     source,
@@ -115,7 +151,7 @@ impl Shared {
         }
         // A reference no value reads with is shared too, so it has to learn.
         for reference in &file.references {
-            saved::reader(reference, picture).map_err(|source| ShareError::Reference {
+            saved::reader(reference, saved).map_err(|source| ShareError::Reference {
                 name: reference.name.clone(),
                 source,
             })?;
@@ -127,14 +163,18 @@ impl Shared {
     ///
     /// # Errors
     ///
-    /// Returns the error from packing.
-    pub(crate) fn pack(&self) -> io::Result<Vec<u8>> {
+    /// Returns a [`ShareError`] when packing fails, or when
+    /// [`Shared::unpack`] would refuse the file, such as one that holds
+    /// more than [`MAX_SHARED_BYTES`].
+    pub(crate) fn pack(&self) -> Result<Vec<u8>, ShareError> {
         let mut zip = ZipPack::new();
-        zip.add(APP_FILE, self.file.to_json().as_bytes())?;
+        zip.add(APP_FILE, self.file.to_json().as_bytes())
+            .map_err(ShareError::Read)?;
         for (name, bytes) in &self.pictures {
-            zip.add(name, bytes)?;
+            zip.add(name, bytes).map_err(ShareError::Read)?;
         }
-        zip.finish()
+        let packed = zip.finish().map_err(ShareError::Read)?;
+        Self::unpack(&packed).map(|_read| packed)
     }
 
     /// The application's file.
@@ -212,6 +252,14 @@ pub(crate) enum ShareError {
 impl fmt::Display for ShareError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // An entry packed another way than deflate is found when it is
+            // read, so it comes as either error.
+            Self::Zip(
+                ZipError::UnsupportedArchive(_) | ZipError::CompressionMethodNotSupported(_),
+            ) => formatter.write_str("it uses a compression AppyTappy can't read"),
+            Self::Read(error) if error.kind() == io::ErrorKind::Unsupported => {
+                formatter.write_str("it uses a compression AppyTappy can't read")
+            },
             Self::Zip(_) => formatter.write_str("it is not a zip file AppyTappy can read"),
             Self::TooLarge => write!(
                 formatter,
@@ -247,13 +295,16 @@ impl Error for ShareError {
 #[cfg(test)]
 mod tests {
     use appytappy_config::app_file::{
-        AntiCheatDef, BuildDef, CheckDef, CheckedDef, ColorDef, FORMAT, OriginDef, OverlayDef,
-        OverlayModeDef, ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
-        StateDef, ValueDef, WindowDef, sample_name, state_image_name,
+        AntiCheatDef, BuildDef, CheckedDef, ColorDef, FORMAT, FixDef, OverlayDef, OverlayModeDef,
+        ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef,
+        WindowDef,
     };
     use appytappy_config::window_match::WindowFacts;
     use appytappy_sources::screen::{Image, Size};
     use proptest::prelude::*;
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+    use zip::{CompressionMethod, ZipWriter};
 
     use super::*;
 
@@ -319,6 +370,47 @@ mod tests {
         (value, image)
     }
 
+    /// The reference `digits`, which reads red text, with `samples` samples
+    /// that each show `11`.
+    fn digits(samples: usize) -> ReferenceDef {
+        ReferenceDef {
+            id: "digits".to_owned(),
+            name: "Digits".to_owned(),
+            ink: ColorDef {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            tolerance: 0,
+            samples: (1..=samples)
+                .map(|number| SampleDef {
+                    image: sample_name("digits", number),
+                    text: "11".to_owned(),
+                })
+                .collect(),
+            expects: None,
+        }
+    }
+
+    /// A picture of `11`: two red columns on gray, 4 by 2 pixels drawn
+    /// `scale` times larger.
+    fn eleven(scale: u32) -> Vec<u8> {
+        let wide = usize::try_from(scale).expect("small");
+        let row = [[0, 0, 255, 255], [40, 40, 40, 255]]
+            .repeat(2)
+            .iter()
+            .flat_map(|pixel| pixel.repeat(wide))
+            .collect::<Vec<u8>>();
+        let size = Size {
+            width: scale.saturating_mul(4),
+            height: scale.saturating_mul(2),
+        };
+        Image::new(size, row.repeat(wide.saturating_mul(2)))
+            .expect("matching length")
+            .encode_png()
+            .expect("encodes")
+    }
+
     /// `Example App` with the state value `status`, and its picture.
     fn with_status() -> (AppFile, String, Vec<u8>) {
         let mut file = app("Example App");
@@ -327,13 +419,26 @@ mod tests {
         (file, image, png(2, 2, [0, 0, 255, 255]))
     }
 
-    /// A zip file of `entries`, as anyone could make one.
-    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
-        let mut zip = ZipPack::new();
+    /// A zip file of `entries`, as anyone could make one, each stored as it
+    /// is or deflated.
+    fn zip_with(method: CompressionMethod, entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(method);
         for (name, bytes) in entries {
-            zip.add(name, bytes).expect("packs");
+            zip.start_file(*name, options).expect("starts");
+            zip.write_all(bytes).expect("packs");
         }
-        zip.finish().expect("packs")
+        zip.finish().expect("packs").into_inner()
+    }
+
+    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        zip_with(CompressionMethod::Deflated, entries)
+    }
+
+    /// `picture` with `more` bytes after its end, which a PNG reader leaves
+    /// unread and deflate packs to almost nothing.
+    fn padded(picture: &[u8], more: usize) -> Vec<u8> {
+        [picture, &vec![0; more]].concat()
     }
 
     /// What reading `bytes` says, as the user reads it.
@@ -383,21 +488,7 @@ mod tests {
              it can read"
         );
         let mut taught = app("Example App");
-        taught.references.push(ReferenceDef {
-            id: "digits".to_owned(),
-            name: "Digits".to_owned(),
-            ink: ColorDef {
-                red: 255,
-                green: 0,
-                blue: 0,
-            },
-            tolerance: 0,
-            samples: vec![SampleDef {
-                image: sample_name("digits", 1),
-                text: "1".to_owned(),
-            }],
-            expects: None,
-        });
+        taught.references.push(digits(1));
         let unread = Shared::unpack(&zip_of(&[
             (APP_FILE, taught.to_json().as_bytes()),
             ("ref-digits-1.png", b"text"),
@@ -430,23 +521,129 @@ mod tests {
         let over = vec![b' '; MAX_SHARED_BYTES.checked_add(1).expect("fits")];
         assert_eq!(refusal(&over), "it holds more than 16 MB");
         // Spaces pack to almost nothing, so the zip file itself is small.
-        let padded = [json.as_bytes(), &over].concat();
-        let bomb = zip_of(&[(APP_FILE, &padded), (&image, &picture)]);
+        let spaced = [json.as_bytes(), &over].concat();
+        let bomb = zip_of(&[(APP_FILE, &spaced), (&image, &picture)]);
         assert!(bomb.len() < MAX_SHARED_BYTES / 16);
         assert_eq!(refusal(&bomb), "it holds more than 16 MB");
-        // The budget is one for the whole file: a picture that would fit
-        // alone does not fit after the others.
+        // The budget is one for the whole file: each of two pictures fits
+        // alone, in a zip file that is itself small, and both do not.
         let mut file = file;
         let (second, second_image) = state_value("other", 2, 2);
         file.values.push(second);
         let json = file.to_json();
-        let half = vec![0; MAX_SHARED_BYTES / 2];
-        let large = zip_of(&[
+        let large = padded(&picture, MAX_SHARED_BYTES / 16 * 9);
+        let both = zip_of(&[
             (APP_FILE, json.as_bytes()),
-            (&image, &half),
-            (&second_image, &half),
+            (&image, &large),
+            (&second_image, &large),
         ]);
-        assert_eq!(refusal(&large), "it holds more than 16 MB");
+        assert!(both.len() < MAX_SHARED_BYTES / 16);
+        assert_eq!(refusal(&both), "it holds more than 16 MB");
+        let one = zip_of(&[
+            (APP_FILE, json.as_bytes()),
+            (&image, &large),
+            (&second_image, &picture),
+        ]);
+        Shared::unpack(&one).expect("one such picture fits");
+    }
+
+    #[test]
+    fn an_application_that_could_not_be_imported_is_not_packed() {
+        let (file, image, picture) = with_status();
+        let large = padded(&picture, MAX_SHARED_BYTES);
+        let held = |name: &str| {
+            assert_eq!(name, image);
+            Ok(large.clone())
+        };
+        let shared = Shared::new(file, held).expect("each value reads");
+        assert_eq!(
+            shared.pack().expect_err("too large to import").to_string(),
+            "it holds more than 16 MB"
+        );
+    }
+
+    #[test]
+    fn a_zip_file_packed_another_way_says_so() {
+        let (file, _image, _picture) = with_status();
+        let mut bytes = zip_with(
+            CompressionMethod::Stored,
+            &[(APP_FILE, file.to_json().as_bytes())],
+        );
+        // The method is the two bytes 8 past an entry's signature and 10
+        // past its signature in the list of entries; 12 is bzip2.
+        for (signature, at) in [(b"PK\x03\x04", 8_usize), (b"PK\x01\x02", 10)] {
+            let found = bytes
+                .windows(4)
+                .rposition(|window| window == signature)
+                .expect("one entry");
+            bytes[found.checked_add(at).expect("small")] = 12;
+        }
+        assert_eq!(
+            refusal(&bytes),
+            "it uses a compression AppyTappy can't read"
+        );
+    }
+
+    #[test]
+    fn each_picture_takes_the_name_a_saved_file_gives_it() {
+        let (mut file, _image, red) = with_status();
+        let blue = png(2, 2, [255, 0, 0, 255]);
+        let (mut other, _own) = state_value("other", 2, 2);
+        // Each value's picture named as the other's next would be, a fix
+        // that shares its value's picture, and a sample named as a state.
+        let CheckDef::State { states, .. } = &mut file.values[0].screen.check else {
+            panic!("a state check");
+        };
+        "other-2.png".clone_into(&mut states[0].image);
+        file.values[0].screen.fixes.push(FixDef {
+            window_size: SizeDef {
+                width: 4,
+                height: 4,
+            },
+            region: RegionDef {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            },
+            images: vec!["other-2.png".to_owned()],
+            reference: None,
+        });
+        let CheckDef::State { states, .. } = &mut other.screen.check else {
+            panic!("a state check");
+        };
+        "status-1.png".clone_into(&mut states[0].image);
+        file.values.push(other);
+        let mut digits = digits(1);
+        "status-2.png".clone_into(&mut digits.samples[0].image);
+        file.references.push(digits);
+        let eleven = eleven(1);
+        let bytes = zip_of(&[
+            (APP_FILE, file.to_json().as_bytes()),
+            ("other-2.png", &red),
+            ("status-1.png", &blue),
+            ("status-2.png", &eleven),
+        ]);
+        let (unpacked, pictures) = Shared::unpack(&bytes).expect("reads").into_parts();
+        assert_eq!(
+            unpacked.images(),
+            [
+                "ref-digits-1.png",
+                "status-1.png",
+                "status-1-1.png",
+                "other-1.png"
+            ]
+        );
+        assert_eq!(
+            pictures,
+            [
+                ("other-1.png".to_owned(), blue),
+                ("ref-digits-1.png".to_owned(), eleven),
+                ("status-1-1.png".to_owned(), red.clone()),
+                ("status-1.png".to_owned(), red),
+            ],
+            "each value reads what it read, from a picture of its own"
+        );
     }
 
     #[test]
@@ -457,6 +654,9 @@ mod tests {
             mode: OverlayModeDef::PictureInPicture,
             panel: None,
         });
+        file.origin = OriginDef::Imported {
+            file: "their-file.zip".to_owned(),
+        };
         let json = file.to_json();
         let bytes = zip_of(&[
             ("unnamed.png", &picture),
@@ -467,18 +667,27 @@ mod tests {
         ]);
         let (read, pictures) = Shared::unpack(&bytes).expect("reads").into_parts();
         file.overlay = None;
-        assert_eq!(read, file);
+        file.origin = OriginDef::Imported {
+            file: String::new(),
+        };
+        assert_eq!(read, file, "without what belongs to its maker's machine");
         assert_eq!(pictures, [(image, picture)]);
     }
 
     prop_compose! {
         /// A definition that can be shared: a few state values, each with a
-        /// picture of its own size and pixels.
+        /// picture of its own size and pixels, and a reference or none with
+        /// a few samples.
         fn shared()(
             name in "[A-Za-z][A-Za-z0-9 ]{0,20}",
             pictures in prop::collection::vec((1_u32..6, 1_u32..6, any::<[u8; 3]>()), 0..4),
+            samples in prop::collection::vec(1_u32..4, 0..3),
             checked in prop::option::of((any::<u32>(), any::<u32>(), prop::option::of("[0-9.]{1,8}"))),
-            from in prop::option::of("[a-z]{1,8}\\.zip"),
+            origin in prop_oneof![
+                Just(OriginDef::ByHand),
+                Just(OriginDef::Recording),
+                "[a-z]{0,8}".prop_map(|file| OriginDef::Imported { file }),
+            ],
             anti_cheat in prop::sample::select(vec![
                 AntiCheatDef::None,
                 AntiCheatDef::UserMode,
@@ -492,14 +701,21 @@ mod tests {
                 build: BuildDef { version, size: size.into(), modified: at.into() },
                 at: at.into(),
             });
-            file.origin = from.map_or(OriginDef::Recording, |file| OriginDef::Imported { file });
+            file.origin = origin;
             let mut held = BTreeMap::new();
             for (number, (width, height, [blue, green, red])) in pictures.into_iter().enumerate() {
                 let (value, image) = state_value(&format!("value_{number}"), width, height);
                 file.values.push(value);
                 held.insert(image, png(width, height, [blue, green, red, 255]));
             }
-            Shared::new(file, held).expect("every value reads")
+            if !samples.is_empty() {
+                let reference = digits(samples.len());
+                for (sample, scale) in reference.samples.iter().zip(samples) {
+                    held.insert(sample.image.clone(), eleven(scale));
+                }
+                file.references.push(reference);
+            }
+            Shared::new(file, |name| Ok(held[name].clone())).expect("every value reads")
         }
     }
 

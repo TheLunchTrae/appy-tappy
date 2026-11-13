@@ -106,7 +106,8 @@ pub enum OriginDef {
     /// Imported from a file that someone exported.
     Imported {
         /// The name of the file it was imported from, such as
-        /// `appytappy-example.zip`.
+        /// `appytappy-example.zip`. Empty in a shared file, which says
+        /// that its maker imported it and not from which file of theirs.
         file: String,
     },
 }

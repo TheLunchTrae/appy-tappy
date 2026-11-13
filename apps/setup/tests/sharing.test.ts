@@ -137,6 +137,7 @@ describe('originText', () => {
     expect(originText({ kind: 'byHand' })).toBe('Made by hand');
     expect(originText({ kind: 'recording' })).toBe('Made with a recording');
     expect(originText({ kind: 'imported', file: 'friend.zip' })).toBe('Imported from friend.zip');
+    expect(originText({ kind: 'imported', file: '' })).toBe('Imported from a file');
   });
 });
 
