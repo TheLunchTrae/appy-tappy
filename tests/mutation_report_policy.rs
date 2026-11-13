@@ -423,7 +423,7 @@ fn passes_a_diff_whose_mutants_the_compiler_rejects() {
         (
             "parent-log",
             "log/../mutant.log",
-            "mutant.log",
+            "log/../mutant.log",
             Some(compiler_log),
         ),
         ("absolute-log", outside, outside, Some(compiler_log)),
