@@ -10,49 +10,9 @@
 
 #![forbid(unsafe_code)]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// The bounds on the time between two reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReadInterval {
-    min: Duration,
-    max: Duration,
-}
-
-impl ReadInterval {
-    /// The bounds the settings start with: at most about 60 reads a
-    /// second, and while the value holds still, a wait of at most half a
-    /// second before the next frame is read.
-    pub const DEFAULT: Self = Self {
-        min: Duration::from_millis(16),
-        max: Duration::from_millis(500),
-    };
-
-    /// Waits between reads of at least `min` and at most `max`, or `None`
-    /// when `min` is longer than `max`.
-    #[must_use]
-    pub fn new(min: Duration, max: Duration) -> Option<Self> {
-        (min <= max).then_some(Self { min, max })
-    }
-
-    /// The shortest time between two reads.
-    #[must_use]
-    pub const fn min(self) -> Duration {
-        self.min
-    }
-
-    /// The longest time between two reads.
-    #[must_use]
-    pub const fn max(self) -> Duration {
-        self.max
-    }
-}
-
-impl Default for ReadInterval {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
+use appytappy_config::settings_file::ReadInterval;
 
 /// What the last read showed about its signal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,76 +44,22 @@ impl ReadSchedule {
     pub const fn new(interval: ReadInterval) -> Self {
         Self {
             interval,
-            wait: interval.min,
+            wait: interval.min(),
         }
     }
 
     /// The wait until the next read, given what the read just taken showed.
     pub fn after_read(&mut self, activity: Activity) -> Duration {
         self.wait = match activity {
-            Activity::Changed => self.interval.min,
+            Activity::Changed => self.interval.min(),
             Activity::Steady => self
                 .wait
                 .saturating_mul(2)
                 .max(FIRST_BACKOFF)
-                .clamp(self.interval.min, self.interval.max),
+                .clamp(self.interval.min(), self.interval.max()),
         };
         self.wait
     }
-}
-
-/// The longest wait a [`ReadClock`] keeps; a longer one, such as
-/// [`Duration::MAX`] to pause, is cut to this so the deadline stays
-/// representable.
-pub const LONGEST_WAIT: Duration = Duration::from_hours(24);
-
-/// When a capture may read next: the deadline the last read's wait set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReadClock {
-    next: Instant,
-}
-
-impl ReadClock {
-    /// A clock whose first read is due at once.
-    #[must_use]
-    pub const fn new(now: Instant) -> Self {
-        Self { next: now }
-    }
-
-    /// Whether a read is due at `now`.
-    #[must_use]
-    pub fn due(self, now: Instant) -> bool {
-        now >= self.next
-    }
-
-    /// How long from `now` until a read is due; zero once it is.
-    #[must_use]
-    pub fn remaining(self, now: Instant) -> Duration {
-        self.next.saturating_duration_since(now)
-    }
-
-    /// Records a read that finished at `now` and asked to wait `wait`.
-    pub fn after_read(&mut self, now: Instant, wait: Duration) {
-        self.next = now.checked_add(wait.min(LONGEST_WAIT)).unwrap_or(now);
-    }
-}
-
-/// The shortest wait a capture asks the system to match. Below it, the
-/// capture keeps its throttle, so a value that changes on every other read
-/// does not change the capture's setting on every read.
-pub const SHORTEST_PACED_WAIT: Duration = Duration::from_millis(64);
-
-/// The least time between frames a capture asks the system for.
-///
-/// After a read that asked to wait `wait`, it is the wait itself, cut to
-/// [`LONGEST_WAIT`] and never below `throttle`, or just `throttle` for a wait
-/// under [`SHORTEST_PACED_WAIT`].
-#[must_use]
-pub fn frame_interval(wait: Duration, throttle: Duration) -> Duration {
-    if wait < SHORTEST_PACED_WAIT {
-        return throttle;
-    }
-    wait.min(LONGEST_WAIT).max(throttle)
 }
 
 #[cfg(test)]
@@ -162,69 +68,6 @@ mod tests {
 
     fn millis(value: u64) -> Duration {
         Duration::from_millis(value)
-    }
-
-    #[test]
-    fn a_read_clock_waits_until_the_deadline() {
-        let start = Instant::now();
-        let mut clock = ReadClock::new(start);
-        assert!(clock.due(start));
-        assert_eq!(clock.remaining(start), Duration::ZERO);
-        clock.after_read(start, millis(10));
-        assert!(!clock.due(start));
-        assert_eq!(clock.remaining(start), millis(10));
-        let later = start.checked_add(millis(10)).unwrap();
-        assert!(clock.due(later));
-        assert_eq!(clock.remaining(later), Duration::ZERO);
-    }
-
-    #[test]
-    fn a_read_clock_cuts_very_long_waits() {
-        let start = Instant::now();
-        let mut clock = ReadClock::new(start);
-        clock.after_read(start, Duration::MAX);
-        assert_eq!(clock.remaining(start), LONGEST_WAIT);
-        assert!(!clock.due(start.checked_add(millis(1)).unwrap()));
-    }
-
-    #[test]
-    fn a_capture_asks_for_frames_as_often_as_it_reads_them() {
-        let throttle = millis(16);
-        assert_eq!(frame_interval(millis(500), throttle), millis(500));
-        assert_eq!(
-            frame_interval(SHORTEST_PACED_WAIT, throttle),
-            SHORTEST_PACED_WAIT
-        );
-        assert_eq!(frame_interval(Duration::MAX, throttle), LONGEST_WAIT);
-    }
-
-    #[test]
-    fn a_short_wait_keeps_the_throttle() {
-        let throttle = millis(16);
-        assert_eq!(frame_interval(Duration::ZERO, throttle), throttle);
-        assert_eq!(frame_interval(millis(32), throttle), throttle);
-        assert_eq!(
-            frame_interval(
-                SHORTEST_PACED_WAIT.checked_sub(millis(1)).unwrap(),
-                throttle
-            ),
-            throttle
-        );
-        assert_eq!(frame_interval(millis(32), Duration::ZERO), Duration::ZERO);
-    }
-
-    #[test]
-    fn a_capture_never_asks_for_frames_faster_than_its_throttle() {
-        assert_eq!(frame_interval(millis(100), millis(200)), millis(200));
-        let slow = LONGEST_WAIT.checked_mul(2).unwrap();
-        assert_eq!(frame_interval(Duration::MAX, slow), slow);
-    }
-
-    #[test]
-    fn the_minimum_cannot_exceed_the_maximum() {
-        assert_eq!(ReadInterval::new(millis(2), millis(1)), None);
-        let interval = ReadInterval::new(millis(1), millis(1)).unwrap();
-        assert_eq!((interval.min(), interval.max()), (millis(1), millis(1)));
     }
 
     #[test]

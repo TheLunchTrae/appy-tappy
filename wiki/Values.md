@@ -338,17 +338,21 @@ to the value. The reference keeps every character it knows, so another value
 can read more of the same reference, and the References page still lists them
 all.
 
-The value reads as if its reference knew nothing else. A character it does
-not read counts as one the reference has not learned, and the value reads
-nothing while its region shows one before the number, inside it, or right
-after it. So **Digits** reads a region that shows only digits, such as `87`.
-It cannot read `87%`, `1,234`, or `37 HP`: the value has to read the
-character that follows the digits to know that the number ended. Add what
-the region shows: the `%` of `87%`, the `,` of `1,234`, the `L`, `v`, and
-`.` of `Lv.5`. Only text after such a character needs none, such as the `HP`
-in `37% HP` once the value reads the `%`. To read `87.5%`, the value reads
-the digits, the `.`, and the `%`; with **Whole number only** on, the number
-ends at the `.`, so the digits and the `.` are enough.
+The value takes its number from the characters it reads alone. A character
+it does not read, and its reference knows, is text to it: it ends the number
+or comes before it, and is never part of it. So **Digits** reads `87%` as 87
+and `Lv.5` as 5.
+
+The value reads nothing while a character it leaves out is a part of the
+number its region shows, and says that it leaves out a character its number
+holds, since the number would be another number without it. So **Digits**
+reads none of `-5`, `.5`, `87.5%`, and `1,234`: add the `-`, the `.`, or the
+`,`. With **Whole number only** on, the number ends at its `.` anyway, so
+**Digits** reads `87.5%` as 87. A digit the value leaves out fails the read
+the same way. A shape the reference has not learned still fails the read
+before the number ends, whatever the value reads: text needs no teaching
+only after a character the reference knows has ended the number, such as the
+`HP` in `37% HP`.
 
 A [fix](#fix-a-value-at-one-size) that reads with its own reference reads the
 same characters of that reference.

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use appytappy_config::app_file::{AppFile, RegionDef};
-use appytappy_sources::screen::{FrameHandler, Image};
+use appytappy_sources::screen::{FrameHandler, Image, Size};
 
 use crate::owner::ReferenceSaveSpec;
 use crate::owner::test_support::{
