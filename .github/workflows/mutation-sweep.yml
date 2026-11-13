@@ -1,0 +1,82 @@
+name: Mutation sweep
+
+# Mutation-tests the whole workspace, as a final check before a release. Only
+# a manual run starts it, and it is not a merge gate: pull requests and pushes
+# mutation-test only what they change, in the quality workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer sweep of the same branch replaces an older one.
+concurrency:
+  group: mutation-sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # One shard of the workspace's mutants on each runner, so the sweep takes
+  # about two hours; wiki/Rust-standards.md#mutation-testing says how the
+  # shard count and time limit follow from the mutant count. Add shards as
+  # the workspace grows.
+  mutants:
+    name: mutants ${{ strategy.job-index }}/${{ strategy.job-total }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      # The list's length sets the shard count; its values are not read.
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    env:
+      MISE_LOCKED: '1'
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      CARGO_INCREMENTAL: '0'
+      # Tasks would otherwise install every tool, not only install_args.
+      MISE_TASK_RUN_AUTO_INSTALL: 'false'
+      MUTANTS_COPY_TARGET: 'true'
+      MUTANTS_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned tools
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          version: '2026.10.19'
+          install: true
+          install_args: rust github:sourcefrog/cargo-mutants bun
+          cache: true
+      - name: Install the webview build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
+      # Reads the quality job's cache, which holds the same Linux builds, and
+      # never saves one.
+      - name: Restore the Rust build cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: rust-${{ runner.os }}-quality-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: rust-${{ runner.os }}-quality-
+      # The setup app's Rust side embeds the built UI, so the UI builds first.
+      - name: Build the setup UI
+        run: mise run ui:build
+      - name: Mutation-test the shard
+        run: mise run rust:mutants
+      # Holds each surviving mutant's diff and log, so a failed shard can be
+      # read without running it again.
+      - name: Upload the mutation report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutants-${{ strategy.job-index }}
+          path: mutants.out/
+          retention-days: 14
+          # A re-run of a failed shard replaces its earlier report.
+          overwrite: true

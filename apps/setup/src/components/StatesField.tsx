@@ -1,9 +1,17 @@
 // A state check's looks: each one's name, the screenshot it is taken from, and how much of it is compared.
 
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 
 import { LIMITS } from '../lib/bindings.ts';
-import { type Draft, type DraftState, stateOn, withoutState, withState, withStateAt } from '../lib/check.ts';
+import {
+  type Draft,
+  type DraftState,
+  stateNameProblems,
+  stateOn,
+  withoutState,
+  withState,
+  withStateAt,
+} from '../lib/check.ts';
 import type { LiveReads } from '../lib/liveCheck.ts';
 import { type Picture, cropPicture } from '../lib/pixels.ts';
 import { useLiveRead } from '../lib/useLiveCheck.ts';
@@ -41,6 +49,40 @@ function addBlocked(draft: Draft, selected: number | null): string | null {
   return draft.states.length >= LIMITS.maxStates ? `A value can tell apart at most ${LIMITS.maxStates} states.` : null;
 }
 
+interface NameProps {
+  /** What the input is called for a screen reader. */
+  readonly label: string;
+  readonly name: string;
+  /** Why the name cannot be saved, shown under it, or null when it can. */
+  readonly problem: string | null;
+  readonly onName: (name: string) => void;
+}
+
+/** A state's name as the user types it, and why it cannot be saved when it cannot. */
+export function StateNameInput({ label, name, problem, onName }: NameProps) {
+  const problemId = useId();
+  return (
+    <>
+      <input
+        className="input"
+        aria-label={label}
+        aria-invalid={problem !== null}
+        aria-describedby={problem === null ? undefined : problemId}
+        placeholder="Name"
+        value={name}
+        onChange={(event) => {
+          onName(event.target.value);
+        }}
+      />
+      {problem === null ? null : (
+        <small id={problemId} className="warn">
+          {problem}
+        </small>
+      )}
+    </>
+  );
+}
+
 interface CardProps {
   readonly state: DraftState;
   readonly region: Rect | null;
@@ -51,6 +93,8 @@ interface CardProps {
   readonly shown: boolean;
   /** Whether the live window reads as this state now. */
   readonly matches: boolean;
+  /** Why its name cannot be saved, or null when it can. */
+  readonly problem: string | null;
   readonly number: number;
   readonly onName: (name: string) => void;
   readonly onClear: () => void;
@@ -69,7 +113,7 @@ function comparedText(state: DraftState, region: Rect | null, masking: Masking |
 }
 
 function StateCard(props: CardProps) {
-  const { state, region, picture, masking, ignoreBackground, shown, matches, number } = props;
+  const { state, region, picture, masking, ignoreBackground, shown, matches, problem, number } = props;
   const crop = useMemo(
     () => (picture === null || region === null ? null : cropPicture(picture, region)),
     [picture, region],
@@ -89,14 +133,11 @@ function StateCard(props: CardProps) {
         {crop === null ? <span className="note">No region</span> : <PictureCanvas picture={crop} label={label} />}
       </button>
       <div className="state-body">
-        <input
-          className="input"
-          aria-label={`Name of the state from screenshot ${number}`}
-          placeholder="Name"
-          value={state.name}
-          onChange={(event) => {
-            props.onName(event.target.value);
-          }}
+        <StateNameInput
+          label={`Name of the state from screenshot ${number}`}
+          name={state.name}
+          problem={problem}
+          onName={props.onName}
         />
         <small>
           Screenshot {number}
@@ -128,6 +169,7 @@ export function StatesField({ draft, full, selected, masks, reads, position, onD
   const { reading } = useLiveRead(reads);
   const blocked = addBlocked(draft, selected);
   const selecting = draft.states.some((state) => state.steps.length > 0);
+  const problems = stateNameProblems(draft.states.map((state) => state.name));
   return (
     <>
       <div className="field">
@@ -149,6 +191,7 @@ export function StatesField({ draft, full, selected, masks, reads, position, onD
                 ignoreBackground={draft.ignoreBackground}
                 shown={state.screenshot === selected}
                 matches={reading?.kind === 'state' && reading.value === state.name.trim()}
+                problem={problems.get(index) ?? null}
                 number={position(state.screenshot)}
                 onName={(name) => {
                   onDraft((current) => withStateAt(current, index, (old) => ({ ...old, name })));

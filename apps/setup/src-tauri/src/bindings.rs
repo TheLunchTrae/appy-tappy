@@ -51,7 +51,7 @@ use appytappy_config::settings_file::{
     FASTEST_READ_MS, MAX_TRACE_FILE_MB, MAX_TRACE_FILES, SHORTCUT_ALONE_KEYS, SHORTCUT_MODIFIERS,
     SHORTCUT_NAMED_KEYS, SLOWEST_READ_MS, SettingsFile, TraceCategory,
 };
-use appytappy_config::signal::NO_STATE;
+use appytappy_config::signal::{MAX_STATE_NAME_LEN, NO_STATE};
 use appytappy_sources::screen::{Image, Size};
 use serde::Serialize;
 use serde_json::json;
@@ -956,6 +956,7 @@ fn constants() -> String {
         "maxActionAppBytes": MAX_APP_NAME_LEN,
         "maxCooldownMs": MAX_COOLDOWN_MS,
         "maxStates": MAX_STATES,
+        "maxStateNameChars": MAX_STATE_NAME_LEN,
         "maxExpectedCharacters": MAX_EXPECTED_CHARACTERS,
         "maxTargetBytes": MAX_TARGET_LEN,
         "maxTraceFileMb": MAX_TRACE_FILE_MB,
@@ -988,7 +989,7 @@ fn constants() -> String {
     });
     [
         format!(
-            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states, the most characters a reference expects, the settings' ranges, the highest tolerance, and the most\n * pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
+            "/**\n * The longest app name a media or volume action names and the longest path or link, the longest cooldown, the\n * most states and the longest state name in characters, the most characters a reference expects, the settings'\n * ranges, the highest tolerance, and the most pixels a click's search area holds, as the saved files take them.\n */\nexport const LIMITS = {} as const;\n",
             literal(&limits)
         ),
         format!(

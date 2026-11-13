@@ -135,7 +135,8 @@ folder** opens the folder that holds both, with the older copy of each.
 
 **Export debug bundle** saves one zip file to share with a developer when
 something goes wrong. Nothing is sent anywhere; you choose where the file goes
-and who gets it. It holds:
+and who gets it. If the export fails, it leaves no file where you picked, not
+even one you chose to replace. It holds:
 
 - your settings and automations;
 - each application's settings, without its pictures unless you include them;

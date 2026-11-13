@@ -91,10 +91,12 @@ installer. The run has two options:
   installed copies are not offered a pre-release. A test build ignores it.
 
 To release, merge a pull request that sets the new workspace version in
-`Cargo.toml` and `Cargo.lock`, then run the workflow on `main` with
-**Publish** on. The workflow never commits, so the version only changes
-through a pull request, and it creates every release tag: never push a `v*`
-tag by hand, because a tag on another commit takes that version. Before it
+`Cargo.toml` and `Cargo.lock`, run the
+[mutation sweep](Rust-standards.md#mutation-testing) on `main`, then run the
+release workflow on `main` with **Publish** on. The workflow never commits, so
+the version only changes through a pull request, and it creates every release
+tag: never push a `v*` tag by hand, because a tag on another commit takes that
+version. Before it
 builds, a publishing run stops when the run is not on `main`, when that
 version is already released, as a full release or a pre-release, or when its
 tag is already on another commit. A pre-release therefore uses up its version,

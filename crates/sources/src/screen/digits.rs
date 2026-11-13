@@ -111,12 +111,16 @@ struct Distance {
     differing: u32,
 }
 
-/// The learned glyph closest to a shape.
+/// What a read takes one character's shape for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Closest {
-    character: char,
-    /// Whether the shape is close enough to read as the character.
-    matches: bool,
+enum Taken {
+    /// A character the value reads.
+    Kept(char),
+    /// A character the value leaves out, which the number takes as text.
+    LeftOut(char),
+    /// No character: the shape matches no glyph. It carries the character
+    /// of the kept glyph closest to it, if the reader has one.
+    Unknown(Option<char>),
 }
 
 /// Columns `left..right` of a character.
@@ -214,7 +218,11 @@ impl DigitReader {
     /// It takes its number from its glyphs for them alone, in the order it
     /// learned them: a shape matches the closest of those glyphs first, so
     /// a reader of digits cannot read a `0` as the `O` its font also has.
-    /// The other characters it learned are still characters to it, which
+    /// A digit it leaves out is the exception: when the closest glyph it
+    /// leaves out is a digit that matches the shape and is closer to it
+    /// than every glyph it reads, the shape is that digit, so leaving out a
+    /// `9` cannot turn a `9` into the `3` it looks like. The other
+    /// characters it learned are still characters to it, which
     /// [`DigitReader::read`] takes as text and not as shapes it has yet to
     /// learn, and so are those an earlier call left out. A check that names
     /// no characters reads with the reader as it is.
@@ -272,29 +280,26 @@ impl DigitReader {
         // where a number among them ends.
         let mut unknown = None;
         for (position, span) in spans.iter().take(count).enumerate() {
-            let shape = shape(&ink, &line, *span);
-            let kept = closest(&self.glyphs, &shape);
-            if let Some(kept) = kept.filter(|kept| kept.matches) {
-                read.push(kept.character);
-                number.push(kept.character);
-                with_left_out.push(kept.character);
-                continue;
-            }
-            // Text after a finished number, such as the "HP" in "37% HP",
-            // needs no glyphs.
-            if with_left_out.ended {
-                break;
-            }
-            let left_out = closest(&self.left_out, &shape);
-            if let Some(Closest { character, .. }) = left_out.filter(|left_out| left_out.matches) {
-                read.push(character);
-                number.push_text(character);
-                with_left_out.push(character);
-                continue;
-            }
-            read.push(ReadText::UNKNOWN);
-            if unknown.is_none() {
-                unknown = Some((position, kept.map(|kept| kept.character)));
+            match self.take(&shape(&ink, &line, *span)) {
+                Taken::Kept(character) => {
+                    read.push(character);
+                    number.push(character);
+                    with_left_out.push(character);
+                },
+                // Text after a finished number, such as the "HP" in
+                // "37% HP", needs no glyphs.
+                _ if with_left_out.ended => break,
+                Taken::LeftOut(character) => {
+                    read.push(character);
+                    number.push_text(character);
+                    with_left_out.push(character);
+                },
+                Taken::Unknown(closest) => {
+                    read.push(ReadText::UNKNOWN);
+                    if unknown.is_none() {
+                        unknown = Some((position, closest));
+                    }
+                },
             }
         }
         if let Some((position, closest)) = unknown {
@@ -373,19 +378,50 @@ impl DigitReader {
         Ok(shapes.iter().map(|shape| self.score(shape)).collect())
     }
 
-    /// The closest glyph to `shape`, and the closest of another character.
-    /// Of equals, the glyph learned first. As [`DigitReader::read`] does, it
-    /// scores a shape that matches no glyph the value reads against the
-    /// glyphs the value leaves out, and takes the closest of those when it
-    /// matches.
-    fn score(&self, shape: &Shape) -> CharacterScore {
-        let kept = CharacterScore::among(&self.glyphs, shape, false);
-        if kept.matches() {
-            return kept;
+    /// What a read takes `shape` for: the closest glyph the value reads,
+    /// when it matches, unless the closest glyph the value leaves out is a
+    /// digit that matches and is closer still; otherwise the closest glyph
+    /// the value leaves out, when it matches. A left-out letter or symbol
+    /// never wins over a kept glyph that matches, so a value of digits reads
+    /// a `0` that is closer to the font's `O` as `0`. A left-out digit does,
+    /// since taking it for a kept lookalike would read another number.
+    fn take(&self, shape: &Shape) -> Taken {
+        let kept = closest(&self.glyphs, shape);
+        let left_out = || closest(&self.left_out, shape).filter(|left_out| left_out.matches());
+        match kept {
+            Some(kept) if kept.matches() => {
+                // Only a left-out digit can beat a kept glyph that matches,
+                // so a reader that leaves none out looks no further.
+                let leaves_out_digits = self
+                    .left_out
+                    .iter()
+                    .any(|glyph| glyph.character.is_ascii_digit());
+                leaves_out_digits
+                    .then(left_out)
+                    .flatten()
+                    .filter(|closer| {
+                        closer.character.is_ascii_digit() && closer.distance() < kept.distance()
+                    })
+                    .map_or(Taken::Kept(kept.character), |digit| {
+                        Taken::LeftOut(digit.character)
+                    })
+            },
+            _ => left_out().map_or_else(
+                || Taken::Unknown(kept.map(|kept| kept.character)),
+                |left_out| Taken::LeftOut(left_out.character),
+            ),
         }
-        Some(CharacterScore::among(&self.left_out, shape, true))
-            .filter(CharacterScore::matches)
-            .unwrap_or(kept)
+    }
+
+    /// The closest glyph to `shape`, and the closest of another character,
+    /// among the glyphs the value reads or, when a read takes the shape for
+    /// a character the value leaves out, among those. Of equals, the glyph
+    /// learned first.
+    fn score(&self, shape: &Shape) -> CharacterScore {
+        match self.take(shape) {
+            Taken::LeftOut(_) => CharacterScore::among(&self.left_out, shape, true),
+            Taken::Kept(_) | Taken::Unknown(_) => CharacterScore::among(&self.glyphs, shape, false),
+        }
     }
 }
 
@@ -452,16 +488,12 @@ fn shape(ink: &Ink, line: &Range<u32>, span: Span) -> Shape {
 
 /// The glyph of `glyphs` closest to `shape`, the earliest learned of equals,
 /// or `None` when there are none.
-fn closest(glyphs: &[Glyph], shape: &Shape) -> Option<Closest> {
+fn closest(glyphs: &[Glyph], shape: &Shape) -> Option<GlyphScore> {
     let around = grown(shape);
-    let score = glyphs
+    glyphs
         .iter()
         .map(|glyph| GlyphScore::of(shape, &around, glyph))
-        .min_by_key(|score| score.distance())?;
-    Some(Closest {
-        character: score.character,
-        matches: score.matches(),
-    })
+        .min_by_key(|score| score.distance())
 }
 
 /// How one character in a region scores, from [`DigitReader::explain`].
@@ -498,11 +530,6 @@ impl CharacterScore {
             runner_up,
             left_out,
         }
-    }
-
-    /// Whether the character reads as its closest glyph.
-    fn matches(&self) -> bool {
-        self.best.is_some_and(GlyphScore::matches)
     }
 }
 
@@ -1374,6 +1401,12 @@ mod tests {
         assert!(knows(&digits, '0'));
         assert!(!knows(&digits, 'O'));
         assert_eq!(digits.read(&letter, false), Ok(Number::new(0.0).unwrap()));
+        // A value that also leaves out a digit still takes the shape for its
+        // own `0`, since only a left-out digit wins over a kept lookalike.
+        let mut with_one = reader.clone();
+        with_one.learn(&draw(&["#"; 16]), "1").unwrap();
+        let zero = with_one.reading(Some("0")).unwrap();
+        assert_eq!(zero.read(&letter, false), Ok(Number::new(0.0).unwrap()));
         // The glyphs kept stay in the order they were learned.
         assert_eq!(reader.clone().reading(Some("0 O")), Some(reader.clone()));
         assert_eq!(reader.clone().reading(Some("%")), None);
@@ -1607,7 +1640,7 @@ mod tests {
     fn a_shape_whose_edges_moved_a_cell_matches() {
         let reader = reader_of(&[('7', shape_of(&BLOCK))]);
         let matches = |rows: &[&str]| {
-            closest(&reader.glyphs, &shape_of(rows)).is_some_and(|closest| closest.matches)
+            closest(&reader.glyphs, &shape_of(rows)).is_some_and(GlyphScore::matches)
         };
         // A column wider, which no rule on differing cells alone lets
         // through next to a missing stroke of the same size.
@@ -1624,7 +1657,7 @@ mod tests {
         let with = |extra: &str| {
             let mut rows = BLOCK.to_vec();
             rows.extend(["........", extra]);
-            closest(&reader.glyphs, &shape_of(&rows)).is_some_and(|closest| closest.matches)
+            closest(&reader.glyphs, &shape_of(&rows)).is_some_and(GlyphScore::matches)
         };
         // Cells two rows below the block are beside none of its cells.
         // Two apart of 66 set match; three of 67 do not.
@@ -1635,9 +1668,7 @@ mod tests {
         // matches with two cells apart of 66.
         let mut narrower = vec![".#######"; 8];
         narrower.extend(["........", "#.#....."]);
-        assert!(
-            closest(&reader.glyphs, &shape_of(&narrower)).is_some_and(|closest| closest.matches)
-        );
+        assert!(closest(&reader.glyphs, &shape_of(&narrower)).is_some_and(GlyphScore::matches));
         // Exactly 1 in 32: two apart of the 64 that a block of 62 and they
         // set.
         let mut smaller = vec!["########"; 7];
@@ -1645,22 +1676,18 @@ mod tests {
         let exact = reader_of(&[('7', shape_of(&smaller))]);
         smaller.extend(["........", "#.#....."]);
         assert_eq!(
-            closest(&exact.glyphs, &shape_of(&smaller)),
-            Some(Closest {
-                character: '7',
-                matches: true
-            })
+            closest(&exact.glyphs, &shape_of(&smaller))
+                .map(|closest| (closest.character, closest.matches())),
+            Some(('7', true))
         );
         // A part the shape lacks is as far apart as one it adds.
         let mut rows = BLOCK.to_vec();
         rows.extend(["........", "#.#.#..."]);
         let larger = reader_of(&[('7', shape_of(&rows))]);
         assert_eq!(
-            closest(&larger.glyphs, &shape_of(&BLOCK)),
-            Some(Closest {
-                character: '7',
-                matches: false
-            })
+            closest(&larger.glyphs, &shape_of(&BLOCK))
+                .map(|closest| (closest.character, closest.matches())),
+            Some(('7', false))
         );
     }
 
@@ -1732,11 +1759,8 @@ mod tests {
         assert_eq!(score.best, Some(best));
         assert!(!best.matches());
         assert_eq!(
-            closest(&reader.glyphs, &far),
-            Some(Closest {
-                character: '7',
-                matches: false
-            })
+            closest(&reader.glyphs, &far).map(|closest| (closest.character, closest.matches())),
+            Some(('7', false))
         );
         // The runner-up is the closest glyph of another character.
         assert_eq!(
@@ -2036,6 +2060,56 @@ mod tests {
                 read: read_text("5?"),
             })
         );
+    }
+
+    #[test]
+    fn a_digit_the_value_leaves_out_is_not_read_as_a_kept_lookalike() {
+        // A 3 and a 9, 16 pixels tall so a pixel is a grid cell. The 9 is
+        // the 3 with two pixels more at the top left, one of them beside
+        // the 3's top stroke, so it matches the 3 within tolerance but is
+        // closer to its own glyph.
+        let three = |row: usize| match row {
+            0 | 7 | 15 => "########",
+            _ => ".......#",
+        };
+        let nine = |row: usize| match row {
+            1 | 2 => "#......#",
+            _ => three(row),
+        };
+        let both: Vec<String> = (0..16)
+            .map(|row| format!("{}.{}", three(row), nine(row)))
+            .collect();
+        let both: Vec<&str> = both.iter().map(String::as_str).collect();
+        let nine = draw(&(0..16).map(nine).collect::<Vec<_>>());
+        let mut reader = DigitReader::new(WHITE, 0);
+        reader.learn(&draw(&both), "39").unwrap();
+        assert_eq!(reader.read(&nine, false), Ok(Number::new(9.0).unwrap()));
+
+        let threes = reader.reading(Some("3")).unwrap();
+        let Shapes(shapes) = threes.shapes(&nine).unwrap();
+        assert_eq!(
+            closest(&threes.glyphs, &shapes[0]).map(|kept| (kept.character, kept.matches())),
+            Some(('3', true))
+        );
+        assert_eq!(
+            threes.read(&nine, false),
+            Err(ReadError::LeftOut {
+                read: read_text("9")
+            })
+        );
+        let shown: Vec<_> = threes
+            .explain(&nine)
+            .unwrap()
+            .iter()
+            .map(|score| (score.best.unwrap().character, score.left_out))
+            .collect();
+        assert_eq!(shown, [('9', true)]);
+
+        // Of a kept glyph and a left-out digit equally close, the kept one.
+        let twins = reader_of(&[('3', shapes[0]), ('9', shapes[0])])
+            .reading(Some("3"))
+            .unwrap();
+        assert_eq!(twins.read(&nine, false), Ok(Number::new(3.0).unwrap()));
     }
 
     #[test]

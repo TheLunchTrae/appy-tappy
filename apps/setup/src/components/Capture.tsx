@@ -20,6 +20,7 @@ import {
   buildCharacters,
   buildSpec,
   EMPTY_DRAFT,
+  firstWithPixels,
   fixDraft,
   onPicture,
   readsOf,
@@ -420,8 +421,9 @@ export function Capture({
     fixShot.current = 'taken';
     background(take());
   }, [opened, liveSize, take]);
-  const firstShot = shots[0]?.index ?? null;
-  const firstPicture = firstShot === null ? undefined : full.get(firstShot);
+  const first = firstWithPixels(shots, full);
+  const firstShot = first?.index ?? null;
+  const firstPicture = first?.picture;
   useEffect(() => {
     if (opened === null || firstShot === null || firstPicture === undefined || fixShot.current === 'placed') {
       return;
@@ -467,8 +469,8 @@ export function Capture({
     if (shot === null) {
       return;
     }
-    // Until both sizes are known, such as before the screenshot's pixels arrive, the region stays where it is.
-    const fits = regionSize === null || shot.size === null ? null : sameSize(regionSize, shot.size);
+    // Until the region's size is known, the region stays where it is.
+    const fits = regionSize === null ? null : sameSize(regionSize, shot.size);
     setDraft((current) => onPicture(current, shot.index, fits));
   };
   const takeShot = async (): Promise<void> => {
@@ -485,8 +487,8 @@ export function Capture({
     }
     setSelected(shot.index);
     const size = shot.size;
-    const region = box === null || size === null ? null : scaleRect(box.rect, box.at, size);
-    if (region === null || size === null) {
+    const region = box === null ? null : scaleRect(box.rect, box.at, size);
+    if (region === null) {
       onValuePicture(shot);
       return;
     }

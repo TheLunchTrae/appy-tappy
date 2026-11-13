@@ -5,7 +5,7 @@ import { debugBundle, errorText } from '../lib/api.ts';
 import { Dialog } from './Dialog.tsx';
 import { bundleName, sizeText } from '../lib/debug.ts';
 import { background } from '../lib/repeat.ts';
-import { pickZipFile } from '../lib/zipFile.ts';
+import { saveZip } from '../lib/zipFile.ts';
 
 interface Props {
   /** The newest trace file, which the bundle can hold, or null without one. */
@@ -25,12 +25,10 @@ export function ExportBundle({ trace, onClose }: Props) {
   const save = async (): Promise<void> => {
     setBusy(true);
     try {
-      const write = await pickZipFile(bundleName(new Date()));
-      if (write === null) {
-        return;
+      const made = async () => debugBundle({ pictures, trace: withTrace && trace !== null ? trace.file : null });
+      if (await saveZip(bundleName(new Date()), made)) {
+        onClose();
       }
-      await write(await debugBundle({ pictures, trace: withTrace && trace !== null ? trace.file : null }));
-      onClose();
     } catch (failure: unknown) {
       setError(`${errorText(failure)} The bundle was not saved.`);
     } finally {

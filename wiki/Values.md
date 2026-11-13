@@ -301,8 +301,14 @@ instant can then be missed.
   live window reads as it. To compare only the thing itself and not what is
   behind it, [select it](#select-the-thing-in-a-state).
 
-State names are up to 32 characters, with no space at either end. Two states
-cannot share a name, ignoring case, and none can be named `none`.
+A state name has 1 to 32 characters and no control character, such as a
+tab. Spaces at either end don't count, and saving drops them. No state can be
+named `none`, in any capitals, since the value reads `none` when no state
+shows. Two states cannot share a name, ignoring case, so `Ready` and `ready`
+are one name: each of them says **Another state has this name, or one that
+differs from it only in capitals**. A name that breaks a rule says which under
+it, and the value waits with **Fix each state name that has a message under
+it** until every name can be saved.
 
 ### Characters a number reads
 
@@ -699,7 +705,8 @@ window's size now: scaled, at its fix, or
 
 A **State** check keeps the picture saved for each state while the region
 stays where it was. **States** then lists each state with
-**Saved picture**: rename a state there, or change the **Tolerance**.
+**Saved picture**: rename a state there, or change the **Tolerance**. A
+new name follows the same [rules](#checks) as a new value's.
 
 To change a state's picture, or to add or remove a state, take every state
 again. Select a screenshot that shows the first state and select

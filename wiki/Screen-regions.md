@@ -54,7 +54,12 @@ byte for each pixel of its region, for which of them are ink.
   for each mark. A value may name the characters it reads, `characters` in
   its check, and then takes its number from its reference's glyphs for them
   alone: a shape takes the closest of those glyphs first, so a value of
-  digits cannot read a `0` as the `O` its font also has. A shape that
+  digits cannot read a `0` as the `O` its font also has. A digit the value
+  leaves out is the exception: when the closest of the glyphs the value
+  leaves out is a digit, matches the shape, and is closer to it than every
+  glyph the value reads, the shape is that digit, so a value that leaves
+  out `9` fails to read a
+  `9` rather than reading it as the `3` it may look like. A shape that
   matches none of them is matched against the reference's other glyphs, the
   ones the value leaves out, and one that matches is text: it ends the
   number or comes before it, so a value of digits reads `53%` as 53. A
@@ -68,8 +73,8 @@ byte for each pixel of its region, for which of them are ink.
   left-out `O` reads as 1; that takes a shape more than 1 cell in 32 from
   every glyph of its own character and within that of another's, which is
   rare. `DigitReader::reading` sorts the glyphs once, when
-  `saved::build` builds the check, so a read matches a character the value
-  reads against those glyphs alone. Characters the
+  `saved::build` builds the check, so a read matches each character against
+  the glyphs the value reads first. Characters the
   reference has yet to learn are passed over, and a value whose reference
   knows none of its characters is not read (`SavedError::NoCharacters`).
 - **Bar fill** returns how full a bar is, from 0 to 100. The user clicks one

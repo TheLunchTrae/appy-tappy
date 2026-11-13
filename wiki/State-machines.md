@@ -21,7 +21,7 @@ draws them. A box is a state, and an arrow is a transition labeled with the
 event that causes it. `[*]` is where the machine starts or ends.
 
 Many messages travel between threads, so a message can arrive after the state
-it was about has gone. Thirteen guards drop such stale messages:
+it was about has gone. Fourteen guards drop such stale messages:
 
 - **Session IDs.** The runtime gives each reader session a new `SessionId`
   (`apps/runtime/src/model.rs`). The owner drops a reading whose session no
@@ -46,17 +46,27 @@ it was about has gone. Thirteen guards drop such stale messages:
   or replaced capture still sends is dropped, and so is text for a recording
   or a search that was discarded or replaced. A ticket's number names its
   work to the UI: a stop that carries the number of another capture than
-  the picked window's is dropped (`Owner::stop_capture`), the owner answers
-  nothing for a picture asked of another search than the one it holds and
-  rereads nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
+  the picked window's is dropped (`Owner::stop_capture`), and so is a stop
+  that carries the number of another recording than the one the capture
+  records (`Owner::stop_recording`). The page sends the screens' picks one
+  at a time and drops a pick whose screen went before its turn
+  (`screenCaptures` in `apps/setup/src/lib/capture.ts`), so a closed
+  screen's late pick never takes the slot from the next screen's pick. The
+  automation editor's watch takes the slot outside that line
+  (`Owner::watch`), so such a pick can still replace a watch; the owner then
+  refuses the watch, and the editor watches again. The owner answers nothing
+  for a picture asked of another search than the one it holds and rereads
+  nothing for one (`apps/setup/src-tauri/src/owner/found.rs`), and
   an ask about another watch than the one it holds is refused. A reading's
   picture is asked for with its recording's number: the owner answers
   nothing for a recording that was discarded or replaced (`recorded_pixels`
   in `apps/setup/src-tauri/src/owner/recording.rs`), and the page drops a
   picture that arrives for another recording than the newest it asked for
-  (`withCrop` in `apps/setup/src/lib/review.ts`). Within one recording, the look's
-  gate drops the answer to a look from before **Record more** or from before
-  a frame showed the window at another size than the recording is placed at
+  (`withCrop` in `apps/setup/src/lib/review.ts`) and ignores a failed ask
+  for another recording's picture, which asks for nothing again
+  (`cropAskFailed`). Within one recording, the look's gate drops the answer
+  to a look from before **Record more** or from before a frame showed the
+  window at another size than the recording is placed at
   (`Gate::Abandoned`). The [character check](#character-check) remembers
   the readings it left out under their recording's number, and keeps none
   again for another recording (`leftOutOf` in
@@ -76,6 +86,12 @@ it was about has gone. Thirteen guards drop such stale messages:
   (`apps/setup/src/lib/drag.ts`). A move, a release, a cancel, or a failed
   capture of any other pointer is dropped, and so is every event but a press
   once the drag is over.
+- **Removed screenshots.** The capture screen remembers the screenshots the
+  user removed (`apps/setup/src/lib/useScreenshots.ts`), and drops pixels
+  that arrive afterward for one taken or recorded. A load of a draft's
+  screenshot that ends after the screenshot left the list changes nothing
+  (`loadEnded`). So a removed screenshot is never listed again, its pixels
+  are not kept, and a failure to load them shows no error.
 - **Press numbers.** A drag over the live window numbers each press, which
   starts taking a screenshot (`apps/setup/src/lib/liveDraw.ts`). A screenshot
   that arrives with another press's number is dropped.
@@ -1354,8 +1370,16 @@ taken, goes back to **Asking** with what the user entered and the reason, and
 **Import** tries again. An event that does not fit the state, such as a late
 read while the dialog asks, changes nothing.
 
-The export dialog (`ExportApp.tsx`) has no states beyond busy while the file
-is made and saved; a failure shows in it and **Save file** tries again.
+The export dialog (`ExportApp.tsx`) and the debug bundle dialog
+(`ExportBundle.tsx`) have no states beyond busy while the file is made and
+saved. Each asks where to save first, then makes the file and writes it
+(`saveZip`): the click lets the page open the picker for only about 5
+seconds, and a slow build would otherwise never reach it. The picker makes
+the file it picks, or empties one that was there, so the old content is gone
+from the pick on. A file that fails to be made or written is removed: a
+failure leaves no file there, not even the one the user picked to replace,
+shows in the dialog, and **Save file** or **Save bundle** tries again. Closing
+the picker makes nothing.
 
 ### Capture slot
 
@@ -1415,11 +1439,17 @@ stateDiagram-v2
   flow, and a click's target screen. The capture stops when that screen
   goes, on **Change window**, and when a click's target screen looks for
   its window again. The screen stops the capture it started, by the number
-  its pick answered (`ownCapture`), and the owner drops the stop when
-  another capture took that one's place (`Owner::stop_capture`): a stop
-  sent as a screen goes can arrive after the next screen's pick or the
-  automation editor's watch started. While one holds it, the pages' lists are read only
-  after a save.
+  its pick answered (`ownTicket` in `apps/setup/src/lib/ticket.ts`), and the
+  owner drops the stop when another capture took that one's place
+  (`Owner::stop_capture`): a stop sent as a screen goes can arrive after the
+  next screen's pick or the automation editor's watch started. The owner
+  takes what the page sends in no set order, so the screens' picks wait in
+  one line (`screenCaptures`): each is sent once the picks before it
+  answered, and a pick whose screen went by its turn is not sent. Otherwise
+  a pick that a closed screen sent could take the slot after the next
+  screen's, and the closed screen's stop of it would leave the next screen
+  with no capture. While one holds it, the pages' lists are read only after
+  a save.
 - The automation editor's watch (`liveWatchStep` in
   `apps/setup/src/lib/liveWatch.ts`) holds the owner's watch number, the
   time before which it starts no new watch, and why its last reading was
@@ -1530,7 +1560,10 @@ stateDiagram-v2
   read at answer a reading with no new trial.
 - **Failed** (`error`). The owner refused the check, such as a label its
   reference cannot learn, and the box says why. The owner keeps the check it
-  had, and nothing is read until the check changes.
+  had, and nothing is read until the check changes. A change of the draft
+  that sends the same check does not try it again: the owner judges what the
+  check sends, the saved files, and the session's screenshots and
+  recording, and such a change leaves them all as they were.
 - A read notes the number in force when it is asked, and its answer is taken
   only while that number is still in force. So an answer under an older
   check is dropped, reading or problem, and so is one asked between a change
@@ -1626,11 +1659,32 @@ two never run together, and starting one replaces the other. Both hold a
 still records, and whose `problem` says why it skips frames or why it stopped
 by itself.
 
+A start answers the recording's number, which **Record more** keeps, and the
+component that started the recording stops it by that number, on **Stop**
+and when it goes (`useRecorder` in `apps/setup/src/lib/useRecorder.ts`). The
+owner drops a stop that carries another recording's number
+(`Owner::stop_recording`), one of the
+[stale-message guards](#how-to-read-this-page): a stop sent as one
+component goes can arrive after the recording that took its place started,
+as when the reference editor's recording of readings replaces a recording of
+looks. After a start the page reads the recording's state until a read
+answers (`keepsReading` in `apps/setup/src/lib/useRecorder.ts`), so a
+recording whose first read failed still shows with **Stop** and **Discard**,
+and then reads it while it still changes. That first read's failure is a
+failed read, as a poll's is, not a failed start: it shows until the next
+read that answers clears it (`learn`).
+
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
 more once a frame did not fit. A reading's picture is answered only for its
 own recording's ticket, one of the
-[stale-message guards](#how-to-read-this-page).
+[stale-message guards](#how-to-read-this-page). The page asks for each
+reading's picture once (`cropsToAsk` in `apps/setup/src/lib/review.ts`). An
+ask that fails is taken back (`cropAskFailed`), and the reading is asked for
+again a second later, up to `CROP_TRIES`, five asks in all, so a page whose
+asks cannot reach the owner stops asking. A reading whose asks all failed,
+or whose answer was none because its recording was replaced, stays without
+a picture in review.
 
 ```mermaid
 stateDiagram-v2
@@ -1891,6 +1945,40 @@ kept beside the machine: 1 shows the whole screenshot. It goes back to 1 when
 the live view shows or a screenshot of another size does. It changes only the
 size the screenshot shows at, so a drag goes on through a zoom or a scroll.
 
+### Draft screenshot pixels
+
+The capture screen's screenshots (`apps/setup/src/lib/useScreenshots.ts`)
+list a screenshot taken or recorded this session only once its thumbnail and
+its own pixels arrive, so its tile is never blank. A screenshot that a draft
+brings back is listed from the start, under the index the draft refers to
+it by, and its tile (`Thumb`) has its own states:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Loading: the draft's screenshots come back
+    Loading --> Loaded: its thumbnail and pixels arrive
+    Loading --> Failed: either does not arrive, or the fetch fails
+    Failed --> Loading: it is shown
+    Loading --> [*]: the user removes it
+    Loaded --> [*]: the user removes it
+    Failed --> [*]: the user removes it
+```
+
+- **Loading** shows an empty tile. **Loaded** shows the thumbnail, and the
+  screenshot can be drawn on. `loadEnded` is the pure transition out of
+  **Loading**.
+- **Failed** says **Not loaded. Select to load again.** in its tile, and the
+  screenshots' error says why. Showing it, by selecting its tile or by any
+  step that shows it, loads it again (`loadsAgain`). The hook remembers the
+  screenshots it is loading, so showing one again before the strip shows it
+  loading starts no second load, whose late failure could mark a loaded tile
+  failed. It stays listed, so the draft's states, boxes, and region keep the
+  screenshot they refer to.
+- **Removed.** A screenshot the user removes leaves the list from any state.
+  A load that ends for it afterward changes neither the list, the pixels
+  kept, nor the error (`loadEnded`), as the
+  [guard](#how-to-read-this-page) for removed screenshots says.
+
 ### Live draw
 
 While a value has no place yet, the capture screen's first step lays a region
@@ -1933,7 +2021,8 @@ stateDiagram-v2
   the screenshot's (`scaleRect`).
 - **A click, or a drag that drew no box,** places the screenshot with no box.
   The screenshot shows, and the user draws on it.
-- **Failures.** A screenshot that cannot be taken arrives as none. The
+- **Failures.** A screenshot that cannot be taken, or whose pixels do not
+  arrive, arrives as none; the strip never lists it. The
   machine still returns to **Idle** on the release, nothing is placed, and
   the screenshots' own error says why. A drag the region surface interrupts
   hands over no box. The surface reports the pointer as let go when it is
@@ -2762,7 +2851,9 @@ states. **Empty** reads the application's file and the pictures for each
 ask. **Kept** answers every ask about that reference from memory, a few for
 each edit in the editor. A reference is kept only when every sample's
 picture could be read, so one that is missing a picture is read again on
-each ask and learned once the picture is back. `Owner::write_app` empties it
+each ask and learned once the picture is back. It keeps the pictures, not a
+reader learned from them: the color and tolerance being taught decide what
+the samples teach, so each ask learns them again. `Owner::write_app` empties it
 before any saved application is written or removed, whether that works or
 fails, and keeping another reference replaces it. An import writes a new
 application, which no kept reference is part of. A file changed outside the setup app
