@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { Picture } from '../src/lib/pixels.ts';
-import { arrive, arrived, loadsAgain, type Thumb, withThumb } from '../src/lib/useScreenshots.ts';
+import { arrive, arrived, loadEnded, loadsAgain, type Strip, type Thumb } from '../src/lib/useScreenshots.ts';
 
 const picture = (width: number): Picture => ({ width, height: 1, data: new Uint8ClampedArray(width * 4) });
 const thumb = picture(1);
@@ -70,47 +70,47 @@ describe('a screenshot taken or recorded is listed only once it arrives', () => 
   });
 });
 
-interface Listed {
-  readonly index: number;
-  readonly thumb: Thumb;
-}
-
 describe("a draft's screenshot stays listed while its pixels load", () => {
   const loading: Thumb = { kind: 'loading' };
   const failed: Thumb = { kind: 'failed' };
   const loaded: Thumb = { kind: 'loaded', picture: thumb };
-  const shots: readonly Listed[] = [
-    { index: 0, thumb: loading },
-    { index: 2, thumb: loaded },
-  ];
+  const shot = (index: number, shown: Thumb) => ({ index, time: 'Draft', thumb: shown, recorded: false });
+  const strip: Strip = { shots: [shot(0, loading), shot(2, loaded)], full: new Map([[2, full]]), error: null };
+  const arrivedPixels = { kind: 'arrived', pixels: { thumb, picture: full } } as const;
+  const stopped = { kind: 'failed', reason: 'the owner stopped' } as const;
 
-  test('and is marked when its pixels fail to load, keeping its place', () => {
-    const marked = withThumb(shots, 0, failed);
-    expect(marked).toEqual([
-      { index: 0, thumb: failed },
-      { index: 2, thumb: loaded },
+  test('shows its thumbnail and keeps its own pixels once they arrive', () => {
+    const shown = loadEnded({ ...strip, error: 'an older failure' }, 0, arrivedPixels);
+    expect(shown.shots).toEqual([shot(0, loaded), shot(2, loaded)]);
+    expect([...shown.full]).toEqual([
+      [2, full],
+      [0, full],
     ]);
-    // The draft refers to it by its index, which stays.
-    expect(marked.map((shot) => shot.index)).toEqual([0, 2]);
+    expect(shown.error).toBeNull();
   });
 
-  test('loads again when it is shown after its pixels failed, and only then', () => {
-    const marked = withThumb(shots, 0, failed);
-    expect(loadsAgain(marked, 0)).toBe(true);
-    expect(loadsAgain(shots, 0)).toBe(false);
-    expect(loadsAgain(marked, 2)).toBe(false);
-    expect(loadsAgain(marked, 5)).toBe(false);
-    // Loading again starts it loading, so showing it once more starts no second load.
-    expect(loadsAgain(withThumb(marked, 0, loading), 0)).toBe(false);
-    expect(withThumb(withThumb(marked, 0, loading), 0, loaded)).toEqual([
-      { index: 0, thumb: loaded },
-      { index: 2, thumb: loaded },
-    ]);
+  test('is marked when its pixels fail to load, keeping its place, and says why', () => {
+    // The draft refers to it by its index, which stays.
+    expect(loadEnded(strip, 0, stopped)).toEqual({
+      shots: [shot(0, failed), shot(2, loaded)],
+      full: strip.full,
+      error: 'the owner stopped',
+    });
   });
 
   test('drops a load that ends after the screenshot was removed', () => {
-    const left: readonly Listed[] = [{ index: 2, thumb: loaded }];
-    expect(withThumb(left, 0, failed)).toBe(left);
-    expect(withThumb(left, 0, loaded)).toBe(left);
+    const left: Strip = { ...strip, shots: [shot(2, loaded)] };
+    expect(loadEnded(left, 0, arrivedPixels)).toBe(left);
+    expect(loadEnded(left, 0, stopped)).toBe(left);
+  });
+
+  test('loads again when it is shown after its pixels failed, once until that load ends', () => {
+    const shots = [shot(0, failed), shot(2, loaded), shot(3, loading)];
+    expect(loadsAgain(shots, new Set(), 0)).toBe(true);
+    expect(loadsAgain(shots, new Set(), 2)).toBe(false);
+    expect(loadsAgain(shots, new Set(), 3)).toBe(false);
+    expect(loadsAgain(shots, new Set(), 5)).toBe(false);
+    // A second show before the strip shows the first load starts no second load.
+    expect(loadsAgain(shots, new Set([0]), 0)).toBe(false);
   });
 });

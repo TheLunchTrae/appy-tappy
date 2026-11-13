@@ -2,7 +2,7 @@
 
 /**
  * Makes a zip with `make` and writes it to the place the user picked. When making or writing it fails, it rejects and
- * leaves no file there.
+ * leaves no file there, not even one that was there before the user picked it.
  */
 export type ZipSaver = (make: () => Promise<Blob>) => Promise<void>;
 
@@ -13,9 +13,10 @@ export interface PickedFile {
 }
 
 /**
- * Saves into `file`, which the picker made, empty, when the user picked it. A zip that fails to be made or written
- * removes the file, so a failed save leaves nothing behind, and the failure is what it rejects with even when the
- * removal fails too.
+ * Saves into `file`, which the picker made, empty, when the user picked it. The picker empties a file that was there
+ * before, too, so its old content is gone from the pick on. A zip that fails to be made or written removes the file,
+ * so a failed save leaves no file there, not even the one the user picked to replace. The failure is what it rejects
+ * with even when the removal fails or throws.
  */
 export function fileSaver(file: PickedFile): ZipSaver {
   return async (make) => {
@@ -30,7 +31,11 @@ export function fileSaver(file: PickedFile): ZipSaver {
       }
       await writable.close();
     } catch (error: unknown) {
-      await Promise.allSettled([file.remove()]);
+      try {
+        await file.remove();
+      } catch {
+        // The save's own failure says why nothing was saved; a file left behind is at most an empty one.
+      }
       throw error;
     }
   };
@@ -77,9 +82,10 @@ async function pickZipFile(name: string): Promise<ZipSaver | null> {
 
 /**
  * Asks where to save a zip, with `name` offered, as `pick` does, then makes it with `make` and writes it there. Says
- * false when the user closed the picker, and makes nothing then. It asks first, while the page still has the click
- * that asked for it, since the picker opens only then and a zip can take long to make. A zip that fails to be made
- * or written rejects and leaves no file behind.
+ * false when the user closed the picker, and makes nothing then. It asks first, since the click that asked for it
+ * lets the page open the picker for only about 5 seconds and a zip can take longer to make. The picker empties a
+ * file it picks, so a zip that fails to be made or written rejects and leaves no file there, not even one the user
+ * picked to replace.
  */
 export async function saveZip(
   name: string,
