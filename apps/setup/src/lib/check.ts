@@ -443,14 +443,17 @@ export function withFixRegion(draft: Draft, region: Rect | null, shot: number): 
 
 /**
  * `draft`, a number value's, reading with `reference` of `references`, its application's, and the characters of it
- * that its choice of characters comes to, as {@link forReference} says.
+ * that its choice of characters comes to, as {@link forReference} says. A reference that `references` do not hold,
+ * such as while the file cannot be read, leaves the choice as it is: nothing says what it knows.
  */
 export function withReference(draft: Draft, reference: string, references: readonly ReferenceDef[]): Draft {
-  const known = (id: string | null): readonly string[] => {
+  const known = (id: string | null): readonly string[] | null => {
     const saved = references.find((each) => each.id === id);
-    return saved === undefined ? [] : referenceCharacters(saved);
+    return saved === undefined ? null : referenceCharacters(saved);
   };
-  return { ...draft, reference, characters: forReference(draft.characters, known(draft.reference), known(reference)) };
+  const to = known(reference);
+  const characters = to === null ? draft.characters : forReference(draft.characters, known(draft.reference) ?? [], to);
+  return { ...draft, reference, characters };
 }
 
 /** `draft` switched to `kind`, with that kind's starting tolerance. */

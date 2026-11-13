@@ -423,6 +423,15 @@ test('withReference keeps the choice of characters that was picked, for the new 
     ':',
   ]);
   expect(withReference({ ...number, characters: ['1', 'L'] }, 'clock', references).characters).toEqual(['1']);
+  // A reference that is not among them, such as while its file cannot be read, changes nothing that is read.
+  expect(withReference({ ...number, characters: ['1', 'L'] }, 'gone', references)).toEqual({
+    ...number,
+    reference: 'gone',
+    characters: ['1', 'L'],
+  });
+  // One taught more in place keeps a chosen set.
+  const taught = [reference('percent', '10%L.')];
+  expect(withReference({ ...number, characters: ['1', '%'] }, 'percent', taught).characters).toEqual(['1', '%']);
   // A first reference has no choice to carry over but the one the draft holds.
   expect(withReference({ ...EMPTY_DRAFT, characters: digits }, 'clock', references).characters).toEqual(digits);
 });
