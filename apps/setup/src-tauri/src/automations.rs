@@ -2,7 +2,8 @@
 //!
 //! Automations live in their own file, apart from the applications' files,
 //! and name a value by its application's ID and the value's ID. Saving one
-//! makes the same check the runtime makes, [`Runnable::new`], so it
+//! makes the same check the runtime makes,
+//! [`Runnable::new`](appytappy_sources::automation::Runnable::new), so it
 //! never names a value that is not there or compares a value with the wrong
 //! kind of target. A value that later goes away shows as a problem on the
 //! automation that used it, and so does an automation that breaks a rule on

@@ -61,7 +61,9 @@ pub(crate) struct ReferenceTrial {
     /// The characters it is taught.
     pub(crate) characters: CharactersSpec,
     /// The characters the number it is made for reads of it, or `None`
-    /// for every character it is taught, as [`CheckDef::Number`] has them.
+    /// for every character it is taught, as
+    /// [`CheckDef::Number`](appytappy_config::app_file::CheckDef::Number)
+    /// has them.
     pub(crate) reads: Option<String>,
     /// Whether that number ignores digits after the decimal point.
     pub(crate) whole: bool,
