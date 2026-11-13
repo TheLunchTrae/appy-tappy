@@ -62,7 +62,8 @@ export function useRecording(): {
   // Each recorded reading's pixels, for the recording they belong to.
   const [crops, setCrops] = useState<Crops>(NO_CROPS);
 
-  // Fetches the pixels of each reading that has none yet, once, and again after a pause when the ask fails.
+  // Fetches the pixels of each reading that has none yet, once, and again after a pause when the ask fails, up to
+  // `CROP_TRIES` asks in all.
   const asked = useRef<CropAsks>(NO_CROP_ASKS);
   const [retries, retry] = useReducer((count: number) => count + 1, 0);
   const readingCount = view?.readings.length ?? 0;
@@ -81,8 +82,11 @@ export function useRecording(): {
             setCrops((current) => withCrop(current, asked.current.id, recordingId, index, picture));
           }
         } catch (error: unknown) {
-          asked.current = cropAskFailed(asked.current, recordingId, index);
-          setTimeout(retry, CROP_RETRY_MS);
+          const failed = cropAskFailed(asked.current, recordingId, index);
+          asked.current = failed.asks;
+          if (failed.retry) {
+            setTimeout(retry, CROP_RETRY_MS);
+          }
           throw error;
         }
       };

@@ -62,9 +62,11 @@ it was about has gone. Thirteen guards drop such stale messages:
   nothing for a recording that was discarded or replaced (`recorded_pixels`
   in `apps/setup/src-tauri/src/owner/recording.rs`), and the page drops a
   picture that arrives for another recording than the newest it asked for
-  (`withCrop` in `apps/setup/src/lib/review.ts`). Within one recording, the look's
-  gate drops the answer to a look from before **Record more** or from before
-  a frame showed the window at another size than the recording is placed at
+  (`withCrop` in `apps/setup/src/lib/review.ts`) and ignores a failed ask
+  for another recording's picture, which asks for nothing again
+  (`cropAskFailed`). Within one recording, the look's gate drops the answer
+  to a look from before **Record more** or from before a frame showed the
+  window at another size than the recording is placed at
   (`Gate::Abandoned`). The [character check](#character-check) remembers
   the readings it left out under their recording's number, and keeps none
   again for another recording (`leftOutOf` in
@@ -1658,9 +1660,12 @@ the user to review. Its `Sightings` hold `full`, which says why it takes no
 more once a frame did not fit. A reading's picture is answered only for its
 own recording's ticket, one of the
 [stale-message guards](#how-to-read-this-page). The page asks for each
-reading's picture once (`cropsToAsk` in `apps/setup/src/lib/review.ts`); an
+reading's picture once (`cropsToAsk` in `apps/setup/src/lib/review.ts`). An
 ask that fails is taken back (`cropAskFailed`), and the reading is asked for
-again a second later, so review never keeps a reading without its picture.
+again a second later, up to `CROP_TRIES`, five asks in all, so a page whose
+asks cannot reach the owner stops asking. A reading whose asks all failed,
+or whose answer was none because its recording was replaced, stays without
+a picture in review.
 
 ```mermaid
 stateDiagram-v2
