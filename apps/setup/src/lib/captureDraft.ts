@@ -21,7 +21,7 @@ export type Step = 'where' | 'how' | 'check';
 
 /**
  * What the capture screen has set up, apart from its screenshots' pixels, which the draft keeps beside it. The
- * value's side and reading area, its check, and a reference's labels, found text and expected characters are all
+ * value's side and reading area, its check, and a reference's boxes and expected characters are all
  * here; what belongs to a recording that runs or waits for review is not.
  */
 export interface CaptureSetup {

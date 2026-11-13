@@ -30,7 +30,7 @@ function cornerOf(target: EventTarget): Corner | null {
 }
 
 /** A box on the picture other than the region, which a press selects. */
-export interface OtherBox {
+interface OtherBox {
   readonly id: number;
   readonly rect: Rect;
   /** What its tag says, such as its number. */
