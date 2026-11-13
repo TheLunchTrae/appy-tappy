@@ -14,10 +14,10 @@
 //! more pixels than [`LARGEST_PICTURE`], decodes each picture once, and
 //! holds the file to the rules a saved file is held to: [`AppFile::parse`],
 //! then `saved::build` for each value with one `saved::Readers` for the
-//! file's references, as the runtime reads them. Each
-//! picture takes the name the setup app gives it, whatever the file calls
-//! it, so no two values or references share a picture and a later save in
-//! the setup app replaces only its own.
+//! file's references, as the runtime reads them. Each picture takes the
+//! name the setup app gives it, whatever the file calls it, so no two
+//! values or references share a picture and a later save in the setup app
+//! replaces only its own.
 //! [`Shared::of`] holds an application to the same rules before it is
 //! exported, and [`Shared::pack`] reads back what it packed, so a file
 //! AppyTappy exports is one it imports.

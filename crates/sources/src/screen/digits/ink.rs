@@ -12,7 +12,7 @@ use super::super::{Image, Size};
 /// once.
 ///
 /// [`DigitReader::ink`]: super::DigitReader::ink
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Ink {
     /// Whether each pixel is ink, row by row from the top.
     inked: Vec<bool>,
@@ -48,8 +48,7 @@ impl Ink {
 
     /// How many pixels of row `y` in `columns` are ink. The columns and
     /// rows outside the image hold none.
-    #[must_use]
-    pub fn count(&self, columns: Range<u32>, y: u32) -> usize {
+    pub(super) fn count(&self, columns: Range<u32>, y: u32) -> usize {
         self.row(y)
             .get(index(columns.start)..index(columns.end.min(self.size.width)))
             .unwrap_or_default()
@@ -72,7 +71,7 @@ impl Ink {
     /// that hold as much, so a stray pixel elsewhere does not stretch the
     /// line. `None` without ink there.
     #[must_use]
-    pub fn line(&self, columns: &Range<u32>, rows: Range<u32>) -> Option<Range<u32>> {
+    pub fn line(&self, columns: Range<u32>, rows: Range<u32>) -> Option<Range<u32>> {
         let mut best: Option<(Range<u32>, usize)> = None;
         let mut run: Option<(Range<u32>, usize)> = None;
         let end = rows.end;
@@ -171,18 +170,18 @@ mod tests {
             "######", //
             "######", //
         ]);
-        let all = 0..6;
-        assert_eq!(ink.line(&all, 0..12), Some(10..12), "the most ink");
+        let all = || 0..6;
+        assert_eq!(ink.line(all(), 0..12), Some(10..12), "the most ink");
         // Rows 2 to 3 and rows 5 to 8 hold 8 pixels each: the upper one.
-        assert_eq!(ink.line(&all, 0..10), Some(2..4));
-        assert_eq!(ink.line(&all, 4..10), Some(5..9));
+        assert_eq!(ink.line(all(), 0..10), Some(2..4));
+        assert_eq!(ink.line(all(), 4..10), Some(5..9));
         // Only the ink in the columns counts, and only the rows asked for.
-        assert_eq!(ink.line(&(2..6), 0..10), Some(2..4));
-        assert_eq!(ink.line(&(0..2), 0..10), Some(5..9));
-        assert_eq!(ink.line(&all, 0..2), Some(0..1));
-        assert_eq!(ink.line(&all, 10..11), Some(10..11), "cut by the rows");
-        assert_eq!(ink.line(&all, 10..40), Some(10..12), "cut by the image");
-        assert_eq!(ink.line(&all, 1..2), None);
-        assert_eq!(ink.line(&(4..6), 0..10), None);
+        assert_eq!(ink.line(2..6, 0..10), Some(2..4));
+        assert_eq!(ink.line(0..2, 0..10), Some(5..9));
+        assert_eq!(ink.line(all(), 0..2), Some(0..1));
+        assert_eq!(ink.line(all(), 10..11), Some(10..11), "cut by the rows");
+        assert_eq!(ink.line(all(), 10..40), Some(10..12), "cut by the image");
+        assert_eq!(ink.line(all(), 1..2), None);
+        assert_eq!(ink.line(4..6, 0..10), None);
     }
 }
