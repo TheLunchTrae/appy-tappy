@@ -540,6 +540,7 @@ stateDiagram-v2
     Empty --> Ended: the check finds the window closed or the device lost
     Holding --> Ended: the check finds the window closed or the device lost
     Empty --> Ended: a read cannot follow the window's size, or the device is lost
+    Holding --> Ended: a read cannot follow the window's size, or the device is lost
     Empty --> [*]: Stop
     Holding --> [*]: Stop, the frame is given back
     Ended --> [*]
@@ -557,8 +558,8 @@ stateDiagram-v2
   frame, has the crop's regions copied, hands the copy to the handler, and
   takes the handler's wait. A wait of 64 ms or more also sets how often the
   system is asked for frames, as [Capture](Screen-regions.md#capture)
-  describes. A handler that returns `NO_MORE_FRAMES` is handed no more,
-  as a one-frame grab's does.
+  describes. A handler that returns `NO_MORE_FRAMES`, as a one-frame grab's
+  does, is handed no frame for a day, longer than such a capture runs.
 - **A frame that fails.** A region that lies outside the window's content, or
   a copy the system fails, reaches the handler as that frame's error, and the
   loop goes on with the wait the handler returns. The
@@ -568,7 +569,7 @@ stateDiagram-v2
   lost. Either ends the capture, and so does a read that fails while the
   device is lost and a system that cannot make frames at the window's new
   size. The handler receives one `NotConnected` error that says why, and the
-  loop returns. The capture's owner recovers: the runtime's
+  loop gives back any frame it holds and returns. The capture's owner recovers: the runtime's
   [reader thread](#reader-thread) captures again after its backoff.
 - **Stop.** Closing or dropping the session wakes the loop, which gives back
   the frame it holds and returns.
