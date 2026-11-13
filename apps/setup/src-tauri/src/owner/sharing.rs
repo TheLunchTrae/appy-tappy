@@ -89,7 +89,7 @@ impl<H: Host> Owner<H> {
         file.origin = OriginDef::Imported { file: from };
         let taken: Vec<&str> = saved.iter().map(|app| app.id.as_str()).collect();
         let id = new_app_id(&file.window.executable, &taken);
-        self.write_app(&id, Changed::Values, Write::Save(&file, &pictures))?;
+        self.write_app(&id, Changed::Values, Write::New(&file, &pictures))?;
         Ok(id)
     }
 }
