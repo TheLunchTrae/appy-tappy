@@ -13,8 +13,9 @@
 //! packed one under another as a [`Placed`] lays them out, so the capture
 //! copies about as many pixels as the values need. Windows pushes a
 //! frame only when the window's content changes, so a still window is
-//! copied no more, and the [`ReadSchedule`] backs off while the values hold
-//! still. What a still window costs is the checks below: the reader lists
+//! copied no more, and the
+//! [`ReadSchedule`](appytappy_sources::schedule::ReadSchedule) backs off
+//! while the values hold still. What a still window costs is the checks below: the reader lists
 //! the processes and windows every [`CHECK_AGAIN`], and the capture checks
 //! its graphics device on a timer while no frame comes.
 //! A value is sent to the owner only when it reads differently from its last
