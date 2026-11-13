@@ -6,11 +6,10 @@ use std::hint;
 use std::time::{Duration, Instant};
 
 use appytappy_config::signal::Value;
-use appytappy_sources::screen::Image;
 use appytappy_sources::screen::check::Check;
 use appytappy_sources::screen::digits::{CharacterScore, GlyphScore};
 use appytappy_sources::screen::workings::Workings;
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{Image, Rgb};
 use serde::Serialize;
 
 /// A live reading's debug details.
@@ -75,6 +74,9 @@ pub(crate) struct CharacterView {
     pub(crate) best: Option<GlyphView>,
     /// The closest glyph of another character, if the reference has one.
     pub(crate) runner_up: Option<GlyphView>,
+    /// Whether the value leaves the character out, so it reads as text and
+    /// not as a part of the number.
+    pub(crate) left_out: bool,
 }
 
 /// How close a character is to one glyph.
@@ -194,6 +196,7 @@ impl From<CharacterScore> for CharacterView {
         Self {
             best: score.best.map(GlyphView::from),
             runner_up: score.runner_up.map(GlyphView::from),
+            left_out: score.left_out,
         }
     }
 }

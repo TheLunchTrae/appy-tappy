@@ -14,8 +14,7 @@
 //! turns into a saved reference the same way.
 
 use appytappy_config::app_file::{CheckDef, ColorDef, RegionDef, StateDef, state_image_name};
-use appytappy_sources::screen::{Image, Region, Size};
-use appytappy_sources::system::Rgb;
+use appytappy_sources::screen::{EmptyRegion, Image, Region, Rgb, Size};
 use serde::{Deserialize, Serialize};
 
 use crate::screenshots::Shots;
@@ -42,13 +41,43 @@ pub(crate) struct RegionSpec {
 
 impl From<Region> for RegionSpec {
     fn from(region: Region) -> Self {
-        let size = region.size();
+        RegionDef::from(region).into()
+    }
+}
+
+impl From<RegionDef> for RegionSpec {
+    fn from(region: RegionDef) -> Self {
+        let RegionDef {
+            x,
+            y,
+            width,
+            height,
+        } = region;
         Self {
-            x: region.x(),
-            y: region.y(),
-            width: size.width,
-            height: size.height,
+            x,
+            y,
+            width,
+            height,
         }
+    }
+}
+
+impl TryFrom<RegionSpec> for Region {
+    type Error = EmptyRegion;
+
+    fn try_from(region: RegionSpec) -> Result<Self, EmptyRegion> {
+        let RegionSpec {
+            x,
+            y,
+            width,
+            height,
+        } = region;
+        Self::try_from(RegionDef {
+            x,
+            y,
+            width,
+            height,
+        })
     }
 }
 
@@ -63,32 +92,20 @@ pub(crate) struct ColorSpec {
 }
 
 impl From<Rgb> for ColorSpec {
-    fn from(color: Rgb) -> Self {
-        Self {
-            red: color.red,
-            green: color.green,
-            blue: color.blue,
-        }
+    fn from(Rgb { red, green, blue }: Rgb) -> Self {
+        Self { red, green, blue }
+    }
+}
+
+impl From<ColorSpec> for Rgb {
+    fn from(ColorSpec { red, green, blue }: ColorSpec) -> Self {
+        Self { red, green, blue }
     }
 }
 
 impl From<ColorSpec> for ColorDef {
     fn from(color: ColorSpec) -> Self {
-        Self {
-            red: color.red,
-            green: color.green,
-            blue: color.blue,
-        }
-    }
-}
-
-impl From<ColorSpec> for Rgb {
-    fn from(color: ColorSpec) -> Self {
-        Self {
-            red: color.red,
-            green: color.green,
-            blue: color.blue,
-        }
+        Rgb::from(color).into()
     }
 }
 
@@ -277,7 +294,7 @@ pub(crate) fn to_saved_fix(
         },
     };
     Ok(SavedCheck {
-        region: region_def(region),
+        region: region.into(),
         check,
         pictures,
     })
@@ -360,18 +377,7 @@ fn state_picture(
 
 /// `region` as a [`Region`].
 fn to_region(region: RegionSpec) -> Result<Region, SpecError> {
-    Region::new(region.x, region.y, region.width, region.height).ok_or(SpecError::EmptyRegion)
-}
-
-/// `region` as the file spells it.
-fn region_def(region: Region) -> RegionDef {
-    let size = region.size();
-    RegionDef {
-        x: region.x(),
-        y: region.y(),
-        width: size.width,
-        height: size.height,
-    }
+    Region::try_from(region).map_err(|EmptyRegion| SpecError::EmptyRegion)
 }
 
 /// The region `region` describes and the window size of the screenshot it

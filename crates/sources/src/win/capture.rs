@@ -5,24 +5,19 @@
 //! event handlers only wake a thread this module owns, and that thread makes
 //! every Direct3D and capture call. The system's own threads fill the frame
 //! pool on the same Direct3D device, so the device is set to serialize its
-//! calls. Between reads the thread keeps only the newest frame and copies
-//! nothing; when the handler's wait ends, the GPU copies just the values'
-//! regions into a small CPU-readable texture, as the crop's layout packs
-//! them, and the thread copies those rows into a reused buffer. A frame takes
-//! in the window's title bar and borders, so each read first finds where the
-//! window's content lies in it, which regions are measured from.
+//! calls.
 //!
-//! A capture that can no longer produce frames ends the way a closed window
-//! does: its handler receives a [`io::ErrorKind::NotConnected`] error that
-//! says why, and the thread stops. That happens when the Direct3D device is
-//! lost, such as after a graphics driver reset or update, and when the frame
-//! pool cannot follow the window to a new size. A closed window and a lost
-//! device stop frames rather than fail them, so the thread checks every
-//! [`HEALTH_CHECK`], whatever arrives meanwhile, that the window is still
-//! there and the device still works. The capture item's own Closed event
-//! would say sooner that the window closed, but registering a handler for it
-//! left a thread handle, events and thread pool waits open after every
-//! capture, even once the handler was removed.
+//! [`run_frames`] decides when a frame is read, which one, and what ends the
+//! capture; this module only makes the calls it asks for, as its
+//! [`FrameSource`]. To read a frame, the GPU copies just the values' regions
+//! into a small CPU-readable texture, as the crop's layout packs them, and
+//! the thread copies those rows into a reused buffer.
+//!
+//! A closed window and a lost Direct3D device stop frames rather than fail
+//! them, so the loop asks about both on a deadline. The capture item's own
+//! Closed event would say sooner that the window closed, but registering a
+//! handler for it left a thread handle, events and thread pool waits open
+//! after every capture, even once the handler was removed.
 //!
 //! The thread joins the Windows Runtime's multithreaded apartment for its
 //! whole life and leaves it once every object is released, so the system
@@ -66,11 +61,11 @@ use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 use windows::core::{Interface, factory};
 
 use super::{WindowsSystem, client_on_screen, frame_on_screen};
-use crate::schedule::{ReadClock, frame_interval};
 use crate::screen::{
-    Capture, CaptureSession, Crop, Frame, FrameBuffer, FrameHandler, OutsideWindow, Placement,
-    Region, Size, content, in_frame, run_capture,
+    Capture, CaptureSession, Crop, FrameBuffer, FrameHandler, FrameSource, Placement, Size, Wake,
+    composed_ago, run_capture, run_frames,
 };
+use crate::system::Bounds;
 
 /// The frame pool's buffers: one the thread may hold until its next read,
 /// and one the system fills meanwhile.
@@ -78,16 +73,6 @@ const POOL_BUFFERS: i32 = 2;
 
 /// How long `start` waits for the capture thread to set up.
 const START_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// How often the thread checks that its window is there and its Direct3D
-/// device works.
-const HEALTH_CHECK: Duration = Duration::from_secs(2);
-
-/// Windows time spans count 100-nanosecond ticks.
-const TICKS_PER_SECOND: i128 = 10_000_000;
-
-/// The frame handler as [`run_capture`] lends it to the capture's work.
-type Handler<'handler> = dyn FnMut(io::Result<Frame<'_>>) -> Duration + 'handler;
 
 /// What wakes the capture thread.
 enum Event {
@@ -102,9 +87,9 @@ enum Event {
 /// included. An extra frame wake costs one look at an empty pool, because
 /// the thread takes every frame in the pool when it wakes.
 #[derive(Clone)]
-struct Wake(Sender<Event>);
+struct Waker(Sender<Event>);
 
-impl Wake {
+impl Waker {
     /// Sends `event` without waiting.
     fn send(&self, event: Event) {
         #[expect(
@@ -119,7 +104,7 @@ impl Wake {
 /// waiting; [`CaptureSession::close`] also waits for the thread to end.
 #[derive(Debug)]
 pub struct WindowsCaptureSession {
-    events: Wake,
+    events: Waker,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -149,9 +134,9 @@ impl std::fmt::Debug for Event {
     }
 }
 
-impl std::fmt::Debug for Wake {
+impl std::fmt::Debug for Waker {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("Wake")
+        formatter.write_str("Waker")
     }
 }
 
@@ -168,12 +153,12 @@ impl Capture for WindowsSystem {
         let window = usize::try_from(window)
             .map_err(|_overflow| io::Error::from(io::ErrorKind::InvalidInput))?;
         let (events, received) = mpsc::channel();
-        let events = Wake(events);
+        let events = Waker(events);
         let (ready, started) = mpsc::sync_channel(1);
         let wake = events.clone();
         let thread = thread::Builder::new()
             .name("appytappy-capture".into())
-            .spawn(move || run(window, crop, throttle, handler, &wake, &received, &ready))?;
+            .spawn(move || run(window, &crop, throttle, handler, &wake, received, &ready))?;
         let session = WindowsCaptureSession {
             events,
             thread: Some(thread),
@@ -198,11 +183,11 @@ impl Capture for WindowsSystem {
 /// frames until told to stop.
 fn run(
     window: usize,
-    crop: Crop,
+    crop: &Crop,
     throttle: Duration,
     mut handler: FrameHandler,
-    wake: &Wake,
-    events: &Receiver<Event>,
+    wake: &Waker,
+    events: Receiver<Event>,
     ready: &SyncSender<io::Result<()>>,
 ) {
     let window = HWND(ptr::without_provenance_mut(window));
@@ -219,7 +204,7 @@ fn run(
             return;
         },
     };
-    let mut capture = match Capturer::start(window, throttle, wake) {
+    let (mut capture, frames) = match Capturer::start(window, throttle, wake, events) {
         Ok(capture) => capture,
         Err(error) => {
             #[expect(
@@ -238,7 +223,7 @@ fn run(
     // A panic while it handles frames reaches the handler as the capture's
     // end, and `stop` still releases what the capture holds.
     run_capture(&mut handler, |handler| {
-        capture.handle_frames(&crop, handler, events);
+        run_frames(&mut capture, frames, throttle, crop, handler);
     });
     capture.stop();
 }
@@ -270,13 +255,6 @@ impl Drop for Apartment {
     }
 }
 
-/// A frame held until the handler's wait ends.
-struct Held {
-    frame: Direct3D11CaptureFrame,
-    received: Instant,
-    delay: Duration,
-}
-
 /// Every Direct3D and capture object of one session, owned by its thread.
 struct Capturer {
     window: HWND,
@@ -288,20 +266,24 @@ struct Capturer {
     context: ID3D11DeviceContext,
     winrt_device: IDirect3DDevice,
     pool: Direct3D11CaptureFramePool,
-    pool_size: SizeInt32,
     session: GraphicsCaptureSession,
     arrived: i64,
-    /// The least time between two frames that the session may ask for.
-    throttle: Duration,
-    /// The time between frames that the session asks the system for now.
-    asked: Duration,
     staging: Option<(Size, ID3D11Texture2D)>,
-    buffer: FrameBuffer,
-    ticks_per_second: i128,
+    /// How many times a second the performance counter counts.
+    frequency: i64,
+    /// What wakes the thread.
+    events: Receiver<Event>,
 }
 
 impl Capturer {
-    fn start(window: HWND, throttle: Duration, wake: &Wake) -> windows::core::Result<Self> {
+    /// Starts capturing `window`, asking for at most one frame every
+    /// `throttle`, and returns the capture with the size of its frames.
+    fn start(
+        window: HWND,
+        throttle: Duration,
+        wake: &Waker,
+        events: Receiver<Event>,
+    ) -> windows::core::Result<(Self, Size)> {
         // First, so a window that is already gone fails before anything is
         // made, and one whose handle another window takes meanwhile reads
         // as closed at the first check.
@@ -359,293 +341,30 @@ impl Capturer {
                 &winrt_device,
             );
         })?;
-        Ok(Self {
+        let capture = Self {
             window,
             owner,
             device,
             context,
             winrt_device,
             pool,
-            pool_size,
             session,
             arrived,
-            throttle,
-            asked: throttle,
             staging: None,
-            buffer: FrameBuffer::default(),
-            ticks_per_second: i128::from(frequency).max(1),
-        })
-    }
-
-    /// Waits for frames and hands the newest to `handler` whenever its last
-    /// wait has ended, until the session stops or the capture ends; an
-    /// ending reaches the handler as a [`io::ErrorKind::NotConnected`] error.
-    fn handle_frames(&mut self, crop: &Crop, handler: &mut Handler<'_>, events: &Receiver<Event>) {
-        let mut held: Option<Held> = None;
-        let mut clock = ReadClock::new(Instant::now());
-        let mut checked = Instant::now();
-        loop {
-            let now = Instant::now();
-            let check_in = HEALTH_CHECK.saturating_sub(now.saturating_duration_since(checked));
-            let wait = match held {
-                Some(_) => clock.remaining(now).min(check_in),
-                None => check_in,
-            };
-            match events.recv_timeout(wait) {
-                Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(Event::Frame) => self.take_newest(&mut held),
-                Err(RecvTimeoutError::Timeout) => {},
-            }
-            // Checked on a deadline, so neither steady wakes nor a handler
-            // that waits long put the check off.
-            let now = Instant::now();
-            if now.saturating_duration_since(checked) >= HEALTH_CHECK {
-                checked = now;
-                if let Some(ending) = self.closed_window().or_else(|| self.lost_device()) {
-                    end(handler, ending);
-                    break;
-                }
-            }
-            if let Some(frame) = held.take_if(|_| clock.due(Instant::now())) {
-                let Some(wait) = self.read(frame, crop, handler) else {
-                    break;
-                };
-                clock.after_read(Instant::now(), wait);
-                self.follow(wait);
-            }
-        }
-        if let Some(frame) = held {
-            close(&frame.frame);
-        }
-    }
-
-    /// Asks the system for frames no more often than the handler reads
-    /// them, as [`frame_interval`] works out, so a window whose values hold
-    /// still costs the system fewer copies too. The system is expected to
-    /// hold back a change drawn inside that time and deliver it once the time
-    /// has passed, which is when the handler would have read again anyway;
-    /// the footprint check's settle check tests that on Windows.
-    fn follow(&mut self, wait: Duration) {
-        let interval = frame_interval(wait, self.throttle);
-        if interval != self.asked {
-            self.asked = interval;
-            ask_interval(&self.session, interval);
-        }
-    }
-
-    /// Takes every frame the pool holds, keeping only the newest.
-    fn take_newest(&self, held: &mut Option<Held>) {
-        while let Ok(frame) = self.pool.TryGetNextFrame() {
-            let received = Instant::now();
-            let delay = self.delay(&frame).unwrap_or_default();
-            if let Some(older) = held.replace(Held {
-                frame,
-                received,
-                delay,
-            }) {
-                close(&older.frame);
-            }
-        }
+            frequency,
+            events,
+        };
+        Ok((capture, size_of(pool_size)))
     }
 
     /// How long ago the system composed `frame`.
     fn delay(&self, frame: &Direct3D11CaptureFrame) -> Option<Duration> {
-        let composed = i128::from(frame.SystemRelativeTime().ok()?.Duration);
+        let composed = frame.SystemRelativeTime().ok()?.Duration;
         let mut counter = 0;
         #[expect(unsafe_code, reason = "a Win32 call")]
         // SAFETY: `counter` is a live i64 the call writes.
         unsafe { QueryPerformanceCounter(&raw mut counter) }.ok()?;
-        let now = i128::from(counter)
-            .checked_mul(TICKS_PER_SECOND)?
-            .checked_div(self.ticks_per_second)?;
-        let ticks = u64::try_from(now.checked_sub(composed)?).ok()?;
-        Some(Duration::from_nanos(ticks.saturating_mul(100)))
-    }
-
-    /// Copies `crop` of one frame and passes it to `handler`, returning the
-    /// handler's wait, or `None` when the capture ended.
-    fn read(&mut self, held: Held, crop: &Crop, handler: &mut Handler<'_>) -> Option<Duration> {
-        let copied = self.copy(&held.frame, crop);
-        close(&held.frame);
-        match copied {
-            Ok(Some(window_size)) => Some(match self.buffer.image() {
-                Some(image) => handler(Ok(Frame {
-                    window_size,
-                    image,
-                    received: held.received,
-                    delay: held.delay,
-                })),
-                None => Duration::ZERO,
-            }),
-            // The pool was resized for the window's new size; the next frame
-            // has the right size.
-            Ok(None) => Some(Duration::ZERO),
-            Err(error) => match self.lost_device() {
-                Some(lost) => {
-                    end(handler, lost);
-                    None
-                },
-                None if error.kind() == io::ErrorKind::NotConnected => {
-                    end(handler, error);
-                    None
-                },
-                None => Some(handler(Err(error))),
-            },
-        }
-    }
-
-    /// Why the capture cannot go on because its window closed, or `None`
-    /// while the window is there.
-    fn closed_window(&self) -> Option<io::Error> {
-        (window_owner(self.window) != Some(self.owner)).then(|| ended("the captured window closed"))
-    }
-
-    /// Why the Direct3D device can no longer be used, such as after a
-    /// graphics driver reset, or `None` while it works.
-    fn lost_device(&self) -> Option<io::Error> {
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: the call takes no arguments and only reads the state of
-        // `device`, which is live.
-        let removed = unsafe { self.device.GetDeviceRemovedReason() };
-        removed
-            .err()
-            .map(|error| ended(&format!("the graphics device was lost: {error}")))
-    }
-
-    /// Where the window's content lies in a frame of `captured` size, or
-    /// `None` when its client area cannot be read or covers none of the
-    /// frame, and the whole frame is the content.
-    fn content(&self, captured: Size) -> Option<Region> {
-        let frame = frame_on_screen(self.window).ok()?;
-        let client = client_on_screen(self.window).ok()?;
-        content(frame, client, captured)
-    }
-
-    /// Copies `crop` of `frame`'s content into the buffer and returns the
-    /// content's size, or `None` when the frame had to be dropped for a
-    /// resize.
-    fn copy(&mut self, frame: &Direct3D11CaptureFrame, crop: &Crop) -> io::Result<Option<Size>> {
-        let surface = frame.ContentSize()?;
-        if surface != self.pool_size {
-            self.pool
-                .Recreate(
-                    &self.winrt_device,
-                    DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                    POOL_BUFFERS,
-                    surface,
-                )
-                .map_err(|error| {
-                    ended(&format!(
-                        "the capture cannot follow the window's new size: {error}"
-                    ))
-                })?;
-            self.pool_size = surface;
-            return Ok(None);
-        }
-        let captured = Size {
-            width: u32::try_from(surface.Width).unwrap_or_default(),
-            height: u32::try_from(surface.Height).unwrap_or_default(),
-        };
-        let area = self
-            .content(captured)
-            .or_else(|| Region::whole(captured))
-            .ok_or(OutsideWindow {
-                window_size: captured,
-            })?;
-        let window_size = area.size();
-        let outside = OutsideWindow { window_size };
-        let whole = [Placement {
-            from: Region::whole(window_size).ok_or(outside)?,
-            y: 0,
-        }];
-        let (size, placements) = match crop {
-            Crop::Whole => (window_size, whole.as_slice()),
-            Crop::Layout(layout) if layout.fits(window_size) => (layout.size(), layout.copies()),
-            Crop::Layout(_) => return Err(outside.into()),
-        };
-        let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `access` wraps the frame's live surface; the call returns a
-        // new reference to its texture.
-        let source: ID3D11Texture2D = unsafe { access.GetInterface() }?;
-        let staging = self.staging(size)?;
-        for placement in placements {
-            let from = in_frame(placement.from, area).ok_or(outside)?;
-            let copied = D3D11_BOX {
-                left: from.x(),
-                top: from.y(),
-                front: 0,
-                right: from.right(),
-                bottom: from.bottom(),
-                back: 1,
-            };
-            #[expect(unsafe_code, reason = "a Win32 call")]
-            // SAFETY: both textures are live and BGRA; `copied` lies inside
-            // the window's content, which `in_frame` checked, and the content
-            // lies inside `captured`, which `content` makes sure of; the
-            // source has the size `captured`, since a frame of another size
-            // than the pool's recreated the pool above instead. The layout
-            // placed the copy inside the staging texture, which has the
-            // layout's size.
-            unsafe {
-                self.context.CopySubresourceRegion(
-                    &staging,
-                    0,
-                    0,
-                    placement.y,
-                    0,
-                    &source,
-                    0,
-                    Some(&raw const copied),
-                );
-            };
-        }
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `staging` is a live CPU-readable texture and `mapped` a live
-        // struct the call writes.
-        unsafe {
-            self.context
-                .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped))
-        }?;
-        let copied = self.copy_rows(&mapped, size);
-        #[expect(unsafe_code, reason = "a Win32 call")]
-        // SAFETY: `staging` was mapped above and is unmapped once.
-        unsafe {
-            self.context.Unmap(&staging, 0);
-        };
-        copied.map(|()| Some(window_size))
-    }
-
-    /// Copies a mapped texture's rows into the buffer.
-    fn copy_rows(&mut self, mapped: &D3D11_MAPPED_SUBRESOURCE, size: Size) -> io::Result<()> {
-        let invalid = |error| io::Error::new(io::ErrorKind::InvalidData, error);
-        let pitch = usize::try_from(mapped.RowPitch).map_err(io::Error::other)?;
-        let row = usize::try_from(size.width)
-            .ok()
-            .and_then(|width| width.checked_mul(4));
-        let length = usize::try_from(size.height)
-            .ok()
-            .and_then(|height| height.checked_sub(1))
-            .and_then(|rows| rows.checked_mul(pitch))
-            .zip(row)
-            .and_then(|(start, row)| start.checked_add(row))
-            .ok_or_else(|| io::Error::other("the mapped texture is too large"))?;
-        if mapped.pData.is_null() || row.is_none_or(|row| pitch < row) {
-            return Err(io::Error::other(
-                "the mapped texture is smaller than its region",
-            ));
-        }
-        #[expect(unsafe_code, reason = "reads a mapped Direct3D texture")]
-        // SAFETY: Direct3D mapped `size.height` rows `pitch` bytes apart at
-        // `pData`, each at least `row` bytes long since `pitch >= row`, so
-        // the last row ends `length` bytes in; the mapping stays valid until
-        // `Unmap`, after this slice is gone.
-        let source =
-            unsafe { slice::from_raw_parts(mapped.pData.cast::<u8>().cast_const(), length) };
-        self.buffer
-            .fill_pitched(size, source, pitch)
-            .map_err(invalid)
+        composed_ago(composed, counter, self.frequency)
     }
 
     /// The staging texture for `size`, made once and remade only when the
@@ -695,6 +414,139 @@ impl Capturer {
             &self.context,
             &self.winrt_device,
         );
+    }
+}
+
+impl FrameSource for Capturer {
+    type Frame = Direct3D11CaptureFrame;
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn wait(&mut self, timeout: Duration) -> Wake {
+        match self.events.recv_timeout(timeout) {
+            Ok(Event::Frame) => Wake::Frame,
+            Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => Wake::Stop,
+            Err(RecvTimeoutError::Timeout) => Wake::Timeout,
+        }
+    }
+
+    fn next_frame(&mut self) -> Option<(Direct3D11CaptureFrame, Duration)> {
+        let frame = self.pool.TryGetNextFrame().ok()?;
+        let delay = self.delay(&frame).unwrap_or_default();
+        Some((frame, delay))
+    }
+
+    fn release(&mut self, frame: Direct3D11CaptureFrame) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a frame that fails to close is released when its last reference drops"
+        )]
+        let _ = frame.Close();
+    }
+
+    /// A window handle that names no window, or one that Windows reused for
+    /// another process's window, is a closed window.
+    fn window_closed(&self) -> bool {
+        window_owner(self.window) != Some(self.owner)
+    }
+
+    fn lost_device(&self) -> Option<String> {
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: the call takes no arguments and only reads the state of
+        // `device`, which is live.
+        let removed = unsafe { self.device.GetDeviceRemovedReason() };
+        removed.err().map(|error| error.to_string())
+    }
+
+    fn frame_size(&self, frame: &Direct3D11CaptureFrame) -> io::Result<Size> {
+        Ok(size_of(frame.ContentSize()?))
+    }
+
+    fn resize_frames(&mut self, size: Size) -> Result<(), String> {
+        let length = |pixels: u32| i32::try_from(pixels).map_err(|error| error.to_string());
+        self.pool
+            .Recreate(
+                &self.winrt_device,
+                DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                POOL_BUFFERS,
+                SizeInt32 {
+                    Width: length(size.width)?,
+                    Height: length(size.height)?,
+                },
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    fn window_bounds(&self) -> Option<(Bounds, Bounds)> {
+        let frame = frame_on_screen(self.window).ok()?;
+        let client = client_on_screen(self.window).ok()?;
+        Some((frame, client))
+    }
+
+    fn copy(
+        &mut self,
+        frame: &Direct3D11CaptureFrame,
+        size: Size,
+        copies: &[Placement],
+        buffer: &mut FrameBuffer,
+    ) -> io::Result<()> {
+        let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `access` wraps the frame's live surface; the call returns a
+        // new reference to its texture.
+        let source: ID3D11Texture2D = unsafe { access.GetInterface() }?;
+        let staging = self.staging(size)?;
+        for placement in copies {
+            let from = placement.from;
+            let source_box = D3D11_BOX {
+                left: from.x(),
+                top: from.y(),
+                front: 0,
+                right: from.right(),
+                bottom: from.bottom(),
+                back: 1,
+            };
+            #[expect(unsafe_code, reason = "a Win32 call")]
+            // SAFETY: both textures are live and BGRA, and `source_box` is a
+            // live local the call reads. The box lies inside the source,
+            // and the copy lands inside the staging texture, which has
+            // `size`: `run_frames` passes only copies that lie inside the
+            // frame's picture and land inside `size`, and reads a frame
+            // only when its picture has the size of the pool's textures.
+            unsafe {
+                self.context.CopySubresourceRegion(
+                    &staging,
+                    0,
+                    0,
+                    placement.y,
+                    0,
+                    &source,
+                    0,
+                    Some(&raw const source_box),
+                );
+            };
+        }
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `staging` is a live CPU-readable texture and `mapped` a live
+        // struct the call writes.
+        unsafe {
+            self.context
+                .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped))
+        }?;
+        let filled = copy_rows(&mapped, size, buffer);
+        #[expect(unsafe_code, reason = "a Win32 call")]
+        // SAFETY: `staging` was mapped above and is unmapped once.
+        unsafe {
+            self.context.Unmap(&staging, 0);
+        };
+        filled
+    }
+
+    fn ask_interval(&mut self, interval: Duration) {
+        ask_interval(&self.session, interval);
     }
 }
 
@@ -781,24 +633,34 @@ fn window_owner(window: HWND) -> Option<u32> {
     (thread != 0).then_some(process)
 }
 
-/// The error that tells a handler its capture ended.
-fn ended(why: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::NotConnected, why)
+/// `size` as the sizes of pictures are counted; a side the system gives as
+/// negative counts as none.
+fn size_of(size: SizeInt32) -> Size {
+    Size {
+        width: u32::try_from(size.Width).unwrap_or_default(),
+        height: u32::try_from(size.Height).unwrap_or_default(),
+    }
 }
 
-/// Tells `handler` that its capture ended. Its wait is moot: nothing more
-/// will arrive.
-fn end(handler: &mut Handler<'_>, error: io::Error) {
-    let _wait = handler(Err(error));
-}
-
-/// Returns a frame's buffer to the pool.
-fn close(frame: &Direct3D11CaptureFrame) {
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "a frame that fails to close is released when its last reference drops"
-    )]
-    let _ = frame.Close();
+/// Copies a mapped texture's rows of a `size` picture into `buffer`.
+fn copy_rows(
+    mapped: &D3D11_MAPPED_SUBRESOURCE,
+    size: Size,
+    buffer: &mut FrameBuffer,
+) -> io::Result<()> {
+    let invalid = |error| io::Error::new(io::ErrorKind::InvalidData, error);
+    let pitch = usize::try_from(mapped.RowPitch).map_err(io::Error::other)?;
+    let length = FrameBuffer::pitched_len(size, pitch).map_err(invalid)?;
+    if mapped.pData.is_null() {
+        return Err(io::Error::other("the texture was mapped nowhere"));
+    }
+    #[expect(unsafe_code, reason = "reads a mapped Direct3D texture")]
+    // SAFETY: Direct3D mapped `size.height` rows `pitch` bytes apart at
+    // `pData`, which is not null, each at least a row of `size.width` pixels
+    // long, so the last row ends `length` bytes in, as `pitched_len` counts;
+    // the mapping stays valid until `Unmap`, after this slice is gone.
+    let source = unsafe { slice::from_raw_parts(mapped.pData.cast::<u8>().cast_const(), length) };
+    buffer.fill_pitched(size, source, pitch).map_err(invalid)
 }
 
 /// A Direct3D device on the GPU, or on Windows' software renderer when no
@@ -836,7 +698,7 @@ mod tests {
 
     use super::*;
     use crate::screen::{Image, Layout, Region};
-    use crate::system::System;
+    use crate::system::{Bounds, System};
     use crate::win::window_handle;
 
     /// Captures a visible window on the desktop of whoever runs it. It is
@@ -967,7 +829,8 @@ mod tests {
             })
             .expect("a visible window with a title bar");
         let (size, image) = capture_once(&system, window.handle, Crop::Whole);
-        assert_eq!(Some(size), system.content_size(window.handle).unwrap());
+        let content = system.content_bounds(window.handle).unwrap();
+        assert_eq!(Some(size), content.and_then(Bounds::size));
         assert_eq!(image.size(), size);
     }
 

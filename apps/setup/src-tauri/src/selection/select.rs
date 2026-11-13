@@ -1,19 +1,17 @@
 //! Selecting the thing a state check looks for on a screenshot.
 //!
-//! The setup app offers two ways to select it instead of drawing its box
-//! exactly. [`snap`] shrinks a rough box to the thing inside it, and
-//! [`grow`] spreads from a clicked pixel over similar colors, like a magic
-//! wand. Either gives a [`Selection`]: the box around the thing and a
-//! [`Mask`] of its pixels, which the check compares while it ignores the
-//! background around them.
+//! [`snap`] shrinks a rough box to the thing inside it, and [`grow`] spreads
+//! from a clicked pixel over similar colors, like a magic wand. Either gives
+//! a [`Selection`]: the box around the thing and a [`Mask`] of its pixels,
+//! which the check compares while it ignores the background around them.
 //!
 //! Colors are compared per channel: two colors are alike when each of their
-//! red, green, and blue differ by at most a tolerance, as a color check does.
+//! red, green, and blue differ by at most a tolerance, as [`Rgb::near`] says.
 
 use std::collections::HashMap;
 
-use super::mask::{Mask, pixels};
-use super::{Image, Region, Size};
+use appytappy_sources::screen::mask::Mask;
+use appytappy_sources::screen::{Image, Region, Rgb, Size};
 
 /// The most background colors [`snap`] collects from a box's edge. A plain
 /// background, even a gradient, has far fewer; more means the edge is not
@@ -23,7 +21,7 @@ const MAX_BACKGROUND_COLORS: usize = 256;
 /// A thing selected on a screenshot: its box and which pixels in the box
 /// belong to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Selection {
+pub(crate) struct Selection {
     region: Region,
     mask: Mask,
 }
@@ -31,19 +29,19 @@ pub struct Selection {
 impl Selection {
     /// The box around the selected pixels, in the screenshot's pixels.
     #[must_use]
-    pub const fn region(&self) -> Region {
+    pub(crate) const fn region(&self) -> Region {
         self.region
     }
 
     /// Which pixels of [`Selection::region`] are selected.
     #[must_use]
-    pub const fn mask(&self) -> &Mask {
+    pub(crate) const fn mask(&self) -> &Mask {
         &self.mask
     }
 
     /// Whether the pixel at (`x`, `y`) of the screenshot is selected.
     #[must_use]
-    pub fn contains(&self, x: u32, y: u32) -> bool {
+    pub(crate) fn contains(&self, x: u32, y: u32) -> bool {
         let (Some(column), Some(row)) = (
             x.checked_sub(self.region.x()),
             y.checked_sub(self.region.y()),
@@ -61,7 +59,7 @@ impl Selection {
 
     /// The pixels selected here or in `other`.
     #[must_use]
-    pub fn union(&self, other: &Self) -> Self {
+    pub(crate) fn union(&self, other: &Self) -> Self {
         let left = self.region.x().min(other.region.x());
         let top = self.region.y().min(other.region.y());
         let right = self.region.right().max(other.region.right());
@@ -80,7 +78,7 @@ impl Selection {
     /// The pixels selected here but not in `other`, or `None` when `other`
     /// covers them all.
     #[must_use]
-    pub fn without(&self, other: &Self) -> Option<Self> {
+    pub(crate) fn without(&self, other: &Self) -> Option<Self> {
         trim(self.region, |x, y| {
             self.contains(x, y) && !other.contains(x, y)
         })
@@ -90,7 +88,7 @@ impl Selection {
     /// selection's own box, as after the user adjusts the box by hand. It is
     /// `None` when no pixel of `region` is selected.
     #[must_use]
-    pub fn mask_in(&self, region: Region) -> Option<Mask> {
+    pub(crate) fn mask_in(&self, region: Region) -> Option<Mask> {
         let kept = points(region).map(|(x, y)| self.contains(x, y)).collect();
         Mask::new(region.size(), kept).ok()
     }
@@ -105,25 +103,25 @@ impl Selection {
 /// such as inside the letter O. It is `None` when `rough` reaches past the
 /// image or holds only background.
 #[must_use]
-pub fn snap(image: &Image, rough: Region, tolerance: u8) -> Option<Selection> {
+pub(crate) fn snap(image: &Image, rough: Region, tolerance: u8) -> Option<Selection> {
     if !rough.fits(image.size()) {
         return None;
     }
-    let mut background: Vec<[u8; 3]> = Vec::new();
-    for color in edge(rough).filter_map(|(x, y)| color(image, x, y)) {
+    let mut background: Vec<Rgb> = Vec::new();
+    for color in edge(rough).filter_map(|(x, y)| image.pixel(x, y)) {
         if background.len() < MAX_BACKGROUND_COLORS && !background.contains(&color) {
             background.push(color);
         }
     }
     // A screenshot repeats its colors, so each is compared with the
     // background once.
-    let mut known: HashMap<[u8; 3], bool> = HashMap::new();
+    let mut known: HashMap<Rgb, bool> = HashMap::new();
     let kept: Vec<bool> = points(rough)
         .map(|(x, y)| {
-            color(image, x, y).is_some_and(|color| {
-                *known.entry(color).or_insert_with(|| {
-                    !background.iter().any(|edge| alike(*edge, color, tolerance))
-                })
+            image.pixel(x, y).is_some_and(|color| {
+                *known
+                    .entry(color)
+                    .or_insert_with(|| !background.iter().any(|edge| edge.near(color, tolerance)))
             })
         })
         .collect();
@@ -142,9 +140,9 @@ pub fn snap(image: &Image, rough: Region, tolerance: u8) -> Option<Selection> {
 /// are within `tolerance` of its color, and fills any holes they enclose. It
 /// is `None` when the point is outside the image.
 #[must_use]
-pub fn grow(image: &Image, x: u32, y: u32, tolerance: u8) -> Option<Selection> {
+pub(crate) fn grow(image: &Image, x: u32, y: u32, tolerance: u8) -> Option<Selection> {
     let size = image.size();
-    let seed = color(image, x, y)?;
+    let seed = image.pixel(x, y)?;
     let mut filled = vec![false; pixels(size)?];
     let start = index(x, y, size)?;
     *filled.get_mut(start)? = true;
@@ -154,7 +152,9 @@ pub fn grow(image: &Image, x: u32, y: u32, tolerance: u8) -> Option<Selection> {
             let Some(at) = index(x, y, size) else {
                 continue;
             };
-            let near = color(image, x, y).is_some_and(|color| alike(seed, color, tolerance));
+            let near = image
+                .pixel(x, y)
+                .is_some_and(|color| seed.near(color, tolerance));
             if near && let Some(slot) = filled.get_mut(at).filter(|slot| !**slot) {
                 *slot = true;
                 pending.push((x, y));
@@ -257,24 +257,17 @@ fn neighbors(x: u32, y: u32, size: Size) -> impl Iterator<Item = (u32, u32)> {
     .flatten()
 }
 
+/// The number of pixels in a picture of `size`, if it fits in memory.
+fn pixels(size: Size) -> Option<usize> {
+    usize::try_from(size.pixels()).ok()
+}
+
 /// The index of pixel (`x`, `y`) in a picture of `size`, row by row.
 fn index(x: u32, y: u32, size: Size) -> Option<usize> {
     usize::try_from(y)
         .ok()?
         .checked_mul(usize::try_from(size.width).ok()?)?
         .checked_add(usize::try_from(x).ok()?)
-}
-
-/// The red, green, and blue of the pixel at (`x`, `y`).
-fn color(image: &Image, x: u32, y: u32) -> Option<[u8; 3]> {
-    image
-        .pixel(x, y)
-        .map(|pixel| [pixel.red, pixel.green, pixel.blue])
-}
-
-/// Whether each channel of `a` is within `tolerance` of `b`'s.
-fn alike(a: [u8; 3], b: [u8; 3], tolerance: u8) -> bool {
-    a.iter().zip(b).all(|(&a, b)| a.abs_diff(b) <= tolerance)
 }
 
 #[cfg(test)]

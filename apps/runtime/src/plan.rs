@@ -21,11 +21,10 @@ use appytappy_config::rule::Rule;
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::{APP_FILE, AppStore, AutomationStore, StoredApp};
 use appytappy_config::window_match::WindowMatch;
-use appytappy_sources::automation::Runnable;
+use appytappy_sources::automation::{AppReaders, Runnable};
 use appytappy_sources::screen::saved::SavedValue;
 
 use crate::click::ClickTargets;
-use crate::lifecycle::Watchlist;
 
 /// What the runtime runs.
 #[derive(Debug, Default, PartialEq)]
@@ -116,13 +115,11 @@ impl AppPlan {
 }
 
 impl Plan {
-    /// The apps detection watches: each one's window match.
-    pub(crate) fn watchlist(&self) -> Watchlist {
-        Watchlist::new(
-            self.apps
-                .iter()
-                .map(|(id, app)| (id.clone(), app.runs.window.clone())),
-        )
+    /// The apps detection watches: each one's ID and its window match.
+    pub(crate) fn windows(&self) -> impl Iterator<Item = (String, WindowMatch)> + '_ {
+        self.apps
+            .iter()
+            .map(|(id, app)| (id.clone(), app.runs.window.clone()))
     }
 }
 
@@ -183,6 +180,7 @@ pub(crate) fn compile(
             )),
         }
     }
+    let mut readers = AppReaders::new();
     for automation in automations
         .automations
         .iter()
@@ -200,7 +198,13 @@ pub(crate) fn compile(
                 },
             check,
             pictures,
-        } = match Runnable::new(automation, &readable, &mut picture, &mut click_picture) {
+        } = match Runnable::new(
+            automation,
+            &readable,
+            &mut readers,
+            &mut picture,
+            &mut click_picture,
+        ) {
             Ok(runnable) => runnable,
             Err(problem) => {
                 problems.push(format!("{} cannot run: {problem}", automation.name));
@@ -260,8 +264,7 @@ pub(crate) mod examples {
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{BarFill, Check};
     use appytappy_sources::screen::saved::{SavedCheck, SavedValue};
-    use appytappy_sources::screen::{Region, Size};
-    use appytappy_sources::system::Rgb;
+    use appytappy_sources::screen::{Region, Rgb, Size};
 
     use super::*;
 
@@ -566,8 +569,8 @@ mod tests {
             SignalName::new("progress").ok()
         );
         assert_eq!(
-            plan.watchlist(),
-            Watchlist::new([("example".to_owned(), example.runs.window.clone())])
+            plan.windows().collect::<Vec<_>>(),
+            [("example".to_owned(), example.runs.window.clone())]
         );
     }
 

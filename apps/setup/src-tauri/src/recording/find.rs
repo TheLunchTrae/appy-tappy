@@ -15,10 +15,10 @@
 
 use std::collections::HashMap;
 
-use appytappy_sources::screen::digits::DigitReader;
+use appytappy_sources::screen::digits::{DigitReader, Ink};
 use appytappy_sources::screen::{Image, Region};
 
-use super::ink::{Ink, Line};
+use super::ink::Line;
 
 /// The most finds one search returns; the rest are counted.
 pub(crate) const MAX_FOUND: usize = 12;
@@ -183,133 +183,83 @@ impl Bounds {
     }
 }
 
-/// Which pixels of a screenshot are ink, one flag a pixel, row by row.
-struct Mask {
-    ink: Vec<bool>,
-    width: u32,
-    height: u32,
+/// Where the pixel at (`x`, `y`) is among the pixels of `ink`'s screenshot,
+/// row by row, or `None` outside it.
+fn index(ink: &Ink, x: u32, y: u32) -> Option<usize> {
+    let size = ink.size();
+    if x >= size.width || y >= size.height {
+        return None;
+    }
+    let index = u64::from(y)
+        .saturating_mul(u64::from(size.width))
+        .saturating_add(u64::from(x));
+    usize::try_from(index).ok()
 }
 
-impl Mask {
-    fn of(image: &Image, reader: &DigitReader) -> Self {
-        let size = image.size();
-        Self {
-            ink: image
-                .pixels()
-                .iter()
-                .map(|&pixel| reader.is_ink(pixel))
-                .collect(),
-            width: size.width,
-            height: size.height,
-        }
-    }
+/// The height of the line of text in `region`, which is the reader's line
+/// of a region ([`Ink::line`]); `None` without ink.
+fn line_height(ink: &Ink, region: Region) -> Option<u32> {
+    let rows = ink.line(region.x()..region.right(), region.y()..region.bottom())?;
+    Some(rows.end.saturating_sub(rows.start))
+}
 
-    fn index(&self, x: u32, y: u32) -> Option<usize> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-        let index = u64::from(y)
-            .saturating_mul(u64::from(self.width))
-            .saturating_add(u64::from(x));
-        usize::try_from(index).ok()
-    }
-
-    fn at(&self, x: u32, y: u32) -> bool {
-        self.index(x, y)
-            .and_then(|index| self.ink.get(index))
-            .copied()
-            .unwrap_or(false)
-    }
-
-    /// The height of the band of adjacent inked rows in `region` that holds
-    /// the most ink, as the reader takes the line of a region; `None`
-    /// without ink.
-    fn line_height(&self, region: Region) -> Option<u32> {
-        let mut best: Option<(u32, usize)> = None;
-        let mut run: Option<(u32, usize)> = None;
-        for y in region.y()..=region.bottom() {
-            let ink = if y < region.bottom() {
-                (region.x()..region.right())
-                    .filter(|&x| self.at(x, y))
-                    .count()
-            } else {
-                0
-            };
-            if ink > 0 {
-                let (rows, total) = run.get_or_insert((0, 0));
-                *rows = rows.saturating_add(1);
-                *total = total.saturating_add(ink);
-            } else if let Some(ended) = run.take()
-                && best.is_none_or(|(_, most)| ended.1 > most)
+/// Each blob of touching ink, corners included, no taller than `tallest`.
+fn blobs(ink: &Ink, tallest: u32) -> Vec<Bounds> {
+    let size = ink.size();
+    let mut seen = vec![false; usize::try_from(size.pixels()).unwrap_or(0)];
+    let mut blobs = Vec::new();
+    for y in 0..size.height {
+        for x in 0..size.width {
+            if let Some(blob) = fill(ink, x, y, &mut seen)
+                && blob.height() <= tallest
             {
-                best = Some(ended);
+                blobs.push(blob);
             }
         }
-        best.map(|(rows, _)| rows)
     }
+    blobs
+}
 
-    /// Each blob of touching ink, corners included, no taller than `tallest`.
-    fn blobs(&self, tallest: u32) -> Vec<Bounds> {
-        let mut seen = vec![false; self.ink.len()];
-        let mut blobs = Vec::new();
-        for y in 0..self.height {
-            for x in 0..self.width {
-                if let Some(blob) = self.fill(x, y, &mut seen)
-                    && blob.height() <= tallest
-                {
-                    blobs.push(blob);
-                }
-            }
-        }
-        blobs
+/// The bounds of the blob of ink at (`x`, `y`), marking its pixels in
+/// `seen`; `None` when that pixel is no ink or was seen already.
+fn fill(ink: &Ink, x: u32, y: u32, seen: &mut [bool]) -> Option<Bounds> {
+    let start = index(ink, x, y)?;
+    if !ink.at(x, y) || std::mem::replace(seen.get_mut(start)?, true) {
+        return None;
     }
-
-    /// The bounds of the blob of ink at (`x`, `y`), marking its pixels in
-    /// `seen`; `None` when that pixel is no ink or was seen already.
-    fn fill(&self, x: u32, y: u32, seen: &mut [bool]) -> Option<Bounds> {
-        let start = self.index(x, y)?;
-        if !self.ink.get(start).copied().unwrap_or(false)
-            || std::mem::replace(seen.get_mut(start)?, true)
-        {
-            return None;
-        }
-        let mut stack = vec![(x, y)];
-        let mut bounds = Bounds {
-            left: x,
-            top: y,
-            right: x.saturating_add(1),
-            bottom: y.saturating_add(1),
+    let mut stack = vec![(x, y)];
+    let mut bounds = Bounds {
+        left: x,
+        top: y,
+        right: x.saturating_add(1),
+        bottom: y.saturating_add(1),
+    };
+    // Each pixel is marked as it is pushed, so it comes off the stack at
+    // most once and the screenshot's size bounds the fill.
+    for _ in 0..seen.len() {
+        let Some((px, py)) = stack.pop() else {
+            break;
         };
-        // Each pixel is marked as it is pushed, so it comes off the stack at
-        // most once and the mask's size bounds the fill.
-        for _ in 0..self.ink.len() {
-            let Some((px, py)) = stack.pop() else {
-                break;
-            };
-            bounds = bounds.join(Bounds {
-                left: px,
-                top: py,
-                right: px.saturating_add(1),
-                bottom: py.saturating_add(1),
-            });
-            for (nx, ny) in neighbors(px, py) {
-                let Some(next) = self.index(nx, ny) else {
-                    continue;
-                };
-                if self.ink.get(next).copied().unwrap_or(false)
-                    && let Some(flag) = seen.get_mut(next)
-                    && !std::mem::replace(flag, true)
-                {
-                    stack.push((nx, ny));
-                }
+        bounds = bounds.join(Bounds {
+            left: px,
+            top: py,
+            right: px.saturating_add(1),
+            bottom: py.saturating_add(1),
+        });
+        for (nx, ny) in neighbors(px, py) {
+            if ink.at(nx, ny)
+                && let Some(flag) = index(ink, nx, ny).and_then(|next| seen.get_mut(next))
+                && !std::mem::replace(flag, true)
+            {
+                stack.push((nx, ny));
             }
         }
-        Some(bounds)
     }
+    Some(bounds)
 }
 
 /// The eight pixels around (`x`, `y`) that do not fall off the top or left
-/// edge; the mask drops those past the right and bottom.
+/// edge; no pixel past the right or the bottom is ink.
 fn neighbors(x: u32, y: u32) -> impl Iterator<Item = (u32, u32)> {
     let columns = [x.checked_sub(1), Some(x), x.checked_add(1)];
     let rows = [y.checked_sub(1), Some(y), y.checked_add(1)];
@@ -417,7 +367,7 @@ fn same_size(height: u32, sample: u32) -> bool {
 /// The ink of `image`, a find's pixels, for the text reader, as `reader`
 /// tells ink from background; `None` when it shows none.
 pub(crate) fn ink_line(image: &Image, reader: &DigitReader) -> Option<Line> {
-    Ink::of(image, reader).line()
+    Line::of(&reader.ink(image))
 }
 
 /// The height of the characters among `blobs` that `region` shows: that of
@@ -435,13 +385,13 @@ fn sample_of(blobs: &[Bounds], region: Region, line: u32) -> u32 {
 }
 
 /// `run` with a margin of a quarter of `sample` around its ink, kept
-/// inside the mask; `None` when that leaves no region.
-fn with_margin(run: Bounds, sample: u32, mask: &Mask) -> Option<Region> {
+/// inside the screenshot of `ink`; `None` when that leaves no region.
+fn with_margin(run: Bounds, sample: u32, ink: &Ink) -> Option<Region> {
     let margin = sample.checked_div(4).unwrap_or(0).max(1);
     let left = run.left.saturating_sub(margin);
     let top = run.top.saturating_sub(margin);
-    let right = run.right.saturating_add(margin).min(mask.width);
-    let bottom = run.bottom.saturating_add(margin).min(mask.height);
+    let right = run.right.saturating_add(margin).min(ink.size().width);
+    let bottom = run.bottom.saturating_add(margin).min(ink.size().height);
     Region::new(
         left,
         top,
@@ -459,16 +409,13 @@ pub(crate) fn sample_heights(
     regions: &[Region],
     reader: &DigitReader,
 ) -> Vec<Option<u32>> {
-    let mask = Mask::of(image, reader);
+    let ink = reader.ink(image);
     let lines: Vec<Option<u32>> = regions
         .iter()
-        .map(|&region| {
-            mask.line_height(region)
-                .filter(|_| region.fits(image.size()))
-        })
+        .map(|&region| line_height(&ink, region).filter(|_| region.fits(image.size())))
         .collect();
     let tallest = lines.iter().flatten().copied().max().unwrap_or(0);
-    let blobs = mask.blobs(tallest.saturating_mul(2));
+    let blobs = blobs(&ink, tallest.saturating_mul(2));
     regions
         .iter()
         .zip(lines)
@@ -501,9 +448,9 @@ fn distance(run: Bounds, near: Region) -> u64 {
 /// the larger sizes' runs, so it is taken once, and text of a larger size
 /// beside it is still found.
 pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitReader) -> Vec<Spot> {
-    let mask = Mask::of(image, reader);
+    let ink = reader.ink(image);
     let largest = sizes.0.last().map_or(0, |size| size.height);
-    let blobs = mask.blobs(largest.saturating_mul(2));
+    let blobs = blobs(&ink, largest.saturating_mul(2));
     let mut found: Vec<(Bounds, TextSize)> = Vec::new();
     for &size in &sizes.0 {
         let height = size.height;
@@ -525,7 +472,7 @@ pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitRe
     found
         .into_iter()
         .filter_map(|(run, size)| {
-            let region = with_margin(run, size.height, &mask)?;
+            let region = with_margin(run, size.height, &ink)?;
             Some(Spot { region, size })
         })
         .take(MAX_LINES)
@@ -545,9 +492,9 @@ pub(crate) fn like(
     if !region.fits(image.size()) {
         return None;
     }
-    let mask = Mask::of(image, reader);
-    let line = mask.line_height(region)?;
-    let blobs = mask.blobs(line.saturating_mul(2));
+    let ink = reader.ink(image);
+    let line = line_height(&ink, region)?;
+    let blobs = blobs(&ink, line.saturating_mul(2));
     let sample = sample_of(&blobs, region, line);
     let mut finds = Vec::new();
     let mut other_sizes = 0_usize;
@@ -568,7 +515,7 @@ pub(crate) fn like(
         .into_iter()
         .take(MAX_FOUND)
         .filter_map(|run| {
-            let region = with_margin(run, sample, &mask)?;
+            let region = with_margin(run, sample, &ink)?;
             let line = image.crop(region).and_then(|crop| ink_line(&crop, reader));
             Some(Find { region, line })
         })
@@ -582,8 +529,7 @@ pub(crate) fn like(
 
 #[cfg(test)]
 mod tests {
-    use appytappy_sources::screen::Size;
-    use appytappy_sources::system::Rgb;
+    use appytappy_sources::screen::{Rgb, Size};
 
     use super::*;
 
@@ -1037,24 +983,25 @@ mod tests {
     }
 
     #[test]
-    fn the_mask_reads_no_ink_past_its_edges() {
-        // Ink only at (0, 1) of a 3 by 2 screenshot: (3, 0) would land on it
-        // if the row wrapped.
-        let image = screenshot(3, 2, &[(0, 1, 1, 1)]);
-        let mask = Mask::of(&image, &reader());
-        assert!(mask.at(0, 1));
-        assert_eq!(mask.index(3, 0), None);
-        assert_eq!(mask.index(0, 2), None);
-        assert!(!mask.at(3, 0));
+    fn no_pixel_past_the_screenshot_s_edges_has_a_place_in_it() {
+        // (3, 0) of a 3 by 2 screenshot would be (0, 1) if the row wrapped.
+        let ink = reader().ink(&screenshot(3, 2, &[(0, 1, 1, 1)]));
+        assert_eq!(index(&ink, 0, 1), Some(3));
+        assert_eq!(index(&ink, 2, 1), Some(5));
+        assert_eq!(index(&ink, 3, 0), None);
+        assert_eq!(index(&ink, 0, 2), None);
     }
 
     #[test]
     fn the_line_height_counts_rows_inside_the_region_and_takes_the_first_of_a_tie() {
         // Ink 4 wide on rows 0 and 1, and 2 wide on rows 4 to 7: 8 pixels each.
         let image = screenshot(6, 12, &[(0, 0, 4, 2), (0, 4, 2, 4), (0, 9, 6, 3)]);
-        let mask = Mask::of(&image, &reader());
-        assert_eq!(mask.line_height(region(0, 0, 6, 8)), Some(2));
+        let ink = reader().ink(&image);
+        assert_eq!(line_height(&ink, region(0, 0, 6, 8)), Some(2));
         // The region ends inside the ink below it.
-        assert_eq!(mask.line_height(region(0, 9, 6, 2)), Some(2));
+        assert_eq!(line_height(&ink, region(0, 9, 6, 2)), Some(2));
+        // Only the region's columns count: the ink 2 wide is 4 rows there.
+        assert_eq!(line_height(&ink, region(0, 4, 2, 4)), Some(4));
+        assert_eq!(line_height(&ink, region(4, 0, 2, 8)), None);
     }
 }
