@@ -30,26 +30,26 @@ interface Shot {
   readonly recorded: boolean;
 }
 
-/**
- * `shots` with the thumbnail of the screenshot `index` as `thumb`; unchanged when it is not listed, such as once it
- * was removed.
- */
-export function withThumb<Listed extends { readonly index: number; readonly thumb: Thumb }>(
-  shots: readonly Listed[],
-  index: number,
-  thumb: Thumb,
-): readonly Listed[] {
-  return shots.some((shot) => shot.index === index)
-    ? shots.map((shot) => (shot.index === index ? { ...shot, thumb } : shot))
-    : shots;
+/** The screenshots listed, and why the last step with them failed, or null. */
+export interface Strip {
+  /** In the order they were kept. */
+  readonly shots: readonly Shot[];
+  /** Each screenshot at its own pixels, once they arrive. */
+  readonly full: ReadonlyMap<number, Picture>;
+  readonly error: string | null;
 }
 
-/** Whether showing the screenshot `index` of `shots` loads it again: its pixels failed to load. */
-export function loadsAgain(
-  shots: readonly { readonly index: number; readonly thumb: Thumb }[],
-  index: number,
-): boolean {
-  return shots.find((shot) => shot.index === index)?.thumb.kind === 'failed';
+/** `shots` with the thumbnail of the screenshot `index` as `thumb`. */
+function withThumb(shots: readonly Shot[], index: number, thumb: Thumb): readonly Shot[] {
+  return shots.map((shot) => (shot.index === index ? { ...shot, thumb } : shot));
+}
+
+/**
+ * Whether showing the screenshot `index` of `shots` loads it again: its pixels failed to load, and no load of them is
+ * under way in `loading`, such as one that showing it a moment before started and the strip does not show yet.
+ */
+export function loadsAgain(shots: readonly Shot[], loading: ReadonlySet<number>, index: number): boolean {
+  return !loading.has(index) && shots.find((shot) => shot.index === index)?.thumb.kind === 'failed';
 }
 
 const THUMB_WIDTH = 224;
@@ -88,6 +88,29 @@ export async function arrive(
   return { thumb, picture };
 }
 
+/** How loading the pixels of a screenshot a draft brought back ended: they arrived, or why not. */
+type LoadEnd =
+  | { readonly kind: 'arrived'; readonly pixels: Pixels }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * `strip` once loading the pixels of the restored screenshot `index` ends in `end`: its tile loaded and its own pixels
+ * kept, or its tile failed with the reason. A load that ends after the user removed the screenshot changes nothing, so
+ * its pixels never come back and its failure shows no error.
+ */
+export function loadEnded(strip: Strip, index: number, end: LoadEnd): Strip {
+  if (!strip.shots.some((shot) => shot.index === index)) {
+    return strip;
+  }
+  return end.kind === 'arrived'
+    ? {
+        shots: withThumb(strip.shots, index, { kind: 'loaded', picture: end.pixels.thumb }),
+        full: new Map(strip.full).set(index, end.pixels.picture),
+        error: null,
+      }
+    : { ...strip, shots: withThumb(strip.shots, index, FAILED), error: end.reason };
+}
+
 /**
  * The screenshot `index` to list, with its pixels, once `fetch` gets both its thumbnail and its own pixels. When
  * either does not arrive, it calls `release` once and rejects, so a screenshot taken or recorded is listed only once
@@ -114,15 +137,10 @@ export async function arrived(
  * back from a draft, so they are listed from the start, and one whose pixels fail to load loads again when it is
  * shown.
  */
-export function useScreenshots(restored: readonly DraftShot[] = []): {
-  /** In the order they were kept. */
-  readonly shots: readonly Shot[];
-  /** Each screenshot at its own pixels, once they arrive. */
-  readonly full: ReadonlyMap<number, Picture>;
+export function useScreenshots(restored: readonly DraftShot[] = []): Strip & {
   readonly selected: number | null;
   /** Shows the screenshot `index`, or the live view for null, loading a restored one again whose pixels failed. */
   readonly setSelected: (index: number | null) => void;
-  readonly error: string | null;
   /**
    * Takes a screenshot of the newest frame and lists it, and with `show` shows it at once; null when it failed. With
    * `hold`, what is shown stays, such as the live view under a drag.
@@ -135,36 +153,38 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
   /** The screenshot's number as the strip shows it, which it keeps when another is removed. */
   readonly position: (index: number) => number;
 } {
-  const [shots, setShots] = useState<readonly Shot[]>(() =>
-    restored.map(({ index, recorded }) => ({ index, time: 'Draft', thumb: LOADING, recorded })),
-  );
-  const [full, setFull] = useState<ReadonlyMap<number, Picture>>(new Map());
+  const [strip, setStrip] = useState<Strip>(() => ({
+    shots: restored.map(({ index, recorded }) => ({ index, time: 'Draft', thumb: LOADING, recorded })),
+    full: new Map(),
+    error: null,
+  }));
   const [selected, setShown] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // The screenshots removed, so pixels that arrive late for one are dropped.
+  const setError = useCallback((error: string | null): void => {
+    setStrip((current) => ({ ...current, error }));
+  }, []);
+  // The screenshots removed, so pixels that arrive late for one taken or recorded never list it.
   const removed = useRef<Set<number>>(new Set());
+  // The restored screenshots whose pixels are loading, so showing one again before the strip shows it loading starts
+  // no second load, whose late failure could mark a loaded tile failed.
+  const loading = useRef<Set<number>>(new Set());
   // The screenshots as last rendered, so showing one can tell whether its pixels failed to load.
-  const listed = useRef(shots);
+  const listed = useRef(strip.shots);
   useEffect(() => {
-    listed.current = shots;
-  }, [shots]);
+    listed.current = strip.shots;
+  }, [strip.shots]);
 
   // Loads the pixels of the restored screenshot `index`, which stays listed: the draft refers to it.
   const load = useCallback(async (index: number): Promise<void> => {
-    setShots((current) => withThumb(current, index, LOADING));
+    loading.current.add(index);
+    setStrip((current) => ({ ...current, shots: withThumb(current.shots, index, LOADING) }));
+    let end: LoadEnd;
     try {
-      const { thumb, picture } = await arrive(index);
-      if (!removed.current.has(index)) {
-        setShots((current) => withThumb(current, index, { kind: 'loaded', picture: thumb }));
-        setFull((current) => new Map(current).set(index, picture));
-        setError(null);
-      }
+      end = { kind: 'arrived', pixels: await arrive(index) };
     } catch (failure: unknown) {
-      if (!removed.current.has(index)) {
-        setShots((current) => withThumb(current, index, FAILED));
-        setError(errorText(failure));
-      }
+      end = { kind: 'failed', reason: errorText(failure) };
     }
+    loading.current.delete(index);
+    setStrip((current) => loadEnded(current, index, end));
   }, []);
   // Fetches the pixels of the screenshot `index` and then lists it. One whose pixels do not arrive is released and
   // never listed, so the strip shows no blank tile for it.
@@ -174,8 +194,11 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
       background(removeScreenshots([failed]));
     });
     if (!removed.current.has(index)) {
-      setShots((current) => withShot(current, shot));
-      setFull((current) => new Map(current).set(index, picture));
+      setStrip((current) => ({
+        ...current,
+        shots: withShot(current.shots, shot),
+        full: new Map(current.full).set(index, picture),
+      }));
     }
     return picture;
   }, []);
@@ -191,7 +214,7 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
   const setSelected = useCallback(
     (index: number | null): void => {
       setShown(index);
-      if (index !== null && loadsAgain(listed.current, index)) {
+      if (index !== null && loadsAgain(listed.current, loading.current, index)) {
         background(load(index));
       }
     },
@@ -213,7 +236,7 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
         return null;
       }
     },
-    [list],
+    [list, setError],
   );
 
   const adopt = useCallback(
@@ -222,24 +245,29 @@ export function useScreenshots(restored: readonly DraftShot[] = []): {
         setError(errorText(error));
       });
     },
-    [list],
+    [list, setError],
   );
 
-  const remove = useCallback(async (indexes: readonly number[]): Promise<void> => {
-    try {
-      await removeScreenshots(indexes);
-      for (const index of indexes) {
-        removed.current.add(index);
+  const remove = useCallback(
+    async (indexes: readonly number[]): Promise<void> => {
+      try {
+        await removeScreenshots(indexes);
+        for (const index of indexes) {
+          removed.current.add(index);
+        }
+        setStrip((current) => ({
+          shots: current.shots.filter((shot) => !indexes.includes(shot.index)),
+          full: new Map([...current.full].filter(([index]) => !indexes.includes(index))),
+          error: null,
+        }));
+        setShown((current) => (current !== null && indexes.includes(current) ? null : current));
+      } catch (error: unknown) {
+        setError(errorText(error));
       }
-      setShots((current) => current.filter((shot) => !indexes.includes(shot.index)));
-      setFull((current) => new Map([...current].filter(([index]) => !indexes.includes(index))));
-      setShown((current) => (current !== null && indexes.includes(current) ? null : current));
-      setError(null);
-    } catch (error: unknown) {
-      setError(errorText(error));
-    }
-  }, []);
+    },
+    [setError],
+  );
 
   const position = (index: number): number => index + 1;
-  return { shots, full, selected, setSelected, error, take, adopt, remove, position };
+  return { ...strip, selected, setSelected, take, adopt, remove, position };
 }
