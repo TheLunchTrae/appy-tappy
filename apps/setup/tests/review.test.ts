@@ -1,15 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { RecordedReading } from '../src/lib/bindings.ts';
+import * as review from '../src/lib/review.ts';
 import {
   addedShapes,
   additions,
   checkedReadings,
   clock,
-  decide,
   disagreements,
   editAll,
-  entries,
   flaggedReadings,
   keepBlocked,
   keptAdditions,
@@ -19,11 +18,40 @@ import {
   seen,
   sighted,
   startEntry,
-  tileNote,
   unrelated,
-  untaught,
   untaughtNote,
 } from '../src/lib/review.ts';
+
+// Most tests are of a reference that does not say which characters it needs, with nothing decided and no clash.
+const NO_NEEDS: readonly string[] = [];
+type Entries = ReadonlyMap<number, review.ReviewEntry>;
+const decide = (
+  decided: Entries,
+  readings: readonly RecordedReading[],
+  edits: Entries,
+  kept: ReadonlyMap<number, string>,
+  needs = NO_NEEDS,
+) => review.decide(decided, readings, edits, kept, needs);
+const entries = (
+  readings: readonly RecordedReading[],
+  edits: Entries,
+  kept: ReadonlyMap<number, string>,
+  decided: Entries = new Map(),
+  needs = NO_NEEDS,
+) => review.entries(readings, edits, kept, decided, needs);
+const untaught = (
+  readings: readonly RecordedReading[],
+  all: readonly review.ReviewEntry[],
+  adds: readonly (readonly number[])[],
+  needs = NO_NEEDS,
+) => review.untaught(readings, all, adds, needs);
+const tileNote = (
+  reading: RecordedReading,
+  entry: review.ReviewEntry,
+  problem: string | undefined,
+  clash?: string,
+  needs = NO_NEEDS,
+) => review.tileNote(reading, entry, problem, clash, needs);
 
 /** A shape for each character, the same for the same character, as when the reader read every reading right. */
 const shapesOf = (text: string): number[] => Array.from(text.trim(), (character) => character.codePointAt(0) ?? 0);
@@ -289,10 +317,14 @@ describe("text that is not the reference's", () => {
   const digits = Array.from('0123456789');
   const readings = [read('12'), read('MENU'), read('PLAY 1'), read('SOS')];
 
-  test('is text with none of the needed characters, counting a lookalike as its digit', () => {
+  test('has no needed character and is not a needed text read as its lookalikes', () => {
     expect(unrelated('MENU', digits)).toBe(true);
+    // Letters that are digits' lookalikes among others do not make a word the reference's.
+    expect(['Score', 'Time', 'Lives', 'Lv'].map((text) => unrelated(text, digits))).toEqual([true, true, true, true]);
     expect(unrelated('PLAY 1', digits)).toBe(false);
+    // Every character may be a digit misread: 505, 1205.
     expect(unrelated('SOS', digits)).toBe(false);
+    expect(unrelated('12O5', digits)).toBe(false);
     expect(unrelated('', digits)).toBe(false);
     expect(unrelated('MENU', [])).toBe(false);
   });

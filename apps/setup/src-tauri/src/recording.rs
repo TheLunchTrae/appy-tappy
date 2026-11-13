@@ -21,10 +21,11 @@
 //! A recording of the whole window collects the same way from every place
 //! the window shows text like the region's: in the characters' color and as
 //! tall as the characters the region showed when it started ([`find`]).
-//! Each such run of text is cropped and offered as the region's own crop
+//! Each such run of text is cropped and counted as the region's own crop
 //! is. Looking over a whole frame costs far more than cropping one region,
-//! so it looks at most once every [`SCAN_EVERY`] and skips the frames
-//! between.
+//! so a thread of its own does it ([`look`]), one frame at a time: the
+//! owner sends a frame at most once every [`SCAN_EVERY`], and none while a
+//! look is out, and skips the frames between.
 //!
 //! A digit, a `%`, and a `.` are all shapes the same way: whatever the
 //! check's own sampling makes one character is one shape here.
@@ -32,6 +33,7 @@
 pub(crate) mod find;
 mod ink;
 mod lifecycle;
+pub(crate) mod look;
 pub(crate) mod looks;
 pub(crate) mod ocr;
 mod sightings;
@@ -108,6 +110,14 @@ impl Recorder {
         }
     }
 
+    /// Stops recording at `at`, keeping what it recorded.
+    pub(crate) fn stop(&mut self, at: Instant) {
+        match self {
+            Self::Readings(recording) => recording.stop(at),
+            Self::Looks(recording) => recording.life.stop(at),
+        }
+    }
+
     /// When it records and why it stops, which both kinds share.
     pub(crate) const fn life_mut(&mut self) -> &mut Lifecycle {
         match self {
@@ -170,11 +180,21 @@ struct Scan {
     /// How tall the characters were that the region showed when the
     /// recording started, in pixels: the size of text it looks for.
     sample: u32,
-    /// When it last looked, so the frames until [`SCAN_EVERY`] after it are
-    /// skipped.
-    last: Option<Instant>,
-    /// Where the last look found text.
+    /// Whether a look is out, and when the last went out.
+    gate: Gate,
+    /// Where the last look found text, while it records.
     spots: Vec<Region>,
+}
+
+/// Whether a frame may go out to be looked over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gate {
+    /// No look is out. The last was of the frame that arrived then, so the
+    /// frames until [`SCAN_EVERY`] after it are skipped; `None` before the
+    /// first.
+    Idle(Option<Instant>),
+    /// A look is out, and every frame is skipped until it is answered.
+    Out,
 }
 
 /// A recording of the readings one region shows.
@@ -235,7 +255,7 @@ impl Recording {
     pub(crate) fn across_window(mut self, sample: u32) -> Self {
         self.looking = Looking::Window(Scan {
             sample,
-            last: None,
+            gate: Gate::Idle(None),
             spots: Vec::new(),
         });
         self
@@ -249,52 +269,17 @@ impl Recording {
         }
     }
 
-    /// Records `frame`, a whole window's frame that arrived at `at`. Answers
-    /// each reading to read as text: one the frame shows that is worth
-    /// keeping, since it shows a shape no kept reading has, or carries
-    /// cleanly one that none carries so. Of several such readings for a
-    /// shape, the first is kept. A place shows one reading a frame; a
-    /// whole window shows one for each run of text like the region's, on
-    /// the frames it looks at. A full recording keeps and counts no more.
-    pub(crate) fn offer(&mut self, frame: &Image, at: Instant) -> Vec<NewReading> {
-        if !self.life.is_recording() {
-            return Vec::new();
+    /// Records `frame`, a whole window's frame that arrived at `at`, in its
+    /// region. Answers the reading to read as text when the frame shows one
+    /// that is worth keeping, since it shows a shape no kept reading has,
+    /// or carries cleanly one that none carries so. Of several such
+    /// readings for a shape, the first is kept. A full recording keeps and
+    /// counts no more. A recording of the whole window keeps nothing from
+    /// a frame here: [`Self::look`] sends the frame to be looked over.
+    pub(crate) fn offer(&mut self, frame: &Image, at: Instant) -> Option<NewReading> {
+        if !self.life.is_recording() || matches!(self.looking, Looking::Window(_)) {
+            return None;
         }
-        match &mut self.looking {
-            Looking::Place => self.offer_place(frame, at).into_iter().collect(),
-            Looking::Window(scan) => {
-                let size = frame.size();
-                if size != self.window_size {
-                    scan.spots.clear();
-                    self.life.set_problem(Some(resized(self.window_size, size)));
-                    return Vec::new();
-                }
-                if scan
-                    .last
-                    .is_some_and(|last| at.saturating_duration_since(last) < SCAN_EVERY)
-                {
-                    return Vec::new();
-                }
-                scan.last = Some(at);
-                scan.spots = find::lines(frame, scan.sample, &self.reader);
-                let spots = scan.spots.clone();
-                self.life.set_problem(None);
-                spots
-                    .into_iter()
-                    .filter_map(|spot| {
-                        let crop = frame.crop(spot)?;
-                        // A run of more characters than a reading holds is
-                        // a sentence in the characters' color, not a value.
-                        let shapes = self.reader.shapes(&crop).ok()?;
-                        self.keep(crop, shapes.characters(), at)
-                    })
-                    .collect()
-            },
-        }
-    }
-
-    /// Records the region of `frame`, as [`Self::offer`] does for a place.
-    fn offer_place(&mut self, frame: &Image, at: Instant) -> Option<NewReading> {
         let crop = match cut(frame, self.region, self.window_size) {
             Ok(crop) => crop,
             Err(problem) => {
@@ -320,6 +305,111 @@ impl Recording {
         };
         self.life.set_problem(None);
         self.keep(crop, shapes.characters(), at)
+    }
+
+    /// The look to send for `frame`, a whole window's frame that arrived at
+    /// `at`, when it records the whole window and a look is due: none is
+    /// out, and the last was of a frame at least [`SCAN_EVERY`] before
+    /// this one. The look is then out until [`Self::looked`] answers it, so
+    /// a look that takes long holds one frame and not a queue of them. A
+    /// frame of another size than the window had is a problem and is not
+    /// looked over.
+    pub(crate) fn look(&mut self, frame: &Image, at: Instant) -> Option<look::Job> {
+        if !self.life.is_recording() {
+            return None;
+        }
+        let Looking::Window(scan) = &mut self.looking else {
+            return None;
+        };
+        let size = frame.size();
+        if size != self.window_size {
+            scan.spots.clear();
+            self.life.set_problem(Some(resized(self.window_size, size)));
+            return None;
+        }
+        self.life.set_problem(None);
+        match scan.gate {
+            Gate::Out => return None,
+            Gate::Idle(Some(last)) if at.saturating_duration_since(last) < SCAN_EVERY => {
+                return None;
+            },
+            Gate::Idle(_) => {},
+        }
+        scan.gate = Gate::Out;
+        Some(look::Job {
+            recording: self.id,
+            frame: frame.clone(),
+            at,
+            sample: scan.sample,
+            near: self.region,
+            reader: self.reader.clone(),
+        })
+    }
+
+    /// Takes the answer to the look of the frame that arrived at `at`:
+    /// counts each run of text it `seen`, and answers each reading to read
+    /// as text, as [`Self::offer`] does for the region. The next look may go
+    /// out [`SCAN_EVERY`] after `at`. An answer that comes once it stopped
+    /// is dropped. `None` is a look that failed, which stops the recording
+    /// at `now` with a reason.
+    pub(crate) fn looked(
+        &mut self,
+        at: Instant,
+        seen: Option<Vec<look::Seen>>,
+        now: Instant,
+    ) -> Vec<NewReading> {
+        let Looking::Window(scan) = &mut self.looking else {
+            return Vec::new();
+        };
+        scan.gate = Gate::Idle(Some(at));
+        if !self.life.is_recording() {
+            return Vec::new();
+        }
+        let Some(seen) = seen else {
+            self.stop_looking(now);
+            return Vec::new();
+        };
+        scan.spots = seen.iter().map(|seen| seen.spot).collect();
+        seen.into_iter()
+            .filter_map(|seen| {
+                let (crop, shapes) = seen.reading?;
+                self.keep(crop, &shapes, at)
+            })
+            .collect()
+    }
+
+    /// Stops recording at `at` because the window can no longer be looked
+    /// over, and lets a look go out again once the user records more.
+    pub(crate) fn stop_looking(&mut self, at: Instant) {
+        if let Looking::Window(scan) = &mut self.looking {
+            scan.gate = Gate::Idle(None);
+            scan.spots.clear();
+        }
+        self.life.fail(
+            at,
+            "Recording stopped: the window could not be looked over. Record more to try again."
+                .to_owned(),
+        );
+    }
+
+    /// Stops recording at `at`; later frames are ignored, and the places
+    /// the last look found text are forgotten.
+    pub(crate) fn stop(&mut self, at: Instant) {
+        self.life.stop(at);
+        self.forget_spots();
+    }
+
+    /// Goes on recording at `at` after a stop.
+    pub(crate) fn resume(&mut self, at: Instant) {
+        self.life.resume(at);
+        // A stop by a failure left them, and they are from before it.
+        self.forget_spots();
+    }
+
+    fn forget_spots(&mut self) {
+        if let Looking::Window(scan) = &mut self.looking {
+            scan.spots.clear();
+        }
     }
 
     /// Counts `crop`, which showed `shapes` at `at`, and keeps it when it
@@ -385,18 +475,10 @@ impl Recording {
             id: self.id,
             recording: self.life.is_recording(),
             elapsed_ms: millis(self.life.elapsed(now)),
-            full: self.sightings.full().map(|full| match full {
-                Full::Shapes => format!(
-                    "This recording is full: the region showed more than {MAX_SHAPES} different \
-                     shapes, more than a reference learns. Stop and review what it found. If the \
-                     region shows more than the value, draw it around the value alone and \
-                     record again."
-                ),
-                Full::Readings => "This recording is full: the region showed more than a million \
-                                   different readings, the most one recording counts. Stop and \
-                                   review what it found."
-                    .to_owned(),
-            }),
+            full: self
+                .sightings
+                .full()
+                .map(|full| full_message(full, self.scope())),
             problem: self.life.problem().map(str::to_owned),
             settings: Settings {
                 region: RegionView::of(self.region),
@@ -413,12 +495,12 @@ impl Recording {
                 scope: self.scope(),
             },
             spots: match &self.looking {
-                Looking::Window(scan) if self.life.is_recording() => scan
+                Looking::Window(scan) => scan
                     .spots
                     .iter()
                     .map(|&spot| RegionView::of(spot))
                     .collect(),
-                Looking::Window(_) | Looking::Place => Vec::new(),
+                Looking::Place => Vec::new(),
             },
             readings: self
                 .readings
@@ -432,6 +514,32 @@ impl Recording {
                 .collect(),
             shapes: self.sightings.view(),
         }
+    }
+}
+
+/// Why a recording that looks where `scope` says is `full`, and what to
+/// do about it.
+fn full_message(full: Full, scope: Scope) -> String {
+    match (full, scope) {
+        (Full::Shapes, Scope::Place) => format!(
+            "This recording is full: the region showed more than {MAX_SHAPES} different shapes, \
+             more than a reference learns. Stop and review what it found. If the region shows \
+             more than the value, draw it around the value alone and record again."
+        ),
+        (Full::Shapes, Scope::Window) => format!(
+            "This recording is full: the window showed more than {MAX_SHAPES} different shapes \
+             in the characters' color and size, more than a reference learns. Stop and review \
+             what it found. If the window shows much other text like the value's, record this \
+             place alone instead."
+        ),
+        (Full::Readings, Scope::Place) => "This recording is full: the region showed more than a \
+                                           million different readings, the most one recording \
+                                           counts. Stop and review what it found."
+            .to_owned(),
+        (Full::Readings, Scope::Window) => "This recording is full: the window showed more than \
+                                            a million different readings, the most one recording \
+                                            counts. Stop and review what it found."
+            .to_owned(),
     }
 }
 
@@ -565,11 +673,6 @@ mod tests {
         Image::new(Size { width, height }, pixels).expect("matching length")
     }
 
-    /// The one new reading `frame` gives a recording of a place, if any.
-    fn offered(recording: &mut Recording, frame: &Image, at: Instant) -> Option<NewReading> {
-        recording.offer(frame, at).pop()
-    }
-
     fn region() -> Region {
         Region::new(0, 0, 8, 4).expect("not empty")
     }
@@ -636,20 +739,24 @@ mod tests {
     fn a_reading_that_would_teach_nothing_new_is_seen_again() {
         let start = Instant::now();
         let mut recording = recording_of(16, 32, start);
-        let first = offered(&mut recording, &frame(16, 32, zero), start).expect("a new reading");
+        let first = recording
+            .offer(&frame(16, 32, zero), start)
+            .expect("a new reading");
         assert_eq!(first.index, 0);
         // A speck inside the 0 fills a quarter of one sampled cell, which
         // stays empty: the same reading.
         let speck = frame(16, 32, |x, y| zero(x, y) || (x, y) == (4, 16));
-        assert_eq!(offered(&mut recording, &speck, start), None);
+        assert_eq!(recording.offer(&speck, start), None);
         // A bar across it is a new character.
         assert_eq!(
-            offered(&mut recording, &frame(16, 32, eight), start).map(|new| new.index),
+            recording
+                .offer(&frame(16, 32, eight), start)
+                .map(|new| new.index),
             Some(1)
         );
         // A reading that showed before is found among all of them, not only
         // the latest.
-        assert_eq!(offered(&mut recording, &frame(16, 32, zero), start), None);
+        assert_eq!(recording.offer(&frame(16, 32, zero), start), None);
         let seen: Vec<u32> = recording.readings().iter().map(|kept| kept.seen).collect();
         assert_eq!(seen, [3, 1]);
         assert_eq!(sightings(&recording, start), [(3, 1), (1, 1)]);
@@ -660,7 +767,9 @@ mod tests {
         let start = Instant::now();
         let mut recording = recording_of(48, 32, start);
         let kept = |recording: &mut Recording, characters: &[fn(u32, u32) -> bool]| {
-            offered(recording, &showing(characters), start).map(|new| new.index)
+            recording
+                .offer(&showing(characters), start)
+                .map(|new| new.index)
         };
         assert_eq!(kept(&mut recording, &[zero]), Some(0));
         assert_eq!(kept(&mut recording, &[eight, zero]), Some(1));
@@ -695,7 +804,9 @@ mod tests {
         let start = Instant::now();
         let mut recording = recording_of(48, 32, start);
         let kept = |recording: &mut Recording, characters: &[fn(u32, u32) -> bool]| {
-            offered(recording, &showing(characters), start).map(|new| new.index)
+            recording
+                .offer(&showing(characters), start)
+                .map(|new| new.index)
         };
         // The first frame with an 8 caught the digit beside it half drawn,
         // which no text can name, so the 8 cannot be learned from it.
@@ -722,13 +833,10 @@ mod tests {
         let percent = |x: u32, y: u32| {
             (x < 4 && y < 4) || ((6..10).contains(&x) && x + y / 4 == 9) || (x >= 12 && y >= 12)
         };
-        assert!(offered(&mut recording, &frame(16, 16, percent), start).is_some());
+        assert!(recording.offer(&frame(16, 16, percent), start).is_some());
         assert_eq!(recording.view(start).readings[0].shapes, [0, 1, 2]);
         // It is the same three shapes each time it shows.
-        assert_eq!(
-            offered(&mut recording, &frame(16, 16, percent), start),
-            None
-        );
+        assert_eq!(recording.offer(&frame(16, 16, percent), start), None);
         assert_eq!(sightings(&recording, start), [(2, 1), (2, 1), (2, 1)]);
     }
 
@@ -788,7 +896,7 @@ mod tests {
             for marks in &frames {
                 let frame = marked(marks);
                 let Ok(shapes) = reader.shapes(&frame) else {
-                    prop_assert_eq!(offered(&mut recording, &frame, start), None, "no ink to keep");
+                    prop_assert_eq!(recording.offer(&frame, start), None, "no ink to keep");
                     continue;
                 };
                 let shapes = shapes.characters();
@@ -798,7 +906,7 @@ mod tests {
                         distinct.push(*shape);
                     }
                 }
-                let kept = offered(&mut recording, &frame, start).is_some();
+                let kept = recording.offer(&frame, start).is_some();
                 prop_assert!(kept || !new, "a frame with a new shape is kept");
                 shown.push(shapes.to_vec());
                 for shape in shapes {
@@ -865,13 +973,13 @@ mod tests {
         // Eight solid six-pixel-wide digits: 384 pixels of ink.
         let digits = |x: u32| x % 8 < 6;
         let first = frame(64, 8, |x, _| digits(x));
-        assert!(offered(&mut recording, &first, start).is_some());
+        assert!(recording.offer(&first, start).is_some());
         // The last digit loses a two by three stroke, six pixels of 384.
         let stroke = frame(64, 8, |x, y| {
             digits(x) && !((58..60).contains(&x) && (2..5).contains(&y))
         });
         assert!(
-            offered(&mut recording, &stroke, start).is_some(),
+            recording.offer(&stroke, start).is_some(),
             "a new character is a new reading"
         );
     }
@@ -885,7 +993,8 @@ mod tests {
         };
         let region = Region::new(0, 0, 1, 10).expect("not empty");
         let mut recording = Recording::new(1, region, (RED, 0), tall, start);
-        let line = offered(&mut recording, &frame(1, 10, |_, _| true), start)
+        let line = recording
+            .offer(&frame(1, 10, |_, _| true), start)
             .expect("a new reading")
             .line;
         // Ten pixels of ink take a margin of five all round.
@@ -898,9 +1007,7 @@ mod tests {
         let mut recording = recording(start);
         // Ink at columns 3 and 4 of rows 1 and 2.
         let shown = frame(8, 4, |x, y| (3..5).contains(&x) && (1..3).contains(&y));
-        let line = offered(&mut recording, &shown, start)
-            .expect("a new reading")
-            .line;
+        let line = recording.offer(&shown, start).expect("a new reading").line;
         // Two pixels of ink each way, and a margin of two all round.
         assert_eq!((line.width, line.height), (6, 6));
         let black: Vec<usize> = line
@@ -922,15 +1029,9 @@ mod tests {
     fn a_frame_without_ink_or_of_another_size_keeps_nothing() {
         let start = Instant::now();
         let mut recording = recording(start);
-        assert_eq!(
-            offered(&mut recording, &frame(8, 4, |_, _| false), start),
-            None
-        );
+        assert_eq!(recording.offer(&frame(8, 4, |_, _| false), start), None);
         assert_eq!(recording.view(start).problem, None);
-        assert_eq!(
-            offered(&mut recording, &frame(9, 4, |_, _| true), start),
-            None
-        );
+        assert_eq!(recording.offer(&frame(9, 4, |_, _| true), start), None);
         assert_eq!(
             recording.view(start).problem.as_deref(),
             Some(
@@ -938,12 +1039,9 @@ mod tests {
                  window to record."
             )
         );
-        assert_eq!(
-            offered(&mut recording, &frame(4, 4, |_, _| true), start),
-            None
-        );
+        assert_eq!(recording.offer(&frame(4, 4, |_, _| true), start), None);
         assert!(recording.view(start).problem.is_some(), "too small to crop");
-        assert!(offered(&mut recording, &frame(8, 4, |_, _| true), start).is_some());
+        assert!(recording.offer(&frame(8, 4, |_, _| true), start).is_some());
         assert_eq!(
             recording.view(start).problem,
             None,
@@ -958,7 +1056,7 @@ mod tests {
         let mut recording = recording_of(60, 4, start);
         // Thirty one-pixel strokes with a gap between each.
         let crowded = frame(60, 4, |x, _| x % 2 == 0);
-        assert_eq!(offered(&mut recording, &crowded, start), None);
+        assert_eq!(recording.offer(&crowded, start), None);
         assert_eq!(
             recording.view(start).problem.as_deref(),
             Some(
@@ -966,10 +1064,7 @@ mod tests {
                  region around the value alone, or lower the tolerance."
             )
         );
-        assert_eq!(
-            offered(&mut recording, &frame(60, 4, |_, _| false), start),
-            None
-        );
+        assert_eq!(recording.offer(&frame(60, 4, |_, _| false), start), None);
         assert_eq!(recording.view(start).problem, None);
         assert!(recording.readings().is_empty());
     }
@@ -988,15 +1083,15 @@ mod tests {
         };
         for width in 2..18 {
             for row in 0..16 {
-                assert!(offered(&mut recording, &notched(width, row), start).is_some());
+                assert!(recording.offer(&notched(width, row), start).is_some());
             }
         }
         assert_eq!(recording.readings().len(), MAX_SHAPES);
         assert_eq!(recording.view(start).full, None, "as many as fit");
-        assert_eq!(offered(&mut recording, &notched(2, 0), start), None);
+        assert_eq!(recording.offer(&notched(2, 0), start), None);
         assert_eq!(recording.readings()[0].seen, 2);
         // One shape more does not fit.
-        assert_eq!(offered(&mut recording, &notched(18, 0), start), None);
+        assert_eq!(recording.offer(&notched(18, 0), start), None);
         assert_eq!(
             recording.view(start).full.as_deref(),
             Some(
@@ -1005,13 +1100,13 @@ mod tests {
                  more than the value, draw it around the value alone and record again."
             )
         );
-        assert_eq!(offered(&mut recording, &notched(2, 0), start), None);
+        assert_eq!(recording.offer(&notched(2, 0), start), None);
         // Stopped and recorded more, it is as full as it was.
         recording.life.stop(start);
         assert!(recording.view(start).full.is_some());
         recording.life.resume(start);
         assert!(recording.view(start).full.is_some());
-        assert_eq!(offered(&mut recording, &notched(2, 0), start), None);
+        assert_eq!(recording.offer(&notched(2, 0), start), None);
         assert_eq!(recording.readings().len(), MAX_SHAPES);
         assert_eq!(recording.readings()[0].seen, 2);
         assert_eq!(sightings(&recording, start).len(), MAX_SHAPES);
@@ -1024,16 +1119,13 @@ mod tests {
         let second = Duration::from_secs(1);
         let mut recording = recording(start);
         let shown = frame(8, 4, |x, _| x < 2);
-        offered(&mut recording, &shown, start + second).expect("new");
+        recording.offer(&shown, start + second).expect("new");
         assert_eq!(recording.view(start + 3 * second).elapsed_ms, 3000);
         recording.life.stop(start + 4 * second);
         let stopped = recording.view(start + 9 * second);
         assert!(!stopped.recording);
         assert_eq!(stopped.elapsed_ms, 4000);
-        assert_eq!(
-            offered(&mut recording, &frame(8, 4, |x, _| x < 3), start),
-            None
-        );
+        assert_eq!(recording.offer(&frame(8, 4, |x, _| x < 3), start), None);
         recording.life.resume(start + 10 * second);
         let going = recording.view(start + 12 * second);
         assert!(going.recording);
@@ -1100,13 +1192,29 @@ mod tests {
     const STROKE: (u32, u32, u32, u32) = (2, 2, 3, 8);
     const BLOCK: (u32, u32, u32, u32) = (30, 20, 6, 8);
 
+    /// Has `recording` look over `frame` as the look's thread would, when
+    /// a look is due, and answers how many new readings it showed.
+    fn looked_over(recording: &mut Recording, frame: &Image, at: Instant) -> Option<usize> {
+        let job = recording.look(frame, at)?;
+        Some(recording.looked(job.at, Some(look::look(&job)), at).len())
+    }
+
     #[test]
     fn a_whole_window_keeps_a_reading_for_each_run_of_text_like_the_region_s() {
         let start = Instant::now();
         let mut recording = window_recording(start);
         // A stroke in the region, a block far from it, and a bar too tall
         // to be text of the region's size.
-        let new = recording.offer(&blocks(&[STROKE, BLOCK, (50, 2, 3, 20)]), start);
+        let shown = blocks(&[STROKE, BLOCK, (50, 2, 3, 20)]);
+        assert_eq!(
+            recording.offer(&shown, start),
+            None,
+            "its region alone keeps none"
+        );
+        let job = recording
+            .look(&shown, start)
+            .expect("the first frame is looked over");
+        let new = recording.looked(job.at, Some(look::look(&job)), start);
         let indexes: Vec<usize> = new.iter().map(|new| new.index).collect();
         assert_eq!(indexes, [0, 1], "one reading for each run, read as text");
         let view = recording.view(start);
@@ -1139,27 +1247,124 @@ mod tests {
     fn a_whole_window_is_looked_over_once_each_interval() {
         let start = Instant::now();
         let mut recording = window_recording(start);
-        assert_eq!(recording.offer(&blocks(&[STROKE]), start).len(), 1);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[STROKE]), start),
+            Some(1)
+        );
         let soon = start + Duration::from_millis(499);
         assert_eq!(
-            recording.offer(&blocks(&[STROKE, BLOCK]), soon),
-            [],
+            looked_over(&mut recording, &blocks(&[STROKE, BLOCK]), soon),
+            None,
             "a frame before the interval passed is skipped"
         );
         assert_eq!(recording.view(soon).spots.len(), 1, "the last look's");
         assert_eq!(sightings(&recording, soon), [(1, 1)], "and not counted");
         let due = start + SCAN_EVERY;
-        assert_eq!(recording.offer(&blocks(&[STROKE, BLOCK]), due).len(), 1);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[STROKE, BLOCK]), due),
+            Some(1)
+        );
         assert_eq!(sightings(&recording, due), [(2, 1), (1, 1)]);
+    }
+
+    #[test]
+    fn a_look_that_takes_longer_than_the_interval_holds_one_frame() {
+        let start = Instant::now();
+        let mut recording = window_recording(start);
+        let shown = blocks(&[STROKE]);
+        let job = recording
+            .look(&shown, start)
+            .expect("the first frame goes out");
+        // The look is still out long after the interval passed.
+        for late in [SCAN_EVERY, 4 * SCAN_EVERY, 60 * SCAN_EVERY] {
+            assert!(
+                recording.look(&shown, start + late).is_none(),
+                "no frame goes out while a look is out"
+            );
+        }
+        let answered = start + 61 * SCAN_EVERY;
+        assert_eq!(
+            recording
+                .looked(job.at, Some(look::look(&job)), answered)
+                .len(),
+            1
+        );
+        assert!(
+            recording.look(&shown, answered).is_some(),
+            "the next frame goes out once it is answered"
+        );
+    }
+
+    #[test]
+    fn a_look_answered_after_a_stop_is_dropped_and_the_next_goes_out_on_record_more() {
+        let start = Instant::now();
+        let mut recording = window_recording(start);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[STROKE]), start),
+            Some(1)
+        );
+        let job = recording
+            .look(&blocks(&[STROKE, BLOCK]), start + SCAN_EVERY)
+            .expect("due");
+        recording.stop(start + SCAN_EVERY);
+        assert_eq!(
+            recording.view(start + SCAN_EVERY).spots,
+            [],
+            "a stop forgets them"
+        );
+        let late = start + 2 * SCAN_EVERY;
+        assert_eq!(recording.looked(job.at, Some(look::look(&job)), late), []);
+        assert_eq!(recording.readings().len(), 1, "what it saw is not kept");
+        assert_eq!(recording.view(late).spots, []);
+        recording.resume(late);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[STROKE, BLOCK]), late),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_look_that_failed_stops_the_recording_and_record_more_looks_again() {
+        let start = Instant::now();
+        let mut recording = window_recording(start);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[STROKE]), start),
+            Some(1)
+        );
+        let job = recording
+            .look(&blocks(&[STROKE]), start + SCAN_EVERY)
+            .expect("due");
+        assert_eq!(recording.looked(job.at, None, start + SCAN_EVERY), []);
+        let view = recording.view(start + SCAN_EVERY);
+        assert!(!view.recording);
+        assert_eq!(
+            view.problem.as_deref(),
+            Some(
+                "Recording stopped: the window could not be looked over. Record more to try \
+                 again."
+            )
+        );
+        assert_eq!(view.spots, []);
+        recording.resume(start + SCAN_EVERY);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[BLOCK]), start + SCAN_EVERY),
+            Some(1)
+        );
     }
 
     #[test]
     fn a_whole_window_of_another_size_says_so_and_shows_no_spots() {
         let start = Instant::now();
         let mut recording = window_recording(start);
-        assert_eq!(recording.offer(&blocks(&[STROKE]), start).len(), 1);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[STROKE]), start),
+            Some(1)
+        );
         let wider = frame(61, 40, |x, y| x < 3 && y < 8);
-        assert_eq!(recording.offer(&wider, start + SCAN_EVERY), []);
+        assert_eq!(
+            looked_over(&mut recording, &wider, start + SCAN_EVERY),
+            None
+        );
         let view = recording.view(start + SCAN_EVERY);
         assert_eq!(
             view.problem.as_deref(),
@@ -1171,10 +1376,28 @@ mod tests {
         assert_eq!(view.spots, []);
         // Back at its size it looks again at once, and the problem clears.
         let back = start + SCAN_EVERY + Duration::from_millis(1);
-        assert_eq!(recording.offer(&blocks(&[BLOCK]), back).len(), 1);
+        assert_eq!(
+            looked_over(&mut recording, &blocks(&[BLOCK]), back),
+            Some(1)
+        );
         assert_eq!(recording.view(back).problem, None);
-        recording.life.stop(back);
-        assert_eq!(recording.view(back).spots, [], "a stopped one shows none");
+    }
+
+    #[test]
+    fn a_full_recording_says_what_showed_too_much() {
+        let place = full_message(Full::Shapes, Scope::Place);
+        assert!(place.contains("the region showed more than 256 different shapes"));
+        assert_eq!(
+            full_message(Full::Shapes, Scope::Window),
+            "This recording is full: the window showed more than 256 different shapes in the \
+             characters' color and size, more than a reference learns. Stop and review what it \
+             found. If the window shows much other text like the value's, record this place \
+             alone instead."
+        );
+        assert!(
+            full_message(Full::Readings, Scope::Window)
+                .contains("the window showed more than a million different readings")
+        );
     }
 
     #[test]

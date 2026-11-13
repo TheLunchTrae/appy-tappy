@@ -37,7 +37,8 @@ it was about has gone. Fourteen guards drop such stale messages:
   generation is dropped.
 - **Recording IDs.** Each recording, of readings or of looks, gets a new `id`
   from one counter, so text that the text reader sends back for a recording
-  that was discarded, or replaced by one of either kind, is dropped.
+  that was discarded, or replaced by one of either kind, is dropped, and so
+  is what a [window look](#window-look) found for one.
 - **Search IDs.** Each search for text like a reference's box gets a new
   `id` from the owner's `search_id`. The owner drops the text reader's text
   for a search that was replaced or forgotten, answers nothing for a picture
@@ -1474,12 +1475,11 @@ stateDiagram-v2
 
 - A recording looks in its region alone or over the whole window
   (`Looking`), chosen when it starts and kept for its life. Over the whole
-  window it holds when it last looked: a frame less than `SCAN_EVERY` after
-  that is skipped and not counted, and any other frame is searched for runs
-  of text like the region's, each cropped and kept or counted as a place's
-  crop is. A frame of another window size sets the problem, clears the
-  places the last look found, and is skipped whenever it arrives; the first
-  frame back at the size is looked at once the interval has passed.
+  window it sends frames to the [window look](#window-look) and keeps or
+  counts each run of text the answer holds as a place's crop is. A frame of
+  another window size sets the problem, clears the places the last look
+  found, and is not sent, whenever it arrives. Stopping forgets those
+  places, and so does **Record more**, after a stop that a failure made.
 - Each frame is cropped to the region. A crop of another window size, or one
   the reader cannot read, sets the recording's `problem` and is skipped while
   it goes on recording. A crop with no ink is skipped and clears the problem,
@@ -2004,6 +2004,44 @@ says what the saved flag is for.
 An edit has the switch. It starts in **Area** when its value saved a reading
 area and in **Fixed** otherwise, and moves as a new value does; the owner
 refuses an edit that names a reading area for a Color or a State check.
+
+### Window look
+
+A recording of the whole window has its frames looked over on a thread of
+its own (`apps/setup/src-tauri/src/recording/look.rs`), so the owner thread
+answers commands while a look runs. The recording holds a gate (`Gate` in
+`recording.rs`) that lets one frame out at a time.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Out: a frame arrives at the window's size, SCAN_EVERY or more after the last one sent
+    Out --> Idle: the look answers
+    Out --> Idle: the look fails, which stops the recording
+    Idle --> Idle: the look thread is gone, which stops the recording
+```
+
+- **Idle** holds when the last frame that went out arrived. A frame less
+  than `SCAN_EVERY` after it is skipped and not counted. The first frame
+  goes out at once.
+- **Out** skips every frame, so the owner holds one frame for the look and
+  no queue of them. A look that takes longer than `SCAN_EVERY` makes the
+  looks rarer: the next frame goes out when the answer comes.
+- The answer (`Message::Looked`) carries the recording's ID and when its
+  frame arrived. The owner drops one for a recording that was discarded or
+  replaced. The recording counts and keeps the runs it holds, and sends each
+  new reading to the [text reader](#text-reader).
+- **An answer after a stop.** The gate opens and what the look saw is
+  dropped, since a stopped recording keeps no more. **Record more** sends
+  the next frame.
+- **Failures.** A look that panics answers that it failed, and a look
+  thread that ended refuses the frame. Either stops the recording with
+  "Recording stopped: the window could not be looked over. Record more to
+  try again.", opens the gate, and forgets the places the last look found.
+  **Record more** sends a frame again, and stops the same way if the thread
+  is gone.
+- A look takes the 32 runs nearest the recording's region (`MAX_LINES`), so
+  the text around the value is counted before other text in the window.
 
 ### Text reader
 

@@ -16,7 +16,7 @@ use appytappy_sources::system::{Bounds, ProcessEntry, WindowEntry, WindowPlace};
 use crate::applications::AppSpec;
 use crate::check_spec::{CharactersSpec, ColorSpec, RegionSpec};
 use crate::overlay::OverlayWindow;
-use crate::recording::{Scope, ocr};
+use crate::recording::{Scope, look, ocr};
 use crate::stores::{self, Stores};
 
 use super::host::{ClickNow, ClickedWindow, Host};
@@ -263,6 +263,8 @@ pub(super) struct Harness {
     pub(super) closed: Receiver<u64>,
     /// What the owner sends the text reader.
     pub(super) jobs: Receiver<ocr::Job>,
+    /// The frames the owner sends to be looked over.
+    pub(super) looks: Receiver<look::Job>,
     /// Each time the owner asked the runtime to read the saved files again.
     reloads: Receiver<()>,
     /// The overlay windows wanted each time the owner opened and closed
@@ -290,6 +292,7 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
     let (handler_sender, handlers) = mpsc::channel();
     let (closed_sender, closed) = mpsc::channel();
     let (job_sender, jobs) = mpsc::channel();
+    let (look_sender, looks) = mpsc::channel();
     let (reload_sender, reloads) = mpsc::channel();
     let (synced_sender, synced) = mpsc::channel();
     let (click_sender, clicks) = mpsc::channel();
@@ -311,11 +314,12 @@ pub(super) fn harness_with(refuse: bool, store: Result<Stores, String>) -> Harne
         unclicked: None,
     };
     Harness {
-        owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender),
+        owner: Owner::new(host, store, OWN_PROCESS, sender, job_sender, look_sender),
         messages,
         handlers,
         closed,
         jobs,
+        looks,
         reloads,
         synced,
         clicks,

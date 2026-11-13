@@ -1,5 +1,5 @@
 import type { RecordedLabel, RecordedReading, RecordedShape } from './bindings.ts';
-import { mayBeNeeded } from './found.ts';
+import { fitsNeeds, mayBeNeeded } from './found.ts';
 import { andList, knownCharacters, labelCharacters } from './reference.ts';
 // Reviewing a recording: which readings the user keeps, what each shows, and what each adds.
 //
@@ -55,13 +55,20 @@ export function named(reading: RecordedReading, text: string): readonly string[]
 }
 
 /**
- * Whether `text` shows none of the characters among `needs`, the ones the reference needs, counting a letter the text
- * reader often reads in place of a digit as that digit: text that is not the reference's, such as a menu's label.
- * Never without text, or when the reference does not say what it needs.
+ * Whether `text` is not the reference's, such as a menu's label: it has none of the characters among `needs`, the
+ * ones the reference needs, and it is not a needed text misread either, every character of it a letter the text
+ * reader often reads in place of a needed digit. So `SOS` may be `505` to a reference that needs digits, and
+ * `Score`, whose `c`, `r`, and `e` are no digit's lookalike, is not its text. Never without text, or when the
+ * reference does not say what it needs.
  */
 export function unrelated(text: string, needs: readonly string[]): boolean {
   const characters = labelCharacters(text);
-  return needs.length > 0 && characters.length > 0 && !characters.some((character) => mayBeNeeded(character, needs));
+  return (
+    needs.length > 0 &&
+    characters.length > 0 &&
+    !characters.some((character) => needs.includes(character)) &&
+    !fitsNeeds(text, needs)
+  );
 }
 
 /** Whether review keeps `reading` with a text that names its shapes, so that it teaches them. */
@@ -213,7 +220,7 @@ export function decide(
   readings: readonly RecordedReading[],
   edits: ReadonlyMap<number, ReviewEntry>,
   kept: ReadonlyMap<number, string>,
-  needs: readonly string[] = [],
+  needs: readonly string[],
 ): ReadonlyMap<number, ReviewEntry> {
   const starts = readings.map((reading, index) => startEntry(reading, kept.get(index)));
   const beside = starts.map((start, index) => edits.get(index) ?? decided.get(index) ?? start);
@@ -244,8 +251,8 @@ export function entries(
   readings: readonly RecordedReading[],
   edits: ReadonlyMap<number, ReviewEntry>,
   kept: ReadonlyMap<number, string>,
-  decided: ReadonlyMap<number, ReviewEntry> = new Map(),
-  needs: readonly string[] = [],
+  decided: ReadonlyMap<number, ReviewEntry>,
+  needs: readonly string[],
 ): readonly ReviewEntry[] {
   const starts = decide(decided, readings, edits, kept, needs);
   return readings.map(
@@ -271,7 +278,7 @@ export function untaught(
   readings: readonly RecordedReading[],
   all: readonly ReviewEntry[],
   adds: readonly (readonly number[])[],
-  needs: readonly string[] = [],
+  needs: readonly string[],
 ): Untaught {
   const characters: string[] = [];
   const offered: number[] = [];
@@ -349,8 +356,8 @@ export function tileNote(
   reading: RecordedReading,
   entry: ReviewEntry,
   problem: string | undefined,
-  clash?: string,
-  needs: readonly string[] = [],
+  clash: string | undefined,
+  needs: readonly string[],
 ): string | null {
   if (problem !== undefined && entry.keep) {
     return problem;

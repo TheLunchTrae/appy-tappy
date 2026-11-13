@@ -431,14 +431,18 @@ character is one shape.
   example's color and size are all that tie a run to the reference's font;
   nothing compares shapes with the example, since a recording starts before
   any shape has a character. Review starts a reading left out when its text
-  shows none of the expected characters (`unrelated` in `lib/review.ts`),
-  counting the text reader's usual lookalikes as digits, and `untaught`
-  then offers only expected characters. A look reads every pixel of the
-  frame in the owner thread, which took about 30 ms for a 1920 by 1080 frame and 125 ms
-  for a 3840 by 2160 one in a release build,
-  so it looks at most once every `SCAN_EVERY`, 500 ms, and skips the frames
-  between without counting them. The view carries where the last look found
-  text (`spots`), which the page outlines on the live window.
+  is not the reference's (`unrelated` in `lib/review.ts`): it has none of
+  the expected characters, and it is not all lookalikes of expected digits
+  either, as `SOS` is of `505`. `untaught` then offers only expected
+  characters. A look reads every pixel of the frame, so it runs on a thread
+  of its own (`recording/look.rs`) and commands do not wait for it. The
+  owner sends it one frame at a time, at most once every `SCAN_EVERY`,
+  500 ms, and skips the frames between without counting them
+  ([Window look](State-machines.md#window-look)). A look takes the 32 runs
+  nearest the region (`MAX_LINES`), nearest first, so a window full of text
+  in the characters' color does not use up the recording's 256 shapes
+  before the value's. The view carries where the last look found text
+  (`spots`), which the page outlines on the live window.
 - **Sizes.** A frame of another window size is skipped because a recording
   has a region and no [pin](Screen-regions.md#window-sizes): only a value
   says which side of the window its region keeps its distance from, and a
