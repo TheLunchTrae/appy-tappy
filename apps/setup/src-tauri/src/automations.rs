@@ -16,9 +16,8 @@ use std::fs;
 
 use appytappy_config::action::KeyChord;
 use appytappy_config::app_file::{AppFile, ValueDef, ValueKind};
-use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, AutomationsFile, TargetDef, new_automation_id,
-};
+use appytappy_config::automation_file::{ActionDef, AutomationDef, AutomationsFile, TargetDef};
+use appytappy_config::names::new_automation_id;
 use appytappy_config::signal::SignalName;
 use appytappy_config::store::StoredApp;
 use appytappy_sources::automation::{Problem, Runnable};

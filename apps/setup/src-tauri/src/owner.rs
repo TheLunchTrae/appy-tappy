@@ -44,8 +44,8 @@ use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{AppFile, BuildDef};
+use appytappy_config::process::ProcessId;
 use appytappy_sources::screen::{CaptureSession, Image};
 
 use crate::check_spec::Pictures;
@@ -329,18 +329,13 @@ impl<H: Host> Owner<H> {
     }
 
     /// Writes `write` to the folder of the application `app`, then tells who
-    /// reads what `changed` names, removes the pictures the file as saved
-    /// does not name, and opens or closes the overlay windows to match when
-    /// `changed` can change which show. Answers why an overlay window could
-    /// not open or close, if one could not.
+    /// reads what `changed` names, and opens or closes the overlay windows
+    /// to match when `changed` can change which show. Answers why an overlay
+    /// window could not open or close, if one could not.
     ///
-    /// A save that failed changed nothing anyone reads, so no one is told,
-    /// and the pictures it wrote before it failed go, since the file still
-    /// saved does not name them. A removal that failed partway may have
-    /// removed some of the application's files, so they are read again
-    /// either way. No one reads a picture the file does not name, so a
-    /// failure to remove one changes nothing they read, and the save
-    /// stands; the application's next save tries again.
+    /// A save that failed changed nothing anyone reads, so no one is told.
+    /// A removal that failed partway may have removed some of the
+    /// application's files, so they are read again either way.
     pub(super) fn write_app(
         &mut self,
         app: &str,
@@ -355,13 +350,6 @@ impl<H: Host> Owner<H> {
         .map_err(|error| error.to_string());
         if written.is_ok() || matches!(write, Write::Remove) {
             self.tell(changed);
-        }
-        if let Write::Save(..) = write {
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "no one reads a picture the saved file does not name, and the next save tries again"
-            )]
-            let _ = self.prune_saved(app);
         }
         written?;
         let windows = changed
@@ -381,25 +369,6 @@ impl<H: Host> Owner<H> {
         let saved = self.stores().and_then(save)?;
         self.tell(Changed::Runtime);
         Ok(saved)
-    }
-
-    /// Removes the pictures of the application `app` that `file` does not
-    /// name, of those AppyTappy named.
-    pub(super) fn prune(&self, app: &str, file: &AppFile) -> Result<(), String> {
-        self.stores()?
-            .apps
-            .prune(app, file)
-            .map_err(|error| error.to_string())
-    }
-
-    /// Removes the pictures of the application `app` that its file, as it
-    /// is saved now, does not name: the new file after a save that worked,
-    /// and the one before it after a save that failed, whose pictures no
-    /// file names. An application whose saved file cannot be read keeps
-    /// every picture, since nothing says which it names.
-    fn prune_saved(&self, app: &str) -> Result<(), String> {
-        let saved = self.stores()?.app(app)?;
-        self.prune(app, &saved.file)
     }
 
     /// Does what follows from a change to the saved files: each overlay

@@ -1285,7 +1285,7 @@ mod tests {
     use std::process;
     use std::time::Duration;
 
-    use appytappy_config::anti_cheat::ProcessId;
+    use appytappy_config::process::ProcessId;
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
 
     use super::*;

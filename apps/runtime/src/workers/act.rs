@@ -416,8 +416,8 @@ mod tests {
     use appytappy_config::action::{
         MediaCommand, MediaTarget, Modifier, OpenTarget, VolumeLevel, VolumeTarget,
     };
-    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::click::{ClickAt, ClickButton, Corner, Spot};
+    use appytappy_config::process::ProcessId;
 
     use appytappy_sources::system::Unsupported;
 

@@ -26,7 +26,7 @@ use crate::action::{
     VolumeTarget,
 };
 use crate::anti_cheat::{AntiCheatClass, allows_input};
-use crate::app_file::{AppFile, RegionDef, SizeDef, ValueDef, ValueKind, id_from_name};
+use crate::app_file::{AppFile, RegionDef, SizeDef, ValueDef, ValueKind};
 use crate::click::{
     Area, Click, ClickAt, ClickButton, ClickDelivery, ClickPicture, Corner, InvalidClick, Spot,
 };
@@ -35,10 +35,6 @@ use crate::signal::{Number, SignalName, StateName, Value};
 
 /// The format version this build writes and reads.
 pub const FORMAT: u32 = 1;
-
-/// The longest ID [`new_automation_id`] makes, in bytes, so a numbered
-/// ID still fits [`SignalName`]'s limit.
-const MAX_AUTOMATION_ID_LEN: usize = 44;
 
 /// The longest cooldown, in milliseconds: a day.
 pub const MAX_COOLDOWN_MS: u32 = 86_400_000;
@@ -761,23 +757,6 @@ impl fmt::Display for AutomationsError {
 
 impl Error for AutomationsError {}
 
-/// An automation ID made from a name the user typed that `taken` does not
-/// hold yet, such as `pause_music` from `Pause music`, or `pause_music_2`
-/// when that is taken.
-#[must_use]
-pub fn new_automation_id(name: &str, taken: &[&str]) -> String {
-    let base = id_from_name(name, "automation", MAX_AUTOMATION_ID_LEN);
-    let base = base.as_str();
-    if !taken.contains(&base) {
-        return base.to_owned();
-    }
-    // `taken` is finite, so one of its length plus one numbers is free.
-    (2_usize..=taken.len().saturating_add(2))
-        .map(|number| format!("{base}_{number}"))
-        .find(|candidate| !taken.contains(&candidate.as_str()))
-        .unwrap_or_else(|| base.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -785,8 +764,9 @@ mod tests {
     use super::*;
     use crate::app_file::{
         AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, OriginDef, ReferenceDef, RegionDef,
-        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef, sample_name,
+        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
+    use crate::names::sample_name;
     use crate::window_match::WindowFacts;
 
     fn value(id: &str, name: &str, check: CheckDef) -> ValueDef {
@@ -1682,34 +1662,5 @@ mod tests {
             .collect();
         assert_eq!(ids, ["pause_music"]);
         assert_eq!(all.watching("example", "lap").count(), 0);
-    }
-
-    #[test]
-    fn new_ids_come_from_the_name_and_avoid_taken_ones() {
-        assert_eq!(new_automation_id("Pause music", &[]), "pause_music");
-        assert_eq!(
-            new_automation_id("Pause music", &["pause_music"]),
-            "pause_music_2"
-        );
-        assert_eq!(
-            new_automation_id("Pause music", &["pause_music", "pause_music_2"]),
-            "pause_music_3"
-        );
-        assert_eq!(new_automation_id("", &[]), "automation");
-        assert_eq!(new_automation_id("!!", &["automation"]), "automation_2");
-        assert_eq!(new_automation_id("2 steps", &[]), "automation_2_steps");
-        assert_eq!(new_automation_id("Value check", &[]), "value_check");
-        assert_eq!(new_automation_id("Éclair", &[]), "clair");
-        let long = new_automation_id(&"a".repeat(80), &[]);
-        assert_eq!(long.len(), MAX_AUTOMATION_ID_LEN);
-        let underscore = format!("{} b", "a".repeat(MAX_AUTOMATION_ID_LEN.saturating_sub(1)));
-        assert!(!new_automation_id(&underscore, &[]).ends_with('_'));
-        for id in [
-            long,
-            new_automation_id(&"a".repeat(80), &[&"a".repeat(44)]),
-            new_automation_id("2 steps", &[]),
-        ] {
-            assert!(SignalName::new(&id).is_ok(), "{id}");
-        }
     }
 }

@@ -26,8 +26,8 @@ use std::io;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_platform::WindowEvent;
 use appytappy_sources::system::{Pick, ProcessEntry, WindowEntry, session_window};

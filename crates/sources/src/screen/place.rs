@@ -9,8 +9,8 @@
 use std::io;
 use std::time::Duration;
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::click::Spot;
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 
 use super::click::ClickSearch;

@@ -8,7 +8,8 @@
 use appytappy_config::app_file::{
     AntiCheatDef, AppFile, FORMAT, OriginDef, SizeChangesDef, WindowDef, WindowDefError,
 };
-use appytappy_config::store::{StoredApp, new_app_id};
+use appytappy_config::names::new_app_id;
+use appytappy_config::store::StoredApp;
 use serde::Deserialize;
 
 use crate::automations;

@@ -5,9 +5,9 @@ use std::io;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{BuildDef, SizeChangesDef, WindowDef};
 use appytappy_config::click::{ClickButton, ClickDelivery, Spot};
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_sources::screen::place::Target;
 use appytappy_sources::screen::{CaptureSession, Crop, Frame, FrameHandler, Image, Size};

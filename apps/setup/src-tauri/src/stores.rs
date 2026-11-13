@@ -131,11 +131,11 @@ mod tests {
         };
         stores
             .apps
-            .save("example", &file, &[("shown-1.png".to_owned(), vec![1, 2])])
+            .save("example", &file, &[("shown.png".to_owned(), vec![1, 2])])
             .expect("saves");
         let saved = stores.app("example").expect("loads");
         assert_eq!(saved.file, file);
-        assert_eq!(saved.picture("shown-1.png").expect("reads"), [1, 2]);
+        assert_eq!(saved.picture("shown.png").expect("reads"), [1, 2]);
         fs::write(saved.folder.join("app.json"), "{").expect("breaks the file");
         assert!(
             stores

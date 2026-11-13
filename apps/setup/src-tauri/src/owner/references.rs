@@ -2,7 +2,8 @@
 //! application. Saving one learns its samples, as the check that reads with
 //! it would, and deleting one waits until no value reads with it.
 
-use appytappy_config::app_file::{OriginDef, new_reference_id, reference_id};
+use appytappy_config::app_file::OriginDef;
+use appytappy_config::names::{new_reference_id, reference_id};
 
 use crate::check_spec::{ReferenceRef, SavedReference, Session};
 
@@ -113,13 +114,13 @@ impl<H: Host> Owner<H> {
 
     /// Removes the reference `reference` of the application `app` and its
     /// pictures, unless a value reads with it, in its check or in a fix. A
-    /// reference already gone changed nothing, so no one is told, but
-    /// pictures an earlier delete left behind are removed.
+    /// reference already gone changed nothing, so nothing is saved and no
+    /// one is told.
     pub(crate) fn delete_reference(&mut self, app: &str, reference: &str) -> Result<(), String> {
-        let gone = self.update_app(app, Changed::Values, |_owner, found| {
+        self.update_app(app, Changed::Values, |_owner, found| {
             let file = &mut found.file;
             let Some(saved) = file.reference(reference) else {
-                return Ok(Edit::Keep(Some(file.clone())));
+                return Ok(Edit::Keep(()));
             };
             let users: Vec<&str> = file
                 .values
@@ -137,12 +138,9 @@ impl<H: Host> Owner<H> {
                 ));
             }
             file.references.retain(|saved| saved.id != reference);
-            Ok(Edit::Save(None, Vec::new()))
-        })?;
-        match gone.answer {
-            Some(file) => self.prune(app, &file),
-            None => Ok(()),
-        }
+            Ok(Edit::Save((), Vec::new()))
+        })
+        .map(|saved| saved.answer)
     }
 }
 
@@ -379,22 +377,8 @@ mod tests {
         assert_eq!(harness.ask(delete("digits")), Ok(()));
         assert_eq!(harness.reloads(), 1, "and the references");
         assert!(!folder.join("ref-digits-1.png").exists());
-        // A picture an earlier delete left behind goes with the next delete,
-        // even of a reference already gone, while the kept pictures stay.
-        let kept: Vec<_> = std::fs::read_dir(&folder)
-            .expect("lists the pictures")
-            .map(|entry| entry.expect("an entry").file_name())
-            .collect();
-        std::fs::write(folder.join("ref-digits-1.png"), b"left behind").expect("a leftover");
         assert_eq!(harness.ask(delete("digits")), Ok(()), "already gone");
         assert_eq!(harness.reloads(), 0, "nothing changed");
-        assert!(
-            !folder.join("ref-digits-1.png").exists(),
-            "the leftover is gone"
-        );
-        for name in &kept {
-            assert!(folder.join(name).exists(), "{name:?} stays");
-        }
         let apps = harness.ask(Owner::apps).expect("lists");
         let file = apps[0].file.as_ref().expect("a good file");
         assert_eq!(

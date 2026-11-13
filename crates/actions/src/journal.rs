@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use appytappy_config::action::{
     Action, KeyChord, MediaCommand, MediaTarget, VolumeLevel, VolumeTarget,
 };
-use appytappy_config::anti_cheat::ProcessId;
+use appytappy_config::process::ProcessId;
 use appytappy_config::rule::Restore;
 
 use crate::{ActionError, Controls, HOLD, Input, MediaSession, Stroke, Volume, strokes};

@@ -4,11 +4,11 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef, new_value_id,
-    value_id,
+    AntiCheatDef, AppFile, BuildDef, CheckedDef, ScreenDef, SizeDef, ValueDef,
 };
+use appytappy_config::names::{new_value_id, value_id};
+use appytappy_config::process::ProcessId;
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::system::{ProcessEntry, WindowEntry};
 

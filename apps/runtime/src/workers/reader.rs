@@ -1312,8 +1312,8 @@ mod tests {
     use std::sync::mpsc::{SyncSender, TryRecvError};
     use std::thread;
 
-    use appytappy_config::anti_cheat::ProcessId;
     use appytappy_config::app_file::{PinDef, SizeChangesDef};
+    use appytappy_config::process::ProcessId;
     use appytappy_config::signal::{Number, SignalName};
     use appytappy_config::window_match::{MustMatch, Pattern, WindowMatch};
     use appytappy_sources::screen::check::{Check, ColorMatch};
@@ -2406,7 +2406,7 @@ mod tests {
 
         fn executable_build(
             &self,
-            _process: appytappy_config::anti_cheat::ProcessId,
+            _process: appytappy_config::process::ProcessId,
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }
@@ -2966,7 +2966,7 @@ mod tests {
 
         fn executable_build(
             &self,
-            _process: appytappy_config::anti_cheat::ProcessId,
+            _process: appytappy_config::process::ProcessId,
         ) -> io::Result<appytappy_config::app_file::BuildDef> {
             Err(io::Error::from(io::ErrorKind::Unsupported))
         }

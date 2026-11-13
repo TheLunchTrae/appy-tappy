@@ -10,7 +10,8 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use appytappy_config::app_file::{ReferenceDef, SampleDef, is_label_character, sample_name};
+use appytappy_config::app_file::{ReferenceDef, SampleDef, is_label_character};
+use appytappy_config::names::sample_name;
 use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::saved::{self, SavedError};
 use appytappy_sources::screen::{Image, Region, Size};

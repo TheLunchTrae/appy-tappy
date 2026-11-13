@@ -7,9 +7,9 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use appytappy_actions::{HostInput, PlacedClick, Watched};
-use appytappy_config::anti_cheat::ProcessId;
 use appytappy_config::app_file::BuildDef;
 use appytappy_config::click::{ClickButton, ClickDelivery};
+use appytappy_config::process::ProcessId;
 use appytappy_config::window_match::WindowMatch;
 use appytappy_platform::InstanceGuard;
 use appytappy_sources::HostSystem;
