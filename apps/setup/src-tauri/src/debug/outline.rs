@@ -51,13 +51,14 @@ pub(crate) fn outline(
     size: Size,
     picture: impl FnMut(&str) -> io::Result<Vec<u8>> + Clone,
 ) -> CaptureOutline {
+    let mut readers = saved::Readers::new(&file.references);
     let placed: Vec<(bool, Result<Region, String>)> = file
         .values
         .iter()
         .map(|value| {
             let region = saved::build(
                 &value.screen,
-                &file.references,
+                &mut readers,
                 file.size_changes,
                 picture.clone(),
             )

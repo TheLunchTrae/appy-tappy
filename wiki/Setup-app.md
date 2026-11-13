@@ -1006,11 +1006,10 @@ saved file is held to and takes nothing else from it:
   of a window hold. A picture without a PNG header, or larger than AppyTappy
   reads, is refused with the value or reference that names it, in the words
   a saved file's would be.
-- Reading the values decodes no more than `MAX_DECODED_PIXELS`, four pictures
-  of `LARGEST_PICTURE`, in all. `saved::build` decodes a reference's pictures
-  again for each value and fix that reads with it, so a file that holds few
-  pixels can still ask for many. A reference's text is small, so many values
-  can read with it.
+- Reading the values decodes each picture once, so the pixels the pictures
+  hold are the pixels it decodes. Each picture has one place that names it,
+  and one `saved::Readers` builds each reference's reader once, however many
+  values and fixes read with it.
 - Each picture takes the name the setup app gives it: `sample_name` for a
   reference's samples in order, and `state_image_name` for a value's states,
   with each fix's pictures in the set of its place among the fixes. The file's
@@ -1018,9 +1017,9 @@ saved file is held to and takes nothing else from it:
   picture for two values, or name a value's picture as another value's next
   one, which a later save would overwrite; after the renaming each picture
   has one owner, and `AppStore::prune` knows every name.
-- `saved::build` reads each value and `saved::reader` each reference from the
-  pictures, as the runtime does and as saving a value does, so a file with a
-  value the runtime could not read is refused.
+- `saved::build` reads each value from the pictures, and `saved::Readers`
+  each reference, as the runtime does and as saving a value does, so a file
+  with a value the runtime could not read is refused.
 
 `Shared::of` holds an application to the same rules, and `pack` reads back
 what it packed with `unpack` and refuses what that refuses, such as an

@@ -446,13 +446,14 @@ fn open<S>(
             .overlay
             .map_or(OverlayModeDef::Overlay, |overlay| overlay.mode),
     };
+    let mut readers = saved::Readers::new(&file.references);
     let values = file
         .values
         .iter()
         .map(|value| {
             let check = saved::build(
                 &value.screen,
-                &file.references,
+                &mut readers,
                 file.size_changes,
                 picture.clone(),
             )
@@ -749,7 +750,13 @@ mod tests {
             "fixes": []
         }))
         .expect("the file's spelling");
-        saved::build(&screen, &[], SizeChangesDef::Often, |_| Ok(png.clone())).expect("builds")
+        saved::build(
+            &screen,
+            &mut saved::Readers::new(&[]),
+            SizeChangesDef::Often,
+            |_| Ok(png.clone()),
+        )
+        .expect("builds")
     }
 
     /// An overlay of `values` whose capture reads at `size`.

@@ -441,9 +441,12 @@ mod tests {
     /// the frame's size, and read from its region there.
     fn as_the_runtime_reads(app: &SavedApp, value: &ValueDef, frame: &Image) -> Option<Value> {
         let file = &app.file;
-        let built = saved::build(&value.screen, &file.references, file.size_changes, |name| {
-            app.picture(name)
-        })
+        let built = saved::build(
+            &value.screen,
+            &mut saved::Readers::new(&file.references),
+            file.size_changes,
+            |name| app.picture(name),
+        )
         .expect("the runtime reads the saved value");
         let at = built.at(frame.size()).ok()?;
         built.check(&at).read(&frame.crop(at.region)?).ok()
