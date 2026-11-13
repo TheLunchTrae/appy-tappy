@@ -790,6 +790,7 @@ export function Capture({
     setDraft((current) => toReference(current, existing));
     boxes.select(null);
     setPicking(null);
+    // Why the value was not saved is about the value before this edit, so it does not show when the editor closes.
     setSaveError(null);
     setReferenceError(null);
     await looks.discard();
@@ -843,7 +844,6 @@ export function Capture({
         characters: characters.spec,
         expects: editing.expects.join(''),
       });
-      setReferenceError(null);
       if (mode.kind === 'reference') {
         await drafting.finished();
         onSaved({ app: saved.app, value: null });

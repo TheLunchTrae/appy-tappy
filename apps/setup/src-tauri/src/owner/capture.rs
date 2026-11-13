@@ -680,6 +680,12 @@ mod tests {
         harness
             .ask(|owner| owner.set_check(&trial(STATE)))
             .expect("a valid check");
+        // The page asks for a reading's pixels by its recording's ID, which
+        // it still holds after the stop.
+        let recording = harness
+            .ask(|owner| owner.recording_state())
+            .expect("a recording runs")
+            .id;
         // What the page can ask for of the picked window: the newest frame,
         // a screenshot, a recorded reading, the recording, and what the
         // check, which holds a state's picture, reads.
@@ -687,10 +693,7 @@ mod tests {
             [
                 owner.preview(4).expect("no failure").is_some(),
                 owner.screenshot_pixels(0, 4).is_some(),
-                owner
-                    .recording_state()
-                    .and_then(|recording| owner.recorded_pixels(recording.id, 0, 4))
-                    .is_some(),
+                owner.recorded_pixels(recording, 0, 4).is_some(),
                 owner.recording_state().is_some(),
                 owner.reading().expect("reads").is_some(),
             ]

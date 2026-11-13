@@ -28,8 +28,9 @@ import type { useRecording } from './useRecording.ts';
 import type { useReview } from './useReview.ts';
 
 /**
- * The reading at `index` of a recording as a place, with the text and the keep `entry` has for it. The check asks
- * about it when review keeps it or, with `saved`, when a reference saved now would learn it.
+ * The reading at `index` of a recording as a place, with the text `entry` has for it. It is kept, and the check
+ * asks about it, when review keeps it or, with `saved`, when a reference saved now would learn it: a place's keep
+ * says what the reference learns from, which review's tick alone does not say for a reading the draft keeps.
  */
 function readingPlace(
   reading: RecordingView['readings'][number],
@@ -37,6 +38,7 @@ function readingPlace(
   entry: ReviewEntry,
   saved: boolean,
 ): Place {
+  const learned = entry.keep || saved;
   return {
     source: 'reading',
     index,
@@ -45,10 +47,10 @@ function readingPlace(
     width: reading.width,
     text: entry.text,
     typed: entry.text !== startEntry(reading, undefined).text,
-    keep: entry.keep,
+    keep: learned,
     ticks: true,
     reading: reading.text.kind === 'pending' && entry.text === '',
-    asks: entry.keep || saved,
+    asks: learned,
   };
 }
 
@@ -75,10 +77,11 @@ export interface DrawnBox {
 /**
  * The places a check goes over: every box, every find listed, ticked or not, and every recorded reading. It asks
  * about the boxes, the finds, the readings review keeps, and the `saved` ones, which {@link savedReadings} lists:
- * a reading the draft keeps is learned on a save even after review, reopened, left it out without Keep. A box
- * whose characters have not arrived waits like text still being read. Any other reading review leaves out shows
- * only shapes the kept ones show, so it has nothing to ask about, but it gets the answers too: review compares the
- * texts of all the readings, and would flag a kept reading the check fixed against a left-out one it did not.
+ * a reading the draft keeps is learned on a save even after review, reopened, left it out without Keep, so it
+ * counts as kept here, and the check leaves it out of the draft like any kept place. A box whose characters have
+ * not arrived waits like text still being read. Any other reading review leaves out shows only shapes the kept
+ * ones show, so it has nothing to ask about, but it gets the answers too: review compares the texts of all the
+ * readings, and would flag a kept reading the check fixed against a left-out one it did not.
  */
 export function checkPlaces(
   drawn: readonly DrawnBox[],
@@ -164,38 +167,62 @@ export function learnedPlaces(
   return [...boxes, ...readings];
 }
 
-/** One reading as the draft has it: the text it keeps it with, or kept it with until a check left it out. */
-export interface KeptReading {
+/** A reading the open check took from the draft. */
+export interface LeftOut {
+  /** The text the draft kept it with. */
   readonly text: string;
+  /** Whether review had it ticked then, which is the tick it gets back when the check keeps it again. */
+  readonly ticked: boolean;
+}
+
+/** One reading as the draft has it: the text it keeps it with, or kept it with until a check left it out. */
+export interface KeptReading extends LeftOut {
   /** Whether a check left it out, so the draft keeps it no longer until the check keeps it again. */
   readonly leftOut: boolean;
 }
 
 /**
+ * Whether review has the reading at `place` ticked after a check's edit of it to `entry`, given its `tick` before.
+ * A place's keep says whether a save learns the reading, which for one the draft keeps can hold while review's tick
+ * is clear. So the tick follows the edit only when the edit changes the keep: an answer that rewrites the text of
+ * such a reading does not tick it. One the check keeps again gets the tick it had when the check took it from the
+ * draft, `was`, or is ticked when the draft never had it.
+ */
+export function reviewTick(tick: boolean, was: boolean | undefined, place: Place, entry: ReviewEntry): boolean {
+  if (entry.keep === place.keep) {
+    return tick;
+  }
+  return entry.keep && (was ?? true);
+}
+
+/**
  * What the draft has of the reading at `place` after a check's edit of it to `entry`, or null for a reading the
  * draft never kept, which review alone keeps or leaves out. `recorded` has the readings the draft keeps, and
- * `leftOut` the ones the open check took from it, each with its text there.
+ * `leftOut` the ones the open check took from it. `tick` is review's tick for the reading before the edit.
  *
  * The draft gets only what the edit changed, so that saving learns what the check wrote and nothing else: `place`
- * has review's text and keep, and what review changed there stays review's until its Keep. So the draft's text gets
- * the characters the edit changed, and the draft keeps the reading or not as before unless the edit changes
- * `place`'s keep: an answer that only rewrites the text of a reading review left out without Keep leaves it on the
- * draft. A reading the edit leaves out goes from the draft with its text remembered, and one it keeps again comes
- * back with that text.
+ * has review's text, and what review changed there stays review's until its Keep. So the draft's text gets the
+ * characters the edit changed, and the draft keeps the reading or not as before unless the edit changes `place`'s
+ * keep: while review is open, an answer that only rewrites the text of a reading review left out without Keep
+ * leaves it on the draft. A reading the edit leaves out goes from the draft with its text and review's tick
+ * remembered, and one it keeps again comes back with that text.
  */
 export function editedReading(
   recorded: ReadonlyMap<number, string>,
-  leftOut: ReadonlyMap<number, string>,
+  leftOut: ReadonlyMap<number, LeftOut>,
   place: Place,
+  tick: boolean,
   entry: ReviewEntry,
 ): KeptReading | null {
-  const text = recorded.get(place.index) ?? leftOut.get(place.index);
+  const left = leftOut.get(place.index);
+  const text = recorded.get(place.index) ?? left?.text;
   if (text === undefined) {
     return null;
   }
   return {
     text: withEdit(text, place.text, entry.text),
     leftOut: entry.keep === place.keep ? !recorded.has(place.index) : !entry.keep,
+    ticked: left?.ticked ?? tick,
   };
 }
 
@@ -205,15 +232,12 @@ export interface Held {
   readonly guide: Guide | null;
   /** What the checks closed since the reference's editor opened answered, which says what the user has confirmed. */
   readonly past: Answers;
-  /**
-   * The readings the open check took from the draft, each with the text the draft kept it with, and the ID of the
-   * recording they are readings of.
-   */
-  readonly leftOut: { readonly recording: number | null; readonly texts: ReadonlyMap<number, string> };
+  /** The readings the open check took from the draft, and the ID of the recording they are readings of. */
+  readonly leftOut: { readonly recording: number | null; readonly readings: ReadonlyMap<number, LeftOut> };
 }
 
 /** Nothing held: no check is open, and none has answered anything. */
-export const NOTHING_HELD: Held = { guide: null, past: new Map(), leftOut: { recording: null, texts: new Map() } };
+export const NOTHING_HELD: Held = { guide: null, past: new Map(), leftOut: { recording: null, readings: new Map() } };
 
 /** What changes what the capture screen holds of the check. */
 export type HeldEvent =
@@ -232,8 +256,8 @@ export type HeldEvent =
     };
 
 /** The readings `held` remembers as left out of recording `recording`: none for any other recording than theirs. */
-export function leftOutOf(held: Held, recording: number | null): ReadonlyMap<number, string> {
-  return held.leftOut.recording === recording ? held.leftOut.texts : NOTHING_HELD.leftOut.texts;
+export function leftOutOf(held: Held, recording: number | null): ReadonlyMap<number, LeftOut> {
+  return held.leftOut.recording === recording ? held.leftOut.readings : NOTHING_HELD.leftOut.readings;
 }
 
 /** Every answer `held` has, of the closed checks and the open one, whose answers come last. */
@@ -254,13 +278,13 @@ export function heldStep(held: Held, event: HeldEvent): Held {
     case 'forget':
       return NOTHING_HELD;
     case 'reading': {
-      const texts = new Map(leftOutOf(held, event.recording));
+      const readings = new Map(leftOutOf(held, event.recording));
       if (event.reading.leftOut) {
-        texts.set(event.index, event.reading.text);
-      } else if (!texts.delete(event.index) && held.leftOut.recording === event.recording) {
+        readings.set(event.index, { text: event.reading.text, ticked: event.reading.ticked });
+      } else if (!readings.delete(event.index) && held.leftOut.recording === event.recording) {
         return held;
       }
-      return { ...held, leftOut: { recording: event.recording, texts } };
+      return { ...held, leftOut: { recording: event.recording, readings } };
     }
   }
 }
@@ -365,10 +389,15 @@ export function useCharacterCheck(
       return;
     }
     if (place.source === 'reading') {
-      review.edit(place.index, entry);
-      // A reading the draft keeps already is fixed there too, so that saving learns what the check wrote.
       const recording = recorder.view?.id ?? null;
-      const reading = editedReading(recorded, leftOutOf(state, recording), place, entry);
+      const leftOut = leftOutOf(state, recording);
+      const tick = review.entries[place.index]?.keep ?? place.keep;
+      review.edit(place.index, {
+        text: entry.text,
+        keep: reviewTick(tick, leftOut.get(place.index)?.ticked, place, entry),
+      });
+      // A reading the draft keeps already is fixed there too, so that saving learns what the check wrote.
+      const reading = editedReading(recorded, leftOut, place, tick, entry);
       if (reading !== null) {
         taught.keepReading(place.index, reading.leftOut ? null : reading.text);
         send({ kind: 'reading', recording, index: place.index, reading });
