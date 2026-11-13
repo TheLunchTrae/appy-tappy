@@ -1597,7 +1597,9 @@ by itself.
 
 A recording of readings keeps a reading for each shape a region shows, for
 the user to review. Its `Sightings` hold `full`, which says why it takes no
-more once a frame did not fit.
+more once a frame did not fit. A reading's picture is answered only for its
+own recording's ID, one of the
+[stale-message guards](#how-to-read-this-page).
 
 ```mermaid
 stateDiagram-v2
