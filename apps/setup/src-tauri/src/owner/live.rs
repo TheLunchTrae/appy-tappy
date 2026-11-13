@@ -663,10 +663,9 @@ mod tests {
 
     #[test]
     fn settling_where_a_fix_reads_forgets_the_size_it_was_not_read_at() {
-        use appytappy_config::app_file::PinDef;
+        use appytappy_sources::screen::Region;
         use appytappy_sources::screen::check::ColorMatch;
         use appytappy_sources::screen::saved::SavedFix;
-        use appytappy_sources::screen::{Region, Size};
         use appytappy_sources::system::Rgb;
 
         let size = |width| Size { width, height: 4 };
@@ -694,21 +693,28 @@ mod tests {
             size_changes: SizeChangesDef::Rarely,
         };
         let frame = |size: Size| {
-            let pixels = usize::try_from(size.width * size.height).expect("small");
-            Image::new(size, vec![0; pixels * 4]).expect("matching length")
+            let bytes = size
+                .width
+                .checked_mul(size.height)
+                .and_then(|pixels| pixels.checked_mul(4))
+                .and_then(|bytes| usize::try_from(bytes).ok())
+                .expect("small");
+            Image::new(size, vec![0; bytes]).expect("matching length")
         };
         let start = Instant::now();
+        let settled = start.checked_add(SETTLE).expect("in range");
+        let later = settled.checked_add(SETTLE).expect("in range");
         let mut live = LiveCheck::new(value, drawn);
         live.saw(unread, start);
-        live.saw(unread, start + SETTLE);
+        live.saw(unread, settled);
         assert!(
             live.region_of(&frame(unread)).is_err(),
             "the size it is not read at says why"
         );
         // Settled where the fix reads, it is placed there, and the size it
         // was not read at is only another size again.
-        live.saw(fixed, start + SETTLE);
-        live.saw(fixed, start + SETTLE * 2);
+        live.saw(fixed, settled);
+        live.saw(fixed, later);
         assert!(matches!(live.region_of(&frame(fixed)), Ok(Some(_))));
         assert_eq!(
             live.region_of(&frame(unread)).map(|read| read.is_some()),
