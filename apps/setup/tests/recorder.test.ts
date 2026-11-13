@@ -10,7 +10,7 @@ interface View {
 const records = (view: View): boolean => view.recording;
 
 test('a recording whose first read failed is read until a read answers, then while it records', () => {
-  const nothing = learn<View>({ view: null, unread: false }, { kind: 'forgot' });
+  const nothing = learn<View>({ view: null, unread: false, readError: null }, { kind: 'forgot' });
   expect(keepsReading(nothing, records)).toBe(false);
   // The start answered and the read after it failed, so nothing but the start was learned.
   const started = learn(nothing, { kind: 'started' });
@@ -23,5 +23,24 @@ test('a recording whose first read failed is read until a read answers, then whi
   // Going on with a stopped recording reads it again too, and a discard forgets it.
   const more = learn(learn(recording, { kind: 'read', view: { recording: false } }), { kind: 'started' });
   expect(keepsReading(more, records)).toBe(true);
-  expect(learn(more, { kind: 'forgot' })).toEqual({ view: null, unread: false });
+  expect(learn(more, { kind: 'forgot' })).toEqual({ view: null, unread: false, readError: null });
+});
+
+test('a failed read after a start is a failed read, which the next read that answers clears', () => {
+  const started = learn<View>({ view: null, unread: false, readError: null }, { kind: 'started' });
+  // The start answered, and the read after it failed: the recording is still read, and the failure is the read's.
+  const failed = learn(started, { kind: 'readFailed', error: 'The owner is busy.' });
+  expect(failed).toEqual({ view: null, unread: true, readError: 'The owner is busy.' });
+  expect(keepsReading(failed, records)).toBe(true);
+  // The first poll that answers shows the recording and clears the failure.
+  expect(learn(failed, { kind: 'read', view: { recording: true } })).toEqual({
+    view: { recording: true },
+    unread: false,
+    readError: null,
+  });
+  // A failed poll keeps the view it had, and a discard forgets the failure with it.
+  const shown = learn(failed, { kind: 'read', view: { recording: true } });
+  const polled = learn(shown, { kind: 'readFailed', error: 'Gone.' });
+  expect(polled).toEqual({ view: { recording: true }, unread: false, readError: 'Gone.' });
+  expect(learn(polled, { kind: 'forgot' }).readError).toBeNull();
 });
