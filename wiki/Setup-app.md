@@ -438,8 +438,10 @@ character is one shape.
   sizes take is a line once, at the smaller size: the ink of a smaller
   size's run is left out before a larger size's runs are joined, so text
   of the larger size beside it is still found. A kept reading holds the
-  size its run was taken for (`size`), which review shows when the
-  recording looked for more than one. A shape is a character scaled to the
+  size its run was taken for (`size`): how tall its text is in its picture,
+  and the example it is the size of, which differ when the window had
+  another size. Review shows it when the recording looked for more than
+  one. A shape is a character scaled to the
   grid, so one that shows at two sizes is counted and kept once, and the
   shapes stay one set across sizes. Each run is cropped with its margin and goes
   through the same counting and keeping as a place's crop, so the bounds
@@ -470,9 +472,14 @@ character is one shape.
   reference is taught for a value, and the side the region is nearest
   otherwise (`PinDef::guess`), as the live check places a reference. For an
   application whose window rarely changes size, nothing is guessed: the
-  recording waits for the size the region was drawn at. A new size counts
+  recording waits for the size the region was drawn at. A recording of the
+  whole window only looks near its region, so a region that scales outside
+  the window is moved and cut to lie inside it (`scale::scaled_within`)
+  rather than refused. Text that scaling made shorter than
+  `follow::MIN_TEXT_HEIGHT` has too few rows to tell characters apart, so
+  the recording waits for a larger window. A new size counts
   once frames have kept it for `SETTLE`, so a drag records nothing on its
-  way, and a size at which the region is not recorded is the recording's
+  way, and a size at which the recording is not placed is its
   problem until the window leaves it
   ([Where a recording is placed](State-machines.md#where-a-recording-is-placed)).
   The view carries the size the recording is placed at (`at`), which the

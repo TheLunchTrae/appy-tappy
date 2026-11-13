@@ -17,7 +17,7 @@ use appytappy_sources::screen::{Image, Region};
 
 use crate::owner::Message;
 
-use super::find::{self, Sizes};
+use super::find::{self, Sizes, TextSize};
 
 /// One frame to look over.
 #[derive(Debug)]
@@ -42,9 +42,8 @@ pub(crate) struct Job {
 pub(crate) struct Seen {
     /// Where it is on the frame.
     pub(crate) spot: Region,
-    /// How tall the characters are that the look took it for, in pixels:
-    /// the one of the job's sizes it has.
-    pub(crate) size: u32,
+    /// The one of the job's sizes the look took it for.
+    pub(crate) size: TextSize,
     /// Its pixels and the shape of each of its characters. `None` for a run
     /// of more characters than a reading holds, which is a sentence in the
     /// characters' color and not a value.
@@ -183,7 +182,13 @@ mod tests {
             panic!("one run of text");
         };
         let (crop, shapes) = seen.reading.as_ref().expect("few characters");
-        assert_eq!(seen.size, 4);
+        assert_eq!(
+            seen.size,
+            TextSize {
+                height: 4,
+                example: 4
+            }
+        );
         assert_eq!(crop.size(), seen.spot.size());
         assert_eq!(shapes.len(), 1);
         assert!(messages.try_recv().is_err(), "and it ends with the owner");

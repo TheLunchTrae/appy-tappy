@@ -1433,11 +1433,10 @@ firstMs: number,
  */
 seen: number,
 /**
- * How tall the characters are that a recording of the whole window
- * took it for when it first showed, in pixels: the one of the
- * recording's sizes it has. `None` for a reading of the region itself.
+ * The size of text a recording of the whole window took it for when
+ * it first showed. `None` for a reading of the region itself.
  */
-size: number | null,
+size: RecordedSize | null,
 /**
  * What the text reader made of it.
  */
@@ -1472,6 +1471,22 @@ frames: number,
  * How many different readings showed it.
  */
 readings: number, }>;
+
+/**
+ * The size of text a reading was taken for, as the UI shows it.
+ */
+export type RecordedSize = DeepReadonly<{
+/**
+ * How tall its characters are in its picture, in pixels: about as
+ * tall as the look searched for at the window's size then.
+ */
+height: number,
+/**
+ * The one of the recording's sizes it is: how tall the characters of
+ * that example were on the screenshot it was drawn on. It differs
+ * from `height` when the window had another size.
+ */
+example: number, }>;
 
 /**
  * What the text reader made of a reading.

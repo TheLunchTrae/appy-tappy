@@ -66,11 +66,17 @@ export function followingNote(view: Pick<RecordingView, 'at' | 'settings'>): str
 }
 
 /**
- * Which of the recording's `sizes` of text `reading` is, such as "text 16 px tall"; null when the recording looked
- * for one size or none, so there is nothing to tell apart.
+ * Which of the recording's `sizes` of text `reading` is, such as "text 16 px tall": how tall its characters are in
+ * its picture. On a window of another size than the examples were drawn at, it names the size it was scaled from too:
+ * "text 16 px tall, the 8 px size scaled". Null when the recording looked for one size or none, so there is nothing
+ * to tell apart.
  */
 export function readingSize(reading: RecordedReading, sizes: readonly number[]): string | null {
-  return sizes.length < 2 || reading.size === null ? null : `text ${reading.size} px tall`;
+  if (sizes.length < 2 || reading.size === null) {
+    return null;
+  }
+  const { height, example } = reading.size;
+  return height === example ? `text ${height} px tall` : `text ${height} px tall, the ${example} px size scaled`;
 }
 
 /**

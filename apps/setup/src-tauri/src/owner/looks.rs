@@ -261,8 +261,8 @@ mod tests {
         assert_eq!(
             paused.problem.as_deref(),
             Some(
-                "The region was drawn when the window was 4x2, and it is 5x2 now. Resize the \
-                 window to record."
+                "The region was drawn when the window was 4 × 2, and it is 5 × 2 now. Resize \
+                 the window to record."
             )
         );
         harness.deliver(&mut handler, Ok(&shade(100)));
@@ -431,7 +431,7 @@ mod tests {
 
         harness.ask(start_looks).expect("records looks instead");
         assert_eq!(
-            harness.ask(|owner| owner.recording_state()),
+            harness.ask(Owner::recording_state),
             None,
             "the recording of readings is gone"
         );
@@ -473,9 +473,7 @@ mod tests {
             assert!(harness.owner.handle(late(recording)).is_continue());
         }
         let text_of = |harness: &mut Harness| {
-            let view = harness
-                .ask(|owner| owner.recording_state())
-                .expect("it records");
+            let view = harness.ask(Owner::recording_state).expect("it records");
             view.readings
                 .into_iter()
                 .map(|reading| reading.text)

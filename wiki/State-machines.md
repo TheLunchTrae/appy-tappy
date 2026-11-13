@@ -1594,8 +1594,18 @@ are at another window size. It asks the application's answer on how often
 its window changes size: **Often** scales them as a saved value scales
 ([Window sizes](Screen-regions.md#window-sizes)), with the region staying at
 the side the value stays at, and **Rarely** records only at the size the
-region was drawn at. A recording of looks does not follow its window
-([Recording looks](#recording-looks)).
+region was drawn at. A recording of the region alone records the scaled
+region's pixels, so the region must lie inside the window
+(`Follows::region`). A recording of the whole window only looks near the
+region, so there a region that scales outside the window is moved and cut
+to lie inside it (`Follows::near`). A recording of looks does not follow
+its window ([Recording looks](#recording-looks)).
+
+A size settles on the frame that finds it kept for `SETTLE`, or, when the
+window stops drawing at its new size and sends no such frame, when the page
+next asks for the recording (`Owner::recording_state`, which calls
+`Recording::settled`). The owner then records the newest frame, which shows
+that size, once.
 
 ```mermaid
 stateDiagram-v2
@@ -1603,11 +1613,13 @@ stateDiagram-v2
     Placed --> Settling: a frame of another window size
     Settling --> Placed: a frame of the size it is placed at
     Settling --> Settling: a frame of yet another size, which starts the wait again
-    Settling --> Placed: frames kept one size for SETTLE, and the rule places the region there
-    Settling --> Unplaced: frames kept one size for SETTLE, and the rule places the region nowhere
+    Settling --> Placed: a frame or the page's poll finds one size kept for SETTLE, and the rule places the recording there
+    Settling --> Unplaced: a frame or the page's poll finds one size kept for SETTLE, and the rule places the recording nowhere
+    Settling --> Placed: Record more, which forgets the size that had yet to settle
+    Settling --> Unplaced: Record more, which forgets the size that had yet to settle
     Unplaced --> Settling: a frame of another window size
-    Unplaced --> Placed: Record more, when the rule places the region at that size as the user has it now
-    Placed --> Unplaced: Record more, when the rule places the region nowhere at that size
+    Unplaced --> Placed: Record more, when the rule places the recording at that size as the user has it now
+    Placed --> Unplaced: Record more, when the rule places the recording nowhere at that size
 ```
 
 - **Placed** records each frame of its size: it crops the region as it lies
@@ -1618,15 +1630,31 @@ stateDiagram-v2
   sizes stays here and records none of them. It clears the places the last
   look found and abandons a look that is out, since both are of the window
   as it was.
-- **Unplaced** records nothing, and each frame of its size sets the
-  recording's `problem`: the recording does not follow the window to that
-  size, or the scaled region reaches outside the window. Both say to resize
-  the window. It leaves when frames keep a size the rule places the region
-  at, such as the size the region was drawn at.
+- **Unplaced** records nothing. The settle that places it nowhere, and each
+  frame of its size, sets the recording's `problem` to the reason
+  (`follow::Unplaced`):
+  - The recording does not follow the window to that size.
+  - The scaled region reaches outside the window, for a recording of the
+    region alone.
+  - Scaling down made the text shorter than `MIN_TEXT_HEIGHT`, 5 pixels,
+    too few rows to tell one character from another: one of the text sizes
+    a recording of the whole window looks for, or the whole region of a
+    recording of the region alone. Text the user drew that short is not
+    refused at the size drawn or a larger one.
+
+  The first two say to resize the window, and the last to make it larger.
+  It leaves when frames keep a size the rule places the recording at, such
+  as the size the region was drawn at.
+
 - The recording stays what it was through all three: it still counts its
   time, and **Stop**, **Record more**, and **Discard** work as in
-  **Placed**. A stopped recording takes no frames, so it notes no size, and
-  the first frame after **Record more** starts the wait at whatever size the
+  **Placed**. A stopped recording takes no frames and is placed nowhere
+  new, also when the page asks for it.
+- **Record more** places the recording again at the size it is placed at,
+  as the application's answer and the examples are by then, so an example
+  that is too small at that size makes it **Unplaced**. It forgets a size
+  that had yet to settle at the stop, since the window may have had any
+  size since: the first frame after it starts the wait at whatever size the
   window has then.
 
 ### Region drag

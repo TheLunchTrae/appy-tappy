@@ -388,9 +388,15 @@ follows depends on what you answered for the application under
   the reference is taught by itself, and a recording of the whole window looks
   for the text sizes scaled the same way. **Recording** then says so, such
   as **The window is 1280 × 720 now, so the place is scaled to it.** A
-  character that looks the same at two window sizes is kept once. If the
-  scaled place would reach outside the window, recording pauses and says to
-  resize the window.
+  character that looks the same at two window sizes is kept once.
+  Recording pauses and says why in two cases. A recording of one place
+  pauses when the scaled place would reach outside the window. A recording
+  of the whole window still looks there, starting near the edge the place
+  passed. Either pauses when the window is so small that the scaled text is
+  under 5 pixels tall, too small to tell the characters apart. Recording
+  goes on when you make the window larger. The window need not redraw for
+  any of this: a window that shows nothing new at its new size is followed
+  too.
 - **Rarely.** Recording pauses at another size and says to resize the
   window. It goes on when the window is back at the size it had on the
   screenshot the recorded place is on.
@@ -457,7 +463,10 @@ size:
    **Looking for text of 2 sizes: 14 px and 28 px tall**. Two examples of
    nearly the same height count as one size.
 3. In review, each reading says which size it is, such as
-   **text 28 px tall**, when the recording looked for more than one.
+   **text 28 px tall**, when the recording looked for more than one. That
+   is how tall the text is in the reading's picture. A reading recorded
+   while the window had another size names the size it was scaled from too,
+   such as **text 28 px tall, the 14 px size scaled**.
 
 To add a size to a recording you stopped, draw a box around some text of
 that size and select **Record more**. A recording keeps the sizes it has: to

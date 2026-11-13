@@ -108,10 +108,15 @@ describe('text sizes', () => {
   });
 
   test('a reading says its size only when the recording looked for more than one', () => {
-    const large = { ...read('5'), size: 16 };
+    const large = { ...read('5'), size: { height: 16, example: 16 } };
     expect(review.readingSize(large, [8, 16])).toBe('text 16 px tall');
     expect(review.readingSize(large, [16])).toBeNull();
     expect(review.readingSize(read('5'), [8, 16])).toBeNull();
+  });
+
+  test('a reading taken at another window size says how tall it is and which size it was scaled from', () => {
+    const scaled = { ...read('5'), size: { height: 16, example: 8 } };
+    expect(review.readingSize(scaled, [8, 16])).toBe('text 16 px tall, the 8 px size scaled');
   });
 });
 

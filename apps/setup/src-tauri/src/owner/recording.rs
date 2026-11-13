@@ -265,8 +265,19 @@ impl<H: Host> Owner<H> {
     }
 
     /// The recording of readings as the interface shows it, or `None`
-    /// without one.
-    pub(crate) fn recording_state(&self) -> Option<RecordingView> {
+    /// without one. A window size that settled since the last frame places
+    /// the recording there first, so a window that stopped drawing is
+    /// placed too, and the newest frame, which shows that size, is then
+    /// recorded once.
+    pub(crate) fn recording_state(&mut self) -> Option<RecordingView> {
+        let now = self.host.now();
+        let placed = self
+            .readings_mut()
+            .is_some_and(|recording| recording.settled(now));
+        if placed && let Some(frame) = self.latest.take() {
+            self.record(&frame, now);
+            self.latest = Some(frame);
+        }
         self.readings()
             .map(|recording| recording.view(Instant::now()))
     }
@@ -348,7 +359,7 @@ mod tests {
     impl Harness {
         /// The recording as the UI sees it.
         fn recording(&mut self) -> Option<RecordingView> {
-            self.ask(|owner| owner.recording_state())
+            self.ask(Owner::recording_state)
         }
 
         /// Each reading's sightings and text.
@@ -772,10 +783,46 @@ mod tests {
             (
                 0,
                 Some(
-                    "The region was drawn when the window was 4x2, and it is 8x2 now. Resize \
-                     the window to record."
+                    "The region was drawn when the window was 4 × 2, and it is 8 × 2 now. \
+                     Resize the window to record."
                         .to_owned()
                 )
+            )
+        );
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_window_that_stops_drawing_at_a_new_size_is_placed_when_the_recording_is_shown() {
+        let (mut harness, mut handler, root) = capturing("rec-settles-unasked");
+        let wide = red_at(8, &[7]);
+        // One frame at the new size, and no more: nothing on it changes.
+        harness.ask(start_recording_right(None)).expect("records");
+        harness.deliver(&mut handler, Ok(&wide));
+        let view = harness.recording().expect("a recording");
+        assert_eq!((view.at.width, view.readings.len()), (4, 0), "not yet");
+        harness.wait(SETTLE);
+        let view = harness.recording().expect("a recording");
+        assert_eq!(view.at.width, 8);
+        assert_eq!(view.problem, None);
+        assert_eq!(view.readings.len(), 1, "the newest frame is recorded");
+        let again = harness.recording().expect("a recording");
+        assert_eq!(again.readings[0].seen, 1, "once");
+        // Where the recording does not follow the window, it says why.
+        harness
+            .ask(|owner| owner.save_app(Some("example"), example_app(SizeChangesDef::Rarely)))
+            .expect("saves");
+        harness.deliver(&mut handler, Ok(&frame_image()));
+        harness.ask(start_recording_right(None)).expect("records");
+        harness.deliver(&mut handler, Ok(&wide));
+        harness.wait(SETTLE);
+        let view = harness.recording().expect("a recording");
+        assert_eq!(view.at.width, 8);
+        assert_eq!(
+            view.problem.as_deref(),
+            Some(
+                "The region was drawn when the window was 4 × 2, and it is 8 × 2 now. Resize the \
+                 window to record."
             )
         );
         std::fs::remove_dir_all(root).expect("clean up");
