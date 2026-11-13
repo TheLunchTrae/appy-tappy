@@ -11,8 +11,8 @@ use appytappy_config::signal::{Number, StateName, Value};
 use appytappy_sources::screen::saved::{self, SavedValue};
 use appytappy_sources::screen::{FrameHandler, Image, Size};
 
-use crate::check_spec::{ColorSpec, RegionSpec};
 use crate::stores::Stores;
+use appytappy_config::app_file::{ColorDef, RegionDef};
 
 use super::test_support::{
     Harness, STATE, WINDOW, add_example_app, characters_in, frame_image, harness_with,
@@ -41,8 +41,8 @@ fn narrow_image() -> Image {
 
 /// The left 2 by 2 pixels of the window, where the number and the state
 /// show.
-fn left() -> RegionSpec {
-    RegionSpec {
+fn left() -> RegionDef {
+    RegionDef {
         x: 0,
         y: 0,
         width: 2,
@@ -50,7 +50,7 @@ fn left() -> RegionSpec {
     }
 }
 
-fn red() -> ColorSpec {
+fn red() -> ColorDef {
     serde_json::from_str(r#"{"red":255,"green":0,"blue":0}"#).expect("valid JSON")
 }
 
@@ -128,7 +128,7 @@ fn with_everything_saved(name: &str) -> (Harness, FrameHandler, Stores, PathBuf,
         .ask(|owner| {
             owner.add_click_picture(
                 0,
-                RegionSpec {
+                RegionDef {
                     x: 2,
                     y: 0,
                     width: 2,

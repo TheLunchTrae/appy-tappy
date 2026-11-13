@@ -34,17 +34,18 @@ use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
 
+use appytappy_config::action::MediaCommand;
 use appytappy_config::action::{
     AppName, KeyChord, MAX_APP_NAME_LEN, MAX_FUNCTION_KEY, MAX_TARGET_LEN, Modifier, NAMED_KEYS,
     OpenTarget, SoundFile,
 };
+use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef,
-    is_label_character,
+    AppFile, MAX_STATES, OverlayModeDef, ReferenceDef, SizeDef, WindowDef, is_label_character,
 };
 use appytappy_config::automation_file::{
     ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, CornerDef,
-    MAX_COOLDOWN_MS, MediaCommandDef, WhenDef,
+    MAX_COOLDOWN_MS, WhenDef,
 };
 use appytappy_config::click::{MAX_SEARCH_PIXELS, Spot};
 use appytappy_config::settings_file::{
@@ -63,9 +64,7 @@ use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
 use crate::check_spec::characters::expected_characters;
-use crate::check_spec::{
-    CharactersSpec, CheckSpec, ColorSpec, Label, MAX_EXPECTED_CHARACTERS, RegionSpec,
-};
+use crate::check_spec::{CharactersSpec, CheckSpec, Label, MAX_EXPECTED_CHARACTERS};
 use crate::commands::Upload;
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
@@ -93,6 +92,7 @@ use crate::sharing::MAX_SHARED_BYTES;
 use crate::updates::UpdateOffer;
 use crate::window_list::{WindowFit, WindowList, WindowScore};
 use crate::{commands, updates};
+use appytappy_config::app_file::{ColorDef, RegionDef};
 
 /// The command to write the files again.
 const REGENERATE: &str = "UPDATE_BINDINGS=1 cargo test -p appytappy-setup bindings";
@@ -544,10 +544,10 @@ fn spelled(value: &impl Serialize) -> String {
 /// kind fail to type-check.
 fn sample_actions() -> Vec<ActionDef> {
     let mut actions: Vec<ActionDef> = [
-        MediaCommandDef::Play,
-        MediaCommandDef::Pause,
-        MediaCommandDef::Next,
-        MediaCommandDef::Previous,
+        MediaCommand::Play,
+        MediaCommand::Pause,
+        MediaCommand::Next,
+        MediaCommand::Previous,
     ]
     .into_iter()
     .map(|command| ActionDef::Media { command, app: None })

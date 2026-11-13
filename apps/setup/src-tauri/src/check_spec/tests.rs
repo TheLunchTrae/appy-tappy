@@ -19,12 +19,12 @@ use super::*;
 use crate::recording::Recording;
 use crate::recording::follow::Follows;
 
-const RED: ColorSpec = ColorSpec {
+const RED: ColorDef = ColorDef {
     red: 255,
     green: 0,
     blue: 0,
 };
-const GRAY: ColorSpec = ColorSpec {
+const GRAY: ColorDef = ColorDef {
     red: 40,
     green: 40,
     blue: 40,
@@ -53,7 +53,7 @@ fn state(name: &str, screenshot: usize) -> StateSpec {
     }
 }
 
-fn states(region: RegionSpec, states: Vec<StateSpec>, tolerance: u8) -> CheckSpec {
+fn states(region: RegionDef, states: Vec<StateSpec>, tolerance: u8) -> CheckSpec {
     CheckSpec::State {
         region,
         drawn_on: 0,
@@ -62,8 +62,8 @@ fn states(region: RegionSpec, states: Vec<StateSpec>, tolerance: u8) -> CheckSpe
     }
 }
 
-fn whole() -> RegionSpec {
-    RegionSpec {
+fn whole() -> RegionDef {
+    RegionDef {
         x: 0,
         y: 0,
         width: 4,
@@ -71,8 +71,8 @@ fn whole() -> RegionSpec {
     }
 }
 
-fn left() -> RegionSpec {
-    RegionSpec {
+fn left() -> RegionDef {
+    RegionDef {
         x: 0,
         y: 0,
         width: 2,
@@ -95,7 +95,7 @@ fn digits(reference: &ReferenceRef) -> Result<SavedReference, String> {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: RED.into(),
+            ink: RED,
             tolerance: 0,
             samples: vec![SampleDef {
                 image: sample_name("digits", 1),
@@ -141,7 +141,7 @@ fn session<'a>(screenshots: &'a dyn Shots, recording: Option<&'a Recording>) -> 
 }
 
 fn characters(
-    region: RegionSpec,
+    region: RegionDef,
     reference: Option<ReferenceRef>,
     labels: Vec<Label>,
     recorded: Vec<RecordedLabel>,
@@ -300,7 +300,7 @@ fn what_the_saved_form_breaks_comes_back_in_the_pages_words() {
         "Pick a filled color and an empty color that differ."
     );
     let outside = CheckSpec::Color {
-        region: RegionSpec {
+        region: RegionDef {
             x: 3,
             y: 0,
             width: 2,
@@ -349,7 +349,7 @@ fn a_selected_image_keeps_only_what_was_selected() {
         [true, true, false, false, true, true, false, false]
     );
 
-    let gray_half = RegionSpec {
+    let gray_half = RegionDef {
         x: 2,
         y: 0,
         width: 2,
@@ -472,13 +472,13 @@ fn a_saved_sample_without_its_picture_says_how_to_recover() {
 
 #[test]
 fn mistakes_come_back_as_errors_the_user_can_fix() {
-    let empty = RegionSpec {
+    let empty = RegionDef {
         x: 0,
         y: 0,
         width: 0,
         height: 2,
     };
-    let outside = RegionSpec {
+    let outside = RegionDef {
         x: 3,
         y: 0,
         width: 2,
@@ -648,7 +648,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
     assert_eq!(
         spec,
         CharactersSpec {
-            region: RegionSpec {
+            region: RegionDef {
                 x: 1,
                 y: 2,
                 width: 3,
@@ -656,7 +656,7 @@ fn the_ui_describes_checks_in_camel_case_json() {
             },
             screenshot: 0,
             reference: None,
-            ink: ColorSpec {
+            ink: ColorDef {
                 red: 1,
                 green: 2,
                 blue: 3
@@ -700,7 +700,7 @@ fn a_new_reference_names_one_picture_per_label() {
             id: "digits".to_owned(),
             name: "Digits".to_owned(),
             origin: OriginDef::ByHand,
-            ink: RED.into(),
+            ink: RED,
             tolerance: 0,
             // The one label teaches the one sample, whatever it expects.
             samples: vec![SampleDef {
@@ -930,7 +930,7 @@ fn recorded_problems_judge_each_reading_after_the_saved_samples() {
 
 #[test]
 fn saved_checks_keep_their_settings() {
-    let region = RegionSpec {
+    let region = RegionDef {
         x: 2,
         y: 0,
         width: 2,
@@ -960,8 +960,8 @@ fn saved_checks_keep_their_settings() {
     assert_eq!(
         saved.check,
         CheckDef::BarFill {
-            filled: RED.into(),
-            empty: GRAY.into()
+            filled: RED,
+            empty: GRAY
         }
     );
     assert_eq!(saved.pictures, Vec::<(String, Vec<u8>)>::new());
@@ -983,7 +983,7 @@ fn saved_checks_keep_their_settings() {
     assert_eq!(
         to_saved(&color, &[], "app", "color").expect("valid").check,
         CheckDef::Color {
-            color: GRAY.into(),
+            color: GRAY,
             tolerance: 4
         }
     );

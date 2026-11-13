@@ -17,7 +17,7 @@ use appytappy_sources::screen::detect::{MIN_LENGTH, NoBar, detect_bar};
 use appytappy_sources::screen::{Image, Region};
 use serde::Serialize;
 
-use super::{ColorSpec, RegionSpec, SpecError, to_region};
+use super::{ColorDef, RegionDef, SpecError, to_region};
 
 /// The most screenshots looked at besides the one the region was drawn on.
 /// Each one costs a copy of the region and a few passes over it.
@@ -31,8 +31,8 @@ pub(crate) enum BarDetection {
     /// The bar's two colors. Screenshots are named by index.
     #[serde(rename_all = "camelCase")]
     Proposed {
-        filled: ColorSpec,
-        empty: ColorSpec,
+        filled: ColorDef,
+        empty: ColorDef,
         /// The screenshot whose layout gave the colors.
         found_on: usize,
         /// The screenshots that show the bar in these colors, full, empty,
@@ -171,7 +171,7 @@ fn frames(
 /// [`SpecError::Outside`] when there is no such region to look at.
 pub(crate) fn detect(
     screenshots: &[Option<Image>],
-    region: RegionSpec,
+    region: RegionDef,
     drawn_on: usize,
 ) -> Result<BarDetection, SpecError> {
     let (frames, left_out) = frames(screenshots, to_region(region)?, drawn_on, MAX_OTHERS)?;
@@ -223,10 +223,10 @@ pub(crate) fn detect(
 /// colors that are the same.
 pub(crate) fn measure(
     screenshots: &[Option<Image>],
-    region: RegionSpec,
+    region: RegionDef,
     drawn_on: usize,
-    filled: ColorSpec,
-    empty: ColorSpec,
+    filled: ColorDef,
+    empty: ColorDef,
 ) -> Result<BarMeasure, SpecError> {
     let bar = BarFill::new(filled.into(), empty.into())
         .map_err(|_same| SpecError::Check(CheckDefError::SameColors))?;
@@ -287,7 +287,7 @@ mod tests {
         shot(width, filled, GREEN)
     }
 
-    const BAR: RegionSpec = RegionSpec {
+    const BAR: RegionDef = RegionDef {
         x: 2,
         y: 1,
         width: 20,
@@ -310,7 +310,7 @@ mod tests {
 
     fn detect(
         screenshots: &[Image],
-        region: RegionSpec,
+        region: RegionDef,
         drawn_on: usize,
     ) -> Result<BarDetection, SpecError> {
         super::detect(&kept(screenshots), region, drawn_on)
@@ -318,10 +318,10 @@ mod tests {
 
     fn measure(
         screenshots: &[Image],
-        region: RegionSpec,
+        region: RegionDef,
         drawn_on: usize,
-        filled: ColorSpec,
-        empty: ColorSpec,
+        filled: ColorDef,
+        empty: ColorDef,
     ) -> Result<BarMeasure, SpecError> {
         super::measure(&kept(screenshots), region, drawn_on, filled, empty)
     }
@@ -502,7 +502,7 @@ mod tests {
         for (reason, words) in reasons {
             assert!(advice(reason, 2, same).contains(words), "{reason:?}");
         }
-        let tiny = RegionSpec { width: 11, ..BAR };
+        let tiny = RegionDef { width: 11, ..BAR };
         assert_eq!(
             declined(detect(&[screenshot(30, 5)], tiny, 0)),
             advice(NoBar::Tiny, 0, same)
@@ -512,12 +512,12 @@ mod tests {
     #[test]
     fn a_region_that_cannot_be_looked_at_is_refused() {
         let screenshots = [screenshot(30, 5)];
-        let empty = RegionSpec { width: 0, ..BAR };
+        let empty = RegionDef { width: 0, ..BAR };
         assert_eq!(detect(&screenshots, empty, 0), Err(SpecError::EmptyRegion));
         assert_eq!(detect(&screenshots, BAR, 1), Err(SpecError::NoScreenshot));
-        let wide = RegionSpec { width: 29, ..BAR };
+        let wide = RegionDef { width: 29, ..BAR };
         assert_eq!(detect(&screenshots, wide, 0), Err(SpecError::Outside));
-        let green = ColorSpec::from(GREEN);
+        let green = ColorDef::from(GREEN);
         assert_eq!(
             measure(&screenshots, BAR, 0, green, green),
             Err(SpecError::Check(CheckDefError::SameColors))
@@ -596,7 +596,7 @@ mod tests {
     fn two_colors_are_read_on_each_screenshot_of_the_regions_window_size() {
         let screenshots = [screenshot(30, 5), screenshot(40, 10), screenshot(30, 15)];
         // One pixel wider and taller than the bar, so it holds white too.
-        let region = RegionSpec {
+        let region = RegionDef {
             x: 2,
             y: 1,
             width: 21,
@@ -626,7 +626,7 @@ mod tests {
             ])
         );
         // A region with neither color reads nothing.
-        let corner = RegionSpec {
+        let corner = RegionDef {
             x: 0,
             y: 0,
             width: 2,

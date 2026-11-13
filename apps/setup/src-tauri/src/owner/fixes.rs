@@ -7,7 +7,9 @@ use appytappy_sources::screen::Region;
 use appytappy_sources::screen::scale::scaled;
 use serde::Deserialize;
 
-use crate::check_spec::{self, CheckSpec, RegionSpec};
+use appytappy_config::app_file::RegionDef;
+
+use crate::check_spec::{self, CheckSpec};
 
 use super::host::Host;
 use super::values::{SavedValue, read_back};
@@ -39,7 +41,7 @@ impl<H: Host> Owner<H> {
         app: &str,
         value: &str,
         size: SizeDef,
-    ) -> Result<Option<RegionSpec>, String> {
+    ) -> Result<Option<RegionDef>, String> {
         let file = self.stores()?.app(app)?.file;
         let saved = find(&file.values, value, &file.name)?;
         Ok(start_region(&saved.screen, size))
@@ -171,9 +173,9 @@ fn find<'file>(values: &'file [ValueDef], id: &str, name: &str) -> Result<&'file
 /// Where `screen` starts on a window of `size`: its fix at that size, or
 /// its first drawing scaled to it, as the runtime would read it while the
 /// window changes size often.
-fn start_region(screen: &ScreenDef, size: SizeDef) -> Option<RegionSpec> {
+fn start_region(screen: &ScreenDef, size: SizeDef) -> Option<RegionDef> {
     if let Some(fix) = screen.fixes.iter().find(|fix| fix.window_size == size) {
-        return Some(fix.region.into());
+        return Some(fix.region);
     }
     scaled(
         Region::try_from(screen.region).ok()?,
@@ -181,7 +183,7 @@ fn start_region(screen: &ScreenDef, size: SizeDef) -> Option<RegionSpec> {
         size.into(),
         screen.pin(),
     )
-    .map(RegionSpec::from)
+    .map(RegionDef::from)
 }
 
 /// Checks that `spec` reads a value whose first drawing's check is `check`

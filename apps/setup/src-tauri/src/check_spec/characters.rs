@@ -22,7 +22,7 @@ use crate::screenshots::Shots;
 use crate::words::sentence;
 
 use super::{
-    ColorSpec, Cut, Pictures, ReferenceRef, RegionSpec, SpecError, cut, drawn, same_size, size_of,
+    ColorDef, Cut, Pictures, ReferenceRef, RegionDef, SpecError, cut, drawn, same_size, size_of,
     to_region,
 };
 
@@ -44,7 +44,7 @@ pub(crate) struct Label {
     /// region: the box the user drew around it, or kept from found text.
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
-    pub(crate) region: Option<RegionSpec>,
+    pub(crate) region: Option<RegionDef>,
     pub(crate) text: String,
 }
 
@@ -67,7 +67,7 @@ pub(crate) struct RecordedLabel {
 pub(crate) struct CharactersSpec {
     /// Where the characters show, which a recording records and the live
     /// window is read at.
-    pub(crate) region: RegionSpec,
+    pub(crate) region: RegionDef,
     /// The screenshot the region was drawn on. Every screenshot with a
     /// box and the recording must have its window size, since the region
     /// means another spot on a window of another size.
@@ -77,7 +77,7 @@ pub(crate) struct CharactersSpec {
     #[serde(default)]
     pub(crate) reference: Option<ReferenceRef>,
     /// The characters' color.
-    pub(crate) ink: ColorSpec,
+    pub(crate) ink: ColorDef,
     /// How far from `ink` a pixel of a character may be.
     pub(crate) tolerance: u8,
     /// The labeled screenshots.
@@ -257,7 +257,7 @@ impl CharactersSpec {
             id: id.to_owned(),
             name: name.to_owned(),
             origin,
-            ink: self.ink.into(),
+            ink: self.ink,
             tolerance: self.tolerance,
             samples,
             expects: None,

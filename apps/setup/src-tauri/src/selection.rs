@@ -11,8 +11,6 @@ use appytappy_sources::screen::mask::Mask;
 use appytappy_sources::screen::{Image, Region};
 use serde::{Deserialize, Serialize};
 
-use crate::check_spec::RegionSpec;
-
 mod select;
 
 use select::{Selection, grow, snap};
@@ -38,7 +36,7 @@ pub(crate) enum Combine {
 pub(crate) enum SelectStep {
     /// Dragged a rough box, which snaps to the thing inside it.
     Snap {
-        region: RegionSpec,
+        region: RegionDef,
         #[serde(default)]
         combine: Combine,
     },
@@ -148,8 +146,8 @@ mod tests {
         .unwrap()
     }
 
-    fn region(x: u32, y: u32, width: u32, height: u32) -> RegionSpec {
-        RegionSpec {
+    fn region(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
             x,
             y,
             width,

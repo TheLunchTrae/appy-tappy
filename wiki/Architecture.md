@@ -712,9 +712,12 @@ design enforces the block in three places:
    `Action`s, and `compile` reads the rule's actions to find one that sends
    input, which `Action::input_sent` names.
    `Rule` has private
-   fields, an action's values such as a key chord or a volume level are types
-   that only their checked constructors make, and neither has `Deserialize` or
-   `Default`, so code that skips validation does not compile. The screen
+   fields, an action's checked values such as a key chord or a volume level
+   are types that only their checked constructors make, and neither has
+   `Deserialize` or `Default`, so code that skips validation does not compile.
+   A type with nothing to check, such as a comparison, a media command, or an
+   anti-cheat class, derives serde with the file's spelling and has no copy
+   of its own for the file. The screen
    source has no such split: `saved::build` in `appytappy-sources` takes the
    raw `ScreenDef` from `app.json` and builds the check it reads with. It
    takes the application's `saved::Readers` too, which learn each

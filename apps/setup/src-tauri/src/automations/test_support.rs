@@ -3,13 +3,17 @@
 use std::path::{Path, PathBuf};
 
 use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, CheckDef, ColorDef, FORMAT, OriginDef, RegionDef, ScreenDef,
-    SizeChangesDef, SizeDef, ValueDef, WindowDef,
+    AppFile, CheckDef, ColorDef, FORMAT, OriginDef, RegionDef, ScreenDef, SizeChangesDef, SizeDef,
+    ValueDef, WindowDef,
 };
+
+use appytappy_config::action::MediaCommand;
+use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::automation_file::{
-    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, ComparisonDef,
-    MediaCommandDef, PointDef, TargetDef, WhenDef,
+    ActionDef, AutomationDef, ClickAtDef, ClickButtonDef, ClickDeliveryDef, PointDef, TargetDef,
+    WhenDef,
 };
+use appytappy_config::rule::Comparison;
 use appytappy_config::window_match::WindowFacts;
 use appytappy_sources::screen::{Image, Size};
 
@@ -54,7 +58,7 @@ pub(super) fn stores(name: &str) -> (Stores, PathBuf) {
             executable: "Example.exe",
         }),
         size_changes: SizeChangesDef::Often,
-        anti_cheat: AntiCheatDef::Unknown,
+        anti_cheat: AntiCheatClass::Unknown,
         overlay: None,
         checked: None,
         references: Vec::new(),
@@ -93,11 +97,11 @@ pub(super) fn draft(name: &str) -> AutomationDef {
         when: WhenDef {
             app: "example".to_owned(),
             value: "icon_visible".to_owned(),
-            is: ComparisonDef::Equals,
+            is: Comparison::Equals,
             target: TargetDef::Flag(true),
         },
         actions: vec![ActionDef::Media {
-            command: MediaCommandDef::Pause,
+            command: MediaCommand::Pause,
             app: Some("Player.exe".to_owned()),
         }],
         undo: true,
@@ -114,7 +118,7 @@ pub(super) fn automations_file(folder: &Path) -> PathBuf {
 /// anti-cheat is set to none so it can click.
 pub(super) fn clicking(stores: &Stores, name: &str, image: &str) -> AutomationDef {
     let mut app = stores.app("example").expect("saved").file;
-    app.anti_cheat = AntiCheatDef::None;
+    app.anti_cheat = AntiCheatClass::None;
     stores.apps.save("example", &app, &[]).expect("saves");
     let mut clicking = draft(name);
     clicking.undo = false;

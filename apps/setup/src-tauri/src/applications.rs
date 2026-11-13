@@ -5,9 +5,9 @@
 //! removed. A new application starts with no
 //! values; the Values page adds them to an application saved here.
 
-use appytappy_config::app_file::{
-    AntiCheatDef, AppFile, FORMAT, SizeChangesDef, WindowDef, WindowDefError,
-};
+use appytappy_config::app_file::{AppFile, FORMAT, SizeChangesDef, WindowDef, WindowDefError};
+
+use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::store::StoredApp;
 use serde::Deserialize;
 
@@ -66,7 +66,7 @@ pub(crate) fn apply(
             name: String::new(),
             window: spec.window.clone(),
             size_changes: spec.size_changes,
-            anti_cheat: AntiCheatDef::Unknown,
+            anti_cheat: AntiCheatClass::Unknown,
             overlay: None,
             checked: None,
             values: Vec::new(),
@@ -151,11 +151,14 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use appytappy_config::app_file::{FallbackDef, MustMatchDef};
+    use appytappy_config::app_file::FallbackDef;
+
+    use appytappy_config::action::MediaCommand;
     use appytappy_config::automation_file::{
-        ActionDef, AutomationDef, AutomationsFile, ComparisonDef, MediaCommandDef, TargetDef,
-        WhenDef,
+        ActionDef, AutomationDef, AutomationsFile, TargetDef, WhenDef,
     };
+    use appytappy_config::rule::Comparison;
+    use appytappy_config::window_match::MustMatch;
     use appytappy_config::window_match::WindowFacts;
 
     use super::*;
@@ -193,7 +196,7 @@ mod tests {
         let id = save(&stores, None, spec(" Example App ", "Example.exe")).expect("saves");
         assert_eq!(id, "example");
         let mut changed = spec("Renamed", "Other.exe");
-        changed.window.must_match = MustMatchDef {
+        changed.window.must_match = MustMatch {
             title: true,
             class: true,
         };
@@ -206,7 +209,7 @@ mod tests {
         assert_eq!(file.name, "Renamed");
         assert_eq!(file.window, changed.window);
         assert_eq!(file.size_changes, SizeChangesDef::Rarely);
-        assert_eq!(file.anti_cheat, AntiCheatDef::Unknown);
+        assert_eq!(file.anti_cheat, AntiCheatClass::Unknown);
         assert_eq!(file.values, Vec::new());
         assert_eq!(
             save(&stores, None, spec("Second", "Example.exe")),
@@ -283,11 +286,11 @@ mod tests {
             when: WhenDef {
                 app: id.clone(),
                 value: "progress".to_owned(),
-                is: ComparisonDef::AtLeast,
+                is: Comparison::AtLeast,
                 target: TargetDef::Number(80.0),
             },
             actions: vec![ActionDef::Media {
-                command: MediaCommandDef::Pause,
+                command: MediaCommand::Pause,
                 app: None,
             }],
             undo: false,

@@ -16,7 +16,9 @@ use appytappy_sources::screen::digits::DigitReader;
 use appytappy_sources::screen::{Image, Region, Rgb};
 use serde::{Deserialize, Serialize};
 
-use crate::check_spec::{ColorSpec, RegionSpec, SpecError};
+use appytappy_config::app_file::{ColorDef, RegionDef};
+
+use crate::check_spec::SpecError;
 
 /// The most runs a layer carries. Runs go to the UI as JSON, and a picture
 /// dithered at a tolerance's edge has a run for every other pixel, so the cap
@@ -31,11 +33,11 @@ const MAX_RUNS: usize = 500_000;
 pub(crate) enum MatchRule {
     /// A reference's characters: each of a pixel's red, green, and blue is
     /// within `tolerance` of `ink`'s.
-    Ink { ink: ColorSpec, tolerance: u8 },
+    Ink { ink: ColorDef, tolerance: u8 },
     /// A bar's fill: a pixel is filled, empty, or neither.
-    BarFill { filled: ColorSpec, empty: ColorSpec },
+    BarFill { filled: ColorDef, empty: ColorDef },
     /// A color check: a pixel on its own is within `tolerance` of `color`.
-    Color { color: ColorSpec, tolerance: u8 },
+    Color { color: ColorDef, tolerance: u8 },
 }
 
 /// The pixels of one kind in the rectangle asked about.
@@ -90,7 +92,7 @@ pub(crate) enum MatchView {
         /// The pixels that are near the color on their own.
         near: Layer,
         /// The rectangle's average color.
-        average: ColorSpec,
+        average: ColorDef,
         /// The largest difference between the average's red, green, and
         /// blue and the color's, which the tolerance bounds.
         distance: u8,
@@ -108,7 +110,7 @@ pub(crate) enum MatchView {
 /// [`SpecError::Check`] for a bar whose two colors are the same.
 pub(crate) fn find(
     image: &Image,
-    area: RegionSpec,
+    area: RegionDef,
     rule: MatchRule,
 ) -> Result<MatchView, SpecError> {
     let area = Region::try_from(area).map_err(|_empty| SpecError::EmptyRegion)?;
@@ -186,7 +188,7 @@ mod tests {
 
     use super::*;
 
-    fn color(red: u8, green: u8, blue: u8) -> ColorSpec {
+    fn color(red: u8, green: u8, blue: u8) -> ColorDef {
         Rgb { red, green, blue }.into()
     }
 
@@ -205,8 +207,8 @@ mod tests {
         Image::new(size, bgra).expect("matching length")
     }
 
-    fn area(x: u32, y: u32, width: u32, height: u32) -> RegionSpec {
-        RegionSpec {
+    fn area(x: u32, y: u32, width: u32, height: u32) -> RegionDef {
+        RegionDef {
             x,
             y,
             width,
@@ -214,7 +216,7 @@ mod tests {
         }
     }
 
-    fn whole(image: &Image) -> RegionSpec {
+    fn whole(image: &Image) -> RegionDef {
         area(0, 0, image.size().width, image.size().height)
     }
 

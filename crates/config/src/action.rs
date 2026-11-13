@@ -6,6 +6,8 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use crate::click::Click;
 
 /// The longest app name, in bytes.
@@ -94,8 +96,12 @@ pub enum MediaTarget {
     App(AppName),
 }
 
-/// What a media action does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a media action does, spelled in the file as the variant in camel
+/// case, such as `play`. It has nothing to check, so the file reads it as
+/// it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub enum MediaCommand {
     /// Start or resume playback.
     Play,

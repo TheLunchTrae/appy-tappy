@@ -1,6 +1,6 @@
 // Text found like a box a reference learns from: which finds to add, as what, and what stops them.
 
-import type { ColorSpec, FoundView, Label } from './bindings.ts';
+import type { ColorDef, FoundView, Label } from './bindings.ts';
 import type { NewBox } from './boxes.ts';
 import type { Rect } from './region.ts';
 
@@ -24,7 +24,7 @@ export interface FoundRow {
   /** Whether the text reader could not read it and the user typed nothing. */
   readonly failed: boolean;
   /** The characters' color and tolerance the text reader last read it with. */
-  readonly readWith: { readonly ink: ColorSpec; readonly tolerance: number };
+  readonly readWith: { readonly ink: ColorDef; readonly tolerance: number };
   /** Why it cannot be added as it is, found without asking the reference, or null. */
   readonly flag: string | null;
   /**
@@ -243,7 +243,7 @@ export const REREAD_SAME = "Change the characters' color or tolerance to read th
 export function rereadOffer(
   rows: readonly FoundRow[],
   flags: ReadonlyMap<number, string>,
-  ink: ColorSpec | null,
+  ink: ColorDef | null,
   tolerance: number,
 ): { readonly indexes: readonly number[]; readonly blocked: string | null } | null {
   const offered = listed(rows).filter((row) => !row.typed && (row.failed || flags.has(row.index)));

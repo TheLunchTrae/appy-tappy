@@ -214,7 +214,8 @@ pub(super) fn and_list(names: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{AntiCheatDef, CheckDef, FixDef, SizeDef};
+    use appytappy_config::anti_cheat::AntiCheatClass;
+    use appytappy_config::app_file::{CheckDef, FixDef, SizeDef};
 
     use crate::owner::SavedValue;
     use crate::owner::test_support::{
@@ -561,7 +562,7 @@ mod tests {
         // Writing an application forgets it, so the next ask reads what
         // the folder has now.
         harness
-            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatClass::None))
             .expect("writes the application");
         assert!(missing(edit(&mut harness)));
         std::fs::remove_dir_all(root).expect("clean up");

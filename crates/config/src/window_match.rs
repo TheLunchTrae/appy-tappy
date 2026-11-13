@@ -11,6 +11,8 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// A text pattern in which `*` matches any run of characters and `?` matches
 /// one character. Case is ignored.
 ///
@@ -86,8 +88,11 @@ fn glob(mut pattern: &[char], mut text: &[char]) -> bool {
     }
 }
 
-/// Which fields besides the executable a window has to match to qualify.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which fields besides the executable a window has to match to qualify,
+/// as an application's file spells it too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MustMatch {
     /// The title has to match.
     pub title: bool,

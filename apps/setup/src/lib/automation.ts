@@ -3,17 +3,17 @@
 import {
   type ActionDef,
   ACTIONS,
-  type AntiCheatDef,
+  type AntiCheatClass,
   type AppSummary,
   type AutomationDef,
   type AutomationSummary,
   type ClickAtDef,
   type ClickButtonDef,
   type ClickDeliveryDef,
-  type ComparisonDef,
+  type Comparison,
   LIMITS,
   type Live,
-  type MediaCommandDef,
+  type MediaCommand,
   NO_STATE,
   type Reading,
   type TargetDef,
@@ -30,7 +30,7 @@ export interface ValueChoice {
   readonly app: string;
   readonly appName: string;
   /** The anti-cheat class of the value's application. */
-  readonly antiCheat: AntiCheatDef;
+  readonly antiCheat: AntiCheatClass;
   readonly value: ValueDef;
   readonly kind: ValueKind;
   /** The names of the states a state check reads, in its order; none for another kind. */
@@ -59,14 +59,14 @@ export function findValue(choices: readonly ValueChoice[], when: Pick<WhenDef, '
 }
 
 /** The comparisons each kind of value offers, the usual one first. */
-export const COMPARISONS: Readonly<Record<ValueKind, readonly ComparisonDef[]>> = {
+export const COMPARISONS: Readonly<Record<ValueKind, readonly Comparison[]>> = {
   number: ['atLeast', 'above', 'atMost', 'below', 'equals', 'notEquals'],
   flag: ['equals', 'notEquals'],
   state: ['equals', 'notEquals'],
 };
 
 /** Each comparison as the condition reads it, after the value's name. */
-export const COMPARISON_NAMES: Readonly<Record<ComparisonDef, string>> = {
+export const COMPARISON_NAMES: Readonly<Record<Comparison, string>> = {
   below: 'is below',
   atMost: 'is at most',
   equals: 'is',
@@ -166,7 +166,7 @@ export function targetText(target: TargetDef): string {
 }
 
 /** What each media command does, as an action's name. */
-export const MEDIA_NAMES: Readonly<Record<MediaCommandDef, string>> = {
+export const MEDIA_NAMES: Readonly<Record<MediaCommand, string>> = {
   pause: 'Pause media',
   play: 'Play media',
   next: 'Next track',
@@ -214,7 +214,7 @@ export function undoable(action: ActionDef): boolean {
  */
 export function keysBlocked(
   actions: readonly { readonly kind: ActionDef['kind'] }[],
-  antiCheat: AntiCheatDef,
+  antiCheat: AntiCheatClass,
   appName: string,
 ): string | null {
   if (antiCheat === 'none' || !actions.some((action) => action.kind !== 'click' && ACTIONS.injectsInput[action.kind])) {
@@ -254,7 +254,7 @@ export interface ActionDraft {
   /** Tells the rows apart while they are added, moved and removed. */
   readonly key: number;
   readonly kind: ActionDef['kind'];
-  readonly command: MediaCommandDef;
+  readonly command: MediaCommand;
   readonly percent: string;
   readonly target: ActionTarget;
   /** The application's executable, such as `Player.exe`, when `target` is `app`. */
@@ -282,7 +282,7 @@ export interface Draft {
   readonly enabled: boolean;
   /** The watched value's application and ID, or null before one is picked. */
   readonly source: { readonly app: string; readonly value: string } | null;
-  readonly is: ComparisonDef;
+  readonly is: Comparison;
   /** The number to compare with, as typed. */
   readonly number: string;
   /** The yes or no to compare with. */

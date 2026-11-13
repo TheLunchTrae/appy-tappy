@@ -369,14 +369,17 @@ mod tests {
     use std::process;
 
     use appytappy_config::app_file::{
-        AntiCheatDef, CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, MustMatchDef,
-        OriginDef, ReferenceDef, RegionDef, SampleDef, ScreenDef, SizeChangesDef, SizeDef,
-        StateDef, ValueDef, WindowDef,
+        CheckDef, ColorDef, FORMAT as APP_FORMAT, FallbackDef, OriginDef, ReferenceDef, RegionDef,
+        SampleDef, ScreenDef, SizeChangesDef, SizeDef, StateDef, ValueDef, WindowDef,
     };
-    use appytappy_config::automation_file::{
-        ActionDef, AutomationDef, ComparisonDef, FORMAT, MediaCommandDef, TargetDef, WhenDef,
-    };
+
+    use appytappy_config::anti_cheat::AntiCheatClass;
+
+    use appytappy_config::action::MediaCommand;
+    use appytappy_config::automation_file::{ActionDef, AutomationDef, FORMAT, TargetDef, WhenDef};
     use appytappy_config::names::sample_name;
+    use appytappy_config::rule::Comparison;
+    use appytappy_config::window_match::MustMatch;
     use appytappy_config::window_match::Pattern;
     use appytappy_sources::screen::{Image, Size};
 
@@ -423,14 +426,14 @@ mod tests {
                 title: "*".to_owned(),
                 class: "*".to_owned(),
                 executable: "Example*.exe".to_owned(),
-                must_match: MustMatchDef {
+                must_match: MustMatch {
                     title: false,
                     class: false,
                 },
                 fallback: FallbackDef::None,
             },
             size_changes: SizeChangesDef::Often,
-            anti_cheat: AntiCheatDef::None,
+            anti_cheat: AntiCheatClass::None,
             overlay: None,
             checked: None,
             values,
@@ -471,11 +474,11 @@ mod tests {
             when: WhenDef {
                 app: app.to_owned(),
                 value: value.to_owned(),
-                is: ComparisonDef::Equals,
+                is: Comparison::Equals,
                 target,
             },
             actions: vec![ActionDef::Media {
-                command: MediaCommandDef::Pause,
+                command: MediaCommand::Pause,
                 app: None,
             }],
             undo: true,
@@ -640,7 +643,7 @@ mod tests {
     #[test]
     fn keys_are_pressed_only_into_an_application_without_anti_cheat() {
         let mut protected = app("Protected App", vec![value("progress", bar())]);
-        protected.anti_cheat = AntiCheatDef::KernelLevel;
+        protected.anti_cheat = AntiCheatClass::KernelLevel;
         let apps = [
             stored("free", Ok(app("Free App", vec![value("progress", bar())]))),
             stored("protected", Ok(protected)),

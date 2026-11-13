@@ -41,13 +41,13 @@ macro_rules! with_commands {
             commands::select(screenshot: usize, selection: SelectionSpec) -> Option<SelectionView>;
             /// The filled and the empty color of the bar in `region`, which was drawn on screenshot `screenshot`, found
             /// on the screenshots of that one's window size; or why none are proposed.
-            commands::detect_bar(region: RegionSpec, screenshot: usize) -> BarDetection;
+            commands::detect_bar(region: RegionDef, screenshot: usize) -> BarDetection;
             /// What a bar of the colors `filled` and `empty` reads in `region`, drawn on screenshot `screenshot`, on each
             /// screenshot of that one's window size.
-            commands::measure_bar(region: RegionSpec, screenshot: usize, filled: ColorSpec, empty: ColorSpec) -> BarMeasure;
+            commands::measure_bar(region: RegionDef, screenshot: usize, filled: ColorDef, empty: ColorDef) -> BarMeasure;
             /// The pixels of `area` on screenshot `screenshot` that `rule` takes, by the rule's own reader, for the page
             /// to tint. `area` is in the screenshot's pixels, and the runs it answers count within it.
-            commands::match_pixels(screenshot: usize, area: RegionSpec, rule: MatchRule) -> MatchView;
+            commands::match_pixels(screenshot: usize, area: RegionDef, rule: MatchRule) -> MatchView;
             /// Reads the live window with the value `trial` would save, where and how the runtime would read it at the
             /// window's size now.
             commands::set_check(trial: TrialSpec) -> ();
@@ -71,7 +71,7 @@ macro_rules! with_commands {
             /// Records the looks of `region` of the picked window, drawn on `screenshot`, in place of any recording: a
             /// screenshot is kept each time the region shows a look that no screenshot of that window size shows yet.
             /// Two looks are the same when they differ by at most `tolerance` on average, as a state check compares.
-            commands::start_look_recording(region: RegionSpec, tolerance: u8, screenshot: usize) -> ();
+            commands::start_look_recording(region: RegionDef, tolerance: u8, screenshot: usize) -> ();
             /// The recording of looks and the screenshots it kept so far, or null without one.
             commands::look_recording_state() -> Option<LookRecordingView>;
             /// A reading of recording `recording` at most `maxWidth` wide, or null for an unknown index or a replaced
@@ -86,20 +86,20 @@ macro_rules! with_commands {
             /// Finds text like what `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance` and
             /// at its size, elsewhere on that screenshot and away from the finds `added` already, in place of any
             /// earlier search.
-            commands::find_like(screenshot: usize, region: RegionSpec, added: Vec<RegionSpec>, ink: ColorSpec, tolerance: u8) -> FoundView;
+            commands::find_like(screenshot: usize, region: RegionDef, added: Vec<RegionDef>, ink: ColorDef, tolerance: u8) -> FoundView;
             /// The search and the text read for each find so far, or null without one.
             commands::found_state() -> Option<FoundView>;
             /// A find of search `search` at most `maxWidth` wide, or null for an unknown index or a replaced search.
             commands::found_picture(search: U64AsNumber, index: usize, max_width: u32) -> Pixels;
             /// Has the text reader read finds `indexes` of search `search` again, in the color `ink` within `tolerance`,
             /// and answers the search, or null when that search was replaced or forgotten.
-            commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: ColorSpec, tolerance: u8) -> Option<FoundView>;
+            commands::reread_found(search: U64AsNumber, indexes: Vec<usize>, ink: ColorDef, tolerance: u8) -> Option<FoundView>;
             /// Forgets the search.
             commands::forget_found() -> ();
             /// The characters the box `region` of screenshot `screenshot` shows, in the color `ink` within `tolerance`,
             /// each with the name a find's or a recorded reading's character of the same shape has. None for an unknown
             /// screenshot or a box that does not fit it.
-            commands::box_characters(screenshot: usize, region: RegionSpec, ink: ColorSpec, tolerance: u8) -> Vec<CharacterView>;
+            commands::box_characters(screenshot: usize, region: RegionDef, ink: ColorDef, tolerance: u8) -> Vec<CharacterView>;
             /// Why the reference `spec` teaches cannot learn each of `found`, in order, or null for one it can.
             commands::found_problems(spec: CharactersSpec, found: Vec<Label>) -> Vec<Option<String>>;
             /// Captures a saved value's region on its application's window, replacing any capture, and returns the
@@ -124,7 +124,7 @@ macro_rules! with_commands {
             /// {@link forgetUnsavedClickPictures}.
             commands::add_click_picture(
                 screenshot: usize,
-                region: RegionSpec,
+                region: RegionDef,
                 selection: Option<SelectionSpec>
             ) -> ClickPictureView;
             /// Removes the click pictures no saved automation names, for when no automation is being made or changed.
@@ -179,7 +179,7 @@ macro_rules! with_commands {
                 value: String,
                 width: u32,
                 height: u32
-            ) -> Option<RegionSpec>;
+            ) -> Option<RegionDef>;
             /// Saves a fix of a saved value at the size of the screenshot `spec` names.
             commands::save_fix(spec: FixSpec) -> SavedValue;
             /// Removes the saved value's fix at `width` by `height`.
@@ -194,7 +194,7 @@ macro_rules! with_commands {
             /// Removes a saved reference and its pictures; refused while a value reads with it.
             commands::delete_reference(application: String, reference: String) -> ();
             /// Sets how the application `application` protects itself from other programs.
-            commands::set_anti_cheat(application: String, anti_cheat: AntiCheatDef) -> ();
+            commands::set_anti_cheat(application: String, anti_cheat: AntiCheatClass) -> ();
             /// Records the build of `application` that runs now as the one its values were checked against.
             commands::mark_checked(application: String) -> ();
             commands::list_automations() -> Vec<AutomationSummary>;

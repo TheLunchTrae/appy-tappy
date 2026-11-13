@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 
-import type { AntiCheatDef, AppSummary, DraftSummary, OverlayModeDef } from '../lib/bindings.ts';
+import type { AntiCheatClass, AppSummary, DraftSummary, OverlayModeDef } from '../lib/bindings.ts';
 import { Question, useQuestion } from '../components/Question.tsx';
 import { errorText, removeApp, setAntiCheat, setOverlay } from '../lib/api.ts';
 import { Hint } from '../components/Hint.tsx';
@@ -23,10 +23,10 @@ import { DraftActions, DraftNote, DraftPill } from '../components/Drafts.tsx';
 
 interface AntiCheatCellProps {
   readonly name: string;
-  readonly antiCheat: AntiCheatDef;
+  readonly antiCheat: AntiCheatClass;
   readonly confirming: boolean;
   readonly onConfirm: (confirming: boolean) => void;
-  readonly onSet: (antiCheat: AntiCheatDef) => void;
+  readonly onSet: (antiCheat: AntiCheatClass) => void;
   /** Whether a change is saving, which locks the question's answers. */
   readonly busy: boolean;
 }
@@ -220,7 +220,7 @@ export function ApplicationsPage({
   // The application whose export dialog is open.
   const [exporting, setExporting] = useState<{ readonly id: string; readonly name: string } | null>(null);
 
-  const set = async (app: string, antiCheat: AntiCheatDef): Promise<void> => {
+  const set = async (app: string, antiCheat: AntiCheatClass): Promise<void> => {
     setSettingAntiCheat(app);
     try {
       await setAntiCheat(app, antiCheat);

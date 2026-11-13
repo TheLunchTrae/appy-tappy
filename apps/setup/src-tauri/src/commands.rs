@@ -17,7 +17,9 @@ pub(crate) use upload::Upload;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use appytappy_config::app_file::{AntiCheatDef, AppFile, OverlayModeDef, SizeDef, WindowDef};
+use appytappy_config::app_file::{AppFile, OverlayModeDef, SizeDef, WindowDef};
+
+use appytappy_config::anti_cheat::AntiCheatClass;
 use appytappy_config::automation_file::{AutomationDef, ClickAtDef, WhenDef};
 use appytappy_config::settings_file::SettingsFile;
 use tauri::ipc::Response;
@@ -27,7 +29,7 @@ use tokio::sync::oneshot;
 use crate::applications::AppSpec;
 use crate::automations::AutomationSummary;
 use crate::check_spec::bar::{BarDetection, BarMeasure};
-use crate::check_spec::{CharactersSpec, ColorSpec, Label, RegionSpec};
+use crate::check_spec::{CharactersSpec, Label};
 use crate::debug::bundle::BundleSpec;
 use crate::debug::outline::CaptureOutline;
 use crate::debug::trace_file::TraceFile;
@@ -50,6 +52,7 @@ use crate::recording::looks::LookRecordingView;
 use crate::selection::{SelectionSpec, SelectionView};
 use crate::settings::{self, SettingsView};
 use crate::window_list::{WindowFit, WindowList, WindowScore};
+use appytappy_config::app_file::{ColorDef, RegionDef};
 
 /// The UI's way to the owner thread.
 #[derive(Debug)]
@@ -187,7 +190,7 @@ pub(crate) async fn select(
 #[tauri::command]
 pub(crate) async fn detect_bar(
     app: AppHandle,
-    region: RegionSpec,
+    region: RegionDef,
     screenshot: usize,
 ) -> Result<BarDetection, String> {
     try_ask(&app, "detect_bar", move |owner| {
@@ -201,10 +204,10 @@ pub(crate) async fn detect_bar(
 #[tauri::command]
 pub(crate) async fn measure_bar(
     app: AppHandle,
-    region: RegionSpec,
+    region: RegionDef,
     screenshot: usize,
-    filled: ColorSpec,
-    empty: ColorSpec,
+    filled: ColorDef,
+    empty: ColorDef,
 ) -> Result<BarMeasure, String> {
     try_ask(&app, "measure_bar", move |owner| {
         owner.measure_bar(region, screenshot, filled, empty)
@@ -217,7 +220,7 @@ pub(crate) async fn measure_bar(
 pub(crate) async fn match_pixels(
     app: AppHandle,
     screenshot: usize,
-    area: RegionSpec,
+    area: RegionDef,
     rule: MatchRule,
 ) -> Result<MatchView, String> {
     try_ask(&app, "match_pixels", move |owner| {
@@ -356,7 +359,7 @@ pub(crate) async fn read_window(app: AppHandle, window: WindowDef) -> Result<Opt
 pub(crate) async fn add_click_picture(
     app: AppHandle,
     screenshot: usize,
-    region: RegionSpec,
+    region: RegionDef,
     selection: Option<SelectionSpec>,
 ) -> Result<ClickPictureView, String> {
     try_ask(&app, "add_click_picture", move |owner| {
@@ -537,7 +540,7 @@ pub(crate) async fn place_value(
     value: String,
     width: u32,
     height: u32,
-) -> Result<Option<RegionSpec>, String> {
+) -> Result<Option<RegionDef>, String> {
     try_ask(&app, "place_value", move |owner| {
         owner.place_value(&application, &value, SizeDef { width, height })
     })
@@ -619,7 +622,7 @@ pub(crate) async fn mark_checked(app: AppHandle, application: String) -> Result<
 pub(crate) async fn set_anti_cheat(
     app: AppHandle,
     application: String,
-    anti_cheat: AntiCheatDef,
+    anti_cheat: AntiCheatClass,
 ) -> Result<(), String> {
     try_ask(&app, "set_anti_cheat", move |owner| {
         owner.set_anti_cheat(&application, anti_cheat)
@@ -779,7 +782,7 @@ pub(crate) async fn recording_state(app: AppHandle) -> Result<Option<RecordingVi
 #[tauri::command]
 pub(crate) async fn start_look_recording(
     app: AppHandle,
-    region: RegionSpec,
+    region: RegionDef,
     tolerance: u8,
     screenshot: usize,
 ) -> Result<(), String> {
@@ -837,9 +840,9 @@ pub(crate) async fn review_problems(
 pub(crate) async fn find_like(
     app: AppHandle,
     screenshot: usize,
-    region: RegionSpec,
-    added: Vec<RegionSpec>,
-    ink: ColorSpec,
+    region: RegionDef,
+    added: Vec<RegionDef>,
+    ink: ColorDef,
     tolerance: u8,
 ) -> Result<FoundView, String> {
     try_ask(&app, "find_like", move |owner| {
@@ -878,7 +881,7 @@ pub(crate) async fn reread_found(
     app: AppHandle,
     search: u64,
     indexes: Vec<usize>,
-    ink: ColorSpec,
+    ink: ColorDef,
     tolerance: u8,
 ) -> Result<Option<FoundView>, String> {
     ask(&app, "reread_found", move |owner| {
@@ -899,8 +902,8 @@ pub(crate) async fn forget_found(app: AppHandle) -> Result<(), String> {
 pub(crate) async fn box_characters(
     app: AppHandle,
     screenshot: usize,
-    region: RegionSpec,
-    ink: ColorSpec,
+    region: RegionDef,
+    ink: ColorDef,
     tolerance: u8,
 ) -> Result<Vec<CharacterView>, String> {
     ask(&app, "box_characters", move |owner| {

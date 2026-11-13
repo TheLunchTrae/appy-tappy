@@ -446,7 +446,8 @@ pub(crate) fn run<H: Host>(mut owner: Owner<H>, messages: &Receiver<Message<H>>)
 
 #[cfg(test)]
 mod tests {
-    use appytappy_config::app_file::{AntiCheatDef, OverlayModeDef};
+    use appytappy_config::anti_cheat::AntiCheatClass;
+    use appytappy_config::app_file::OverlayModeDef;
 
     use crate::overlay::OverlayWindow;
 
@@ -531,7 +532,7 @@ mod tests {
             std::fs::write(folder.join(left), b"left").expect("writes");
         }
         harness
-            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::None))
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatClass::None))
             .expect("the next save of the application");
         assert_eq!(
             names_in(&folder),
@@ -617,7 +618,7 @@ mod tests {
             harness
                 .ask(|owner| {
                     owner.update_app("example", Changed::Applications, |_owner, found| {
-                        found.file.anti_cheat = AntiCheatDef::None;
+                        found.file.anti_cheat = AntiCheatClass::None;
                         // A file that fails its own checks is not saved.
                         found.file.name.clear();
                         Ok(Edit::Save((), Vec::new()))
@@ -629,7 +630,7 @@ mod tests {
             .ask(|owner| owner.stores()?.app("example"))
             .expect("saved")
             .file;
-        assert_eq!(file.anti_cheat, AntiCheatDef::Unknown, "kept as saved");
+        assert_eq!(file.anti_cheat, AntiCheatClass::Unknown, "kept as saved");
         assert_eq!(harness.reloads(), 0);
         assert!(harness.closed.try_recv().is_err());
         assert!(harness.synced.try_recv().is_err());

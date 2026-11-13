@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { type AntiCheatDef, LIMITS, type OriginDef, type SharedView } from '../src/lib/bindings.ts';
+import { type AntiCheatClass, LIMITS, type OriginDef, type SharedView } from '../src/lib/bindings.ts';
 import {
   type ImportEvent,
   type ImportState,
@@ -14,7 +14,7 @@ import {
   sizeProblem,
 } from '../src/lib/sharing.ts';
 
-function view(antiCheat: AntiCheatDef): SharedView {
+function view(antiCheat: AntiCheatClass): SharedView {
   return {
     name: 'Example App 2',
     file: {

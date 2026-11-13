@@ -428,7 +428,8 @@ mod tests {
     use std::time::Duration;
 
     use appytappy_config::app_file::WindowDef;
-    use appytappy_config::automation_file::{ComparisonDef, TargetDef};
+    use appytappy_config::automation_file::TargetDef;
+    use appytappy_config::rule::Comparison;
     use appytappy_sources::screen::{FrameHandler, Image, Region};
 
     use appytappy_sources::screen::settle::SETTLE;
@@ -466,7 +467,7 @@ mod tests {
         WhenDef {
             app: "example".to_owned(),
             value: value.to_owned(),
-            is: ComparisonDef::AtLeast,
+            is: Comparison::AtLeast,
             target: TargetDef::Number(target),
         }
     }

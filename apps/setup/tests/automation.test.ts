@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AntiCheatDef, AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/bindings.ts';
+import type { AntiCheatClass, AppSummary, AutomationDef, CheckDef, ValueDef } from '../src/lib/bindings.ts';
 import {
   EMPTY_DRAFT,
   actionText,
@@ -629,7 +629,7 @@ describe('clicks', () => {
     windows: [],
     running: null,
   };
-  const withAntiCheat = (watched: AntiCheatDef, clicked: AntiCheatDef): readonly AppSummary[] => [
+  const withAntiCheat = (watched: AntiCheatClass, clicked: AntiCheatClass): readonly AppSummary[] => [
     ...apps.map((app) => (app.file === null ? app : { ...app, file: { ...app.file, antiCheat: watched } })),
     { ...streaming, file: { ...streaming.file, antiCheat: clicked } },
   ];

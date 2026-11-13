@@ -163,7 +163,7 @@ mod tests {
     };
     use crate::owner::messages::{Event, Message, Run};
     use crate::reading::Reading;
-    use appytappy_config::app_file::AntiCheatDef;
+    use appytappy_config::anti_cheat::AntiCheatClass;
 
     use crate::owner::test_support::{
         BAR, FakeHost, Harness, WINDOW, add_other_bar, frame_image, spec, with_saved_bar,
@@ -808,7 +808,7 @@ mod tests {
         );
         assert!(
             harness
-                .ask(|owner| owner.set_anti_cheat("missing", AntiCheatDef::None))
+                .ask(|owner| owner.set_anti_cheat("missing", AntiCheatClass::None))
                 .is_err()
         );
         assert!(
@@ -821,7 +821,7 @@ mod tests {
 
         // A setting only the runtime reads leaves the overlay alone.
         harness
-            .ask(|owner| owner.set_anti_cheat("example", AntiCheatDef::UserMode))
+            .ask(|owner| owner.set_anti_cheat("example", AntiCheatClass::UserMode))
             .expect("saves");
         assert_eq!(harness.reloads(), 1);
         assert!(harness.closed.try_recv().is_err(), "the overlay goes on");
