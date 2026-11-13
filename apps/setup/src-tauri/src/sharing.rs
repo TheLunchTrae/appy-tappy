@@ -127,12 +127,7 @@ impl Shared {
         file.overlay = None;
         // A shared file says that its maker imported a value or a
         // reference, and not from which file of theirs.
-        let origins = file
-            .values
-            .iter_mut()
-            .map(|value| &mut value.origin)
-            .chain(file.references.iter_mut().map(|saved| &mut saved.origin));
-        for origin in origins {
+        for origin in file.origins_mut() {
             if let OriginDef::Imported { file: from } = origin {
                 from.clear();
             }
