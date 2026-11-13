@@ -33,8 +33,8 @@ pub(crate) const SIZE_PERCENT: u32 = 15;
 
 /// The character heights a look over a whole window takes text of, in
 /// pixels, smallest first: one for each example of text the user drew.
-/// Each is further than [`SIZE_PERCENT`] from every other, since a look for
-/// one height takes the text of a height that near it too.
+/// An example's height is held unless a look for one held before it takes
+/// text that tall, within [`SIZE_PERCENT`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Sizes(Vec<u32>);
 
@@ -45,10 +45,11 @@ impl Sizes {
     }
 
     /// Adds `height`, unless a look for a size it holds takes text that
-    /// tall already, or a look for `height` would take that size's text.
+    /// tall already. A height that no look takes is always added, so text
+    /// of every example's height is looked for, whatever order the
+    /// examples come in.
     pub(crate) fn add(&mut self, height: u32) {
-        let held = |&size: &u32| same_size(height, size) || same_size(size, height);
-        if !self.0.iter().any(held) {
+        if !self.0.iter().any(|&size| same_size(height, size)) {
             self.0.push(height);
             self.0.sort_unstable();
         }
@@ -123,17 +124,19 @@ impl Bounds {
         self.top < other.bottom && other.top < self.bottom
     }
 
-    const fn overlaps(self, other: Self) -> bool {
-        self.left < other.right && other.left < self.right && self.rows_meet(other)
+    fn meets(self, region: Region) -> bool {
+        self.left < region.right()
+            && region.x() < self.right
+            && self.top < region.bottom()
+            && region.y() < self.bottom
     }
 
-    fn meets(self, region: Region) -> bool {
-        self.overlaps(Self {
-            left: region.x(),
-            top: region.y(),
-            right: region.right(),
-            bottom: region.bottom(),
-        })
+    /// Whether all of it lies inside `other`.
+    const fn within(self, other: Self) -> bool {
+        other.left <= self.left
+            && self.right <= other.right
+            && other.top <= self.top
+            && self.bottom <= other.bottom
     }
 
     fn centered_in(self, region: Region) -> bool {
@@ -466,30 +469,28 @@ fn distance(run: Bounds, near: Region) -> u64 {
 ///
 /// Each size is looked for by itself, as [`like`] looks for one: among the
 /// ink no taller than twice the size, joined into runs no further apart
-/// than the size. Ink that is part of a smaller size's run is not taken
-/// again for a larger one.
+/// than the size. Ink that is part of a smaller size's run is left out of
+/// the larger sizes' runs, so it is taken once, and text of a larger size
+/// beside it is still found.
 pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitReader) -> Vec<Spot> {
     let mask = Mask::of(image, reader);
     let largest = sizes.heights().last().copied().unwrap_or(0);
     let blobs = mask.blobs(largest.saturating_mul(2));
     let mut found: Vec<(Bounds, u32)> = Vec::new();
     for &size in sizes.heights() {
-        let smaller = found.len();
         let tallest = size.saturating_mul(2);
+        // The ink of a smaller size's run is left out before the runs are
+        // joined, so text of this size beside it is still a run of its own.
         let inked = blobs
             .iter()
             .copied()
             .filter(|blob| blob.height() <= tallest)
+            .filter(|blob| !found.iter().any(|&(taken, _)| blob.within(taken)))
             .collect();
-        for run in runs(inked, size, size) {
-            let taken = found
-                .iter()
-                .take(smaller)
-                .any(|(other, _)| other.overlaps(run.bounds));
-            if same_size(run.tallest, size) && !taken {
-                found.push((run.bounds, size));
-            }
-        }
+        let lines = runs(inked, size, size)
+            .into_iter()
+            .filter(|run| same_size(run.tallest, size));
+        found.extend(lines.map(|run| (run.bounds, size)));
     }
     found.sort_by_key(|&(run, _)| (distance(run, near), run.top, run.left));
     found
@@ -699,12 +700,13 @@ mod tests {
     #[test]
     fn sizes_hold_each_height_apart_from_the_others_smallest_first() {
         assert_eq!(sizes(20, &[40, 10, 30]).heights(), [10, 20, 30, 40]);
-        // A look for 20 takes text 17 to 23 tall, and one for 24 would take
-        // text 20 tall, so neither is another size. 16 and 25 are.
-        assert_eq!(sizes(20, &[17, 23, 24, 20]).heights(), [20]);
-        assert_eq!(sizes(20, &[25, 16]).heights(), [16, 20, 25]);
+        // A look for 20 takes text 17 to 23 tall, so those are no other
+        // size. 16 and 24 are, though a look for 24 takes text 20 tall too.
+        assert_eq!(sizes(20, &[17, 23, 20]).heights(), [20]);
+        assert_eq!(sizes(20, &[24, 16]).heights(), [16, 20, 24]);
         // A look for 7 takes text 5 tall, though one for 5 would not take 7.
         assert_eq!(sizes(7, &[5]).heights(), [7]);
+        assert_eq!(sizes(5, &[7]).heights(), [5, 7]);
     }
 
     #[test]
@@ -741,6 +743,53 @@ mod tests {
             lines(&image, &sizes(10, &[13]), region(0, 0, 12, 12), &reader()),
             [spot(10, 2, 2, 11, 16)]
         );
+    }
+
+    #[test]
+    fn an_example_just_past_a_held_size_s_reach_is_looked_for_too() {
+        // A look for 20 takes text up to 23 tall, so text 24 tall is found
+        // only because 24 is held as a size of its own.
+        let image = screenshot(60, 40, &pair(4, 4, 24));
+        assert_eq!(
+            lines(&image, &sizes(20, &[24]), region(0, 0, 12, 12), &reader()),
+            [spot(24, 0, 0, 17, 34)]
+        );
+    }
+
+    #[test]
+    fn text_of_a_larger_size_beside_text_of_a_smaller_one_is_a_line_too() {
+        // A character 8 tall 11 past text 16 tall: too far to join it for
+        // the look for 8, and near enough for the look for 16, whose run it
+        // must not take with it.
+        let mut boxes = pair(4, 4, 16).to_vec();
+        boxes.push((22, 4, 3, 8));
+        let image = screenshot(60, 40, &boxes);
+        assert_eq!(
+            lines(&image, &sizes(8, &[16]), region(0, 0, 12, 12), &reader()),
+            [spot(16, 0, 0, 15, 24), spot(8, 20, 2, 7, 12)]
+        );
+    }
+
+    #[test]
+    fn the_nearest_runs_of_all_sizes_together_are_taken() {
+        // Text 16 tall in the place, and 33 runs of text 8 tall further off,
+        // in 3 rows of 11.
+        let mut boxes = pair(2, 2, 16).to_vec();
+        for row in [40_u32, 54, 68] {
+            for column in 0..11_u32 {
+                boxes.extend(pair(column.saturating_mul(20).saturating_add(2), row, 8));
+            }
+        }
+        let image = screenshot(230, 80, &boxes);
+        let taken = lines(&image, &sizes(8, &[16]), region(0, 0, 12, 20), &reader());
+        assert_eq!(taken.len(), MAX_LINES);
+        assert_eq!(taken[0], spot(16, 0, 0, 13, 22), "the nearest is first");
+        let small = taken.iter().filter(|spot| spot.size == 8).count();
+        assert_eq!(small, 31);
+        // The run left out is the furthest: the last of the bottom row.
+        let last = region(200, 66, 11, 12);
+        assert!(taken.iter().all(|spot| spot.region != last));
+        assert!(taken.contains(&spot(8, 180, 66, 11, 12)));
     }
 
     #[test]
