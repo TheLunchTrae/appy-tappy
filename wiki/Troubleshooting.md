@@ -94,10 +94,10 @@ The reasons a number has no reading:
   shows what it read, with a `?` for each character it couldn't, such as
   `8 7 ?`, and the character it learned that the first `?` looks most like.
   If that is the character the application shows there, the application drew
-  it a little differently this time: label a screenshot that shows this
-  reading, or [record](References.md#record-readings) the region until it
-  reads. If it is another character, the reference hasn't learned the one
-  shown: label a reading with it.
+  it a little differently this time: draw a [box](References.md#boxes) around
+  this reading on a screenshot, or [record](References.md#record-readings)
+  the region until it reads. If it is another character, the reference hasn't
+  learned the one shown: draw a box around a reading with it.
   [What a reference can't learn](References.md#what-a-reference-cant-learn)
   lists the characters no label teaches.
 - **The characters hold no number.** The message shows what it read, such as
@@ -111,9 +111,10 @@ screenshot of the window at the size you play at.
 
 ## A number reads wrong
 
-[Edit its reference](References.md#make-a-reference) and label more screenshots,
-or record more readings, so that every digit the number can show appears on at
-least one of them, and check the characters' color.
+[Edit its reference](References.md#make-a-reference) and draw more
+[boxes](References.md#boxes), or record more readings, so that every digit
+the number can show appears in at least one of them, and check the
+characters' color.
 [**Characters still missing**](References.md#choose-what-it-needs) lists what
 is left to teach. Some text the **Number**
 check cannot read; [Checks](Values.md#checks) says what it can't, and what to
