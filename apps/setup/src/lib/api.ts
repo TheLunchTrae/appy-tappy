@@ -80,13 +80,17 @@ export async function listWindows(): Promise<WindowList> {
   return invoke<WindowList>('list_windows');
 }
 
-export async function pickWindow(window: number): Promise<void> {
-  await invoke('pick_window', { window });
+/** Starts capturing `window` for the preview, and answers the capture's number. */
+export async function pickWindow(window: number): Promise<number> {
+  return invoke<number>('pick_window', { window });
 }
 
-/** Stops capturing and forgets the session's screenshots and check. */
-export async function stopCapture(): Promise<void> {
-  await invoke('stop_capture');
+/**
+ * Stops capture `capture` and forgets the session's screenshots and check, unless another capture took
+ * its place.
+ */
+export async function stopCapture(capture: number): Promise<void> {
+  await invoke('stop_capture', { capture });
 }
 
 /** The newest frame at most `maxWidth` wide, or null before one arrives. */

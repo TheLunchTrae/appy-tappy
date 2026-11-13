@@ -23,9 +23,11 @@ macro_rules! with_commands {
     ($then:ident) => {
         $then! {
             commands::list_windows() -> WindowList;
-            commands::pick_window(window: U64AsNumber) -> ();
-            /// Stops capturing and forgets the session's screenshots and check.
-            commands::stop_capture() -> ();
+            /// Starts capturing `window` for the preview, and answers the capture's number.
+            commands::pick_window(window: U64AsNumber) -> U64AsNumber;
+            /// Stops capture `capture` and forgets the session's screenshots and check, unless another capture took
+            /// its place.
+            commands::stop_capture(capture: U64AsNumber) -> ();
             /// The newest frame at most `maxWidth` wide, or null before one arrives.
             commands::preview(max_width: u32) -> Pixels;
             /// Keeps the newest frame as a screenshot and returns its index.

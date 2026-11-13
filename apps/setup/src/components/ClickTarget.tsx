@@ -1,6 +1,6 @@
 import { type PointerEvent, useEffect, useReducer, useRef, useState } from 'react';
 
-import { addClickPicture, clickNow, errorText, findClick, pickWindow, readWindow, select } from '../lib/api.ts';
+import { addClickPicture, clickNow, errorText, findClick, readWindow, select } from '../lib/api.ts';
 import {
   type AppSummary,
   type ClickAtDef,
@@ -167,7 +167,7 @@ function TargetStage({
   const picks = useNewest();
   // The stage holds the capture until it goes: when the screen closes, or another stage opens, which may find no
   // window to pick in its place. Its screenshots go with it.
-  useCapture();
+  const { pick } = useCapture();
 
   // What trying the target answered shows below the buttons, which may be past the end of a short window.
   const answer = useRef<HTMLDivElement>(null);
@@ -215,7 +215,7 @@ function TargetStage({
           if (!isOpen()) {
             return;
           }
-          await pickWindow(read);
+          await pick(read);
           if (isOpen()) {
             setWindow({ kind: 'picked', handle: read });
           }
@@ -229,7 +229,7 @@ function TargetStage({
     return undefined;
     // The window rules are read when the stage opens, and looking again opens a new one, not each time the lists
     // are read again.
-  }, [picks]);
+  }, [picks, pick]);
 
   // The window's own size: a screenshot's, since the live view may be scaled down.
   const newest = shots.at(-1);
