@@ -5,6 +5,7 @@ import {
   type Place,
   type Turn,
   beingRead,
+  boxesShowing,
   join,
   listed,
   openGuide,
@@ -12,11 +13,21 @@ import {
   settle,
   steps,
   turn,
-  unchecked,
+  unconfirmed,
   unfitted,
 } from '../src/lib/confirm.ts';
 import { disagreements, entries } from '../src/lib/review.ts';
-import { checkPlaces, escapeCloses, learnedPlaces } from '../src/lib/useCharacterCheck.ts';
+import {
+  type Held,
+  NOTHING_HELD,
+  answersOf,
+  checkPlaces,
+  editedReading,
+  escapeCloses,
+  heldStep,
+  learnedPlaces,
+  leftOutOf,
+} from '../src/lib/useCharacterCheck.ts';
 
 /** A place that shows `shapes`, one name each, two pixels wide each, with `text` as the reader or the user has it. */
 function place(source: Place['source'], index: number, shapes: string, text: string, keep = true): Place {
@@ -296,7 +307,114 @@ describe('a box', () => {
     ]);
     // One that joins afterward is not remembered as left out either.
     const late = [...aside.places, { ...place('box', 5, 's', '7'), typed: true }];
-    expect(join(aside.guide, late)).toMatchObject({ guide: { left: aside.guide.left }, changes: [] });
+    const joined = join(aside.guide, late);
+    expect(joined.guide.left).toEqual(aside.guide.left);
+    expect(joined.changes).toEqual([]);
+  });
+
+  test('that shows a shape that is no character twice is named once among the boxes that still teach it', () => {
+    const twice = [place('box', 4, 'ss', '11'), place('box', 6, 's', '1'), place('find', 0, 's', '1')];
+    const { guide } = play(twice, [], { kind: 'setAside', shape: 's' });
+    const [use] = steps(twice, guide, [])[0]?.shapes ?? [];
+    expect(use?.spots).toHaveLength(4);
+    expect(use === undefined ? [] : boxesShowing(use, twice).map((each) => each.index)).toEqual([4, 6]);
+  });
+
+  test('that shows no character is asked nothing and counts for nothing, since no answer could be about it', () => {
+    // No character was found in its picture: no text fits it, and it has no tick to leave it out with.
+    const bare = place('box', 4, '', '18');
+    expect(unfitted([bare], openGuide([bare], []))).toEqual([]);
+    expect(openGuide([bare], []).cursor).toEqual({ at: 'done' });
+    expect(unconfirmed([bare], new Map())).toEqual([]);
+    // A find that shows none has a tick, so it is still text to type or leave out.
+    const find = place('find', 0, '', '18');
+    expect(unfitted([find], openGuide([find], []))).toEqual([0]);
+    expect(unconfirmed([find], new Map())).toEqual(['1', '8']);
+  });
+});
+
+describe('a reading the draft keeps already', () => {
+  // The draft keeps reading 1 as the reader read it, 18, and its 1 is a 7 misread.
+  const kept = new Map([[1, '18']]);
+  const none = new Map<number, string>();
+  /** The one edit of the reading among `edits`, as the entry the hook passes on. */
+  const entryOf = (edits: ReturnType<typeof turn>['changes']) => {
+    const [edit] = edits.filter((change) => change.source === 'reading');
+    return { keep: edit?.keep ?? true, text: edit?.text ?? '' };
+  };
+
+  test('goes from the draft for a shape that is no character, and comes back when that is taken back', () => {
+    const open = openGuide([reading], []);
+    const aside = turn(open, { kind: 'setAside', shape: 's' }, [reading], []);
+    const gone = editedReading(kept, none, reading, entryOf(aside.changes));
+    expect(gone).toEqual({ text: '18', leftOut: true });
+    // The draft keeps it no longer, and review has it left out.
+    const left = edited([reading], aside.changes);
+    const back = turn(aside.guide, { kind: 'restore', shape: 's' }, left, []);
+    expect(back.changes).toEqual([{ source: 'reading', index: 1, text: '18', keep: true }]);
+    expect(editedReading(none, new Map([[1, '18']]), left[0] ?? reading, entryOf(back.changes))).toEqual({
+      text: '18',
+      leftOut: false,
+    });
+  });
+
+  test("gets the check's answer on the draft, and not what review changed without keeping", () => {
+    const fixed = turn(openGuide([reading], []), { kind: 'retype', shape: 's', character: '7' }, [reading], []);
+    expect(editedReading(kept, none, reading, entryOf(fixed.changes))).toEqual({ text: '78', leftOut: false });
+    // Review has its 8 as a 9, which the user did not keep: the draft gets the 7 alone.
+    const reviewed = { ...reading, text: '19', typed: true };
+    const again = turn(openGuide([reviewed], []), { kind: 'retype', shape: 's', character: '7' }, [reviewed], []);
+    expect(entryOf(again.changes)).toEqual({ keep: true, text: '79' });
+    expect(editedReading(kept, none, reviewed, entryOf(again.changes))).toEqual({ text: '78', leftOut: false });
+    // A text typed over the whole reading is the check's, whatever the draft had.
+    expect(editedReading(kept, none, reviewed, { keep: true, text: '7 8 %' })).toEqual({
+      text: '7 8 %',
+      leftOut: false,
+    });
+  });
+
+  test('is none of the readings review alone keeps, which stay off the draft', () => {
+    expect(editedReading(none, none, reading, { keep: true, text: '78' })).toBeNull();
+    expect(editedReading(none, none, reading, { keep: false, text: '18' })).toBeNull();
+  });
+});
+
+describe('what the capture screen holds of the check', () => {
+  const answered = play(all, [], { kind: 'confirm' }).guide;
+  const open: Held = heldStep(NOTHING_HELD, { kind: 'show', guide: answered });
+  const leftOut = { kind: 'reading', recording: 3, index: 1, reading: { text: '18', leftOut: true } } as const;
+
+  test('closing keeps the answers as what the user confirmed, and forgets the readings left out', () => {
+    const closed = heldStep(heldStep(open, leftOut), { kind: 'close' });
+    expect(closed.guide).toBeNull();
+    expect(closed.past).toEqual(answered.answers);
+    expect(leftOutOf(closed, 3).size).toBe(0);
+    // The next check's answers come after them.
+    const next = heldStep(closed, { kind: 'show', guide: { ...answered, answers: new Map([['s', null]]) } });
+    expect(answersOf(next).get('s')).toBeNull();
+    expect(answersOf(next).size).toBe(answered.answers.size);
+  });
+
+  test("the reference's editor closing closes an open check and forgets every answer", () => {
+    const closed = heldStep(open, { kind: 'close' });
+    for (const held of [open, closed, heldStep(open, leftOut)]) {
+      expect(heldStep(held, { kind: 'forget' })).toEqual(NOTHING_HELD);
+    }
+    expect(answersOf(open).size).toBeGreaterThan(0);
+  });
+
+  test('remembers a reading left out until it is kept again, and drops one of another recording', () => {
+    const held = heldStep(open, leftOut);
+    expect([...leftOutOf(held, 3)]).toEqual([[1, '18']]);
+    // A recording that replaced that one has its own readings under the same indexes.
+    expect(leftOutOf(held, 4).size).toBe(0);
+    const other = heldStep(held, { ...leftOut, recording: 4, index: 2 });
+    expect([...leftOutOf(other, 4)]).toEqual([[2, '18']]);
+    expect(leftOutOf(other, 3).size).toBe(0);
+    const back = heldStep(held, { ...leftOut, reading: { text: '18', leftOut: false } });
+    expect(leftOutOf(back, 3).size).toBe(0);
+    // An edit of a reading that was never left out changes nothing held.
+    expect(heldStep(held, { ...leftOut, index: 5, reading: { text: '4', leftOut: false } })).toBe(held);
   });
 });
 
@@ -305,18 +423,18 @@ describe('the characters nobody has checked', () => {
   const typed = { ...place('box', 1, 'sx', '74'), typed: true };
 
   test("are the ones of the text reader's guesses, each once, and never the ones the user typed", () => {
-    expect(unchecked([guess, typed, place('reading', 0, 'se', '18')], new Map())).toEqual(['1', '8', '%']);
-    expect(unchecked([typed], new Map())).toEqual([]);
+    expect(unconfirmed([guess, typed, place('reading', 0, 'se', '18')], new Map())).toEqual(['1', '8', '%']);
+    expect(unconfirmed([typed], new Map())).toEqual([]);
   });
 
   test('leave out a character the user typed for the same shape elsewhere, unless an answer says otherwise', () => {
     const typedToo = { ...place('box', 1, 'ep', '8%'), typed: true };
-    expect(unchecked([guess, typedToo], new Map())).toEqual(['1']);
+    expect(unconfirmed([guess, typedToo], new Map())).toEqual(['1']);
     // Typed text that gives the shape another character does not check the guess.
-    expect(unchecked([guess, { ...place('box', 1, 's', '7'), typed: true }], new Map())).toEqual(['1', '8', '%']);
-    expect(unchecked([guess, typedToo], new Map([['e', '3']]))).toEqual(['1', '8']);
+    expect(unconfirmed([guess, { ...place('box', 1, 's', '7'), typed: true }], new Map())).toEqual(['1', '8', '%']);
+    expect(unconfirmed([guess, typedToo], new Map([['e', '3']]))).toEqual(['1', '8']);
     // Typed text that does not fit its shapes says nothing about them.
-    expect(unchecked([guess, { ...place('box', 1, 'ep', '8'), typed: true }], new Map())).toEqual(['1', '8', '%']);
+    expect(unconfirmed([guess, { ...place('box', 1, 'ep', '8'), typed: true }], new Map())).toEqual(['1', '8', '%']);
   });
 
   test('leave out a character whose shape an answer says is that character, or is none', () => {
@@ -325,13 +443,13 @@ describe('the characters nobody has checked', () => {
       ['e', '3'],
       ['p', null],
     ]);
-    // The answer for the second shape is another character than the guess has, so the guess is still not checked.
-    expect(unchecked([guess], answers)).toEqual(['8']);
+    // The answer for the second shape is another character than the guess has, so nobody has confirmed the guess.
+    expect(unconfirmed([guess], answers)).toEqual(['8']);
   });
 
   test('are every character of a guess that does not fit its shapes, and none of one still being read', () => {
-    expect(unchecked([place('reading', 0, 'se', '187')], new Map([['s', '1']]))).toEqual(['1', '8', '7']);
-    expect(unchecked([{ ...guess, reading: true }], new Map())).toEqual([]);
+    expect(unconfirmed([place('reading', 0, 'se', '187')], new Map([['s', '1']]))).toEqual(['1', '8', '7']);
+    expect(unconfirmed([{ ...guess, reading: true }], new Map())).toEqual([]);
   });
 });
 
@@ -535,7 +653,7 @@ describe('the places a check goes over', () => {
   const characters = [{ shape: 's', left: 0, right: 3 }];
   const row = { region, typed: false, failed: false, readWith: { ink, tolerance: 40 }, flag: null };
 
-  test('are every listed find and every reading, and it asks about the finds and the kept readings', () => {
+  test('are every box, listed find and reading; it asks about all but readings left out; a save learns the boxes with text and the kept readings', () => {
     const finds = [0, 1, 2].map(() => ({ region, text: { kind: 'pending' as const }, ink, tolerance: 40, characters }));
     const rows = [
       { ...row, index: 0, keep: false, text: '7', reading: false, fits: true },
@@ -558,7 +676,7 @@ describe('the places a check goes over', () => {
     const box = { screenshot: 0, region };
     const drawn = [
       { box: { ...box, id: 7, text: '7' }, characters },
-      { box: { ...box, id: 2, text: '1', guess: '1' }, characters: null },
+      { box: { ...box, id: 2, text: '1', guessed: true as const }, characters: null },
     ];
     const readings = [recorded('read'), recorded('read'), recorded('pending')];
     const places = checkPlaces(drawn, finds, rows, readings, entries);
@@ -583,10 +701,6 @@ describe('the places a check goes over', () => {
       [2, true],
       [3, true],
     ]);
-    expect(checkPlaces([{ box: { ...box, id: 2, text: '7', guess: '1' }, characters }], [], [], [], [])[0]?.typed).toBe(
-      true,
-    );
-
     // A reference saved now learns from the boxes with text and the readings the draft keeps, with their kept text.
     const blank = { box: { ...box, id: 3, text: ' ' }, characters };
     const learned = learnedPlaces(

@@ -155,10 +155,10 @@ describe('adding found text', () => {
     expect(addBlocked(rows, rowFlags(rows, new Map()), false)).toBe('Checking the text…');
     expect(addBlocked(rows, rowFlags(rows, new Map()), true)).toBeNull();
     expect(keptFound(view.screenshot, rows)).toEqual([
-      { screenshot: 2, region: at(0), text: '93.4%', guess: '93.4%' },
+      { screenshot: 2, region: at(0), text: '93.4%', guessed: true },
       // The user typed this one, so it is no guess.
       { screenshot: 2, region: at(40), text: '1205' },
-      { screenshot: 2, region: at(80), text: '60%', guess: '60%' },
+      { screenshot: 2, region: at(80), text: '60%', guessed: true },
     ]);
   });
 

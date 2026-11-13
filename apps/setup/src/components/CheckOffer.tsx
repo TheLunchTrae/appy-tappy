@@ -9,14 +9,18 @@ const SHOWN_CHARACTERS = 12;
 export const CHECK_OFFER_ID = 'check-offer-text';
 
 interface Props {
-  /** The characters the reference would learn that nobody has checked. */
+  /** The characters the reference would learn that nobody has confirmed. */
   readonly characters: readonly string[];
   readonly onCheck: () => void;
 }
 
 /**
- * The offer to check a reference's characters before it is saved, while it would learn some that nobody has
- * checked. It sits above Save reference and never holds the save up: the user takes it, or saves.
+ * The offer to check a reference's characters before it is saved, while it would learn some that are the text
+ * reader's guesses and that nobody has confirmed one at a time. It sits above Save reference and never holds the
+ * save up: the user takes it, or saves.
+ *
+ * It says "confirmed", not "checked": the recording panel's Found, not checked yet counts a reading as checked once
+ * the user keeps it, and the two show together.
  */
 export function CheckOffer({ characters, onCheck }: Props) {
   if (characters.length === 0) {
@@ -28,15 +32,15 @@ export function CheckOffer({ characters, onCheck }: Props) {
   return (
     <section className="check-offer" aria-labelledby="check-offer-title">
       <span className="name">
-        <span id="check-offer-title">Not checked yet</span>
-        <Hint topic="Not checked yet" id="hint-check-offer">
+        <span id="check-offer-title">Not confirmed yet</span>
+        <Hint topic="Not confirmed yet" id="hint-check-offer">
           {CHECK_OFFER_HINT}
         </Hint>
       </span>
       <span
         className="glyphs unchecked"
         role="img"
-        aria-label={`${one ? 'Character' : 'Characters'} not checked yet: ${andList([...characters])}`}
+        aria-label={`${one ? 'Character' : 'Characters'} not confirmed yet: ${andList([...characters])}`}
       >
         {shown.map((character) => (
           <span key={character} className="glyph" aria-hidden="true">
@@ -50,8 +54,9 @@ export function CheckOffer({ characters, onCheck }: Props) {
         )}
       </span>
       <p id={CHECK_OFFER_ID} className="note">
-        AppyTappy read {one ? 'this character' : 'these characters'}, and nobody has typed or checked{' '}
-        {one ? 'it' : 'them'}. Check {one ? 'it' : 'them'} now, or save the reference as it is.
+        {one
+          ? "This is AppyTappy's guess: it read the character, and nobody has typed it or confirmed it. Confirm it with Check characters, or save the reference as it is."
+          : "These are AppyTappy's guesses: it read them, and nobody has typed them or confirmed them one at a time. Confirm them with Check characters, or save the reference as it is."}
       </p>
       <div className="row">
         <button type="button" className="btn small" aria-describedby="hint-check-offer" onClick={onCheck}>

@@ -11,10 +11,10 @@ export interface Box {
   readonly region: Rect;
   readonly text: string;
   /**
-   * The text the text reader gave it, for a box added from a find whose text nobody typed. While that is still its
-   * text, nobody has checked it.
+   * Set while its text is the text reader's guess: the box was added from a find whose text nobody typed, and nobody
+   * has typed it since, by hand or with an answer of the character check.
    */
-  readonly guess?: string;
+  readonly guessed?: true;
 }
 
 /** A box before it has an ID: a region of a screenshot, and its text. */
@@ -32,6 +32,11 @@ function withBoxes(
 /** `boxes` with the box `id` changed by `change`. */
 function changedBox(boxes: readonly Box[], id: number, change: Partial<Omit<Box, 'id'>>): readonly Box[] {
   return boxes.map((box) => (box.id === id ? { ...box, ...change } : box));
+}
+
+/** `box` with `text` typed as what it shows, which is the text reader's guess no longer. */
+function retyped({ guessed: _guessed, ...box }: Box, text: string): Box {
+  return { ...box, text };
 }
 
 /** The boxes on screenshot `screenshot`. */
@@ -115,7 +120,7 @@ export function boxStep(state: BoxState, event: BoxEvent): BoxState {
     case 'add':
       return { ...state, boxes: withBoxes(boxes, event.boxes).boxes };
     case 'retype':
-      return { ...state, boxes: changedBox(boxes, event.id, { text: event.text }) };
+      return { ...state, boxes: boxes.map((box) => (box.id === event.id ? retyped(box, event.text) : box)) };
     case 'remove':
       return {
         boxes: boxes.filter((box) => box.id !== event.id),

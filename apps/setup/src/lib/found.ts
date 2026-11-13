@@ -193,10 +193,12 @@ export function addBlocked(
 export function keptFound(screenshot: number, rows: readonly FoundRow[]): readonly NewBox[] {
   return rows
     .filter((row) => row.keep && row.text.trim() !== '')
-    .map((row) => {
-      const text = row.text.trim();
-      return { screenshot, region: row.region, text, ...(row.typed ? {} : { guess: text }) };
-    });
+    .map((row) => ({
+      screenshot,
+      region: row.region,
+      text: row.text.trim(),
+      ...(row.typed ? {} : { guessed: true as const }),
+    }));
 }
 
 /** The rows of `rows` the panel lists and the screenshot outlines: those that may show only characters the reference needs. */

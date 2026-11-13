@@ -90,7 +90,7 @@ export const CHECK_CHARACTERS_HINT =
 
 /** Why the reference editor offers Check characters before a save, and that the save does not wait for it. */
 export const CHECK_OFFER_HINT =
-  'AppyTappy read these in text you added or kept without typing it. It tends to misread a character the same way everywhere, and a reference that learns one wrong reads its values wrong. Check characters asks about each once. Saving does not wait for it.';
+  'AppyTappy read these in text you added or kept without typing it, and keeping a text does not confirm its characters. It tends to misread a character the same way everywhere, and a reference that learns one wrong reads its values wrong. Check characters asks about each once. Saving does not wait for it.';
 
 /** What Reread reads again, and when that changes anything. */
 export const REREAD_HINT =

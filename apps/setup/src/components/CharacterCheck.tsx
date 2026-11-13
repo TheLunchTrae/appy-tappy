@@ -7,6 +7,7 @@ import {
   type Step,
   type Turn,
   beingRead,
+  boxesShowing,
   listed,
   placeKey,
   progress,
@@ -187,12 +188,7 @@ function ShapeTile({
   const noteId = `shape-${use.shape}-note`;
   const state = use.aside ? 'Left out: not a character. ' : use.answered ? 'Checked. ' : '';
   // A box has no tick to clear, so it still teaches a shape that is no character until the user changes the box.
-  const boxes = use.aside
-    ? use.spots.flatMap((spot) => {
-        const place = places[spot.place];
-        return place === undefined || place.ticks ? [] : [placeName(place)];
-      })
-    : [];
+  const boxes = use.aside ? boxesShowing(use, places).map(placeName) : [];
   return (
     <li className={use.aside ? 'tile shape off' : use.answered ? 'tile shape kept' : 'tile shape'}>
       <Cutout
@@ -208,7 +204,9 @@ function ShapeTile({
         {use.also.length === 0 || use.aside ? '' : ` The text of some has it as ${use.also.join(', ')}.`}
         {boxes.length === 0
           ? ''
-          : ` ${andList([...new Set(boxes)])} still ${boxes.length === 1 ? 'teaches' : 'teach'} it: delete the box, or draw it around the characters alone.`}
+          : boxes.length === 1
+            ? ` ${andList(boxes)} still teaches it: delete the box, or draw it around the characters alone.`
+            : ` ${andList(boxes)} still teach it: delete the boxes, or draw them around the characters alone.`}
       </span>
       <span className="marks">
         {use.spots.slice(0, SHOWN_PLACES).map((spot) => {

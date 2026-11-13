@@ -2,15 +2,16 @@
 //
 // A reference learns a character from each place whose text names it: a box, a find from Find more like it, or a
 // recorded reading. The text reader's guesses fill the texts of finds and readings in, and it tends to misread one
-// shape the same way wherever the shape shows. So the check goes by shape instead of by place. Each step is one character with every shape the
-// texts give it, and one answer for a shape rewrites the text of every place that shows the shape.
+// shape the same way wherever the shape shows. So the check goes by shape instead of by place. Each step is one
+// character with every shape the texts give it, and one answer for a shape rewrites the text of every place that
+// shows the shape.
 //
 // The places' texts stay the one record of what each place shows. The check holds only the answers given so far, by
 // shape, and where it is. Every change it makes is an edit of a place's text or its tick, the same edit the user
-// makes by hand in the list of boxes, the list of finds, or review. It makes them in the turn that gives the answer, and once more
-// for each place that joins afterward: one that first shows, or whose text the reader sends, while the check is
-// open gets the answers that stand for its shapes. Text the user typed is theirs. Where it disagrees with an answer
-// it is left as it is, and the shape counts as not answered again, so its step asks once more.
+// makes by hand in the list of boxes, the list of finds, or review. It makes them in the turn that gives the answer,
+// and once more for each place that joins afterward: one that first shows, or whose text the reader sends, while the
+// check is open gets the answers that stand for its shapes. Text the user typed is theirs. Where it disagrees with
+// an answer it is left as it is, and the shape counts as not answered again, so its step asks once more.
 //
 // A place whose text has another number of characters than the place has shapes gives its shapes no characters. It
 // joins no step. Once every one of its shapes has an answer from the other places, its text is written from the
@@ -147,6 +148,15 @@ function setAside(place: Place, answers: Answers): boolean {
   return place.characters.some((character) => answers.get(character.shape) === null);
 }
 
+/**
+ * Whether `place` gives the check nothing to do: no character was found in its picture, so no answer is about it,
+ * and it has no tick to leave it out with. That is a box whose characters could not be found, which only the user
+ * changes, in the list of boxes.
+ */
+function blank(place: Place): boolean {
+  return !place.ticks && place.characters.length === 0;
+}
+
 /** Whether the steps go over `place`: the check asks about it, or left it out and may yet keep it again. */
 function asked(place: Place, left: ReadonlySet<string>): boolean {
   return place.asks || left.has(placeKey(place));
@@ -204,12 +214,19 @@ export function steps(places: readonly Place[], given: Given, needs: readonly st
 
 /**
  * The places, by position, whose text fits no step: the check asks about the place, the text reader is done with
- * it, and its text has another number of characters than the place has shapes, or the place shows no shape at all.
- * A place left out for a shape that is no character needs no text.
+ * it, and its text has another number of characters than the place has shapes, or the place shows no shape at all
+ * and can be left out. A place left out for a shape that is no character needs no text, and neither does a box
+ * that shows no shape: no text fits it, and the check cannot leave it out.
  */
 export function unfitted(places: readonly Place[], given: Given): readonly number[] {
   return places.flatMap((place, at) =>
-    asked(place, given.left) && !place.reading && named(place) === null && !setAside(place, given.answers) ? [at] : [],
+    asked(place, given.left) &&
+    !place.reading &&
+    !blank(place) &&
+    named(place) === null &&
+    !setAside(place, given.answers)
+      ? [at]
+      : [],
   );
 }
 
@@ -234,6 +251,23 @@ function rewritten(text: string, characters: readonly (string | null | undefined
     position += 1;
     return characters[position] ?? character;
   }).join('');
+}
+
+/**
+ * `text` after the edit that made `from` into `to`, for a text that may differ from `from`: the same place's text as
+ * another list holds it. Only the characters the edit changed change in it, while all three have as many
+ * characters; otherwise it becomes `to`, the whole text the edit wrote.
+ */
+export function withEdit(text: string, from: string, to: string): string {
+  const before = labelCharacters(from);
+  const after = labelCharacters(to);
+  if (text === from || before.length !== after.length || labelCharacters(text).length !== after.length) {
+    return to;
+  }
+  return rewritten(
+    text,
+    after.map((character, at) => (character === before[at] ? undefined : character)),
+  );
 }
 
 /**
@@ -483,6 +517,18 @@ export function turn(
   return { guide: { ...next, cursor: to }, changes: edits };
 }
 
+/**
+ * The boxes among `places` that show the shape of `use`, each once however often it shows the shape. A box has no
+ * tick, so it still teaches a shape the user said is no character.
+ */
+export function boxesShowing(use: ShapeUse, places: readonly Place[]): readonly Place[] {
+  const boxes = use.spots.flatMap((spot) => {
+    const place = places[spot.place];
+    return place === undefined || place.ticks ? [] : [place];
+  });
+  return [...new Set(boxes)];
+}
+
 /** How far the check is: the number of the step it is at, from 1, and how many steps there are; null past them. */
 export function progress(
   guide: Guide,
@@ -496,13 +542,14 @@ export function progress(
 }
 
 /**
- * The characters of `places` that nobody has checked, each once, as they first show: the ones in text that is the
+ * The characters of `places` that nobody has confirmed, each once, as they first show: the ones in text that is the
  * text reader's guess, for a shape nobody has said is that character. The user says so with an answer in `answers`,
  * or by typing a text that gives the shape that character in one of `places`; an answer comes before typed text.
- * An answer that a shape is no character counts as checked. A guess with another number of characters than its
- * place has shapes names none of its shapes, so every character of it counts.
+ * An answer that a shape is no character confirms it. A guess with another number of characters than its place has
+ * shapes names none of its shapes, so every character of it counts, unless the place is a box that shows no shape:
+ * no answer could confirm it, so it would count for good.
  */
-export function unchecked(places: readonly Place[], answers: Answers): readonly string[] {
+export function unconfirmed(places: readonly Place[], answers: Answers): readonly string[] {
   const said = new Map<string, string | null>();
   for (const place of places) {
     const characters = place.typed ? named(place) : null;
@@ -518,7 +565,7 @@ export function unchecked(places: readonly Place[], answers: Answers): readonly 
   }
   const found = new Set<string>();
   for (const place of places) {
-    if (place.typed || place.reading) {
+    if (place.typed || place.reading || blank(place)) {
       continue;
     }
     const characters = named(place);

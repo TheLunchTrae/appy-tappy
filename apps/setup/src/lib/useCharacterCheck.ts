@@ -1,7 +1,7 @@
 // The check of a reference's characters, one at a time, over the boxes, the finds and the recorded readings it would
 // learn from.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useReducer } from 'react';
 
 import type { Box } from './boxes.ts';
 
@@ -16,7 +16,8 @@ import {
   openGuide,
   settle,
   turn,
-  unchecked,
+  unconfirmed,
+  withEdit,
 } from './confirm.ts';
 import { type FoundRow, listed } from './found.ts';
 import { type Color, type Picture, cropPicture } from './pixels.ts';
@@ -52,9 +53,9 @@ export interface DrawnBox {
 /**
  * The places a check goes over: every box, every find listed, ticked or not, and every recorded reading. It asks
  * about the boxes, the finds, and the readings review keeps. A box whose characters have not arrived waits like text
- * still being read. A reading review leaves out shows only shapes the kept ones show, so it
- * has nothing to ask about, but it gets the answers too: review compares the texts of all the readings, and would
- * flag a kept reading the check fixed against a left-out one it did not.
+ * still being read. A reading review leaves out shows only shapes the kept ones show, so it has nothing to ask
+ * about, but it gets the answers too: review compares the texts of all the readings, and would flag a kept reading
+ * the check fixed against a left-out one it did not.
  */
 export function checkPlaces(
   drawn: readonly DrawnBox[],
@@ -70,7 +71,7 @@ export function checkPlaces(
     characters: characters ?? [],
     width: box.region.width,
     text: box.text,
-    typed: box.guess !== box.text,
+    typed: box.guessed !== true,
     keep: true,
     ticks: false,
     reading: characters === null,
@@ -139,6 +140,98 @@ export function learnedPlaces(
   return [...boxes, ...readings];
 }
 
+/** One reading as the draft has it: the text it keeps it with, or kept it with until a check left it out. */
+export interface KeptReading {
+  readonly text: string;
+  /** Whether a check left it out, so the draft keeps it no longer until the check keeps it again. */
+  readonly leftOut: boolean;
+}
+
+/**
+ * What the draft has of the reading at `place` after a check's edit of it to `entry`, or null for a reading the
+ * draft never kept, which review alone keeps or leaves out. `recorded` has the readings the draft keeps, and
+ * `leftOut` the ones the open check took from it, each with its text there.
+ *
+ * The draft's text gets only what the edit changed, so that saving learns what the check wrote and nothing else:
+ * `place` has review's text, and what review changed there stays review's until its Keep. A reading the edit leaves
+ * out goes from the draft with its text remembered, and one it keeps again comes back with that text.
+ */
+export function editedReading(
+  recorded: ReadonlyMap<number, string>,
+  leftOut: ReadonlyMap<number, string>,
+  place: Place,
+  entry: ReviewEntry,
+): KeptReading | null {
+  const text = recorded.get(place.index) ?? leftOut.get(place.index);
+  return text === undefined ? null : { text: withEdit(text, place.text, entry.text), leftOut: !entry.keep };
+}
+
+/** What the capture screen holds of the check of the reference being taught. */
+export interface Held {
+  /** The open check, or null while it is closed. */
+  readonly guide: Guide | null;
+  /** What the checks closed since the reference's editor opened answered, which says what the user has confirmed. */
+  readonly past: Answers;
+  /**
+   * The readings the open check took from the draft, each with the text the draft kept it with, and the ID of the
+   * recording they are readings of.
+   */
+  readonly leftOut: { readonly recording: number | null; readonly texts: ReadonlyMap<number, string> };
+}
+
+/** Nothing held: no check is open, and none has answered anything. */
+export const NOTHING_HELD: Held = { guide: null, past: new Map(), leftOut: { recording: null, texts: new Map() } };
+
+/** What changes what the capture screen holds of the check. */
+export type HeldEvent =
+  /** The check opens with `guide`, or the open one becomes it. */
+  | { readonly kind: 'show'; readonly guide: Guide }
+  /** The check closes: its answers stay as what the user has confirmed. */
+  | { readonly kind: 'close' }
+  /** The reference's editor closes, so the next reference starts with nothing. */
+  | { readonly kind: 'forget' }
+  /** The check edited reading `index` of recording `recording`, which the draft now has as `reading`. */
+  | {
+      readonly kind: 'reading';
+      readonly recording: number | null;
+      readonly index: number;
+      readonly reading: KeptReading;
+    };
+
+/** The readings `held` remembers as left out of recording `recording`: none for any other recording than theirs. */
+export function leftOutOf(held: Held, recording: number | null): ReadonlyMap<number, string> {
+  return held.leftOut.recording === recording ? held.leftOut.texts : NOTHING_HELD.leftOut.texts;
+}
+
+/** Every answer `held` has, of the closed checks and the open one, whose answers come last. */
+export function answersOf(held: Held): Answers {
+  return new Map([...held.past, ...(held.guide?.answers ?? [])]);
+}
+
+/**
+ * What the capture screen holds of the check after `event`. Closing forgets which readings the check left out with
+ * its answers, since only an answer of the open check keeps one again.
+ */
+export function heldStep(held: Held, event: HeldEvent): Held {
+  switch (event.kind) {
+    case 'show':
+      return { ...held, guide: event.guide };
+    case 'close':
+      return { ...NOTHING_HELD, past: answersOf(held) };
+    case 'forget':
+      return NOTHING_HELD;
+    case 'reading': {
+      const texts = new Map(leftOutOf(held, event.recording));
+      if (event.reading.leftOut) {
+        texts.set(event.index, event.reading.text);
+      } else if (!texts.delete(event.index) && held.leftOut.recording === event.recording) {
+        return held;
+      }
+      return { ...held, leftOut: { recording: event.recording, texts } };
+    }
+  }
+}
+
 /** What the check goes over besides the finds and the readings: the reference's boxes, and what it keeps. */
 export interface Taught {
   readonly boxes: readonly Box[];
@@ -168,11 +261,11 @@ export interface CharacterCheck {
   /** Closes it and forgets its answers; the texts they wrote stay. Escape closes it too. */
   readonly close: () => void;
   /**
-   * The characters a reference saved now would learn that nobody has checked: the text reader read them, and the
+   * The characters a reference saved now would learn that nobody has confirmed: the text reader read them, and the
    * user neither typed them nor answered for their shapes in a check of this reference.
    */
-  readonly unchecked: readonly string[];
-  /** Forgets what earlier checks answered, as the reference's editor closes. */
+  readonly unconfirmed: readonly string[];
+  /** Closes it and forgets what every check answered, as the reference's editor closes. */
   readonly forget: () => void;
   readonly act: (event: Turn) => void;
   /** Edits one place's text and tick by hand, as its row in the list of finds or its tile in review does. */
@@ -188,9 +281,8 @@ export function useCharacterCheck(
   needs: readonly string[],
   taught: Taught,
 ): CharacterCheck {
-  const [held, setHeld] = useState<Guide | null>(null);
-  // What the checks that are closed answered, which says what the user has checked once the answers are forgotten.
-  const [past, setPast] = useState<Answers>(new Map());
+  const [state, send] = useReducer(heldStep, NOTHING_HELD);
+  const held = state.guide;
   const { boxes, ink, tolerance, recorded, full } = taught;
   const shown = useBoxCharacters(boxes, ink, tolerance);
   const places = useMemo(() => {
@@ -212,14 +304,12 @@ export function useCharacterCheck(
       ),
     [boxes, full],
   );
-  const answered = useMemo(() => new Map([...past, ...(held?.answers ?? [])]), [past, held]);
-  const notChecked = useMemo(
-    () => unchecked(learnedPlaces(places, recorder.view?.readings ?? [], recorded), answered),
-    [places, recorder.view, recorded, answered],
+  const notConfirmed = useMemo(
+    () => unconfirmed(learnedPlaces(places, recorder.view?.readings ?? [], recorded), answersOf(state)),
+    [places, recorder.view, recorded, state],
   );
   const close = (): void => {
-    setPast(answered);
-    setHeld(null);
+    send({ kind: 'close' });
   };
 
   const edit = (place: Place, entry: ReviewEntry): void => {
@@ -233,8 +323,11 @@ export function useCharacterCheck(
     if (place.source === 'reading') {
       review.edit(place.index, entry);
       // A reading the draft keeps already is fixed there too, so that saving learns what the check wrote.
-      if (recorded.has(place.index)) {
-        taught.keepReading(place.index, entry.keep ? entry.text : null);
+      const recording = recorder.view?.id ?? null;
+      const reading = editedReading(recorded, leftOutOf(state, recording), place, entry);
+      if (reading !== null) {
+        taught.keepReading(place.index, reading.leftOut ? null : reading.text);
+        send({ kind: 'reading', recording, index: place.index, reading });
       }
       return;
     }
@@ -259,7 +352,7 @@ export function useCharacterCheck(
     const next = join(held, places);
     if (next.guide !== held) {
       apply(next.changes);
-      setHeld(next.guide);
+      send({ kind: 'show', guide: next.guide });
     }
   });
 
@@ -289,12 +382,12 @@ export function useCharacterCheck(
     places,
     guide,
     open: () => {
-      setHeld(openGuide(places, needs));
+      send({ kind: 'show', guide: openGuide(places, needs) });
     },
     close,
-    unchecked: notChecked,
+    unconfirmed: notConfirmed,
     forget: () => {
-      setPast(new Map());
+      send({ kind: 'forget' });
     },
     act: (event) => {
       if (guide === null) {
@@ -302,7 +395,7 @@ export function useCharacterCheck(
       }
       const next = turn(guide, event, places, needs);
       apply(next.changes);
-      setHeld(next.guide);
+      send({ kind: 'show', guide: next.guide });
     },
     edit,
     picture: (place) => {

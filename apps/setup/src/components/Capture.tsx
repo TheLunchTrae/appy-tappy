@@ -1594,7 +1594,7 @@ export function Capture({
             </p>
           ) : null}
           {draftError}
-          {checking ? null : <CheckOffer characters={guided.unchecked} onCheck={guided.open} />}
+          {checking ? null : <CheckOffer characters={guided.unconfirmed} onCheck={guided.open} />}
           <div className="actions">
             <button
               type="button"
@@ -1615,7 +1615,7 @@ export function Capture({
               type="button"
               className="btn primary"
               disabled={!canSaveRef}
-              aria-describedby={checking || guided.unchecked.length === 0 ? undefined : CHECK_OFFER_ID}
+              aria-describedby={checking || guided.unconfirmed.length === 0 ? undefined : CHECK_OFFER_ID}
               onClick={() => {
                 background(saveRef());
               }}

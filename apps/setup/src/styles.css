@@ -2192,8 +2192,8 @@ div.match-answer {
 }
 
 /*
- * The offer to check characters before a reference is saved. Its dashed edge is the one the characters nobody has
- * checked wear, so it reads as a matter left open and not as a fault.
+ * The offer to check characters before a reference is saved. Its dashed edge is the one the characters that are
+ * still the text reader's guess wear, so it reads as a matter left open and not as a fault.
  */
 .check-offer {
   position: relative;

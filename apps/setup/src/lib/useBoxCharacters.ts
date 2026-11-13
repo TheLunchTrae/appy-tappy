@@ -14,33 +14,46 @@ export function boxCharactersKey(box: Pick<Box, 'screenshot' | 'region'>, ink: C
   return [box.screenshot, x, y, width, height, ink.red, ink.green, ink.blue, tolerance].join(',');
 }
 
+/** The characters that have arrived, by {@link boxCharactersKey}. */
+export type ShownByKey = ReadonlyMap<string, readonly ShownCharacter[]>;
+
+/** `shown` with only what `live` names: the answers for what a box of the reference still shows. */
+export function stillShown(shown: ShownByKey, live: ReadonlySet<string>): ShownByKey {
+  return [...shown.keys()].every((key) => live.has(key)) ? shown : new Map([...shown].filter(([key]) => live.has(key)));
+}
+
+/**
+ * `shown` with the `characters` that arrived for `key`. An answer for a key that `live` does not name is dropped:
+ * the box it was asked for has moved or gone since, or the characters' color has changed, and what the box shows now
+ * was asked for under its own key.
+ */
+export function arrived(
+  shown: ShownByKey,
+  live: ReadonlySet<string>,
+  key: string,
+  characters: readonly ShownCharacter[],
+): ShownByKey {
+  return live.has(key) ? new Map(shown).set(key, characters) : shown;
+}
+
 /**
  * The characters each of `boxes` shows in the characters' color `ink` within `tolerance`, by
  * {@link boxCharactersKey}, once they arrive. A box that moves, or a color that changes, is asked about anew, and an
- * answer for what no box shows anymore is held under its own name until the boxes next change. A box that could not
- * be asked about shows no characters, so the check has the user type it instead of waiting.
+ * answer for what no box shows anymore is dropped. A box that could not be asked about shows no characters, so the
+ * check leaves it to the list of boxes instead of waiting for it.
  */
-export function useBoxCharacters(
-  boxes: readonly Box[],
-  ink: Color | null,
-  tolerance: number,
-): ReadonlyMap<string, readonly ShownCharacter[]> {
-  const [shown, setShown] = useState<ReadonlyMap<string, readonly ShownCharacter[]>>(new Map());
+export function useBoxCharacters(boxes: readonly Box[], ink: Color | null, tolerance: number): ShownByKey {
+  const [shown, setShown] = useState<ShownByKey>(new Map());
   // What was asked for and is still wanted, so nothing is asked for twice.
   const asked = useRef(new Set<string>());
   const wanted = ink === null ? [] : boxes.map((box) => ({ box, key: boxCharactersKey(box, ink, tolerance) }));
   const keys = wanted.map((each) => each.key).join(' ');
-  const latest = useRef({ wanted, ink, tolerance });
-  latest.current = { wanted, ink, tolerance };
+  const latest = useRef({ wanted, ink, tolerance, live: new Set<string>() });
+  latest.current = { wanted, ink, tolerance, live: new Set(wanted.map((each) => each.key)) };
   useEffect(() => {
     const now = latest.current;
-    const live = new Set(now.wanted.map((each) => each.key));
-    asked.current = new Set([...asked.current].filter((key) => live.has(key)));
-    setShown((current) =>
-      [...current.keys()].every((key) => live.has(key))
-        ? current
-        : new Map([...current].filter(([key]) => live.has(key))),
-    );
+    asked.current = new Set([...asked.current].filter((key) => now.live.has(key)));
+    setShown((current) => stillShown(current, now.live));
     if (now.ink === null) {
       return;
     }
@@ -53,7 +66,7 @@ export function useBoxCharacters(
         boxCharacters(box.screenshot, box.region, now.ink, now.tolerance)
           .catch((): readonly ShownCharacter[] => [])
           .then((characters) => {
-            setShown((current) => new Map(current).set(key, characters));
+            setShown((current) => arrived(current, latest.current.live, key, characters));
           }),
       );
     }
