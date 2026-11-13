@@ -297,7 +297,10 @@ This page covers what the user guide leaves out.
   by ID, and saving refuses one of another application. The reference editor
   sends the characters it teaches as a `characters` check, which names the
   saved reference it adds to, if any; the owner learns that reference's saved
-  pictures first, so trying an edit reads as the saved reference will. A
+  pictures first, so trying an edit reads as the saved reference will.
+  `set_characters` learns the characters once and reads the number back with
+  the reader it learned (`Readers::learned`), not one learned again from the
+  same pictures. A
   reference belongs to a saved application. It keeps its ID when renamed, and
   a new one named like a renamed one's old name gets that ID with a number.
   One that a value reads with cannot be deleted.
@@ -364,7 +367,8 @@ a second, in the owner thread, and share when they record and why they stop
 region was drawn on is skipped, a capture failure stops the recording with the
 failure as its problem, and a closed window ends it. Starting one kind
 replaces a recording of the other. Recordings of both kinds are numbered from
-one counter.
+one counter, and the page stops a recording by the number its start answered
+([Recording](State-machines.md#recording)).
 
 On the page, the two kinds share one hook for the recording's state, its
 errors, and its commands (`useRecorder` in `lib/useRecorder.ts`), under
