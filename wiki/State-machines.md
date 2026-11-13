@@ -2445,8 +2445,13 @@ stateDiagram-v2
 - The places are every [box](#reference-boxes) of the reference, every
   [found text](#found-text) the list holds, ticked or not, and every
   [recording](#recording) reading (`checkPlaces`). The check asks about the
-  boxes, the finds, and the readings that review keeps. A reading that
-  review leaves out joins no step and never changes its keep; it only gets
+  boxes, the finds, the readings that review keeps, and the readings a
+  save would learn next (`savedReadings`): while review is open, the ones
+  its **Keep** would put on the draft, and otherwise the ones the draft
+  keeps, which review may have left out since without **Keep**. Such a
+  reading counts as kept though review's tick for it is clear, so the
+  check leaves it out of the draft like any kept place. Any other reading
+  that review leaves out joins no step and never changes its keep; it gets
   the answers, so its text does not disagree with the kept ones. A box has
   no tick (`ticks`): it gets the answers in its text, gets its whole text
   from them when it has none, and is never left out, so the tile of a
@@ -2488,11 +2493,11 @@ stateDiagram-v2
   which `useCharacterCheck.ts` runs after each render). Its text takes the
   answered characters, it is left out and remembered in `left` for a shape
   that is no character, and it is ticked or kept once all its shapes have
-  answers. A reading that review leaves out gets the text and keeps its
-  keep. A place whose text the user typed keeps that text and is only left
-  out. A place joins once, so a text or a tick the user changes afterward
-  stays. One that is gone, or being read again, leaves `seen` and joins
-  anew.
+  answers. A reading that nothing would learn, since review leaves it out
+  and the draft does not keep it, gets the text and keeps its keep. A place
+  whose text the user typed keeps that text and is only left out. A place
+  joins once, so a text or a tick the user changes afterward stays. One
+  that is gone, or being read again, leaves `seen` and joins anew.
 - **Text that fits no step.** A place whose text has another number of
   characters than its picture has shapes joins no step. Once every one of
   its shapes has an answer, the answers are its text. One still left is the
@@ -2517,18 +2522,23 @@ stateDiagram-v2
   too, so that saving learns what the check wrote (`editedReading`). Its
   kept text gets only the characters the edit changed, and the draft keeps
   it or not as before unless the edit changes its keep, so what review
-  changed without **Keep**, a text or a cleared tick, stays review's. A
-  draft text of another length than review's does not line up with the
-  edit and stays as it is. A reading left out goes from the
-  draft, and `leftOut` remembers the text the draft kept it with;
-  **It is a character**, or its tick on the `Unfitted` stop, puts it back
-  with that text. A reading the draft never kept stays off it. Closing
+  changed without **Keep**, a text or a cleared tick, stays review's:
+  review's tick follows the edit only when the edit changes the keep
+  (`reviewTick`), so an answer that rewrites the text of a reading the
+  draft keeps does not tick it in review again. A draft text of another
+  length than review's does not line up with the edit and stays as it is.
+  A reading left out goes from the draft, whether or not review has it
+  ticked, and `leftOut` remembers the text the draft kept it with and
+  review's tick; **It is a character**, or its tick on the `Unfitted` stop,
+  puts it back with that text and that tick. A reading the draft never
+  kept stays off it. Closing
   forgets `leftOut` with the answers, and a reading of another recording
   than the one `leftOut` names is not in it.
 - Closing moves the answers into `past`, which only says what the user has
   confirmed. The characters nobody has confirmed (`unconfirmed`) are the
-  ones a reference saved now would learn from a text reader's guess, a box
-  that is still `guessed` or a kept reading with the reader's text, for a
+  ones a reference saved next would learn from a text reader's guess, a box
+  that is still `guessed` or one of the same `savedReadings` with the
+  reader's text, for a
   shape that neither an answer, open or past, nor a text the user typed
   gives that character. A guessed box that shows no characters counts for
   none, since no answer could confirm it. While there are any, the editor
