@@ -1912,7 +1912,7 @@ div.match-answer {
   background: none;
 }
 
-/* Text found like the first sample, to check before it teaches the reference. */
+/* Text found like the selected box, to check before it teaches the reference. */
 .autofill {
   display: flex;
   flex-direction: column;
@@ -2068,6 +2068,15 @@ div.match-answer {
   grid-column: 2 / 4;
   font-size: 11px;
   color: var(--muted);
+}
+
+/* The box a reference taught by itself reads and records at. */
+.box-list .reads-here {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--capture);
+  border-radius: 999px;
+  color: var(--capture);
 }
 
 .autofill .row {

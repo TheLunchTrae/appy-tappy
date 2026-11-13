@@ -64,8 +64,10 @@ interface Props {
    */
   readonly others?: readonly OtherBox[];
   readonly onSelectOther?: (id: number) => void;
-  /** Called when Delete or Backspace is pressed on the surface, which can then take focus. */
+  /** Called when Delete is pressed on the surface, which can then take focus. */
   readonly onDelete?: () => void;
+  /** The id of the text that says what the surface's keys do, which a screen reader reads with it. */
+  readonly describedBy?: string;
   /** Called when the main button goes down on the surface to draw, and when that pointer is let go or cancelled. */
   readonly onPointer?: (phase: 'down' | 'up') => void;
   /** Called with the region a finished drag made, drawn anew or adjusted. A drag that is interrupted calls nothing. */
@@ -159,6 +161,7 @@ export function RegionSurface({
   others = [],
   onSelectOther,
   onDelete,
+  describedBy,
   onPointer,
   onRegion,
   onPick,
@@ -291,7 +294,7 @@ export function RegionSurface({
   };
 
   const key = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (onDelete !== undefined && (event.key === 'Delete' || event.key === 'Backspace')) {
+    if (onDelete !== undefined && event.key === 'Delete') {
       event.preventDefault();
       onDelete();
     }
@@ -319,7 +322,13 @@ export function RegionSurface({
       // With boxes to delete, the surface takes focus, so Delete reaches it after a box is pressed.
       {...(onDelete === undefined
         ? {}
-        : { tabIndex: 0, role: 'group', 'aria-label': 'Boxes on this screenshot', onKeyDown: key })}
+        : {
+            tabIndex: 0,
+            role: 'group',
+            'aria-label': 'Boxes on this screenshot',
+            'aria-describedby': describedBy,
+            onKeyDown: key,
+          })}
       onPointerDown={start}
       onPointerMove={move}
       onPointerUp={end}

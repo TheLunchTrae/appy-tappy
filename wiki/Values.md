@@ -29,8 +29,8 @@ back to the automation with the value picked.
    AppyTappy where the value is, in one of two ways:
    - **Drag over the live window.** While the window shows what to read, drag
      a box around it. The drag takes the screenshot as it starts, the
-     picture holds still while you drag, and the region goes on that
-     screenshot.
+     picture holds still while you drag and gives way to the screenshot once
+     it is taken, and the region goes on that screenshot.
    - **Take a screenshot and draw on it.** Select **Take screenshot**, or
      press the screenshot shortcut, `F9` at first, then drag a box on the
      screenshot, as [Draw the region](#draw-the-region) describes. The

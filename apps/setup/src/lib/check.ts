@@ -149,6 +149,33 @@ export function newestOfSize(screenshots: readonly (readonly [number, Size])[], 
   return found?.[0] ?? null;
 }
 
+/** `draft` with the characters' color and tolerance of the stopped recording's `settings`, and its place as it is. */
+export function withRecordedInk(draft: Draft, settings: RecordingSettings): Draft {
+  return { ...draft, ink: settings.ink, tolerance: settings.tolerance };
+}
+
+/**
+ * The screenshot the reading box goes back on to read where the stopped recording's `settings` read, or null when it
+ * stays. `boxOn` is the screenshot the box the recording read at is on now, or null when that box is gone, and
+ * `screenshots` each screenshot's index and its window size. The box keeps its screenshot when that has the size
+ * recorded at, and otherwise goes on the newest one that has it. A reference taught from a value reads at the
+ * value's region, which the editor leaves alone, and with no screenshot of the size the box has nowhere to go.
+ */
+export function recordedPlace(
+  draft: Draft,
+  settings: RecordingSettings,
+  boxOn: number | null,
+  screenshots: readonly (readonly [number, Size])[],
+): number | null {
+  if (draft.region !== null) {
+    return null;
+  }
+  const own = screenshots.find(([index]) => index === boxOn)?.[1];
+  return boxOn !== null && own?.width === settings.windowSize.width && own.height === settings.windowSize.height
+    ? boxOn
+    : newestOfSize(screenshots, settings.windowSize);
+}
+
 /**
  * The screenshot the region shows over: the one shown, once its pixels are in `full`, or else the one it was drawn
  * on, or else `newest`, the newest screenshot. So while the live view shows, the region keeps the size of the
@@ -473,10 +500,11 @@ export function withKind(draft: Draft, kind: CheckKind): Draft {
  * `draft` once screenshot `shot` is the picture the value's region is set on, as a new screenshot taken while its
  * place is set is. `fits` says the screenshot has the size the region is drawn at, so the region moves onto it; on
  * one of another size it is drawn again, unless it is drawn on no screenshot yet, such as an edited value's waiting
- * for a screenshot of its size.
+ * for a screenshot of its size. `fits` is null while either size is unknown, such as before the screenshot's pixels
+ * arrive, and the draft stays as it is.
  */
-export function onPicture(draft: Draft, shot: number, fits: boolean): Draft {
-  if (draft.region === null) {
+export function onPicture(draft: Draft, shot: number, fits: boolean | null): Draft {
+  if (draft.region === null || fits === null) {
     return draft;
   }
   if (fits) {

@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { LIVE_IDLE, type LiveDraw, type LiveDrawEvent, liveDraw } from '../src/lib/liveDraw.ts';
+import {
+  LIVE_IDLE,
+  type LiveDraw,
+  type LiveDrawEvent,
+  liveDraw,
+  liveShown,
+  liveSizeAfter,
+} from '../src/lib/liveDraw.ts';
 
 const box = { rect: { x: 1, y: 2, width: 30, height: 10 }, at: { width: 800, height: 450 } };
 const shot = { index: 4, size: { width: 1600, height: 900 } };
@@ -80,5 +87,35 @@ describe('drawing over the live view', () => {
       { type: 'taken', press: 1, shot },
     ]);
     expect(done.placed).toEqual([{ shot, box }]);
+  });
+
+  test('shows the screenshot in place of the frame held still once it arrives, while the drag goes on', () => {
+    expect(liveShown(LIVE_IDLE)).toEqual({ frozen: false, shot: null, box: null });
+    expect(liveShown(run([{ type: 'press', press: 1 }]).state)).toEqual({ frozen: true, shot: null, box: null });
+    const arrived = run([
+      { type: 'press', press: 1 },
+      { type: 'taken', press: 1, shot },
+    ]);
+    expect(liveShown(arrived.state)).toEqual({ frozen: true, shot, box: null });
+    // A screenshot that failed leaves the frame held still.
+    const failed = run([
+      { type: 'press', press: 1 },
+      { type: 'taken', press: 1, shot: null },
+    ]);
+    expect(liveShown(failed.state)).toEqual({ frozen: true, shot: null, box: null });
+  });
+
+  test('keeps the box drawn outlined from when the pointer is let go until its screenshot arrives', () => {
+    const waiting = run([{ type: 'press', press: 1 }, { type: 'drew', box }, { type: 'release' }]);
+    expect(liveShown(waiting.state)).toEqual({ frozen: true, shot: null, box });
+    expect(liveShown(liveDraw(waiting.state, { type: 'taken', press: 1, shot }).state).box).toBeNull();
+  });
+
+  test('a frame that arrives while the view holds still does not change the size the box is measured in', () => {
+    const held = { width: 800, height: 450 };
+    expect(liveSizeAfter(held, { width: 640, height: 480 }, true)).toBe(held);
+    expect(liveSizeAfter(held, { width: 640, height: 480 }, false)).toEqual({ width: 640, height: 480 });
+    expect(liveSizeAfter(held, { ...held }, false)).toBe(held);
+    expect(liveSizeAfter(null, held, false)).toBe(held);
   });
 });
