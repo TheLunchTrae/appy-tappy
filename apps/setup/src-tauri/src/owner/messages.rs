@@ -139,11 +139,18 @@ pub(crate) struct ReferenceTrial {
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecordSpec {
+    /// The saved application whose window is recorded, whose answer on how
+    /// often its window changes size says whether the recording follows
+    /// the window to another size.
+    pub(crate) app: String,
     /// The region of the window to record.
     pub(crate) region: RegionSpec,
     /// The screenshot the region was drawn on, whose window size the
     /// recording keeps.
     pub(crate) screenshot: usize,
+    /// The side of the window the region stays at as the window changes
+    /// size, or `None` for the side the region is nearest.
+    pub(crate) pin: Option<PinDef>,
     /// The characters' color.
     pub(crate) ink: ColorSpec,
     /// How far from `ink` a pixel of a character may be.

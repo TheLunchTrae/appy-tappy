@@ -40,7 +40,8 @@ it was about has gone. Fifteen guards drop such stale messages:
   that was discarded, or replaced by one of either kind, is dropped, and so
   is what a [window look](#window-look) found for one. Within one recording,
   the look's gate drops the answer to a look from before **Record more** or
-  a change of the window's size (`Gate::Abandoned`). The
+  from before a frame showed the window at another size than the recording
+  is placed at (`Gate::Abandoned`). The
   [character check](#character-check) remembers the readings it left out
   under their recording's ID, and keeps none again for another recording
   (`leftOutOf` in `apps/setup/src/lib/useCharacterCheck.ts`).
@@ -1534,10 +1535,11 @@ stateDiagram-v2
 - A recording looks in its region alone or over the whole window
   (`Looking`), chosen when it starts and kept for its life. Over the whole
   window it sends frames to the [window look](#window-look) and keeps or
-  counts each run of text the answer holds as a place's crop is. A frame of
-  another window size sets the problem, clears the places the last look
-  found, and is not sent, whenever it arrives. Stopping forgets those
-  places, and so does **Record more**, after a stop that a failure made.
+  counts each run of text the answer holds as a place's crop is. A frame
+  the recording is not placed at ([below](#where-a-recording-is-placed))
+  clears the places the last look found and is not sent, whenever it
+  arrives. Stopping forgets those places, and so does **Record more**, after
+  a stop that a failure made.
 - A recording of the whole window holds the sizes of text it looks for
   (`Sizes` in `recording/find.rs`): the height of the text its region shows
   on its screenshot, and the height of the text in each of the reference's
@@ -1546,15 +1548,16 @@ stateDiagram-v2
   grows: a new recording measures them, and **Record more** measures the
   boxes again and adds the sizes of the ones drawn since
   (`Recording::look_for`). No event removes a size; **Discard** and a new
-  recording start the set again. Each look carries the sizes the recording
-  held when its frame went out. A kept reading holds the size its text was
-  taken for, and a shape that shows at two sizes is one shape, kept and
-  counted once.
-- Each frame is cropped to the region. A crop of another window size, or one
-  the reader cannot read, sets the recording's `problem` and is skipped while
-  it goes on recording. A crop with no ink is skipped and clears the problem,
-  as does a crop that reads. A capture failure stops the recording, and its
-  problem says why.
+  recording start the set again. The sizes are in pixels of the window the
+  region was drawn on. Each look carries them scaled to the window size the
+  recording is placed at when its frame goes out. A kept reading holds the
+  size its text was taken for, as it was drawn, and a shape that shows at
+  two sizes is one shape, kept and counted once.
+- Each frame the recording is placed at is cropped to the region as it lies
+  at that size. A crop the reader cannot read sets the recording's `problem`
+  and is skipped while it goes on recording. A crop with no ink is skipped
+  and clears the problem, as does a crop that reads. A capture failure stops
+  the recording, and its problem says why.
 - A crop that shows a shape no kept reading has is kept and sent to the text
   reader, and so is the first crop to carry cleanly a shape that no kept
   reading carries so ([Recording](Setup-app.md#recording)). Any other crop
@@ -1568,8 +1571,12 @@ stateDiagram-v2
   it: **Stop** and review what it found, or **Discard** it to start a new
   one.
 - **Record more** needs the same region, ink, tolerance, window size, and
-  choice of where to look, and clears the problem. The boxes may differ,
-  since they only add sizes to look for. The page sends the
+  choice of where to look, and clears the problem. The window size is that
+  of the screenshot the region was drawn on, whatever size the window has
+  since. The boxes may differ, since they only add sizes to look for, and so
+  may the side the region stays at and the application's answer on its
+  window's size, which **Record more** takes as they are
+  (`Recording::resume`). The page sends the
   stopped recording's own choice of where to look, so only the others can
   differ. When any of them differs (`settingsDiffer`), **Use its
   settings** shows and puts the ink and the tolerance back
@@ -1594,6 +1601,83 @@ stateDiagram-v2
   recording. A save or a try with a box's screenshot, a recording, or a
   compared screenshot of another window size is refused, and the error names
   which one (`check_spec::drawn_size`).
+
+#### Where a recording is placed
+
+A recording of readings is drawn on a screenshot, so its region and the
+sizes of text it looks for are in the pixels of one window size. It holds
+`placed`, the window size it records at and where its region lies there, and
+a `Settle` that says when frames have kept a new size. `Follows`
+(`recording/follow.rs`) is the one rule for what the region and a text size
+are at another window size. It asks the application's answer on how often
+its window changes size: **Often** scales them as a saved value scales
+([Window sizes](Screen-regions.md#window-sizes)), with the region staying at
+the side the value stays at, and **Rarely** records only at the size the
+region was drawn at. A recording of the region alone records the scaled
+region's pixels, so the region must lie inside the window
+(`Follows::region`). A recording of the whole window only looks near the
+region, so there a region that scales outside the window is moved and cut
+to lie inside it (`Follows::near`). A recording of looks does not follow
+its window ([Recording looks](#recording-looks)).
+
+A size settles on the frame that finds it kept for `SETTLE`, or, when the
+window stops drawing at its new size and sends no such frame, when the page
+next asks for the recording (`Owner::recording_state`, which calls
+`Recording::settled`). The owner then records the newest frame, which shows
+that size, once.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Placed: Record, placed at the size the region was drawn at
+    Placed --> Settling: a frame of another window size
+    Settling --> Placed: a frame of the size it is placed at, when the rule places it there
+    Settling --> Unplaced: a frame of the size it is placed at, when the rule places it nowhere there
+    Settling --> Settling: a frame of yet another size, which starts the wait again
+    Settling --> Placed: a frame or the page's poll finds one size kept for SETTLE, and the rule places the recording there
+    Settling --> Unplaced: a frame or the page's poll finds one size kept for SETTLE, and the rule places the recording nowhere
+    Settling --> Placed: Record more, which forgets the size that had yet to settle
+    Settling --> Unplaced: Record more, which forgets the size that had yet to settle
+    Unplaced --> Settling: a frame of another window size
+    Unplaced --> Placed: Record more, when the rule places the recording at that size as the user has it now
+    Placed --> Unplaced: Record more, when the rule places the recording nowhere at that size
+    Placed --> Unplaced: another example adds a text size, when the rule places the recording nowhere at that size
+```
+
+- **Placed** records each frame of its size: it crops the region as it lies
+  there, or sends the frame to the [window look](#window-look) with the text
+  sizes scaled to it. Each frame means what it means to every reader of a
+  place on the window (`FrameMeaning`).
+- **Settling** records nothing and changes no problem. A drag across many
+  sizes stays here and records none of them. It clears the places the last
+  look found and abandons a look that is out, since both are of the window
+  as it was.
+- **Unplaced** records nothing. The settle, **Record more**, or new text
+  size that places it nowhere, and each frame of its size, sets the
+  recording's `problem` to the reason (`follow::Unplaced`), so a window that
+  draws no new frame still says why:
+  - The recording does not follow the window to that size.
+  - The scaled region reaches outside the window, for a recording of the
+    region alone.
+  - Scaling down made the text shorter than `MIN_TEXT_HEIGHT`, 5 pixels,
+    too few rows to tell one character from another: one of the text sizes
+    a recording of the whole window looks for, or the whole region of a
+    recording of the region alone. Text the user drew that short is not
+    refused at the size drawn or a larger one.
+
+  The first two say to resize the window, and the last to make it larger.
+  It leaves when frames keep a size the rule places the recording at, such
+  as the size the region was drawn at.
+
+- The recording stays what it was through all three: it still counts its
+  time, and **Stop**, **Record more**, and **Discard** work as in
+  **Placed**. A stopped recording takes no frames and is placed nowhere
+  new, also when the page asks for it.
+- **Record more** places the recording again at the size it is placed at,
+  as the application's answer and the examples are by then, so an example
+  that is too small at that size makes it **Unplaced**. It forgets a size
+  that had yet to settle at the stop, since the window may have had any
+  size since: the first frame after it starts the wait at whatever size the
+  window has then.
 
 ### Region drag
 
@@ -2090,11 +2174,11 @@ answers commands while a look runs. The recording holds a gate (`Gate` in
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Out: a frame arrives at the window's size, SCAN_EVERY or more after the last one sent
+    Idle --> Out: a frame the recording is placed at arrives, SCAN_EVERY or more after the last one sent
     Out --> Idle: the look answers
     Out --> Idle: the look fails, which stops the recording
     Idle --> Idle: the look thread is gone, which stops the recording
-    Out --> Abandoned: Record more after a stop, or a frame of another size arrives
+    Out --> Abandoned: Record more after a stop, or a frame the recording is not placed at arrives
     Abandoned --> Idle: the look answers or fails, and the answer is dropped
 ```
 
@@ -2116,21 +2200,25 @@ stateDiagram-v2
   the next frame. When **Record more** comes before the answer, the look is
   **Abandoned**: its frame is from before the stop, so its answer is dropped
   too.
-- **An answer after a resize.** A frame of another size than the window had
-  when the region was drawn is a problem and is not looked over. A look that
-  is out then is **Abandoned**, because the places it found text are not
-  where the window shows it now.
+- **An answer after a resize.** A frame the recording is not placed at
+  ([Where a recording is placed](#where-a-recording-is-placed)) is not
+  looked over. A look that is out then is **Abandoned**, because the places
+  it found text are not where the window shows it now. That holds from the
+  first frame of another size, before the size settles, and when the window
+  returns to the size before the answer comes.
 - **Failures.** A look that panics answers that it failed, and a look
   thread that ended refuses the frame. Either stops the recording with
   "Recording stopped: the window could not be looked over. Record more to
   try again.", opens the gate, and forgets the places the last look found.
   **Record more** sends a frame again, and stops the same way if the thread
   is gone.
-- A look takes the 32 runs nearest the recording's region (`MAX_LINES`), of
-  all the sizes together, so the text around the value is counted before
+- A look takes the 32 runs nearest the recording's region as it lies at the
+  frame's size (`MAX_LINES`), of all the sizes together, so the text around the value is counted before
   other text in the window.
 - A job carries the sizes of text to look for, as the recording held them
-  when the frame went out, and the answer says which of them each run has.
+  when the frame went out, scaled to the frame's window size, and the answer
+  says which of them each run has. Two sizes that scale to one are looked
+  for once, and a run of that size is of the smaller.
   **Record more** can add a size while a look is out; that look is then
   **Abandoned**, and the next frame goes out with the sizes as they are.
 

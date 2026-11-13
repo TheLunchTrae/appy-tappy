@@ -726,7 +726,8 @@ export function Capture({
     const scope = more ? (recording?.settings.scope ?? recordScope) : recordScope;
     // Each box is one more example of the text a recording of the whole window looks for.
     const examples = draft.boxes.map((box) => ({ region: box.region, screenshot: box.screenshot }));
-    await recorder.start({ region, ink, tolerance, drawnOn, scope, examples }, more, () => {
+    const settings = { app: appId, pin: fixPin ?? pin, region, ink, tolerance, drawnOn, scope, examples };
+    await recorder.start(settings, more, () => {
       review.show(false);
       setSelected(null);
       setPicking(null);

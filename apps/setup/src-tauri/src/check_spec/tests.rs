@@ -15,6 +15,7 @@ use appytappy_sources::screen::saved;
 use super::characters::{RecordedLabel, Taught, expected_characters};
 use super::*;
 use crate::recording::Recording;
+use crate::recording::follow::Follows;
 
 const RED: ColorSpec = ColorSpec {
     red: 255,
@@ -551,7 +552,13 @@ fn what_is_cut_at_a_region_has_the_size_it_was_drawn_at() {
     let screenshots = [screenshot(), small.clone()];
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
-    let mut recording = Recording::new(1, region, (RED.into(), 0), small.size(), now);
+    let mut recording = Recording::new(
+        1,
+        region,
+        (RED.into(), 0),
+        (small.size(), Follows::Drawn),
+        now,
+    );
     recording.offer(&small, now).expect("a reading");
     let kept = vec![RecordedLabel {
         reading: 0,
@@ -830,7 +837,13 @@ fn a_new_sample_skips_a_picture_name_already_taken() {
 fn recorded_readings_are_learned_and_saved_after_the_labels() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 4, 2).expect("not empty");
-    let mut recording = Recording::new(1, region, (RED.into(), 0), screenshot().size(), now);
+    let mut recording = Recording::new(
+        1,
+        region,
+        (RED.into(), 0),
+        (screenshot().size(), Follows::Drawn),
+        now,
+    );
     recording.offer(&screenshot(), now).expect("a reading");
     let recorded = |reading| {
         vec![RecordedLabel {
@@ -880,7 +893,13 @@ fn recorded_readings_are_learned_and_saved_after_the_labels() {
 fn recorded_problems_judge_each_reading_after_the_saved_samples() {
     let now = std::time::Instant::now();
     let region = Region::new(0, 0, 2, 2).expect("not empty");
-    let mut recording = Recording::new(1, region, (RED.into(), 0), screenshot().size(), now);
+    let mut recording = Recording::new(
+        1,
+        region,
+        (RED.into(), 0),
+        (screenshot().size(), Follows::Drawn),
+        now,
+    );
     recording.offer(&screenshot(), now).expect("a reading");
     let as_text = |text: &str| {
         vec![RecordedLabel {

@@ -61,6 +61,10 @@ export const RECORD_SCOPE_HINT =
 export const TEXT_SIZES_HINT =
   'A recording of the whole window looks for text about as tall as an example: the text where the reference reads, and the text in each box you drew. Two examples of nearly the same height are one size. To collect another size, stop, draw a box around some text of that size, and select Record more. A character that looks the same at two sizes is still kept once.';
 
+/** What a recording does when its window changes size. */
+export const RECORD_RESIZED_HINT =
+  "This application's window changes size often, so a recording goes on when it does. Once the window has kept its new size for a moment, the place is scaled to it and keeps its distance from the side it stays at, and the whole window is searched for text at the scaled sizes. A character that looks the same at two window sizes is kept once. A recording for an application whose window rarely changes size waits for the size its place was drawn at instead.";
+
 /** What a reference is. */
 export const REFERENCE_HINT =
   'A reference knows what each character looks like in one font and color, learned from the boxes you draw on screenshots and the readings you record. Values that show the same font can share one.';

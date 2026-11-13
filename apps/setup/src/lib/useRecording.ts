@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ExampleSpec, RecordingSettings, RecordingView } from './bindings.ts';
+import type { ExampleSpec, PinDef, RecordingSettings, RecordingView } from './bindings.ts';
 import { discardRecording, errorText, recordedReading, recordingState, startRecording, stopRecording } from './api.ts';
 import type { Picture } from './pixels.ts';
 import { background, useRepeat } from './repeat.ts';
@@ -13,10 +13,13 @@ const RECORDING_PAUSE_MS = 250;
 const CROP_WIDTH = 480;
 
 /**
- * What a recording records: a region drawn on a screenshot, read with the characters' color and tolerance, in that
- * place alone or wherever the window shows text like it or like one of the `examples`, the reference's boxes.
+ * What a recording records: a region drawn on a screenshot of `app`'s window, read with the characters' color and
+ * tolerance, in that place alone or wherever the window shows text like it or like one of the `examples`, the
+ * reference's boxes. As the window changes size the region stays at `pin`, or at the side it is nearest for null.
  */
 type Recordable = Omit<RecordingSettings, 'windowSize'> & {
+  readonly app: string;
+  readonly pin: PinDef | null;
   readonly drawnOn: number;
   readonly examples: readonly ExampleSpec[];
 };
@@ -121,8 +124,8 @@ export function useRecording(): {
   const start = async (settings: Recordable, more: boolean, onStarted: () => void): Promise<void> => {
     turn.current += 1;
     try {
-      const { region, ink, tolerance, drawnOn, scope, examples } = settings;
-      await startRecording({ region, screenshot: drawnOn, ink, tolerance, scope, examples }, more);
+      const { app, pin, region, ink, tolerance, drawnOn, scope, examples } = settings;
+      await startRecording({ app, region, screenshot: drawnOn, pin, ink, tolerance, scope, examples }, more);
       if (!more) {
         // A new recording replaced the old one, whose readings' pixels go with it.
         setCrops(NO_CROPS);

@@ -31,33 +31,72 @@ pub(crate) const MAX_LINES: usize = 32;
 /// size, in percent of the sample's.
 pub(crate) const SIZE_PERCENT: u32 = 15;
 
-/// The character heights a look over a whole window takes text of, in
-/// pixels, smallest first: one for each example of text the user drew.
-/// An example's height is held unless a look for one held before it takes
-/// text that tall, within [`SIZE_PERCENT`].
+/// One size of text a look over a whole window takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TextSize {
+    /// How tall its characters are on the frame looked over, in pixels.
+    pub(crate) height: u32,
+    /// How tall the characters of the example were that it is the size
+    /// of, on the screenshot the user drew it on. It is `height` until the
+    /// window changes size.
+    pub(crate) example: u32,
+}
+
+/// The sizes of text a look over a whole window takes, smallest first: one
+/// for each example of text the user drew. An example's height is held
+/// unless a look for one held before it takes text that tall, within
+/// [`SIZE_PERCENT`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Sizes(Vec<u32>);
+pub(crate) struct Sizes(Vec<TextSize>);
 
 impl Sizes {
     /// The one size `height`.
     pub(crate) fn of(height: u32) -> Self {
-        Self(vec![height])
+        Self(vec![TextSize {
+            height,
+            example: height,
+        }])
     }
 
-    /// Adds `height`, unless a look for a size it holds takes text that
-    /// tall already. A height that no look takes is always added, so text
-    /// of every example's height is looked for, whatever order the
-    /// examples come in.
+    /// Adds the example `height`, unless a look for a size it holds takes
+    /// text that tall already. A height that no look takes is always
+    /// added, so text of every example's height is looked for, whatever
+    /// order the examples come in.
     pub(crate) fn add(&mut self, height: u32) {
-        if !self.0.iter().any(|&size| same_size(height, size)) {
-            self.0.push(height);
-            self.0.sort_unstable();
+        self.hold(TextSize {
+            height,
+            example: height,
+        });
+    }
+
+    fn hold(&mut self, size: TextSize) {
+        if !self
+            .0
+            .iter()
+            .any(|held| same_size(size.height, held.height))
+        {
+            self.0.push(size);
+            self.0.sort_unstable_by_key(|held| held.height);
         }
     }
 
+    /// The sizes `scaled` makes of each height, such as those at another
+    /// window size, each still the size of its example. A height it makes
+    /// nothing of is left out, and heights that scale to one size are that
+    /// one size, of the smallest of their examples.
+    pub(crate) fn each(&self, scaled: impl Fn(u32) -> Option<u32>) -> Self {
+        let mut sizes = Self(Vec::new());
+        for size in &self.0 {
+            if let Some(height) = scaled(size.height) {
+                sizes.hold(TextSize { height, ..*size });
+            }
+        }
+        sizes
+    }
+
     /// Each height, smallest first.
-    pub(crate) fn heights(&self) -> &[u32] {
-        &self.0
+    pub(crate) fn heights(&self) -> Vec<u32> {
+        self.0.iter().map(|size| size.height).collect()
     }
 }
 
@@ -66,8 +105,8 @@ impl Sizes {
 pub(crate) struct Spot {
     /// Where it is on the frame, with a margin around its ink.
     pub(crate) region: Region,
-    /// The height of [`Sizes`] its characters have.
-    pub(crate) size: u32,
+    /// The one of [`Sizes`] its characters have.
+    pub(crate) size: TextSize,
 }
 
 /// One run of text like the sample.
@@ -463,11 +502,12 @@ fn distance(run: Bounds, near: Region) -> u64 {
 /// beside it is still found.
 pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitReader) -> Vec<Spot> {
     let mask = Mask::of(image, reader);
-    let largest = sizes.heights().last().copied().unwrap_or(0);
+    let largest = sizes.0.last().map_or(0, |size| size.height);
     let blobs = mask.blobs(largest.saturating_mul(2));
-    let mut found: Vec<(Bounds, u32)> = Vec::new();
-    for &size in sizes.heights() {
-        let tallest = size.saturating_mul(2);
+    let mut found: Vec<(Bounds, TextSize)> = Vec::new();
+    for &size in &sizes.0 {
+        let height = size.height;
+        let tallest = height.saturating_mul(2);
         // The ink of a smaller size's run is left out before the runs are
         // joined, so text of this size beside it is still a run of its own.
         let inked = blobs
@@ -476,16 +516,16 @@ pub(crate) fn lines(image: &Image, sizes: &Sizes, near: Region, reader: &DigitRe
             .filter(|blob| blob.height() <= tallest)
             .filter(|blob| !found.iter().any(|&(taken, _)| blob.within(taken)))
             .collect();
-        let lines = runs(inked, size, size)
+        let lines = runs(inked, height, height)
             .into_iter()
-            .filter(|run| same_size(run.tallest, size));
+            .filter(|run| same_size(run.tallest, height));
         found.extend(lines.map(|run| (run.bounds, size)));
     }
     found.sort_by_key(|&(run, _)| (distance(run, near), run.top, run.left));
     found
         .into_iter()
         .filter_map(|(run, size)| {
-            let region = with_margin(run, size, &mask)?;
+            let region = with_margin(run, size.height, &mask)?;
             Some(Spot { region, size })
         })
         .take(MAX_LINES)
@@ -585,7 +625,10 @@ mod tests {
     fn spot(size: u32, x: u32, y: u32, width: u32, height: u32) -> Spot {
         Spot {
             region: region(x, y, width, height),
-            size,
+            size: TextSize {
+                height: size,
+                example: size,
+            },
         }
     }
 
@@ -699,6 +742,25 @@ mod tests {
     }
 
     #[test]
+    fn sizes_made_of_each_height_hold_what_is_made_apart_and_leave_out_what_is_not() {
+        let held = sizes(8, &[20, 40]);
+        let twice = held.each(|height| height.checked_mul(2));
+        assert_eq!(twice.heights(), [16, 40, 80]);
+        let examples = |sizes: &Sizes| -> Vec<u32> {
+            let all = sizes.0.iter();
+            all.map(|size| size.example).collect()
+        };
+        assert_eq!(examples(&twice), [8, 20, 40], "each is of its example");
+        // 8 and 20 both come to 2 at a tenth, rounded, so they are one size.
+        let tenth = held.each(|height| Some(height.saturating_add(5).checked_div(10)?.max(2)));
+        assert_eq!(tenth.heights(), [2, 4]);
+        assert_eq!(examples(&tenth), [8, 40], "the smaller example's");
+        let some = held.each(|height| (height != 20).then_some(height));
+        assert_eq!(some.heights(), [8, 40]);
+        assert_eq!(held.each(|_| None).heights(), [0_u32; 0]);
+    }
+
+    #[test]
     fn the_lines_of_a_window_are_the_runs_of_each_size_looked_for() {
         let boxes = [pair(2, 2, 8), pair(2, 24, 14), pair(30, 2, 20)].concat();
         let image = screenshot(60, 44, &boxes);
@@ -760,7 +822,7 @@ mod tests {
         let taken = lines(&image, &sizes(8, &[16]), region(0, 0, 12, 20), &reader());
         assert_eq!(taken.len(), MAX_LINES);
         assert_eq!(taken[0], spot(16, 0, 0, 13, 22), "the nearest is first");
-        let small = taken.iter().filter(|spot| spot.size == 8).count();
+        let small = taken.iter().filter(|spot| spot.size.height == 8).count();
         assert_eq!(small, 31);
         // The run left out is the furthest: the last of the bottom row.
         let last = region(200, 66, 11, 12);

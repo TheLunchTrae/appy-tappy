@@ -438,8 +438,10 @@ character is one shape.
   sizes take is a line once, at the smaller size: the ink of a smaller
   size's run is left out before a larger size's runs are joined, so text
   of the larger size beside it is still found. A kept reading holds the
-  size its run was taken for (`size`), which review shows when the
-  recording looked for more than one. A shape is a character scaled to the
+  size its run was taken for (`size`): how tall its text is in its picture,
+  and the example it is the size of, which differ when the window had
+  another size. Review shows it when the recording looked for more than
+  one. A shape is a character scaled to the
   grid, so one that shows at two sizes is counted and kept once, and the
   shapes stay one set across sizes. Each run is cropped with its margin and goes
   through the same counting and keeping as a place's crop, so the bounds
@@ -460,13 +462,33 @@ character is one shape.
   in the characters' color does not use up the recording's 256 shapes
   before the value's. The view carries where the last look found text
   (`spots`), which the page outlines on the live window.
-- **Sizes.** A frame of another window size is skipped because a recording
-  has a region and no [pin](Screen-regions.md#window-sizes): only a value
-  says which side of the window its region keeps its distance from, and a
-  reference's region is drawn only to teach. Placing it at another size
-  would mean guessing the pin, and a wrong guess records other pixels. A
-  reference learned at one size reads at others, since shapes scale to the
-  grid, so the limit is where the recording looks, not what it learns.
+- **Sizes.** A recording follows its window to another size as a saved
+  value does ([Window sizes](Screen-regions.md#window-sizes)), and
+  `Follows` in `recording/follow.rs` is the one place that says how. For an
+  application whose window changes size often, the region is scaled with
+  `scale::scaled` and a text size with `scale::scaled_length`, both by the
+  window's new height over the height it was drawn at. The region stays at
+  the side the page sends (`RecordSpec::pin`): the value's own when the
+  reference is taught for a value, and the side the region is nearest
+  otherwise (`PinDef::guess`), as the live check places a reference. For an
+  application whose window rarely changes size, nothing is guessed: the
+  recording waits for the size the region was drawn at. A recording of the
+  whole window only looks near its region, so a region that scales outside
+  the window is moved and cut to lie inside it (`scale::scaled_within`)
+  rather than refused. Text that scaling made shorter than
+  `follow::MIN_TEXT_HEIGHT` has too few rows to tell characters apart, so
+  the recording waits for a larger window. A new size counts
+  once frames have kept it for `SETTLE`, so a drag records nothing on its
+  way, and a size at which the recording is not placed is its
+  problem until the window leaves it
+  ([Where a recording is placed](State-machines.md#where-a-recording-is-placed)).
+  The view carries the size the recording is placed at (`at`), which the
+  page says when it is not the size the region was drawn at, and scales the
+  outlines of the last look by. Shapes scale to the grid, so a character
+  kept at one window size is the same shape at another and is kept once. A
+  wrong side records other pixels at another size, which review shows as
+  readings that are not the value's: that is why the region's side is the
+  value's where there is one, and why the rule is in one place.
 - **Color and tolerance.** The shapes are the ones the recording's own
   characters' color and tolerance show, and "every shape is in a kept
   reading" holds for those. A reference learns the kept crops again with the
@@ -533,6 +555,8 @@ conflict such as one shape typed as `l` in one reading and `1` in another is
 flagged on the reading that causes it. **Record more** goes on with the stopped
 recording only when the region, color, tolerance, and window size are the
 ones it was recorded with, and otherwise says so rather than start over. The
+window size is the one the region was drawn at, not the one the window has
+by then. The
 UI then offers **Use its settings**, which puts the recording's color and
 tolerance back on the draft. A reference taught by itself reads at its first
 box, so its recorded box also goes back where the recording read
